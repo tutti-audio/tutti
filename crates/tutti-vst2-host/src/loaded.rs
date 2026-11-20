@@ -635,6 +635,8 @@ impl Vst2Loaded {
         }
         self.instance
             .with_preset_bracket(main, |instance| instance.change_preset(main, index));
+        // The program set the values: none is a host write.
+        self.host.clear_written();
         // A program change moves values the plugin does not report: the host
         // asks for them to be read again.
         let _ = tutti_plugin_types::Request::RescanParams(tutti_plugin_types::RescanScope::Values)

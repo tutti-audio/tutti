@@ -532,5 +532,7 @@ impl Processor for Vst2Processor {
         self.midi.send.reset_midi();
         self.midi.reset_out();
         self.render.stop_process();
+        // The plugin starts over from its own state: no value it reports is a host write.
+        self.host.clear_written();
     }
 }

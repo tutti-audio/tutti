@@ -250,12 +250,18 @@ impl AuLoaded {
             Edit::Begin(id) => Some(ParamEdit::Begin(ParamId::new(id))),
             Edit::End(id) => Some(ParamEdit::End(ParamId::new(id))),
             // The unit repeating the narrowing of a host write is not an edit.
-            Edit::Change(id, plain) if self.ranges.is_echo(id, plain) => None,
+            Edit::Change(id, plain) if self.ranges.absorbs_report(id, plain) => None,
             Edit::Change(id, plain) => Some(ParamEdit::change(
                 ParamId::new(id),
                 self.normalize(id, plain),
             )),
         }));
+    }
+
+    /// Forgets every written position: the unit set its own state (a preset, a
+    /// document, a reset), so no value it reports is a host write repeated.
+    pub(crate) fn clear_written(&self) {
+        self.ranges.marks().clear_written();
     }
 
     /// The marks the render sets bits in: the current table's, and every
@@ -430,10 +436,12 @@ impl Control for AuLoaded {
         self.parameter_writable(main, id)?;
         // Declared, so the table has its range.
         if let Some(plain) = self.denormalize(id, value) {
-            if let Some(slot) = self.ranges.slot(id.get()) {
+            // Recorded once the unit took the write: a refused one repeats nothing.
+            if parameters::set(self.unit(), id.get(), plain).is_ok()
+                && let Some(slot) = self.ranges.slot(id.get())
+            {
                 self.ranges.marks().record(slot, value);
             }
-            let _ = parameters::set(self.unit(), id.get(), plain);
         }
         Ok(())
     }

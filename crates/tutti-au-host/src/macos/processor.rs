@@ -857,6 +857,8 @@ impl Processor for AuProcessor {
         if let Some(midi_out) = &mut self.rendering.midi_out {
             midi_out.reset();
         }
+        // The unit starts over from its own state: no value it reports is a host write.
+        self.ranges.lend().marks().clear_written();
     }
 }
 

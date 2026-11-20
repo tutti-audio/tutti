@@ -51,9 +51,7 @@ impl ParamBounds {
     pub(crate) fn plain_map(self) -> PlainMap {
         PlainMap::Linear(LinearRange::new(self.min, self.max))
     }
-}
 
-impl ParamBounds {
     /// The `Float32` word `AudioUnitSetParameter` takes for the position
     /// `value`: AU's parameter word is `f32`, so this is the one place a value
     /// narrows on its way to the unit.
@@ -73,9 +71,10 @@ impl ParamBounds {
 impl ParamMapping for ParamBounds {
     /// Maps a position onto `[min, max]`, narrowed to the `Float32` that
     /// `AudioUnitSetParameter` takes (and widened back, so the value is the one
-    /// the unit is given: [`Self::word`] is the same narrowing). A range with no span yields `min` when finite and
-    /// `0.0` otherwise ([`LinearRange`]), so the result is always finite and
-    /// inside `[min, max]` (both came from an `f32`).
+    /// the unit is given: [`ParamBounds::word`] is the same narrowing). A range
+    /// with no span yields `min` when finite and `0.0` otherwise
+    /// ([`LinearRange`]), so the result is always finite and inside
+    /// `[min, max]` (both came from an `f32`).
     fn plain(&self, value: Normalized) -> f64 {
         f64::from(self.word(value))
     }
@@ -167,12 +166,13 @@ impl RangeTable {
     }
 
     /// Whether `plain`, a value the unit reported for `id`, is the narrowing of
-    /// the position the host last wrote there ([`tutti_plugin_types::WrittenValues`]): the unit
-    /// repeating the host's own write, not an edit of its own. `false` for a
-    /// parameter off the table or never written.
-    pub(crate) fn is_echo(&self, id: u32, plain: f32) -> bool {
+    /// the position the host last wrote there: the unit repeating the host's
+    /// own write, not an edit of its own. Any other report clears the record
+    /// ([`tutti_plugin_types::WrittenValues::absorbs`]). `false` for a parameter
+    /// off the table or never written.
+    pub(crate) fn absorbs_report(&self, id: u32, plain: f32) -> bool {
         self.bounds(id)
-            .is_some_and(|bounds| self.marks.echoes(id, |value| bounds.word(value) == plain))
+            .is_some_and(|bounds| self.marks.absorbs(id, |value| bounds.word(value) == plain))
     }
 
     /// Every declared id, ascending.
@@ -328,29 +328,47 @@ mod tests {
     }
 
     /// The unit reporting the `Float32` narrowing of a position the host wrote
-    /// (one that differs from it only below `f32` precision) is an echo, so the
-    /// control side drops it and the `f64` written stays the value.
+    /// (one that differs from it only below `f32` precision) is an echo, however
+    /// often it does, so the control side drops it and the `f64` written stays
+    /// the value.
     #[test]
-    fn a_report_equal_to_the_narrowing_of_a_write_is_an_echo() {
+    fn a_report_equal_to_the_narrowing_of_a_write_is_an_echo_every_time() {
         let table = written_table();
         let bounds = table.bounds(7).unwrap();
         let written = n(0.1 + 1e-12);
         table.marks().record(table.slot(7).unwrap(), written);
         let word = bounds.word(written);
         assert_ne!(f64::from(word), bounds.plain_map().plain(written));
-        assert!(table.is_echo(7, word));
+        assert!(table.absorbs_report(7, word));
+        assert!(table.absorbs_report(7, word));
     }
 
-    /// A report one `f32` step from the narrowing is the unit's own change, and
-    /// a parameter never written has nothing to echo.
+    /// A report off the narrowing is the unit's own change, and clears the
+    /// record: the narrowing of the old write, reported after, is a change too.
     #[test]
-    fn a_report_off_the_narrowing_is_the_units_own_change() {
+    fn the_old_narrowing_after_the_units_own_change_is_reported() {
         let table = written_table();
         let bounds = table.bounds(7).unwrap();
-        assert!(!table.is_echo(7, 100.0), "nothing was written");
+        assert!(!table.absorbs_report(7, 100.0), "nothing was written");
         let written = n(0.1 + 1e-12);
         table.marks().record(table.slot(7).unwrap(), written);
-        assert!(!table.is_echo(7, bounds.word(written).next_up()));
-        assert!(!table.is_echo(3, 100.0), "an undeclared id echoes nothing");
+        let word = bounds.word(written);
+        assert!(!table.absorbs_report(7, 500.0));
+        assert!(!table.absorbs_report(7, word));
+        assert!(
+            !table.absorbs_report(3, 100.0),
+            "an undeclared id absorbs nothing"
+        );
+    }
+
+    /// A state the unit sets itself forgets the host's writes.
+    #[test]
+    fn the_narrowing_of_a_write_after_the_written_values_are_cleared_is_reported() {
+        let table = written_table();
+        let bounds = table.bounds(7).unwrap();
+        let written = n(0.1 + 1e-12);
+        table.marks().record(table.slot(7).unwrap(), written);
+        table.marks().clear_written();
+        assert!(!table.absorbs_report(7, bounds.word(written)));
     }
 }

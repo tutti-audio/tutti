@@ -44,7 +44,7 @@ pub(crate) struct Marks {
     /// The latest value (`f32` bits) of each parameter, read for a bit of `deferred`.
     values: Box<[AtomicU32]>,
     /// The position last written to each parameter, by slot: what a value the
-    /// unit reports back is compared with ([`echoes`](Self::echoes)).
+    /// unit reports back is compared with ([`absorbs`](Self::absorbs)).
     written: WrittenValues,
 }
 
@@ -90,13 +90,20 @@ impl Marks {
         self.written.record(slot.0.get(), value);
     }
 
-    /// Whether the position last written to `id` satisfies `repeats` (its
-    /// narrowing equals what the unit reported). `false` for an id these marks
-    /// were not sized for.
-    pub(crate) fn echoes(&self, id: u32, repeats: impl FnOnce(Normalized) -> bool) -> bool {
+    /// Whether a report for `id` is the position last written there repeated
+    /// ([`WrittenValues::absorbs`]: `repeats` is its narrowing equal to the
+    /// report). A report that is not clears the record. `false` for an id these
+    /// marks were not sized for.
+    pub(crate) fn absorbs(&self, id: u32, repeats: impl FnOnce(Normalized) -> bool) -> bool {
         self.ids
             .binary_search(&id)
-            .is_ok_and(|at| self.written.echoes(at, repeats))
+            .is_ok_and(|at| self.written.absorbs(at, repeats))
+    }
+
+    /// Forgets every position written: the unit set its own state (a preset, a
+    /// document), so no value it reports is a host write repeated.
+    pub(crate) fn clear_written(&self) {
+        self.written.clear();
     }
 
     /// The render's call: the unit applied an automated value of this parameter.

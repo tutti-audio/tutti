@@ -163,7 +163,7 @@ pub(crate) struct HostState {
     /// The value last written to each parameter, sized when the plugin's
     /// parameter count is known ([`size_written`](Self::size_written)). A report
     /// equal to the `f32` narrowing of it is the plugin repeating the write, not
-    /// an edit ([`automate`](Host::automate)).
+    /// an edit ([`automate`](Host::automate)); any other report clears it.
     written: std::sync::OnceLock<WrittenValues>,
     /// The maximum block size the plugin was last told (`effSetBlockSize`), in
     /// samples. Served back through `audioMasterGetBlockSize`.
@@ -239,27 +239,38 @@ impl HostState {
         value.get() as f32
     }
 
-    /// A host write of `value` to parameter `index`: records the `f64` written,
-    /// then runs `set` (the plugin's `setParameter`) with its `f32` narrowing,
-    /// marked as a host write ([`host_write`]). Returns what `set` returned.
+    /// A host write of `value` to parameter `index`: runs `set` (the plugin's
+    /// `setParameter`) with its `f32` narrowing, marked as a host write
+    /// ([`host_write`]), and records the `f64` written when `set` took it.
+    /// Returns what `set` returned.
     pub(crate) fn write(
         &self,
         index: i32,
         value: Normalized,
         set: impl FnOnce(f32) -> bool,
     ) -> bool {
-        if let (Some(written), Ok(slot)) = (self.written.get(), usize::try_from(index)) {
+        let taken = host_write(|| set(Self::narrow(value)));
+        if taken && let (Some(written), Ok(slot)) = (self.written.get(), usize::try_from(index)) {
             written.record(slot, value);
         }
-        host_write(|| set(Self::narrow(value)))
+        taken
+    }
+
+    /// Forgets every written value: the plugin set its own state (a chunk, a
+    /// program), so what it reports next is not the host's write repeated.
+    pub(crate) fn clear_written(&self) {
+        if let Some(written) = self.written.get() {
+            written.clear();
+        }
     }
 
     /// Whether `report` for parameter `index` is the plugin repeating the
-    /// narrowing of the value the host last wrote there.
-    fn echoes_write(&self, index: i32, report: f32) -> bool {
+    /// narrowing of the value the host last wrote there. A report that is not
+    /// clears the record ([`WrittenValues::absorbs`]).
+    fn absorbs_report(&self, index: i32, report: f32) -> bool {
         let slot = usize::try_from(index).ok();
         self.written.get().zip(slot).is_some_and(|(written, slot)| {
-            written.echoes(slot, |value| Self::narrow(value) == report)
+            written.absorbs(slot, |value| Self::narrow(value) == report)
         })
     }
 
@@ -456,7 +467,7 @@ impl Host for HostState {
     /// A report made from inside the host's own `setParameter` is an echo of
     /// the host's value and is not queued ([`host_write`]).
     fn automate(&self, index: i32, value: f32) {
-        if self.echoes_write(index, value) {
+        if self.absorbs_report(index, value) {
             return;
         }
         // The callback's word is an `f32`; it widens here, once, into a quantity.
@@ -1018,7 +1029,7 @@ mod tests {
     /// thread and after the write returned, is echoing: nothing is queued, and the
     /// `f64` the host wrote is the value held.
     #[test]
-    fn automate_of_the_narrowing_of_a_host_write_is_an_echo() {
+    fn automate_of_the_narrowing_of_a_host_write_is_an_echo_every_time() {
         let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         host.size_written(2);
         let written = Normalized::of(0.1 + 1e-12);
@@ -1029,6 +1040,7 @@ mod tests {
         }));
         assert_ne!(f64::from(word), written.get(), "the write must narrow");
 
+        host.automate(1, word);
         host.automate(1, word);
 
         assert_eq!(host.param_tx.pop(), None, "an echo is not an edit");
@@ -1059,6 +1071,66 @@ mod tests {
                 Normalized::clamped(f64::from(moved))
             ))
         );
+    }
+
+    /// Once the plugin reported a value of its own, the narrowing of the old write is
+    /// no echo of anything: the report that follows is the plugin's change back to it.
+    #[test]
+    fn automate_of_the_old_narrowing_after_the_plugins_own_change_is_reported() {
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+        host.size_written(1);
+        let mut word = 0.0_f32;
+        host.write(0, Normalized::of(0.1 + 1e-12), |w| {
+            word = w;
+            true
+        });
+        let own = Normalized::of(0.75);
+
+        host.automate(0, 0.75);
+        host.automate(0, word);
+
+        assert_eq!(host.param_tx.pop(), Some(ParameterChange::Automate(0, own)));
+        assert_eq!(
+            host.param_tx.pop(),
+            Some(ParameterChange::Automate(
+                0,
+                Normalized::clamped(f64::from(word))
+            ))
+        );
+    }
+
+    /// A state the plugin sets itself forgets the host's writes: its narrowing,
+    /// reported after, is the plugin's value.
+    #[test]
+    fn automate_of_the_narrowing_after_the_written_values_are_cleared_is_reported() {
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+        host.size_written(1);
+        let mut word = 0.0_f32;
+        host.write(0, Normalized::of(0.1 + 1e-12), |w| {
+            word = w;
+            true
+        });
+        host.clear_written();
+
+        host.automate(0, word);
+
+        assert!(host.param_tx.pop().is_some());
+    }
+
+    /// A write the plugin refused is not recorded, so its narrowing is not an echo.
+    #[test]
+    fn a_refused_write_records_nothing() {
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+        host.size_written(1);
+        let mut word = 0.0_f32;
+        assert!(!host.write(0, Normalized::of(0.1 + 1e-12), |w| {
+            word = w;
+            false
+        }));
+
+        host.automate(0, word);
+
+        assert!(host.param_tx.pop().is_some());
     }
 
     /// The MIDI-out queue counts its drops separately from the parameter
