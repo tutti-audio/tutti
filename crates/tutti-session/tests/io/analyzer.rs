@@ -182,7 +182,7 @@ fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
     let (finite, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let (through, _) = s.graph().add(ForkByClone(Through::mono()));
     s.graph().connect(nan, through).unwrap().unfaded();
-    let loudness = WindowedLoudnessConfig::new(ChannelTopology::assumed(ChannelLayout::MONO));
+    let loudness = WindowedLoudnessConfig::new(ChannelTopology::default_for(ChannelLayout::MONO));
     let mut analyzer = s
         .graph()
         .taps()

@@ -695,9 +695,9 @@ impl<C: Clock> SessionBuilder<C> {
     /// States what the output device's channels are: an interface wired as
     /// 5.1 on its six outputs, say. The graph root is folded into it by
     /// speaker. Without it the device is taken to be the engine's order for
-    /// its width ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1,
+    /// its width ([`ChannelTopology::default_for`]: mono, stereo, quad, 5.1, 7.1,
     /// 7.1.4, and independent channels at any other width) and is read back as
-    /// [`Placement::Assumed`](tutti_buffers::Placement::Assumed)
+    /// [`Placement::Default`](tutti_buffers::Placement::Default)
     /// ([`Session::output_device`]).
     ///
     /// The statement is the device's width: a build whose device has another
@@ -1101,7 +1101,7 @@ impl<C: Clock> SessionBuilder<C> {
                 .into());
             }
             Some(stated) => stated.clone(),
-            None => ChannelTopology::assumed(device),
+            None => ChannelTopology::default_for(device),
         };
         match &self.opts.root {
             // The same check `Graph::declare_root` makes a step later; made
@@ -1114,7 +1114,7 @@ impl<C: Clock> SessionBuilder<C> {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
                 tutti_graph::fold_to_topology::<C::Float>(
-                    &ChannelTopology::assumed(width),
+                    &ChannelTopology::default_for(width),
                     &placed,
                 )?;
             }

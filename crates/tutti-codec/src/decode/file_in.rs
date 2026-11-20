@@ -160,7 +160,7 @@ impl<S: Sample> FileIn<S> {
     }
 
     /// Which speaker each channel of the interleaved frames feeds, in channel
-    /// order: what the container names, or [`ChannelTopology::assumed`] for
+    /// order: what the container names, or [`ChannelTopology::default_for`] for
     /// the count it states (see [`read_wave`](crate::read_wave)). Its width is
     /// [`layout`](Source::layout)'s.
     pub fn topology(&self) -> &ChannelTopology {
@@ -168,7 +168,7 @@ impl<S: Sample> FileIn<S> {
     }
 
     /// Whether [`topology`](Self::topology) was stated by the container or
-    /// assumed from a channel count.
+    /// the default layout for a channel count.
     pub fn placement(&self) -> Placement {
         self.placement
     }

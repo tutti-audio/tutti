@@ -276,7 +276,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
     let to_mono = Stem::new(wide.erase(), dir.path().join("mono.wav"), float_wav())
         .layout(ChannelLayout::MONO);
     let wrong_width = Stem::new(wide.erase(), dir.path().join("two.wav"), float_wav()).topology(
-        tutti_buffers::ChannelTopology::assumed(ChannelLayout::STEREO),
+        tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO),
     );
     for stem in [to_mono, wrong_width] {
         let b = bounce(0.01).stem_with(stem);

@@ -106,7 +106,7 @@ fn the_limit_is_judged_at_the_output_rate() {
 }
 
 /// A topology reaches the file: four channels declare the quad mask `0x33`,
-/// told they are quad or assumed by their width, six declare 5.1 by their
+/// told they are quad or default to it by their width, six declare 5.1 by their
 /// width, and four unassigned channels declare none.
 ///
 /// This restores the export-level half of the old

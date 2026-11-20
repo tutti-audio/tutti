@@ -393,7 +393,7 @@ fn main_bus(topology: ChannelTopology) -> Bus {
 }
 
 fn smpte(n: u16) -> Bus {
-    main_bus(ChannelTopology::assumed(ChannelLayout::from_count(n)))
+    main_bus(ChannelTopology::default_for(ChannelLayout::from_count(n)))
 }
 
 fn unassigned(n: u16) -> Bus {

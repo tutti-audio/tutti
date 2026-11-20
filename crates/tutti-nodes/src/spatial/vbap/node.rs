@@ -335,8 +335,8 @@ fn steer<T: Lerp>(ramp: &mut Ramp<T>, target: T, whole: bool, steps: u32) {
 /// The fold of the stereo input to the mono the single-source branch pans.
 fn stereo_to_mono<F: Float>() -> Fold<F> {
     Fold::between(
-        &ChannelTopology::assumed(ChannelLayout::STEREO),
-        &ChannelTopology::assumed(ChannelLayout::MONO),
+        &ChannelTopology::default_for(ChannelLayout::STEREO),
+        &ChannelTopology::default_for(ChannelLayout::MONO),
     )
     .expect("stereo folds to mono")
 }

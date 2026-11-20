@@ -886,11 +886,11 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
 
 /// A restart takes what its own request states about the new device: the
 /// session reads `Stated` after a restart that says how the device is wired
-/// and `Assumed` after one that does not (another device is wired another
+/// and `Default` after one that does not (another device is wired another
 /// way), and a statement that is not the new device's width is refused before
 /// the graph moves.
 #[test]
-fn a_restart_states_or_assumes_the_new_devices_placement() {
+fn a_restart_states_or_defaults_the_new_devices_placement() {
     use tutti_buffers::{Bed, Placement};
     let six = OutputSpec::new(
         SampleRate::SR_48K,
@@ -904,7 +904,7 @@ fn a_restart_states_or_assumes_the_new_devices_placement() {
         .unwrap();
     assert_eq!(
         session.output_device().map(|d| d.placement),
-        Some(Placement::Assumed)
+        Some(Placement::Default)
     );
 
     let (driver, _new) = ManualStreamDriver::new();
@@ -938,12 +938,12 @@ fn a_restart_states_or_assumes_the_new_devices_placement() {
         Some(Placement::Stated)
     );
 
-    // The same width again with nothing stated: assumed again.
+    // The same width again with nothing stated: the default again.
     let (driver, _new) = ManualStreamDriver::new();
     session.restart_on(six, driver, None, None).unwrap();
     assert_eq!(
         session.output_device().map(|d| d.placement),
-        Some(Placement::Assumed)
+        Some(Placement::Default)
     );
 }
 
@@ -989,7 +989,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         tutti_buffers::SampleFormat::F32,
     );
     let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
-    let stereo = tutti_buffers::ChannelTopology::assumed(ChannelLayout::STEREO);
+    let stereo = tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO);
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(Default::default())

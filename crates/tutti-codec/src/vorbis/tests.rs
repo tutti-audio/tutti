@@ -138,7 +138,7 @@ fn a_rear_stands_in_only_for_a_missing_side() {
 }
 
 /// A width Vorbis defines is refused when the file cannot say which speakers it
-/// holds (3, 5 and 7 have no engine default; a bare 4 is the assumed quad, which
+/// holds (3, 5 and 7 have no engine default; a bare 4 is the default quad, which
 /// is Vorbis's own), or says speakers that are not Vorbis's layout.
 #[test]
 fn a_width_with_no_vorbis_layout_is_refused() {
@@ -271,7 +271,7 @@ mod round_trip {
             let spec = vorbis_spec(case.width, topology.clone());
             let source: Vec<Speaker> = match case.source {
                 Some(s) => s.to_vec(),
-                None => ChannelTopology::assumed(spec.layout())
+                None => ChannelTopology::default_for(spec.layout())
                     .positions()
                     .unwrap()
                     .to_vec(),

@@ -1383,7 +1383,7 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
         g.pipe_output(id);
         built_with(g, RATE, Setup::new().root(root))
     };
-    let swapped = ChannelTopology::assumed(ChannelLayout::from(6u16));
+    let swapped = ChannelTopology::default_for(ChannelLayout::from(6u16));
     assert!(swapped.index_of(Speaker::FrontLeft).is_some());
     let mut six = six_channels(swapped);
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;

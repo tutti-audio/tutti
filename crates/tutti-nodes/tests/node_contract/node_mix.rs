@@ -312,7 +312,8 @@ fn a_mix_move_on_a_delay_ramps_across_the_block() {
     let make = || {
         DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus"),
+                BusTopology::default_for(ChannelLayout::from(6u16))
+                    .expect("six channels are one bus"),
                 MaxDelay::of(Seconds::new(0.1)),
                 InterpolationMode::Linear,
             ))

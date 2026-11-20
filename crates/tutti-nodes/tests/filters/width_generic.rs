@@ -153,7 +153,7 @@ fn ladder(layout: ChannelLayout) -> LadderFilterNode<f32> {
 fn delay(layout: ChannelLayout) -> DelayNode<f32> {
     DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::assumed(layout).expect("a test width is one bus"),
+            BusTopology::default_for(layout).expect("a test width is one bus"),
             MaxDelay::of(Seconds::new(0.5)),
             InterpolationMode::CubicHermite,
         ))
@@ -176,7 +176,7 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
     ModDelayNode::<f32>::from(
         ModDelayConfig::new(
             ModDelayLayout::builder(
-                BusTopology::assumed(layout).expect("a test width is one bus"),
+                BusTopology::default_for(layout).expect("a test width is one bus"),
                 Sweep::CHORUS,
             )
             .stagger(Stagger::try_from(&zeros[..]).expect("zero offsets"))
@@ -190,7 +190,7 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
 fn phaser(layout: ChannelLayout) -> PhaserNode<f32> {
     PhaserNode::<f32>::try_from(
         PhaserConfig::new(
-            BusTopology::assumed(layout).expect("a test width is one bus"),
+            BusTopology::default_for(layout).expect("a test width is one bus"),
             Stages::of(6),
         )
         .controls(PhaserControls {

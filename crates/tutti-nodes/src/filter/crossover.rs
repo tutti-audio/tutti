@@ -117,7 +117,8 @@ impl<F: Float + SimdLanes> CrossoverNode<F> {
     pub fn new(layout: ChannelLayout, frequencies: &[Hz]) -> Result<Self, CrossoverError> {
         let controls = CrossoverControls::ordered(frequencies)?;
         let channels = usize::from(layout.count());
-        let input = BusTopology::assumed(layout).ok_or(CrossoverError::Channels { channels })?;
+        let input =
+            BusTopology::default_for(layout).ok_or(CrossoverError::Channels { channels })?;
         let kernel = CrossoverKernel::new(input, frequencies.len() + 1, &controls)?;
         if channels * kernel.bands() > tutti_graph::MAX_PORTS {
             return Err(CrossoverError::Channels { channels });

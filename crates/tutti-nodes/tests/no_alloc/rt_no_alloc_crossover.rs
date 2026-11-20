@@ -92,7 +92,7 @@ fn multiband_compressor_with_moving_params_is_allocation_free() {
     // Four bands: every band param, every crossover and both toggles are
     // written each block (27 ports and 8 toggle cells).
     let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-        BusTopology::assumed(ChannelLayout::from_count(6)).unwrap(),
+        BusTopology::default_for(ChannelLayout::from_count(6)).unwrap(),
         MultibandBands::of(4),
     ));
     let mut hz = 120.0f32;

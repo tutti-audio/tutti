@@ -93,7 +93,8 @@ fn strip(c: &mut Criterion) {
 
         let mut d = Direct::new(
             BusStripNode::new(
-                BusTopology::assumed(ChannelLayout::from(width)).expect("a bench width fits a bus"),
+                BusTopology::default_for(ChannelLayout::from(width))
+                    .expect("a bench width fits a bus"),
             ),
             SR,
             BLOCK,

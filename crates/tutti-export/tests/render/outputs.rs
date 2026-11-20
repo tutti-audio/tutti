@@ -94,7 +94,7 @@ fn finish(g: GraphBuilder) -> RenderGraph {
 }
 
 fn stereo_placement() -> Placement {
-    Placement::new(ChannelTopology::assumed(ChannelLayout::STEREO))
+    Placement::new(ChannelTopology::default_for(ChannelLayout::STEREO))
 }
 
 fn job(frames: usize) -> Job {
@@ -409,7 +409,7 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
         &FrozenClock,
         vec![Output::tap(
             wide,
-            Placement::new(ChannelTopology::assumed(ChannelLayout::MONO)),
+            Placement::new(ChannelTopology::default_for(ChannelLayout::MONO)),
             wav(&dir.path().join("a.wav"), Pcm::Int16),
         )],
         &mut Control::none(),
@@ -812,7 +812,7 @@ fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
 /// A file whose topology is not stated is taken to be the engine's order for
 /// its width, and its `Written` says so; a stated one says it was stated.
 #[test]
-fn a_file_reports_whether_its_placement_was_assumed_or_stated() {
+fn a_file_reports_whether_its_placement_is_the_default_or_stated() {
     let dir = tempfile::tempdir().unwrap();
     let placement = |target: FileTarget| {
         let mut graph = wide(6);
@@ -835,7 +835,7 @@ fn a_file_reports_whether_its_placement_was_assumed_or_stated() {
     };
     assert_eq!(
         placement(file_of(&dir.path().join("a.wav"), 6)),
-        tutti_buffers::Placement::Assumed
+        tutti_buffers::Placement::Default
     );
     assert_eq!(
         placement(file_of(&dir.path().join("b.wav"), 6).topology(Bed::Surround51.topology())),
@@ -843,7 +843,7 @@ fn a_file_reports_whether_its_placement_was_assumed_or_stated() {
     );
 }
 
-/// A Lufs output of a width with no assumed placement is refused up front with
+/// A Lufs output of a width with no default layout is refused up front with
 /// a name that says to state a topology, and nothing is rendered or written; a
 /// peak output of the same width needs no placement and renders.
 #[test]
@@ -924,13 +924,13 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
     assert!((peak - 10f32.powf(-12.0 / 20.0)).abs() < 0.005, "{peak}");
 }
 
-/// A Peak output at a width with an assumed placement still reads a real
+/// A Peak output at a width with a default layout still reads a real
 /// loudness, weighted by it: six channels of the same tone read the five
 /// non-LFE channels at weights 1, 1, 1, 1.41, 1.41 (sum 5.82) (BS.1770-5 Table 5, system
 /// B): `10 log10(0.5^2 / 2 * 5.82)` = -1.38 LUFS, where the LFE counted too
 /// would read -0.64.
 #[test]
-fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
+fn a_peak_output_with_a_default_layout_reports_its_weighted_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let target = file_of(&dir.path().join("p.wav"), 6)
         .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
@@ -948,7 +948,7 @@ fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
     .next()
     .and_then(Produced::into_file)
     .unwrap();
-    assert_eq!(written.placement, tutti_buffers::Placement::Assumed);
+    assert_eq!(written.placement, tutti_buffers::Placement::Default);
     let lufs = written.measured.expect("a placed loudness").lufs.get();
     let analytic = Db::from_power(0.5f64.powi(2) / 2.0 * 5.82).get();
     assert!((lufs - analytic).abs() < 0.1, "{lufs} vs {analytic}");

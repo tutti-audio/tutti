@@ -572,7 +572,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
 
     /// Every input folded to mono, then convolved with one IR per output; the width is
     /// `irs.len()`. The inputs are folded as the engine's order for that width places them
-    /// ([`ChannelTopology::assumed`], the one place this node reads a count as a placement,
+    /// ([`ChannelTopology::default_for`], the one place this node reads a count as a placement,
     /// since a folded node's inputs have no layout to state).
     ///
     /// # Errors
@@ -591,8 +591,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         let width = node.layout.inputs().count();
         node.fold = Some(
             Fold::<F>::between(
-                &ChannelTopology::assumed(ChannelLayout::from(width)),
-                &ChannelTopology::assumed(ChannelLayout::MONO),
+                &ChannelTopology::default_for(ChannelLayout::from(width)),
+                &ChannelTopology::default_for(ChannelLayout::MONO),
             )
             .map_err(|source| ConvolverError::NoFold { width, source })?,
         );
@@ -1466,8 +1466,8 @@ mod direct_sum {
             let mut mono = vec![0.0f32; FRAMES];
             if x.len() == 2 {
                 Fold::between(
-                    &ChannelTopology::assumed(ChannelLayout::STEREO),
-                    &ChannelTopology::assumed(ChannelLayout::MONO),
+                    &ChannelTopology::default_for(ChannelLayout::STEREO),
+                    &ChannelTopology::default_for(ChannelLayout::MONO),
                 )
                 .expect("stereo folds to mono")
                 .fold_planar_channel(Planes::from_vecs(&x).unwrap(), 0, MonoMut::new(&mut mono))
@@ -1567,8 +1567,8 @@ mod direct_sum {
         let x = signal(6, 700);
         let got = render(node, &x);
         let to_mono = Fold::between(
-            &ChannelTopology::assumed(ChannelLayout::from(6u16)),
-            &ChannelTopology::assumed(ChannelLayout::MONO),
+            &ChannelTopology::default_for(ChannelLayout::from(6u16)),
+            &ChannelTopology::default_for(ChannelLayout::MONO),
         )
         .unwrap();
         let mono: Vec<f32> = (0..700)

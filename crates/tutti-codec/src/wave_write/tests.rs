@@ -32,7 +32,7 @@ fn ramp_wave(topology: ChannelTopology, rate: f64, frames: usize) -> Wave {
 fn a_written_wave_reads_back_as_itself() {
     use crate::{Pcm, read_wave};
     let dir = tempfile::tempdir().unwrap();
-    let stereo = || ChannelTopology::assumed(ChannelLayout::STEREO);
+    let stereo = || ChannelTopology::default_for(ChannelLayout::STEREO);
     let cases = [
         ("stereo.wav", Format::Wav(Pcm::Int16), stereo()),
         ("float.wav", Format::Wav(Pcm::Float32), stereo()),

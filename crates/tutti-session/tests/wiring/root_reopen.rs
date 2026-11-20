@@ -42,7 +42,7 @@ fn block(s: &mut Session) -> Vec<SessionEvent> {
 }
 
 fn mono() -> ChannelTopology {
-    ChannelTopology::assumed(ChannelLayout::MONO)
+    ChannelTopology::default_for(ChannelLayout::MONO)
 }
 
 /// The readers `events` announce.
@@ -163,7 +163,7 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
         .open_output(Samples::new(4096))
         .expect("the outputs exist");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
+    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("a stereo root")
         .unfaded();
     for _ in 0..3 {
@@ -236,9 +236,11 @@ fn only_the_last_of_two_changes_before_an_update_is_reported() {
     s.declare_root_topology(Some(mono()))
         .expect("mono")
         .unfaded();
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::from_count(4))))
-        .expect("quad")
-        .unfaded();
+    s.declare_root_topology(Some(ChannelTopology::default_for(
+        ChannelLayout::from_count(4),
+    )))
+    .expect("quad")
+    .unfaded();
     let mut events = reopened(s.update());
     assert_eq!(events.len(), 1);
     let new = claim_tap(&mut s, events.remove(0).0);
@@ -264,9 +266,11 @@ fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
         .unfaded();
     let first = reopened(block(&mut s));
     assert_eq!(first.len(), 1);
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::from_count(4))))
-        .expect("quad")
-        .unfaded();
+    s.declare_root_topology(Some(ChannelTopology::default_for(
+        ChannelLayout::from_count(4),
+    )))
+    .expect("quad")
+    .unfaded();
     let second = reopened(block(&mut s));
     assert_eq!(second.len(), 1, "announced again");
     assert_eq!(first[0].0, second[0].0, "under the one id");
@@ -324,7 +328,7 @@ fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopene
         .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
+    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo")
         .unfaded();
     let events = reopened(block(&mut s));
@@ -352,7 +356,7 @@ fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
         .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
-    let four = ChannelTopology::assumed(ChannelLayout::from_count(4));
+    let four = ChannelTopology::default_for(ChannelLayout::from_count(4));
     s.declare_root_topology(Some(four.clone()))
         .expect("quad")
         .unfaded();

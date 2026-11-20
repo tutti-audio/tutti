@@ -20,7 +20,7 @@ const SETTLE: usize = 24_000;
 fn bank(width: u16, bands: usize) -> MultibandBank<f32> {
     MultibandBank::<f32>::new(
         BankShape::new(
-            BusTopology::assumed(ChannelLayout::from_count(width)).unwrap(),
+            BusTopology::default_for(ChannelLayout::from_count(width)).unwrap(),
             MultibandBands::new(u8::try_from(bands).unwrap()).unwrap(),
         ),
         RATE,

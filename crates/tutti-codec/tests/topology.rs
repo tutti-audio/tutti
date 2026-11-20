@@ -82,7 +82,7 @@ fn a_wave_mask_names_each_channels_speaker() {
     );
     assert_eq!(
         topology_of_mask(6, 0x60F),
-        ChannelTopology::assumed(ChannelLayout::from(6u16))
+        ChannelTopology::default_for(ChannelLayout::from(6u16))
     );
     assert_eq!(
         topology_of_mask(3, 0x7).positions().unwrap(),

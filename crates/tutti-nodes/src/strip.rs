@@ -522,7 +522,7 @@ mod tests {
 
     /// The engine's bus at `n` channels.
     fn width(n: u16) -> BusTopology {
-        BusTopology::assumed(ChannelLayout::from(n)).expect("a test width fits a bus")
+        BusTopology::default_for(ChannelLayout::from(n)).expect("a test width fits a bus")
     }
 
     /// Left, right, centre: a placed bus of three.

@@ -2303,7 +2303,7 @@ mod tests {
         let folded = [61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0];
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();
-        let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
+        let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
         declare(&mut ed, &control, Some(five_one), ChannelLayout::STEREO).expect("5.1 into stereo");
         assert_eq!(first_frame(&engine, 2), folded);
         // The same six channels declared with the front pair swapped.
@@ -2346,8 +2346,8 @@ mod tests {
         let mut id = ed.spec().root_id;
         for root in [
             ChannelTopology::unassigned(ChannelLayout::QUAD),
-            ChannelTopology::assumed(ChannelLayout::from(6u16)),
-            ChannelTopology::assumed(eight),
+            ChannelTopology::default_for(ChannelLayout::from(6u16)),
+            ChannelTopology::default_for(eight),
         ] {
             id = id.next();
             control.publish_root(id, Some(root), eight).unwrap();
@@ -2809,7 +2809,7 @@ mod tests {
     }
 
     /// A device whose wiring is stated is folded into by speaker, and is
-    /// reported `Stated`; the width's order is `Assumed`. A stereo root into
+    /// reported `Stated`; the width's default layout is `Default`. A stereo root into
     /// a device stated right then left lands its left on the device's second
     /// channel, and taking the statement back is the identity again.
     #[test]
@@ -2825,11 +2825,11 @@ mod tests {
         rewire(&mut ed, 2);
         let control = engine.output_control();
         let _ = first_frame(&engine, 2);
-        // Assumed stereo; a 2-wide root passes through.
+        // Default stereo; a 2-wide root passes through.
         let stereo = ChannelLayout::STEREO;
         assert_eq!(
             control.device(stereo).map(|d| d.placement),
-            Some(Placement::Assumed)
+            Some(Placement::Default)
         );
         assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
         // A 2-wide device stated as a left-right swap of the front pair: the
@@ -2844,7 +2844,7 @@ mod tests {
         control.state_device(stereo, None).unwrap();
         assert_eq!(
             control.device(stereo).map(|d| d.placement),
-            Some(Placement::Assumed)
+            Some(Placement::Default)
         );
         assert_eq!(first_frame_after_fade(&engine, 2), [21.0, 22.0]);
         // A statement of another width than the device is refused.
