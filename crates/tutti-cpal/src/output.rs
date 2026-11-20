@@ -19,15 +19,16 @@ use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
 use crate::roster::{DeviceId, Direction};
 
 /// What [`AudioEngine`] opens: the output device and its sample format.
-/// `Default` is the host's default device at the device's default format; a
-/// [`DeviceSelector`], a [`DeviceId`] or an `Option<DeviceId>` converts to the
-/// config that names it. The choice survives a restart.
+/// [`new`](Self::new) names the device at its default format; `Default` is the
+/// host's default device; a [`DeviceSelector`], a [`DeviceId`] or an
+/// `Option<DeviceId>` converts to the config that names it. The choice survives
+/// a restart.
 ///
 /// ```
 /// use tutti_buffers::SampleFormat;
 /// use tutti_cpal::{DeviceSelector, OutputConfig};
 ///
-/// let config = OutputConfig::from(DeviceSelector::named("Interface"))
+/// let config = OutputConfig::new(DeviceSelector::named("Interface"))
 ///     .sample_format(SampleFormat::I16);
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -37,6 +38,15 @@ pub struct OutputConfig {
 }
 
 impl OutputConfig {
+    /// The device `device` names, at its default sample format.
+    #[must_use]
+    pub fn new(device: impl Into<DeviceSelector>) -> Self {
+        Self {
+            device: device.into(),
+            sample_format: None,
+        }
+    }
+
     /// Names `device` instead; the chosen sample format stays, so a restart
     /// onto another device is asked for the same format.
     pub(crate) fn select(&mut self, device: DeviceSelector) {
@@ -63,10 +73,7 @@ impl OutputConfig {
 impl From<DeviceSelector> for OutputConfig {
     /// The device `device` names, at its default sample format.
     fn from(device: DeviceSelector) -> Self {
-        Self {
-            device,
-            sample_format: None,
-        }
+        Self::new(device)
     }
 }
 

@@ -520,6 +520,7 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
     ty("crates/tutti-au-host/", "StreamConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-cpal/", "OutputConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-nodes/", "MidSideConfig", WIDTH, STEREO_ONLY),
     ty(
         "crates/tutti-nodes/",
