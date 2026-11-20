@@ -1024,7 +1024,8 @@ impl<C: Clock> SessionBuilder<C> {
             &executor,
             &bells,
         )?;
-        let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts.plugins);
+        let (plugins, _early_work) =
+            crate::session::parts::PluginPart::new(&self.opts.plugins, &executor);
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
         let session = Session {

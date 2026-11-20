@@ -379,13 +379,6 @@ impl Jobs {
         Ticket::new(&self.outputs)
     }
 
-    /// The session's executor, for a component that starts its own task on it
-    /// (a served plugin's exit watch).
-    #[cfg(feature = "plugin")]
-    pub(crate) fn executor(&self) -> &Executor {
-        &self.executor
-    }
-
     /// Runs `work` on the executor as a typed job. `land` runs in a later
     /// [`Session::update`] with the worker's end and the job's ticket.
     #[cfg_attr(

@@ -54,10 +54,8 @@ use crate::{OtherPeer, PeerState, SavedPeer};
 struct Context {
     rate: SampleRate,
     work: MainWorkHandle,
-    /// The session's executor, which a served plugin's exit watch runs on. This
-    /// is a clone: a load that is queued and never run keeps the executor alive,
-    /// until the plugin-load values of the work-value API hold none.
-    executor: tutti_platform::Executor,
+    /// The session's executor, which a served plugin's exit watch runs on.
+    executor: tutti_platform::WeakExecutor,
     ids: ResourceIds,
     /// Whether the session recovers a plugin that dies at its node.
     recovery: bool,
@@ -677,7 +675,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 cx: Context {
                     rate: self.graph.prepared().sample_rate(),
                     work: self.plugins.work.clone(),
-                    executor: self.jobs.executor().clone(),
+                    executor: self.plugins.executor.clone(),
                     ids: self.pool.resource_ids.clone(),
                     recovery: self.plugins.recovery.is_some(),
                 },

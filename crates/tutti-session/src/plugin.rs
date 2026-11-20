@@ -193,8 +193,9 @@ pub(crate) struct PluginLoad {
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
     /// The session's executor, which a served plugin's exit watch runs on. The
-    /// load holds it until it has run.
-    executor: tutti_platform::Executor,
+    /// load upgrades it as it opens a served plugin and holds it only while it
+    /// does, so a queued load never keeps the executor alive.
+    executor: tutti_platform::WeakExecutor,
 }
 
 impl std::fmt::Debug for PluginLoad {
@@ -239,6 +240,16 @@ impl PluginLoad {
         }
     }
 
+    /// The session's executor while it lives: a load that runs once the
+    /// session is dropping is refused.
+    fn executor(&self) -> Result<tutti_platform::Executor, IpcError> {
+        self.executor.upgrade().ok_or_else(|| IpcError::LoadFailed {
+            path: Some(self.loadable.plugin().path().to_path_buf()),
+            stage: tutti_plugin_types::LoadStage::Opening,
+            reason: "the session is shutting down".into(),
+        })
+    }
+
     /// [`run`](Self::run)'s open, on this thread.
     fn open(self, at: Opening) -> Open {
         // The state goes in **before the plugin is activated** (`open_with_state`):
@@ -247,23 +258,27 @@ impl PluginLoad {
         // it is not silent.
         let state = self.state.as_deref().map(PeerState::bytes);
         let opened = match (at, state) {
-            (Opening::Served, None) => HostPlugin::open_served(
-                &self.config,
-                &self.executor,
-                &self.work,
-                &self.loadable,
-                self.rate,
-            )
-            .map(|plugin| (plugin, None)),
-            (Opening::Served, Some(state)) => HostPlugin::open_served_restoring(
-                &self.config,
-                &self.executor,
-                &self.work,
-                &self.loadable,
-                self.rate,
-                state,
-            )
-            .map(|(plugin, restore)| (plugin, Some(restore))),
+            (Opening::Served, None) => self.executor().and_then(|executor| {
+                HostPlugin::open_served(
+                    &self.config,
+                    &executor,
+                    &self.work,
+                    &self.loadable,
+                    self.rate,
+                )
+                .map(|plugin| (plugin, None))
+            }),
+            (Opening::Served, Some(state)) => self.executor().and_then(|executor| {
+                HostPlugin::open_served_restoring(
+                    &self.config,
+                    &executor,
+                    &self.work,
+                    &self.loadable,
+                    self.rate,
+                    state,
+                )
+                .map(|(plugin, restore)| (plugin, Some(restore)))
+            }),
             (Opening::OnMain(main), None) => {
                 HostPlugin::open_in_process(main, &self.work, &self.loadable, self.rate)
                     .map(|plugin| (plugin, None))
@@ -2240,7 +2255,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             config: origin.config,
             state: hosted.snapshot.clone().map(Arc::new),
             work: self.plugins.work.clone(),
-            executor: self.jobs.executor().clone(),
+            executor: self.plugins.executor.clone(),
         };
         let token = Arc::clone(&hosted.reload.token);
         let snapshot_age = hosted
@@ -2592,6 +2607,42 @@ mod tests {
     use tutti_plugin_types::ParameterInfo;
     use tutti_units::Normalized;
     use tutti_units::ParamId;
+
+    /// **A plugin load that is queued and never run keeps no executor alive**:
+    /// the load reaches the executor through the session part's weak handle, so
+    /// with every strong handle dropped the executor shuts down while the load
+    /// is still in its queue.
+    #[test]
+    fn a_queued_plugin_load_does_not_keep_the_executor_alive() {
+        let executor = Executor::new();
+        let (part, _early) = crate::session::parts::PluginPart::new(
+            &crate::session::parts::PluginOptions::default(),
+            &executor,
+        );
+        let (_collector, work) = tutti_plugin_types::MainWork::new();
+        let load = PluginLoad {
+            loadable: Loadable::uncatalogued(PluginRef::file("queued.vst3")),
+            rate: SampleRate::SR_48K,
+            config: AudioConfig::default(),
+            state: None,
+            work,
+            executor: part.executor.clone(),
+        };
+        // Queued, and nothing drives the executor: the load waits in its queue.
+        let queued = executor.spawn(async move {
+            let _load = load;
+            std::future::pending::<()>().await;
+        });
+        let weak = executor.downgrade();
+
+        drop(executor);
+
+        assert!(
+            weak.upgrade().is_none(),
+            "a queued load kept the executor alive"
+        );
+        drop(queued);
+    }
 
     /// The controls of a plugin's node, counting nothing yet.
     fn node_controls() -> NodeControls {
