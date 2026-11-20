@@ -514,6 +514,57 @@ fn the_reset_is_in_before_restore_not_after() {
     assert_eq!(applied(&mut processor), 0, "before_restore voids the write");
 }
 
+/// **A write made after a flush is the block's last word**: the Controller's
+/// write (a flush is one) goes in at the head of the block, and the block's own
+/// parameter changes carry a later write of the same parameter after it. The
+/// plugin hears the flushed value first and the later one last. Reversing the
+/// two leaves the plugin on the flushed value.
+#[test]
+fn a_write_after_a_flush_is_the_blocks_last_word() {
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let cutoff = &probe_params()[0];
+    let id = ParamId::new(cutoff.id);
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
+    let mut later = tutti_plugin_types::ParameterChanges::reserved(1, 4);
+    assert!(later.add_change(id, 0, 0.6));
+    let ctx = ProcessContext::new().params(&later);
+    let mut out = ProcessOutput::default();
+    let input = [0.0f32; 64];
+    let (mut left, mut right) = ([1.0f32; 64], [1.0f32; 64]);
+    let inputs = [input.as_slice(), input.as_slice()];
+    let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
+    let mut io = PluginIo {
+        buffer: InputOutput::from_slices(
+            tutti_plugin_types::Samples::new(64),
+            &inputs,
+            &mut outputs,
+        )
+        .expect("equal channels"),
+        ctx: &ctx,
+        out: &mut out,
+    };
+    Processor::process(&mut processor, &mut io).expect("a block");
+    let cap = process_capture();
+    let heard: Vec<f64> = cap.events[..cap.event_count as usize]
+        .iter()
+        .filter(|e| e.event_type == PARAM_VALUE && e.param_id == cutoff.id)
+        .map(|e| e.value)
+        .collect();
+    assert_eq!(
+        heard.len(),
+        2,
+        "the flushed write and the block's: {heard:?}"
+    );
+    assert!((heard[0] - 350.0).abs() < 1e-9, "100 + 0.25 * 1000 first");
+    assert!((heard[1] - 700.0).abs() < 1e-9, "100 + 0.6 * 1000 last");
+}
+
 /// **A flood of writes to one parameter is its latest value in the next
 /// block**, once: the slot holds the last, and a block after it sends nothing.
 #[test]

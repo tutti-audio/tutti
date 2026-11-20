@@ -71,6 +71,8 @@ pub struct Rebinder<L: Loaded, F: Float = f32> {
     /// Where a tick delivers what its pump finds: the handle's listeners.
     /// `None` for a served plugin, whose own listener reports it.
     reporting: Option<Reporting>,
+    /// The host's writes' reader, which every successor node claims too.
+    edits: Option<super::host_edits::EditPort>,
     /// The delivery counters of the newest node a commit gave the Processor
     /// (the one the rebinder was made from until then), shared by every clone:
     /// what a successor's parameter delivery is seeded from.
@@ -100,6 +102,7 @@ impl<L: Loaded, F: Float> Clone for Rebinder<L, F> {
             sample_rate: self.sample_rate,
             pending_sample_rate: Arc::clone(&self.pending_sample_rate),
             reporting: self.reporting.clone(),
+            edits: self.edits.clone(),
             delivery: Arc::clone(&self.delivery),
             parameters: self.parameters.clone(),
             spares: self.spares,
@@ -183,6 +186,7 @@ where
             Some(self.event_room),
         );
         client.reporting = self.reporting.clone();
+        client.edits = self.edits.clone();
         // What the node it replaces delivered: the plugin holds those values.
         let delivered = self.delivery.lock().delivered();
         client.seed_delivery(&delivered);
@@ -319,6 +323,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             sample_rate: self.sample_rate,
             pending_sample_rate: Arc::clone(&self.pending_sample_rate),
             reporting: self.reporting.clone(),
+            edits: self.edits.clone(),
             delivery: Arc::new(Mutex::new(self.params.counters())),
             parameters: self.parameters.clone(),
             spares: self.spares,
@@ -427,6 +432,119 @@ mod tests {
         let rebinder = client.rebinder(tempo());
         let node = contract::prepared(client.bind(tempo()), SR, BLOCK);
         (fake, rebinder, node, inner)
+    }
+
+    /// A node over the fake with the host's parameter slots attached, driven by
+    /// hand; the post that feeds them.
+    fn edited_node() -> (
+        FakePlugin,
+        super::super::host_edits::EditPost,
+        tutti_graph::contract::Direct<PluginNode<FakeLoaded>>,
+        Arc<Mutex<Instance<FakeLoaded>>>,
+    ) {
+        let (fake, loaded) = FakePlugin::new();
+        fake.declare(&[(ParamId::new(1), false)]);
+        let main = main_thread();
+        let wiring = loaded.wiring(main);
+        let descriptor = loaded.info().clone();
+        let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block"));
+        let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+            panic!("the fake activates");
+        };
+        let mut client = client_over::<FakeLoaded, f32>(
+            processor,
+            controller,
+            prepare,
+            descriptor,
+            &wiring,
+            [ParamId::new(1)],
+            0,
+            None,
+        )
+        .expect("the fake is narrow");
+        let (post, port) = super::super::host_edits::host_edits([ParamId::new(1)]);
+        client.edits = Some(port);
+        let inner = Arc::clone(&client.inner);
+        let unit = tutti_graph::contract::Direct::new(client.bind(tempo()), SR, BLOCK);
+        (fake, post, unit, inner)
+    }
+
+    fn block_params(fake: &FakePlugin) -> Vec<(ParamId, f64)> {
+        fake.calls()
+            .into_iter()
+            .filter_map(|call| match call {
+                Call::BlockParam(id, value) => Some((id, value.get())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **A write owed after a block the plugin failed is dropped when a load
+    /// comes before the next block**: the write was drained into the failed
+    /// block's chunk, which did not go and so owes it to the next; a state load
+    /// since made it stale, and the next block, whole-block path, does not send it.
+    #[test]
+    fn a_write_owed_after_a_failed_block_is_not_sent_after_a_load() {
+        let (fake, post, mut unit, _inner) = edited_node();
+        fake.fail_blocks(true);
+        post.write(ParamId::new(1), tutti_units::Normalized::of(0.75))
+            .expect("a declared parameter");
+        unit.block();
+        assert!(
+            block_params(&fake).is_empty(),
+            "the failed block took nothing"
+        );
+        post.reset();
+        fake.fail_blocks(false);
+        unit.block();
+        assert!(
+            block_params(&fake).is_empty(),
+            "the stale owed write reached the plugin: {:?}",
+            block_params(&fake)
+        );
+    }
+
+    /// **A write made after a flush is the plugin's last word**, through a node:
+    /// the first write is applied by a flush (the plugin's own `Control`), the
+    /// second rides the next block, and nothing the plugin is told after the
+    /// block undoes it.
+    #[test]
+    fn a_write_after_a_flush_ends_the_plugin_on_the_later_write() {
+        let (fake, post, mut unit, inner) = edited_node();
+        let id = ParamId::new(1);
+        post.write(id, tutti_units::Normalized::of(0.25))
+            .expect("a declared parameter");
+        post.flush(main_thread(), inner.lock().control().expect("alive"));
+        post.write(id, tutti_units::Normalized::of(0.75))
+            .expect("a declared parameter");
+        unit.block();
+        let told: Vec<Call> = fake
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, Call::SetParameter(_) | Call::BlockParam(..)))
+            .collect();
+        assert_eq!(
+            told,
+            [
+                Call::SetParameter(id),
+                Call::BlockParam(id, tutti_units::Normalized::of(0.75)),
+            ],
+            "the flushed write first, the block's later write last"
+        );
+    }
+
+    /// **A write owed after a failed block, with no load, is sent by the next**
+    /// (the positive case of the test above).
+    #[test]
+    fn a_write_owed_after_a_failed_block_is_sent_by_the_next() {
+        let (fake, post, mut unit, _inner) = edited_node();
+        fake.fail_blocks(true);
+        post.write(ParamId::new(1), tutti_units::Normalized::of(0.75))
+            .expect("a declared parameter");
+        unit.block();
+        fake.fail_blocks(false);
+        unit.block();
+        assert_eq!(block_params(&fake), [(ParamId::new(1), 0.75)]);
     }
 
     /// **The node declares what its own MIDI intake takes**
