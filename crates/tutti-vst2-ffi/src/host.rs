@@ -1,6 +1,7 @@
 //! Host specific structures.
 
 use num_traits::Float;
+use tracing::{error, warn};
 use tutti_rt::{LockExt, Tally, TallyWriter, tally};
 
 use libloading::Library;
@@ -18,7 +19,8 @@ use std::thread::ThreadId;
 use std::{fmt, ptr, slice};
 
 use tutti_plugin_types::{
-    MainThreadMarker, MainWorkHandle, WindowHandle, c_str_prefix, ffi_guard, read_c_str,
+    MAX_STATE_BYTES, MainThreadMarker, MainWorkHandle, WindowHandle, c_str_prefix, ffi_guard,
+    read_c_str,
 };
 
 use crate::{
@@ -27,13 +29,14 @@ use crate::{
     editor::{KeyCode, Rect},
     interfaces,
     plugin::{self, Category, Info},
+    primitive_enum::primitive_enum,
     speaker::{ArrangementRead, SpeakerArrangement},
 };
 
 primitive_enum! {
     #[derive(Clone, Copy, Debug)]
     #[doc(hidden)]
-    pub enum OpCode: i32 {
+    pub enum AudioMasterOpCode: i32 {
         /// [index]: parameter index
         /// [opt]: parameter value
         Automate = 0,
@@ -219,13 +222,6 @@ pub trait Host {
     ///
     /// This is useful when the plugin is doing something such as mouse tracking in the UI.
     fn idle(&self) {}
-
-    /// Get vendor and product information.
-    ///
-    /// Returns a tuple in the form of `(version, vendor_name, product_name)`.
-    fn get_info(&self) -> (isize, &str, &str) {
-        (1, "vendor string", "product string")
-    }
 
     /// Handle incoming events from the plugin: what the host callback hands the host for
     /// `audioMasterProcessEvents`, as a view only the callback can make.
@@ -441,13 +437,13 @@ pub struct ShellPlugin {
 /// finish first and later audio entries are refused.
 ///
 /// ```compile_fail,E0061
-/// # use tutti_vst2_ffi::host::PluginInstance;
+/// # use tutti_vst2_ffi::PluginInstance;
 /// // A main-thread entry needs the proof: there is no token-free `resume`.
 /// fn go(instance: &mut PluginInstance) { instance.resume(); }
 /// ```
 ///
 /// ```compile_fail,E0277
-/// # use tutti_vst2_ffi::host::PluginInstance;
+/// # use tutti_vst2_ffi::PluginInstance;
 /// fn needs_sync<T: Sync>() {}
 /// needs_sync::<PluginInstance>();
 /// ```
@@ -479,13 +475,10 @@ pub struct PluginInstance {
     ///
     /// Mandatory in VST2.4 and set by essentially every plugin, but a plugin
     /// that clears it is telling the host that `processReplacing` is not
-    /// installed. Captured here rather than added to [`Info`] because `Info` is
-    /// the *plugin-authoring* struct: it is what a plugin returns from
-    /// `get_info()` to have the flags built for it, so a `can_replacing` field
-    /// there would be a host-only concern in a plugin-side type.
+    /// installed.
     can_replacing: bool,
     /// `effFlagsCanDoubleReplacing`, mirroring [`Self::can_replacing`] for the
-    /// `f64` path. (Also surfaced to plugin authors as `Info::f64_precision`.)
+    /// `f64` path.
     can_double_replacing: bool,
     /// `effFlagsHasEditor` in `AEffect::flags` — whether the plugin publishes a
     /// GUI at all.
@@ -660,7 +653,7 @@ struct Closer {
 impl Closer {
     /// Sends the opcodes of a close, once, on the main thread; see [`PluginInstance`]'s docs.
     fn close(self) {
-        use plugin::OpCode as op;
+        use plugin::EffectOpCode as op;
 
         // The editor first: some plugins read audio state during editor teardown (to flush
         // meter buffers).
@@ -750,7 +743,7 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
     /// ```no_run
     /// # use std::path::Path;
     /// # use std::sync::Arc;
-    /// # use tutti_vst2_ffi::host::{Host, PluginLoader};
+    /// # use tutti_vst2_ffi::{Host, PluginLoader};
     /// # let path = Path::new(".");
     /// # struct MyHost;
     /// # impl MyHost { fn new() -> MyHost { MyHost } }
@@ -884,7 +877,13 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
             work.clone(),
         );
 
-        let api_ver = instance.dispatch(plugin::OpCode::GetApiVersion, 0, 0, ptr::null_mut(), 0.0);
+        let api_ver = instance.dispatch(
+            plugin::EffectOpCode::GetApiVersion,
+            0,
+            0,
+            ptr::null_mut(),
+            0.0,
+        );
         if api_ver < 2400 {
             return Err(PluginLoadError::InvalidApiVersion { version: api_ver });
         }
@@ -915,30 +914,11 @@ impl PluginInstance {
         (self.can_replacing && replacing) || accumulating
     }
 
-    /// Re-read the counts and delay [`Info`] snapshots from the
-    /// live `AEffect`: `numInputs`, `numOutputs`, `numParams`, `numPrograms`
-    /// and `initialDelay`. The snapshot is taken before `effOpen`, so
-    /// [`init`](Self::init) calls this once it returns; a host calls it again
-    /// after `audioMasterIOChanged`, which is the plugin saying the pin counts
-    /// moved.
-    pub fn refresh_effect_fields(&mut self) {
-        // SAFETY: `self.core` owns the `*mut AEffect` for this instance's
-        // lifetime; these are plain `i32` fields, not calls into the plugin.
-        let effect = unsafe { &*self.core.get_effect() };
-        self.info.inputs = effect.numInputs;
-        self.info.outputs = effect.numOutputs;
-        self.info.parameters = effect.numParams;
-        self.info.presets = effect.numPrograms;
-        self.info.initial_delay = effect.initialDelay;
-    }
-
     /// Read `AEffect::numPrograms` as it stands *now*.
     ///
-    /// [`get_info`](Self::get_info) returns the snapshot taken in
-    /// `new`, before `effOpen`. A **shell** plugin — one bundle
-    /// exposing many effects — picks which effect it is during init, and its
-    /// program count is that effect's, not the shell's. Reading the snapshot
-    /// gives the count from before the choice.
+    /// A **shell** plugin — one bundle exposing many effects — picks which effect it is
+    /// during init, and its program count is that effect's, not the shell's, so the count is
+    /// read after `effOpen`.
     ///
     /// Same live-field reasoning as
     /// [`read_initial_delay`](Self::read_initial_delay); `numPrograms` is a
@@ -967,9 +947,9 @@ impl PluginInstance {
         _main: MainThreadMarker,
         change: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        self.opcode(plugin::OpCode::BeginSetPreset);
+        self.opcode(plugin::EffectOpCode::BeginSetPreset);
         let result = change(self);
-        self.opcode(plugin::OpCode::EndSetPreset);
+        self.opcode(plugin::EffectOpCode::EndSetPreset);
         result
     }
 
@@ -992,7 +972,7 @@ impl PluginInstance {
     /// advertisement is the documented contract.
     pub fn set_bypass(&mut self, _main: MainThreadMarker, bypass: bool) -> bool {
         self.dispatch(
-            plugin::OpCode::SoftBypass,
+            plugin::EffectOpCode::SoftBypass,
             0,
             isize::from(bypass),
             ptr::null_mut(),
@@ -1002,16 +982,10 @@ impl PluginInstance {
 
     /// Read `AEffect::initialDelay` as it stands *now*.
     ///
-    /// [`get_info`](Self::get_info) returns a clone of the snapshot taken in
-    /// `new`, which runs before `effOpen`, `effSetSampleRate` and
-    /// `effMainsChanged`. Plugins routinely set their latency during those —
-    /// a linear-phase EQ does not know its filter length until it knows the
-    /// sample rate — so the snapshot's `initial_delay` is a pre-init value and
-    /// is usually 0 for exactly the plugins that have latency.
-    ///
-    /// This reads the field back off the live `AEffect` instead, so a host can
-    /// re-ask after the init sequence and after any state change that lets a
-    /// plugin re-declare.
+    /// Plugins routinely set their latency during `effOpen`, `effSetSampleRate` and
+    /// `effMainsChanged` (a linear-phase EQ does not know its filter length until it knows
+    /// the sample rate), so a host asks again after the init sequence and after any state
+    /// change that lets a plugin re-declare.
     pub fn read_initial_delay(&self) -> i32 {
         // SAFETY: `self.core` owns the `*mut AEffect` for this instance's
         // lifetime; `initialDelay` is a plain `i32` field, not a call into the
@@ -1028,11 +1002,16 @@ impl PluginInstance {
     /// mapping it here would have to pick a vocabulary, and the two candidate
     /// zeros mean opposite things.
     ///
-    /// Read live rather than from the `get_info` snapshot, for the same reason
-    /// [`read_initial_delay`](Self::read_initial_delay) is: a plugin may not
-    /// know its tail until it knows its sample rate.
+    /// Read live, for the same reason [`read_initial_delay`](Self::read_initial_delay) is: a
+    /// plugin may not know its tail until it knows its sample rate.
     pub fn read_tail_size(&self, _main: MainThreadMarker) -> isize {
-        self.dispatch(plugin::OpCode::GetTailSize, 0, 0, std::ptr::null_mut(), 0.0)
+        self.dispatch(
+            plugin::EffectOpCode::GetTailSize,
+            0,
+            0,
+            std::ptr::null_mut(),
+            0.0,
+        )
     }
 
     /// Ask the plugin how many MIDI channels it uses, via
@@ -1046,12 +1025,11 @@ impl PluginInstance {
     /// separable at all: anything outside that range is an absent answer, not a
     /// count. A host must therefore treat `None` as "unknown", never as zero.
     ///
-    /// Not folded into [`plugin::Info`] because that snapshot is taken in
-    /// `new`, before `effOpen`, and a plugin may not know its MIDI
-    /// configuration until it is initialised — the same trap
-    /// [`read_initial_delay`](Self::read_initial_delay) documents for latency.
+    /// Not part of [`Info`]: a plugin may not know its MIDI configuration until it is
+    /// initialised, the same trap [`read_initial_delay`](Self::read_initial_delay)
+    /// documents for latency.
     pub fn read_midi_channels(&self, _main: MainThreadMarker) -> MidiChannelCounts {
-        fn ask(this: &PluginInstance, opcode: plugin::OpCode) -> Option<u8> {
+        fn ask(this: &PluginInstance, opcode: plugin::EffectOpCode) -> Option<u8> {
             // VST 2.4 documents the valid answer as 1..=15. Out of that range —
             // including the 0 an unimplemented opcode returns — means the
             // plugin did not answer.
@@ -1061,8 +1039,8 @@ impl PluginInstance {
         }
 
         MidiChannelCounts {
-            inputs: ask(self, plugin::OpCode::GetNumMidiInputs),
-            outputs: ask(self, plugin::OpCode::GetNumMidiOutputs),
+            inputs: ask(self, plugin::EffectOpCode::GetNumMidiInputs),
+            outputs: ask(self, plugin::EffectOpCode::GetNumMidiOutputs),
         }
     }
 
@@ -1077,7 +1055,7 @@ impl PluginInstance {
             // As `read_string_param`: the spec's size is a floor, real plugins write more.
             let mut buf = vec![0u8; MIN_STRING_BUFFER];
             let answer = self.dispatch(
-                plugin::OpCode::ShellGetNextPlugin,
+                plugin::EffectOpCode::ShellGetNextPlugin,
                 0,
                 0,
                 buf.as_mut_ptr() as *mut c_void,
@@ -1097,16 +1075,6 @@ impl PluginInstance {
         found
     }
 
-    fn entry(&self) -> RenderEntry {
-        RenderEntry {
-            effect: self.core.get_effect(),
-            inputs: self.info.inputs.max(0) as usize,
-            outputs: self.info.outputs.max(0) as usize,
-            can_replacing: self.can_replacing,
-            can_double_replacing: self.can_double_replacing,
-        }
-    }
-
     /// The audio-thread entries of this plugin, with the pin counts read from the
     /// `AEffect` now: a plugin settles them in `effOpen` and may change them
     /// later, and a block must carry what it has at this moment.
@@ -1118,9 +1086,11 @@ impl PluginInstance {
         let (inputs, outputs) = self.read_pin_counts();
         RenderHandle {
             entry: RenderEntry {
+                effect: self.core.get_effect(),
                 inputs: inputs.max(0) as usize,
                 outputs: outputs.max(0) as usize,
-                ..self.entry()
+                can_replacing: self.can_replacing,
+                can_double_replacing: self.can_double_replacing,
             },
             name: Arc::from(self.info.name.as_str()),
             refusals: Refusals {
@@ -1196,14 +1166,23 @@ impl PluginInstance {
         _main: MainThreadMarker,
         work: MainWorkHandle,
     ) -> PluginInstance {
-        use plugin::OpCode as op;
+        use plugin::EffectOpCode as op;
 
         let main_thread = std::thread::current().id();
         let core = Core::new(effect, host_ref, main_thread, work);
         let mut plug = PluginInstance {
             core,
             lib: ManuallyDrop::new(lib),
-            info: Default::default(),
+            // Replaced below, once the plugin has been asked.
+            info: Info {
+                name: String::new(),
+                vendor: String::new(),
+                unique_id: 0,
+                version: 0,
+                category: Ok(Category::Unknown),
+                preset_chunks: false,
+                f64_precision: false,
+            },
             main_thread,
             resumed: false,
             editor_open: false,
@@ -1229,7 +1208,8 @@ impl PluginInstance {
             // the plugin's. Saturating rather than truncating: a value that does
             // not fit was never a category code, and truncation could land it on
             // a real one.
-            let category_code = plug.opcode(op::GetCategory).try_into().unwrap_or(i32::MAX);
+            let answer = i32::try_from(plug.opcode(op::GetCategory)).unwrap_or(i32::MAX);
+            let category = Category::try_from(answer as isize);
 
             // `effGetEffectName` is the plugin's own name for itself;
             // `effGetProductString` is the product it ships in, which for a
@@ -1254,26 +1234,11 @@ impl PluginInstance {
             plug.info = Info {
                 name,
                 vendor: plug.read_string(op::GetVendorName, MAX_VENDOR_STR_LEN),
-
-                presets: effect.numPrograms,
-                parameters: effect.numParams,
-                inputs: effect.numInputs,
-                outputs: effect.numOutputs,
-
-                midi_inputs: 0,
-                midi_outputs: 0,
-
                 unique_id: effect.uniqueId,
                 version: effect.version,
-
-                category: Category::try_from(category_code as isize).unwrap_or(Category::Unknown),
-                category_code,
-
-                initial_delay: effect.initialDelay,
-
+                category,
                 preset_chunks: flags.intersects(PluginFlags::PROGRAM_CHUNKS),
                 f64_precision: flags.intersects(PluginFlags::CAN_DOUBLE_REPLACING),
-                silent_when_stopped: flags.intersects(PluginFlags::NO_SOUND_IN_STOP),
             };
         }
 
@@ -1301,7 +1266,7 @@ impl PluginInstance {
 
         let supported = self.concurrent(|| {
             self.dispatch(
-                plugin::OpCode::GetParamInfo,
+                plugin::EffectOpCode::GetParamInfo,
                 index,
                 0,
                 props.as_mut_ptr() as *mut c_void,
@@ -1352,7 +1317,7 @@ impl PluginInstance {
         }
 
         let serviced = self.dispatch(
-            plugin::OpCode::GetMidiProgramName,
+            plugin::EffectOpCode::GetMidiProgramName,
             channel,
             0,
             name.as_mut_ptr() as *mut c_void,
@@ -1391,7 +1356,7 @@ impl PluginInstance {
         let mut name: MaybeUninit<api::MidiProgramName> = MaybeUninit::zeroed();
 
         let current = self.dispatch(
-            plugin::OpCode::GetCurrentMidiProgram,
+            plugin::EffectOpCode::GetCurrentMidiProgram,
             channel,
             0,
             name.as_mut_ptr() as *mut c_void,
@@ -1426,7 +1391,7 @@ impl PluginInstance {
         }
 
         let serviced = self.dispatch(
-            plugin::OpCode::GetMidiProgramCategory,
+            plugin::EffectOpCode::GetMidiProgramCategory,
             channel,
             0,
             cat.as_mut_ptr() as *mut c_void,
@@ -1448,7 +1413,7 @@ impl PluginInstance {
     /// garbage non-zero answer must not be read as "changed" forever.
     pub fn midi_programs_changed(&self, _main: MainThreadMarker, channel: i32) -> bool {
         self.dispatch(
-            plugin::OpCode::HasMidiProgramsChanged,
+            plugin::EffectOpCode::HasMidiProgramsChanged,
             channel,
             0,
             ptr::null_mut(),
@@ -1482,7 +1447,7 @@ impl PluginInstance {
         }
 
         let supported = self.dispatch(
-            plugin::OpCode::GetMidiKeyName,
+            plugin::EffectOpCode::GetMidiKeyName,
             channel,
             0,
             key.as_mut_ptr() as *mut c_void,
@@ -1524,7 +1489,7 @@ trait Dispatch {
     /// Send a dispatch message to the plugin.
     fn dispatch(
         &self,
-        opcode: plugin::OpCode,
+        opcode: plugin::EffectOpCode,
         index: i32,
         value: isize,
         ptr: *mut c_void,
@@ -1541,12 +1506,12 @@ trait Dispatch {
         // SAFETY: `dispatcher` came out of the `AEffect` this instance owns, so
         // the effect pointer it is handed is the one it belongs to and is live
         // for the call. `ptr`/`value` are the caller's to get right — that is
-        // the obligation `DispatcherProc` being `unsafe` now states out loud.
+        // the obligation `DispatcherProc` being `unsafe` states.
         unsafe { dispatcher(self.get_effect(), opcode.into(), index, value, ptr, opt) }
     }
 
     /// Send a lone opcode with no parameters.
-    fn opcode(&self, opcode: plugin::OpCode) -> isize {
+    fn opcode(&self, opcode: plugin::EffectOpCode) -> isize {
         self.dispatch(opcode, 0, 0, ptr::null_mut(), 0.0)
     }
 
@@ -1557,7 +1522,7 @@ trait Dispatch {
     /// program name), and a longer string would run past it.
     fn write_string(
         &self,
-        opcode: plugin::OpCode,
+        opcode: plugin::EffectOpCode,
         index: i32,
         value: isize,
         string: &str,
@@ -1569,13 +1534,13 @@ trait Dispatch {
         self.dispatch(opcode, index, value, string.as_ptr() as *mut c_void, opt)
     }
 
-    fn read_string(&self, opcode: plugin::OpCode, max: usize) -> String {
+    fn read_string(&self, opcode: plugin::EffectOpCode, max: usize) -> String {
         self.read_string_param(opcode, 0, 0, 0.0, max)
     }
 
     fn read_string_param(
         &self,
-        opcode: plugin::OpCode,
+        opcode: plugin::EffectOpCode,
         index: i32,
         value: isize,
         opt: f32,
@@ -1617,7 +1582,7 @@ impl Core {
     fn set_chunk(&self, index: i32, data: &[u8]) {
         let mut copy = data.to_vec();
         self.dispatch(
-            plugin::OpCode::SetData,
+            plugin::EffectOpCode::SetData,
             index,
             copy.len() as isize,
             copy.as_mut_ptr() as *mut c_void,
@@ -1642,11 +1607,12 @@ impl Core {
     ///   and then a `Vec` allocation of 16 exbibytes (or a wild read).
     /// * a positive length with a null pointer, from a plugin that computed a
     ///   size but failed to hand back the buffer.
+    /// * a length past [`MAX_STATE_BYTES`], which no state holds.
     fn get_chunk(&self, index: i32) -> Result<Vec<u8>, GetChunkError> {
         // Create a pointer that can be updated from the plugin.
         let mut ptr: *mut u8 = ptr::null_mut();
         let len = self.dispatch(
-            plugin::OpCode::GetData,
+            plugin::EffectOpCode::GetData,
             index,
             0,
             &mut ptr as *mut *mut u8 as *mut c_void,
@@ -1668,7 +1634,8 @@ impl Core {
 /// testable without a loaded plugin.
 ///
 /// `len == 0` is `Ok(empty)` — a normal state for an untouched chunk-capable
-/// plugin. The two failure shapes get an `Err`, so a caller cannot read a failed
+/// plugin. The failure shapes (a negative length, a length past
+/// [`MAX_STATE_BYTES`], a null buffer) get an `Err`, so a caller cannot read a failed
 /// save as "nothing saved".
 ///
 /// # Safety
@@ -1682,6 +1649,10 @@ unsafe fn copy_chunk(ptr: *mut u8, len: isize) -> Result<Vec<u8>, GetChunkError>
     if len == 0 {
         // Genuinely nothing saved — not an error.
         return Ok(Vec::new());
+    }
+    if len as usize > MAX_STATE_BYTES {
+        warn!("plugin reported {len} bytes of chunk data, past the state cap");
+        return Err(GetChunkError::TooLarge(len));
     }
     if ptr.is_null() {
         warn!("plugin reported {len} bytes of chunk data but left the pointer null");
@@ -1728,7 +1699,7 @@ struct RenderEntry {
 impl RenderEntry {
     fn dispatch(
         &self,
-        opcode: plugin::OpCode,
+        opcode: plugin::EffectOpCode,
         index: i32,
         value: isize,
         ptr: *mut c_void,
@@ -1875,7 +1846,7 @@ impl RenderEntry {
 
     fn process_events(&self, events: &api::Events) -> Option<isize> {
         self.dispatch(
-            plugin::OpCode::ProcessEvents,
+            plugin::EffectOpCode::ProcessEvents,
             0,
             0,
             events as *const _ as *mut _,
@@ -1902,7 +1873,7 @@ impl RenderEntry {
 /// way.
 ///
 /// ```compile_fail,E0599
-/// # use tutti_vst2_ffi::host::RenderHandle;
+/// # use tutti_vst2_ffi::RenderHandle;
 /// // A main-thread opcode is not an audio-thread entry.
 /// fn go(render: &mut RenderHandle) { render.resume(); }
 /// ```
@@ -2052,7 +2023,13 @@ impl RenderHandle {
             |entry, core| {
                 if !core.processing.swap(true, Ordering::AcqRel)
                     && entry
-                        .dispatch(plugin::OpCode::StartProcess, 0, 0, ptr::null_mut(), 0.0)
+                        .dispatch(
+                            plugin::EffectOpCode::StartProcess,
+                            0,
+                            0,
+                            ptr::null_mut(),
+                            0.0,
+                        )
                         .is_none()
                 {
                     self.refusals.dispatcher.add(1);
@@ -2071,7 +2048,13 @@ impl RenderHandle {
             |entry, core| {
                 if core.processing.swap(false, Ordering::AcqRel)
                     && entry
-                        .dispatch(plugin::OpCode::StopProcess, 0, 0, ptr::null_mut(), 0.0)
+                        .dispatch(
+                            plugin::EffectOpCode::StopProcess,
+                            0,
+                            0,
+                            ptr::null_mut(),
+                            0.0,
+                        )
                         .is_none()
                 {
                     self.refusals.dispatcher.add(1);
@@ -2121,21 +2104,22 @@ unsafe impl Send for PluginInstance {}
 
 /// The entries of the main thread. See the type's docs for which take a token and why.
 impl PluginInstance {
-    /// The plugin's `AEffect` snapshot: name, vendor, category and the pin, parameter and
-    /// program counts as they were read after `effOpen` (see
-    /// [`refresh_effect_fields`](Self::refresh_effect_fields)).
+    /// What the plugin declared about itself when it was loaded: [`Info`]. The pin, parameter
+    /// and program counts and the latency are read live
+    /// ([`read_pin_counts`](Self::read_pin_counts), [`read_num_params`](Self::read_num_params),
+    /// [`read_num_programs`](Self::read_num_programs),
+    /// [`read_initial_delay`](Self::read_initial_delay)).
     pub fn get_info(&self) -> Info {
         self.info.clone()
     }
 
-    /// Dispatch `effOpen`, then re-read the `AEffect` fields the plugin may
-    /// have finalised in it (pin and parameter counts, program count,
-    /// `initialDelay`): a plugin, a shell plugin above all, settles on which
-    /// effect it is during init, and [`get_info`](Self::get_info) and the
-    /// process entry points' channel-count checks read this snapshot.
+    /// Dispatch `effOpen`. A plugin settles its pin and parameter counts, program count
+    /// and `initialDelay` here, so those are read from the `AEffect` after it
+    /// ([`read_pin_counts`](Self::read_pin_counts), [`read_num_params`](Self::read_num_params),
+    /// [`read_num_programs`](Self::read_num_programs),
+    /// [`read_initial_delay`](Self::read_initial_delay)).
     pub fn init(&mut self, _main: MainThreadMarker) {
-        self.opcode(plugin::OpCode::Initialize);
-        self.refresh_effect_fields();
+        self.opcode(plugin::EffectOpCode::Initialize);
     }
 
     /// Runs one of the **exclusive** calls: the ones a plugin cannot take while it is
@@ -2174,7 +2158,13 @@ impl PluginInstance {
     /// `effSetSampleRate`; exclusive (see [`PluginInstance`]'s docs).
     pub fn set_sample_rate(&mut self, _main: MainThreadMarker, rate: f32) {
         self.exclusive(|| {
-            self.dispatch(plugin::OpCode::SetSampleRate, 0, 0, ptr::null_mut(), rate);
+            self.dispatch(
+                plugin::EffectOpCode::SetSampleRate,
+                0,
+                0,
+                ptr::null_mut(),
+                rate,
+            );
         });
     }
 
@@ -2182,7 +2172,7 @@ impl PluginInstance {
     pub fn set_block_size(&mut self, _main: MainThreadMarker, size: i64) {
         self.exclusive(|| {
             self.dispatch(
-                plugin::OpCode::SetBlockSize,
+                plugin::EffectOpCode::SetBlockSize,
                 0,
                 size as isize,
                 ptr::null_mut(),
@@ -2194,7 +2184,13 @@ impl PluginInstance {
     /// `effMainsChanged(1)`; exclusive.
     pub fn resume(&mut self, _main: MainThreadMarker) {
         self.exclusive(|| {
-            self.dispatch(plugin::OpCode::StateChanged, 0, 1, ptr::null_mut(), 0.0);
+            self.dispatch(
+                plugin::EffectOpCode::StateChanged,
+                0,
+                1,
+                ptr::null_mut(),
+                0.0,
+            );
         });
         self.resumed = true;
     }
@@ -2204,7 +2200,13 @@ impl PluginInstance {
     pub fn suspend(&mut self, _main: MainThreadMarker) {
         if self.resumed {
             self.exclusive(|| {
-                self.dispatch(plugin::OpCode::StateChanged, 0, 0, ptr::null_mut(), 0.0);
+                self.dispatch(
+                    plugin::EffectOpCode::StateChanged,
+                    0,
+                    0,
+                    ptr::null_mut(),
+                    0.0,
+                );
             });
             self.resumed = false;
         }
@@ -2220,7 +2222,7 @@ impl PluginInstance {
     pub fn set_precision(&mut self, _main: MainThreadMarker, double: bool) {
         self.exclusive(|| {
             self.dispatch(
-                plugin::OpCode::SetPrecision,
+                plugin::EffectOpCode::SetPrecision,
                 0,
                 double as isize,
                 ptr::null_mut(),
@@ -2248,7 +2250,7 @@ impl PluginInstance {
         let mut output = output.encode();
         self.exclusive(|| {
             self.dispatch(
-                plugin::OpCode::SetSpeakerArrangement,
+                plugin::EffectOpCode::SetSpeakerArrangement,
                 0,
                 input.as_mut_ptr() as isize,
                 output.as_mut_ptr().cast::<c_void>(),
@@ -2278,7 +2280,7 @@ impl PluginInstance {
         let mut output: *const c_void = ptr::null();
         let read = || {
             let answered = self.dispatch(
-                plugin::OpCode::GetSpeakerArrangement,
+                plugin::EffectOpCode::GetSpeakerArrangement,
                 0,
                 ptr::addr_of_mut!(input) as isize,
                 ptr::addr_of_mut!(output).cast::<c_void>(),
@@ -2315,18 +2317,18 @@ impl PluginInstance {
     /// `effEditKeyDown` for `key`, to the open editor: whether the plugin used the key.
     /// `false` with no call when no editor is open.
     pub fn editor_key_down(&mut self, _main: MainThreadMarker, key: KeyCode) -> bool {
-        self.editor_key(plugin::OpCode::EditorKeyDown, key)
+        self.editor_key(plugin::EffectOpCode::EditorKeyDown, key)
     }
 
     /// `effEditKeyUp`, as [`editor_key_down`](Self::editor_key_down).
     pub fn editor_key_up(&mut self, _main: MainThreadMarker, key: KeyCode) -> bool {
-        self.editor_key(plugin::OpCode::EditorKeyUp, key)
+        self.editor_key(plugin::EffectOpCode::EditorKeyUp, key)
     }
 
     /// The key opcodes carry the ASCII character in `index`, the virtual key in `value` and
     /// the modifier mask in `opt`, whose `f32` bits are the mask (the receiver reads
     /// `opt.to_bits()`).
-    fn editor_key(&self, opcode: plugin::OpCode, key: KeyCode) -> bool {
+    fn editor_key(&self, opcode: plugin::EffectOpCode, key: KeyCode) -> bool {
         if !self.editor_open {
             return false;
         }
@@ -2351,7 +2353,7 @@ impl PluginInstance {
         // length, an uninitialised stack slot) become `Supported::Custom`.
         // Panicking here would abort during *load*, since the host queries
         // canDo while probing every plugin.
-        Supported::from(self.write_string(plugin::OpCode::CanDo, 0, 0, &s, usize::MAX, 0.0))
+        Supported::from(self.write_string(plugin::EffectOpCode::CanDo, 0, 0, &s, usize::MAX, 0.0))
     }
 
     /// Whether the plugin publishes a GUI at all: `effFlagsHasEditor`.
@@ -2382,7 +2384,7 @@ impl PluginInstance {
         let rect_ptr: *mut *mut Rect = &mut rect;
 
         let result = self.dispatch(
-            plugin::OpCode::EditorGetRect,
+            plugin::EffectOpCode::EditorGetRect,
             0,
             0,
             rect_ptr as *mut c_void,
@@ -2416,7 +2418,7 @@ impl PluginInstance {
             return true;
         }
 
-        let result = self.dispatch(plugin::OpCode::EditorOpen, 0, 0, parent.as_ptr(), 0.0);
+        let result = self.dispatch(plugin::EffectOpCode::EditorOpen, 0, 0, parent.as_ptr(), 0.0);
 
         let opened = result > 0;
         if opened {
@@ -2436,7 +2438,13 @@ impl PluginInstance {
         if !self.editor_open {
             return;
         }
-        self.dispatch(plugin::OpCode::EditorClose, 0, 0, ptr::null_mut(), 0.0);
+        self.dispatch(
+            plugin::EffectOpCode::EditorClose,
+            0,
+            0,
+            ptr::null_mut(),
+            0.0,
+        );
         self.editor_open = false;
     }
 
@@ -2450,13 +2458,13 @@ impl PluginInstance {
         if !self.editor_open {
             return;
         }
-        self.dispatch(plugin::OpCode::EditorIdle, 0, 0, ptr::null_mut(), 0.0);
+        self.dispatch(plugin::EffectOpCode::EditorIdle, 0, 0, ptr::null_mut(), 0.0);
     }
 
     /// `effChangeProgram`.
     pub fn change_preset(&self, _main: MainThreadMarker, preset: i32) {
         self.dispatch(
-            plugin::OpCode::ChangePreset,
+            plugin::EffectOpCode::ChangePreset,
             0,
             preset as isize,
             ptr::null_mut(),
@@ -2466,12 +2474,13 @@ impl PluginInstance {
 
     /// `effGetProgram`.
     pub fn get_preset_num(&self, _main: MainThreadMarker) -> i32 {
-        self.opcode(plugin::OpCode::GetCurrentPresetNum) as i32
+        self.opcode(plugin::EffectOpCode::GetCurrentPresetNum) as i32
     }
 
+    /// The name of preset `preset` (`effGetProgramNameIndexed`), empty when the plugin gives none.
     pub fn get_preset_name(&self, _main: MainThreadMarker, preset: i32) -> String {
         self.read_string_param(
-            plugin::OpCode::GetPresetName,
+            plugin::EffectOpCode::GetPresetName,
             preset,
             0,
             0.0,
@@ -2533,7 +2542,7 @@ impl PluginInstance {
     pub fn get_parameter_label(&self, index: i32) -> String {
         self.concurrent(|| {
             self.read_string_param(
-                plugin::OpCode::GetParameterLabel,
+                plugin::EffectOpCode::GetParameterLabel,
                 index,
                 0,
                 0.0,
@@ -2546,7 +2555,7 @@ impl PluginInstance {
     pub fn get_parameter_text(&self, index: i32) -> String {
         self.concurrent(|| {
             self.read_string_param(
-                plugin::OpCode::GetParameterDisplay,
+                plugin::EffectOpCode::GetParameterDisplay,
                 index,
                 0,
                 0.0,
@@ -2559,7 +2568,7 @@ impl PluginInstance {
     pub fn get_parameter_name(&self, index: i32) -> String {
         self.concurrent(|| {
             self.read_string_param(
-                plugin::OpCode::GetParameterName,
+                plugin::EffectOpCode::GetParameterName,
                 index,
                 0,
                 0.0,
@@ -2572,7 +2581,7 @@ impl PluginInstance {
     pub fn can_be_automated(&self, index: i32) -> bool {
         self.concurrent(|| {
             self.dispatch(
-                plugin::OpCode::CanBeAutomated,
+                plugin::EffectOpCode::CanBeAutomated,
                 index,
                 0,
                 ptr::null_mut(),
@@ -2585,7 +2594,7 @@ impl PluginInstance {
     pub fn string_to_parameter(&self, index: i32, text: String) -> bool {
         self.concurrent(|| {
             self.write_string(
-                plugin::OpCode::StringToParameter,
+                plugin::EffectOpCode::StringToParameter,
                 index,
                 0,
                 &text,
@@ -2813,25 +2822,25 @@ mod tests {
     /// opcodes the plugin-side dispatcher in `interfaces.rs` actually matches
     /// on, and must not be left at the `Plugin` trait's empty default bodies.
     ///
-    /// Asserting the numeric values is the point: `OpCode` is `#[repr(i32)]` and
+    /// Asserting the numeric values is the point: `AudioMasterOpCode` is `#[repr(i32)]` and
     /// positional, so inserting a variant above these shifts every opcode below
     /// it and silently re-points the dispatch. The SDK fixes
     /// `effStartProcess = 71` and `effStopProcess = 72`.
     /// Spec: vst2.eff.StartProcess, vst2.eff.StopProcess
     #[test]
     fn start_and_stop_process_opcodes_match_the_sdk() {
-        assert_eq!(plugin::OpCode::StartProcess as i32, 71);
-        assert_eq!(plugin::OpCode::StopProcess as i32, 72);
+        assert_eq!(plugin::EffectOpCode::StartProcess as i32, 71);
+        assert_eq!(plugin::EffectOpCode::StopProcess as i32, 72);
 
         // And the plugin-side dispatcher decodes those same numbers back to
         // the variants it handles — the other half of the round trip.
         assert!(matches!(
-            plugin::OpCode::try_from(71),
-            Ok(plugin::OpCode::StartProcess)
+            plugin::EffectOpCode::try_from(71),
+            Ok(plugin::EffectOpCode::StartProcess)
         ));
         assert!(matches!(
-            plugin::OpCode::try_from(72),
-            Ok(plugin::OpCode::StopProcess)
+            plugin::EffectOpCode::try_from(72),
+            Ok(plugin::EffectOpCode::StopProcess)
         ));
     }
 
@@ -2841,10 +2850,10 @@ mod tests {
     /// Spec: vst2.eff.SetProcessPrecision
     #[test]
     fn set_precision_opcode_matches_the_sdk() {
-        assert_eq!(plugin::OpCode::SetPrecision as i32, 77);
+        assert_eq!(plugin::EffectOpCode::SetPrecision as i32, 77);
         assert!(matches!(
-            plugin::OpCode::try_from(77),
-            Ok(plugin::OpCode::SetPrecision)
+            plugin::EffectOpCode::try_from(77),
+            Ok(plugin::EffectOpCode::SetPrecision)
         ));
     }
 
@@ -2868,9 +2877,8 @@ mod tests {
         }
     }
 
-    /// `effGetChunk` used to be trusted blindly:
-    /// `slice::from_raw_parts(ptr, len as usize)` with no null check and no
-    /// sign check. This is the project-*save* path, so each of these is a real
+    /// `effGetChunk` is not trusted: a null pointer, a negative length or one past the state
+    /// cap is refused before any slice is formed. This is the project-*save* path, so each of these would be a real
     /// crash on a real user's save.
     /// Spec: vst2.eff.GetChunk
     #[test]
@@ -2884,7 +2892,16 @@ mod tests {
         // SAFETY: `copy_chunk` reads through `ptr` only when `len > 0` and `ptr` is non-null; here `len <= 0` so it returns before any read.
         assert_eq!(unsafe { copy_chunk(ptr::null_mut(), 0) }, Ok(Vec::new()));
 
-        // An error return. `-1 as usize` was `usize::MAX`.
+        // A length no state holds is refused with a live buffer: nothing is read.
+        let mut data = [1u8, 2, 3, 4];
+        let past_cap = MAX_STATE_BYTES as isize + 1;
+        assert_eq!(
+            // SAFETY: `len` is past the cap, so `copy_chunk` returns before any read.
+            unsafe { copy_chunk(data.as_mut_ptr(), past_cap) },
+            Err(GetChunkError::TooLarge(past_cap))
+        );
+
+        // An error return.
         assert_eq!(
             // SAFETY: `copy_chunk` reads through `ptr` only when `len > 0` and `ptr` is non-null; here `len <= 0` so it returns before any read.
             unsafe { copy_chunk(ptr::null_mut(), -1) },
@@ -2900,7 +2917,6 @@ mod tests {
 
         // A non-null pointer with a negative length is still rejected — the
         // length is what would be cast, and it must never reach `as usize`.
-        let mut data = [1u8, 2, 3, 4];
         assert_eq!(
             // SAFETY: `len` is negative, so `copy_chunk` returns before any read; `data` is a live 4-byte array regardless.
             unsafe { copy_chunk(data.as_mut_ptr(), -1) },
@@ -2940,11 +2956,11 @@ mod tests {
             _ptr: *mut c_void,
             _opt: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::EditorOpen as i32 {
+            if opcode == plugin::EffectOpCode::EditorOpen as i32 {
                 OPENS.fetch_add(1, Ordering::SeqCst);
                 return OPEN_ANSWER.load(Ordering::SeqCst);
             }
-            if opcode == plugin::OpCode::EditorClose as i32 {
+            if opcode == plugin::EffectOpCode::EditorClose as i32 {
                 CLOSES.fetch_add(1, Ordering::SeqCst);
             }
             0
@@ -3035,10 +3051,10 @@ mod tests {
             _ptr: *mut c_void,
             _opt: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::EditorOpen as i32 {
+            if opcode == plugin::EffectOpCode::EditorOpen as i32 {
                 return 1;
             }
-            if opcode == plugin::OpCode::EditorIdle as i32 {
+            if opcode == plugin::EffectOpCode::EditorIdle as i32 {
                 IDLES.fetch_add(1, Ordering::SeqCst);
             }
             0
@@ -3067,9 +3083,8 @@ mod tests {
     /// `audioMasterCanDo` reaches `Host::can_do` with the plugin's string, and
     /// the three VST 2.4 answers come back as `1`, `0` and `-1`.
     ///
-    /// Before the arm existed the opcode logged the query and fell through to
-    /// `0`, so a plugin gating a feature on `canDo("sendVstEvents")` was told
-    /// "don't know" for everything.
+    /// A plugin gates a feature on `canDo("sendVstEvents")`, so each query is answered
+    /// from the host, never with the fall-through `0` ("don't know").
     /// Spec: vst2.audioMaster.CanDo
     #[test]
     fn host_can_do_reaches_the_host_and_maps_to_the_three_answers() {
@@ -3091,7 +3106,7 @@ mod tests {
                 interfaces::host_dispatch(
                     &Answers,
                     ptr::null_mut(),
-                    OpCode::CanDo as i32,
+                    AudioMasterOpCode::CanDo as i32,
                     0,
                     0,
                     name.as_ptr() as *mut c_void,
@@ -3113,7 +3128,7 @@ mod tests {
     fn file_selector_is_declined_and_language_is_english() {
         struct Plain;
         impl Host for Plain {}
-        let ask = |opcode: OpCode| {
+        let ask = |opcode: AudioMasterOpCode| {
             // A non-null garbage pointer: a declining arm must not dereference it.
             // SAFETY: the declining arms do not read `ptr`, which is what the test checks.
             unsafe {
@@ -3128,9 +3143,9 @@ mod tests {
                 )
             }
         };
-        assert_eq!(ask(OpCode::OpenFileSelector), 0);
-        assert_eq!(ask(OpCode::CloseFileSelector), 0);
-        assert_eq!(ask(OpCode::GetLanguage), 1);
+        assert_eq!(ask(AudioMasterOpCode::OpenFileSelector), 0);
+        assert_eq!(ask(AudioMasterOpCode::CloseFileSelector), 0);
+        assert_eq!(ask(AudioMasterOpCode::GetLanguage), 1);
     }
 
     /// **A chunk reaches the plugin as the header lays `effSetChunk` out**: `[index]` is 0 for a
@@ -3152,7 +3167,7 @@ mod tests {
             ptr: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::SetData as i32 {
+            if opcode == plugin::EffectOpCode::SetData as i32 {
                 // SAFETY: the host gives `value` readable bytes at `ptr`.
                 let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, value as usize) };
                 SEEN.lock().unwrap().push((index, value, bytes.to_vec()));
@@ -3214,7 +3229,7 @@ mod tests {
         use crate::api::{DispatcherProc, ProcessProc, ProcessProcF64};
 
         // The bytes a plugin leaves in a slot it never fills in. Transmuted
-        // per-field: every function slot is `Option` now, so an all-zero
+        // per-field: every function slot is `Option`, so an all-zero
         // `AEffect` would in fact be valid, but building one would assert far
         // less precisely than naming each slot that must read as absent.
         // SAFETY: `Option<fn>` has the size of a pointer and null is its `None` niche, so the zero word is a valid `None`.
@@ -3282,16 +3297,14 @@ mod tests {
     /// The absent case must stay distinguishable from a real `0.0`.
     ///
     /// `PluginParameters::get_parameter` returns `Option<f32>` for exactly this
-    /// reason. Upstream vst-rs returns a bare `f32`, mirroring the C API, which
-    /// forces `0.0` to mean both "the plugin has no parameter access" and "the
-    /// parameter is at zero" — and there is deliberately no infallible overload
-    /// alongside it that would let a caller re-merge them by accident.
+    /// reason. A bare `f32`, mirroring the C API, would force `0.0` to mean both "the plugin
+    /// has no parameter access" and "the parameter is at zero", and there is deliberately no
+    /// infallible overload alongside it that would let a caller re-merge them by accident.
     ///
     /// Driven through the real accessor over a zeroed `AEffect` — exactly the
     /// struct a parameterless plugin presents, and a valid instance only
-    /// *because* every function slot is `Option`. Before that conversion this
-    /// test could not have been written, and the code it covers jumped to
-    /// address zero.
+    /// *because* every function slot is `Option`: an absent accessor is refused, never
+    /// called at address zero.
     #[test]
     fn an_absent_parameter_accessor_is_not_a_real_zero() {
         // Every slot null: the plugin filled in nothing.
@@ -3547,7 +3560,7 @@ mod tests {
             if unsafe { (*effect).getParameter.is_none() } {
                 OPCODES_AFTER_CLOSE.fetch_add(1, Ordering::SeqCst);
             }
-            if opcode == plugin::OpCode::Shutdown as i32 {
+            if opcode == plugin::EffectOpCode::Shutdown as i32 {
                 CLOSES.fetch_add(1, Ordering::SeqCst);
                 // The plugin frees its `AEffect` here; poison what a late call sees.
                 // SAFETY: as above.
@@ -3656,7 +3669,7 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::Shutdown as i32 {
+            if opcode == plugin::EffectOpCode::Shutdown as i32 {
                 CLOSES.fetch_add(1, Ordering::SeqCst);
             }
             0
@@ -3781,7 +3794,7 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::Shutdown as i32 {
+            if opcode == plugin::EffectOpCode::Shutdown as i32 {
                 CLOSES.fetch_add(1, Ordering::SeqCst);
             }
             0
@@ -3857,7 +3870,7 @@ mod tests {
             _: f32,
         ) -> isize {
             let mut seen = SEEN.lock().unwrap();
-            if opcode == plugin::OpCode::StateChanged as i32 {
+            if opcode == plugin::EffectOpCode::StateChanged as i32 {
                 seen.push(if value == 1 { 1000 } else { 1001 });
             } else {
                 seen.push(opcode);
@@ -3865,7 +3878,8 @@ mod tests {
             1
         }
         let take = || std::mem::take(&mut *SEEN.lock().unwrap());
-        let wanted = |ops: &[plugin::OpCode]| ops.iter().map(|o| *o as i32).collect::<Vec<_>>();
+        let wanted =
+            |ops: &[plugin::EffectOpCode]| ops.iter().map(|o| *o as i32).collect::<Vec<_>>();
 
         // Resumed and processing, editor open: all four, in order.
         let (mut instance, main) = instance_over(fake_effect(dispatch));
@@ -3875,9 +3889,12 @@ mod tests {
         render.start_process();
         take();
         drop(instance);
-        let mut expected = wanted(&[plugin::OpCode::EditorClose, plugin::OpCode::StopProcess]);
+        let mut expected = wanted(&[
+            plugin::EffectOpCode::EditorClose,
+            plugin::EffectOpCode::StopProcess,
+        ]);
         expected.push(1001);
-        expected.push(plugin::OpCode::Shutdown as i32);
+        expected.push(plugin::EffectOpCode::Shutdown as i32);
         assert_eq!(take(), expected);
         drop(render);
 
@@ -3885,7 +3902,7 @@ mod tests {
         let (instance, _main) = instance_over(fake_effect(dispatch));
         take();
         drop(instance);
-        assert_eq!(take(), wanted(&[plugin::OpCode::Shutdown]));
+        assert_eq!(take(), wanted(&[plugin::EffectOpCode::Shutdown]));
     }
 
     /// **The exclusive calls are serialised with the audio entries, both ways**: an
@@ -3913,7 +3930,7 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::SetSampleRate as i32 {
+            if opcode == plugin::EffectOpCode::SetSampleRate as i32 {
                 // The rate must not be dispatched while a process is unfinished.
                 assert_eq!(
                     PROCESSES.load(Ordering::SeqCst),
@@ -4039,7 +4056,7 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::GetParameterName as i32 {
+            if opcode == plugin::EffectOpCode::GetParameterName as i32 {
                 NAME_DISPATCHED.store(true, Ordering::SeqCst);
                 IN_NAME.store(true, Ordering::SeqCst);
                 while !RELEASE_NAME.load(Ordering::SeqCst) {
@@ -4257,10 +4274,10 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::Shutdown as i32 {
+            if opcode == plugin::EffectOpCode::Shutdown as i32 {
                 CLOSES.fetch_add(1, Ordering::SeqCst);
             }
-            if opcode == plugin::OpCode::GetApiVersion as i32 {
+            if opcode == plugin::EffectOpCode::GetApiVersion as i32 {
                 return 2400;
             }
             0
@@ -4401,10 +4418,10 @@ mod tests {
             _: f32,
         ) -> isize {
             CALLS.fetch_add(1, Ordering::SeqCst);
-            if opcode == plugin::OpCode::Shutdown as i32 {
+            if opcode == plugin::EffectOpCode::Shutdown as i32 {
                 CLOSES.fetch_add(1, Ordering::SeqCst);
             }
-            if opcode == plugin::OpCode::GetApiVersion as i32 {
+            if opcode == plugin::EffectOpCode::GetApiVersion as i32 {
                 return 2400;
             }
             0
@@ -4493,7 +4510,7 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::GetApiVersion as i32 {
+            if opcode == plugin::EffectOpCode::GetApiVersion as i32 {
                 return 2400;
             }
             0
@@ -4560,7 +4577,7 @@ mod tests {
             _: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::GetApiVersion as i32 {
+            if opcode == plugin::EffectOpCode::GetApiVersion as i32 {
                 return 2400;
             }
             0
@@ -4623,7 +4640,7 @@ mod tests {
             ptr: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::SetData as i32 {
+            if opcode == plugin::EffectOpCode::SetData as i32 {
                 // SAFETY: the host gives `value` writable bytes (the property under
                 // test: a copy it owns).
                 unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, value as usize) }
@@ -4654,7 +4671,7 @@ mod tests {
             ptr: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode == plugin::OpCode::GetParameterName as i32 {
+            if opcode == plugin::EffectOpCode::GetParameterName as i32 {
                 // SAFETY: the host offers at least 256 bytes (the property under test).
                 let buf = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, 200) };
                 buf.fill(b'x');
@@ -4684,7 +4701,7 @@ mod tests {
             ptr: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode != plugin::OpCode::GetSpeakerArrangement as i32 {
+            if opcode != plugin::EffectOpCode::GetSpeakerArrangement as i32 {
                 return 0;
             }
             let stereo = STEREO.get().expect("set before the call");
@@ -4741,7 +4758,7 @@ mod tests {
             ptr: *mut c_void,
             _: f32,
         ) -> isize {
-            if opcode != plugin::OpCode::SetSpeakerArrangement as i32 {
+            if opcode != plugin::EffectOpCode::SetSpeakerArrangement as i32 {
                 return 0;
             }
             // SAFETY: the host passes two arrangements of the channels it proposes (the

@@ -12,9 +12,10 @@
 
 use std::sync::Arc;
 use tutti_graph::UmpAt;
+use tutti_plugin_types::{MidiEventVec, TransportInfo};
 use tutti_rt::{Counter, Tally};
 
-use vst::host::RenderHandle;
+use vst::RenderHandle;
 
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{ByWidth, Float, InputOutput};
@@ -26,11 +27,11 @@ use tutti_units::Normalized;
 
 use crate::host::HostState;
 use crate::loaded::{AudioSide, LossesTold};
-use crate::midi::MidiIo;
-use crate::scratch::RenderScratch;
 use crate::time_info::{advance_time_info, build_vst2_time_info};
 use crate::transport_cell::TransportWriter;
-use crate::types::{MidiEventVec, TransportInfo, Vst2ProcessContext};
+use crate::types::Vst2ProcessContext;
+use vst::MidiIo;
+use vst::RenderScratch;
 
 /// The realtime half of an activation: renders blocks.
 ///

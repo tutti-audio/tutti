@@ -6,8 +6,8 @@
 
 use crate::error::{Result, Vst2Error};
 use crate::loaded::Vst2Loaded;
-use crate::types::WindowHandle;
 use dpi::Size;
+use tutti_plugin_types::WindowHandle;
 use tutti_plugin_types::{EditorUnit, MainThreadMarker};
 
 /// `width` by `height` as an `ERect` extent counts them: device pixels on Windows and
