@@ -47,6 +47,7 @@ mod config;
 mod conversation;
 mod error;
 mod ipc;
+mod latch;
 mod offline_wait;
 mod process_guard;
 mod protocol;

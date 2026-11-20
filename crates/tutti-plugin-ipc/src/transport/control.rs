@@ -169,14 +169,6 @@ fn send_then<T>(
     then(super::sys::connection(stream)).map_err(send_failed)
 }
 
-/// How long the unbounded [`recv`] entry may wait for a whole frame.
-///
-/// Only the `Ready` handshake uses it: every in-session read goes through
-/// [`recv_within`] with the caller's own budget. Generous, because a subprocess
-/// still loading a large plugin binary legitimately takes seconds to answer,
-/// and finite because nothing else would ever end the wait.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Wait longer each time a peeked stream comes back empty, never past `remaining`.
 ///
 /// **The first polls yield instead of sleeping, and that is not an optimisation.**
@@ -462,21 +454,6 @@ fn recv_by<T: Framed>(
         None => None,
     };
     Ok(msg)
-}
-
-/// Blocking read with no caller-supplied bound, used for the handshake.
-///
-/// Still deadline-bounded, by [`HANDSHAKE_TIMEOUT`]: "no timeout" on a socket
-/// means a peer that never speaks parks this thread forever, and the handshake
-/// runs before any crash reporting exists to notice.
-pub fn recv<T: Framed>(stream: &mut ControlStream) -> IpcResult<T> {
-    let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
-    // The handshake has no resume path — a failure here ends the connection —
-    // so the cursor is local and dropped with the frame it describes.
-    let mut partial = PartialFrame::default();
-    with_poll_timeout(stream, HANDSHAKE_TIMEOUT, |s, wakeup| {
-        recv_by(s, deadline, &mut partial, wakeup)
-    })
 }
 
 /// Recv with a total-time bound, **not** resumable.
