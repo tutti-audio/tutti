@@ -29,11 +29,13 @@
 //! - **Cascaded sections** (`sos/`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose
 //!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`] and
 //!   [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`] peaking
-//!   equalizer, the [`Tilt`] shelf and [`SosBank`], which runs one as state-variable
-//!   sections over [`SosCoefficients`].
+//!   equalizer, the [`Tilt`] shelf, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
+//!   one as state-variable sections over [`SosCoefficients`].
 //! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
-//!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
+//!   [`Fir`], failing with a [`FirError`]; [`LinearPhaseDesign`] takes the product of
+//!   [`Lti`] bands' magnitudes as a target and designs it as a linear-phase [`Fir`];
+//!   [`kaiser_beta`] is the window's parameter.
 //! - **Oversampling** (`oversample/`): [`Oversampling`] describes a cascade of linear-phase
 //!   half-band 2x stages (an [`OversamplingFactor`], an attenuation and a [`Passband`]);
 //!   [`plan`](Oversampling::plan) designs it at a rate into an [`OversamplingPlan`], whose
@@ -150,6 +152,7 @@ mod fir;
 mod follower;
 mod interp;
 mod level;
+mod loudness;
 mod modulation;
 mod novelty;
 mod onepole;
@@ -210,9 +213,13 @@ pub use filter::{
     SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfModel, SvfType, fit_to_rate, ladder_step,
     svf_step,
 };
-pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
+pub use fir::{
+    Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,
+    kaiser_beta,
+};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
+pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{
@@ -253,7 +260,7 @@ pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;
 pub use sos::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley,
+    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, KWeighting, LinkwitzRiley,
     MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank, SosCoefficients, SosError, Tilt,
 };
 pub use spatial::{

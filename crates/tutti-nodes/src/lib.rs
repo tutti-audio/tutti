@@ -201,7 +201,8 @@
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
-//!   [`TiltFilterNode`], [`EnvelopeFilterNode`]; the coefficient solvers
+//!   [`TiltFilterNode`], [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
+//!   linear-phase equalizer: a [`tutti_dsp::Fir`] through the convolver); the coefficient solvers
 //!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
 //!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
 //!   graph it is inserted in (`tutti_buffers::Float` with [`SimdLanes`]).
@@ -416,7 +417,7 @@ pub use signal::{
 mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
-pub use convolution::{ConvolverError, ConvolverNode, IrLayout, PortSide};
+pub use convolution::{ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout, PortSide};
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a
 // test, example or bench wires a graph out of.

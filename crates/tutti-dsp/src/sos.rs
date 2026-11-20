@@ -1,6 +1,6 @@
 //! [`Sos`]: a cascade of second-order sections, the design and analysis form of an IIR
-//! filter of any order, and the [`Butterworth`], [`LinkwitzRiley`], [`MatchedBell`] and
-//! [`Tilt`] designs that make one.
+//! filter of any order, and the [`Butterworth`], [`LinkwitzRiley`], [`MatchedBell`], [`Tilt`] and
+//! [`KWeighting`] designs that make one.
 //!
 //! A [`Sos`] is plain data: a list of [`Biquad`]s whose product is the response. A first-order section is a [`Biquad`] with `b2 = a2 = 0`.
 //! [`SosBank`] runs one as a cascade of trapezoidal state-variable sections (each section's
@@ -10,6 +10,7 @@
 mod bank;
 mod bell;
 mod butterworth;
+mod k_weighting;
 mod tilt;
 
 use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
@@ -23,6 +24,7 @@ pub use butterworth::{
     Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley,
     MAX_GAIN_MAGNITUDE, SosError,
 };
+pub use k_weighting::KWeighting;
 pub use tilt::Tilt;
 
 /// The longest impulse response [`Sos::tail`](System::tail) follows, in frames: a longer
