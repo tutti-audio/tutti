@@ -258,6 +258,17 @@ pub enum Error {
     },
 }
 
+impl From<tutti_dsp::ChannelWeightError> for Error {
+    fn from(e: tutti_dsp::ChannelWeightError) -> Self {
+        match e {
+            tutti_dsp::ChannelWeightError::Ambisonic => Self::AmbisonicLoudness,
+            tutti_dsp::ChannelWeightError::Unplaced { width } => {
+                Self::UnplacedLoudnessChannels { width }
+            }
+        }
+    }
+}
+
 impl From<tutti_dsp::StftError> for Error {
     fn from(error: tutti_dsp::StftError) -> Self {
         match error {
