@@ -383,7 +383,7 @@ fn sender(wire: &Wire, to: Recipient) -> (Session, tutti_session::MidiSink) {
         .build()
         .expect("builds");
     let _ = s.update();
-    let sink = s.open_midi_sink(Arc::new(wire.clone()));
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
     let _ = s.update();
     s.midi_nodes()
         .unwrap()

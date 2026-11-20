@@ -234,7 +234,7 @@ pub use midi_port::{
 #[cfg(feature = "midi")]
 pub use midi_report::MidiReport;
 #[cfg(feature = "midi")]
-pub use midi_sink::MidiSink;
+pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,

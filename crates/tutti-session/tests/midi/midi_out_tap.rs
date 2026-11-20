@@ -57,7 +57,7 @@ fn rig(wire: &Wire) -> (Session, MidiSink) {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    let sink = s.open_midi_sink(Arc::new(wire.clone()));
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
     let _ = s.update();
     s.play().expect("room");
     (s, sink)
@@ -257,9 +257,9 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
     assert_eq!(kinds, [(0, true), (24_000, false)], "{sent:?}");
 }
 
-/// **A sink is open while a handle is held**: its node is in the graph, it
-/// opens unstamped and a handle sets whether it stamps, a clone keeps it open,
-/// and a second sink on the same `MidiOut` is a sink of its own.
+/// **A sink is open while a handle is held**: its node is in the graph, a
+/// clone keeps it open, and a second sink on the same `MidiOut` is a sink of
+/// its own.
 #[test]
 fn a_sink_is_open_while_a_handle_is_held() {
     let first: Arc<dyn MidiOut> = Arc::new(Wire::default());
@@ -267,9 +267,8 @@ fn a_sink_is_open_while_a_handle_is_held() {
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
-    let sink = s.open_midi_sink(Arc::clone(&first));
+    let sink = s.open_midi_sink(Arc::clone(&first)).run();
     let _ = s.update();
-    assert_eq!(sink.stamping(), Stamping::Off);
     assert!(s.graph_ref().contains(sink.node()), "the sink's node");
 
     let node = sink.node();
@@ -279,11 +278,8 @@ fn a_sink_is_open_while_a_handle_is_held() {
     let _ = s.update();
     assert!(s.graph_ref().contains(node), "a clone keeps the sink open");
 
-    let other = s.open_midi_sink(first);
-    other.set_stamping(Stamping::Jr);
-    assert_eq!(other.stamping(), Stamping::Jr);
-    assert_eq!(clone.stamping(), Stamping::Off, "a sink of its own");
-    assert_ne!(other.node(), clone.node());
+    let other = s.open_midi_sink(first).stamping(Stamping::Jr).run();
+    assert_ne!(other.node(), clone.node(), "a sink of its own");
 }
 
 /// **Dropping the last handle ends the sink**: its node leaves the graph, and
@@ -318,8 +314,10 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
-    let out = s.open_midi_sink(Arc::new(wire.clone()));
-    out.set_stamping(Stamping::Jr);
+    let out = s
+        .open_midi_sink(Arc::new(wire.clone()))
+        .stamping(Stamping::Jr)
+        .run();
     let _ = s.update();
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     let _ = s.update();

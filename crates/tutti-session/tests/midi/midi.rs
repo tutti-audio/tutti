@@ -516,7 +516,7 @@ impl tutti_midi_runtime::MidiOut for Refusing {
 /// handle keeps it open.
 fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> (Session, tutti_session::MidiSink) {
     let mut s = offline();
-    let out = s.open_midi_sink(sink);
+    let out = s.open_midi_sink(sink).run();
     let _ = s.update(); // the sink's node, committed
     s.midi_nodes()
         .unwrap()

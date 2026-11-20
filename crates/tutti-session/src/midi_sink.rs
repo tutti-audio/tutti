@@ -11,7 +11,6 @@
 //! first.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_runtime::MidiOut;
@@ -23,24 +22,12 @@ use crate::midi::{
 
 // --- The shared record ---
 
-/// What the session reads and the handle writes and reads of one sink.
+/// What the session writes and the handle reads of one sink.
 #[derive(Debug)]
 pub(crate) struct SinkShared {
-    /// Whether the sink is sent JR Timestamps.
-    jr: AtomicBool,
     /// What its node's tap had no room for, and what the sink refused or was
     /// scheduled too far ahead to send.
     losses: LossReaders,
-}
-
-impl SinkShared {
-    fn stamping(&self) -> Stamping {
-        if self.jr.load(Ordering::Acquire) {
-            Stamping::Jr
-        } else {
-            Stamping::Off
-        }
-    }
 }
 
 // --- The handle ---
@@ -75,31 +62,51 @@ impl MidiSink {
     pub fn losses(&self) -> Losses {
         self.claim.shared.losses.get()
     }
-
-    /// Sets whether the sink is sent JR Timestamps. It gates timestamps, not
-    /// delivery: with it off the events still go out, unstamped. A sink opens
-    /// unstamped, and a change applies from the next drain.
-    pub fn set_stamping(&self, stamping: Stamping) {
-        self.claim
-            .shared
-            .jr
-            .store(stamping == Stamping::Jr, Ordering::Release);
-    }
-
-    /// Whether the sink is sent JR Timestamps.
-    #[must_use]
-    pub fn stamping(&self) -> Stamping {
-        self.claim.shared.stamping()
-    }
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// Opens `sink` as an output, unstamped ([`MidiSink::set_stamping`]): wire
-    /// what it should receive to its [`node`](MidiSink::node). It closes when
-    /// every clone of the handle is dropped, at the next
+    /// A request to open `sink` as an output: wire what it should receive to
+    /// its [`node`](MidiSink::node). [`run`](OpenMidiSink::run) opens it, and it
+    /// closes when every clone of the handle is dropped, at the next
     /// [`update`](Self::update) or open.
-    pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> MidiSink {
-        self.midi().open_sink(sink)
+    pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpenMidiSink<'_, K, C> {
+        OpenMidiSink {
+            session: self,
+            sink,
+            stamping: Stamping::Off,
+        }
+    }
+}
+
+/// A sink to open, built by [`Session::open_midi_sink`]: it borrows the session
+/// until [`run`](Self::run) opens the sink.
+#[must_use = "the sink opens when the request runs"]
+pub struct OpenMidiSink<'s, K: crate::AppKey, C: crate::Clock> {
+    session: &'s mut Session<K, C>,
+    sink: Arc<dyn MidiOut>,
+    stamping: Stamping,
+}
+
+impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpenMidiSink<'_, K, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenMidiSink")
+            .field("stamping", &self.stamping)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<K: crate::AppKey, C: crate::Clock> OpenMidiSink<'_, K, C> {
+    /// Whether the sink is sent JR Timestamps. It gates timestamps, not
+    /// delivery: with it off (the default) the events still go out, unstamped.
+    pub const fn stamping(mut self, stamping: Stamping) -> Self {
+        self.stamping = stamping;
+        self
+    }
+
+    /// Opens the sink: its output node joins the graph (the next
+    /// [`update`](Session::update) commits it).
+    pub fn run(self) -> MidiSink {
+        self.session.midi().open_sink(self.sink, self.stamping)
     }
 }
 
@@ -108,7 +115,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 /// One sink as the session keeps it.
 struct SinkPort {
     claim: Held<SinkShared>,
-    shared: Arc<SinkShared>,
     node: NodeKey,
     tap: EventTapReader,
     out: UmpOut,
@@ -124,20 +130,17 @@ pub(crate) struct Sinks {
 impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
     /// Opens the sink `sink`: its output node joins the graph, fed by the
     /// session's clock.
-    pub(crate) fn open_sink(&mut self, sink: Arc<dyn MidiOut>) -> MidiSink {
+    pub(crate) fn open_sink(&mut self, sink: Arc<dyn MidiOut>, stamping: Stamping) -> MidiSink {
         self.close_dropped();
         let rate = self.graph.prepared().sample_rate();
         let (node, tap) = self.add_output_node();
-        let out = UmpOut::new(sink, rate);
+        let mut out = UmpOut::new(sink, rate);
+        out.set_stamping(stamping);
         let (losses, readers) = loss_cells();
-        let shared = Arc::new(SinkShared {
-            jr: AtomicBool::new(false),
-            losses: readers,
-        });
+        let shared = Arc::new(SinkShared { losses: readers });
         let (claim, held) = Held::new(Arc::clone(&shared), node);
         self.state.sinks.ports.push(SinkPort {
             claim: held,
-            shared,
             node,
             tap,
             out,
@@ -207,10 +210,8 @@ impl Sinks {
 }
 
 impl SinkPort {
-    /// Reads the tap dry to the sink with the stamping the handles set, and
-    /// counts what did not go.
+    /// Reads the tap dry to the sink, and counts what did not go.
     fn drain(&mut self, timing: Option<&OutputTiming>) {
-        self.out.set_stamping(self.shared.stamping());
         drain_events(&mut self.tap, Some(&mut self.out), &mut self.losses, timing);
     }
 }

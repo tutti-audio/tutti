@@ -68,7 +68,7 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream, tutti_session::MidiSink) {
         .build_device_on(spec(), driver)
         .expect("builds with no device");
     let _ = s.update();
-    let sink = s.open_midi_sink(Arc::new(wire.clone()));
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
     let _ = s.update();
     s.midi_nodes()
         .unwrap()
