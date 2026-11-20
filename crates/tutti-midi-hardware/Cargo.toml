@@ -36,7 +36,7 @@ tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-# `spawn_named`: the port threads.
+# `Executor`: the ALSA pump and watch threads; `spawn_named`: the other port threads.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

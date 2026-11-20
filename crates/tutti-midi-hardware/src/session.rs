@@ -34,7 +34,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant};
 
 use tutti_midi_ci::ResourceStore;
 
@@ -281,7 +281,8 @@ pub enum Polled {
 }
 
 impl MidiSession {
-    /// Opens a session over this platform's backend, its input ports inlets made
+    /// Opens a session over this platform's backend, whose threads are
+    /// `executor`'s, its input ports inlets made
     /// by `inlets` (the session builds and owns the [`HardwareMidiInputs`] over
     /// them: [`ports`](Self::ports)).
     ///
@@ -290,8 +291,12 @@ impl MidiSession {
     /// # Errors
     ///
     /// As [`Devices::open`].
-    pub fn open(inlets: Arc<InputInlets>, config: MidiHardwareConfig) -> Result<Self> {
-        Self::open_over(backend::active(), inlets, config)
+    pub fn open(
+        executor: &Executor,
+        inlets: Arc<InputInlets>,
+        config: MidiHardwareConfig,
+    ) -> Result<Self> {
+        Self::open_over(backend::active(executor), inlets, config)
     }
 
     /// A session over a supplied backend.

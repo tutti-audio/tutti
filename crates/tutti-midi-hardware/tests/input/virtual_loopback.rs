@@ -31,7 +31,12 @@ fn session() -> (MidiSession, Listener) {
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let listener = Listener::over(&inlets);
     (
-        MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session"),
+        MidiSession::open(
+            &tutti_platform::Executor::new(),
+            inlets,
+            MidiHardwareConfig::new(),
+        )
+        .expect("a session"),
         listener,
     )
 }
@@ -91,10 +96,12 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
 #[test]
 fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
     let spec = spec("destination");
+    let executor = tutti_platform::Executor::new();
     let (io, mut graph) = session();
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
+    let destination =
+        VirtualDestination::open(&executor, &spec, producer).expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
     graph.ready(
@@ -122,10 +129,12 @@ fn a_midi1_destination_delivers_what_the_input_node_widens() {
     let spec = spec("midi1").protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over_input(&inlets);
-    let io = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
+    let executor = tutti_platform::Executor::new();
+    let io = MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
+    let _destination =
+        VirtualDestination::open(&executor, &spec, producer).expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
     graph.ready(

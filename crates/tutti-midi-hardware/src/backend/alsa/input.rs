@@ -17,14 +17,8 @@ use tutti_alsa_ffi::{
     Blocking, Client, Event, Poller, PortCaps, PortKind, QueueClock, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
-use tutti_platform::{ThreadHandle, spawn_named};
+use tutti_platform::{Executor, Task};
 use tutti_rt::FaultLatch;
-
-/// How long dropping an input waits for its pump to end before it lets the
-/// thread go. A pump ends within a poll wake of the stop; only a read that never
-/// returns outlasts this, and a drop that waited for it would hang the caller
-/// (the session's control thread) with it.
-const JOIN_BOUND: Duration = Duration::from_secs(1);
 
 /// How long a pairing of the queue's clock with the OS's is trusted: the two
 /// run apart by parts per million, and a pair this old has drifted by
@@ -38,7 +32,9 @@ pub struct AlsaInput {
     stop: Option<UnixStream>,
     /// Raised by the pump when it ends on an error, never on a stop.
     died: Arc<FaultLatch<InputFault>>,
-    thread: Option<ThreadHandle<()>>,
+    /// The pump's future, on a thread of the executor's own. Dropping it cancels
+    /// the future once it returns from `poll`.
+    pump: Option<Task<()>>,
 }
 
 impl InputConnection for AlsaInput {
@@ -48,26 +44,14 @@ impl InputConnection for AlsaInput {
 }
 
 impl Drop for AlsaInput {
+    /// Closing the stop end wakes the pump out of `poll`, and the pump returns
+    /// at once; the task then drops, and the future ends on its thread, which
+    /// closes the client and so unsubscribes the port. The task drops second: a
+    /// cancelled future does not leave a syscall it is blocked in, so only the
+    /// stop wakes it.
     fn drop(&mut self) {
         drop(self.stop.take());
-        if let Some(thread) = self.thread.take() {
-            // Joining matters: the thread owns the `Client`, and letting it
-            // outlive this would leave the port subscribed to a device the
-            // caller believes it disconnected. But not for ever: a pump stuck in
-            // alsa-lib is detached, and says so.
-            match thread.stop_within(JOIN_BOUND) {
-                Ok(Ok(())) => {}
-                // The pump's guard catches its own panics and marks the input
-                // dead; one that escapes the guard is reported here.
-                Ok(Err(panicked)) => tracing::error!("ALSA MIDI pump: {panicked}"),
-                Err(stuck) => {
-                    tracing::warn!(
-                        "ALSA MIDI pump did not stop within {JOIN_BOUND:?}; left running, still subscribed"
-                    );
-                    stuck.detach();
-                }
-            }
-        }
+        drop(self.pump.take());
     }
 }
 
@@ -90,8 +74,8 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 
 /// Opens `id` for input and starts pumping its events into `producer`.
 ///
-/// The pump runs on its own thread and stops when the returned connection is
-/// dropped, which is also when the port unsubscribes.
+/// The pump runs on a dedicated thread of `executor` and stops when the returned
+/// connection is dropped, which is also when the port unsubscribes.
 ///
 /// # Errors
 ///
@@ -100,9 +84,13 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 /// [`MidiHardwareError::Spawn`] if the pump thread cannot be
 /// spawned. A source client that exits while the open reads its Endpoint record
 /// fails the open (`ENOENT`) rather than opening as a legacy port.
-pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn InputConnection>> {
+pub fn open(
+    executor: &Executor,
+    id: EndpointId,
+    producer: InputProducerHandle,
+) -> Result<Box<dyn InputConnection>> {
     let (seq, clock) = prepare(id)?;
-    Ok(Box::new(start(seq, clock, producer)?))
+    Ok(Box::new(start(executor, seq, clock, producer)?))
 }
 
 /// A client subscribed to `id`, and its port's clock: what [`start`] pumps.
@@ -144,8 +132,9 @@ pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
     Ok((seq, clock))
 }
 
-/// Starts pumping what the client's ports receive into `producer`: the pump
-/// owns `seq` and ends, closing it, when the returned connection drops.
+/// Starts pumping what the client's ports receive into `producer`, on a
+/// dedicated thread of `executor`: the pump owns `seq` and ends, closing it,
+/// when the returned connection drops.
 ///
 /// # Errors
 ///
@@ -153,6 +142,7 @@ pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
 /// polled, [`MidiHardwareError::Io`] if the stop pair cannot be made, and
 /// [`MidiHardwareError::Spawn`] if the pump thread cannot start.
 pub(super) fn start(
+    executor: &Executor,
     seq: Client,
     clock: QueueClock,
     producer: InputProducerHandle,
@@ -164,20 +154,21 @@ pub(super) fn start(
     let seq = seq.into_poller(OwnedFd::from(stop_rx))?;
     let died = Arc::new(FaultLatch::<InputFault>::new());
     let flag = Arc::clone(&died);
-    let thread = spawn_named(MidiThread::MidiIn.name(), None, move |_| {
-        // A panic in the pump ends it with the input held, so it is caught
-        // and raises the latch, as an error does.
-        Guard::new(Arc::clone(&flag)).run(|| pump(seq, clock, &flag, producer));
-    })
-    .map_err(|source| MidiHardwareError::Spawn {
-        thread: MidiThread::MidiIn,
-        source,
-    })?;
+    let pump = executor
+        .spawn_dedicated(MidiThread::MidiIn.name(), None, async move {
+            // A panic in the pump ends it with the input held, so it is caught
+            // and raises the latch, as an error does.
+            Guard::new(Arc::clone(&flag)).run(|| pump(seq, clock, &flag, producer));
+        })
+        .map_err(|source| MidiHardwareError::Spawn {
+            thread: MidiThread::MidiIn,
+            source,
+        })?;
 
     Ok(AlsaInput {
         stop: Some(stop_tx),
         died,
-        thread: Some(thread),
+        pump: Some(pump),
     })
 }
 

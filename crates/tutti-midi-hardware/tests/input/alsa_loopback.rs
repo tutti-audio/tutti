@@ -42,8 +42,9 @@ fn open() -> Loopback {
     // 256 events, each placed 20 ms after it arrived.
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let mut graph = Listener::over(&inlets);
-    let mut io =
-        MidiSession::open(Arc::clone(&inlets), MidiHardwareConfig::new()).expect("open MIDI");
+    let executor = tutti_platform::Executor::new();
+    let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
+        .expect("open MIDI");
     let inputs = io.inputs();
     let outputs = io.outputs();
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {

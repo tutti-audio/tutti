@@ -108,7 +108,9 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
+    let executor = tutti_platform::Executor::new();
+    let destination =
+        VirtualDestination::open(&executor, &spec, producer).expect("a virtual destination");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the destination is listed");
     peer.connect_to(port, found.address).expect("subscribes");
@@ -133,7 +135,9 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
+    let executor = tutti_platform::Executor::new();
+    let _destination =
+        VirtualDestination::open(&executor, &spec, producer).expect("a virtual destination");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the destination is listed");
     peer.connect_to(port, found.address).expect("subscribes");
@@ -173,7 +177,9 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let ports = HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
-    let destination = VirtualDestination::open(&dest_spec, producer).expect("a destination");
+    let executor = tutti_platform::Executor::new();
+    let destination =
+        VirtualDestination::open(&executor, &dest_spec, producer).expect("a destination");
     assert_eq!(source.protocol(), VirtualProtocol::Midi2);
     assert_eq!(destination.protocol(), VirtualProtocol::Midi2);
 
@@ -208,7 +214,8 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let destination = VirtualDestination::open(&spec, producer).expect("a destination");
+    let executor = tutti_platform::Executor::new();
+    let destination = VirtualDestination::open(&executor, &spec, producer).expect("a destination");
     assert_eq!(destination.protocol(), VirtualProtocol::Midi1);
 
     let (peer, port) = peer(PortCaps::READ);

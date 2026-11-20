@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 use tutti_graph::{Losses, UmpAt};
+use tutti_platform::Executor;
 use tutti_rt::LockExt;
 
 use tutti_graph::EventInletNode;
@@ -217,7 +218,8 @@ impl core::fmt::Debug for ChangeSink {
 /// use std::time::Duration;
 /// use tutti_midi_hardware::Devices;
 ///
-/// let devices = Devices::open()?;
+/// let executor = tutti_platform::Executor::new();
+/// let devices = Devices::open(&executor)?;
 /// let events = devices.subscribe();
 /// for device in events.initial() {
 ///     println!("{}: {}", device.id, device.name);
@@ -248,8 +250,9 @@ impl core::fmt::Debug for Devices {
 }
 
 impl Devices {
-    /// Lists this platform's devices and starts watching them; the watch stops
-    /// when the last `Devices` and [`DeviceEvents`] over it are dropped.
+    /// Lists this platform's devices and starts watching them, on a thread of
+    /// `executor` where the backend has one; the watch stops when the last
+    /// `Devices` and [`DeviceEvents`] over it are dropped.
     ///
     /// Where the build has no MIDI backend (Windows, or alsa-lib older than
     /// 1.2.10) the list is empty and stays so, as enumeration is; opening a
@@ -259,8 +262,8 @@ impl Devices {
     ///
     /// The platform error from starting the watch, such as a thread that could
     /// not be spawned.
-    pub fn open() -> Result<Self> {
-        Self::open_over(backend::active())
+    pub fn open(executor: &Executor) -> Result<Self> {
+        Self::open_over(backend::active(executor))
     }
 
     /// As [`open`](Self::open), over a supplied backend: a test's

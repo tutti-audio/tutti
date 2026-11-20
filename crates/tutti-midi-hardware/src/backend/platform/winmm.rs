@@ -4,12 +4,13 @@ use crate::InputProducerHandle;
 use crate::endpoints::{InputConnection, MidiEndpoints};
 use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
+use tutti_platform::Executor;
 
 /// Why no virtual endpoint can be published here.
 const VIRTUAL_REASON: &str = "Windows Multimedia has no virtual MIDI ports";
 
 /// Returns this platform's MIDI backend.
-pub(crate) fn active() -> Box<dyn MidiEndpoints> {
+pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::winmm::WinMmEndpoints::new())
 }
 
@@ -22,6 +23,7 @@ pub(crate) fn open_virtual_source(
 
 /// Refuses: winmm has no virtual ports.
 pub(crate) fn open_virtual_destination(
+    _executor: &Executor,
     _spec: &VirtualSpec,
     _producer: InputProducerHandle,
 ) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {

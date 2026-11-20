@@ -21,6 +21,7 @@
 //! through the same inlets.
 
 use std::sync::Mutex;
+use tutti_platform::Executor;
 use tutti_rt::LockExt;
 
 use tutti_midi_device::FunctionBlock;
@@ -247,13 +248,18 @@ impl core::fmt::Debug for VirtualDestination {
 }
 
 impl VirtualDestination {
-    /// Publishes the endpoint `spec` describes, delivering into `producer`.
+    /// Publishes the endpoint `spec` describes, delivering into `producer`; a
+    /// backend that reads on a thread of its own starts it on `executor`.
     ///
     /// # Errors
     ///
     /// As [`VirtualSource::open`].
-    pub fn open(spec: &VirtualSpec, producer: InputProducerHandle) -> Result<Self> {
-        let (connection, protocol) = backend::open_virtual_destination(spec, producer)?;
+    pub fn open(
+        executor: &Executor,
+        spec: &VirtualSpec,
+        producer: InputProducerHandle,
+    ) -> Result<Self> {
+        let (connection, protocol) = backend::open_virtual_destination(executor, spec, producer)?;
         Ok(Self {
             connection,
             name: spec.name,

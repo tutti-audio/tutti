@@ -31,7 +31,8 @@
 //! use tutti_midi_device::DeviceEvent;
 //! use tutti_midi_hardware::Devices;
 //!
-//! let devices = Devices::open()?;
+//! let executor = tutti_platform::Executor::new();
+//! let devices = Devices::open(&executor)?;
 //! let events = devices.subscribe();
 //! for device in events.initial() {
 //!     println!("{}: {}", device.id, device.name);
@@ -109,7 +110,8 @@
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
-//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareConfig::new())?;
+//! let executor = tutti_platform::Executor::new();
+//! let mut session = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.

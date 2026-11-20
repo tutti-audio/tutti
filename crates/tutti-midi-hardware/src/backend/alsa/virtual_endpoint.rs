@@ -11,6 +11,7 @@ use tutti_alsa_ffi::{
     Blocking, Client, Operation, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::{FunctionBlock, UMP_VERSION};
+use tutti_platform::Executor;
 use tutti_rt::LockExt;
 use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Protocol, Ump};
 
@@ -121,6 +122,7 @@ pub(crate) fn source(spec: &VirtualSpec) -> Result<(AlsaVirtualSource, VirtualPr
 /// subscribable port, read by a pump into `producer`, each event stamped by the
 /// kernel as it arrives.
 pub(crate) fn destination(
+    executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
 ) -> Result<(AlsaInput, VirtualProtocol)> {
@@ -132,5 +134,5 @@ pub(crate) fn destination(
     )?;
     publish(&client, spec, protocol)?;
     let clock = client.stamp_port(port)?;
-    Ok((input::start(client, clock, producer)?, protocol))
+    Ok((input::start(executor, client, clock, producer)?, protocol))
 }

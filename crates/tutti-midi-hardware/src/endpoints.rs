@@ -79,8 +79,8 @@ pub trait InputConnection: Send {
 
 /// A running watch over the OS's device list. Method-less like
 /// [`InputConnection`]: it is a lifetime. Dropping it stops the backend's
-/// thread and returns once the thread has ended, so no report reaches the sink
-/// afterwards.
+/// work: a backend whose work is a future on an `Executor` returns at once, and
+/// a report already under way reaches the sink as the work ends.
 pub trait Watch: Send + Sync {}
 
 /// A watch that watches nothing: where no OS reports changes.

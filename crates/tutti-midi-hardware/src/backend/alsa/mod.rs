@@ -27,7 +27,8 @@
 //! ring CoreMIDI's callback feeds. The thread exits when its connection drops.
 //!
 //! One more thread watches the `System:Announce` port for devices that come and
-//! go ([`watch`]); it exists while a `Devices` does.
+//! go ([`watch`]); it exists while a `Devices` does. Both are dedicated threads of
+//! the [`Executor`] the backend was made over.
 
 mod client;
 mod enumerate;
@@ -46,6 +47,7 @@ use crate::error::Result;
 use std::sync::Mutex;
 use tutti_alsa_ffi::{Address, Blocking, Client, UmpVersion};
 use tutti_midi_device::{EndpointId, OsDevice, PortDirection};
+use tutti_platform::Executor;
 use tutti_rt::LockExt;
 
 /// The handle a port is listed under.
@@ -64,8 +66,8 @@ pub(super) fn address_of(handle: EndpointId) -> Option<Address> {
 /// opened per call would announce its own start, port and exit each time, and
 /// every watch on the machine would wake for it. Each connection owns the client
 /// it pumps or sends through, and the watch enumerates on its own.
-#[derive(Default)]
 pub struct AlsaEndpoints {
+    executor: Executor,
     enumerator: Mutex<Option<Client>>,
 }
 
@@ -76,9 +78,13 @@ impl core::fmt::Debug for AlsaEndpoints {
 }
 
 impl AlsaEndpoints {
-    /// The ALSA backend. No client is open until one is needed.
-    pub fn new() -> Self {
-        Self::default()
+    /// The ALSA backend, whose pump and watch threads are `executor`'s. No client
+    /// is open until one is needed.
+    pub fn new(executor: &Executor) -> Self {
+        Self {
+            executor: executor.clone(),
+            enumerator: Mutex::new(None),
+        }
     }
 
     /// A fresh snapshot in `direction`.
@@ -108,7 +114,7 @@ fn devices(seq: &Client) -> Option<Vec<OsDevice>> {
 
 impl MidiEndpoints for AlsaEndpoints {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        watch::start(sink, devices)
+        watch::start(&self.executor, sink, devices)
     }
 
     fn inputs(&self) -> Vec<OsEndpoint> {
@@ -124,7 +130,7 @@ impl MidiEndpoints for AlsaEndpoints {
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        input::open(id, producer)
+        input::open(&self.executor, id, producer)
     }
 
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
