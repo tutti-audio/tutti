@@ -143,7 +143,7 @@ pub fn send_blob(
 ///
 /// # Errors
 ///
-/// The object cannot be made, or as [`send_setup`].
+/// The object cannot be made, or a write to the stream fails.
 #[cfg(feature = "testing")]
 pub fn send_state_reply(stream: &ControlStream, id: ReqId, state: &[u8]) -> IpcResult<()> {
     let object = Blob::create(state)?;
