@@ -19,7 +19,8 @@ fn drivers() -> usize {
 
 /// **The session's own executor and its drive threads end with a build that
 /// fails**: once the error is returned, no `tutti-exec` thread remains. The
-/// wait is a hang guard on the kernel's listing of a joined thread.
+/// loop yields (check-test-time refuses a sleep) and its limit only guards a hang
+/// on the kernel's listing of a joined thread.
 #[test]
 fn a_failed_midi_open_leaves_no_drive_thread_running() {
     let built = Session::builder()
@@ -39,6 +40,6 @@ fn a_failed_midi_open_leaves_no_drive_thread_running() {
             tutti_platform::Instant::now() < end,
             "a drive thread is left"
         );
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        std::thread::yield_now();
     }
 }
