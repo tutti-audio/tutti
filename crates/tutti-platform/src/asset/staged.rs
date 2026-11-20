@@ -85,6 +85,11 @@ impl Staged {
         &self.temp
     }
 
+    /// The path the file is put in place at.
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
     /// Creates the temporary and opens it for writing.
     ///
     /// # Errors

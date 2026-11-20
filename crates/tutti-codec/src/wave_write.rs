@@ -4,7 +4,7 @@ use crate::encoder::check_planned;
 use crate::{Encoder, FileEncoder, Format, Result, Spec};
 use std::io::{Cursor, Seek, Write};
 use tutti_buffers::{Interleaved, InterleavedMut, Sample, Wave, interleave};
-use tutti_platform::{Destination, Staged};
+use tutti_platform::Destination;
 use tutti_units::Samples;
 
 /// Frames written to the encoder at a time by [`write_wave`].
@@ -63,14 +63,8 @@ pub fn write_wave<'a, S: Sample>(
 ) -> Result<()> {
     let spec = Spec::new(format, wave.topology().clone(), wave.sample_rate());
     match dest.into() {
-        Destination::Path { path, create_new } => {
+        Destination::Path(staged) => {
             check_planned(&spec, wave.len())?;
-            let staged = Staged::new(&path);
-            let staged = if create_new {
-                staged.create_new()
-            } else {
-                staged
-            };
             write_file(wave, FileEncoder::create(&spec, staged)?)
         }
         Destination::Writer(writer) => {
