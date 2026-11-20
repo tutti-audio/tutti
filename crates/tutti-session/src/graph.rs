@@ -2687,7 +2687,7 @@ impl<F: Float> Graph<F> {
                 // its width.
                 let source = tutti_buffers::ChannelTopology::from(out_topology);
                 let placed = if source.is_unassigned() {
-                    tutti_buffers::ChannelTopology::assumed(source.width())
+                    tutti_buffers::ChannelTopology::default_for(source.width())
                 } else {
                     source
                 };
@@ -3423,7 +3423,7 @@ impl<F: Float> Graph<F> {
     /// order for the width the graph has.
     pub(crate) fn root_in_force(&self) -> tutti_buffers::ChannelTopology {
         self.root.clone().unwrap_or_else(|| {
-            tutti_buffers::ChannelTopology::assumed(ChannelLayout::clamped(self.outputs()))
+            tutti_buffers::ChannelTopology::default_for(ChannelLayout::clamped(self.outputs()))
         })
     }
 
@@ -3432,7 +3432,7 @@ impl<F: Float> Graph<F> {
     fn placed_topology(&self) -> Option<tutti_buffers::ChannelTopology> {
         let placed = self.output.as_ref()?;
         Some(placed.control.device(placed.device).map_or_else(
-            || tutti_buffers::ChannelTopology::assumed(placed.device),
+            || tutti_buffers::ChannelTopology::default_for(placed.device),
             |p| p.topology,
         ))
     }
@@ -3557,7 +3557,7 @@ impl<F: Float> Graph<F> {
                         tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
                     tutti_graph::fold_to_topology::<f32>(
-                        &tutti_buffers::ChannelTopology::assumed(width),
+                        &tutti_buffers::ChannelTopology::default_for(width),
                         placed,
                     )?;
                 }

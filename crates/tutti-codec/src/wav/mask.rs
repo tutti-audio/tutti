@@ -7,8 +7,8 @@
 //! a speaker has no WAVE bit or the order differs. Samples are never
 //! reordered, so file channel `n` is always the engine's channel `n`.
 //!
-//! A spec built from a width alone (`Spec::of_width`) takes the assumed
-//! topology ([`ChannelTopology::assumed`]): 1 channel is `0x4`
+//! A spec built from a width alone (`Spec::of_width`) takes the default
+//! topology ([`ChannelTopology::default_for`]): 1 channel is `0x4`
 //! (`KSAUDIO_SPEAKER_MONO`), 2 is `0x3`, 4 is `0x33` (`KSAUDIO_SPEAKER_QUAD`),
 //! 6 is `0x60F` (`KSAUDIO_SPEAKER_5POINT1_SURROUND`), and every other width is
 //! `0`, including 8 and 12 (tutti's 7.1 is `... SL SR BL BR`, WAVE's would be
@@ -40,7 +40,7 @@ mod tests {
     use super::*;
     use tutti_buffers::Speaker;
 
-    /// The masks are the `ksmedia.h` constants for the assumed widths whose
+    /// The masks are the `ksmedia.h` constants for the default-layout widths whose
     /// order WAVE can state (mono, stereo, quad, 5.1), and `0` for 7.1 and 7.1.4
     /// (tutti's 7.1 is SL SR BL BR, WAVE's would be BL BR SL SR), for unnamed
     /// widths, for a topology out of ascending order or with a speaker WAVE has
@@ -48,7 +48,7 @@ mod tests {
     #[test]
     fn masks_match_ksmedia_and_are_zero_where_they_cannot_be_stated() {
         let m = |n: u16| {
-            channel_mask(&ChannelTopology::assumed(
+            channel_mask(&ChannelTopology::default_for(
                 tutti_buffers::ChannelLayout::from(n),
             ))
         };

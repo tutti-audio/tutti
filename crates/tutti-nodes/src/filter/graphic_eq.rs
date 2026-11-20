@@ -205,7 +205,7 @@ mod tests {
     use tutti_units::{Hz, UnitAddr, UnitParam};
 
     fn mono() -> BusTopology {
-        BusTopology::assumed(ChannelLayout::MONO).expect("mono is a bus")
+        BusTopology::default_for(ChannelLayout::MONO).expect("mono is a bus")
     }
 
     fn band(i: usize) -> UnitAddr {

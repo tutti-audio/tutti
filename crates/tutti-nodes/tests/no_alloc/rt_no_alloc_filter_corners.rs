@@ -366,7 +366,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                     .map(|i| Hz::new(150.0 * 3f64.powi(i as i32)))
                     .collect();
                 let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    BusTopology::assumed(ChannelLayout::from(width)).unwrap(),
+                    BusTopology::default_for(ChannelLayout::from(width)).unwrap(),
                     CrossoverControls::try_from(&initial[..]).unwrap(),
                 ))
                 .unwrap();

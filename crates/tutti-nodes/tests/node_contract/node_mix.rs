@@ -310,7 +310,8 @@ fn a_mix_move_on_a_delay_ramps_across_the_block() {
     let make = || {
         DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus"),
+                BusTopology::default_for(ChannelLayout::from(6u16))
+                    .expect("six channels are one bus"),
                 MaxDelay::of(Seconds::new(0.1)),
                 InterpolationMode::Linear,
             ))
@@ -465,7 +466,7 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    let bus = tutti_buffers::BusTopology::assumed(width).expect("a test width fits a bus");
+    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(bus, irs)
             .folded()

@@ -21,7 +21,7 @@ fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
 }
 
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(width.into()).expect("a test width is one bus")
+    BusTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 fn mono(mode: InterpolationMode) -> DelayLayout {

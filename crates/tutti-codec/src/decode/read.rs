@@ -53,11 +53,11 @@ pub struct WaveMetadata {
     /// give it): a lone channel is the centre, a speaker the vocabulary has no
     /// name for is [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown), and a
     /// container that states a count and no placement is
-    /// [`ChannelTopology::assumed`] ([`placement`](Self::placement)). A caller deciding whether a file
+    /// [`ChannelTopology::default_for`] ([`placement`](Self::placement)). A caller deciding whether a file
     /// can be placed asks this before it loads or opens the file.
     pub topology: ChannelTopology,
     /// Whether the container stated [`topology`](Self::topology) or only a
-    /// channel count it was assumed from.
+    /// channel count it took the default layout for.
     pub placement: Placement,
     /// The format the file's samples are held in: what [`read_wave`] and
     /// [`FileIn`](crate::FileIn) give back exactly, with no conversion, when

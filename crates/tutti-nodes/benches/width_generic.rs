@@ -116,8 +116,10 @@ fn delay(c: &mut Criterion) {
     for w in [2usize, 6] {
         let node = DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("at most one bus wide"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("at most one bus wide"),
                 MaxDelay::of(Seconds::new(1.0)),
                 InterpolationMode::Linear,
             ))
@@ -138,8 +140,10 @@ fn mod_delay(c: &mut Criterion) {
             "chorus",
             w,
             ModDelayNode::<f32>::from(ModDelayConfig::chorus(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("a test width is one bus"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("a test width is one bus"),
             )),
             None,
         );
@@ -153,8 +157,10 @@ fn phaser(c: &mut Criterion) {
             "phaser",
             w,
             PhaserNode::<f32>::try_from(PhaserConfig::new(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("a test width is one bus"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("a test width is one bus"),
                 Stages::of(6),
             ))
             .expect("a step fits any width"),

@@ -385,7 +385,7 @@ impl From<Speakers> for Vec<Speaker> {
 /// A [`ChannelLayout`] says how many channels, and nothing about what they
 /// are: 4 is quad or B-format, 6 is 5.1 or six interface inputs, 12 is 7.1.4
 /// or twelve tracks. Only an edge knows, so an edge states a topology, or says
-/// it guessed with [`assumed`](Self::assumed) and reports a [`Placement`].
+/// it guessed with [`default_for`](Self::default_for) and reports a [`Placement`].
 /// `tutti_buffers::Fold::between` is the one place two topologies meet.
 ///
 /// # Examples
@@ -393,7 +393,7 @@ impl From<Speakers> for Vec<Speaker> {
 /// ```
 /// use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Speaker};
 ///
-/// let bed = ChannelTopology::assumed(ChannelLayout::from(6u16));
+/// let bed = ChannelTopology::default_for(ChannelLayout::from(6u16));
 /// assert_eq!(bed, Bed::Surround51.topology());
 /// assert_eq!(bed.index_of(Speaker::FrontCenter), Some(2));
 /// assert_eq!(bed.lfe_index(), Some(3));
@@ -497,12 +497,12 @@ impl ChannelTopology {
     /// [`unassigned`](Self::unassigned) channels at any other width.
     ///
     /// The one count-to-placement map: an edge that uses it reports
-    /// [`Placement::Assumed`], and an edge that knows better states its own
+    /// [`Placement::Default`], and an edge that knows better states its own
     /// topology instead. The quad is a guess a four-channel device or root
     /// invites over B-format; an unlisted width names no speaker, so a fold
     /// places each channel by index.
     #[must_use]
-    pub fn assumed(width: ChannelLayout) -> Self {
+    pub fn default_for(width: ChannelLayout) -> Self {
         let bed = match width.count() {
             1 => Bed::Mono,
             2 => Bed::Stereo,
@@ -544,16 +544,16 @@ impl From<Bed> for ChannelTopology {
 /// Where a reported topology came from.
 ///
 /// An edge that cannot know a placement (a device, a container that states a
-/// count and no placement) calls [`ChannelTopology::assumed`] and says so with
-/// [`Assumed`](Self::Assumed); an edge that read it from the format says
+/// count and no placement) calls [`ChannelTopology::default_for`] and says so with
+/// [`Default`](Self::Default); an edge that read it from the format says
 /// [`Stated`](Self::Stated).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Placement {
     /// The format, the device or the caller stated it.
     Stated,
-    /// A count became a placement through [`ChannelTopology::assumed`].
-    Assumed,
+    /// A count became a placement through [`ChannelTopology::default_for`].
+    Default,
 }
 
 #[cfg(test)]
@@ -755,11 +755,11 @@ mod tests {
         );
     }
 
-    /// The assumed 5.1 puts the LFE at index 3, pinned as an absolute index
+    /// The default 5.1 puts the LFE at index 3, pinned as an absolute index
     /// (the number the downmix skips) rather than through `lfe_index` alone.
     #[test]
-    fn the_assumed_51_order_puts_lfe_at_index_three() {
-        let t = ChannelTopology::assumed(ChannelLayout::from(6u16));
+    fn the_default_51_order_puts_lfe_at_index_three() {
+        let t = ChannelTopology::default_for(ChannelLayout::from(6u16));
         assert_eq!(
             t.positions().unwrap(),
             &[
@@ -777,7 +777,7 @@ mod tests {
     /// The count-to-placement map: 1 mono, 2 stereo, 4 quad, 6 5.1, 8 7.1,
     /// 12 7.1.4, every other width unassigned.
     #[test]
-    fn assumed_maps_the_six_widths_and_leaves_the_rest_unassigned() {
+    fn default_for_maps_the_six_widths_and_leaves_the_rest_unassigned() {
         for (width, bed) in [
             (1u16, Bed::Mono),
             (2, Bed::Stereo),
@@ -786,24 +786,27 @@ mod tests {
             (8, Bed::Surround71),
             (12, Bed::Surround714),
         ] {
-            let t = ChannelTopology::assumed(ChannelLayout::from(width));
+            let t = ChannelTopology::default_for(ChannelLayout::from(width));
             assert_eq!(t, bed.topology(), "width {width}");
             assert_eq!(t.width().count(), width);
         }
         for width in [0u16, 3, 5, 7, 9, 10, 11, 13, 16] {
             let w = ChannelLayout::from(width);
-            assert_eq!(ChannelTopology::assumed(w), ChannelTopology::unassigned(w));
+            assert_eq!(
+                ChannelTopology::default_for(w),
+                ChannelTopology::unassigned(w)
+            );
         }
-        assert!(!ChannelTopology::assumed(ChannelLayout::EMPTY).is_unassigned());
+        assert!(!ChannelTopology::default_for(ChannelLayout::EMPTY).is_unassigned());
     }
 
     /// 7.1 extends 5.1 without moving its prefix; 7.1.4 extends 7.1 with the
     /// four heights.
     #[test]
-    fn the_assumed_orders_extend_each_other() {
-        let five = ChannelTopology::assumed(ChannelLayout::from(6u16));
-        let seven = ChannelTopology::assumed(ChannelLayout::from(8u16));
-        let atmos = ChannelTopology::assumed(ChannelLayout::from(12u16));
+    fn the_default_orders_extend_each_other() {
+        let five = ChannelTopology::default_for(ChannelLayout::from(6u16));
+        let seven = ChannelTopology::default_for(ChannelLayout::from(8u16));
+        let atmos = ChannelTopology::default_for(ChannelLayout::from(12u16));
         assert_eq!(&seven.positions().unwrap()[..6], five.positions().unwrap());
         assert_eq!(
             &seven.positions().unwrap()[6..],

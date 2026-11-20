@@ -244,7 +244,7 @@ fn open_lanes<F: FftFloat>(
         let placement = if topology.is_some() {
             tutti_buffers::Placement::Stated
         } else {
-            tutti_buffers::Placement::Assumed
+            tutti_buffers::Placement::Default
         };
         let channels = FileChannels { layout, topology };
         let (fold, tap) = match feed {

@@ -179,18 +179,18 @@ mod tests {
     /// 5.1 and 7.1 agree with the engine's own order.
     ///
     /// The two layouts where AU and the engine happen to coincide, which is why
-    /// they need no channel remapping. Asserted against `ChannelTopology::assumed` rather than a
+    /// they need no channel remapping. Asserted against `ChannelTopology::default_for` rather than a
     /// literal so the claim is about *agreement*, not about a copied list.
     #[test]
     fn the_audiounit_surround_tags_match_the_engines_order() {
         assert_eq!(
             topology_of(AuLayoutTag::AudioUnit5_1),
-            Some(ChannelTopology::assumed(ChannelLayout::from(6u16))),
+            Some(ChannelTopology::default_for(ChannelLayout::from(6u16))),
             "AudioUnit_5_1 is L R C LFE Ls Rs, the engine's own 5.1 order"
         );
         assert_eq!(
             topology_of(AuLayoutTag::AudioUnit7_1),
-            Some(ChannelTopology::assumed(ChannelLayout::from(8u16))),
+            Some(ChannelTopology::default_for(ChannelLayout::from(8u16))),
             "AudioUnit_7_1 is L R C LFE Ls Rs Rls Rrs, the engine's own 7.1 order"
         );
     }

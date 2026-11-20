@@ -272,7 +272,7 @@ mod tests {
     }
 
     fn bus(width: u16) -> BusTopology {
-        BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
+        BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
     }
 
     /// `node` prepared at [`RATE`], over `inputs` (one `Vec` per channel) frame by frame,

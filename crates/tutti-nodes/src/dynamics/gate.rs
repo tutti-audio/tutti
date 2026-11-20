@@ -84,7 +84,7 @@ impl GateConfig {
     /// key filter and at [`GateControls::DEFAULT`].
     ///
     /// The main bus keeps its speaker placement. A width past one bus is refused by
-    /// [`BusTopology::assumed`] before it reaches here: `new(BusTopology::assumed(n)?)`.
+    /// [`BusTopology::default_for`] before it reaches here: `new(BusTopology::default_for(n)?)`.
     #[must_use]
     pub fn new(input: BusTopology) -> Self {
         Self {
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn the_width_and_the_key_choice_are_the_port_layout() {
         let c = four(-20.0, 0.001, 0.01, 0.1);
-        let wide = BusTopology::assumed(tutti_buffers::ChannelLayout::from(4u16))
+        let wide = BusTopology::default_for(tutti_buffers::ChannelLayout::from(4u16))
             .expect("at most one bus wide");
         for (node, inputs, outputs) in [
             (
