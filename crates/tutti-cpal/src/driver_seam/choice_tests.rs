@@ -93,7 +93,7 @@ fn a_chosen_output_format_the_device_lacks_is_a_named_error() {
     assert!(
         matches!(
             &err,
-            Error::OutputFormatUnavailable { device_name, format: SampleFormat::I32 }
+            DeviceError::OutputFormatUnavailable { device_name, format: SampleFormat::I32 }
                 if device_name == "Card"
         ),
         "{err:?}"
@@ -113,7 +113,7 @@ fn a_format_offered_only_at_another_rate_is_not_offered() {
     )
     .expect_err("no I16 at 48 kHz stereo");
     assert!(
-        matches!(err, Error::OutputFormatUnavailable { .. }),
+        matches!(err, DeviceError::OutputFormatUnavailable { .. }),
         "{err:?}"
     );
 }

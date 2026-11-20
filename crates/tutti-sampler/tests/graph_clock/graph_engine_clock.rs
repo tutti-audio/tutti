@@ -30,7 +30,7 @@ use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
 use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
-use tutti_timeline::{AfterLocate, FadeOut, LoopEdit, MotionEvent, Timeline, Transport};
+use tutti_timeline::{AfterLocate, FadeOut, LoopEdit, MotionCommand, Timeline, Transport};
 use tutti_units::{At, Beat, Cents, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -112,7 +112,7 @@ fn play(
 ) -> Vec<f32> {
     transport
         .motion()
-        .try_send(MotionEvent::Play)
+        .try_send(MotionCommand::Play)
         .expect("room");
     let mut all = Vec::with_capacity(n * blocks * 2);
     let mut buf = vec![0.0f32; n * 2];
@@ -338,7 +338,7 @@ fn a_scheduled_locate_lands_on_its_frame() {
         t.motion()
             .schedule(
                 At::Frame(Frame::new(at as u64)),
-                MotionEvent::Locate {
+                MotionCommand::Locate {
                     beat: Beat::new(0.25),
                     fade: FadeOut::Immediate,
                     then: AfterLocate::Keep,

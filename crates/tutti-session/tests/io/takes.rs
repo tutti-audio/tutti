@@ -60,7 +60,7 @@ impl InputOpener for Opener {
 /// refuses a format it cannot give.
 impl InputOpener<f64> for Opener {
     fn open(&mut self, _: &MicConfig, _: SampleRate) -> tutti_cpal::Result<OpenedInput<f64>> {
-        Err(tutti_cpal::Error::InvalidConfig(
+        Err(tutti_cpal::DeviceError::InvalidConfig(
             "this capture serves one sample width only".into(),
         ))
     }

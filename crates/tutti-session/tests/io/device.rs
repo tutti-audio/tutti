@@ -8,7 +8,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_platform::Instant;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_cpal::{DeviceId, DeviceSelector, Direction, Snapshot, SnapshotSource};
+use tutti_cpal::{DeviceDirection, DeviceId, DeviceSelector, Snapshot, SnapshotSource};
 use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputSpec};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
@@ -254,11 +254,11 @@ fn the_watch_reports_what_the_host_lists() {
             events.as_slice(),
             [
                 SessionEvent::Device(DeviceEvent::Appeared {
-                    direction: Direction::Output,
+                    direction: DeviceDirection::Output,
                     ..
                 }),
                 SessionEvent::Device(DeviceEvent::DefaultChanged {
-                    direction: Direction::Output,
+                    direction: DeviceDirection::Output,
                     ..
                 }),
             ]
@@ -826,7 +826,7 @@ fn the_session_lists_the_outputs_once_and_retries_a_failed_start() {
     let make = |fail: bool| {
         calls.set(calls.get() + 1);
         if fail {
-            Err(tutti_cpal::Error::InvalidConfig("no thread".into()))
+            Err(tutti_cpal::DeviceError::InvalidConfig("no thread".into()))
         } else {
             tutti_cpal::DeviceListing::spawn_with(|| Ok(Vec::new()))
         }

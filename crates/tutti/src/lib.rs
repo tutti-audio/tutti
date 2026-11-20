@@ -146,7 +146,7 @@ pub use tutti_rt::PushError;
 #[cfg(feature = "session")]
 pub use tutti_engine::{BlockCounts, Load};
 pub use tutti_timeline::{
-    AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
+    AfterLocate, FadeOut, LoopRegion, MotionCommand, MotionState, TransportCommand,
 };
 
 // Units, channels, buffers and the musical meter.
@@ -409,14 +409,13 @@ pub mod graph {
     };
     pub use tutti_graph::{
         BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
-        Edge as GraphEdge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
-        ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
-        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput,
-        ParamKind, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell,
-        ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
-        SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
-        TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
-        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+        Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild, ForkCause,
+        ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
+        HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
+        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
+        ParamSegment, Pass, PlayClock, RenderMode, Resolution, SilenceMask, Sink, SortedEvents,
+        Source, SubBlocks, TransportChange, TransportChangeRejected, TransportChanges,
+        TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -427,14 +426,13 @@ pub mod graph {
 #[cfg(feature = "session")]
 pub mod session {
     #[cfg(feature = "device")]
-    pub use tutti_cpal::Error as DeviceError;
+    pub use tutti_cpal::DeviceError;
     #[cfg(feature = "capture")]
     pub use tutti_cpal::MicConfig;
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
-        DeviceChange, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
-        Direction as DeviceDirection, Listed, OutputConfig, Snapshot, SnapshotSource,
-        SupportedConfig,
+        DeviceChange, DeviceDirection, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
+        Listed, OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
@@ -443,8 +441,7 @@ pub mod session {
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
-        ConfigError, Error as ExportError, JobError, Rendered, RenderedError, TargetError,
-        Unmeasured,
+        ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
         BusError, BusRef, BusSource, CloseError, CommitError, Inserted, MissingSource, MixError,

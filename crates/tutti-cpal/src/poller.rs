@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use tutti_platform::StopToken;
 
-use crate::error::{Error, Result};
+use crate::error::{DeviceError, Result};
 use crate::host::{AudioHost, DeviceHost};
 use crate::roster::{Snapshot, SnapshotSource};
 
@@ -41,8 +41,8 @@ impl DevicePoller {
     /// Starts polling `host` every `interval`, the first look at once.
     ///
     /// # Errors
-    /// [`Error::HostUnavailable`] when the host cannot be opened, or
-    /// [`Error::InvalidConfig`] when the thread cannot be spawned.
+    /// [`DeviceError::HostUnavailable`] when the host cannot be opened, or
+    /// [`DeviceError::InvalidConfig`] when the thread cannot be spawned.
     pub fn spawn(host: AudioHost, interval: Duration) -> Result<Self> {
         let interval = interval.max(MIN_POLL_INTERVAL);
         // Opened here to report an unreachable host to the caller; the thread
@@ -70,7 +70,7 @@ impl DevicePoller {
                 }
             }
         })
-        .map_err(|e| Error::InvalidConfig(format!("cannot start the device poller: {e}")))?;
+        .map_err(|e| DeviceError::InvalidConfig(format!("cannot start the device poller: {e}")))?;
         let stop = thread.token();
         thread.detach();
         Ok(Self { snapshots, stop })

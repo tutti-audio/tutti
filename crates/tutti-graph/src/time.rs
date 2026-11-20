@@ -171,7 +171,7 @@ pub enum Due {
     /// [`Offset::ZERO`] of this block and counts it as late — a late command
     /// is never dropped. For a frame: the frame is before the block. For a
     /// beat: continuous playback crossed it before this block (see
-    /// [`Playhead`]).
+    /// [`BeatCrossings`]).
     Late,
     /// It falls after this block — or, for a beat, the playhead has not
     /// reached it by continuous playback (stopped, not there yet, or a seek
@@ -208,7 +208,7 @@ pub enum Due {
 /// because this pass will reach it again: a beat there waits for that,
 /// rather than firing now as late.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Playhead {
+pub struct BeatCrossings {
     prev: Option<Env>,
     /// Where the current continuous run started.
     anchor: Option<f64>,
@@ -219,8 +219,8 @@ pub struct Playhead {
 /// Continuity slack when no tempo is moving to measure a frame by, in beats.
 const STILL: f64 = 1e-9;
 
-impl Playhead {
-    /// A playhead with no history.
+impl BeatCrossings {
+    /// A tracker with no history.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -291,7 +291,7 @@ impl TransportPosition {
     /// It continues this one when the loop is the same and its beat is one
     /// this one reaches by rolling `frames` at a tempo between its own and
     /// `next`'s, ± one frame, wrapped by the loop (unmoved when stopped):
-    /// the rule [`Playhead`] tells a run from a jump by, so a tempo change
+    /// the rule [`BeatCrossings`] tells a run from a jump by, so a tempo change
     /// (a step or a ramp) rolls on, and a seek or a loop edit jumps.
     ///
     /// A stopped transport does not roll: `next` at its beat is
@@ -371,7 +371,7 @@ impl Env {
     ///   [`Due::NotYet`] otherwise: stopped, not reached, or behind the
     ///   playhead. Whether a beat behind the playhead is *late* depends on
     ///   how the playhead got past it, which one block cannot say; that is
-    ///   [`Playhead::crossed`].
+    ///   [`BeatCrossings::crossed`].
     pub fn due(&self, at: At) -> Due {
         match at {
             At::NextBlock => Due::In(Offset::ZERO),
@@ -513,7 +513,7 @@ impl Env {
 
     /// Whether this block, with its tempo changing to `next_tempo` at some
     /// point inside it, could have left the transport at beat `next` — and
-    /// if so, whether it wrapped its loop on the way. See [`Playhead`] for
+    /// if so, whether it wrapped its loop on the way. See [`BeatCrossings`] for
     /// the rule. No allocation: the next block's start is unwrapped against
     /// the loop candidate by candidate.
     fn arrives_at(&self, next: f64, next_tempo: Bpm) -> Option<bool> {
@@ -608,18 +608,23 @@ impl Env {
     /// timeline position to align with: it lands at the start of the block,
     /// uncompensated.
     ///
-    /// A beat is late when `playhead` (already fed this block) says
+    /// A beat is late when `crossings` (already fed this block) says
     /// continuous playback crossed it before this block.
-    pub(crate) fn due_at_arrival(&self, at: &mut At, arrival: Latency, playhead: &Playhead) -> Due {
+    pub(crate) fn due_at_arrival(
+        &self,
+        at: &mut At,
+        arrival: Latency,
+        crossings: &BeatCrossings,
+    ) -> Due {
         match *at {
             At::NextBlock => Due::In(Offset::ZERO),
             At::Frame(f) => self.due(At::Frame(f + arrival.samples())),
             At::Beat(b) => match self.due(*at) {
                 Due::In(k) => {
                     *at = At::Frame(self.frame_at(k));
-                    self.due_at_arrival(at, arrival, playhead)
+                    self.due_at_arrival(at, arrival, crossings)
                 }
-                _ if playhead.crossed(b.get()) => Due::Late,
+                _ if crossings.crossed(b.get()) => Due::Late,
                 other => other,
             },
         }
@@ -847,7 +852,7 @@ mod tests {
             Due::In(Offset::raw(11))
         );
         // Behind the playhead: one block cannot call it late (that needs
-        // the `Playhead`'s history).
+        // the `BeatCrossings`'s history).
         assert_eq!(e.due(At::Beat(Beat::new(1.0))), Due::NotYet);
         assert_eq!(e.due(At::Beat(Beat::new(2.0))), Due::NotYet);
         let stopped = env(35_990, 64, {
@@ -865,7 +870,7 @@ mod tests {
     #[test]
     fn a_command_lands_its_arrival_after_its_timeline_time() {
         let a = Latency::new(Samples::new(60));
-        let ph = Playhead::new();
+        let ph = BeatCrossings::new();
         let e = env(1000, 64, TransportPosition::default());
         let mut at = At::Frame(Frame::new(1000));
         assert_eq!(e.due_at_arrival(&mut at, a, &ph), Due::In(Offset::raw(60)));
@@ -893,7 +898,7 @@ mod tests {
 
     /// Looping: a passed beat inside the loop comes round again after the
     /// wrap; one past the loop end waits; one before loop and playhead waits
-    /// too (only the `Playhead` can call it late).
+    /// too (only the `BeatCrossings` can call it late).
     #[test]
     fn a_looping_transport_reaches_a_passed_beat_after_the_wrap() {
         // 120 BPM at 48 kHz: 24 000 frames a beat, so a 64-frame block
@@ -934,11 +939,11 @@ mod tests {
         )
     }
 
-    /// The playhead's crossed set: continuous playback crosses, a seek
+    /// The crossed set: continuous playback crosses, a seek
     /// starts over, a stop keeps the run, and a wrap crosses the loop.
     #[test]
-    fn the_playhead_crosses_only_by_continuous_playback() {
-        let mut ph = Playhead::new();
+    fn beat_crossings_cross_only_by_continuous_playback() {
+        let mut ph = BeatCrossings::new();
         ph.observe(&block(1.0, 2400, true, None));
         assert!(!ph.crossed(1.0), "a new run has crossed nothing");
         ph.observe(&block(1.1, 2400, true, None));
@@ -953,7 +958,7 @@ mod tests {
         // Looping [4, 8): start at 3.5, before the loop, in half-beat
         // blocks; play through the loop, wrap, and on to 4.5.
         let l = Some(LoopRange::new(Beat::new(4.0), Beat::new(8.0)).expect("a loop"));
-        let mut ph = Playhead::new();
+        let mut ph = BeatCrossings::new();
         for b in [3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5] {
             ph.observe(&block(b, 12_000, true, l));
         }
@@ -983,7 +988,7 @@ mod tests {
             )
         };
         // f32 beats around beat 100 at 120 BPM (512 frames = 0.02133 beat).
-        let mut ph = Playhead::new();
+        let mut ph = BeatCrossings::new();
         let mut exact = 100.0f64;
         for _ in 0..8 {
             ph.observe(&at(f64::from(exact as f32), 120.0));
@@ -992,7 +997,7 @@ mod tests {
         assert!(ph.crossed(100.05), "one run, despite the f32 steps");
         // A ramp from 120 to 180 BPM, 2 BPM per block, linear inside each:
         // each block advances by its average tempo.
-        let mut ph = Playhead::new();
+        let mut ph = BeatCrossings::new();
         let (mut beat, mut tempo) = (10.0f64, 120.0f64);
         for _ in 0..8 {
             ph.observe(&at(beat, tempo));
@@ -1004,7 +1009,7 @@ mod tests {
         // A step from 120 to 240 BPM at offset 64 of a 256-frame block: the
         // block reports 120, the next 240, and the position moved 64 frames
         // at 120 and 192 at 240. A beat crossed inside it was crossed.
-        let mut ph = Playhead::new();
+        let mut ph = BeatCrossings::new();
         let e = |beat: f64, tempo: f64| {
             env(
                 0,
@@ -1106,7 +1111,7 @@ mod tests {
     fn a_seek_out_of_a_loop_is_not_a_wrap() {
         let l = Some(LoopRange::new(Beat::new(4.0), Beat::new(4.5)).expect("a loop"));
         let at = |beat: f64| block(beat, 1_200, true, l);
-        let mut ph = Playhead::new();
+        let mut ph = BeatCrossings::new();
         ph.observe(&at(4.45));
         ph.observe(&at(3.0));
         ph.observe(&at(3.05));
@@ -1129,7 +1134,7 @@ mod tests {
                 let l = Some(LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop"));
                 // 480 frames is 0.02 beat at 120 BPM: from 0.01 beat before
                 // the loop, the block reaches it halfway through.
-                let mut ph = Playhead::new();
+                let mut ph = BeatCrossings::new();
                 ph.observe(&block(start - 0.01, 480, true, l));
                 ph.observe(&block(start, 480, true, l));
                 let _ = tx.send(ph.crossed(start - 0.005));
@@ -1148,7 +1153,7 @@ mod tests {
     /// the command is seen is late; one jumped over by a seek waits.
     #[test]
     fn a_beat_is_late_only_when_playback_crossed_it() {
-        let mut ph = Playhead::new();
+        let mut ph = BeatCrossings::new();
         ph.observe(&block(1.0, 2400, true, None));
         let e = block(1.1, 2400, true, None);
         ph.observe(&e);
@@ -1330,7 +1335,7 @@ mod tests {
     #[test]
     fn a_seek_inside_the_block_starts_a_new_run() {
         let roll = |beat: f64| TransportPosition::new(true, Bpm::of(120.0), Beat::new(beat), None);
-        let mut ph = Playhead::new();
+        let mut ph = BeatCrossings::new();
         let mut b = env(0, 4_800, roll(0.0));
         b.changes.push(at(2_400), roll(8.0)).expect("inside");
         ph.observe(&b);

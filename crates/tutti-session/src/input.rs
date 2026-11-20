@@ -60,7 +60,7 @@ pub struct InputConfig {
     /// The sample format to open the device at, at the graph's rate
     /// ([`MicConfig::sample_format`]): `None` is `F32` when the device offers
     /// it. A format the device lacks fails the open with
-    /// [`tutti_cpal::Error::InputFormatUnavailable`].
+    /// [`tutti_cpal::DeviceError::InputFormatUnavailable`].
     pub sample_format: Option<SampleFormat>,
     /// The depth of the ring into the graph, in time at the input's rate:
     /// shallow on purpose, so a monitored input is heard now and not late. A
