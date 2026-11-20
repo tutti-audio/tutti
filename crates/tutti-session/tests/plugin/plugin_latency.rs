@@ -268,6 +268,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
+        tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
         RATE,
@@ -330,6 +331,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
+        tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
         RATE,
@@ -384,6 +386,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
+        tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
         RATE,

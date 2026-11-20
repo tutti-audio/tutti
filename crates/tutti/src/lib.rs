@@ -271,6 +271,10 @@ pub mod nodes {
         SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
+        AllPassFilter, CombBank, CombControls, CombFilter, CombForm, FrequencyShifterBank,
+        FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
+    };
+    pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
         Cookbook, CutResponse, Elliptic, EllipticTolerances, FirError, LinearPhaseDesign,
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
@@ -335,6 +339,10 @@ pub mod nodes {
         FreeverbSet, GateSet, GraphicEqSet, HasControl, LadderSet, LevellerSet, LimiterSet,
         ModDelaySet, PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet,
         TransientShaperKernel, TransientShaperSet,
+    };
+    pub use tutti_nodes::{
+        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
+        FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet,
     };
 }
 
