@@ -7,6 +7,7 @@
 //! note expression, reached here through capability accessors.
 
 use crate::host::placement::placement;
+use tutti_platform::Executor;
 use tutti_plugin_db::{Hosting, Loadable};
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
@@ -64,7 +65,14 @@ enum Placed {
 ///
 /// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3");
 /// let (_collector, work) = tutti_plugin_types::MainWork::new();
-/// let plugin = Plugin::open(None, &work, &Loadable::uncatalogued(file), SampleRate::SR_48K)?;
+/// let executor = tutti_platform::Executor::new();
+/// let plugin = Plugin::open(
+///     None,
+///     &executor,
+///     &work,
+///     &Loadable::uncatalogued(file),
+///     SampleRate::SR_48K,
+/// )?;
 /// println!("{} ({:?})", plugin.descriptor().name, plugin.descriptor().class.role());
 /// if plugin.loaded().features.contains(tutti_plugin_types::Features::MIDI_IN) {
 ///     // wire a MIDI source to the node's event input
@@ -105,7 +113,8 @@ impl Plugin {
     ///     .resolve(&"vst3.00112233-44556677-8899AABB-CCDDEEFF".parse::<PluginId>()?)
     ///     .bind()?;
     /// let (_collector, work) = tutti_plugin_types::MainWork::new();
-    /// let plugin = Plugin::open(None, &work, &foo, tutti_units::SampleRate::SR_48K)?;
+    /// let executor = tutti_platform::Executor::new();
+    /// let plugin = Plugin::open(None, &executor, &work, &foo, tutti_units::SampleRate::SR_48K)?;
     /// # Ok(()) }
     /// ```
     ///
@@ -118,7 +127,8 @@ impl Plugin {
     /// editor and audio processor into one instance, and every other format in
     /// a `plugin-server` subprocess with an IPC bridge. This call blocks while
     /// the subprocess starts and the plugin loads, so call it off the audio
-    /// thread.
+    /// thread. `executor` runs the subprocess's exit watch, and a fork of the
+    /// served plugin keeps it for its own.
     ///
     /// `main` is the proof that the caller is on the main thread. Only an
     /// in-process load needs it, and refuses to load without it; a plugin
@@ -145,11 +155,19 @@ impl Plugin {
     /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
     pub fn open(
         main: Option<MainThreadMarker>,
+        executor: &Executor,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
     ) -> IpcResult<Self> {
-        Self::open_with(main, work, &AudioConfig::default(), plugin, sample_rate)
+        Self::open_with(
+            main,
+            executor,
+            work,
+            &AudioConfig::default(),
+            plugin,
+            sample_rate,
+        )
     }
 
     /// Opens a plugin file with explicit bridge settings.
@@ -161,12 +179,13 @@ impl Plugin {
     /// The same as [`open`](Self::open).
     pub(crate) fn open_with(
         main: Option<MainThreadMarker>,
+        executor: &Executor,
         work: &MainWorkHandle,
         audio: &AudioConfig,
         plugin: &Loadable,
         sample_rate: SampleRate,
     ) -> IpcResult<Self> {
-        Self::open_with_state(main, work, audio, plugin, sample_rate, None)
+        Self::open_with_state(main, executor, work, audio, plugin, sample_rate, None)
             .map(|(plugin, _)| plugin)
     }
 
@@ -182,6 +201,7 @@ impl Plugin {
     /// The same as [`open`](Self::open).
     pub fn open_with_state(
         main: Option<MainThreadMarker>,
+        executor: &Executor,
         work: &MainWorkHandle,
         audio: &AudioConfig,
         plugin: &Loadable,
@@ -213,13 +233,18 @@ impl Plugin {
             );
         }
 
-        let ((client, restored), handle) =
-            PluginClient::open(audio.to_bridge_config()?, work, plugin, sample_rate, state).map(
-                |(client, restored)| {
-                    let handle = client.handle();
-                    ((client, restored), handle)
-                },
-            )?;
+        let ((client, restored), handle) = PluginClient::open(
+            audio.to_bridge_config()?,
+            executor,
+            work,
+            plugin,
+            sample_rate,
+            state,
+        )
+        .map(|(client, restored)| {
+            let handle = client.handle();
+            ((client, restored), handle)
+        })?;
         Ok((Self::from_subprocess(client, handle), restored))
     }
 

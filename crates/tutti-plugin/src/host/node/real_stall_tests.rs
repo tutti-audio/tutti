@@ -122,6 +122,7 @@ fn load_probe(env: &mut ScopedEnv, render_mode: u32) -> (PluginClient, PluginHan
     );
     let client = PluginClient::new(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::clap_probe(),

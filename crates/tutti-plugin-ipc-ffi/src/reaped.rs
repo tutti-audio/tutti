@@ -95,6 +95,17 @@ impl Reaped {
         self.child.wait()
     }
 
+    /// Gives the child up: it is killed with its group, and neither waited for
+    /// nor reaped, so this never blocks. It stays a zombie until this process
+    /// ends. For a child whose reaping could not be handed to anything that
+    /// may wait for it; [`Drop`] would wait.
+    pub fn leave(mut self) {
+        let _ = self.kill_all();
+        // Dropping would wait; a `Child` holds no resource that a forget leaks
+        // beyond the zombie.
+        let _left = std::mem::ManuallyDrop::new(self);
+    }
+
     /// Ends the group while its leader's id is still the leader's: before the
     /// reaping, or at it. A `false` `group` has nothing to end.
     fn end_group(&mut self) {
@@ -141,5 +152,23 @@ mod tests {
         }));
         assert!(unwound.is_err());
         assert!(!exists(pid), "child {pid} survived its guard");
+    }
+
+    /// **A child that is left is killed and not reaped**: the call returns
+    /// without waiting, and the ended child is still a zombie (a zombie answers
+    /// `kill -0`; a reaped child does not).
+    #[test]
+    fn a_left_child_is_killed_and_not_reaped() {
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id();
+        let reaped = Reaped::new(child);
+        let wait = reaped.exit_wait();
+        reaped.leave();
+        // The first wait only says it may have ended; the second returns when
+        // the OS signals the kill's end.
+        for _ in 0..2 {
+            assert!(wait.wait(std::time::Duration::from_secs(600), |_| ()));
+        }
+        assert!(exists(pid), "a left child is not reaped");
     }
 }

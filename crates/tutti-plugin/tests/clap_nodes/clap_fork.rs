@@ -1426,6 +1426,7 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
             restore: None,
         },
         None,
+        &tutti_platform::Executor::new(),
     )
     .expect("a fresh probe launches");
     let ipc = launched.ipc;

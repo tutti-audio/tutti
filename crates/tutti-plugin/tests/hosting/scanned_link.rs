@@ -56,6 +56,7 @@ fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let plugin = Plugin::open(
         None,
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &loadable,
         tutti_units::SampleRate::SR_48K,

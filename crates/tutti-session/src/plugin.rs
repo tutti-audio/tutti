@@ -191,6 +191,9 @@ pub(crate) struct PluginLoad {
     state: Option<Arc<PeerState>>,
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
+    /// The session's executor, which a served plugin's exit watch runs on. The
+    /// load holds it until it has run.
+    executor: tutti_platform::Executor,
 }
 
 impl std::fmt::Debug for PluginLoad {
@@ -250,6 +253,7 @@ impl PluginLoad {
         // it is not silent.
         let (plugin, restore) = match HostPlugin::open_with_state(
             main,
+            &self.executor,
             &self.work,
             &self.config,
             &self.loadable,
@@ -2200,6 +2204,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             config: origin.config,
             state: hosted.snapshot.clone().map(Arc::new),
             work: self.plugins.work.clone(),
+            executor: self.jobs.executor().clone(),
         };
         let token = Arc::clone(&hosted.reload.token);
         let snapshot_age = hosted

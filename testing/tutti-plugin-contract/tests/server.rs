@@ -30,6 +30,7 @@ fn through_server<F: Format>(path: PathBuf) {
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let client = PluginClient::new(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(path)),
         tutti_plugin_types::SampleRate::SR_48K,
@@ -141,6 +142,7 @@ fn served<F: Format>(
             no_editor,
             tutti_fixtures::detached_work(),
         )),
+        &tutti_platform::Executor::new(),
     )
     .unwrap_or_else(|e| panic!("{}: the server loads the plugin: {e:?}", F::NAME));
     let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

@@ -25,6 +25,7 @@ fn a_vst2_path_is_refused_with_a_typed_error_before_a_server_starts() {
             IpcConfig::at(
                 tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
             ),
+            &tutti_platform::Executor::new(),
             &tutti_fixtures::pumped_work(),
             &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
                 path.clone(),

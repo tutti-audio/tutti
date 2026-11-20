@@ -46,6 +46,7 @@ fn the_served_control_and_any_thread_answer_alike() {
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),
         )),
+        &tutti_platform::Executor::new(),
     )
     .expect("the probe launches in a real plugin-server");
     let main = main_thread();
@@ -126,6 +127,7 @@ fn a_live_served_load_reaches_the_plugin_in_the_context_it_names() {
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),
         )),
+        &tutti_platform::Executor::new(),
     )
     .expect("the probe launches in a real plugin-server");
     let main = main_thread();
@@ -169,6 +171,7 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
             restore: None,
         },
         None,
+        &tutti_platform::Executor::new(),
     )
     .expect("the probe launches in a real plugin-server with no editor loader");
     let main = main_thread();
@@ -213,6 +216,7 @@ fn a_served_bypass_write_is_lost_when_the_link_is_dead() {
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),
         )),
+        &tutti_platform::Executor::new(),
     )
     .expect("the probe launches in a real plugin-server");
     let any = ipc.controller();
@@ -256,6 +260,7 @@ fn a_normal_teardown_leaves_the_forks_watch_alive() {
             restore: None,
         },
         None,
+        &tutti_platform::Executor::new(),
     )
     .expect("the probe launches in a real plugin-server");
     let wait = ipc.watch(true);

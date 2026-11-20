@@ -249,6 +249,7 @@ fn served_id(plugin: &PluginRef) -> PluginId {
             no_editor,
             tutti_fixtures::detached_work(),
         )),
+        &tutti_platform::Executor::new(),
     )
     .unwrap_or_else(|e| panic!("{plugin:?}: the server loads it: {e:?}"));
     ipc.origin()

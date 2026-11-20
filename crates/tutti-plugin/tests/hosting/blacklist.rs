@@ -40,6 +40,7 @@ fn an_uncatalogued_plugin_does_not_consult_a_blacklist() {
 
     let err = Plugin::open(
         None,
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(&path)),
         SampleRate::SR_48K,
@@ -68,6 +69,7 @@ fn a_plugin_blacklisted_after_its_resolve_is_refused_at_the_load() {
 
     let err = Plugin::open(
         None,
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &loadable,
         SampleRate::SR_48K,

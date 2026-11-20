@@ -95,6 +95,7 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
+use tutti_platform::Executor;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_host::{
     InProcessClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
@@ -232,7 +233,7 @@ impl PluginClient<Unbound> {
     ///
     /// Blocks while the subprocess launches and completes its handshake. The
     /// `work` is the collector of the plugin's owner, which the editor instance
-    /// hands its close to. The
+    /// hands its close to; `executor` runs the server's exit watch. The
     /// subprocess exits when the graph has dropped the node and every
     /// [`PluginHandle`] built from this
     /// client has been dropped.
@@ -246,11 +247,12 @@ impl PluginClient<Unbound> {
     /// format's own load failure), or the IPC bridge cannot be set up.
     pub fn new(
         config: IpcConfig,
+        executor: &Executor,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
     ) -> IpcResult<Self> {
-        Self::open(config, work, plugin, sample_rate, None).map(|(client, _)| client)
+        Self::open(config, executor, work, plugin, sample_rate, None).map(|(client, _)| client)
     }
 
     /// [`new`](Self::new), restoring `state` into the plugin **before it is
@@ -265,6 +267,7 @@ impl PluginClient<Unbound> {
     /// As [`new`](Self::new).
     pub fn open(
         config: IpcConfig,
+        executor: &Executor,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
@@ -298,6 +301,7 @@ impl PluginClient<Unbound> {
                 crate::format::gui::load_gui_instance,
                 work.clone(),
             )),
+            executor,
         )?;
         Self::over(ipc).map(|client| (client, restored))
     }

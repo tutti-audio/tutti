@@ -291,6 +291,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
         RATE,

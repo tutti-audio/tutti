@@ -51,6 +51,7 @@ use tutti_rt::Exclusive;
 use tutti_rt::LockExt;
 
 use tutti_buffers::FloatWidth;
+use tutti_platform::Executor;
 use tutti_plugin_types::{
     ChunkCounters, Controller, IpcError, IpcResult, LoadStage, Loaded, LoadedPlugin,
     MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
@@ -80,6 +81,8 @@ pub struct LaunchSpec {
     /// Loads the editor-only instance, as the first launch's did; `None`
     /// again for an editor in the server.
     pub load_editor: Option<EditorLoader>,
+    /// Runs the new server's exit watch, as the first launch's did.
+    pub executor: Executor,
 }
 
 impl LaunchSpec {
@@ -110,6 +113,7 @@ impl LaunchSpec {
                 }),
             },
             self.load_editor.clone(),
+            &self.executor,
         )
     }
 }
@@ -556,6 +560,9 @@ impl Ipc {
     /// second instance in this process (CLAP, VST3, AU), `None` opens it on the
     /// served instance in the server, parented to the host's window.
     ///
+    /// `executor` runs the server's exit watch; a clone of it stays with the
+    /// plugin's origin, so a reopen watches its server on the same one.
+    ///
     /// # Errors
     ///
     /// The server cannot be found or spawned, the handshake fails or times
@@ -564,8 +571,9 @@ impl Ipc {
         config: IpcConfig,
         request: &LoadRequest<'_>,
         load_editor: Option<EditorLoader>,
+        executor: &Executor,
     ) -> IpcResult<Launched> {
-        let server = launch(&config, request)?;
+        let server = launch(&config, request, executor)?;
         let LoadRequest { format, rate, .. } = *request;
         // The plugin the server opened, so a reopen and the editor instance
         // load that one, though the request chose none.
@@ -607,6 +615,7 @@ impl Ipc {
                 origin: origin.clone(),
                 format,
                 load_editor,
+                executor: executor.clone(),
             }),
         });
         Ok(Launched { ipc, restored })

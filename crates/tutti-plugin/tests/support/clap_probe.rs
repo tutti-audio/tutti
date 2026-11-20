@@ -469,6 +469,7 @@ pub fn load_probe_with(config: IpcConfig, sample_rate: f64) -> LoadedProbe {
 
     let client = PluginClient::new(
         config,
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::clap_probe(),

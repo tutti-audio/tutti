@@ -63,6 +63,7 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
                 tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
             )
         },
+        &tutti_platform::Executor::new(),
         &tutti_fixtures::detached_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::clap_probe(),
