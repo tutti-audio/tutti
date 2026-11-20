@@ -14,7 +14,7 @@ macro_rules! make_plugin {
 
             use crate::main;
             use crate::api::AEffect;
-            use crate::host::{Host, OpCode};
+            use crate::host::{AudioMasterOpCode, Host};
             use crate::plugin::{HostCallback, Info, Plugin};
 
             $(#[$attr]) *
@@ -58,23 +58,23 @@ macro_rules! make_plugin {
                     _ptr: *mut c_void,
                     opt: f32,
                 ) -> isize {
-                    match OpCode::try_from(opcode) {
-                        Ok(OpCode::BeginEdit) => {
+                    match AudioMasterOpCode::try_from(opcode) {
+                        Ok(AudioMasterOpCode::BeginEdit) => {
                             assert_eq!(index, 123);
                             0
                         },
-                        Ok(OpCode::Automate) => {
+                        Ok(AudioMasterOpCode::Automate) => {
                             assert_eq!(index, 123);
                             assert_eq!(opt, 12.3);
                             0
                         },
-                        Ok(OpCode::EndEdit) => {
+                        Ok(AudioMasterOpCode::EndEdit) => {
                             assert_eq!(index, 123);
                             0
                         },
-                        Ok(OpCode::Version) => 2400,
-                        Ok(OpCode::CurrentId) => 9876,
-                        Ok(OpCode::Idle) => 0,
+                        Ok(AudioMasterOpCode::Version) => 2400,
+                        Ok(AudioMasterOpCode::CurrentId) => 9876,
+                        Ok(AudioMasterOpCode::Idle) => 0,
                         _ => 0
                     }
                 }
@@ -119,7 +119,7 @@ fn host_callbacks() {
     unsafe {
         dispatcher(
             aeffect,
-            plugin::OpCode::Initialize.into(),
+            plugin::EffectOpCode::Initialize.into(),
             0,
             0,
             ptr::null_mut(),

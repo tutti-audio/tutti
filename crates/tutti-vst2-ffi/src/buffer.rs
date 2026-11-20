@@ -258,7 +258,7 @@ impl<'a, T> Outputs<'a, T> {
     /// The slice borrows `self`, so two live slices of one channel cannot exist:
     ///
     /// ```compile_fail,E0499
-    /// # use tutti_vst2_ffi::buffer::AudioBuffer;
+    /// # use tutti_vst2_ffi::AudioBuffer;
     /// let mut samples = [0.0f32; 4];
     /// let inputs: [*const f32; 0] = [];
     /// let mut outputs = [samples.as_mut_ptr()];

@@ -44,3 +44,5 @@ macro_rules! primitive_enum {
         }
     };
 }
+
+pub(crate) use primitive_enum;
