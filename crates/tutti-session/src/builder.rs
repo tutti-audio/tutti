@@ -115,7 +115,7 @@ pub(crate) struct Options {
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
     #[cfg(feature = "midi-hardware")]
-    midi_hardware: Option<tutti_midi_hardware::MidiHardwareOptions>,
+    midi_hardware: Option<tutti_midi_hardware::MidiHardwareConfig>,
     /// The backend the OS MIDI layer runs over, if not the platform's.
     #[cfg(feature = "midi-hardware")]
     midi_backend: Option<MidiBackend>,
@@ -792,13 +792,13 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
     /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
     /// entries, each input feeding the graph through an input node and an event
-    /// inlet of its own, with `options` (where input times come from). Who the
+    /// inlet of its own, with `config` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
     /// [`MidiPolicy`](crate::MidiPolicy). Default off.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
-    pub fn midi_hardware(mut self, options: tutti_midi_hardware::MidiHardwareOptions) -> Self {
-        self.opts.midi_hardware = Some(options);
+    pub fn midi_hardware(mut self, config: tutti_midi_hardware::MidiHardwareConfig) -> Self {
+        self.opts.midi_hardware = Some(config);
         self
     }
 
@@ -811,9 +811,9 @@ impl<C: Clock> SessionBuilder<C> {
     pub fn midi_hardware_over(
         mut self,
         backend: Box<dyn tutti_midi_hardware::MidiEndpoints>,
-        options: tutti_midi_hardware::MidiHardwareOptions,
+        config: tutti_midi_hardware::MidiHardwareConfig,
     ) -> Self {
-        self.opts.midi_hardware = Some(options);
+        self.opts.midi_hardware = Some(config);
         self.opts.midi_backend = Some(MidiBackend(backend));
         self
     }

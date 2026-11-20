@@ -164,3 +164,62 @@ fn duration_is_frames_over_rate() {
     let w = Wave::<f32>::zero(1, SampleRate::of(4.0), Seconds::new(1.5));
     assert_eq!(w.duration(), Seconds::new(1.5));
 }
+
+/// Widening an `f32` wave is exact: every sample is `x as f64`, with the same
+/// rate, topology and placement.
+#[test]
+fn widening_an_f32_wave_is_every_sample_as_f64() {
+    let mut w32 = Wave::with_topology(crate::Bed::Quad.topology(), SampleRate::SR_44K1);
+    w32.append(
+        Interleaved::new(
+            &[
+                0.1f32,
+                -0.2,
+                0.3,
+                f32::MIN_POSITIVE,
+                1.0e-3,
+                2.0,
+                -3.5,
+                1.0 / 3.0,
+            ],
+            ChannelLayout::from(4u16),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let w64 = Wave::<f64>::from(&w32);
+    assert_eq!(w64.sample_rate(), w32.sample_rate());
+    assert_eq!(w64.topology(), w32.topology());
+    assert_eq!(w64.placement(), w32.placement());
+    assert_eq!(w64.len(), w32.len());
+    for c in 0..4 {
+        for i in 0..2 {
+            assert_eq!(w64.at(c, i), f64::from(w32.at(c, i)));
+        }
+    }
+}
+
+/// Mapping a wave applies `f` to every sample and keeps the rate, topology,
+/// placement and length; a cast narrows exactly as the cast does.
+#[test]
+fn mapping_an_f64_wave_with_a_cast_is_every_sample_cast() {
+    let mut w64 = Wave::<f64>::with_topology(crate::Bed::Quad.topology(), SampleRate::SR_48K);
+    w64.append(
+        Interleaved::new(
+            &[0.1f64, -0.2, 1.0 / 3.0, 1.0e-30, 5.5, 7.25, -1.0e10, 0.0],
+            ChannelLayout::from(4u16),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let w32 = w64.map(|x| x as f32);
+    assert_eq!(w32.sample_rate(), w64.sample_rate());
+    assert_eq!(w32.topology(), w64.topology());
+    assert_eq!(w32.placement(), w64.placement());
+    assert_eq!(w32.len(), w64.len());
+    for c in 0..4 {
+        for i in 0..2 {
+            assert_eq!(w32.at(c, i), w64.at(c, i) as f32);
+        }
+    }
+}

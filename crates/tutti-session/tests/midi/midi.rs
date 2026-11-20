@@ -602,7 +602,7 @@ fn hot_plug_session() -> (Session, tutti_midi_hardware::test_support::FakeCounte
     let (backend, fake) =
         tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
     let s = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -701,7 +701,7 @@ fn keyboards() -> (
         usize::MAX,
     );
     let mut s = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
