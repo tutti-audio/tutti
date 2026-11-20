@@ -271,8 +271,9 @@ pub mod nodes {
         SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
-        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, FirError,
-        LinearPhaseDesign, LinkwitzRiley, Lti, MAX_GRID, MatchedBell, Sos, SosError, System, Tilt,
+        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, Cookbook, CutResponse,
+        FirError, LinearPhaseDesign, LinkwitzRiley, Lti, MAX_GRID, MatchedBell, Sos, SosError,
+        System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -305,34 +306,34 @@ pub mod nodes {
         EqBandConfig, EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode, FeedbackRouting,
         FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FreeverbConfig,
         FreeverbControls, FreeverbNode, FreezeMode, GateConfig, GateControls, GateNode,
-        HrtfBinauralConfig, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource,
-        LadderControls, LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig,
-        LevellerControls, LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig,
-        LimiterControls, LimiterNode, MetronomeMode, ModDelayConfig, ModDelayControls,
-        ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandBands,
-        MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoteEnvelopeConfig,
-        NoteEnvelopeNode, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
-        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder,
-        SweepError, SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls,
-        TiltFilterNode, TransientControls, TransientShaperConfig, TransientShaperNode, VbapError,
-        VbapPannerConfig, VbapPannerNode,
+        GraphicBands, GraphicEqConfig, GraphicEqControls, GraphicEqNode, HrtfBinauralConfig,
+        HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
+        LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig, LevellerControls,
+        LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
+        MetronomeMode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder,
+        ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+        MultibandControls, NoteEnvelopeConfig, NoteEnvelopeNode, OscillatorConfig, OscillatorNode,
+        OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode, PlateControls,
+        PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterConfig,
+        SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError,
+        TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
+        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
         ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
-        EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelConfig,
-        KernelNode, LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel, PhaserKernel,
-        ReconcileError, SvfKernel, TiltFilterKernel,
+        EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, GraphicEqKernel, Kernel,
+        KernelConfig, KernelNode, LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel,
+        PhaserKernel, ReconcileError, SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
-        FreeverbSet, GateSet, HasControl, LadderSet, LevellerSet, LimiterSet, ModDelaySet,
-        PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet, TransientShaperKernel,
-        TransientShaperSet,
+        FreeverbSet, GateSet, GraphicEqSet, HasControl, LadderSet, LevellerSet, LimiterSet,
+        ModDelaySet, PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet,
+        TransientShaperKernel, TransientShaperSet,
     };
 }
 

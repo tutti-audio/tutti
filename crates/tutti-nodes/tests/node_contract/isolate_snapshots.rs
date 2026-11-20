@@ -35,8 +35,8 @@ use tutti_nodes::{
     TransientShaperNode,
 };
 use tutti_nodes::{
-    PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
-    TiltFilterNode,
+    GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
+    StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode,
 };
 use tutti_units::{
     Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
@@ -271,6 +271,25 @@ fn tilt_filter() {
     })
     .control("gain", |d| {
         assert!(d.param_set().set(UnitParam::GainDb, -9.0))
+    })
+    .check();
+}
+
+#[test]
+fn graphic_eq() {
+    IsolateRow::new("GraphicEqNode (stereo, octave)", || {
+        let node = GraphicEqNode::from(GraphicEqConfig::new(
+            BusTopology::STEREO,
+            GraphicBands::Octave,
+        ));
+        assert!(
+            node.param_set()
+                .set(UnitAddr::new(UnitParam::GainDb, 4), 6.0)
+        );
+        node
+    })
+    .control("band gain", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 4), -9.0))
     })
     .check();
 }
