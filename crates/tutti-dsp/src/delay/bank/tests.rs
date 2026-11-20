@@ -1,9 +1,10 @@
 use tutti_buffers::BusTopology;
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_units::{Feedback, SampleRate, Seconds};
+use tutti_music::{NoteDuration, NoteModifier, NoteValue};
+use tutti_units::{Bpm, Feedback, SampleRate, Seconds};
 
 use super::*;
-use crate::{ChannelTimes, FeedbackRouting, GAIN_RAMP, MaxDelay};
+use crate::{ChannelTimes, FeedbackRouting, GAIN_RAMP, MaxDelay, NoteTimes};
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -612,4 +613,103 @@ fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
     );
     assert_close_f64(&y[0], &delayed(&v0), 2.0f64.powi(-45));
     assert_close_f64(&y[1], &delayed(&v1), 2.0f64.powi(-45));
+}
+
+/// A mono synced delay of `note` that holds up to four seconds.
+fn synced(note: NoteDuration) -> DelayLayout {
+    DelayLayout::builder(
+        BusTopology::MONO,
+        MaxDelay::of(Seconds::new(4.0)),
+        InterpolationMode::Linear,
+    )
+    .synced(NoteTimes::all(note))
+    .build()
+    .unwrap()
+}
+
+/// A rig of a synced `layout` at rest on `tempo`.
+fn synced_at(layout: &DelayLayout, tempo: Bpm) -> Rig {
+    let mut rig = Rig::at(layout, &DelayControls::DEFAULT, BINARY);
+    rig.bank.retarget_tempo(&mut rig.ramps, tempo);
+    rig.ramps.jump_to_target();
+    rig
+}
+
+/// The time of a synced delay is `beats * 60 / bpm * rate` frames: a quarter is one beat, a
+/// dotted note one and a half times its value and a triplet two thirds, at two tempos.
+#[test]
+fn a_synced_time_is_the_notes_beats_over_the_tempo_in_frames() {
+    // (the note, its beats written out, not derived)
+    let notes = [
+        (NoteDuration::QUARTER, 1.0),
+        (
+            NoteDuration::new(NoteValue::QUARTER, NoteModifier::Dotted),
+            1.5,
+        ),
+        (
+            NoteDuration::new(NoteValue::QUARTER, NoteModifier::Triplet),
+            2.0 / 3.0,
+        ),
+        (
+            NoteDuration::new(NoteValue::EIGHTH, NoteModifier::Dotted),
+            0.75,
+        ),
+        (NoteDuration::new(NoteValue::HALF, NoteModifier::Plain), 2.0),
+    ];
+    for bpm in [120.0, 90.0] {
+        for (note, beats) in notes {
+            let rig = synced_at(&synced(note), Bpm::of(bpm));
+            let want = beats * 60.0 / bpm * BINARY.get();
+            let got = rig.ramps.times[0].target().span().get();
+            assert!(
+                (got - want).abs() < 1e-6,
+                "{note:?} at {bpm} bpm: {got} frames, wanted {want}"
+            );
+        }
+    }
+}
+
+/// A tempo that moves moves the time at `DELAY_SLEW` frames of delay per frame, not at
+/// once. A quarter note at 120 bpm is 512 frames and at 60 bpm 1024: an echo of a ramp
+/// input at frame `i` after the change reads `i + 1` steps of 1/8 frame along, so the output
+/// is the input a delay of `512 + (i + 1) / 8` frames earlier. A jump would read 1024 at once.
+#[test]
+fn a_tempo_change_ramps_the_time_at_the_slew() {
+    let mut rig = synced_at(&synced(NoteDuration::QUARTER), Bpm::of(120.0));
+    let ramp =
+        |from: usize, to: usize| -> Vec<f32> { (from..to).map(|g| g as f32 + 1.0).collect() };
+    let settled = rig.run(&[ramp(0, 1024)]).remove(0);
+    for (g, &y) in settled.iter().enumerate().skip(512) {
+        assert!((y - (g as f32 + 1.0 - 512.0)).abs() < 1e-3, "frame {g}");
+    }
+    rig.bank.retarget_tempo(&mut rig.ramps, Bpm::of(60.0));
+    assert_eq!(rig.ramps.times[0].target().span().get(), 1024.0);
+    let moved = rig.run(&[ramp(1024, 2048)]).remove(0);
+    for (i, &y) in moved.iter().enumerate() {
+        let delay = 512.0 + (i as f32 + 1.0) / 8.0;
+        let want = (1024 + i) as f32 + 1.0 - delay;
+        assert!(
+            (y - want).abs() < 1e-3,
+            "frame {i} after the change: {y}, wanted {want}"
+        );
+    }
+}
+
+/// A synced delay is not told its time by the control: a control at any time leaves the
+/// note's, and a delay timed in seconds ignores the tempo.
+#[test]
+fn only_a_synced_delay_follows_the_tempo_and_only_a_free_one_the_control() {
+    let mut synced_rig = synced_at(&synced(NoteDuration::QUARTER), Bpm::of(120.0));
+    synced_rig
+        .bank
+        .retarget(&mut synced_rig.ramps, &controls(3.0, 0.0, 0.0));
+    assert_eq!(synced_rig.ramps.times[0].target().span().get(), 512.0);
+
+    let mut free = Rig::at(
+        &mono(InterpolationMode::Linear),
+        &controls(0.25, 0.0, 0.0),
+        BINARY,
+    );
+    free.bank.retarget_tempo(&mut free.ramps, Bpm::of(30.0));
+    assert_eq!(free.ramps.times[0].target().span().get(), 256.0);
 }
