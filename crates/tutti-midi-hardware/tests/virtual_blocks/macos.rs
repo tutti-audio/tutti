@@ -182,15 +182,15 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
 }
 
 /// **What is written to the destination the OS lists beside a source with
-/// Function Blocks is counted as refused**: a session output sends 100 notes to it
-/// and `losses` reaches the level it had before plus 100.
+/// Function Blocks is counted as refused**: a session output sends notes to it one
+/// at a time, and after each one `losses` rises above the level read before it.
 ///
-/// The count is of every message written to the destination, and CoreMIDI sends
-/// the endpoint a few messages of its own (MIDI-CI and stream messages, five were
-/// there at creation), so no analytic form exists: the callback is generic and a
-/// message of CoreMIDI's cannot be told from a note by the counter. The level is
-/// reached only if all but a few of the 100 are counted, which a counter that drops
-/// or ignores messages does not do.
+/// One at a time because the path from the session's output to CoreMIDI is not
+/// lossless under load (a loaded CI Mac delivered 83 of 100 notes sent in a burst),
+/// so a burst cannot say how many arrived. CoreMIDI also sends the endpoint a few
+/// messages of its own (MIDI-CI and stream messages, mostly at creation), which the
+/// count includes; a counter that counts nothing fails the first step and every one
+/// after it, which no message of CoreMIDI's can stand in for.
 pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
     let name = &unique_name("tutti-vsrc-losses");
     let opened = VirtualSource::open(&two_blocks(name), main_thread());
@@ -207,45 +207,20 @@ pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
     tutti_fixtures::wait_until("the destination is listed", PATIENCE, || {
         session.outputs().iter().any(|d| d.name.contains(name))
     });
-    let matching: Vec<_> = session
+    let device = session
         .outputs()
         .into_iter()
-        .filter(|d| d.name.contains(name))
-        .collect();
-    eprintln!(
-        "outputs named like the endpoint: {:?}",
-        matching.iter().map(|d| d.name.clone()).collect::<Vec<_>>()
-    );
-    let device = matching
-        .into_iter()
-        .next()
+        .find(|d| d.name.contains(name))
         .expect("the destination is listed");
-    eprintln!("connecting {device:?}");
     let mut out = session.connect_output(&device.id).expect("connects");
     let note: Ump = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::of(1), 60, 0x8000);
-    let before = source.losses().refused;
-    // On stderr for a failure: the release and the level the count started from.
-    eprintln!(
-        "macOS {:?}, {before} refused before the notes",
-        tutti_fixtures::macos_major()
-    );
-    struct Report<'a>(&'a VirtualSource);
-    impl Drop for Report<'_> {
-        fn drop(&mut self) {
-            eprintln!("level at the end: {:?}", self.0.losses());
-        }
+    for _ in 0..20 {
+        let before = source.losses().refused;
+        assert_eq!(out.queue(&[(Offset::ZERO, note)]).packets(), 1);
+        tutti_fixtures::wait_until("the note is counted as refused", PATIENCE, || {
+            source.losses().refused > before
+        });
     }
-    let _report = Report(&source);
-    for n in 0..100 {
-        let taken = out.queue(&[(Offset::ZERO, note)]);
-        if n == 0 || taken.packets() != 1 {
-            eprintln!("note {n}: {taken:?}");
-        }
-        assert_eq!(taken.packets(), 1);
-    }
-    tutti_fixtures::wait_until("the notes are counted as refused", PATIENCE, || {
-        source.losses().refused >= before + 100
-    });
 }
 
 /// A sender whose source was dropped is refused by name, and one sent while it
