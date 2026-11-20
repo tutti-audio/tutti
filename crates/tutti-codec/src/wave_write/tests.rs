@@ -111,12 +111,24 @@ fn a_path_replaces_by_default_and_create_new_refuses() {
         Destination::from(&path).create_new(),
         Format::Wav(Pcm::Float32),
     );
-    let Err(Error::Io(e)) = refused else {
+    let Err(Error::Commit(e)) = refused else {
         panic!("an existing file is refused: {refused:?}");
     };
-    assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+    let kept = e.kept().to_path_buf();
+    let kept_bytes = std::fs::read(&kept).unwrap();
+    assert_eq!(e.into_source().kind(), std::io::ErrorKind::AlreadyExists);
     assert_eq!(std::fs::read(&path).unwrap(), b"old");
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    assert_eq!(&kept_bytes[..4], b"RIFF");
+    std::fs::remove_file(&kept).unwrap();
+    let whole = dir.path().join("whole.wav");
+    write_wave(&wave, &whole, Format::Wav(Pcm::Float32)).unwrap();
+    assert_eq!(
+        kept_bytes,
+        std::fs::read(&whole).unwrap(),
+        "the kept file is whole"
+    );
+    std::fs::remove_file(&whole).unwrap();
 
     write_wave(&wave, &path, Format::Wav(Pcm::Float32)).unwrap();
     assert_eq!(&std::fs::read(&path).unwrap()[..4], b"RIFF");

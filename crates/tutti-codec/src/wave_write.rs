@@ -18,8 +18,10 @@ const WRITE_CHUNK: usize = 8192;
 ///   [`FileEncoder::create`] does, so a failure leaves what was at the path as
 ///   it was. An existing file is replaced unless the destination is
 ///   [`create_new`](Destination::create_new), which refuses it with an
-///   [`Error::Io`](crate::Error::Io) of kind
-///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists).
+///   [`Error::Commit`](crate::Error::Commit) whose source kind is
+///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists). A failed commit
+///   keeps the complete file at the error's `kept` path, the caller's to move
+///   or delete.
 /// - A writer (`&mut W` for any [`Write`]; a `Vec<u8>` is appended
 ///   to) is encoded into memory first and then handed over in one `write_all`,
 ///   so it needs no `Seek` and never holds a partial file from an encode error.

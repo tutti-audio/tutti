@@ -88,16 +88,29 @@ fn the_default_commit_replaces_an_existing_target() {
 }
 
 #[test]
-fn create_new_refuses_an_existing_target_and_cleans_up() {
+fn a_refused_commit_keeps_the_complete_file_and_leaves_the_target() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("a.bin");
     std::fs::write(&target, b"old").unwrap();
     let err = stage(Staged::new(&target).create_new(), b"new")
         .commit()
         .unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+    assert_eq!(
+        err.kept().parent(),
+        target.parent(),
+        "the file is kept beside the target"
+    );
+    assert_eq!(std::fs::read(err.kept()).unwrap(), b"new");
     assert_eq!(std::fs::read(&target).unwrap(), b"old");
-    assert_eq!(names(dir.path()), ["a.bin"]);
+    let kept = err.kept().to_path_buf();
+    assert!(err.to_string().contains(&kept.display().to_string()));
+    assert_eq!(err.into_source().kind(), ErrorKind::AlreadyExists);
+    assert_eq!(
+        std::fs::read(&kept).unwrap(),
+        b"new",
+        "the kept file outlives the error"
+    );
+    assert_eq!(names(dir.path()).len(), 2);
 }
 
 #[test]
@@ -106,7 +119,9 @@ fn create_new_refuses_a_target_that_appears_after_the_staging() {
     let target = dir.path().join("a.bin");
     let file = stage(Staged::new(&target).create_new(), b"new");
     std::fs::write(&target, b"raced").unwrap();
-    assert_eq!(file.commit().unwrap_err().kind(), ErrorKind::AlreadyExists);
+    let err = file.commit().unwrap_err();
+    assert_eq!(std::fs::read(err.kept()).unwrap(), b"new");
+    assert_eq!(err.into_source().kind(), ErrorKind::AlreadyExists);
     assert_eq!(std::fs::read(&target).unwrap(), b"raced");
 }
 

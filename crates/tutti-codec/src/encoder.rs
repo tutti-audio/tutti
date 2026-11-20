@@ -258,8 +258,8 @@ impl<W> Finalized<W> {
 /// The file is written to a temporary beside the path and put in place by
 /// [`finish`](Self::finish) (synced and closed first), so the path holds
 /// either what it held before or a complete new file, never a partial take. A
-/// take that fails, or an encoder dropped before `finish`, removes the
-/// temporary and leaves the path alone. The commit is the encoder's own, so a
+/// take that fails a `write`, or an encoder dropped before `finish`, removes the
+/// temporary and leaves the path alone; a commit that fails keeps the file. The commit is the encoder's own, so a
 /// file is never put in place while its sink is open, and never left
 /// uncommitted by a caller that kept the sink.
 ///
@@ -339,8 +339,8 @@ impl FileEncoder {
     ///
     /// # Errors
     ///
-    /// As [`finalize`](Self::finalize), and [`Error::Io`] when the move fails
-    /// (the file is then removed and the path left alone).
+    /// As [`finalize`](Self::finalize), and [`Error::Commit`] when the sync or
+    /// the move fails: the path is left alone and the complete file is kept.
     pub fn finish(self) -> Result<()> {
         self.finalize()?.commit()
     }
@@ -382,12 +382,13 @@ pub struct FinalizedFile {
 
 impl FinalizedFile {
     /// Syncs the file and moves it onto its path (replacing what is there,
-    /// unless the destination was `create_new`). A move that fails removes
-    /// the file and leaves what was at the path alone.
+    /// unless the destination was `create_new`).
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] when the sync or the move fails.
+    /// [`Error::Commit`] when the sync or the move fails (or the path exists
+    /// under `create_new`): what was at the path is left alone and the complete
+    /// file is kept at the error's `kept` path, the caller's to move or delete.
     pub fn commit(self) -> Result<()> {
         Ok(self.file.commit()?)
     }

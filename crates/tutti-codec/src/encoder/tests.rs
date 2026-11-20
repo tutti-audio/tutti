@@ -431,10 +431,11 @@ fn a_finalized_file_waits_for_its_commit() {
     }
 }
 
-/// A rename that fails after `finalize` is an `Io` error, the temporary is
-/// removed and what is at the path (a directory here) is untouched.
+/// A rename that fails after `finalize` is a `Commit` error, the complete file
+/// is kept where the error says and what is at the path (a directory here) is
+/// untouched.
 #[test]
-fn a_commit_that_cannot_rename_removes_the_temporary() {
+fn a_commit_that_cannot_rename_keeps_the_file() {
     let dir = tempfile::tempdir().unwrap();
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
@@ -446,8 +447,19 @@ fn a_commit_that_cannot_rename_removes_the_temporary() {
         let finalized = encoder.finalize().unwrap();
         std::fs::create_dir(&path).unwrap();
         let err = finalized.commit().expect_err("a directory is in the way");
-        assert!(matches!(err, Error::Io(_)), "{ext}: {err}");
-        assert_eq!(listing(dir.path()), [format!("take.{ext}")], "{ext}");
+        let Error::Commit(e) = err else {
+            panic!("{ext}: {err}");
+        };
+        assert!(
+            std::fs::metadata(e.kept()).unwrap().len() > 100,
+            "{ext}: the kept file is complete"
+        );
+        assert_eq!(
+            listing(dir.path()).len(),
+            2,
+            "{ext}: the path and the kept file"
+        );
+        std::fs::remove_file(e.kept()).unwrap();
         std::fs::remove_dir(&path).unwrap();
     }
 }

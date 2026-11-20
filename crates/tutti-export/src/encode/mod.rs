@@ -76,12 +76,21 @@ pub(crate) struct Closed {
 }
 
 impl Closed {
-    /// Puts the file in place.
+    /// Puts the file in place. A render can be run again, so a file that could
+    /// not be put in place is removed, not kept: the failure is the error.
     pub(crate) fn commit(self) -> tutti_codec::Result<Landed> {
-        self.file.commit().map(|()| Landed {
-            clipped: self.clipped,
-            frames: self.frames,
-        })
+        match self.file.commit() {
+            Ok(()) => Ok(Landed {
+                clipped: self.clipped,
+                frames: self.frames,
+            }),
+            Err(tutti_codec::Error::Commit(e)) => {
+                // Best effort: the render's outcome is already the error.
+                let _ = std::fs::remove_file(e.kept());
+                Err(e.into_source().into())
+            }
+            Err(other) => Err(other),
+        }
     }
 }
 
