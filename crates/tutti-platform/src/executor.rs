@@ -161,10 +161,9 @@ impl WeakExecutor {
     }
 
     /// Whether an executor clone still lives: `false` from the moment the last clone
-    /// drops, which is when the executor starts to shut down (its threads are told to
-    /// stop and joined after it). One atomic load, so a long-lived future on a thread
-    /// that must not wait reads it between its slices of work instead of waiting to be
-    /// stopped; it takes no lock, allocates nothing and makes no clone.
+    /// drops, which is when shutdown begins and the dedicated threads are joined. A
+    /// dedicated future that never yields reads it each turn and returns. One atomic
+    /// load: no lock, allocation or clone.
     #[must_use]
     pub fn is_alive(&self) -> bool {
         self.handle.strong_count() > 0
