@@ -259,9 +259,13 @@ pub trait Control: EditorWindow {
         None
     }
 
-    /// Tells the plugin how the host is automating it.
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
+    /// Tells the plugin how the host is automating it. `true` when the plugin
+    /// was told (it carries the format's automation-state channel:
+    /// [`Features::AUTOMATION_STATE`](crate::Features)); `false` when it has
+    /// none, and nothing was sent.
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
         let _ = (main, mode);
+        false
     }
 
     /// Tells the plugin's host what the host says of the track the plugin sits
@@ -828,8 +832,8 @@ impl<W: Wraps> Control for W {
         self.plugin_mut().current_preset(main)
     }
 
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
-        self.plugin_mut().set_automation_state(main, mode);
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
+        self.plugin_mut().set_automation_state(main, mode)
     }
 
     fn rescan_parameters(&mut self, main: MainThreadMarker, scope: RescanScope) {

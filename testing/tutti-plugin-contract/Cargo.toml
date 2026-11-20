@@ -47,6 +47,11 @@ required-features = ["server"]
 name = "probe"
 required-features = ["server"]
 
+# `tests/automation_state.rs` loads plugins through the in-process handle.
+[[test]]
+name = "automation_state"
+required-features = ["server"]
+
 [dev-dependencies]
 # `tests/server.rs` and `tests/probe.rs` (feature `server`) name it; the library
 # does not, and an optional dependency cannot be a dev-dependency.

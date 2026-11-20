@@ -129,7 +129,7 @@ impl Editor for ClapEditor {
 
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
         // The editor instance is the one whose UI shows the indication.
-        Control::set_automation_state(&mut self.inner, main, mode);
+        let _ = Control::set_automation_state(&mut self.inner, main, mode);
     }
 
     fn take_requests(&mut self, _main: MainThreadMarker, out: &mut Vec<Request>) {

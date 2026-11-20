@@ -99,6 +99,8 @@ impl Vst2Loaded {
         features.insert(Features::TRANSPORT);
         // The host answers the process level, so every plugin takes the mode.
         features.insert(Features::RENDER_MODE);
+        // The host answers `audioMasterGetAutomationState` for every plugin.
+        features.insert(Features::AUTOMATION_STATE);
         features
     }
 }
@@ -314,8 +316,9 @@ impl Control for Vst2Loaded {
     /// now on, and the time info of each block carries it in its automation flags. VST2
     /// has no push to the plugin, so there is nothing to refuse. The store is atomic: the
     /// plugin may ask from its audio thread while the control thread sets it.
-    fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) {
+    fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) -> bool {
         self.host.set_automation(mode);
+        true
     }
 
     /// The reports of `audioMasterBeginEdit`, `audioMasterAutomate` and

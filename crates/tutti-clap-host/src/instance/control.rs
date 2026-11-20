@@ -187,6 +187,10 @@ impl ClapLoaded {
         // preset-discovery extension, which is factory-level and unbound here,
         // so only the load half is answered.
         features.set(Features::PRESET_LOAD, self.supports_preset_load());
+        features.set(
+            Features::AUTOMATION_STATE,
+            self.plugin.supports_param_indication(),
+        );
         // The format the plugin runs at: 64-bit only while activated as such.
         features.set(Features::F64_AUDIO, self.audio.f64_active);
         features.set(
@@ -318,14 +322,18 @@ impl Control for ClapLoaded {
 
     /// `param-indication.set_automation` for every automatable parameter: the
     /// mode is the plugin's whole, and CLAP names automation per parameter.
-    /// A plugin without `clap.param-indication` is not told.
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
+    /// A plugin without `clap.param-indication` is not told (`false`).
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
+        if !self.plugin.supports_param_indication() {
+            return false;
+        }
         let state = ParamAutomationState::from(mode);
         for info in self.parameter_list(main) {
             if info.flag(ParamFlags::AUTOMATABLE) == Some(true) {
                 self.set_param_automation(main, info.id().get(), state, None);
             }
         }
+        true
     }
 
     /// What the plugin's `track-info.get` answers from now on; the plugin is
