@@ -58,6 +58,24 @@ impl LinearPhaseEqConfig {
 /// The output is the filtered signal alone, scaled by an output [`gain`](Self::gain) that starts at 1. A node
 /// of a [`LinearPhaseEqConfig`] (`LinearPhaseEqNode::from`).
 ///
+/// # Example
+///
+/// ```
+/// use tutti_buffers::ChannelLayout;
+/// use tutti_dsp::{LinearPhaseDesign, MatchedBell, Tilt};
+/// use tutti_nodes::{LinearPhaseEqConfig, LinearPhaseEqNode};
+/// use tutti_units::{Db, Hz, Q, SampleRate};
+///
+/// let rate = SampleRate::SR_48K;
+/// let bands = [
+///     MatchedBell::new(Q::new(1.0), Db::new(6.0)).design(Hz::new(1_000.0), rate).unwrap(),
+///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
+/// ];
+/// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
+/// let node = LinearPhaseEqNode::<f32>::from(LinearPhaseEqConfig::new(ChannelLayout::STEREO, &fir));
+/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// ```
+///
 /// # Panics
 ///
 /// `LinearPhaseEqNode::from` panics for a width of no channels or past a bus's width.

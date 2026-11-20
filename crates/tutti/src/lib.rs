@@ -241,6 +241,23 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 /// dynamics, reverbs, modulation effects, mixing, panners, convolution and
 /// automation lanes, each with its config, controls and enums. A node is
 /// inserted with `Session::graph().add(node)`.
+///
+/// A linear-phase equalizer from bands, reachable from here alone:
+///
+/// ```
+/// use tutti::nodes::{
+///     LinearPhaseDesign, LinearPhaseEqConfig, LinearPhaseEqNode, MatchedBell, Tilt,
+/// };
+/// use tutti::{ChannelLayout, Db, Hz, Q, SampleRate};
+///
+/// let rate = SampleRate::SR_48K;
+/// let bands = [
+///     MatchedBell::new(Q::new(1.0), Db::new(6.0)).design(Hz::new(1_000.0), rate).unwrap(),
+///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
+/// ];
+/// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
+/// let _node = LinearPhaseEqNode::<f32>::from(LinearPhaseEqConfig::new(ChannelLayout::STEREO, &fir));
+/// ```
 pub mod nodes {
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
@@ -248,6 +265,9 @@ pub mod nodes {
         LookaheadError, Matrix, MatrixConvolverError, MaxDecayError, Network,
         OutputMap as NetworkOutputMap, ResampleError, SimdLanes, SpeakerGeometryError, Stage, Tap,
         Taps, WaveshaperControls,
+    };
+    pub use tutti_dsp::{
+        Biquad, FirError, LinearPhaseDesign, Lti, MatchedBell, Sos, SosError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
