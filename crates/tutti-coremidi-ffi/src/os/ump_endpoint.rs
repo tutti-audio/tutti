@@ -227,8 +227,9 @@ impl UmpEndpoint {
         self.sender.clone()
     }
 
-    /// The numbers CoreMIDI gave the blocks, in the order of the `blocks` the
-    /// endpoint was created with: the first is the number of the first block given.
+    /// The numbers CoreMIDI gave the blocks, indexed by the number each was given:
+    /// `blocks()[n]` is the number other apps read for the block created as number
+    /// `n` (the given numbers run 0, 1, 2 without a gap).
     #[must_use]
     pub fn blocks(&self) -> &[FunctionBlockId] {
         &self.blocks

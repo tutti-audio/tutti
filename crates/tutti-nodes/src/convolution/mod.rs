@@ -17,6 +17,8 @@ mod node;
 
 #[cfg(test)]
 mod fir_convolver_tests;
+#[cfg(test)]
+mod test_nodes;
 
 pub use layout::IrLayout;
-pub use node::{ConvolverError, ConvolverNode, FirConvolverConfig, PortSide};
+pub use node::{ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig};

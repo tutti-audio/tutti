@@ -1,8 +1,6 @@
 use super::*;
 use crate::testing::aim;
-use tutti_buffers::ChannelLayout;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::Planes;
+use tutti_buffers::{ChannelLayout, MaxBlock, Planes};
 use tutti_dsp::HRTF_STEP;
 use tutti_graph::contract::{drive, prepared};
 use tutti_units::UnitParam;
@@ -70,7 +68,7 @@ fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
 
 fn make_node() -> HrtfBinauralNode<f32> {
     let bytes = synthetic_hrir_sphere(44_100, 64);
-    let node = HrtfBinauralNode::<f32>::new(&bytes, RATE).expect("synthetic sphere should parse");
+    let node = hrtf::<f32>(&bytes).expect("synthetic sphere should parse");
     prepared(node, RATE, BLOCK)
 }
 
@@ -171,7 +169,7 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
 
 #[test]
 fn rejects_garbage_bytes() {
-    let err = HrtfBinauralNode::<f32>::new(&[0u8; 16], SampleRate::SR_44K1);
+    let err = hrtf::<f32>(&[0u8; 16]);
     assert!(err.is_err(), "non-HRIR bytes must fail to construct");
 }
 
@@ -258,9 +256,9 @@ fn reported_latency_is_the_measured_impulse_delay() {
 /// declared latency, so an impulse leaves all three outputs on one frame.
 #[test]
 fn pdc_compensates_the_other_path_by_the_binaural_latency() {
+    use crate::testing::Through;
     use tutti_dsp::HRTF_LATENCY as LATENCY;
     use tutti_graph::GraphBuilder;
-    use tutti_nodes::testing::Through;
 
     let mut node = make_node();
     aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
@@ -406,11 +404,7 @@ fn clone_shares_the_position_atomics() {
 #[test]
 fn a_prepare_above_the_ceiling_retunes_the_ramp() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
-    let mut node = HrtfBinauralNode::<f32>::new(
-        &synthetic_hrir_sphere(48_000, 4),
-        SampleRate::of(1_536_000.0),
-    )
-    .expect("parses");
+    let mut node = hrtf::<f32>(&synthetic_hrir_sphere(48_000, 4)).expect("parses");
     node.prepare(&Prepare::new(
         SampleRate::of(1_024_000.0),
         MaxBlock::of(Samples::new(64)),
@@ -536,9 +530,31 @@ fn a_signal_drives_each_param_as_its_cell_would() {
 fn in_an_f64_graph_the_panner_is_linear_on_wide_signals() {
     let bytes = synthetic_hrir_sphere(44_100, 64);
     crate::test_support::assert_linear(
-        || HrtfBinauralNode::<f64>::new(&bytes, RATE).expect("synthetic sphere should parse"),
+        || hrtf::<f64>(&bytes).expect("synthetic sphere should parse"),
         RATE,
         2,
         1_024,
     );
+}
+
+/// A binaural node over the sphere in `bytes`, prepared at `rate`.
+fn hrtf<F: tutti_dsp::FftFloat>(
+    bytes: &[u8],
+) -> Result<crate::HrtfBinauralNode<F>, tutti_dsp::HrtfBinauralError> {
+    Ok(crate::HrtfBinauralNode::from(
+        crate::HrtfBinauralConfig::new(std::sync::Arc::new(tutti_dsp::HrirSphere::from_bytes(
+            bytes,
+        )?)),
+    ))
+}
+
+/// Before `prepare` the node has no renderer: a block of signal comes out as silence, never
+/// stale or panicking.
+#[test]
+fn an_unprepared_node_renders_silence() {
+    let bytes = synthetic_hrir_sphere(44_100, 64);
+    let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere should parse");
+    let ones = [1.0f32; BLOCK];
+    let out = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);
+    assert!(out.iter().flatten().all(|&s| s == 0.0));
 }

@@ -1,11 +1,11 @@
 //! [`HrtfBinauralNode`] — the binaural graph node, 2 in / 2 out.
 //!
-//! Construction needs a measured HRIR sphere, so [`HrtfBinauralNode::new`]
-//! takes the dataset bytes.
+//! Construction needs a measured HRIR sphere, so [`HrtfBinauralConfig::new`]
+//! takes the parsed dataset.
 
-use tutti_buffers::BusTopology;
-use tutti_buffers::{MonoMut, StereoPlanes};
-use tutti_dsp::{FftFloat, HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError};
+use std::sync::Arc;
+use tutti_buffers::{BusTopology, MonoMut, StereoPlanes};
+use tutti_dsp::{FftFloat, HRTF_LATENCY, HRTF_STEP, HrirSphere, HrtfBinaural};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::Latency;
@@ -25,7 +25,7 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
 /// A binaural panner for headphones: FFT convolution against a measured HRIR
 /// sphere, stereo in, stereo out.
 ///
-/// Build it with [`new`](Self::new) from the dataset bytes. The input pair is
+/// Build it from an [`HrtfBinauralConfig`] over the parsed dataset. The input pair is
 /// folded to mono, placed at the commanded bearing and height, and blended
 /// against the (equally delayed) dry mono by the blend ([`UnitParam::Wet`]:
 /// 1.0, the default, is full HRTF, 0.0 the dry mono).
@@ -43,11 +43,14 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
 /// Output lags input by 128 samples (one convolution step), on both the wet
 /// and the dry half. The node declares this as latency, so the graph's delay
 /// compensation lines the other paths up with it. Rendering a block
-/// allocates nothing, takes no lock and cannot panic on any sphere `new`
-/// accepted; preparing at a new rate resamples the dataset and allocates.
+/// allocates nothing, takes no lock and cannot panic on any sphere
+/// [`HrirSphere::from_bytes`] accepted; preparing at a new rate resamples the dataset and allocates.
 #[derive(Debug)]
 pub struct HrtfBinauralNode<F: FftFloat> {
-    panner: HrtfBinaural<F>,
+    /// The sphere the renderer is prepared from.
+    sphere: Arc<HrirSphere>,
+    /// The renderer, built at the graph's rate by `prepare`; until then the node is silent.
+    panner: Option<HrtfBinaural<F>>,
     /// The de-zipper, stepped once per convolution step: the node's, the
     /// convolver renders the direction it returns.
     aim: AngleSmoother,
@@ -59,7 +62,6 @@ pub struct HrtfBinauralNode<F: FftFloat> {
     /// `0..1`. Not the VBAP panner's width, a mid/side
     /// [`StereoWidth`](tutti_units::StereoWidth).
     blend: Param<Mix>,
-    sample_rate: SampleRate,
     /// The last finite azimuth and elevation the cells held. The de-zipper
     /// smoother is recursive, so one NaN or ±∞ coordinate would leave it NaN
     /// for good; a non-finite write reads as unchanged instead.
@@ -80,55 +82,59 @@ impl<F: FftFloat> Clone for HrtfBinauralNode<F> {
     /// the renderer gets its own, cleared, streaming state.
     fn clone(&self) -> Self {
         Self {
-            panner: self.panner.fresh(self.aim.current()),
+            sphere: self.sphere.clone(),
+            panner: self.panner.as_ref().map(|p| p.fresh(self.aim.current())),
             aim: self.aim.clone(),
             azimuth: self.azimuth.clone(),
             elevation: self.elevation.clone(),
             blend: self.blend.clone(),
-            sample_rate: self.sample_rate,
             good: self.good,
         }
     }
 }
 
-impl<F: FftFloat> HrtfBinauralNode<F> {
-    /// Creates a renderer from HRIR sphere bytes (for example an embedded
-    /// IRCAM `.bin`, in the format `hrir_sphere_builder` writes), aimed straight
-    /// ahead at full HRTF blend.
-    ///
-    /// The sphere is parsed once and resampled to `sample_rate`. The graph
-    /// prepares the node at the device rate before its first block,
-    /// resampling again if that differs. Either rate is held to at most
-    /// [`MAX_PREPARED_RATE`](tutti_dsp::MAX_PREPARED_RATE) for the sphere.
-    /// Clones and forks share the parsed sphere. Allocates; call it on the
-    /// control thread.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`HrtfBinauralError`] if the bytes are not a well-formed
-    /// HRIR sphere. Every index, length and value is checked here, so nothing
-    /// malformed reaches the audio thread.
-    pub fn new(
-        hrir_bytes: &[u8],
-        sample_rate: impl Into<SampleRate>,
-    ) -> Result<Self, HrtfBinauralError> {
-        let sample_rate = sample_rate.into();
-        let aim = AngleSmoother::new(sample_rate, Samples::new(HRTF_STEP));
-        Ok(Self {
-            panner: HrtfBinaural::new(hrir_bytes, sample_rate, aim.current())?,
-            aim,
+/// What an [`HrtfBinauralNode`] is made from: the parsed HRIR sphere; [`From`] makes the node,
+/// aimed straight ahead at full HRTF blend.
+///
+/// The sphere is parsed once ([`HrirSphere::from_bytes`], which checks every index, length
+/// and value, so nothing malformed reaches the audio thread) and shared: clones and forks
+/// read the one sphere. The node resamples it to the graph's rate in
+/// [`prepare`](Node::prepare), held to at most
+/// [`MAX_PREPARED_RATE`](tutti_dsp::MAX_PREPARED_RATE), and renders silence until then.
+#[derive(Clone, Debug)]
+pub struct HrtfBinauralConfig {
+    sphere: Arc<HrirSphere>,
+}
+
+impl HrtfBinauralConfig {
+    /// A renderer over `sphere` (for example an embedded IRCAM `.bin`, in the format
+    /// `hrir_sphere_builder` writes).
+    #[must_use]
+    pub fn new(sphere: Arc<HrirSphere>) -> Self {
+        Self { sphere }
+    }
+}
+
+impl<F: FftFloat> From<HrtfBinauralConfig> for HrtfBinauralNode<F> {
+    fn from(config: HrtfBinauralConfig) -> Self {
+        Self {
+            sphere: config.sphere,
+            panner: None,
+            // The graph's rate arrives in `prepare`, which re-seats the smoother on it.
+            aim: AngleSmoother::new(SampleRate::SR_48K, Samples::new(HRTF_STEP)),
             azimuth: Param::new(Azimuth::FRONT),
             elevation: Param::new(Elevation::LEVEL),
             blend: Param::new(Mix::WET),
-            sample_rate,
             good: Held {
                 azimuth: LastGood::fixed(Azimuth::FRONT.get()),
                 elevation: LastGood::fixed(Elevation::LEVEL.get()),
                 blend: LastGood::fixed(Mix::WET.get()),
             },
-        })
+        }
     }
+}
 
+impl<F: FftFloat> HrtfBinauralNode<F> {
     /// The position cells, read once (`driven` is the block's azimuth and
     /// elevation where a control signal drives them): a non-finite coordinate held at
     /// the last finite one, the bearing wrapped and the height clamped.
@@ -172,9 +178,11 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
         Shape::through(BusTopology::STEREO)
             .with_param_addrs(self.declared_ports().as_slice())
             .with_latency(Latency::new(Samples::new(HRTF_LATENCY)))
-            .with_tail(match self.panner.ring_out() {
-                0 => Tail::None,
-                n => Tail::Finite(Samples::new(n)),
+            .with_tail(match self.panner.as_ref().map(HrtfBinaural::ring_out) {
+                // The response length follows the graph's rate, known at `prepare`.
+                None => Tail::Unbounded,
+                Some(0) => Tail::None,
+                Some(n) => Tail::Finite(Samples::new(n)),
             })
             // An exception to the nearest-class rule. The FFT work lands all at once in the
             // block that completes a 128-frame step: at 64-frame blocks that
@@ -186,14 +194,18 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
 
     /// Resamples the sphere to the graph's rate (allocates; control thread).
     fn prepare(&mut self, p: &Prepare) {
-        self.sample_rate = p.sample_rate();
+        let rate = p.sample_rate();
         let target = self.placement([None; 2]);
-        self.aim.set_sample_rate(self.sample_rate);
+        self.aim.set_sample_rate(rate);
         let aim = &mut self.aim;
-        self.panner.set_sample_rate(self.sample_rate, || {
+        let mut seat = || {
             aim.reset_to_target(target);
             aim.current()
-        });
+        };
+        match &mut self.panner {
+            Some(panner) => panner.prepare(rate, seat),
+            None => self.panner = Some(HrtfBinaural::new(self.sphere.clone(), rate, seat())),
+        }
     }
 
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -217,12 +229,19 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
         let size = io.frames();
         let (inputs, mut outputs) = io.split();
         let (left, right) = (&inputs.get(0)[..size], &inputs.get(1)[..size]);
+        let Some(panner) = self.panner.as_mut() else {
+            // Not prepared: no renderer yet, so silence.
+            for out in outputs.iter_mut().take(2) {
+                out[..size].fill(F::ZERO);
+            }
+            return Status::Modified;
+        };
         let mut outs = outputs.iter_mut();
         // The shape declares two outputs, so both are always present.
         if let (Some(out_left), Some(out_right)) = (outs.next(), outs.next()) {
             let aim = &mut self.aim;
             if let Ok(input) = StereoPlanes::new(left, right) {
-                self.panner.process(
+                panner.process(
                     blend,
                     input,
                     (
@@ -243,7 +262,9 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
     fn reset(&mut self) {
         let target = self.placement([None; 2]);
         self.aim.reset_to_target(target);
-        self.panner.reset_state(self.aim.current());
+        if let Some(panner) = &mut self.panner {
+            panner.reset_state(self.aim.current());
+        }
     }
 
     fn param_base(&self, k: usize) -> Option<f64> {

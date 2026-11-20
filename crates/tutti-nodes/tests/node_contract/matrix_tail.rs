@@ -19,11 +19,11 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, MaxBlock,
+    AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, ChannelTopology, MaxBlock,
+    Mono, Planes, PlanesMut,
 };
-use tutti_buffers::{Mono, Planes, PlanesMut};
+
 use tutti_dsp::MatrixConvolver;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -195,7 +195,7 @@ fn assert_parks_at_the_tail(node: ConvolverNode<f32>, latency: usize, tail: usiz
 #[test]
 fn a_true_stereo_node_parks_after_its_longest_path() {
     let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-    let node = ConvolverNode::<f32>::true_stereo(
+    let node = true_stereo_node::<f32, _>(
         Mono::new(&irs[0]),
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
@@ -219,10 +219,10 @@ fn a_linear_phase_node_parks_after_its_response() {
         .design(SR, &[tilt])
         .unwrap();
     let delay = fir.delay().get();
-    let node: ConvolverNode<f32> = FirConvolverConfig::new(ChannelLayout::MONO, &fir)
-        .block_size(Samples::new(64))
-        .build()
-        .unwrap();
+    let node = ConvolverNode::<f32>::try_from(
+        FirConvolverConfig::new(BusTopology::MONO, &fir).block_size(Samples::new(64)),
+    )
+    .unwrap();
     assert_parks_at_the_tail(node, 64 + delay, delay);
 }
 
@@ -240,9 +240,8 @@ fn an_ambisonic_node_parks_after_its_longest_path() {
         })
         .collect();
     let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-    let node =
-        ConvolverNode::<f32>::ambisonic(foa, ChannelTopology::from(foa), &views, Samples::new(64))
-            .unwrap();
+    let node = ambisonic_node::<f32, _>(foa, ChannelTopology::from(foa), &views, Samples::new(64))
+        .unwrap();
     assert_parks_at_the_tail(node, 64, 300);
 }
 
@@ -259,7 +258,7 @@ fn an_ambisonic_to_stereo_node_parks_after_its_longest_path() {
         })
         .collect();
     let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-    let node = ConvolverNode::<f32>::ambisonic(
+    let node = ambisonic_node::<f32, _>(
         foa,
         ChannelTopology::from(Bed::Stereo),
         &views,
@@ -277,7 +276,7 @@ fn an_ambisonic_to_stereo_node_parks_after_its_longest_path() {
 #[test]
 fn the_node_says_silent_from_the_first_block_past_its_tail() {
     let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-    let node = ConvolverNode::<f32>::true_stereo(
+    let node = true_stereo_node::<f32, _>(
         Mono::new(&irs[0]),
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
@@ -310,7 +309,7 @@ fn the_node_says_silent_from_the_first_block_past_its_tail() {
 #[test]
 fn a_node_that_never_says_silent_is_never_skipped() {
     let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-    let node = ConvolverNode::<f32>::true_stereo(
+    let node = true_stereo_node::<f32, _>(
         Mono::new(&irs[0]),
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
@@ -445,7 +444,7 @@ type Make = fn() -> ConvolverNode<f32>;
 fn kinds() -> Vec<(&'static str, Make)> {
     fn true_stereo() -> ConvolverNode<f32> {
         let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-        ConvolverNode::<f32>::true_stereo(
+        true_stereo_node::<f32, _>(
             Mono::new(&irs[0]),
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
@@ -454,14 +453,14 @@ fn kinds() -> Vec<(&'static str, Make)> {
         )
     }
     fn dual_mono() -> ConvolverNode<f32> {
-        ConvolverNode::<f32>::per_channel(
+        per_channel_node::<f32, _>(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
             Samples::new(64),
         )
         .unwrap()
     }
     fn folded() -> ConvolverNode<f32> {
-        ConvolverNode::<f32>::folded(
+        folded_node::<f32, _>(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
             Samples::new(64),
         )
@@ -490,7 +489,7 @@ fn a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size() {
         let input = stream(2);
         // The second burst alone through a fresh node at the gain it resumes at.
         let fresh = make();
-        fresh.set_gain(Amplitude::new(0.25));
+        fresh.gain().store(Amplitude::new(0.25));
         let second: Vec<Vec<f32>> = input.iter().map(|c| c[3000..STREAM].to_vec()).collect();
         let want = direct_once(fresh, &second);
 
@@ -638,7 +637,7 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
         out
     };
     let node = || {
-        ConvolverNode::<f32>::true_stereo(
+        true_stereo_node::<f32, _>(
             Mono::new(&irs[0]),
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
@@ -748,4 +747,65 @@ fn a_gap_inside_one_call_renders_as_blocks_of_64_do() {
             );
         }
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// One response per channel, at as many unassigned channels as responses.
+fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    )
+}
+
+/// Every input folded to mono, then one response per output, at the engine's placement of
+/// that many channels.
+fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    let bus = tutti_buffers::BusTopology::assumed(width).expect("a test width fits a bus");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(bus, irs)
+            .folded()
+            .block_size(block_size),
+    )
+}
+
+/// True stereo from `[LL, LR, RL, RR]`.
+fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ll: tutti_buffers::Mono<'_, S>,
+    lr: tutti_buffers::Mono<'_, S>,
+    rl: tutti_buffers::Mono<'_, S>,
+    rr: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
+            .true_stereo()
+            .block_size(block_size),
+    )
+    .expect("four responses on a stereo pair")
+}
+
+/// An ambisonic set of `input` in, `output` out.
+fn ambisonic_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    input: tutti_buffers::AmbisonicFormat,
+    output: tutti_buffers::ChannelTopology,
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let output = tutti_buffers::BusTopology::try_from(&output).expect("a test output fits a bus");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(output, irs)
+            .ambisonic(input)
+            .block_size(block_size),
+    )
 }

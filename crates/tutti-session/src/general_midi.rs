@@ -17,7 +17,9 @@
 
 use tutti_buffers::{BusTopology, Float};
 use tutti_dsp::{Lerp, SimdLanes};
-use tutti_nodes::{BusStripNode, FreeverbConfig, FreeverbNode, ModDelayConfig, ModDelayNode};
+use tutti_nodes::{
+    BusStripConfig, BusStripNode, FreeverbConfig, FreeverbNode, ModDelayConfig, ModDelayNode,
+};
 use tutti_soundfont::SoundFontUnit;
 use tutti_units::Amplitude;
 
@@ -149,7 +151,7 @@ where
         let (reverb, _) = graph.add(FreeverbNode::<C::Float>::from(
             FreeverbConfig::general_midi(),
         ));
-        let (strip, _) = graph.add(BusStripNode::stereo());
+        let (strip, _) = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.
         graph.connect(OutPort::new(unit, 2), chorus.input(0))?;
         graph.connect(OutPort::new(unit, 3), chorus.input(1))?;
