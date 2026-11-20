@@ -35,17 +35,6 @@ impl Imp {
         })
     }
 
-    /// Blocks until the process has ended: `true`. `false` when the wait
-    /// itself failed.
-    pub(super) fn wait_ended(&self) -> bool {
-        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
-        use windows_sys::Win32::System::Threading::INFINITE;
-
-        // SAFETY: `handle` is an open process handle owned by `self` for the
-        // whole call, and the wait takes no pointer.
-        unsafe { WaitForSingleObject(self.handle.as_raw_handle(), INFINITE) == WAIT_OBJECT_0 }
-    }
-
     pub(super) fn wait(&self, timeout: Duration) -> bool {
         let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
         // SAFETY: `handle` is an open process handle owned by `self` for the

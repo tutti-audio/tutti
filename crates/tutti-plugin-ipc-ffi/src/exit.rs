@@ -30,10 +30,6 @@ mod platform {
             None
         }
 
-        pub(super) fn wait_ended(&self) -> bool {
-            match *self {}
-        }
-
         pub(super) fn wait(&self, _timeout: std::time::Duration) -> bool {
             match *self {}
         }
@@ -48,19 +44,19 @@ use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// The slice a platform with no wake sleeps between asks.
+/// The slice a platform with no wake pauses between asks.
 const NAP: Duration = Duration::from_millis(10);
 
 /// A wait for one child process to end.
 ///
 /// It answers "may have ended" rather than "has ended with this status": the
 /// owner of the [`Child`] asks `try_wait` for the status, and this only says
-/// when to ask. Where the OS has no such wake, [`wait`](Self::wait) sleeps a
-/// short slice and says "may have ended" at its end, so the owner's `try_wait`
-/// is a poll there.
+/// when to ask. Where the OS has no such wake, [`wait`](Self::wait) hands a
+/// short slice to the caller's pause and says "may have ended" at its end, so
+/// the owner's `try_wait` is a poll there.
 #[derive(Debug)]
 pub struct ExitWait {
-    /// `None` when the OS gave no wake for this child: the wait then sleeps.
+    /// `None` when the OS gave no wake for this child: the wait then pauses.
     inner: Option<platform::Imp>,
     /// Until the first [`wait`](Self::wait) has answered. A child may have
     /// ended before the OS was asked to watch it (a kqueue registration on a
@@ -81,16 +77,21 @@ impl ExitWait {
     }
 
     /// Waits up to `timeout` for the child to end. `true` when it may have
-    /// ended (the OS signalled it, or this platform wakes only by sleeping),
+    /// ended (the OS signalled it, or this platform wakes only by pausing),
     /// `false` when the whole `timeout` passed with the OS saying it still
     /// runs.
+    ///
+    /// With no OS wake, the wait is `pause` of `timeout` or a short slice,
+    /// whichever is less, and then `true`: the caller says how it pauses (a stop
+    /// token's wait, so that a stop ends it) and never one that ignores the end
+    /// of the wait. `pause` is not called when the OS wakes.
     #[must_use]
-    pub fn wait(&self, timeout: Duration) -> bool {
+    pub fn wait(&self, timeout: Duration, pause: impl FnOnce(Duration)) -> bool {
         if self.unasked.swap(false, Ordering::AcqRel) {
             return true;
         }
         let Some(inner) = &self.inner else {
-            std::thread::sleep(timeout.min(NAP));
+            pause(timeout.min(NAP));
             return true;
         };
         inner.wait(timeout)
@@ -133,7 +134,7 @@ mod tests {
         let wait = ExitWait::of(&child);
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
-            if wait.wait(Duration::from_millis(100))
+            if wait.wait(Duration::from_millis(100), std::thread::sleep)
                 && let Some(status) = child.try_wait().expect("the status reads")
             {
                 assert!(status.success(), "{status:?}");
@@ -155,14 +156,47 @@ mod tests {
     fn the_end_of_a_child_wakes_the_wait() {
         let mut child = Command::new("sleep").arg("30").spawn().expect("sleep");
         let wait = ExitWait::of(&child);
-        assert!(wait.wait(Duration::ZERO), "the first wait asks nothing");
-        assert!(!wait.wait(Duration::from_millis(50)), "a running child");
+        assert!(
+            wait.wait(Duration::ZERO, std::thread::sleep),
+            "the first wait asks nothing"
+        );
+        assert!(
+            !wait.wait(Duration::from_millis(50), std::thread::sleep),
+            "a running child"
+        );
 
         child.kill().expect("kill");
         assert!(
-            wait.wait(Duration::from_secs(600)),
+            wait.wait(Duration::from_secs(600), std::thread::sleep),
             "its end wakes the wait"
         );
         child.wait().expect("reaped");
+    }
+
+    /// **Without an OS wake the wait pauses and says "may have ended", until the
+    /// child ends.** The wait has no OS side, and the injected pause is where the
+    /// child ends, so a wait that did not hand its slice to the pause, or that
+    /// did not end with the child, fails.
+    #[cfg(unix)]
+    #[test]
+    fn the_wait_without_a_wake_pauses_until_the_child_ends() {
+        let mut child = Command::new("sleep").arg("600").spawn().expect("sleep");
+        let wait = ExitWait {
+            inner: None,
+            unasked: AtomicBool::new(false),
+        };
+        let mut pauses = Vec::new();
+        let mut status = None;
+        while status.is_none() {
+            assert!(wait.wait(Duration::from_secs(600), |slice| {
+                pauses.push(slice);
+                child.kill().expect("kill");
+                // The wake is the pause's end: the child is gone by then.
+                child.wait().expect("reaped");
+            }));
+            status = child.try_wait().expect("status");
+        }
+        child.wait().expect("reaped");
+        assert_eq!(pauses, [NAP], "one slice, capped at the nap");
     }
 }

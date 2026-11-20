@@ -8,10 +8,11 @@
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::{ControlTransport, Incoming, Transport, TransportListener};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tutti_platform::StopToken;
+use tutti_platform::{Executor, StopToken, Task, Threads};
 use tutti_plugin_ipc::{
     AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
@@ -84,6 +85,14 @@ pub struct PluginServer {
     /// Stopped once the shutdown is under way: a host that ends then finds the
     /// teardown, itself bounded, and is let finish ([`watch_host`]).
     served: StopToken,
+    /// The watch on the host, held for the life of the server; a drop cancels it.
+    _host_watch: Option<Task<()>>,
+    /// Drives the executor's tasks, started in [`PluginServer::new`]; it stops
+    /// before the executor drops.
+    _threads: Threads,
+    /// Where this process's background work runs: built on the main thread and
+    /// held until the server drops.
+    _executor: Executor,
 }
 
 impl std::fmt::Debug for PluginServer {
@@ -114,7 +123,12 @@ impl PluginServer {
         ))?;
         let (session, render) = Session::new()?;
         let served = StopToken::new();
-        watch_host(
+        let executor = Executor::new();
+        let threads = executor
+            .spawn_threads(NonZeroUsize::MIN)
+            .map_err(|_| IpcError::ProtocolError("the executor's thread cannot start"))?;
+        let host_watch = watch_host(
+            &executor,
             socket.clone(),
             session.ties().host_gone.clone(),
             session.ties().bell.clone(),
@@ -126,6 +140,9 @@ impl PluginServer {
             render: Some(render),
             main,
             served,
+            _host_watch: host_watch,
+            _threads: threads,
+            _executor: executor,
         })
     }
 
@@ -455,12 +472,13 @@ const HOST_GONE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 /// process ended outright. A server whose host is unknown cannot watch it: that
 /// is logged, and only the host's connections end it.
 fn watch_host(
+    executor: &Executor,
     socket_path: std::path::PathBuf,
     host_gone: StopToken,
     bell: crate::main_loop::Bell,
     served: StopToken,
-) {
-    let watch = tutti_plugin_ipc_ffi::watch_spawner(move || {
+) -> Option<Task<()>> {
+    let watch = tutti_plugin_ipc_ffi::watch_spawner(executor, move || {
         tracing::info!("the host process is gone; shutting the server down");
         host_gone.stop();
         bell.ring();
@@ -473,12 +491,13 @@ fn watch_host(
         }
     });
     match watch {
-        Ok(true) => {}
-        Ok(false) => {
+        Ok(Some(task)) => return Some(task),
+        Ok(None) => {
             tracing::warn!("the host's process id is unknown: this server cannot notice its end");
         }
         Err(e) => tracing::warn!("the host watch cannot start: {e}"),
     }
+    None
 }
 
 #[cfg(test)]

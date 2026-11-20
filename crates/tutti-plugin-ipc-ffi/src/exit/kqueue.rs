@@ -82,26 +82,4 @@ impl Imp {
             Err(_) => true,
         }
     }
-
-    /// Blocks until the process has ended: `true`. `false` when the wait
-    /// itself failed.
-    pub(super) fn wait_ended(&self) -> bool {
-        loop {
-            if self.seen.load(Ordering::Acquire) {
-                return true;
-            }
-            let mut taken = [MaybeUninit::<Event>::uninit(); 1];
-            // SAFETY: as in `wait`: no change is submitted and the event list
-            // is a live buffer of one slot.
-            match unsafe { kevent_timespec(&self.queue, &[], &mut taken[..], None) } {
-                Ok(([], _)) => {}
-                Ok(_) => {
-                    self.seen.store(true, Ordering::Release);
-                    return true;
-                }
-                Err(rustix::io::Errno::INTR) => {}
-                Err(_) => return false,
-            }
-        }
-    }
 }

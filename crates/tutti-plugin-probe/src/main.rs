@@ -44,14 +44,16 @@ mod args;
 use args::{Args, Measure, USAGE, Usage};
 use std::path::Path;
 use std::process::ExitCode;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant, Task};
 use tutti_plugin_probe::{StateFor, describe, describe_measured, read_widths};
 use tutti_plugin_types::{
     Deadline, MainThreadMarker, ProbeExit, ProbeOutcome, ProbeRefusal, write_result,
 };
 
 fn main() -> ExitCode {
-    watch_host();
+    // Held for the process: the host watch's thread joins when it drops.
+    let executor = Executor::new();
+    let _watch = watch_host(&executor);
     let args = match args::parse(std::env::args_os().skip(1)) {
         Ok(args) => args,
         Err(Usage::NoResultFile) => {
@@ -138,12 +140,15 @@ fn main() -> ExitCode {
 /// host. A probe has nothing to clean up (the host owns the result's directory),
 /// and a plugin's exit handlers must not run while the plugin is mid-call. A probe
 /// with no known host runs unwatched, and the host's deadline is its only bound.
-fn watch_host() {
-    match tutti_plugin_ipc_ffi::watch_spawner(|| tutti_plugin_ipc_ffi::terminate_process()) {
-        Ok(true) => {}
-        Ok(false) => eprintln!("plugin-probe: the host's process id is unknown: running unwatched"),
+fn watch_host(executor: &Executor) -> Option<Task<()>> {
+    match tutti_plugin_ipc_ffi::watch_spawner(executor, || {
+        tutti_plugin_ipc_ffi::terminate_process()
+    }) {
+        Ok(Some(task)) => return Some(task),
+        Ok(None) => eprintln!("plugin-probe: the host's process id is unknown: running unwatched"),
         Err(e) => eprintln!("plugin-probe: the host watch cannot start: {e}"),
     }
+    None
 }
 
 /// A command line that is wrong is a result, so it is not read as a crash.

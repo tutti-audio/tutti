@@ -72,8 +72,11 @@ mod tests {
         .expect("the shell prints its helper's pid");
         let helper: u32 = line.trim().parse().expect("a pid");
         let (ended, helper_ended) = std::sync::mpsc::channel();
-        crate::watch_host(helper, move || ended.send(()).expect("listening"))
-            .expect("the watch on the helper starts");
+        let executor = tutti_platform::Executor::new();
+        let _watch = crate::watch_host(&executor, helper, move || {
+            ended.send(()).expect("listening");
+        })
+        .expect("the watch on the helper starts");
 
         kill_group(leader.id());
         leader.wait().expect("the leader ends");
