@@ -121,9 +121,9 @@ fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
         AudioData::Resident(wave) => {
             tutti_sampler::Clip::new(Arc::clone(wave)).expect("a placeable wave")
         }
-        AudioData::Streamed(info) => {
+        AudioData::Streamed(_) => {
             let opened = s
-                .open_stream(info.asset().clone(), StreamStart::HEAD)
+                .open_stream(audio.asset().clone(), StreamStart::HEAD)
                 .expect("a streamer")
                 .run()
                 .expect("the file reads");
@@ -259,7 +259,7 @@ fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
     let AudioData::Streamed(info) = long.data() else {
         panic!("a file past the line streams");
     };
-    assert_eq!(info.facts().frames.map(|f| f.get()), Some(frames));
+    assert_eq!(info.frames.map(|f| f.get()), Some(frames));
 }
 
 /// **`Tier::Auto { above }` compares the decoded size with `above`.** A file

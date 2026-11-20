@@ -512,7 +512,7 @@ pub mod session {
             feature = "decode-ogg"
         )
     ))]
-    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, StreamInfo, Tier};
+    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, Tier};
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,

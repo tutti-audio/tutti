@@ -7,13 +7,12 @@
 //! the wave lives while a clone of the handle does.
 
 use std::marker::PhantomData;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use tutti_buffers::{Float, Wave};
-use tutti_platform::{Asset, Identity};
+use tutti_platform::Asset;
 
-use crate::jobs::panic_message;
+use crate::loaded::{Stamp, caught};
 use crate::{AppKey, Clock, LoadError, Session};
 
 /// Where a file's samples are read from: [`LoadAudio::tier`]'s choice.
@@ -26,8 +25,11 @@ pub enum Tier {
     /// load with [`LoadError::NotStreamable`].
     Streamed,
     /// By the file's size: streamed when the file can be streamed and its
-    /// decoded size (`frames * channels * size_of::<S>()` bytes in the
-    /// session's float `S`) is more than `above` bytes, resident otherwise.
+    /// decoded size (`frames * channels * size_of::<F>()` bytes in the
+    /// session's float `F`) is more than `above` bytes, resident otherwise.
+    ///
+    /// A file whose header gives no length counts as past any threshold, so
+    /// when it can be streamed it is.
     ///
     /// The choice is the file's alone: it does not ask whether the session has
     /// a disk streamer, so a streamed reading in a session built without one
@@ -61,29 +63,6 @@ impl Default for Tier {
     }
 }
 
-/// What a streamed [`LoadedAudio`]'s header says: the asset and what the
-/// sampler can do with it.
-#[derive(Clone, Debug)]
-pub struct StreamInfo {
-    asset: Asset,
-    facts: tutti_sampler::SampleFacts,
-}
-
-impl StreamInfo {
-    /// The asset the load read.
-    #[must_use]
-    pub const fn asset(&self) -> &Asset {
-        &self.asset
-    }
-
-    /// The file's header: length, rate and channels. The file is streamable, or
-    /// the load would have failed with [`LoadError::NotStreamable`].
-    #[must_use]
-    pub const fn facts(&self) -> &tutti_sampler::SampleFacts {
-        &self.facts
-    }
-}
-
 /// A wave file to read, built by [`Session::load_audio`] and not yet run:
 /// [`run`](Self::run) returns a [`LoadedAudio`].
 ///
@@ -91,13 +70,13 @@ impl StreamInfo {
 /// thread it chooses; dropping it unrun cancels it.
 #[derive(Debug)]
 #[must_use = "work does nothing until it runs"]
-pub struct LoadAudio<S: Float = f32> {
+pub struct LoadAudio<F: Float = f32> {
     asset: Asset,
     tier: Tier,
-    float: PhantomData<fn() -> S>,
+    float: PhantomData<fn() -> F>,
 }
 
-impl<S: Float> LoadAudio<S> {
+impl<F: Float> LoadAudio<F> {
     pub(crate) fn new(asset: Asset) -> Self {
         Self {
             asset,
@@ -113,31 +92,23 @@ impl<S: Float> LoadAudio<S> {
         self
     }
 
-    /// Reads the file on the calling thread: decodes it whole into `S`, or
+    /// Reads the file on the calling thread: decodes it whole into `F`, or
     /// reads its header when the tier streams it.
     ///
-    /// The asset's [`Identity`] is taken before the read, so a rewrite during
+    /// The asset's [`Identity`](tutti_platform::Identity) is taken before the read, so a rewrite during
     /// it shows in [`LoadedAudio::changed`].
     ///
     /// # Errors
     ///
     /// The [`LoadError`] of a file that cannot be decoded, probed or streamed;
     /// [`LoadError::Panicked`] when a decoder panicked.
-    pub fn run(self) -> Result<LoadedAudio<S>, LoadError> {
-        let loaded_from = self.asset.identity();
-        let data = catch_unwind(AssertUnwindSafe(|| self.read())).unwrap_or_else(|payload| {
-            Err(LoadError::Panicked {
-                message: panic_message(payload.as_ref()),
-            })
-        })?;
-        Ok(LoadedAudio {
-            asset: self.asset,
-            loaded_from,
-            data,
-        })
+    pub fn run(self) -> Result<LoadedAudio<F>, LoadError> {
+        let stamp = Stamp::take(self.asset.clone());
+        let data = caught(|| self.read())?;
+        Ok(LoadedAudio { stamp, data })
     }
 
-    fn read(&self) -> Result<AudioData<S>, LoadError> {
+    fn read(&self) -> Result<AudioData<F>, LoadError> {
         match self.tier {
             Tier::Resident => self.resident(),
             Tier::Streamed => {
@@ -153,10 +124,10 @@ impl<S: Float> LoadAudio<S> {
                 // A decoded wave's size in bytes, saturating: a count past
                 // `u64` is past any threshold.
                 let wide = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
-                let bytes = facts.frames.map_or(0, |frames| {
+                let bytes = facts.frames.map_or(u64::MAX, |frames| {
                     wide(frames.get())
                         .saturating_mul(u64::from(facts.layout.count()))
-                        .saturating_mul(wide(size_of::<S>()))
+                        .saturating_mul(wide(size_of::<F>()))
                 });
                 if facts.streamable && bytes > above {
                     Ok(self.streamed(facts))
@@ -171,15 +142,12 @@ impl<S: Float> LoadAudio<S> {
         tutti_sampler::probe(self.asset.clone()).map_err(|error| LoadError::Probe(Arc::new(error)))
     }
 
-    fn streamed(&self, facts: tutti_sampler::SampleFacts) -> AudioData<S> {
-        AudioData::Streamed(Arc::new(StreamInfo {
-            asset: self.asset.clone(),
-            facts,
-        }))
+    fn streamed(&self, facts: tutti_sampler::SampleFacts) -> AudioData<F> {
+        AudioData::Streamed(Arc::new(facts))
     }
 
-    fn resident(&self) -> Result<AudioData<S>, LoadError> {
-        tutti_codec::read_wave::<S>(self.asset.clone())
+    fn resident(&self) -> Result<AudioData<F>, LoadError> {
+        tutti_codec::read_wave::<F>(self.asset.clone())
             .map(|wave| AudioData::Resident(Arc::new(wave)))
             .map_err(|error| LoadError::Decode(Arc::new(error)))
     }
@@ -188,13 +156,14 @@ impl<S: Float> LoadAudio<S> {
 /// What a [`LoadedAudio`] holds: the decoded wave, or the file's header.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-pub enum AudioData<S: Float = f32> {
+pub enum AudioData<F: Float = f32> {
     /// The file decoded whole into the session's float. Every clone of the
     /// handle shares the `Arc`.
-    Resident(Arc<Wave<S>>),
+    Resident(Arc<Wave<F>>),
     /// The file's header; its samples stay on disk until a stream opens
-    /// ([`Session::open_stream`] over [`StreamInfo::asset`]).
-    Streamed(Arc<StreamInfo>),
+    /// ([`Session::open_stream`] over [`LoadedAudio::asset`]). It is streamable,
+    /// or the load would have failed with [`LoadError::NotStreamable`].
+    Streamed(Arc<tutti_sampler::SampleFacts>),
 }
 
 /// A loaded wave file: its decoded wave (resident) or its header (streamed).
@@ -202,37 +171,35 @@ pub enum AudioData<S: Float = f32> {
 /// A clone shares what the load read. Releasing is dropping every clone: the
 /// session holds none, so the wave is freed with the last one.
 #[derive(Clone, Debug)]
-pub struct LoadedAudio<S: Float = f32> {
-    asset: Asset,
-    loaded_from: Option<Identity>,
-    data: AudioData<S>,
+pub struct LoadedAudio<F: Float = f32> {
+    stamp: Stamp,
+    data: AudioData<F>,
 }
 
-impl<S: Float> LoadedAudio<S> {
+impl<F: Float> LoadedAudio<F> {
     /// The asset the load read.
     #[must_use]
     pub const fn asset(&self) -> &Asset {
-        &self.asset
+        self.stamp.asset()
     }
 
     /// What the load read: the wave or the header.
     #[must_use]
-    pub const fn data(&self) -> &AudioData<S> {
+    pub const fn data(&self) -> &AudioData<F> {
         &self.data
     }
 
-    /// Whether the asset is not what was read: its [`Identity`] (a file's path
+    /// Whether the asset is not what was read: its [`Identity`](tutti_platform::Identity) (a file's path
     /// with its length and modification time) now differs from the one taken
     /// before the load. This reads the file's metadata, and nothing else.
     ///
     /// An asset of bytes never changes. A file stamped at the load reads
     /// changed when it is gone or differs; one that could not be stamped reads
-    /// changed once it can be. To reload, run
-    /// [`Session::load_audio`] over [`asset`](Self::asset) and swap the handle
-    /// where it is used.
+    /// changed once it can be. To reload, run [`Session::load_audio`] over
+    /// [`asset`](Self::asset) and swap the handle where it is used.
     #[must_use]
     pub fn changed(&self) -> bool {
-        self.asset.identity() != self.loaded_from
+        self.stamp.changed()
     }
 }
 

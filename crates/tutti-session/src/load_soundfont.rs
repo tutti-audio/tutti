@@ -6,12 +6,11 @@
 //! nothing of what it loads: two loads of one file are two parses, and the font
 //! lives while a clone of the handle does.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
-use tutti_platform::{Asset, Identity};
+use tutti_platform::Asset;
 
-use crate::jobs::panic_message;
+use crate::loaded::{Stamp, caught};
 use crate::{AppKey, Clock, LoadError, Session};
 
 /// A SoundFont to parse, built by [`Session::load_soundfont`] and not yet run:
@@ -26,7 +25,7 @@ pub struct LoadSoundFont {
 }
 
 impl LoadSoundFont {
-    /// Parses the file on the calling thread. The asset's [`Identity`] is taken
+    /// Parses the file on the calling thread. The asset's [`Identity`](tutti_platform::Identity) is taken
     /// before the read, so a rewrite during it shows in [`LoadedSoundFont::changed`].
     ///
     /// # Errors
@@ -34,19 +33,13 @@ impl LoadSoundFont {
     /// [`LoadError::SoundFont`] for a file that is no SoundFont;
     /// [`LoadError::Panicked`] when the parser panicked.
     pub fn run(self) -> Result<LoadedSoundFont, LoadError> {
-        let loaded_from = self.asset.identity();
-        let font = catch_unwind(AssertUnwindSafe(|| {
-            tutti_sf2::SoundFont::open(self.asset.clone())
+        let stamp = Stamp::take(self.asset.clone());
+        let font = caught(|| {
+            tutti_sf2::SoundFont::open(self.asset)
                 .map_err(|error| LoadError::SoundFont(Arc::new(error)))
-        }))
-        .unwrap_or_else(|payload| {
-            Err(LoadError::Panicked {
-                message: panic_message(payload.as_ref()),
-            })
         })?;
         Ok(LoadedSoundFont {
-            asset: self.asset,
-            loaded_from,
+            stamp,
             font: Arc::new(font),
         })
     }
@@ -56,8 +49,7 @@ impl LoadSoundFont {
 /// clone.
 #[derive(Clone, Debug)]
 pub struct LoadedSoundFont {
-    asset: Asset,
-    loaded_from: Option<Identity>,
+    stamp: Stamp,
     font: Arc<tutti_sf2::SoundFont>,
 }
 
@@ -72,20 +64,20 @@ impl LoadedSoundFont {
     /// The asset the load read.
     #[must_use]
     pub const fn asset(&self) -> &Asset {
-        &self.asset
+        self.stamp.asset()
     }
 
-    /// Whether the asset is not what was read: its [`Identity`] now differs from
+    /// Whether the asset is not what was read: its [`Identity`](tutti_platform::Identity) now differs from
     /// the one taken before the load. This reads the file's metadata, and
     /// nothing else.
     ///
     /// An asset of bytes never changes. A file stamped at the load reads
     /// changed when it is gone or differs; one that could not be stamped reads
-    /// changed once it can be. To reload, run
-    /// [`Session::load_soundfont`] over [`asset`](Self::asset).
+    /// changed once it can be. To reload, run [`Session::load_soundfont`] over
+    /// [`asset`](Self::asset).
     #[must_use]
     pub fn changed(&self) -> bool {
-        self.asset.identity() != self.loaded_from
+        self.stamp.changed()
     }
 }
 
