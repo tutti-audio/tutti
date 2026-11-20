@@ -582,6 +582,18 @@ knowing because the same shapes recur:
   *between* syscalls, so a budget of any size was unenforceable. The fix is
   `PeekNamedPipe`: ask how many bytes are buffered, and only read when the
   answer is "some". See `tutti-plugin-ipc`'s `transport::control`.
+- **The audio slab is anonymous on unix, and its descriptor is its own message.**
+  The plugin process loads untrusted code, so a slab it could open by name, or
+  `ftruncate` once opened, would fault the host's audio thread (SIGBUS on the next
+  read of an unbacked page). On Linux the slab is a `memfd` sealed against shrinking,
+  growing and sealing; the server refuses a descriptor that is not one, or not the
+  layout's exact length. On macOS it is a POSIX shared memory object unlinked as soon
+  as it is sized; nothing seals it there, and whether a second `ftruncate` is refused
+  is not claimed. The descriptor follows the `SetupSharedMemory` frame as one byte
+  carrying it (as ancillary data), read by the exact read that follows the frame: a plain
+  `read` across a message with descriptors drops them, so a buffered reader that reads
+  ahead would have to `recvmsg` everywhere. Windows keeps a named, delete-on-close
+  file whose name travels in the frame.
 - **`set_nonblocking` is not the way out, and was tried.** It took Windows from
   37 failures to 47. `PIPE_NOWAIT` makes `ReadFile` report *success with zero
   bytes*, which this transport reads as EOF, so a quiet peer was reported as a

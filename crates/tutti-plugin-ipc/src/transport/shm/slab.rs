@@ -325,7 +325,7 @@ impl AudioSlab {
         }
         let base = match direction {
             Direction::Input => SLAB_HEADER_BYTES,
-            Direction::Output => SLAB_HEADER_BYTES + self.layout.input_ring_bytes(),
+            Direction::Output => SLAB_HEADER_BYTES + self.layout.input_region_bytes(),
         };
         let stride = self.layout.channel_bytes();
         Ok(base + (slot_for(seq) * channels + channel) * stride)
@@ -1008,7 +1008,7 @@ mod tests {
         // 1. Audio starts after the header, and the two rings are disjoint.
         let stride = SAMPLES * size_of::<f32>();
         let input_base = SLAB_HEADER_BYTES;
-        let output_base = SLAB_HEADER_BYTES + l.input_ring_bytes();
+        let output_base = SLAB_HEADER_BYTES + l.input_region_bytes();
         assert_eq!(
             l.input_ring_bytes(),
             RING_SLOTS * in_channels * stride,

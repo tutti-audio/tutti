@@ -7,7 +7,7 @@
 
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
-use crate::transport::{ControlTransport, Transport, TransportListener};
+use crate::transport::{ControlTransport, Incoming, Transport, TransportListener};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -280,15 +280,20 @@ impl PluginServer {
 
     fn handshake_phase(&mut self, transport: &mut ControlTransport) -> IpcResult<bool> {
         loop {
-            let Request { id, body } = match transport.recv() {
-                Ok(request) => request,
+            let (id, reaction) = match transport.recv() {
+                Ok(Incoming::Request(Request { id, body })) => {
+                    let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
+                        self.load_working(transport, id, body)?
+                    } else {
+                        self.session.handle_with(self.main, body, &mut |_| {})?
+                    };
+                    (id, reaction)
+                }
+                Ok(Incoming::SetupSlab { id, layout, slab }) => {
+                    (id, self.session.setup_slab(&slab, layout))
+                }
                 Err(IpcError::Io(_)) => return Ok(false),
                 Err(e) => return Err(e),
-            };
-            let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
-                self.load_working(transport, id, body)?
-            } else {
-                self.session.handle_with(self.main, body, &mut |_| {})?
             };
             match reaction {
                 Reaction::Shutdown => return Ok(true),

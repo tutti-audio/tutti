@@ -6,10 +6,13 @@
 //! crates.
 //!
 //! - **The audio slab's shared memory** ([`MappingWriter`], [`SharedMapping`],
-//!   [`SlabHeader`]): the file, the mapping, the header both processes map (its
-//!   layout is the ABI between them), and the only copies in and out. A mapping
-//!   exists only with its one writer, which is what makes the copies safe to
-//!   call. What the data region holds, and where, is `tutti-plugin-ipc`'s.
+//!   [`SlabHeader`], [`SlabHandle`]): the memory (a sealed `memfd` on Linux, an
+//!   unlinked POSIX shared memory object on macOS, a temp file on Windows), its
+//!   descriptor sent over the control socket, the mapping, the header both
+//!   processes map (its layout is the ABI between them), and the only copies in
+//!   and out. A mapping exists only with its one writer, which is what makes the
+//!   copies safe to call. What the data region holds, and where, is
+//!   `tutti-plugin-ipc`'s.
 //! - **The wait for a child's end** ([`ExitWait`]): the host's wait for a server
 //!   process to end, which the OS wakes (a pidfd on Linux, a kqueue on macOS, the
 //!   process handle on Windows).
@@ -40,6 +43,8 @@
 //!
 //! It names no tutti crate.
 
+#[cfg(unix)]
+mod descriptor;
 mod exit;
 mod harden;
 mod header;
@@ -58,7 +63,7 @@ pub use exit::{ExitWait, HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
-pub use mapping::{MappingWriter, SharedMapping, SlabHandle};
+pub use mapping::{Connection, MappingWriter, SharedMapping, SlabHandle, SlabWire};
 pub use os::*;
 pub use reaped::Reaped;
 pub use wakeups::{FdId, Interest, Ready, Watch};
@@ -66,8 +71,8 @@ pub use wakeups::{FdId, Interest, Ready, Watch};
 /// Why a slab could not be made, opened or trusted.
 #[derive(Debug, thiserror::Error)]
 pub enum SlabError {
-    /// The backing file could not be created, opened, sized or mapped.
-    #[error("failed to {op} the slab file: {source}")]
+    /// The slab's memory could not be created, opened, sized, sealed or mapped.
+    #[error("failed to {op} the slab memory: {source}")]
     File {
         /// What was being done to the file, as a verb phrase.
         op: &'static str,
@@ -75,16 +80,45 @@ pub enum SlabError {
         #[source]
         source: std::io::Error,
     },
-    /// The operating system's random source could not name a new slab.
+    /// The operating system's random source could not name a new slab (macOS and
+    /// Windows, where a slab is briefly or lastingly named).
     #[error("failed to draw a name for the slab: {0}")]
     Name(getrandom::Error),
     /// The peer's slab is shorter than the layout this side expects.
     #[error("slab is {actual} bytes, layout needs {expected}")]
     Short {
-        /// The file's length.
+        /// The slab's length.
         actual: u64,
         /// The length the layout needs.
         expected: usize,
+    },
+    /// The peer's slab is longer than the layout this side expects: a sealed
+    /// slab is exactly the layout's length.
+    #[error("slab is {actual} bytes, layout is exactly {expected}")]
+    Long {
+        /// The slab's length.
+        actual: u64,
+        /// The length the layout needs.
+        expected: usize,
+    },
+    /// The descriptor received is not a memory file sealed against shrinking and
+    /// growing: whoever holds it could resize the memory under the mapping.
+    #[error("the slab descriptor is not a memfd sealed against shrinking and growing")]
+    NotSealed,
+    /// The byte that carries a slab's descriptor arrived without one, or did
+    /// not arrive.
+    #[error("the slab's descriptor did not arrive")]
+    NoDescriptor,
+    /// More than one descriptor arrived with the slab's byte, or the control
+    /// message was cut short: all that arrived is closed.
+    #[error("more than one descriptor, or a cut control message, arrived with the slab")]
+    ExtraDescriptors,
+    /// The OS failed or the peer closed while the slab's descriptor was received.
+    #[error("failed to receive the slab's descriptor: {source}")]
+    Transfer {
+        /// The OS error.
+        #[source]
+        source: std::io::Error,
     },
     /// The mapping does not begin with the tutti slab magic: it is not a slab.
     #[error("not a tutti audio slab: magic {found:#x}, expected {expected:#x}")]
