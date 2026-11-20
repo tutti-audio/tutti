@@ -104,8 +104,9 @@ impl<K: Sink, F: Float> DitherSink<K, F> {
         }
     }
 
-    /// Runs the quantizer as error feedback through `shaping`, which was
-    /// designed for the rate of the blocks written. Allocates its state, one
+    /// Runs the quantizer as error feedback through `shaping`. The sink has no
+    /// rate of its own, so the caller designs `shaping` for the rate of the
+    /// blocks it writes. Allocates its state, one
     /// history of [`order`](NoiseShaping::order) errors per channel.
     #[must_use]
     pub fn shaped(mut self, shaping: &NoiseShaping) -> Self {
@@ -156,28 +157,20 @@ impl<K: Sink, F: Float> Sink for DitherSink<K, F> {
                 .resize(part.samples().len(), K::Sample::SILENCE);
             let converted =
                 InterleavedMut::new(&mut self.converted, layout).map_err(|_| SinkFailed)?;
-            let clipped = match (self.shape, &mut self.shaping) {
-                (Some(shape), shaping) => {
+            let mut noisy;
+            let dithered = match self.shape {
+                Some(shape) => {
                     self.noisy.clear();
                     self.noisy.extend_from_slice(part.samples());
-                    let mut noisy =
-                        InterleavedMut::new(&mut self.noisy, layout).map_err(|_| SinkFailed)?;
+                    noisy = InterleavedMut::new(&mut self.noisy, layout).map_err(|_| SinkFailed)?;
                     self.noise.process(shape, self.lsb, noisy.reborrow());
-                    match shaping {
-                        Some(feedback) => feedback.process(
-                            F::from_unit(self.lsb),
-                            part,
-                            noisy.as_interleaved(),
-                            converted,
-                        ),
-                        None => convert_counting_clips(noisy.as_interleaved(), converted)
-                            .map_err(|_| SinkFailed)?,
-                    }
+                    noisy.as_interleaved()
                 }
-                (None, Some(feedback)) => {
-                    feedback.process(F::from_unit(self.lsb), part, part, converted)
-                }
-                (None, None) => convert_counting_clips(part, converted).map_err(|_| SinkFailed)?,
+                None => part,
+            };
+            let clipped = match &mut self.shaping {
+                Some(feedback) => feedback.process(self.lsb, part, dithered, converted),
+                None => convert_counting_clips(dithered, converted).map_err(|_| SinkFailed)?,
             };
             self.clipped += clipped as u64;
             let block = Interleaved::new(&self.converted, layout).map_err(|_| SinkFailed)?;

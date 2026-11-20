@@ -293,7 +293,7 @@ pub use transport_handle::TransportHandle;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
-pub use tutti_dsp::DitherSink;
+pub use tutti_dsp::{DitherSink, NoiseShaping};
 pub use tutti_engine::{BlockDates, OutputPlacement, OutputTapOpen, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{

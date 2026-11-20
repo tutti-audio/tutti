@@ -2,6 +2,7 @@ use super::*;
 use crate::{DitherShape, DitherSink};
 use core::f64::consts::PI;
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Sink, SinkFailed};
+use tutti_units::Amplitude;
 
 /// Collects the integers a mono sink receives.
 #[derive(Default)]
@@ -24,6 +25,7 @@ impl Sink for Collect {
 
 /// One i16 step in the float domain.
 const LSB: f64 = 1.0 / 32768.0;
+const AMP_LSB: Amplitude = Amplitude::new(LSB);
 
 fn rate(hz: f64) -> SampleRate {
     SampleRate::new(hz).unwrap()
@@ -129,7 +131,7 @@ fn terhardt_db(hz: f64) -> f64 {
 /// The length of a statistical run.
 const N: usize = 1 << 20;
 
-/// The unshaped TPDF error has variance `1/6` (the dither) plus `1/12` (the rounding), in LSB^2,
+/// The reference for the shaped test below: the unshaped TPDF error has variance `1/6` (the dither) plus `1/12` (the rounding), in LSB^2,
 /// and the two are uncorrelated for a triangular dither (Lipshitz, Wannamaker and Vanderkooy,
 /// "Quantization and dither: a theory", JAES 1992). The sample variance of `N = 2^20` values
 /// of a bounded, platykurtic error (kurtosis under 3) has standard deviation under
@@ -151,10 +153,10 @@ fn unshaped_tpdf_error_variance_is_a_sixth_plus_a_twelfth() {
     );
 }
 
-/// The unshaped error is white: each of 16 equal bands of a Welch estimate (1023 half-overlapped
-/// segments, 32 bins per band, so the relative standard deviation of a band is under
-/// `1 / sqrt(1023 * 32 / 1.5) = 0.7 %` for a Hann window) is the variance `1/4` to
-/// within 5 %, seven standard deviations.
+/// The reference for the shaped test below: the unshaped error is white: each of 16 equal bands of a Welch estimate (1023 half-overlapped
+/// segments, 32 bins per band: the relative standard deviation of a band is about
+/// `1 / sqrt(segments * bins)` at most, 0.6 %, and the estimate's overlap and window raise it
+/// by a factor the bound treats conservatively) is the variance `1/4` to within 5 %.
 #[test]
 fn unshaped_tpdf_error_spectrum_is_flat() {
     let e = error_lsb(None, &tone(N, 44_100.0));
@@ -193,12 +195,15 @@ fn shaped_error_spectrum_is_the_ntf_power_times_the_unshaped_variance() {
 
 /// The filter is monic and minimum phase, so `integral of ln |NTF| over [0, pi]` is zero
 /// (Gerzon and Craven, "Optimal noise shaping and dither of digital signals", AES 87th
-/// Convention, 1989). The trapezoid rule on 2^14 points of a response of 32 taps is exact to
-/// well under `1e-9`; what is left is the truncation, which moves no zero across the circle
-/// here, so the integral is below `1e-9` at each rate.
+/// Convention, 1989). The integral is exactly zero while every zero of the truncated filter
+/// stays inside the unit circle, and the trapezoid rule on 2^14 points of the response is
+/// exact to well under `1e-9`, so it is below `1e-9` at each rate swept.
 #[test]
 fn the_ntf_log_magnitude_integrates_to_zero() {
-    for sr in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+    for sr in [
+        8_000.0, 11_025.0, 16_000.0, 22_050.0, 32_000.0, 44_100.0, 48_000.0, 88_200.0, 96_000.0,
+        176_400.0, 192_000.0,
+    ] {
         let shaping = NoiseShaping::new(rate(sr));
         let mean = mean_ln_ntf(shaping.taps());
         assert!(mean.abs() < 1e-9, "rate {sr}: {mean}");
@@ -207,9 +212,9 @@ fn the_ntf_log_magnitude_integrates_to_zero() {
 
 /// The NTF follows Terhardt's threshold in Hz: its dB response at `f` is the threshold at `f` less
 /// the threshold's mean over `[0, rate / 2]` (the monic filter's mean log magnitude is zero),
-/// at 44.1 kHz and at 96 kHz alike, within 2.5 dB from 2 kHz to 16 kHz. The tolerance is the
-/// fit of a 32-tap truncation (to 70 taps at 96 kHz) of the target: 2.1 dB is the worst
-/// of these rates, at 2 kHz. Below 2 kHz the weighting's slope is steeper than the taps resolve.
+/// at 44.1 kHz and at 96 kHz alike, within 2.5 dB from 2 kHz to 16 kHz. The tolerance is
+/// measured, not derived: the worst deviation seen at these rates is 2.1 dB, at 2 kHz, the fit
+/// of a 32-tap truncation (70 taps at 96 kHz) of the target. Below 2 kHz the weighting's slope is steeper than the taps resolve.
 #[test]
 fn the_ntf_follows_the_threshold_in_hz_at_every_rate() {
     for sr in [44_100.0, 96_000.0] {
@@ -244,7 +249,7 @@ fn an_overload_keeps_the_state_bounded_and_the_loop_recovers() {
         let xs = vec![x; out.len()];
         let view = || Interleaved::new(&xs, ChannelLayout::MONO).unwrap();
         feedback.process(
-            LSB,
+            AMP_LSB,
             view(),
             view(),
             InterleavedMut::new(out, ChannelLayout::MONO).unwrap(),
@@ -286,4 +291,63 @@ fn the_shaped_output_does_not_depend_on_the_write_sizes() {
         write_all(&mut cut, &x, piece);
         assert_eq!(whole.get_mut().0, cut.get_mut().0, "piece {piece}");
     }
+}
+
+/// Runs `feedback` over `x` (interleaved at `layout`, no dither) into an `i16` buffer.
+fn run_layout(feedback: &mut ErrorFeedback<f64>, layout: ChannelLayout, x: &[f64]) -> Vec<i16> {
+    let mut out = vec![0i16; x.len()];
+    let view = || Interleaved::new(x, layout).unwrap();
+    feedback.process(
+        AMP_LSB,
+        view(),
+        view(),
+        InterleavedMut::new(&mut out, layout).unwrap(),
+    );
+    out
+}
+
+/// A NaN, then an infinity, leave nothing in the history (a non-finite error is dropped),
+/// and the finite signal after them is shaped as before: the history stays finite and within
+/// `2 LSB`, and once it has flushed `|y - x| <= (1 + sum |c_k|) / 2` LSB (rounding error of at
+/// most half an LSB, `y - x = e * NTF`).
+#[test]
+fn a_nan_and_an_infinity_do_not_latch_in_the_history() {
+    let shaping = NoiseShaping::new(rate(44_100.0));
+    let mut feedback = ErrorFeedback::<f64>::new(&shaping, 1);
+    let mut x = vec![0.1; 8];
+    x[2] = f64::NAN;
+    x[5] = f64::INFINITY;
+    run_layout(&mut feedback, ChannelLayout::MONO, &x);
+    assert!(feedback.peak().is_finite() && feedback.peak() <= 2.0 * LSB);
+    let finite = tone(4096, 44_100.0);
+    let out = run_layout(&mut feedback, ChannelLayout::MONO, &finite);
+    assert!(feedback.peak().is_finite() && feedback.peak() <= 2.0 * LSB);
+    let gain = 1.0 + shaping.taps().iter().map(|c| c.abs()).sum::<f64>();
+    for (&y, &x) in out.iter().zip(&finite).skip(shaping.order()) {
+        let err = (f64::from(y) * LSB - x).abs() / LSB;
+        assert!(err <= 0.5 * gain, "error {err} LSB past {}", 0.5 * gain);
+    }
+}
+
+/// Stereo with the left channel overloaded and the right silent: each channel has its own
+/// history, so the right channel stays at its rounding error of exactly zero (a zero input
+/// quantizes to zero with nothing fed back) and the left holds the error bound. Then a
+/// silent left channel recovers within the same per-channel bound as the mono case.
+#[test]
+fn each_channel_keeps_its_own_history() {
+    let shaping = NoiseShaping::new(rate(44_100.0));
+    let mut feedback = ErrorFeedback::<f64>::new(&shaping, 2);
+    let loud: Vec<f64> = (0..4096).flat_map(|_| [2.0, 0.0]).collect();
+    let out = run_layout(&mut feedback, ChannelLayout::STEREO, &loud);
+    assert!(out.chunks(2).all(|f| f[0] == i16::MAX && f[1] == 0));
+    assert_eq!(feedback.peak_of(1), 0.0);
+    assert!(feedback.peak_of(0) <= 2.0 * LSB && feedback.peak_of(0) > 0.0);
+    let quiet = vec![0.0; 2 * 4096];
+    let out = run_layout(&mut feedback, ChannelLayout::STEREO, &quiet);
+    let gain = 1.0 + shaping.taps().iter().map(|c| c.abs()).sum::<f64>();
+    for f in out.chunks(2).skip(shaping.order()) {
+        assert!(f64::from(f[0]).abs() <= 0.5 * gain);
+        assert_eq!(f[1], 0);
+    }
+    assert_eq!(feedback.peak_of(1), 0.0);
 }
