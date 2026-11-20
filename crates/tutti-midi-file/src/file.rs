@@ -16,7 +16,6 @@
 //! loaded for playback. A file allocates and never reaches the audio thread.
 
 use std::collections::HashMap;
-use std::error::Error as _;
 use std::io::{ErrorKind, Write as _};
 use std::sync::Arc;
 
@@ -1721,11 +1720,7 @@ impl MidiFile {
                 let mut file = staged.open().map_err(WriteError::Stage)?;
                 file.write_all(&bytes).map_err(WriteError::Stage)?;
                 file.commit().map_err(|e| {
-                    let refused = e
-                        .source()
-                        .and_then(|s| s.downcast_ref::<std::io::Error>())
-                        .is_some_and(|io| io.kind() == ErrorKind::AlreadyExists);
-                    if create_new && refused {
+                    if create_new && e.kind() == ErrorKind::AlreadyExists {
                         WriteError::Exists {
                             path: path.into_owned(),
                             source: e,
