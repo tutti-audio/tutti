@@ -30,7 +30,7 @@ pub struct OneshotReceiver<T> {
 }
 
 /// Nothing to read: the answer has not come, or never will.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum Unanswered {
     /// Not sent yet.
     Empty,

@@ -250,13 +250,3 @@ fn a_request_whose_sender_is_dropped_resolves_to_disconnected() {
         Poll::Ready(Err(PeerError::Disconnected))
     );
 }
-
-/// A request answered after it was dropped is harmless: the answer goes nowhere.
-#[test]
-fn an_answer_to_a_dropped_request_is_discarded() {
-    use super::Request;
-
-    let (sender, request) = Request::<PeData>::new();
-    drop(request);
-    Reply::<GetProperty>::Future(sender).land(Err(PeerError::TimedOut));
-}

@@ -1,4 +1,4 @@
-//! Where a peer's answer goes: a [`Job`] that lands in an update, or a
+//! Where a peer's answer goes: a [`Job`](crate::Job) that lands in an update, or a
 //! [`Request`] future that tutti's MIDI thread resolves.
 
 use std::future::Future;
