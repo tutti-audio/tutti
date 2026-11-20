@@ -243,7 +243,7 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 /// inserted with `Session::graph().add(node)`.
 pub mod nodes {
     pub use tutti_dsp::{
-        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn,
+        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation,
         LookaheadError, Matrix, MatrixConvolverError, MaxDecayError, Network,
         OutputMap as NetworkOutputMap, ResampleError, SimdLanes, SpeakerGeometryError, Stage, Tap,
@@ -278,9 +278,10 @@ pub mod nodes {
         FdnLayout, FdnNode, FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode,
         HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
         LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
-        MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
-        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
+        LinearPhaseEqConfig, LinearPhaseEqNode, MetronomeMode, ModDelayControls, ModDelayNode,
+        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
+        OversamplingFactor, PhaserControls, PhaserNode, PlateControls, PlateReverbConfig,
+        PlateReverbNode, PortSide, Routing as FeedbackRouting,
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
         SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
         SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,

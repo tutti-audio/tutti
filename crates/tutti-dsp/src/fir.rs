@@ -14,6 +14,10 @@
 
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
+mod linear_phase;
+
+pub use linear_phase::LinearPhaseDesign;
+
 use crate::stft::window::KaiserWindow;
 
 /// The longest filter [`FirDesign::design`] builds, in taps.
@@ -354,6 +358,9 @@ pub enum FirError {
         /// The widest width the edges allow.
         widest: Hz,
     },
+    /// A target magnitude with a value that is not finite, or a band with no response.
+    #[error("the target magnitude has a value that is not finite")]
+    NonFiniteTarget,
     /// A filter longer than the supported maximum.
     #[error("a filter of {len} taps exceeds the {max} supported")]
     TooLong {

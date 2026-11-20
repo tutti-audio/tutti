@@ -495,6 +495,27 @@ fn bus_strip() {
         .check();
 }
 #[test]
+fn linear_phase_eq() {
+    use tutti_dsp::{LinearPhaseDesign, Tilt};
+    use tutti_nodes::{LinearPhaseEqConfig, LinearPhaseEqNode};
+    use tutti_units::{Db, Hz, SampleRate};
+
+    let tilt = Tilt::new(Db::new(6.0))
+        .design(Hz::new(2_000.0), SampleRate::SR_48K)
+        .unwrap();
+    let fir = LinearPhaseDesign::new(Hz::new(200.0))
+        .design(SampleRate::SR_48K, &[tilt])
+        .unwrap();
+    IsolateRow::new("LinearPhaseEqNode (mono)", move || {
+        LinearPhaseEqNode::<f32>::from(
+            LinearPhaseEqConfig::new(tutti_buffers::ChannelLayout::MONO, &fir)
+                .block_size(Samples::new(64)),
+        )
+    })
+    .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
+    .check();
+}
+#[test]
 fn convolver() {
     use tutti_nodes::ConvolverNode;
     // A short decaying tail: a fixed LCG, so the IR is the same every run.

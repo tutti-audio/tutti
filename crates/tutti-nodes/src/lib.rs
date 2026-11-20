@@ -201,7 +201,8 @@
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
-//!   [`TiltFilterNode`], [`EnvelopeFilterNode`]; the coefficient solvers
+//!   [`TiltFilterNode`], [`EnvelopeFilterNode`], [`LinearPhaseEqNode`] (a
+//!   [`tutti_dsp::Fir`] through the convolver); the coefficient solvers
 //!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
 //!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
 //!   graph it is inserted in (`tutti_buffers::Float` with [`SimdLanes`]).
@@ -308,8 +309,9 @@ pub use filter::{
     BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
     CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig, CutFilterControls,
     CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, EqControls, EqKernel,
-    LadderFilterNode, LadderKernel, LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
-    TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
+    LadderFilterNode, LadderKernel, LadderSet, LinearPhaseEqConfig, LinearPhaseEqNode,
+    MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet, TiltFilterConfig, TiltFilterControls,
+    TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,

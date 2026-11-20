@@ -10,6 +10,7 @@ mod envelope;
 mod eq;
 pub mod eq_band;
 pub mod ladder;
+mod linear_phase;
 mod ramped;
 pub mod svf;
 mod tilt;
@@ -29,6 +30,7 @@ pub use envelope::{
 pub use eq::{EqControls, EqKernel};
 pub use eq_band::EqBandNode;
 pub use ladder::{LadderFilterNode, LadderKernel, LadderSet};
+pub use linear_phase::{LinearPhaseEqConfig, LinearPhaseEqNode};
 pub use svf::{SvfFilterNode, SvfKernel, SvfSet};
 pub use tilt::{
     TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,

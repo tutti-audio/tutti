@@ -33,7 +33,9 @@
 //!   sections over [`SosCoefficients`].
 //! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
-//!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
+//!   [`Fir`], failing with a [`FirError`]; [`LinearPhaseDesign`] takes the product of
+//!   [`Lti`] bands' magnitudes as a target and designs it as a linear-phase [`Fir`];
+//!   [`kaiser_beta`] is the window's parameter.
 //! - **Oversampling** (`oversample/`): [`Oversampling`] describes a cascade of linear-phase
 //!   half-band 2x stages (an [`OversamplingFactor`], an attenuation and a [`Passband`]);
 //!   [`plan`](Oversampling::plan) designs it at a rate into an [`OversamplingPlan`], whose
@@ -208,7 +210,9 @@ pub use filter::{
     SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfModel, SvfType, fit_to_rate, ladder_step,
     svf_step,
 };
-pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
+pub use fir::{
+    Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, kaiser_beta,
+};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
