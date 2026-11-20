@@ -274,10 +274,7 @@ mod tests {
         let base = tempfile::tempdir().expect("a temporary directory");
         let deep = base.path().join("d".repeat(SOCKET_PATH_MAX));
         std::fs::create_dir_all(&deep).expect("the deep directory");
-        let name = format!(
-            "{}.sock",
-            crate::config::unique_name("tutti-bridge").expect("a random source")
-        );
+        let name = format!("{}.sock", tutti_fixtures::unique_name("tutti-bridge"));
 
         let path = socket_path_in(&deep, &name);
         assert!(!path.starts_with(&deep), "{path:?}");

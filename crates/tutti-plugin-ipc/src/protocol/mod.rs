@@ -155,7 +155,9 @@ pub(crate) mod wire;
 ///   `ControlFrame::Working`, which the server also sends while it opens the
 ///   plugin, once a second, for the host's wait to restart on; the control
 ///   connection's `Ready` is a frame of its own and not a reply.
-pub const PROTOCOL_VERSION: u32 = 52;
+/// - **Version 53** drops `LoadPlugin`'s `shm_name`, which the server never read:
+///   the slab is named only in `SetupSharedMemory`, as an opaque `SlabHandle`.
+pub const PROTOCOL_VERSION: u32 = 53;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -752,6 +754,40 @@ mod tests {
         }
     }
 
+    /// **A slab handle that crossed the wire opens the creator's slab.** The
+    /// server learns the slab only from `SetupSharedMemory`, so the bytes it
+    /// decodes must open the memory the host wrote into.
+    #[test]
+    fn a_slab_handle_that_crossed_the_wire_opens_the_creators_slab() {
+        use crate::{AudioSlab, RING_SLOTS, SlabLayout};
+        let layout = SlabLayout {
+            samples_per_channel: 8,
+            format: FloatWidth::F32,
+            slots: RING_SLOTS as u32,
+            inputs: vec![tutti_plugin_types::ChannelLayout::MONO],
+            outputs: vec![tutti_plugin_types::ChannelLayout::MONO],
+        };
+        let (mut host, handle) = AudioSlab::create(layout.clone()).unwrap();
+        host.write(1, 0, &[0.25f32; 8]).unwrap();
+        host.publish(1);
+
+        let sent = ControlRequest::SetupSharedMemory {
+            slab: handle,
+            layout: layout.clone(),
+        };
+        let bytes = postcard::to_allocvec(&sent).unwrap();
+        let ControlRequest::SetupSharedMemory { slab, .. } = postcard::from_bytes(&bytes).unwrap()
+        else {
+            panic!("the request changed variant on the wire");
+        };
+
+        let server = AudioSlab::open(&slab, layout).unwrap();
+        let mut back = [0.0f32; 8];
+        assert!(server.has_input(1), "the host's published block is visible");
+        server.read_input_into(1, 0, &mut back).unwrap();
+        assert_eq!(back, [0.25f32; 8]);
+    }
+
     #[test]
     fn test_load_plugin_f64_serialization() {
         let msg = ControlRequest::LoadPlugin {
@@ -764,7 +800,6 @@ mod tests {
             sample_rate: SampleRate::SR_96K,
             block_size: 1024,
             preferred_format: FloatWidth::F64,
-            shm_name: "test_shm".to_string(),
             state: None,
         };
 

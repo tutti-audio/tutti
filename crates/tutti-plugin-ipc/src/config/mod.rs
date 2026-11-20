@@ -14,5 +14,4 @@ pub mod audio;
 pub mod bridge;
 
 pub use audio::AudioConfig;
-pub(crate) use bridge::unique_name;
 pub use bridge::{IpcConfig, RandomSourceError, unique_socket_path};

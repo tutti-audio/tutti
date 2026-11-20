@@ -58,7 +58,7 @@ pub use exit::{ExitWait, HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
-pub use mapping::{MappingWriter, SharedMapping};
+pub use mapping::{MappingWriter, SharedMapping, SlabHandle};
 pub use os::*;
 pub use reaped::Reaped;
 pub use wakeups::{FdId, Interest, Ready, Watch};
@@ -75,6 +75,9 @@ pub enum SlabError {
         #[source]
         source: std::io::Error,
     },
+    /// The operating system's random source could not name a new slab.
+    #[error("failed to draw a name for the slab: {0}")]
+    Name(getrandom::Error),
     /// The peer's slab is shorter than the layout this side expects.
     #[error("slab is {actual} bytes, layout needs {expected}")]
     Short {

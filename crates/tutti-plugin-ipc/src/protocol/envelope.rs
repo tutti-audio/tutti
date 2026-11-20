@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
+use crate::SlabHandle;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MidiEventVec;
@@ -217,9 +218,6 @@ pub enum ControlRequest {
         /// with what it actually negotiated.
         #[serde(default = "default_format")]
         preferred_format: FloatWidth,
-        /// Name of the shared-memory audio slab, empty if not yet set up.
-        #[serde(default)]
-        shm_name: String,
         /// The state this load restores, staged before it
         /// ([`StageStateChunk`](Self::StageStateChunk)): what the host expects the
         /// server to hold. The server refuses a load whose declaration and stage
@@ -289,8 +287,8 @@ pub enum ControlRequest {
     },
     /// Point the subprocess at the shared-memory audio slab.
     SetupSharedMemory {
-        /// OS name of the shared-memory object to map.
-        shm_name: String,
+        /// The slab to map, as its creator handed it out.
+        slab: SlabHandle,
         /// Region geometry, which both sides must agree on exactly.
         layout: SlabLayout,
     },

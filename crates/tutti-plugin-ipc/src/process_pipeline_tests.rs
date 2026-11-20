@@ -36,7 +36,7 @@ use crate::unique_socket_path;
 use crate::{
     AudioReply, AudioRequest, ControlFrame, Framed, PROTOCOL_VERSION, Request, SlabLayout,
 };
-use crate::{AudioSlab, BATCH_OUTCOMES, Chunks, RING_SLOTS, Replies, SlabWriter};
+use crate::{AudioSlab, BATCH_OUTCOMES, Chunks, RING_SLOTS, Replies, SlabHandle, SlabWriter};
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
@@ -276,11 +276,10 @@ fn bridge_with_server_mode(
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let out_channels: usize = layout.outputs.iter().map(|l| l.count() as usize).sum();
-    let shm_name = tutti_fixtures::unique_name("test_process-sync");
-    let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
+    let (host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
     // The server side maps the SAME backing file as a view, mirroring the real
     // subprocess: audio travels in shared memory, not over the socket.
-    let mut server_slab = AudioSlab::open(shm_name, layout).unwrap();
+    let mut server_slab = AudioSlab::open(&handle, layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
@@ -719,7 +718,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
     /// Shares a ring slot with seq 1 — the block the host collects second.
     const DECOY_SEQ: u64 = 1 + RING_SLOTS as u64;
 
-    let (bridge, mut bridge_thread, slab, replies) = bridge_with_no_server();
+    let (bridge, mut bridge_thread, slab, handle, replies) = bridge_with_no_server();
     let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(
         CHANNELS,
@@ -741,7 +740,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
 
     // The decoy is what a server would have published: written through the
     // server's end of the slab, the output writer `open` hands back.
-    let mut server = AudioSlab::open(host_slab.name(), host_slab.layout()).unwrap();
+    let mut server = AudioSlab::open(&handle, host_slab.layout()).unwrap();
     for ch in 0..CHANNELS {
         server.write(DECOY_SEQ, ch, &[DECOY; BATCH_SIZE]).unwrap();
     }
@@ -810,13 +809,18 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
 ///
 /// Returned deliberately without a server thread — the point is a bridge that
 /// never publishes to the slab.
-fn bridge_with_no_server() -> (Arc<PluginBridge>, IpcThread, SlabWriter, Replies) {
+fn bridge_with_no_server() -> (
+    Arc<PluginBridge>,
+    IpcThread,
+    SlabWriter,
+    SlabHandle,
+    Replies,
+) {
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
 
     let layout = stereo_layout();
-    let shm_name = tutti_fixtures::unique_name("test_no-server");
-    let host_slab = AudioSlab::create(shm_name, layout).unwrap();
+    let (host_slab, handle) = AudioSlab::create(layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path,
@@ -832,7 +836,7 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, IpcThread, SlabWriter, Replies
     )
     .unwrap();
 
-    (bridge, bridge_thread, host_slab, replies)
+    (bridge, bridge_thread, host_slab, handle, replies)
 }
 
 /// Drive `blocks` blocks through `batcher`, asserting nothing but that it runs.
@@ -1184,7 +1188,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
 /// path into `silence_block`.
 #[test]
 fn silence_on_a_missing_reply_does_not_allocate() {
-    let (bridge, mut bridge_thread, slab, replies) = bridge_with_no_server();
+    let (bridge, mut bridge_thread, slab, _handle, replies) = bridge_with_no_server();
     let mut batcher = Batcher::new(
         CHANNELS,
         CHANNELS,
@@ -1242,7 +1246,7 @@ fn silence_on_a_missing_reply_does_not_allocate() {
 /// the claim in the name, and it is the claim being checked.
 #[test]
 fn silence_on_a_crashed_bridge_does_not_allocate() {
-    let (bridge, mut bridge_thread, slab, replies) = bridge_with_no_server();
+    let (bridge, mut bridge_thread, slab, _handle, replies) = bridge_with_no_server();
     let mut batcher = Batcher::new(
         CHANNELS,
         CHANNELS,
@@ -1550,9 +1554,8 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let layout = stereo_layout();
-    let shm_name = tutti_fixtures::unique_name("test_stamped");
-    let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
-    let mut server_slab = AudioSlab::open(shm_name, layout).unwrap();
+    let (host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
+    let mut server_slab = AudioSlab::open(&handle, layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
@@ -1820,8 +1823,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
     let _lock = machine_lock();
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
-    let slab =
-        AudioSlab::create(tutti_fixtures::unique_name("test_refused"), stereo_layout()).unwrap();
+    let (slab, _handle) = AudioSlab::create(stereo_layout()).unwrap();
     let (bridge, _thread, replies) = PluginBridge::new(
         path,
         tutti_plugin_types::PluginRef::file("test.vst3"),

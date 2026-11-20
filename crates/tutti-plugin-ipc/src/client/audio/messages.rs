@@ -2,6 +2,7 @@
 //! Distinct from wire-format `AudioRequest`/`ControlRequest` and their replies in `protocol/`.
 
 use super::ask::Reply;
+use crate::SlabHandle;
 use dpi::Size;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, PluginFailure, ResyncKind, StateError, StateUse,
@@ -145,10 +146,10 @@ pub(super) enum ControlCommand {
         id: PresetId,
         reply: Reply<bool>,
     },
-    /// Tell the server to open the slab named `shm_name` and render through
+    /// Tell the server to open the slab `slab` names and render through
     /// it from its next block: answered `true` once it has.
     SetupSharedMemory {
-        shm_name: String,
+        slab: SlabHandle,
         layout: crate::SlabLayout,
         reply: Reply<bool>,
     },

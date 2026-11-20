@@ -549,7 +549,7 @@ mod tests {
     /// saved state: the preset is read from the live plugin at the gather.
     #[test]
     fn a_served_forks_capture_carries_the_live_preset() {
-        let rig = rig("preset");
+        let rig = rig();
         let capture = source_over(&rig).capture(ForkMode::Live).expect("captures");
         let (preset, state) = restored_with(&capture);
         assert_eq!(preset, Some(PresetId::Number(PRESET)));
@@ -560,7 +560,7 @@ mod tests {
     /// reports as current.
     #[test]
     fn a_plugin_without_preset_loading_forks_without_a_preset() {
-        let rig = rig("no_preset");
+        let rig = rig();
         let mut source = source_over(&rig);
         source.features = Features::empty();
         let capture = source.capture(ForkMode::Live).expect("captures");
@@ -572,7 +572,7 @@ mod tests {
     /// and an offline fork is offline either way.
     #[test]
     fn a_served_live_fork_keeps_the_live_render_mode() {
-        let rig = rig("mode");
+        let rig = rig();
         let source = source_over(&rig);
         let live = source.capture(ForkMode::Live).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told nothing: realtime");

@@ -28,6 +28,7 @@ mod progress;
 mod thread;
 
 use crate::ServerWatch;
+use crate::SlabHandle;
 use crate::SlabLayout;
 use dpi::Size;
 use tutti_plugin_types::{
@@ -985,17 +986,17 @@ impl AudioBridge {
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)
     }
 
-    /// Has the server open the slab `shm_name` (laid out as `layout`) and
+    /// Has the server open the slab `slab` names (laid out as `layout`) and
     /// render through it from its next block. `true` once it has; `false` when
     /// it refused, did not answer within [`Timeouts::param`](tutti_plugin_types::Timeouts::param) or is gone.
     /// Control thread; the old slab stays valid until the caller drops it.
-    pub(crate) fn setup_shared_memory(&self, shm_name: String, layout: SlabLayout) -> bool {
+    pub(crate) fn setup_shared_memory(&self, slab: SlabHandle, layout: SlabLayout) -> bool {
         if self.lifecycle.is_crashed() {
             return false;
         }
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
             ControlCommand::SetupSharedMemory {
-                shm_name,
+                slab,
                 layout,
                 reply,
             }

@@ -255,7 +255,6 @@ impl Session {
                 sample_rate,
                 block_size,
                 preferred_format,
-                shm_name: _,
                 state,
             } => self.handle_load(
                 main,
@@ -444,10 +443,10 @@ impl Session {
                 bytes,
             } => Ok(self.handle_stage_state_chunk(seq, total, last, &bytes)),
 
-            M::SetupSharedMemory { shm_name, layout } => {
+            M::SetupSharedMemory { slab, layout } => {
                 // A slab this side cannot open is the host's to hear of: a reply,
                 // not the end of the session.
-                match AudioSlab::open(shm_name, layout) {
+                match AudioSlab::open(&slab, layout) {
                     Ok(slab) => {
                         // The scratch is sized here, to the most a block may
                         // carry; the render thread refuses any block longer.
@@ -1134,7 +1133,7 @@ mod tests {
     /// `write` first, as a UI parameter write just before a snapshot), and
     /// reports whether any block was silent.
     #[cfg(feature = "clap")]
-    fn save_during_playback(name: &str, write: bool) -> SteadySave {
+    fn save_during_playback(write: bool) -> SteadySave {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         // The first blocks warm the render side up and are dropped from the
@@ -1158,7 +1157,7 @@ mod tests {
             1,
             0,
         );
-        let (mut s, mut shm) = load_clap(name, FloatWidth::F32);
+        let (mut s, mut shm) = load_clap(FloatWidth::F32);
         let before = save_state_bytes(&mut s);
 
         let side = Arc::clone(&s.side);
@@ -1271,7 +1270,7 @@ mod tests {
     #[test]
     #[cfg(feature = "clap")]
     fn a_save_after_a_write_during_playback_sees_it_and_silences_no_block() {
-        let r = save_during_playback("save_write", true);
+        let r = save_during_playback(true);
         assert_ne!(r.before, r.after, "the save has the write");
         let silent = r.silent.iter().filter(|&&s| s).count();
         assert_eq!(silent, 0, "{silent} blocks were silent around the save");
@@ -1292,7 +1291,7 @@ mod tests {
     #[test]
     #[cfg(feature = "clap")]
     fn a_save_with_no_write_pending_recalls_nothing() {
-        let r = save_during_playback("save_plain", false);
+        let r = save_during_playback(false);
         assert_eq!(r.before, r.after);
         let silent = r.silent.iter().filter(|&&s| s).count();
         assert_eq!(silent, 0, "{silent} blocks were silent around the save");
@@ -1304,7 +1303,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_save_after_a_write_with_no_blocks_sees_it() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("save_quiet", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         let before = save_state_bytes(&mut s);
         let r = s
             .handle_audio(apply_parameter(77, 0.25))
@@ -1488,7 +1487,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_process_request_from_a_plugin_thread_rings_the_bell_and_tells_the_host_once() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("process_requested", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         let main = main_thread();
         assert!(!s.ties().bell.rung(), "nothing asked yet");
         assert!(
@@ -1522,13 +1521,13 @@ mod tests {
             vec![tutti_plugin_types::ChannelLayout::STEREO],
             vec![tutti_plugin_types::ChannelLayout::STEREO],
         );
+        // A handle whose slab is gone: made, then every mapping of it dropped.
+        let (owner, gone) = AudioSlab::create(layout.clone()).unwrap();
+        drop(owner);
         let reply = s
             .handle(
                 main_thread(),
-                ControlRequest::SetupSharedMemory {
-                    shm_name: format!("tutti_no_such_slab_{}", std::process::id()),
-                    layout,
-                },
+                ControlRequest::SetupSharedMemory { slab: gone, layout },
             )
             .expect("a refused slab is a reply, not a failure of the session");
         assert!(
@@ -1548,7 +1547,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_session_reports_a_lost_clap_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("lost_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         assert!(!s.plugin_lost());
         s.lose_plugin();
         assert!(s.plugin_lost());
@@ -1559,7 +1558,7 @@ mod tests {
     #[cfg(feature = "vst3")]
     fn a_session_reports_a_lost_vst3_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_vst3_probe("lost_vst3");
+        let (mut s, _shm) = load_vst3_probe();
         assert!(!s.plugin_lost());
         s.lose_plugin();
         assert!(s.plugin_lost());
@@ -1590,7 +1589,7 @@ mod tests {
         #[test]
         fn a_window_number_that_means_nothing_here_is_refused_as_foreign() {
             let _lock = crate::test_utils::plugin_load_lock();
-            let (mut s, _shm) = load_clap("foreign_window", FloatWidth::F32);
+            let (mut s, _shm) = load_clap(FloatWidth::F32);
             let raw = 0x40_0001;
             let scale = tutti_plugin_types::ContentScale::IDENTITY;
             assert!(matches!(
@@ -1635,7 +1634,6 @@ mod tests {
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
-                    shm_name: "x".into(),
                     state: None,
                 },
             )
@@ -1668,7 +1666,7 @@ mod tests {
     /// Returns (session, shm_guard). The guard keeps the creator-side mmap
     /// alive while the session holds its own mapping.
     #[cfg(feature = "clap")]
-    fn load_clap(name: &str, preferred_format: FloatWidth) -> (Rig, SlabWriter) {
+    fn load_clap(preferred_format: FloatWidth) -> (Rig, SlabWriter) {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
@@ -1679,13 +1677,11 @@ mod tests {
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
                 preferred_format,
-                shm_name: name.to_string(),
                 state: None,
             },
         )
         .unwrap();
 
-        let buffer_name = format!("tutti_vst_buffer_{}_{}", name, std::process::id());
         // The negotiated format, not the requested one, as the host's
         // `setup_shm` sizes the slab.
         let loaded = s.plugin.as_ref().unwrap().plugin().loaded();
@@ -1695,8 +1691,8 @@ mod tests {
             loaded.input_widths(),
             loaded.output_widths(),
         );
-        let shm_guard = AudioSlab::create(buffer_name.clone(), layout.clone()).unwrap();
-        s.attach(AudioSlab::open(buffer_name, layout).unwrap());
+        let (shm_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        s.attach(AudioSlab::open(&handle, layout).unwrap());
         (s, shm_guard)
     }
 
@@ -1713,7 +1709,6 @@ mod tests {
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
-                    shm_name: "choosing".to_string(),
                     state: None,
                 },
             )
@@ -1796,7 +1791,7 @@ mod tests {
         let _render = crate::test_utils::clap_probe_render_mode(
             tutti_clap_test_plugin::RenderMode::TagPassthrough as u32,
         );
-        let (mut s, mut shm) = load_clap("rate_refusal_cycle", FloatWidth::F64);
+        let (mut s, mut shm) = load_clap(FloatWidth::F64);
         assert_eq!(s.clock.format, FloatWidth::F64, "fixture");
         let set = |s: &mut Rig, rate: f64| {
             s.handle(
@@ -1874,7 +1869,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn load_clap_plugin_f64() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (s, _shm) = load_clap("load_clap_f64", FloatWidth::F64);
+        let (s, _shm) = load_clap(FloatWidth::F64);
         let loaded = s.plugin.as_ref().unwrap().plugin().loaded();
         assert!(!loaded.features.contains(Features::F64_AUDIO));
         assert_eq!(s.clock.format, FloatWidth::F32);
@@ -1891,7 +1886,7 @@ mod tests {
     /// does. The render mode goes back to `Inert` when the guard drops, on a
     /// failed assertion too.
     #[cfg(feature = "clap")]
-    fn clap_round_trip<T>(name: &str, mask: u32, format: FloatWidth, input: T) -> RoundTrip<T>
+    fn clap_round_trip<T>(mask: u32, format: FloatWidth, input: T) -> RoundTrip<T>
     where
         T: tutti_buffers::Float,
     {
@@ -1900,7 +1895,7 @@ mod tests {
         let _render = crate::test_utils::clap_probe_render_mode(
             tutti_clap_test_plugin::RenderMode::TagPassthrough as u32,
         );
-        let (mut s, mut shm) = load_clap(name, format);
+        let (mut s, mut shm) = load_clap(format);
         for ch in 0..shm.layout_ref().input_channels() {
             shm.write::<T>(SEQ, ch, &[input; F64_FRAMES]).unwrap();
         }
@@ -1960,7 +1955,7 @@ mod tests {
         use tutti_clap_test_plugin::Site;
 
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("reset_reaches_the_plugin", FloatWidth::F32);
+        let (mut s, mut shm) = load_clap(FloatWidth::F32);
         let visits = |site: Site| clap_probe_sites().sites[site as usize].visits;
         let resets_at_load = visits(Site::Reset);
         let processes_at_load = visits(Site::Process);
@@ -2025,7 +2020,7 @@ mod tests {
         use tutti_clap_test_plugin::Site;
 
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("block_bounds", FloatWidth::F32);
+        let (mut s, mut shm) = load_clap(FloatWidth::F32);
         let visits = |site: Site| clap_probe_sites().sites[site as usize].visits;
         let processes_at_load = visits(Site::Process);
 
@@ -2080,7 +2075,7 @@ mod tests {
         use tutti_plugin_types::ChannelLayout;
 
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, matching) = load_clap("layout_gate", FloatWidth::F32);
+        let (mut s, matching) = load_clap(FloatWidth::F32);
         let visits = |site: Site| clap_probe_sites().sites[site as usize].visits;
         let processes_at_load = visits(Site::Process);
         let layout = tutti_plugin_ipc::SlabLayout {
@@ -2090,9 +2085,8 @@ mod tests {
             inputs: vec![ChannelLayout::STEREO],
             outputs: vec![ChannelLayout::MONO],
         };
-        let name = format!("tutti_layout_gate_mono_{}", std::process::id());
-        let mut host = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        s.attach(AudioSlab::open(name, layout).unwrap());
+        let (mut host, handle) = AudioSlab::create(layout.clone()).unwrap();
+        s.attach(AudioSlab::open(&handle, layout).unwrap());
 
         let block = |s: &mut Rig, host: &mut SlabWriter, seq: u64, channels: usize| {
             for ch in 0..channels {
@@ -2130,9 +2124,8 @@ mod tests {
             "the block never reached the plugin"
         );
 
-        let mut matching = matching;
-        let name = format!("tutti_vst_buffer_layout_gate_{}", std::process::id());
-        s.attach(AudioSlab::open(name, matching.layout()).unwrap());
+        let (mut matching, handle) = AudioSlab::create(matching.layout()).unwrap();
+        s.attach(AudioSlab::open(&handle, matching.layout()).unwrap());
         assert!(
             block(&mut s, &mut matching, 2, 2),
             "the matching slab renders"
@@ -2168,7 +2161,7 @@ mod tests {
             f64_audio,
             out,
             ..
-        } = clap_round_trip("f32_session_64bit_clap", both, FloatWidth::F32, 0.5f32);
+        } = clap_round_trip(both, FloatWidth::F32, 0.5f32);
         assert_eq!(format, FloatWidth::F32);
         assert!(!f64_audio, "activated f64 for an f32 session");
         for (ch, samples) in out.iter().enumerate() {
@@ -2199,7 +2192,7 @@ mod tests {
             f64_audio,
             out,
             ..
-        } = clap_round_trip("f64_session_64bit_clap", both, FloatWidth::F64, 0.1f64);
+        } = clap_round_trip(both, FloatWidth::F64, 0.1f64);
         assert_eq!(format, FloatWidth::F64);
         assert!(f64_audio);
         for (ch, samples) in out.iter().enumerate() {
@@ -2226,7 +2219,6 @@ mod tests {
             out,
             ..
         } = clap_round_trip(
-            "f64_session_f32_inputs_clap",
             tutti_clap_test_plugin::PORTS_64BIT_OUTPUTS,
             FloatWidth::F64,
             0.5f32,
@@ -2261,7 +2253,6 @@ mod tests {
             outputs,
             out,
         } = clap_round_trip(
-            "f64_clap_instrument",
             tutti_clap_test_plugin::PORTS_64BIT_OUTPUTS,
             FloatWidth::F64,
             0.1f64,
@@ -2295,7 +2286,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn the_parameter_list_is_the_plugins_declared_table_in_its_order() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("get_param_list_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         let reply = s
             .handle(main_thread(), ControlRequest::GetParameterList)
             .unwrap()
@@ -2317,7 +2308,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_parameter_reads_as_its_declared_default_normalized() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("get_param_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         let reply = s
             .handle(
                 main_thread(),
@@ -2342,7 +2333,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_parameter_write_reaches_the_plugin_and_reads_back() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("set_param_clap", FloatWidth::F32);
+        let (mut s, mut shm) = load_clap(FloatWidth::F32);
         let param_id = ParamId::new(CUTOFF);
         let r = s
             .handle_audio(apply_parameter(param_id.get(), 0.25))
@@ -2476,7 +2467,6 @@ mod tests {
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
-                    shm_name: "staged".into(),
                     state: declared,
                 },
             )
@@ -2498,7 +2488,6 @@ mod tests {
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
-                shm_name: "x".into(),
                 state: declared,
             },
         )
@@ -2615,7 +2604,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_staged_state_is_restored_by_the_next_load() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut source, _shm) = load_clap("stage_source", FloatWidth::F32);
+        let (mut source, _shm) = load_clap(FloatWidth::F32);
         let own = save_state_bytes(&mut source);
 
         let mut s = Rig::new();
@@ -2664,7 +2653,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_stateful_load_announces_the_restore() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut source, _shm) = load_clap("announce_source", FloatWidth::F32);
+        let (mut source, _shm) = load_clap(FloatWidth::F32);
         let own = save_state_bytes(&mut source);
         let load = |s: &mut Rig, declared: Option<StagedState>| {
             let mut heard = Vec::new();
@@ -2678,7 +2667,6 @@ mod tests {
                         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                         block_size: 512,
                         preferred_format: FloatWidth::F32,
-                        shm_name: "announce".into(),
                         state: declared,
                     },
                     &mut |m| heard.push(m),
@@ -2736,7 +2724,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn save_load_state() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("save_load_state_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         let data = save_state_bytes(&mut s);
         let r = load_state_bytes(&mut s, &data);
         assert_state_loaded(r);
@@ -2750,7 +2738,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn save_load_state_round_trips_byte_exact() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("rt_state_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
 
         let first = save_state_bytes(&mut s);
         assert_state_loaded(load_state_bytes(&mut s, &first));
@@ -2770,7 +2758,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn set_sample_rate_with_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("set_sr_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         let r = s
             .handle(
                 main_thread(),
@@ -2787,7 +2775,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn unload_loaded_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("unload_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         assert!(s.plugin.is_some());
         assert!(s.side().has_slab());
         let r = s
@@ -2802,7 +2790,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn process_audio_with_plugin() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("proc_audio_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         let reply = s
             .handle_audio(AudioRequest::ProcessAudio(
                 tutti_plugin_ipc::ProcessAudioData {
@@ -2827,7 +2815,7 @@ mod tests {
     /// The probe bundle `AnyServer::load` picks the format from, as a session
     /// loads it, with a slab sized to what the plugin declared.
     #[cfg(feature = "vst3")]
-    fn load_vst3_probe(name: &str) -> (Rig, SlabWriter) {
+    fn load_vst3_probe() -> (Rig, SlabWriter) {
         let bundle = tutti_plugin_types::bundle::bundle_dir_of(
             std::path::Path::new(crate::test_utils::vst3_probe_path()),
             tutti_plugin_types::bundle::ModuleKind::Vst3,
@@ -2844,7 +2832,6 @@ mod tests {
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
-                shm_name: name.to_string(),
                 state: None,
             },
         )
@@ -2857,9 +2844,8 @@ mod tests {
             inputs: loaded.input_widths(),
             outputs: loaded.output_widths(),
         };
-        let buffer_name = format!("tutti_vst_buffer_{}_{}", name, std::process::id());
-        let guard = AudioSlab::create(buffer_name.clone(), layout.clone()).unwrap();
-        s.attach(AudioSlab::open(buffer_name, layout).unwrap());
+        let (guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        s.attach(AudioSlab::open(&handle, layout).unwrap());
         (s, guard)
     }
 
@@ -2916,7 +2902,7 @@ mod tests {
             // variable holds it. 4 is `kMisbehaveProcessFails`.
             let mut env = tutti_fixtures::ScopedEnv::new();
             env.set("TUTTI_PROBE_MISBEHAVIOUR", "4");
-            let (mut s, mut shm) = load_vst3_probe("fails_vst3");
+            let (mut s, mut shm) = load_vst3_probe();
             drop(env);
             for seq in 1..=3 {
                 assert!(
@@ -2930,7 +2916,7 @@ mod tests {
         };
         assert_eq!(failing, 3);
         // The same server code with a plugin that behaves renders and publishes.
-        let (mut s, mut shm) = load_vst3_probe("renders_vst3");
+        let (mut s, mut shm) = load_vst3_probe();
         assert!(run_silent_block(&mut s, &mut shm, 1, 128));
         assert_eq!(s.render.losses().failed_blocks, 0);
     }
@@ -2945,7 +2931,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_clap_block_the_plugin_fails_is_silence_and_the_server_goes_on() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, mut shm) = load_clap("fails_clap", FloatWidth::F32);
+        let (mut s, mut shm) = load_clap(FloatWidth::F32);
         {
             let _error = crate::test_utils::clap_probe_status_mode(
                 tutti_clap_test_plugin::StatusMode::Error,
@@ -2967,7 +2953,7 @@ mod tests {
     #[cfg(feature = "vst3")]
     fn an_idle_drain_does_not_allocate_vst3() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_vst3_probe("idle_vst3");
+        let (mut s, _shm) = load_vst3_probe();
         // Warm: the first pass sizes the bridge's request buffer.
         assert!(s.drain_async_events(main_thread()).is_empty());
         assert_no_alloc::assert_no_alloc(|| {
@@ -2982,7 +2968,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn an_idle_drain_does_not_allocate_clap() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut s, _shm) = load_clap("idle_clap", FloatWidth::F32);
+        let (mut s, _shm) = load_clap(FloatWidth::F32);
         assert!(s.drain_async_events(main_thread()).is_empty());
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..64 {
@@ -3023,7 +3009,6 @@ mod tests {
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
-                shm_name: "refit_vst3".to_string(),
                 state: None,
             },
         )
@@ -3070,7 +3055,7 @@ mod tests {
     #[cfg(all(feature = "clap", feature = "vst3"))]
     fn the_parameter_count_agrees_with_the_list() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let (s, _shm) = load_clap("count_clap", FloatWidth::F32);
+        let (s, _shm) = load_clap(FloatWidth::F32);
         let clap = s.plugin.as_ref().unwrap().plugin();
         assert!(clap.parameter_count(main_thread()) > 0);
         assert_eq!(

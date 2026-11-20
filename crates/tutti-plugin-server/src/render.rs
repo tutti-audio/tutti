@@ -1188,16 +1188,15 @@ mod tests {
 
     /// A slab of `samples` frames, stereo each way, and the host's end that
     /// keeps its memory alive.
-    fn slab(name: &str, samples: usize) -> (impl Sized, SlabWriter) {
+    fn slab(samples: usize) -> (impl Sized, SlabWriter) {
         let layout = SlabLayout::new(
             samples,
             FloatWidth::F32,
             vec![ChannelLayout::STEREO],
             vec![ChannelLayout::STEREO],
         );
-        let name = format!("tutti_render_{name}_{}", std::process::id());
-        let host = AudioSlab::create(name.clone(), layout.clone()).expect("slab");
-        (host, AudioSlab::open(name, layout).expect("slab"))
+        let (host, handle) = AudioSlab::create(layout.clone()).expect("slab");
+        (host, AudioSlab::open(&handle, layout).expect("slab"))
     }
 
     /// **A drain never allocates or frees**, whatever it applies: a second slab
@@ -1207,12 +1206,12 @@ mod tests {
     #[test]
     fn a_drain_that_replaces_the_slab_refits_the_params_and_changes_format_never_allocates() {
         let (mut link, mut side) = link().expect("bells");
-        let (_first_host, first) = slab("drain_first", 256);
+        let (_first_host, first) = slab(256);
         link.attach_slab(first);
         link.reserve_params(4, 64);
         side.drain();
 
-        let (_second_host, second) = slab("drain_second", 4096);
+        let (_second_host, second) = slab(4096);
         link.attach_slab(second);
         link.fit_params(300);
         link.set_format(FloatWidth::F64);
@@ -1314,7 +1313,7 @@ mod tests {
                 .expect("the audio transport");
             let thread = RenderThread::spawn(side, Some(Box::new(audio))).expect("the thread");
 
-            let (_slab_host, slab) = slab("wake", 256);
+            let (_slab_host, slab) = slab(256);
             let settle = link.ties().settle.clone();
             let seen = settle.seen();
             link.attach_slab(slab);
@@ -1450,9 +1449,9 @@ mod tests {
 
     /// A render side with a stereo slab and `plugin` seated, and the host's
     /// end of the slab.
-    fn seated(name: &str, plugin: Faulty) -> (RenderLink, RenderSide, impl Sized) {
+    fn seated(plugin: Faulty) -> (RenderLink, RenderSide, impl Sized) {
         let (mut link, mut side) = link().expect("bells");
-        let (host, writer) = slab(name, FRAMES);
+        let (host, writer) = slab(FRAMES);
         link.attach_slab(writer);
         link.send(ToRender::Config(RenderConfig {
             max_block: FRAMES,
@@ -1503,7 +1502,7 @@ mod tests {
             );
         };
         tracing::subscriber::with_default(CountEvents(Arc::clone(&events)), || {
-            let (mut link, mut side, _host) = seated("quiet", Faulty::new(Mode::Fail));
+            let (mut link, mut side, _host) = seated(Faulty::new(Mode::Fail));
             let mut filled = 0;
             on_render_thread(&mut || filled = fill_back_queue(&mut side, &link));
             // A plugin that fails: each failure's cause would go home, and
@@ -1596,7 +1595,7 @@ mod tests {
         let errors = (0..BLOCKS)
             .map(|i| PluginError::Other(format!("the plugin failed block {i}")))
             .collect();
-        let (link, mut side, _host) = seated("owned_errors", Faulty::new(Mode::Owned(errors)));
+        let (link, mut side, _host) = seated(Faulty::new(Mode::Owned(errors)));
         let filled = fill_back_queue(&mut side, &link);
         assert_no_alloc::assert_no_alloc(|| {
             for seq in 1..=BLOCKS as u64 {
@@ -1615,7 +1614,7 @@ mod tests {
     /// a plugin failing every block is not a flood of hand-backs.
     #[test]
     fn a_failed_blocks_cause_goes_home_on_a_doubling_schedule() {
-        let (mut link, mut side, _host) = seated("failing_causes", Faulty::new(Mode::Fail));
+        let (mut link, mut side, _host) = seated(Faulty::new(Mode::Fail));
         // The seat and slab hand-backs of the setup are home already.
         while link.back.pop().is_some() {}
         for seq in 1..=9 {
@@ -1638,7 +1637,7 @@ mod tests {
     fn the_final_counts_are_reported_when_they_differ_from_the_last_report() {
         let events = Arc::new(AtomicUsize::new(0));
         tracing::subscriber::with_default(CountEvents(Arc::clone(&events)), || {
-            let (mut link, mut side, _host) = seated("final", Faulty::new(Mode::Fail));
+            let (mut link, mut side, _host) = seated(Faulty::new(Mode::Fail));
             for seq in 1..=2 {
                 side.handle(block(seq)).expect("answered");
             }
@@ -1738,7 +1737,7 @@ mod tests {
     /// a decode of points still allocates (see `PointBuf`'s `Deserialize`).
     #[test]
     fn a_step_with_extras_reads_decodes_renders_and_answers_without_allocating() {
-        let (mut link, mut side, _host) = seated("step_alloc", Faulty::new(Mode::Alternate));
+        let (mut link, mut side, _host) = seated(Faulty::new(Mode::Alternate));
         let mut block = ProcessAudioData {
             seq: 1,
             num_samples: FRAMES,

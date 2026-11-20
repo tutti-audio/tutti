@@ -19,6 +19,9 @@ memmap2 = "0.9"
 # The header's per-architecture cache-line padding.
 crossbeam-utils = "0.8"
 thiserror = "2"
+# The slab handle crosses the control wire; the slab's fresh name.
+serde = { version = "1", features = ["derive"] }
+getrandom = "0.4"
 # `spawn_named`: the host-watch thread; `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 

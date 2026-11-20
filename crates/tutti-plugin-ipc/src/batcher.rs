@@ -830,31 +830,28 @@ impl Batcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AudioSlab;
     use crate::client::audio::response_ring;
+    use crate::{AudioSlab, SlabHandle};
     use tutti_plugin_types::MAX_CHUNK;
 
     /// A real slab's input writer, `samples` frames per channel, stereo both
     /// ways: these tests stage nothing, but a batcher cannot exist without the
     /// writer its chunks go through.
     fn slab(samples: usize) -> SlabWriter {
-        slab_of(samples, FloatWidth::F32)
+        slab_of(samples, FloatWidth::F32).0
     }
 
-    /// [`slab`] with the wire's format `format`.
-    fn slab_of(samples: usize, format: FloatWidth) -> SlabWriter {
-        let name = tutti_fixtures::unique_name("batcher");
+    /// [`slab`] with the wire's format `format`, and the handle a server opens
+    /// it with.
+    fn slab_of(samples: usize, format: FloatWidth) -> (SlabWriter, SlabHandle) {
         let stereo = tutti_plugin_types::ChannelLayout::STEREO;
-        AudioSlab::create(
-            name,
-            crate::SlabLayout {
-                samples_per_channel: samples,
-                format,
-                slots: crate::RING_SLOTS as u32,
-                inputs: vec![stereo],
-                outputs: vec![stereo],
-            },
-        )
+        AudioSlab::create(crate::SlabLayout {
+            samples_per_channel: samples,
+            format,
+            slots: crate::RING_SLOTS as u32,
+            inputs: vec![stereo],
+            outputs: vec![stereo],
+        })
         .unwrap()
     }
 
@@ -872,8 +869,8 @@ mod tests {
     /// writes.
     #[test]
     fn the_output_is_read_from_the_slab_given_and_a_missing_channel_is_silence() {
-        let writer = slab(MAX_CHUNK);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F32);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         server.write(1, 0, &[0.5f32; 8]).unwrap();
         server.publish(1);
         let mut rows = Rows::<f32>::new(0, 3, MAX_CHUNK);
@@ -891,8 +888,8 @@ mod tests {
     /// the slab lacks, and the others still play.**
     #[test]
     fn a_channel_the_slab_lacks_is_counted_as_missed() {
-        let writer = slab(MAX_CHUNK);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F32);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         for ch in 0..2 {
             server.write(1, ch, &[0.25f32; 8]).unwrap();
         }
@@ -931,8 +928,8 @@ mod tests {
     #[test]
     fn a_64_bit_block_through_a_64_bit_wire_is_bit_exact() {
         assert_ne!(FINE as f32 as f64, FINE, "the value must not fit in f32");
-        let mut writer = slab_of(MAX_CHUNK, FloatWidth::F64);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (mut writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F64);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         let mut rows = Rows::<f64>::new(2, 2, MAX_CHUNK);
 
         let src = [FINE; 8];
@@ -965,8 +962,8 @@ mod tests {
     #[test]
     fn a_64_bit_block_through_a_32_bit_wire_is_narrowed_by_the_sample_rule() {
         use tutti_buffers::Sample;
-        let mut writer = slab(MAX_CHUNK);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (mut writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F32);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         let mut rows = Rows::<f32>::new(1, 1, MAX_CHUNK);
 
         let src = [FINE, -FINE, 0.1, 0.3];

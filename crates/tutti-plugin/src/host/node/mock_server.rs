@@ -191,8 +191,8 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
     }
 }
 
-pub(super) fn rig(label: &str) -> Rig {
-    rig_gated(label, None)
+pub(super) fn rig() -> Rig {
+    rig_gated(None)
 }
 
 /// What holds a mock server's replies: the server signals `published` once a
@@ -204,17 +204,16 @@ pub(super) struct ReplyGate {
 }
 
 /// [`rig`] whose server holds each block's reply behind `gate`, if given.
-pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
+pub(super) fn rig_gated(gate: Option<ReplyGate>) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-    let shm = tutti_fixtures::unique_name(&format!("diff_{label}"));
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
         .name(tutti_plugin_ipc::socket_name(&path).unwrap())
         .create_sync()
         .unwrap();
-    let slab = AudioSlab::create(shm.clone(), layout()).unwrap();
-    let server_slab = AudioSlab::open(shm, layout()).unwrap();
+    let (slab, handle) = AudioSlab::create(layout()).unwrap();
+    let server_slab = AudioSlab::open(&handle, layout()).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
         tutti_plugin_types::PluginRef::file("test.vst3"),

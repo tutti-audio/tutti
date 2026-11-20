@@ -36,6 +36,10 @@
 //! or racing peer yields wrong audio, which the recheck then discards, never an
 //! invalid value on this side.
 //!
+//! A slab is made with [`MappingWriter::create`], which returns the
+//! [`SlabHandle`] the peer opens it with; no caller names, spells or builds
+//! one.
+//!
 //! The backing file's platform is one module, chosen once above: where it lives,
 //! how it is opened, and what keeps it from outliving its last mapping.
 
@@ -49,8 +53,10 @@ mod platform;
 use crate::SlabError;
 use crate::header::{SLAB_HEADER_BYTES, SlabHeader};
 use memmap2::MmapRaw;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A mapped slab: a [`SlabHeader`] at offset 0, then the data region.
 ///
@@ -80,6 +86,36 @@ pub struct MappingWriter {
     mapping: Arc<SharedMapping>,
 }
 
+/// What a peer needs to open a slab made by [`MappingWriter::create`]: handed
+/// out by `create`, sent to the peer, and taken by [`MappingWriter::open`].
+///
+/// Opaque: its contents are private to this module, so nothing outside can
+/// read or construct one. It serializes as the one value a peer needs; a
+/// peer's bytes that name nothing fail at `open`, never as a default.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlabHandle {
+    /// The backing file's name in the platform's shared directory.
+    name: String,
+}
+
+impl SlabHandle {
+    /// A fresh name: the process id, a per-process count and sixty-four random
+    /// bits, so no two slabs this process makes meet and a peer cannot guess it.
+    fn fresh() -> Result<Self, SlabError> {
+        static COUNT: AtomicU64 = AtomicU64::new(0);
+        let mut bytes = [0u8; 8];
+        getrandom::fill(&mut bytes).map_err(SlabError::Name)?;
+        Ok(Self {
+            name: format!(
+                "tutti_plugin-{}-{}-{:016x}",
+                std::process::id(),
+                COUNT.fetch_add(1, Ordering::Relaxed),
+                u64::from_ne_bytes(bytes),
+            ),
+        })
+    }
+}
+
 /// Whether [`platform::open_file`] creates the backing file or opens the peer's.
 enum Open {
     Create,
@@ -87,8 +123,8 @@ enum Open {
 }
 
 impl MappingWriter {
-    /// Creates the slab named `name`, `size` bytes long, maps it and stamps its
-    /// header, before any peer can know the name.
+    /// Creates a slab `size` bytes long, maps it and stamps its header, before
+    /// any peer holds its [`SlabHandle`], which is returned beside the writer.
     ///
     /// The file is created exclusively, at 0600 on unix (the temp directory's
     /// ACL on Windows): a name that already exists (a symlink included) is an
@@ -100,6 +136,7 @@ impl MappingWriter {
     ///
     /// # Errors
     ///
+    /// [`SlabError::Name`] if the random source fails, and
     /// [`SlabError::File`] if the file exists or cannot be created, sized or
     /// mapped.
     ///
@@ -107,17 +144,18 @@ impl MappingWriter {
     ///
     /// If `size` is smaller than [`SLAB_HEADER_BYTES`]: the caller sizes the
     /// slab from a layout that always includes the header.
-    pub fn create(name: &str, size: usize) -> Result<Self, SlabError> {
-        let (file, backing) = platform::open_file(name, size, Open::Create)?;
+    pub fn create(size: usize) -> Result<(Self, SlabHandle), SlabError> {
+        let handle = SlabHandle::fresh()?;
+        let (file, backing) = platform::open_file(&handle.name, size, Open::Create)?;
         let writer = Self::map(file, backing)?;
-        // Stamp before anyone can open it: the peer is told the slab's name only
+        // Stamp before anyone can open it: the peer gets the handle only
         // after this returns, and `initialize` releases the magic last so an
         // opener that sees the magic sees a fully written header.
         writer.mapping.header().initialize();
-        Ok(writer)
+        Ok((writer, handle))
     }
 
-    /// Opens the peer's slab named `name`, checking that it is at least `size`
+    /// Opens the peer's slab that `handle` names, checking that it is at least `size`
     /// bytes and a tutti slab of this build's header.
     ///
     /// On unix a symlink at the name is refused (`O_NOFOLLOW`).
@@ -133,8 +171,8 @@ impl MappingWriter {
     /// # Panics
     ///
     /// As for [`create`](Self::create).
-    pub fn open(name: &str, size: usize) -> Result<Self, SlabError> {
-        let (file, backing) = platform::open_file(name, size, Open::Existing)?;
+    pub fn open(handle: &SlabHandle, size: usize) -> Result<Self, SlabError> {
+        let (file, backing) = platform::open_file(&handle.name, size, Open::Existing)?;
         let actual = file
             .metadata()
             .map_err(|source| SlabError::File {
@@ -284,8 +322,11 @@ mod tests {
     use super::*;
     use crate::header::SLAB_MAGIC;
 
-    fn name(tag: &str) -> String {
-        format!("ffi_{tag}_{}", std::process::id())
+    /// A handle naming `name`, for a file the test made itself.
+    fn handle_of(name: &str) -> SlabHandle {
+        SlabHandle {
+            name: name.to_owned(),
+        }
     }
 
     /// The mapping's copies refuse the header's bytes: the header is only ever
@@ -294,8 +335,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "outside the data region")]
     fn a_copy_into_the_header_panics() {
-        let n = name("hdr");
-        let mut w = MappingWriter::create(&n, SLAB_HEADER_BYTES + 64).unwrap();
+        let (mut w, _handle) = MappingWriter::create(SLAB_HEADER_BYTES + 64).unwrap();
         w.write(0, &[0u8; 8]);
     }
 
@@ -304,9 +344,8 @@ mod tests {
     /// load-bearing. Read from the file, not through the header type.
     #[test]
     fn the_magic_sits_at_offset_zero() {
-        let n = name("magic");
-        let _w = MappingWriter::create(&n, SLAB_HEADER_BYTES + 64).unwrap();
-        let bytes = std::fs::read(platform::path(&n)).unwrap();
+        let (_w, handle) = MappingWriter::create(SLAB_HEADER_BYTES + 64).unwrap();
+        let bytes = std::fs::read(platform::path(&handle.name)).unwrap();
         assert_eq!(
             u64::from_le_bytes(bytes[..8].try_into().unwrap()),
             SLAB_MAGIC
@@ -317,34 +356,44 @@ mod tests {
     /// than the size it asked for.
     #[test]
     fn open_sees_the_creators_bytes_and_refuses_a_short_file() {
-        let n = name("open");
         let size = SLAB_HEADER_BYTES + 16;
-        let mut w = MappingWriter::create(&n, size).unwrap();
+        let (mut w, handle) = MappingWriter::create(size).unwrap();
         w.write(SLAB_HEADER_BYTES, &[7u8; 16]);
-        let peer = MappingWriter::open(&n, size).unwrap();
+        let peer = MappingWriter::open(&handle, size).unwrap();
         let mut back = [0u8; 16];
         peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
         assert_eq!(back, [7u8; 16]);
-        let err = MappingWriter::open(&n, size + 1).expect_err("a short slab");
+        let err = MappingWriter::open(&handle, size + 1).expect_err("a short slab");
         assert!(matches!(err, SlabError::Short { .. }), "got {err}");
     }
 
-    /// A symlink planted at the name is refused by both ends: `create` does
-    /// not follow it into the file it names, and `open` (`O_NOFOLLOW`) does not
-    /// map whatever it points at.
+    /// Two slabs made by one process are two files: a created slab never meets
+    /// another's bytes.
+    #[test]
+    fn two_creates_make_two_slabs() {
+        let size = SLAB_HEADER_BYTES + 16;
+        let (mut a, ha) = MappingWriter::create(size).unwrap();
+        let (_b, hb) = MappingWriter::create(size).unwrap();
+        a.write(SLAB_HEADER_BYTES, &[1u8; 16]);
+        let peer = MappingWriter::open(&hb, size).unwrap();
+        let mut back = [0u8; 16];
+        peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
+        assert_eq!(back, [0u8; 16], "the second slab holds the first's bytes");
+        assert_ne!(ha.name, hb.name);
+    }
+
+    /// A symlink planted at the handle's name is refused by `open`
+    /// (`O_NOFOLLOW`), and `create` never reuses an existing name.
     #[cfg(unix)]
     #[test]
     fn a_symlink_at_the_name_is_refused() {
         let size = SLAB_HEADER_BYTES + 64;
-        let real = name("real");
-        let _owner = MappingWriter::create(&real, size).unwrap();
-        let link = name("link");
-        std::os::unix::fs::symlink(platform::path(&real), platform::path(&link)).unwrap();
+        let (_owner, real) = MappingWriter::create(size).unwrap();
+        let link = handle_of(&format!("{}_link", real.name));
+        std::os::unix::fs::symlink(platform::path(&real.name), platform::path(&link.name)).unwrap();
         let opened = MappingWriter::open(&link, size);
-        let created = MappingWriter::create(&link, size);
-        let _ = std::fs::remove_file(platform::path(&link));
+        let _ = std::fs::remove_file(platform::path(&link.name));
         assert!(opened.is_err(), "open followed a link");
-        assert!(created.is_err(), "create followed a link");
     }
 
     /// Opening a file that is not a slab must fail on the magic, not produce a
@@ -352,10 +401,10 @@ mod tests {
     #[test]
     fn opening_a_foreign_file_is_refused() {
         let size = SLAB_HEADER_BYTES + 64;
-        let n = name("foreign");
-        std::fs::write(platform::path(&n), vec![0xABu8; size]).unwrap();
-        let err = MappingWriter::open(&n, size).expect_err("a foreign file must not open");
-        std::fs::remove_file(platform::path(&n)).unwrap();
+        let foreign = handle_of(&format!("ffi_foreign_{}", std::process::id()));
+        std::fs::write(platform::path(&foreign.name), vec![0xABu8; size]).unwrap();
+        let err = MappingWriter::open(&foreign, size).expect_err("a foreign file must not open");
+        std::fs::remove_file(platform::path(&foreign.name)).unwrap();
         assert!(
             matches!(err, SlabError::BadMagic { found, expected: SLAB_MAGIC } if found == 0xABAB_ABAB_ABAB_ABAB),
             "expected a magic failure, got: {err}"
@@ -363,18 +412,17 @@ mod tests {
     }
 
     /// No openable slab outlives the last of its mappings: after the owner and
-    /// its peer drop, the name opens no more (unlinked on unix, deleted or
+    /// its peer drop, the handle opens no more (unlinked on unix, deleted or
     /// delete-pending on Windows). CI runs this on unix only.
     #[test]
     fn nothing_outlives_the_last_mapping() {
         let size = SLAB_HEADER_BYTES + 64;
-        let n = name("gone");
-        let owner = MappingWriter::create(&n, size).unwrap();
-        let peer = MappingWriter::open(&n, size).unwrap();
+        let (owner, handle) = MappingWriter::create(size).unwrap();
+        let peer = MappingWriter::open(&handle, size).unwrap();
         drop(owner);
         drop(peer);
         assert!(
-            MappingWriter::open(&n, size).is_err(),
+            MappingWriter::open(&handle, size).is_err(),
             "the slab opens after its mappings are gone"
         );
     }
@@ -384,9 +432,8 @@ mod tests {
     #[test]
     fn the_peer_outlives_the_owner_and_ends_the_slab() {
         let size = SLAB_HEADER_BYTES + 16;
-        let n = name("peer_last");
-        let owner = MappingWriter::create(&n, size).unwrap();
-        let mut peer = MappingWriter::open(&n, size).unwrap();
+        let (owner, handle) = MappingWriter::create(size).unwrap();
+        let mut peer = MappingWriter::open(&handle, size).unwrap();
         drop(owner);
         peer.write(SLAB_HEADER_BYTES, &[9u8; 16]);
         let mut back = [0u8; 16];
@@ -394,7 +441,7 @@ mod tests {
         assert_eq!(back, [9u8; 16]);
         drop(peer);
         assert!(
-            MappingWriter::open(&n, size).is_err(),
+            MappingWriter::open(&handle, size).is_err(),
             "the slab opens after its mappings are gone"
         );
     }
@@ -404,12 +451,22 @@ mod tests {
     /// left once the panic has unwound.
     #[test]
     fn a_failed_create_leaves_no_file() {
-        let n = name("failed");
-        let made = std::panic::catch_unwind(|| MappingWriter::create(&n, 1));
+        let before = slab_files();
+        let made = std::panic::catch_unwind(|| MappingWriter::create(1));
         assert!(made.is_err(), "a slab shorter than its header was made");
-        assert!(
-            !platform::path(&n).exists(),
-            "the failed create left its file"
-        );
+        assert_eq!(slab_files(), before, "the failed create left its file");
+    }
+
+    /// The backing files of this process's slabs, by name.
+    fn slab_files() -> Vec<String> {
+        let prefix = format!("tutti_tutti_plugin-{}-", std::process::id());
+        let dir = platform::path("x").parent().unwrap().to_owned();
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.starts_with(&prefix))
+            .collect();
+        names.sort();
+        names
     }
 }

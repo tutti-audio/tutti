@@ -50,14 +50,12 @@ pub fn unique_socket_path() -> Result<PathBuf, RandomSourceError> {
 
 /// `stem`, this process's id, a count shared by every name this process
 /// makes, and [`unguessable`]: a name for something in a shared namespace
-/// (the control socket, the audio slab) that is unique and not predictable.
-/// One count for both, so no two names this process makes are alike
-/// whatever their stems.
+/// (the control socket) that is unique and not predictable.
 ///
 /// # Errors
 ///
 /// The operating system's random source cannot be read.
-pub(crate) fn unique_name(stem: &str) -> Result<String, RandomSourceError> {
+fn unique_name(stem: &str) -> Result<String, RandomSourceError> {
     static COUNTER: tutti_rt::Mint = tutti_rt::Mint::new();
     Ok(format!(
         "{stem}-{}-{}-{}",
@@ -68,8 +66,8 @@ pub(crate) fn unique_name(stem: &str) -> Result<String, RandomSourceError> {
 }
 
 /// Sixteen hex digits from the operating system's random source, for a name in
-/// a shared directory that must not be predictable (the control socket here,
-/// the audio slab in `subprocess::launch`). Sixty-four bits: enough that
+/// a shared directory that must not be predictable (the control socket).
+/// Sixty-four bits: enough that
 /// guessing is not an attack, short enough that a macOS socket path (104 bytes,
 /// under a long per-user temporary directory) still fits.
 ///

@@ -712,9 +712,8 @@ mod tests {
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_past_scratch_{}", std::process::id());
-        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
         let mut pipeline = AudioPipeline::new(tutti_rt::tally().writer());
         let mut plugin = NanPlugin {
             meta: meta(&[2], &[2]),
@@ -812,10 +811,8 @@ mod tests {
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_status_test_{}_{status:?}", fill.to_bits());
-        let _guard =
-            AudioSlab::create(format!("{name}_{}", std::process::id()), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(format!("{name}_{}", std::process::id()), layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
         let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = SaysPlugin {
             meta: meta(&[2], &[2]),
@@ -960,9 +957,8 @@ mod tests {
             &[ChannelLayout::STEREO, ChannelLayout::MONO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_multibus_test_{}", std::process::id());
-        let mut host = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (mut host, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
 
         // Write a distinct marker into each of the 3 input channels, then
         // publish — without the publish the pipeline correctly refuses to read
@@ -1050,9 +1046,8 @@ mod tests {
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_recycled_slot_{}", std::process::id());
-        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
 
         // Leave recognisable audio in the slot the stale block would land in, as
         // a previous occupant would have. `publish_input` is NOT called for
@@ -1096,9 +1091,8 @@ mod tests {
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_nan_test_{}_{}", fill.to_bits(), std::process::id());
-        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
 
         let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = NanPlugin {
@@ -1148,9 +1142,8 @@ mod tests {
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_ragged_test_{}", std::process::id());
-        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
 
         let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = NanPlugin {
@@ -1192,9 +1185,8 @@ mod tests {
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
-        let name = tutti_fixtures::unique_name("tutti_noalloc_test");
-        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
 
         let mut pipeline = pipeline_for(&shm, format);
         // A finite-output fake; sanitize still runs, it just finds nothing.
@@ -1255,9 +1247,8 @@ mod tests {
             &[ChannelLayout::STEREO, ChannelLayout::MONO],
             &[ChannelLayout::STEREO],
         );
-        let name = format!("tutti_noalloc_mb_test_{}", std::process::id());
-        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
 
         let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = NanPlugin {
@@ -1358,9 +1349,8 @@ mod tests {
             &loaded.output_widths(),
         );
 
-        let name = format!("tutti_noalloc_vst3_{}", std::process::id());
-        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
-        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let (_guard, handle) = AudioSlab::create(layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(&handle, layout).unwrap();
 
         let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let block = || AudioBlock {

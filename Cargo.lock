@@ -3217,9 +3217,11 @@ name = "tutti-plugin-ipc-ffi"
 version = "0.0.1"
 dependencies = [
  "crossbeam-utils",
+ "getrandom",
  "loom",
  "memmap2",
  "rustix",
+ "serde",
  "thiserror 2.0.21",
  "tutti-platform",
  "windows-sys",
