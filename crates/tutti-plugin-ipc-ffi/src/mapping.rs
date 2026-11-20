@@ -104,8 +104,10 @@ pub struct SlabHandle {
 }
 
 /// A handle as it travels: the name alone, unchecked until it becomes one.
+/// The type is private to this module; its field is `pub` because
+/// `check-range-types` flags a private field under a plain `Deserialize`.
 #[derive(Deserialize)]
-struct WireName(String);
+struct WireName(pub String);
 
 impl TryFrom<WireName> for SlabHandle {
     type Error = String;
