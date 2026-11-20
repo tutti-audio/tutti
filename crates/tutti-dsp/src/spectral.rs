@@ -12,7 +12,7 @@ use tutti_units::Hz;
 /// when taking a logarithm (-120 dB), so empty bins do not send the geometric
 /// mean to zero by an amount that depends on the bin count. Relative, so a quiet
 /// frame reads the same as a loud one.
-const RELATIVE_POWER_FLOOR: f64 = 1e-12;
+pub(crate) const RELATIVE_POWER_FLOOR: f64 = 1e-12;
 
 /// The magnitude-weighted mean frequency: where the spectrum's centre of mass
 /// sits, and the usual proxy for brightness.

@@ -387,25 +387,6 @@ impl Jobs {
         self.submit_job_at(Place::Pool, work, land)
     }
 
-    /// [`submit_job`](Self::submit_job) for work that blocks: the executor gives
-    /// it a thread named `name`, so the pool never waits behind it.
-    #[cfg_attr(
-        not(feature = "plugin"),
-        expect(
-            dead_code,
-            reason = "the plugin state job (feature `plugin`) is its user"
-        )
-    )]
-    pub(crate) fn submit_job_blocking<J, R, W, L>(&mut self, name: &str, work: W, land: L) -> Job<J>
-    where
-        J: JobKind,
-        R: Send + 'static,
-        W: FnOnce(&Cancel) -> R + Send + 'static,
-        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, Ticket<J>) + Send + 'static,
-    {
-        self.submit_job_at(Place::Dedicated(name), work, land)
-    }
-
     fn submit_job_at<J, R, W, L>(&mut self, place: Place<'_>, work: W, land: L) -> Job<J>
     where
         J: JobKind,

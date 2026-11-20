@@ -318,6 +318,31 @@ impl PluginHandle {
         self.any_thread.save_state(state_use)
     }
 
+    /// Serializes the plugin's state for `state_use` on the main thread
+    /// ([`Control::save_state`]): a served plugin's round trip runs on this
+    /// thread, an in-process plugin's is a direct call. Unlike
+    /// [`save_state`](Self::save_state) it never waits for another thread.
+    ///
+    /// # Errors
+    ///
+    /// [`StateError::NoStateRoute`] when this handle carries no main-thread
+    /// route; [`StateError::PluginCrashed`] when the plugin is lost; otherwise
+    /// the plugin's own failure.
+    pub fn save_state_on(
+        &self,
+        main: MainThreadMarker,
+        state_use: StateUse,
+    ) -> Result<Vec<u8>, StateError> {
+        let Some(control) = self.control.as_deref() else {
+            return Err(StateError::NoStateRoute);
+        };
+        match lent(control, |c| c.save_state(main, state_use)) {
+            Some(Ok(bytes)) => Ok(bytes),
+            Some(Err(error)) => Err(error.into()),
+            None => Err(StateError::PluginCrashed),
+        }
+    }
+
     /// Tells the plugin whether it renders offline and returns whether it
     /// accepted the mode ([`AnyThread::set_render_mode`]).
     pub fn announce_render_mode(&self, mode: RenderMode) -> bool {

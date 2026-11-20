@@ -5,6 +5,7 @@ pub(crate) mod align;
 pub(crate) mod chord;
 pub(crate) mod features;
 pub(crate) mod key;
+pub(crate) mod mfcc;
 pub(crate) mod notes;
 pub(crate) mod tempo;
 pub(crate) mod transform;
