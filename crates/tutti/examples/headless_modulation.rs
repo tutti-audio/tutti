@@ -80,7 +80,7 @@ fn play(s: &mut Session, windows: usize) {
 }
 
 fn main() -> Result<(), Error> {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .outputs(ChannelLayout::MONO)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))

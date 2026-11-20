@@ -117,10 +117,12 @@ fn play<M: Master>(
     midi: &Path,
     master: impl FnOnce(Bounce) -> Bounce<NodeKey, M>,
 ) -> Result<M::Result<f32>, Box<dyn std::error::Error>> {
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()?;
+    // The plugin's load is background work: threads run it while the updates land it.
+    background.spawn_threads(std::thread::available_parallelism()?)?;
 
     let synth = load(&mut s, main, plugin, state)?;
     s.graph().connect(synth, Root).unwrap();
@@ -129,7 +131,7 @@ fn play<M: Master>(
     // converts its tracks to clips. A file in SMPTE time or of format 2 has no
     // one beat timeline to adopt: this example plays one metrical timeline only.
     let job = s.midi().load_midi(midi);
-    let loaded = job.wait(&mut s)?;
+    let loaded = job.wait(&mut s, &mut background)?;
     let tempo_map = loaded.tempo()?.clone();
     let Timebase::Metrical(metrical) = loaded.file().timebase() else {
         return Err("a file with no one beat timeline has nothing to play on".into());

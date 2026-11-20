@@ -18,6 +18,7 @@
 //!        --example headless_export -- <outdir>`
 
 use tutti::graph::{ForkByClone, Node};
+use tutti::session::Background;
 use tutti::{
     Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, Pcm, Range, Root,
     SampleRate, Seconds, Session,
@@ -29,15 +30,15 @@ use tutti_nodes::testing::{Const, Osc};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A session whose outputs hear `node`, one second of a project.
-fn session_with(node: impl Node + Clone + 'static) -> Session {
-    let mut session = Session::new(RATE).expect("a session builds");
+fn session_with(node: impl Node + Clone + 'static) -> (Session, Background) {
+    let (mut session, background) = Session::new(RATE).expect("a session builds");
     let (node, _) = session.graph().add(ForkByClone(node));
     session.graph().connect(node, Root).unwrap();
-    session
+    (session, background)
 }
 
 /// A 440 Hz tone at -12 dBFS, in stereo.
-fn tone() -> Session {
+fn tone() -> (Session, Background) {
     session_with(
         Osc::sine(Hz::new(440.0))
             .with_amplitude(Amplitude::new(0.25))
@@ -46,7 +47,7 @@ fn tone() -> Session {
 }
 
 /// A mono project, to show the channel fold.
-fn mono_tone() -> Session {
+fn mono_tone() -> (Session, Background) {
     session_with(Const::mono(0.5))
 }
 
@@ -67,13 +68,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. A project to a file.
     let path = dir.join("tone.wav");
-    let written = tone()
+    let (mut project, _background) = tone();
+    let written = project
         .bounce(first(1.0).master(&path, FORMAT))?
         .into_master();
     println!("wrote {} ({written:?})", path.display());
 
     // 2. The same project into memory, and a measurement of it.
-    let rendered = tone().bounce(first(1.0).master_buffers())?.into_master();
+    let (mut project, _background) = tone();
+    let rendered = project.bounce(first(1.0).master_buffers())?.into_master();
     let flat = rendered.interleaved();
     // `tutti` exports no path to `Bed`, so the placement is the assumed one for
     // two channels, which is a stereo bed.
@@ -93,7 +96,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. A mono project into a stereo file: the fold, which the export layer
     //    does for you and the graph does not.
     let mono_path = dir.join("mono-to-stereo.wav");
-    mono_tone().bounce(
+    let (mut mono, _background) = mono_tone();
+    mono.bounce(
         first(0.5)
             .channels(ChannelLayout::STEREO)
             .master(&mono_path, FORMAT),

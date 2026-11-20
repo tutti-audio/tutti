@@ -15,7 +15,7 @@ fn report(events: Vec<SessionEvent>) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut live = SessionBuilder::default()
+    let (mut live, _bg) = SessionBuilder::default()
         .device(Default::default())
         .build()?;
     let tone = Osc::sine(Hz::new(440.0)).with_amplitude(Amplitude::new(0.2));

@@ -37,8 +37,14 @@ device:
 
 ```rust,ignore
 // No sound card: the session renders when we ask it to.
-let mut session = Session::new(SampleRate::SR_48K)?;
+let (mut session, background) = Session::new(SampleRate::SR_48K)?;
 ```
+
+Building gives us two things: the session, and its
+[`Background`](../api/tutti/session/struct.Background.html), which does the
+work a session sets aside for later, like loading a big file. Our first sound
+needs none, so we simply keep it next to the session, and later chapters
+put it to work.
 
 The sample rate (also known as *sampling frequency*) tells
 the session how finely to slice time. 48 000 slices a
@@ -123,7 +129,8 @@ or *stereo mix*). Then we hand it to the session:
 
 ```rust,ignore
 // The file's name picks its format: `.flac` is FLAC.
-tone()?.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+let (mut session, _background) = tone()?;
+session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
 ```
 
 The session renders the two seconds as fast as your computer can manage,

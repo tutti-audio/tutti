@@ -54,7 +54,7 @@ fn main() -> Result<(), Error> {
 fn song(dir: &std::path::Path) -> Result<Written, Error> {
     std::fs::create_dir_all(dir)?;
 
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()?;

@@ -49,7 +49,7 @@ struct Outcome {
 
 /// A session for the program: the hardware's OS layer if it opens, else none.
 /// Hears Groups 1 and 2 (`midi_groups`), so a route can name Group 2.
-fn session() -> Result<Session, Error> {
+fn session() -> Result<(Session, tutti::session::Background), Error> {
     let build = |hardware: bool| {
         let builder = Session::builder().midi_groups(MidiGroup::of(1));
         let builder = if hardware {
@@ -94,7 +94,8 @@ fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
 }
 
 fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
-    let mut s = session()?;
+    let (mut s, mut background) = session()?;
+    background.spawn_threads(std::thread::available_parallelism()?)?;
 
     // MPE is set once, on the session: the hardware input node and every clip's
     // transform read it, and no synth holds a zone.
@@ -118,12 +119,12 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     let mut take = s.midi().tap(synth.node(), EventCapacity::of(256))?;
 
     // A clip from a file's timeline: the packets it holds at their beats.
-    // The load is a job on the session's worker, which converts each track to
+    // The load is a job on the session's background, which converts each track to
     // a clip value; `wait` runs updates until it lands.
     let path = std::env::temp_dir().join(format!("tutti-midi-all-{}.mid", std::process::id()));
     file()?.write(&path)?;
     let job = s.midi().load_midi(&path);
-    let loaded = job.wait(&mut s);
+    let loaded = job.wait(&mut s, &mut background);
     std::fs::remove_file(&path)?;
     let loaded = loaded?;
     s.midi().play_track(synth.node(), loaded.track(0)?)?;

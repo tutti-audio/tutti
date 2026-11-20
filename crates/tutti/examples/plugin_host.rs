@@ -92,10 +92,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    plugin the catalog blacklisted does not resolve and fails its load,
     //    before any server starts. The thread that finishes an in-process load
     //    is the main thread: make the token once.
-    let mut session = Session::builder()
+    let (mut session, mut background) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()?;
+    // The load is background work: threads run it while the updates below land it.
+    background.spawn_threads(std::thread::available_parallelism()?)?;
     let main = tutti::plugin::MainThreadMarker::new().ok_or("run on the process's main thread")?;
     let id = entry
         .id
@@ -205,7 +207,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             support if support.can_list() => {
                 eprintln!("{} preset(s)", presets.len());
                 if let Some(first) = presets.iter().next() {
-                    session.load_preset(&"plugin", &first)?.wait(&mut session)?;
+                    session
+                        .load_preset(&"plugin", &first)?
+                        .wait(&mut session, &mut background)?;
                     eprintln!(
                         "loaded {:?}, current {:?}",
                         first.name(),

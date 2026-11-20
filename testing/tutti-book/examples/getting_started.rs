@@ -8,14 +8,15 @@ use std::path::Path;
 
 // ANCHOR: imports
 use tutti::nodes::OscillatorNode;
+use tutti::session::Background;
 use tutti::{Amplitude, Bounce, ChannelLayout, Format, Hz, Root, SampleRate, Seconds, Session};
 // ANCHOR_END: imports
 
 // ANCHOR: session
 /// A session whose output plays a 440 Hz sine at a quarter of full scale.
-fn tone() -> Result<Session, tutti::Error> {
+fn tone() -> Result<(Session, Background), tutti::Error> {
     // No sound card: the session renders when we ask it to.
-    let mut session = Session::new(SampleRate::SR_48K)?;
+    let (mut session, background) = Session::new(SampleRate::SR_48K)?;
 
     // An A at 440 Hz, a quarter of full scale.
     let (sine, _) = session
@@ -25,7 +26,7 @@ fn tone() -> Result<Session, tutti::Error> {
     // One mono output, heard in the left and the right channel.
     session.graph().connect(sine.out(0), Root::output(0))?;
     session.graph().connect(sine.out(0), Root::output(1))?;
-    Ok(session)
+    Ok((session, background))
 }
 // ANCHOR_END: session
 
@@ -45,7 +46,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new(&dir).join("getting_started.flac");
 
     // The file's name picks its format: `.flac` is FLAC.
-    tone()?.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+    let (mut session, _background) = tone()?;
+    session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
 
     println!("wrote {}", path.display());
     Ok(())
@@ -60,8 +62,8 @@ mod tests {
     /// level: a peak of 0.25 and an RMS of 0.25 / √2.
     #[test]
     fn the_bounce_is_a_sine_at_its_level_on_both_channels() {
-        let rendered = tone()
-            .unwrap()
+        let (mut session, _background) = tone().unwrap();
+        let rendered = session
             .bounce(two_seconds().master_buffers())
             .unwrap()
             .into_master();
