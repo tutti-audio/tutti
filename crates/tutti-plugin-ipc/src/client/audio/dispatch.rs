@@ -979,9 +979,9 @@ pub(super) fn handle_control(
             // would report that the request had been *sent*, never whether the
             // plugin accepted it.
             //
-            // A timeout here is **not** connection-level, for the same reason
-            // the over-limit branch above is not: the socket is synchronised and
-            // the session is healthy, the plugin simply has not answered yet.
+            // A timeout here is **not** connection-level: the socket is
+            // synchronised and the session is healthy, the plugin simply has not
+            // answered yet.
             // Propagating would `crash()` it, and the caller would receive
             // `Stalled` (which says "the session is fine, retrying is
             // reasonable") against a session that had just been torn down.
