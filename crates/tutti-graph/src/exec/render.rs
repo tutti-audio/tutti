@@ -145,7 +145,7 @@ impl<F: Float> Executor<F> {
     /// node.
     ///
     /// `meter` is the project's meter for this block, lent by the host once
-    /// for the block and handed to every node through [`Cx::meter`] (serial or
+    /// for the block and handed to every node through [`Cx::meter`](crate::Cx::meter) (serial or
     /// on a pool); `None` where the host has none.
     ///
     /// # Panics
