@@ -1328,7 +1328,7 @@ impl<F: Float> Midi<'_, F> {
     /// the transport's beat 0, with [`play_clip`](Self::play_clip)'s clip,
     /// looping and bounce behaviour. The clip starts at its own beats; a
     /// caller who wants an offset rebuilds the events and uses `play_clip`. The track is the one
-    /// [`load_midi`](Self::load_midi) landed
+    /// [`load_midi`](Self::load_midi) returned
     /// ([`LoadedMidi::track`](crate::LoadedMidi::track)); its events are built
     /// already, so this publishes a shared value and converts nothing.
     ///

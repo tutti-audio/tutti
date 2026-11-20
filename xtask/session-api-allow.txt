@@ -7,3 +7,5 @@
 crates/tutti-session/src/editor.rs::Editor  the editor handle: its calls run on the main thread and the handle holds the proof
 crates/tutti-session/src/session/phases.rs::PhaseCx  a phase-stepping host's context: `main` is the proof, or none where the thread is not the main one
 crates/tutti-session/src/bounce.rs::run  `BounceJob::run`, the offline render's blocking door, until the bounce is a `Job`
+crates/tutti-session/src/analyze.rs::run  `Analyze::run`: the app's own call, on its thread, that folds the audio through the meter; the value holds nothing of the session
+crates/tutti-session/src/midi_load.rs::run  `LoadMidi::run`: the app's own call, on its thread, that reads the file; the value holds nothing of the session

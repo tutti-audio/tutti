@@ -125,11 +125,10 @@ fn play<M: Master>(
     let synth = load(&mut s, main, plugin, state)?;
     s.graph().connect(synth, Root).unwrap();
 
-    // The load is a job: the worker reads the file (an SMF or a Clip File) and
-    // converts its tracks to clips. A file in SMPTE time or of format 2 has no
+    // The load is a value the app runs: `run` reads the file (an SMF or a Clip
+    // File) and converts its tracks to clips. A file in SMPTE time or of format 2 has no
     // one beat timeline to adopt: this example plays one metrical timeline only.
-    let job = s.midi().load_midi(midi);
-    let loaded = job.wait(&mut s)?;
+    let loaded = s.midi().load_midi(midi).run()?;
     let tempo_map = loaded.tempo()?.clone();
     let Timebase::Metrical(metrical) = loaded.file().timebase() else {
         return Err("a file with no one beat timeline has nothing to play on".into());

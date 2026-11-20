@@ -1,14 +1,15 @@
-//! A MIDI file as a job: [`Midi::load_midi`] reads the file at a path on a
-//! worker and lands a [`LoadedMidi`], each track already a clip value.
+//! A MIDI file as a value: [`Midi::load_midi`] returns a [`LoadMidi`] that,
+//! when the app runs it, reads the file and returns a [`LoadedMidi`], each
+//! track already a clip value.
 //!
 //! The reading, the conversion of every track's events to a [`ClipEvents`], and
-//! the tempo map and meter of its timeline are all the worker's; the control
-//! thread receives finished values and publishes them
-//! ([`Midi::play_track`]). A file's ticks become beats over its division, so no
-//! sample rate enters and the job never converts to frames.
+//! the tempo map and meter of its timeline are all [`LoadMidi::run`]'s; the
+//! control thread publishes the finished values ([`Midi::play_track`]). A
+//! file's ticks become beats over its division, so no sample rate enters and
+//! the load never converts to frames.
 //!
 //! What the read repaired ([`Normalized`]) and what the conversion left out
-//! (a [`DroppedEvent`]) is the landed value's [`report`](LoadedMidi::report),
+//! (a [`DroppedEvent`]) is the loaded value's [`report`](LoadedMidi::report),
 //! never a log line.
 
 use std::sync::Arc;
@@ -24,28 +25,43 @@ use tutti_timeline::ProjectMeter;
 use tutti_ump::TicksPerQuarterNote;
 use tutti_units::Beat;
 
-use crate::job::job_kind;
-use crate::{Midi, WaitError, WorkerError};
+use crate::Midi;
 
-job_kind! {
-    /// A MIDI file read and converted to clip values ([`Midi::load_midi`]); the
-    /// job lands a [`LoadedMidi`].
-    pub LoadMidi => LoadedMidi, LoadMidiError
+/// A MIDI file to read and convert to clip values, built by
+/// [`Midi::load_midi`] and not yet run: [`run`](Self::run) returns a
+/// [`LoadedMidi`].
+///
+/// It holds the asset and nothing of the session, so the app runs it on any
+/// thread it chooses; dropping it unrun cancels it.
+#[derive(Debug)]
+#[must_use = "work does nothing until it runs"]
+pub struct LoadMidi {
+    asset: Asset,
 }
 
-/// Why a [`LoadMidi`] job ended without a [`LoadedMidi`].
+impl LoadMidi {
+    /// Reads the file and converts each track to a clip value, on the calling
+    /// thread. The cost is a full read of the file.
+    ///
+    /// A file in SMPTE time has seconds and no beats: it returns with its
+    /// [`file`](LoadedMidi::file) and report, and [`TrackError::SmpteTiming`]
+    /// for every track.
+    ///
+    /// # Errors
+    ///
+    /// [`LoadMidiError::Read`] when the file cannot be read.
+    pub fn run(self) -> Result<LoadedMidi, LoadMidiError> {
+        Ok(convert(MidiFile::read(self.asset)?))
+    }
+}
+
+/// Why a [`LoadMidi`] ended without a [`LoadedMidi`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LoadMidiError {
     /// The file could not be read.
     #[error("MIDI file: {0}")]
     Read(#[from] ReadError),
-    /// The worker did not finish: its work panicked, or the executor dropped it.
-    #[error(transparent)]
-    Worker(#[from] WorkerError),
-    /// The wait could not run ([`Job::wait`](crate::Job::wait)).
-    #[error(transparent)]
-    Wait(#[from] WaitError),
 }
 
 /// Why a [`LoadedMidi`] has no [`LoadedTrack`] `i`.
@@ -144,7 +160,7 @@ enum Timeline {
     Smpte,
 }
 
-/// The landing of a [`LoadMidi`] job: the file as read, and each track as a
+/// What a [`LoadMidi`] returns: the file as read, and each track as a
 /// [`LoadedTrack`].
 #[derive(Debug)]
 pub struct LoadedMidi {
@@ -214,34 +230,15 @@ impl LoadedMidi {
 }
 
 impl<F: Float> Midi<'_, F> {
-    /// Reads the MIDI file `asset` (a path, or bytes) on the session's executor and converts each
-    /// track to a clip value there. Returns at once; the [`LoadedMidi`] lands
-    /// in a later [`update`](crate::Session::update) as a
-    /// [`SessionEvent::JobDone`](crate::SessionEvent::JobDone), or
-    /// [`Job::wait`](crate::Job::wait) returns it. A file that cannot be read
-    /// lands [`LoadMidiError::Read`]. **Dropping the [`Job`](crate::Job)
-    /// discards the result.**
-    ///
-    /// A file in SMPTE time has seconds and no beats: it lands with its
-    /// [`file`](LoadedMidi::file) and report, and [`TrackError::SmpteTiming`]
-    /// for every track.
-    pub fn load_midi(&mut self, asset: impl Into<Asset>) -> crate::Job<LoadMidi> {
-        let asset = asset.into();
-        self.jobs.submit_job(
-            move |_| load(&asset),
-            |_, done, ticket| {
-                ticket.land(match done {
-                    Ok(loaded) => loaded,
-                    Err(failed) => Err(failed.into()),
-                });
-            },
-        )
+    /// A [`LoadMidi`] of the MIDI file `asset` (a path, or bytes); nothing is
+    /// read until the app calls [`run`](LoadMidi::run), which runs on the
+    /// caller's thread. A file that cannot be read fails with
+    /// [`LoadMidiError::Read`].
+    pub fn load_midi(&self, asset: impl Into<Asset>) -> LoadMidi {
+        LoadMidi {
+            asset: asset.into(),
+        }
     }
-}
-
-/// Reads `asset` and builds its [`LoadedMidi`].
-fn load(asset: &Asset) -> Result<LoadedMidi, LoadMidiError> {
-    Ok(convert(MidiFile::read(asset.clone())?))
 }
 
 /// The clips, timeline values and report of `file`.

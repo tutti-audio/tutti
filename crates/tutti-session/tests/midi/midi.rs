@@ -213,8 +213,7 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
     file.write(&path).unwrap();
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
-    let job = s.midi().load_midi(path);
-    let loaded = job.wait(&mut s).unwrap();
+    let loaded = s.midi().load_midi(path).run().unwrap();
     s.midi()
         .play_track(synth, loaded.track(0).unwrap())
         .unwrap();
