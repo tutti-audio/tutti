@@ -48,7 +48,7 @@ use crate::host::RenderHandle;
 /// ```
 ///
 /// ```compile_fail,E0603
-/// use tutti_vst2_ffi::Rows;
+/// use tutti_vst2_ffi::scratch::Rows;
 /// ```
 pub struct RenderScratch {
     rows: Format,
