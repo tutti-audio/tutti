@@ -3,6 +3,7 @@
 //! (`support`, which shares no code with the crate).
 
 use crate::common::{self, metrical, note, track, unspecified, without_defaults};
+use crate::common::{ToBytes, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
@@ -31,12 +32,12 @@ fn raw_track(body: &[u8]) -> Vec<u8> {
 }
 
 fn ticks(bytes: &[u8]) -> Vec<u64> {
-    let file = MidiFile::from_bytes(bytes).expect("reads");
+    let file = read_bytes(bytes).expect("reads");
     unspecified(&file, 0).iter().map(|(t, _)| t.0).collect()
 }
 
 fn voices(bytes: &[u8]) -> Vec<Voice1> {
-    let file = MidiFile::from_bytes(bytes).expect("reads");
+    let file = read_bytes(bytes).expect("reads");
     unspecified(&file, 0)
         .iter()
         .filter_map(|(_, e)| match e {
@@ -108,7 +109,7 @@ fn a_quantity_writes_to_its_bytes() {
 fn a_five_byte_quantity_is_refused() {
     let body = [0x81, 0x80, 0x80, 0x80, 0x00, 0x90, 0x3C, 0x40];
     assert!(matches!(
-        MidiFile::from_bytes(&raw_track(&body)),
+        read_bytes(raw_track(&body)),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 22,
@@ -117,7 +118,7 @@ fn a_five_byte_quantity_is_refused() {
     ));
     // And one cut off mid-quantity.
     assert!(matches!(
-        MidiFile::from_bytes(&raw_track(&[0x81, 0x80])),
+        read_bytes(raw_track(&[0x81, 0x80])),
         Err(ReadError::Smf { .. })
     ));
 }
@@ -156,7 +157,7 @@ fn a_meta_event_cancels_running_status() {
         RawEvent::running_status(0, vec![0x3E, 0x00]),
     ]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 31,
@@ -177,7 +178,7 @@ fn a_sysex_cancels_running_status() {
         RawEvent::running_status(0, vec![0x00]),
     ]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 32,
@@ -191,7 +192,7 @@ fn a_sysex_cancels_running_status() {
 #[test]
 fn a_first_event_needs_a_status() {
     assert!(matches!(
-        MidiFile::from_bytes(&raw_track(&[0x00, 0x3C, 0x40])),
+        read_bytes(raw_track(&[0x00, 0x3C, 0x40])),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 22,
@@ -217,7 +218,7 @@ fn system_statuses_are_refused() {
     for status in [0xF1u8, 0xF2, 0xF8, 0xFE] {
         assert!(
             matches!(
-                MidiFile::from_bytes(&raw_track(&[0x00, status, 0x00])),
+                read_bytes(raw_track(&[0x00, status, 0x00])),
                 Err(ReadError::Smf {
                     track: Some(0),
                     offset: 22,
@@ -233,7 +234,7 @@ fn system_statuses_are_refused() {
 #[test]
 fn a_high_data_byte_is_malformed() {
     assert!(matches!(
-        MidiFile::from_bytes(&raw_track(&[0x00, 0x90, 0x3C, 0x80])),
+        read_bytes(raw_track(&[0x00, 0x90, 0x3C, 0x80])),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 22,
@@ -264,14 +265,14 @@ fn more_tracks_than_declared_is_malformed() {
     // The header declares two (bytes 10..12); say one.
     bytes[10..12].copy_from_slice(&1u16.to_be_bytes());
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: None,
             offset: 26,
             cause: SmfParseError::ExtraTracks
         })
     ));
-    assert!(MidiFile::from_bytes(&two).is_ok());
+    assert!(read_bytes(&two).is_ok());
 }
 
 /// A header chunk longer than six bytes is read for its first six.
@@ -286,7 +287,7 @@ fn a_longer_header_is_read() {
     bytes.extend_from_slice(&4u32.to_be_bytes());
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert_eq!(
-        metrical(&MidiFile::from_bytes(&bytes).unwrap()).ticks_per_quarter(),
+        metrical(&read_bytes(&bytes).unwrap()).ticks_per_quarter(),
         DIVISION
     );
 }
@@ -305,7 +306,7 @@ fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
         0x00, 0xFF, 0x59, 0x03, 0xFD, 0x01, 0x99, // 3 flats minor + 1
         0x00, 0xFF, 0x2F, 0x00,
     ]);
-    let file = MidiFile::from_bytes(&bytes).unwrap();
+    let file = read_bytes(&bytes).unwrap();
     let metas: Vec<&Meta> = file.tracks()[0]
         .events()
         .iter()
@@ -349,7 +350,7 @@ fn a_longer_meta_event_is_written_back_as_it_was() {
         0x00, 0xFF, 0x59, 0x03, 0xFD, 0x01, 0x99, //
         0x00, 0xFF, 0x2F, 0x00,
     ]);
-    let back = MidiFile::from_bytes(&bytes).unwrap().to_bytes();
+    let back = read_bytes(&bytes).unwrap().to_bytes();
     assert_eq!(back, bytes);
 }
 
@@ -365,7 +366,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
         0x00, 0xFF, 0x2F, 0x00,
     ]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 22,
@@ -493,7 +494,7 @@ fn a_written_file_reads_back_equal() {
         vec![track, crate::common::track(vec![(0, note(1, 60))])],
     )
     .unwrap();
-    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let back = read_bytes(file.to_bytes()).unwrap();
     assert_eq!(back.tracks(), file.tracks());
     assert_eq!(metrical(&back).ticks_per_quarter(), DIVISION);
 }
@@ -521,7 +522,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
         let mut body = vec![0x00, 0xFF, kind, data.len() as u8];
         body.extend_from_slice(data);
         body.extend_from_slice(&[0x00, 0x90, 60, 100, 0x00, 0xFF, 0x2F, 0x00]);
-        let read = MidiFile::from_bytes(&raw_track(&body)).expect("reads");
+        let read = read_bytes(raw_track(&body)).expect("reads");
         let events = &unspecified(&read, 0);
         // The note after it is read.
         assert_eq!(events.len(), 2, "{kind:#04x} {data:?}");
@@ -537,7 +538,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
             written.windows(event.len()).any(|w| w == event),
             "{kind:#04x} {data:?}"
         );
-        assert_eq!(MidiFile::from_bytes(&written).unwrap(), read);
+        assert_eq!(read_bytes(&written).unwrap(), read);
         let converted = metrical(&read).to_clip().unwrap();
         let reasons: Vec<DropReason> = converted.dropped.iter().map(|d| d.reason).collect();
         assert_eq!(reasons, [DropReason::MalformedMeta], "{kind:#04x} {data:?}");
@@ -554,7 +555,7 @@ fn a_second_header_chunk_is_refused_where_it_starts() {
     bytes.extend_from_slice(&6u32.to_be_bytes());
     bytes.extend_from_slice(&[0, 0, 0, 1, 0, TPQ as u8]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: None,
             offset: 14,
@@ -572,7 +573,7 @@ fn a_header_shorter_than_six_bytes_is_refused() {
     bytes.extend_from_slice(&4u32.to_be_bytes());
     bytes.extend_from_slice(&[0, 0, 0, 1]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: None,
             offset: 0,
@@ -587,7 +588,7 @@ fn a_header_shorter_than_six_bytes_is_refused() {
 fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
     let two = build_smf(0, Division::Metrical(TPQ), &[vec![], vec![]]);
     assert!(matches!(
-        MidiFile::from_bytes(&two),
+        read_bytes(&two),
         Err(ReadError::Smf {
             track: None,
             offset: 0,
@@ -612,7 +613,7 @@ fn every_text_meta_type_reads_and_writes_back() {
         (0x09, TextKind::DeviceName),
     ] {
         let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
-        let read = MidiFile::from_bytes(&bytes).unwrap();
+        let read = read_bytes(&bytes).unwrap();
         assert_eq!(
             unspecified(&read, 0)[0].1,
             FileEvent::Meta(Meta::text(kind, "x")),
@@ -622,7 +623,7 @@ fn every_text_meta_type_reads_and_writes_back() {
     }
     for meta_type in [0x02, 0x03] {
         let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
-        let read = MidiFile::from_bytes(&bytes).unwrap();
+        let read = read_bytes(&bytes).unwrap();
         let track = &read.tracks()[0];
         assert_eq!(unspecified(&read, 0), [], "{meta_type:#x}");
         let field = if meta_type == 0x02 {
@@ -647,7 +648,7 @@ fn every_format_word_reads_and_writes_back() {
             vec![vec![], vec![]]
         };
         let bytes = build_smf(word, Division::Metrical(TPQ), &tracks);
-        let read = MidiFile::from_bytes(&bytes).unwrap();
+        let read = read_bytes(&bytes).unwrap();
         assert_eq!(read.to_bytes()[8..10], word.to_be_bytes(), "format {word}");
     }
 }
@@ -760,7 +761,7 @@ fn four_four() -> FileEvent {
 /// Spec: smf/examples#1, smf/examples#2
 #[test]
 fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte() {
-    let file = MidiFile::from_bytes(&EXAMPLE_FORMAT_0).unwrap();
+    let file = read_bytes(EXAMPLE_FORMAT_0).unwrap();
     assert_eq!(file.format(), Some(SmfFormat::SingleTrack));
     assert_eq!(file.division(), Some(SMF_DIVISION));
     assert_eq!(file.tracks().len(), 1);
@@ -778,7 +779,7 @@ fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte(
 /// Spec: smf/examples#3, smf/examples#4
 #[test]
 fn the_spec_format_1_example_reads_as_four_tracks_and_writes_back_byte_for_byte() {
-    let file = MidiFile::from_bytes(&EXAMPLE_FORMAT_1).unwrap();
+    let file = read_bytes(EXAMPLE_FORMAT_1).unwrap();
     assert_eq!(file.format(), Some(SmfFormat::Parallel));
     assert_eq!(file.tracks().len(), 4);
     let tempo_track = &file.tracks()[0];
@@ -799,7 +800,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
         0x00, 0xF0, 0x05, 0x43, 0x12, 0x00, 0x07, 0xF7, //
         0x00, 0xFF, 0x2F, 0x00,
     ]);
-    let read = MidiFile::from_bytes(&whole).unwrap();
+    let read = read_bytes(&whole).unwrap();
     assert_eq!(
         unspecified(&read, 0),
         [(
@@ -815,7 +816,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
         0x64, 0xF7, 0x04, 0x43, 0x12, 0x00, 0xF7, //
         0x00, 0xFF, 0x2F, 0x00,
     ]);
-    let read = MidiFile::from_bytes(&packets).unwrap();
+    let read = read_bytes(&packets).unwrap();
     assert_eq!(
         unspecified(&read, 0),
         [
@@ -846,7 +847,7 @@ fn the_spec_time_signature_example_is_six_eight_with_36_clocks_a_click() {
         0x00, 0xFF, 0x58, 0x04, 0x06, 0x03, 0x24, 0x08, //
         0x00, 0xFF, 0x2F, 0x00,
     ]);
-    let read = MidiFile::from_bytes(&bytes).unwrap();
+    let read = read_bytes(&bytes).unwrap();
     assert_eq!(
         unspecified(&read, 0)[0].1,
         FileEvent::Meta(Meta::TimeSignature {
@@ -880,7 +881,7 @@ fn a_key_signature_is_seven_flats_to_seven_sharps_and_a_mode() {
                 0x2F,
                 0x00,
             ]);
-            let read = MidiFile::from_bytes(&bytes).unwrap();
+            let read = read_bytes(&bytes).unwrap();
             assert_eq!(
                 unspecified(&read, 0)[0].1,
                 FileEvent::Meta(Meta::KeySignature {
@@ -912,7 +913,7 @@ fn the_spec_delta_time_example_6144_ticks_at_96_and_500000_is_32_seconds() {
             RawEvent::note_on(6144, 0, 60, 100),
         ]],
     );
-    let file = MidiFile::from_bytes(&bytes).unwrap();
+    let file = read_bytes(&bytes).unwrap();
     assert_eq!(metrical(&file).seconds_at(Tick(6144)), Seconds::new(32.0));
 }
 
@@ -923,7 +924,7 @@ fn the_spec_delta_time_example_6144_ticks_at_96_and_500000_is_32_seconds() {
 fn meta_events_at_one_tick_read_in_the_order_the_file_has_them() {
     let tempo = RawEvent::tempo(0, 500_000);
     let text = RawEvent::new(0, vec![0xFF, 0x01, 1, b'x']);
-    let first = MidiFile::from_bytes(&file(vec![tempo, text])).unwrap();
+    let first = read_bytes(file(vec![tempo, text])).unwrap();
     let kinds = |f: &MidiFile| -> Vec<bool> {
         f.tracks()[0]
             .events()
@@ -935,7 +936,7 @@ fn meta_events_at_one_tick_read_in_the_order_the_file_has_them() {
     assert_eq!(kinds(&first), [true, false, false]);
     let tempo = RawEvent::tempo(0, 500_000);
     let text = RawEvent::new(0, vec![0xFF, 0x01, 1, b'x']);
-    let second = MidiFile::from_bytes(&file(vec![text, tempo])).unwrap();
+    let second = read_bytes(file(vec![text, tempo])).unwrap();
     assert_eq!(kinds(&second), [false, true, false]);
 }
 
@@ -945,7 +946,7 @@ fn meta_events_at_one_tick_read_in_the_order_the_file_has_them() {
 #[test]
 fn text_bytes_with_the_high_bit_set_read_and_write_back_unchanged() {
     let bytes = file(vec![RawEvent::new(0, vec![0xFF, 0x01, 2, 0xE9, b'a'])]);
-    let read = MidiFile::from_bytes(&bytes).unwrap();
+    let read = read_bytes(&bytes).unwrap();
     assert_eq!(
         unspecified(&read, 0)[0].1,
         FileEvent::Meta(Meta::Text {

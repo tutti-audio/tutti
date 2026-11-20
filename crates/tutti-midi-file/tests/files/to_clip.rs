@@ -9,6 +9,7 @@
 //! packets the conversion makes survive them.
 
 use crate::common::{self, metrical, note, track};
+use crate::common::{ToBytes, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
@@ -325,7 +326,7 @@ fn a_sysex_that_is_not_one_complete_message_is_reported() {
     let rest = FileEvent::Escape(vec![3, 0xF7].into());
     // An `F0` event with an 8-bit byte is read as the escape of the bytes it sends.
     let eight_bit = FileEvent::Escape(vec![0xF0, 0x7E, 0x80, 0xF7].into());
-    let smf = MidiFile::from_bytes(&build_smf(
+    let smf = read_bytes(build_smf(
         0,
         Division::Metrical(TPQ),
         &[vec![
@@ -830,7 +831,7 @@ fn the_clip_round_trips_through_its_bytes() {
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
+    let again = read_bytes(clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
 }
 
@@ -1076,7 +1077,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
 fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, tempo_event(1_000_000)), (50, note(0, 60))]);
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
+    let again = read_bytes(clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     assert_eq!(
         flex_events(&again, is_tempo),
@@ -1090,7 +1091,7 @@ fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
 fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, signature_meta(3, 2)), (50, note(0, 60))]);
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
+    let again = read_bytes(clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     let [sig, _] = signature_events(3, 2, 8, 24);
     assert_eq!(flex_events(&again, is_signature), [(0, sig)]);

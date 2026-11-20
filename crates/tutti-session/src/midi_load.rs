@@ -11,7 +11,6 @@
 //! (a [`DroppedEvent`]) is the landed value's [`report`](LoadedMidi::report),
 //! never a log line.
 
-use std::io::Read;
 use std::sync::Arc;
 
 use tutti_buffers::Float;
@@ -242,12 +241,7 @@ impl<F: Float> Midi<'_, F> {
 
 /// Reads `asset` and builds its [`LoadedMidi`].
 fn load(asset: &Asset) -> Result<LoadedMidi, LoadMidiError> {
-    let mut bytes = Vec::new();
-    asset
-        .open()
-        .and_then(|mut reader| reader.read_to_end(&mut bytes))
-        .map_err(ReadError::Io)?;
-    Ok(convert(MidiFile::from_bytes(&bytes)?))
+    Ok(convert(MidiFile::read(asset.clone())?))
 }
 
 /// The clips, timeline values and report of `file`.

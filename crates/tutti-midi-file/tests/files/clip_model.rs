@@ -3,6 +3,7 @@
 //! only a hand-built stream can get wrong on purpose).
 
 use crate::common::{self, metrical, track};
+use crate::common::{ToBytes, read_bytes};
 
 use tutti_fixtures::midi;
 use tutti_midi_ci::{NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget};
@@ -80,7 +81,7 @@ fn valid() -> Vec<Ump> {
 /// What reading a clip made of `parts` refused: the index of the packet whose
 /// first word is the word the error names, and the rule broken.
 fn clip_error(parts: &[Ump]) -> (usize, ClipFileError) {
-    match MidiFile::from_bytes(&clip(parts)) {
+    match read_bytes(clip(parts)) {
         Err(ReadError::Clip { word, cause }) => {
             let mut at = 0;
             let packet = parts
@@ -106,9 +107,9 @@ fn packet(m: Message) -> FileEvent {
 /// Spec: m2-116/3.2.2#1, m2-116/hdr/1, m2-116/hdr/2, m2-116/hdr/3, m2-116/hdr/4, m2-116/hdr/5, m2-116/hdr/6, m2-116/hdr/7, m2-116/hdr/8, m2-116/5#2
 #[test]
 fn a_clip_reads_at_absolute_ticks() {
-    let file = MidiFile::from_bytes(&clip(&valid())).unwrap();
+    let file = read_bytes(clip(&valid())).unwrap();
     assert_eq!(
-        MidiFileKind::detect(&file.to_bytes()),
+        MidiFileKind::detect(file.to_bytes()).unwrap(),
         Some(MidiFileKind::ClipFile)
     );
     assert_eq!(metrical(&file).ticks_per_quarter(), DIVISION);
@@ -142,9 +143,9 @@ fn the_clip_length_is_the_delta_before_end_of_clip() {
     let mut parts = valid();
     let n = parts.len();
     parts[n - 2] = dcs(4 * u32::from(TPQ));
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     assert_eq!(file.tracks()[0].end(), Tick(5 * u64::from(TPQ)));
-    let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let again = read_bytes(file.to_bytes()).unwrap();
     assert_eq!(again, file);
 }
 
@@ -175,10 +176,10 @@ fn a_gap_past_the_dcs_field_round_trips() {
         dcs(0),
         end(),
     ];
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     assert_eq!(file.tracks()[0].events()[2].0, Tick(u64::from(gap)));
     let written = file.to_bytes();
-    assert_eq!(MidiFile::from_bytes(&written).unwrap(), file);
+    assert_eq!(read_bytes(&written).unwrap(), file);
 }
 
 #[test]
@@ -188,13 +189,13 @@ fn a_packet_no_definition_covers_survives() {
     let mut parts = valid();
     parts.insert(6, reserved);
     parts.insert(6, dcs(0));
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let kept = file.tracks()[0]
         .events()
         .iter()
         .any(|(_, e)| matches!(e, FileEvent::Unknown(u) if u.0 == reserved));
     assert!(kept, "{:?}", file.tracks()[0].events());
-    assert_eq!(MidiFile::from_bytes(&file.to_bytes()).unwrap(), file);
+    assert_eq!(read_bytes(file.to_bytes()).unwrap(), file);
 }
 
 /// **The tempo map is the Set Tempo messages** (Flex Data, M2-116 section
@@ -204,7 +205,7 @@ fn a_packet_no_definition_covers_survives() {
 #[test]
 fn the_tempo_map_is_the_set_tempo_messages() {
     let q = u32::from(TPQ);
-    let file = MidiFile::from_bytes(&clip(&[
+    let file = read_bytes(clip(&[
         dcs(0),
         dctpq(TPQ),
         dcs(0),
@@ -227,7 +228,7 @@ fn the_tempo_map_is_the_set_tempo_messages() {
     // The messages are events, kept.
     assert_eq!(file.tracks()[0].events().len(), 2);
 
-    let bare = MidiFile::from_bytes(&clip(&valid())).unwrap();
+    let bare = read_bytes(clip(&valid())).unwrap();
     assert_eq!(
         metrical(&bare).tempo_map().constant_tempo(),
         Some(Bpm::of(120.0))
@@ -287,7 +288,7 @@ fn a_dctpq_is_1_to_65535_and_zero_is_refused() {
     assert_eq!(clip_error(&parts), (0, ClipFileError::ZeroDctpq));
     for ticks in [1, u16::MAX] {
         parts[1] = dctpq(ticks);
-        let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+        let file = read_bytes(clip(&parts)).unwrap();
         assert_eq!(metrical(&file).ticks_per_quarter().get(), ticks);
     }
 }
@@ -313,7 +314,7 @@ fn a_wall_clock_clip_has_a_millisecond_tick() {
         dcs(0),
         end(),
     ];
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let events = &file.tracks()[0].events();
     let note = events
         .iter()
@@ -346,7 +347,7 @@ fn a_clip_without_end_of_clip_is_refused() {
 fn clockstamps_and_jr_messages_do_not_count_as_content() {
     let mut parts = vec![utility(Utility::Noop), utility(Utility::JrClock(7)), dcs(5)];
     parts.extend(valid());
-    assert!(MidiFile::from_bytes(&clip(&parts)).is_ok());
+    assert!(read_bytes(clip(&parts)).is_ok());
 }
 
 /// Spec: m2-116/5#1
@@ -354,13 +355,13 @@ fn clockstamps_and_jr_messages_do_not_count_as_content() {
 fn the_magic_alignment_and_a_cut_packet_are_refused() {
     let good = clip(&valid());
     assert!(matches!(
-        MidiFile::from_bytes(b"SMF2CLI"),
+        read_bytes(b"SMF2CLI"),
         Err(ReadError::UnknownFormat)
     ));
     let mut odd = good.clone();
     odd.push(0);
     assert!(matches!(
-        MidiFile::from_bytes(&odd),
+        read_bytes(&odd),
         // The word the stray byte starts.
         Err(ReadError::Clip {
             word,
@@ -370,7 +371,7 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
     // End of Clip is a 128-bit message: cut it to one word.
     let cut = &good[..good.len() - 12];
     assert!(matches!(
-        MidiFile::from_bytes(cut),
+        read_bytes(cut),
         // The one word of the cut packet is past the whole packets.
         Err(ReadError::Clip {
             word,
@@ -383,10 +384,10 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
 #[test]
 fn no_prefix_of_a_valid_clip_is_accepted() {
     let bytes = clip(&valid());
-    assert!(MidiFile::from_bytes(&bytes).is_ok());
+    assert!(read_bytes(&bytes).is_ok());
     for n in 0..bytes.len() {
         assert!(
-            MidiFile::from_bytes(&bytes[..n]).is_err(),
+            read_bytes(&bytes[..n]).is_err(),
             "the first {n} of {} bytes were accepted",
             bytes.len()
         );
@@ -437,7 +438,7 @@ fn a_gap_past_a_u32_round_trips() {
     let bytes = file.to_bytes();
     // 4096 restarts of two words each, and the Delta Clockstamps around them.
     assert!(bytes.len() > 4096 * 8);
-    assert_eq!(MidiFile::from_bytes(&bytes).unwrap(), file);
+    assert_eq!(read_bytes(&bytes).unwrap(), file);
 }
 
 /// A gap whose Null restarts would not fit 4 GB is refused when the clip is
@@ -502,7 +503,7 @@ fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
     let events = || vec![(0, packet(message(true))), (96, packet(message(false)))];
     let smf = crate::common::format0(SMF_DIVISION, track(events())).unwrap();
     let clip = MidiFile::clip(DIVISION, track(events())).unwrap();
-    let read = |f: &MidiFile| MidiFile::from_bytes(&f.to_bytes()).unwrap();
+    let read = |f: &MidiFile| read_bytes(f.to_bytes()).unwrap();
     let (a, b) = (read(&smf), read(&clip));
     assert_eq!(a.tracks()[0].notes(), b.tracks()[0].notes());
     // The file's Set Tempo and Time Signature come first.
@@ -597,7 +598,7 @@ fn set_profile_on_before_the_dctpq_is_accepted() {
     let messages = then(&[&set_profile_on(), &set_profile_on_of(MPE)]);
     let mut parts = messages.clone();
     parts.extend(with_header(&[]));
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let header = &file.tracks()[0].header();
     assert_eq!(header.len(), messages.len());
     assert!(header.iter().all(|(t, _)| *t == Tick(0)));
@@ -610,7 +611,7 @@ fn set_profile_on_before_the_dctpq_is_accepted() {
         }
     }
     assert!(written.starts_with(&expected));
-    assert_eq!(MidiFile::from_bytes(&written).unwrap(), file);
+    assert_eq!(read_bytes(&written).unwrap(), file);
 }
 
 /// Anything else before the DCTPQ is not allowed: a note, or a SysEx that is
@@ -641,7 +642,7 @@ fn a_header_with_program_change_cc_and_sysex_round_trips() {
         },
     ));
     let sysex = sysex7(tutti_ump::SysexStatus::Complete, &[0x7D, 1, 2, 3]);
-    let file = MidiFile::from_bytes(&clip(&with_header(&[
+    let file = read_bytes(clip(&with_header(&[
         dcs(0),
         program_change(),
         dcs(10),
@@ -660,7 +661,7 @@ fn a_header_with_program_change_cc_and_sysex_round_trips() {
     // Not on the sequence's timeline, not sounding at bar 1.
     assert_eq!(track.events().len(), 2);
     assert_eq!(metrical(&file).events().count(), 2);
-    assert_eq!(MidiFile::from_bytes(&file.to_bytes()).unwrap(), file);
+    assert_eq!(read_bytes(file.to_bytes()).unwrap(), file);
 }
 
 /// Spec: m2-116/6.1#3, m2-116/6.1.1#3
@@ -684,7 +685,7 @@ fn a_header_set_tempo_not_first_or_not_at_delta_zero_is_misplaced() {
     assert_eq!(clip_error(&late), (2, ClipFileError::MisplacedHeaderTempo));
     // Sharing the DCTPQ's DCS (no DCS of its own) is first at delta 0.
     let sharing = with_header(&[set_tempo(100.0)]);
-    assert!(MidiFile::from_bytes(&clip(&sharing)).is_ok());
+    assert!(read_bytes(clip(&sharing)).is_ok());
 }
 
 /// Spec: m2-116/6.1#3, m2-116/6.1.2#3
@@ -729,7 +730,7 @@ fn a_header_time_signature_must_follow_the_set_tempo_immediately() {
         with_header(&[dcs(0), set_tempo(100.0), dcs(0), time_signature()]),
         with_header(&[dcs(0), time_signature()]),
     ] {
-        assert!(MidiFile::from_bytes(&clip(&ok)).is_ok());
+        assert!(read_bytes(clip(&ok)).is_ok());
     }
 }
 
@@ -749,7 +750,7 @@ fn the_header_set_tempo_is_the_tempo_from_the_start_of_the_sequence() {
         start(),
     ];
     parts.extend([dcs(q), set_tempo(50.0), dcs(q), on(60, 1), dcs(0), end()]);
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let map = metrical(&file).tempo_map();
     assert_eq!(map.tempo_at(Beat::new(0.5)), Bpm::of(100.0));
     assert_eq!(map.tempo_at(Beat::new(1.5)), Bpm::of(50.0));
@@ -831,11 +832,11 @@ fn the_dctpq_has_a_zero_delta_clockstamp_before_it() {
         parts.extend_from_slice(&tail);
         parts
     };
-    assert!(MidiFile::from_bytes(&clip(&with(&[dcs(0)]))).is_ok());
+    assert!(read_bytes(clip(&with(&[dcs(0)]))).is_ok());
     assert_eq!(clip_error(&with(&[])), (0, ClipFileError::DctpqDelta));
     assert_eq!(clip_error(&with(&[dcs(5)])), (0, ClipFileError::DctpqDelta));
     // It follows the Set Profile On messages, and its DCS is the one after them.
-    assert!(MidiFile::from_bytes(&clip(&with(&then(&[&set_profile_on(), &[dcs(0)]])))).is_ok());
+    assert!(read_bytes(clip(&with(&then(&[&set_profile_on(), &[dcs(0)]])))).is_ok());
     assert_eq!(
         clip_error(&with(&then(&[&set_profile_on(), &[dcs(2)]]))),
         (set_profile_on().len(), ClipFileError::DctpqDelta)
@@ -853,7 +854,7 @@ fn a_set_profile_on_has_no_delta_clockstamp_before_it() {
         parts.extend_from_slice(&after);
         parts
     };
-    assert!(MidiFile::from_bytes(&clip(&with(&set_profile_on()))).is_ok());
+    assert!(read_bytes(clip(&with(&set_profile_on()))).is_ok());
     assert_eq!(
         clip_error(&with(&then(&[&[dcs(0)], &set_profile_on()]))),
         (1, ClipFileError::ProfileOnDelta)
@@ -938,7 +939,7 @@ fn property_exchange_is_refused_everywhere() {
             dcs(0),
             end(),
         ];
-        assert!(MidiFile::from_bytes(&clip(&parts)).is_ok(), "{sub_id2:#x}");
+        assert!(read_bytes(clip(&parts)).is_ok(), "{sub_id2:#x}");
     }
 }
 
@@ -959,7 +960,7 @@ fn the_header_keeps_its_duration() {
         dcs(0),
         end(),
     ];
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let track = &file.tracks()[0];
     assert_eq!(track.header().len(), 1);
     assert_eq!(track.header()[0].0, Tick(4));
@@ -969,14 +970,14 @@ fn the_header_keeps_its_duration() {
     let written = packets_of(&bytes);
     let at = written.iter().position(|&u| u == start()).unwrap();
     assert_eq!(written[at - 1], dcs(26));
-    assert_eq!(MidiFile::from_bytes(&bytes).unwrap(), file);
+    assert_eq!(read_bytes(&bytes).unwrap(), file);
     // A header with no message has its duration too.
     let empty = [dcs(0), dctpq(TPQ), dcs(12), start(), dcs(0), end()];
-    let file = MidiFile::from_bytes(&clip(&empty)).unwrap();
+    let file = read_bytes(clip(&empty)).unwrap();
     assert_eq!(file.tracks()[0].header_end(), Tick(12));
-    assert_eq!(MidiFile::from_bytes(&file.to_bytes()).unwrap(), file);
+    assert_eq!(read_bytes(file.to_bytes()).unwrap(), file);
     // None, as in `valid`, is zero.
-    let file = MidiFile::from_bytes(&clip(&valid())).unwrap();
+    let file = read_bytes(clip(&valid())).unwrap();
     assert_eq!(file.tracks()[0].header_end(), Tick(0));
 }
 
@@ -1041,7 +1042,7 @@ fn the_parts_of_a_lyric_or_ruby_message_share_one_delta_clockstamp() {
             "{kind:?}: a DCS before the first"
         );
         // Either way it reads back as the same events at the same ticks.
-        let back = MidiFile::from_bytes(&bytes).unwrap();
+        let back = read_bytes(&bytes).unwrap();
         assert_eq!(back.tracks()[0].events(), events, "{kind:?}");
     }
     // Two separate Lyric messages at one tick are two messages: each its own DCS.
@@ -1056,10 +1057,7 @@ fn the_parts_of_a_lyric_or_ruby_message_share_one_delta_clockstamp() {
         .position(|&u| u == Ump::from(*two[0].1.message().unwrap()))
         .unwrap();
     assert!(is_dcs(written[first + 1]));
-    assert_eq!(
-        MidiFile::from_bytes(&bytes).unwrap().tracks()[0].events(),
-        two
-    );
+    assert_eq!(read_bytes(&bytes).unwrap().tracks()[0].events(), two);
 }
 
 /// A Set Profile On message is complete before the DCTPQ: a Start with no End,
@@ -1083,7 +1081,7 @@ fn half_a_packet_after_end_of_clip_is_trailing_data() {
     // The first word of a 64-bit Note On.
     bytes.extend_from_slice(&on(60, 1).words()[0].to_be_bytes());
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         // The first word of the Note On, after the clip's words.
         Err(ReadError::Clip {
             word,
@@ -1101,7 +1099,7 @@ fn half_a_packet_after_end_of_clip_is_trailing_data() {
 #[test]
 fn a_written_clip_stamps_every_message_and_ends_the_header_at_start_of_clip() {
     let sysex = sysex7(tutti_ump::SysexStatus::Complete, &[0x7D, 1, 2, 3]);
-    let file = MidiFile::from_bytes(&clip(&with_header(&[
+    let file = read_bytes(clip(&with_header(&[
         dcs(0),
         program_change(),
         dcs(10),
@@ -1135,7 +1133,7 @@ fn simultaneous_events_share_a_delta_clockstamp_in_presentation_order() {
     let mut parts = vec![dcs(0), dctpq(TPQ), dcs(0), start(), dcs(0)];
     parts.extend(at_zero);
     parts.extend([dcs(u32::from(TPQ)), off(64), dcs(0), end()]);
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let events = &file.tracks()[0].events();
     assert_eq!(events.len(), 5);
     let ticks: Vec<Tick> = events.iter().map(|e| e.0).collect();
@@ -1143,7 +1141,7 @@ fn simultaneous_events_share_a_delta_clockstamp_in_presentation_order() {
     for (event, want) in events.iter().zip(at_zero) {
         assert_eq!(event.1, FileEvent::Message(want.decode().unwrap()));
     }
-    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let back = read_bytes(file.to_bytes()).unwrap();
     assert_eq!(back.tracks()[0].events(), *events);
 }
 
@@ -1271,7 +1269,7 @@ fn a_flex_message_is_not_interrupted_in_a_clip() {
 fn read_with_leading(leading: &[Ump]) -> Result<MidiFile, ReadError> {
     let mut parts = leading.to_vec();
     parts.extend(with_header(&[]));
-    MidiFile::from_bytes(&clip(&parts))
+    read_bytes(clip(&parts))
 }
 
 /// Section 6.2: the header's Set Profile On names the Profile the sequence
@@ -1307,7 +1305,7 @@ fn the_headers_profile_is_read_typed() {
         ]
     );
     // The write keeps them.
-    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let back = read_bytes(file.to_bytes()).unwrap();
     assert_eq!(back.tracks()[0].profiles(), file.tracks()[0].profiles());
 }
 
@@ -1363,8 +1361,7 @@ fn a_profile_is_written_at_the_start_of_the_header() {
         target: ProfileTarget::Group,
         profile: ProfileId::MPE,
     };
-    let with_program =
-        MidiFile::from_bytes(&clip(&with_header(&[dcs(0), program_change()]))).unwrap();
+    let with_program = read_bytes(clip(&with_header(&[dcs(0), program_change()]))).unwrap();
     let track = with_program.tracks()[0].clone().profile_on(on);
     assert_eq!(track.profiles(), vec![on]);
     assert_eq!(track.header().len(), set_profile_on_of(MPE).len() + 1);
@@ -1375,7 +1372,7 @@ fn a_profile_is_written_at_the_start_of_the_header() {
         &[dcs(0), dctpq(TPQ), dcs(0)],
     ]));
     assert!(bytes.starts_with(&want));
-    assert_eq!(MidiFile::from_bytes(&bytes).unwrap(), file);
+    assert_eq!(read_bytes(&bytes).unwrap(), file);
     // A second Profile goes after the first and before the other messages.
     let second = ProfileOnRequest {
         target: ProfileTarget::FunctionBlock,
@@ -1396,7 +1393,7 @@ fn written_after_start(events: Vec<Ump>, header_end: u32) -> (Vec<Ump>, MidiFile
         parts.extend([dcs(0), event]);
     }
     parts.extend([dcs(0), end()]);
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let packets = packets_of(&file.to_bytes());
     let s = packets.iter().position(|p| *p == start()).unwrap();
     (packets[s - 1..].to_vec(), file)
@@ -1427,7 +1424,7 @@ fn the_first_tempo_and_signature_use_the_delta_clockstamp_before_start_of_clip()
     let events = &file.tracks()[0].events();
     assert!(events.iter().all(|(tick, _)| *tick == Tick(0)));
     assert_eq!(file.tracks()[0].header_end(), Tick(5));
-    assert_eq!(MidiFile::from_bytes(&file.to_bytes()).unwrap(), file);
+    assert_eq!(read_bytes(file.to_bytes()).unwrap(), file);
 }
 
 /// With no Set Tempo the Set Time Signature is the one that follows Start of
@@ -1462,7 +1459,7 @@ fn a_set_tempo_with_its_own_zero_delta_clockstamp_reads_at_tick_zero() {
         dcs(0),
         end(),
     ];
-    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let file = read_bytes(clip(&parts)).unwrap();
     let ticks: Vec<_> = file.tracks()[0].events().iter().map(|e| e.0).collect();
     assert_eq!(ticks, [Tick(0), Tick(0)]);
     assert_eq!(file.tracks()[0].header_end(), Tick(5));

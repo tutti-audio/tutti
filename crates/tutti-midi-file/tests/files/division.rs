@@ -1,6 +1,7 @@
 //! An SMF's division word and format word (SMF 1.0 section 2.1): SMPTE time,
 //! a metrical division, and a format the specification leaves undefined.
 
+use crate::common::{ToBytes, read_bytes};
 use crate::common::{metrical, sequences};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
@@ -12,7 +13,7 @@ use tutti_midi_protocol::MtcRate;
 use tutti_units::Seconds;
 
 fn read(bytes: &[u8]) -> MidiFile {
-    MidiFile::from_bytes(bytes).expect("reads")
+    read_bytes(bytes).expect("reads")
 }
 
 /// The SMPTE view of one timeline of `file`.
@@ -95,7 +96,7 @@ fn a_division_with_a_foreign_frame_rate_or_no_resolution_is_refused() {
         });
         assert!(
             matches!(
-                MidiFile::from_bytes(&bytes),
+                read_bytes(&bytes),
                 Err(ReadError::Smf { track: None, offset: 0, cause: c }) if c == cause
             ),
             "{fps} x {ticks_per_frame}"

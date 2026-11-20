@@ -8,6 +8,7 @@
 //! reading of the bytes, never on the bytes.
 
 use crate::common::{self, metrical, sequences, track, unspecified};
+use crate::common::{ToBytes, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 
@@ -56,7 +57,7 @@ fn off(channel: u8, key: u8, vel: u8) -> FileEvent {
 }
 
 fn read(bytes: &[u8]) -> MidiFile {
-    MidiFile::from_bytes(bytes).expect("reads")
+    read_bytes(bytes).expect("reads")
 }
 
 /// A file one of every event the SMF has, in a track.
@@ -129,7 +130,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         let bytes = smf(format, &tracks);
         let file = read(&bytes);
         assert_eq!(
-            MidiFileKind::detect(&bytes),
+            MidiFileKind::detect(bytes.clone()).unwrap(),
             Some(MidiFileKind::StandardMidiFile)
         );
         let ticks_per_quarter = match file.timebase() {
@@ -612,7 +613,7 @@ fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
 fn a_zero_division_is_refused() {
     let bytes = build_smf(0, Division::Metrical(0), &[vec![]]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: None,
             offset: 0,
@@ -639,10 +640,10 @@ fn no_prefix_of_a_valid_file_is_accepted() {
             ],
         ],
     );
-    assert!(MidiFile::from_bytes(&bytes).is_ok());
+    assert!(read_bytes(&bytes).is_ok());
     for n in 0..bytes.len() {
         assert!(
-            MidiFile::from_bytes(&bytes[..n]).is_err(),
+            read_bytes(&bytes[..n]).is_err(),
             "the first {n} of {} bytes were accepted",
             bytes.len()
         );
@@ -655,7 +656,7 @@ fn a_chunk_cut_short_is_truncated() {
     let bytes = smf(0, &[everything()]);
     let cut = &bytes[..bytes.len() - 5];
     assert!(matches!(
-        MidiFile::from_bytes(cut),
+        read_bytes(cut),
         Err(ReadError::Smf {
             track: None,
             offset: 14,
@@ -664,7 +665,7 @@ fn a_chunk_cut_short_is_truncated() {
     ));
     // Cut inside the 8-byte chunk header of the track.
     assert!(matches!(
-        MidiFile::from_bytes(&bytes[..14 + 5]),
+        read_bytes(&bytes[..14 + 5]),
         Err(ReadError::Smf {
             track: None,
             offset: 14,
@@ -688,7 +689,7 @@ fn a_file_missing_a_track_is_truncated() {
     let one = smf(1, &[vec![RawEvent::note_on(0, 0, 60, 100)]]);
     let cut = &two[..one.len()];
     assert!(matches!(
-        MidiFile::from_bytes(cut),
+        read_bytes(cut),
         Err(ReadError::Smf {
             track: None,
             offset,
@@ -710,7 +711,7 @@ fn a_track_that_ends_mid_event_is_a_parse_error() {
     bytes.extend_from_slice(&[0x00, 0x90, 0x3C]);
     // The header chunk is 14 bytes and the track chunk's own header 8.
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 22,
@@ -729,7 +730,7 @@ fn a_meta_event_longer_than_its_chunk_is_an_event_cut_off() {
     bytes.extend_from_slice(&4u32.to_be_bytes());
     // A Text meta event declaring 5 bytes of text and holding none.
     bytes.extend_from_slice(&[0x00, 0xFF, 0x01, 0x05]);
-    let err = MidiFile::from_bytes(&bytes).unwrap_err();
+    let err = read_bytes(&bytes).unwrap_err();
     assert!(
         matches!(
             err,
@@ -756,7 +757,7 @@ fn a_chunk_past_the_declared_tracks_is_named_where_it_starts() {
     bytes.extend_from_slice(&4u32.to_be_bytes());
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: None,
             offset,
@@ -1007,11 +1008,8 @@ fn a_file_reads_and_writes_a_path() {
 #[test]
 fn bytes_of_neither_container_are_named_as_such() {
     assert!(matches!(
-        MidiFile::from_bytes(b"RIFF....WAVE"),
+        read_bytes(b"RIFF....WAVE"),
         Err(ReadError::UnknownFormat)
     ));
-    assert!(matches!(
-        MidiFile::from_bytes(b""),
-        Err(ReadError::UnknownFormat)
-    ));
+    assert!(matches!(read_bytes(b""), Err(ReadError::UnknownFormat)));
 }
