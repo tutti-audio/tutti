@@ -1,5 +1,7 @@
 //! The errors of a CoreMIDI call.
 
+use super::objc_exception::ObjcException;
+use crate::blocks::BlockRefusal;
 use std::fmt;
 
 /// A CoreMIDI `OSStatus`: the code a call returned.
@@ -57,6 +59,14 @@ pub enum Operation {
     ReceivedEventList,
     /// `MIDISendEventList`: an output port sending to a destination.
     SendEventList,
+    /// `-[MIDIUMPMutableEndpoint initWithName:...]`.
+    CreateUmpEndpoint,
+    /// `-[MIDIUMPMutableFunctionBlock initWithName:...]`.
+    CreateFunctionBlock,
+    /// `-[MIDIUMPMutableEndpoint registerFunctionBlocks:markAsStatic:error:]`.
+    RegisterFunctionBlocks,
+    /// `-[MIDIUMPMutableEndpoint setEnabled:error:]`.
+    EnableUmpEndpoint,
 }
 
 impl fmt::Display for Operation {
@@ -70,12 +80,16 @@ impl fmt::Display for Operation {
             Self::CreateOutputPort => "MIDIOutputPortCreate",
             Self::ReceivedEventList => "MIDIReceivedEventList",
             Self::SendEventList => "MIDISendEventList",
+            Self::CreateUmpEndpoint => "MIDIUMPMutableEndpoint init",
+            Self::CreateFunctionBlock => "MIDIUMPMutableFunctionBlock init",
+            Self::RegisterFunctionBlocks => "MIDIUMPMutableEndpoint registerFunctionBlocks",
+            Self::EnableUmpEndpoint => "MIDIUMPMutableEndpoint setEnabled",
         })
     }
 }
 
 /// A CoreMIDI call that failed, or a message CoreMIDI could not be given.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// A call returned a non-zero status.
     #[error("{operation} failed: {status}")]
@@ -92,6 +106,44 @@ pub enum Error {
     /// A message does not fit the event list it is sent in.
     #[error("the message does not fit the event list")]
     EventListFull,
+    /// An Objective-C call returned an `NSError`: its code and domain are the
+    /// error's own, not assumed to be an `OSStatus`.
+    #[error("{operation} failed: {description} (domain {domain}, code {code})")]
+    Objc {
+        /// The call.
+        operation: Operation,
+        /// `NSError.code`.
+        code: isize,
+        /// `NSError.domain`.
+        domain: String,
+        /// `NSError.localizedDescription`.
+        description: String,
+    },
+    /// CoreMIDI numbered a Function Block outside the 5 bits the spec holds.
+    #[error("CoreMIDI numbered a Function Block {0}, which the spec cannot hold")]
+    BlockNumber(u8),
+    /// The Product Instance Id is past the 42 characters CoreMIDI accepts.
+    #[error("a Product Instance Id of {len} characters is past the 42 CoreMIDI accepts")]
+    InstanceIdTooLong {
+        /// Its length in bytes.
+        len: usize,
+    },
+    /// The endpoint a send was for has been dropped.
+    #[error("the endpoint was dropped")]
+    EndpointGone,
+    /// An Objective-C call returned no object and no error.
+    #[error("{0} returned no object")]
+    NoObject(Operation),
+    /// The OS has no `MIDIUMPMutableEndpoint` (before macOS 15), so an endpoint
+    /// with Function Blocks cannot be created.
+    #[error("this macOS has no MIDIUMPMutableEndpoint (before macOS 15)")]
+    UmpEndpointUnsupported,
+    /// A Function Block CoreMIDI cannot carry.
+    #[error(transparent)]
+    Block(#[from] BlockRefusal),
+    /// CoreMIDI raised an Objective-C exception.
+    #[error(transparent)]
+    Exception(#[from] ObjcException),
     /// The process's client has been started: it has one, and a second is not made.
     #[error("the process's CoreMIDI client is already started")]
     ClientExists,

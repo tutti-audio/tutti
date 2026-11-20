@@ -142,6 +142,29 @@ impl Receiver {
     }
 }
 
+/// A receiver's counters, readable after the receiver is gone.
+#[derive(Clone)]
+pub(crate) struct Counts(Arc<Callback>);
+
+impl Counts {
+    /// As [`Receiver::faults`].
+    pub(crate) fn faults(&self) -> u64 {
+        self.0.faults.load(Ordering::Relaxed)
+    }
+
+    /// As [`Receiver::truncated`].
+    pub(crate) fn truncated(&self) -> u64 {
+        self.0.truncated.load(Ordering::Relaxed)
+    }
+}
+
+impl Receiver {
+    /// A handle on this receiver's counters that outlives it.
+    pub(crate) fn counts(&self) -> Counts {
+        Counts(Arc::clone(&self.callback))
+    }
+}
+
 impl Drop for Receiver {
     fn drop(&mut self) {
         // The lock is never poisoned: `receive` catches every panic under it.

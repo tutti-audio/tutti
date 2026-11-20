@@ -21,11 +21,13 @@ use crate::UniqueId;
 use objc2::rc::autoreleasepool;
 use objc2::runtime::AnyClass;
 use objc2_core_midi::{
-    MIDIUMPEndpoint, MIDIUMPEndpointManager, MIDIUMPFunctionBlock, MIDIUMPProtocolOptions,
+    MIDI2DeviceInfo, MIDIUMPEndpoint, MIDIUMPEndpointManager, MIDIUMPFunctionBlock,
+    MIDIUMPProtocolOptions,
 };
 use tutti_ump::{
-    EndpointInfoNotification, FunctionBlockCount, FunctionBlockInfo, FunctionBlocks,
-    OsFunctionBlock, Protocol, UiHint, UmpVersion, read_function_block, read_protocol,
+    DeviceIdentity, EndpointInfoNotification, FunctionBlockCount, FunctionBlockInfo,
+    FunctionBlocks, ManufacturerId, OsFunctionBlock, Protocol, SoftwareRevision, U7, UiHint,
+    UmpVersion, read_function_block, read_protocol,
 };
 
 /// One Function Block as CoreMIDI reports it (`MIDIUMPFunctionBlock`).
@@ -57,6 +59,10 @@ pub struct UmpEndpointInfo {
     pub source_unique_id: Option<UniqueId>,
     /// The unique id of its destination, when it has one.
     pub destination_unique_id: Option<UniqueId>,
+    /// Its Device Identity (`deviceInfo`), when its bytes form one.
+    pub identity: Option<DeviceIdentity>,
+    /// Its Product Instance Id (`productInstanceID`), when it is not empty.
+    pub instance: Option<String>,
     /// Its Function Blocks.
     pub blocks: Vec<UmpBlockInfo>,
 }
@@ -119,7 +125,18 @@ fn ui_hint_of(raw: i32) -> UiHint {
 
 fn endpoint_info(endpoint: &MIDIUMPEndpoint) -> UmpEndpointInfo {
     // SAFETY: plain getters on a live endpoint object.
-    let (protocol, supported, source, destination, blocks, is_static, rx_jr, tx_jr) = unsafe {
+    let (
+        protocol,
+        supported,
+        source,
+        destination,
+        blocks,
+        is_static,
+        rx_jr,
+        tx_jr,
+        device,
+        instance,
+    ) = unsafe {
         (
             endpoint.MIDIProtocol().0,
             endpoint.supportedMIDIProtocols(),
@@ -129,6 +146,8 @@ fn endpoint_info(endpoint: &MIDIUMPEndpoint) -> UmpEndpointInfo {
             endpoint.hasStaticFunctionBlocks(),
             endpoint.hasJRTSReceiveCapability(),
             endpoint.hasJRTSTransmitCapability(),
+            endpoint.deviceInfo(),
+            endpoint.productInstanceID().to_string(),
         )
     };
     let blocks: Vec<UmpBlockInfo> = blocks.iter().map(|b| block_info(&b)).collect();
@@ -145,8 +164,45 @@ fn endpoint_info(endpoint: &MIDIUMPEndpoint) -> UmpEndpointInfo {
         },
         source_unique_id: UniqueId::of(source),
         destination_unique_id: UniqueId::of(destination),
+        identity: identity_of(&device),
+        instance: (!instance.is_empty()).then_some(instance),
         blocks,
     }
+}
+
+/// The Device Identity `info` holds, or `None` when a byte is not 7 bits or the
+/// manufacturer bytes are no id.
+fn identity_of(info: &MIDI2DeviceInfo) -> Option<DeviceIdentity> {
+    let pair = |value: u16| {
+        Some([
+            U7::new(u8::try_from(value & 0x7F).ok()?)?,
+            U7::new(u8::try_from(value >> 7).ok()?)?,
+        ])
+    };
+    let bytes = |raw: [u8; 4]| -> Option<[U7; 4]> {
+        Some([
+            U7::new(raw[0])?,
+            U7::new(raw[1])?,
+            U7::new(raw[2])?,
+            U7::new(raw[3])?,
+        ])
+    };
+    // SAFETY: plain getters on a live device info object.
+    let (manufacturer, family, model, revision) = unsafe {
+        (
+            info.manufacturerID().sysExIDByte,
+            info.family(),
+            info.modelNumber(),
+            info.revisionLevel().revisionLevel,
+        )
+    };
+    let [a, b, c] = manufacturer;
+    Some(DeviceIdentity {
+        manufacturer: ManufacturerId::from_sysex_bytes([U7::new(a)?, U7::new(b)?, U7::new(c)?])?,
+        family: pair(family)?,
+        model: pair(model)?,
+        revision: SoftwareRevision::from(bytes(revision)?),
+    })
 }
 
 fn block_info(block: &MIDIUMPFunctionBlock) -> UmpBlockInfo {

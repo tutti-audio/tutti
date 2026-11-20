@@ -13,8 +13,10 @@ mod receive;
 mod run_loop;
 mod source;
 mod ump_destination;
+mod ump_endpoint;
 mod ump_endpoints;
 
+pub use crate::blocks::{BlockField, BlockRefusal};
 pub use crate::find::FindError;
 pub use crate::notification::Notification;
 pub use crate::unique_id::UniqueId;
@@ -28,4 +30,5 @@ pub use output_port::OutputPort;
 pub use run_loop::run_notifications;
 pub use source::UmpSource;
 pub use ump_destination::UmpDestination;
+pub use ump_endpoint::UmpEndpoint;
 pub use ump_endpoints::{UmpBlockInfo, UmpEndpointInfo, UmpEndpointsError, ump_endpoints};
