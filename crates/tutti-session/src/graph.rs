@@ -305,7 +305,7 @@ struct Placed<F: Float> {
 /// `Editor`: the edit/commit boundary stays visible.
 pub struct Graph<F: Float = f32> {
     editor: Editor<F>,
-    local: Option<Local<F>>,
+    local: Option<Box<Local<F>>>,
     nodes: BTreeMap<NodeKey, Entry>,
     /// What each node's params are written through: the session's value
     /// table, which the session's `Values` share.
@@ -533,11 +533,11 @@ impl<F: Float> Graph<F> {
         master_meter.enable();
         Self {
             editor,
-            local: Some(Local {
+            local: Some(Box::new(Local {
                 exec,
                 #[cfg(feature = "testing")]
                 scratch: Vec::new(),
-            }),
+            })),
             nodes: BTreeMap::new(),
             values: ValueTable::new(),
             edited: true,
