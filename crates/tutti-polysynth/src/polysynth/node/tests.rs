@@ -12,8 +12,10 @@ fn the_shape_declares_volume_and_the_unison_params() {
     use tutti_graph::Node;
     use tutti_units::UnitParam;
 
-    let mut plain = PolySynth::new(SynthConfig::default());
-    plain.set_volume(tutti_units::Amplitude::new(0.5));
+    let plain = PolySynth::new(SynthConfig {
+        volume: tutti_units::Amplitude::new(0.5),
+        ..Default::default()
+    });
     assert_eq!(plain.shape().params.as_slice(), &[UnitParam::Volume][..]);
     assert_eq!(plain.param_base(0), Some(0.5));
     assert_eq!(plain.param_base(1), None);

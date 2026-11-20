@@ -22,7 +22,7 @@ fn triad(root: usize, minor: bool) -> [f64; CLASSES] {
 }
 
 fn grid(rows: &[[f64; CLASSES]]) -> Grid<f64> {
-    Grid::new(rows.concat(), FrameCount(rows.len()), BinCount(CLASSES)).unwrap()
+    Grid::try_from((rows.concat(), FrameCount(rows.len()), BinCount(CLASSES))).unwrap()
 }
 
 fn run(rows: &[[f64; CLASSES]], cfg: &ChordConfig) -> Vec<ChordSpan> {
@@ -283,7 +283,7 @@ fn no_chord_leaves_a_gap() {
 #[test]
 fn inputs_are_validated() {
     let invalid = |g: &Grid<f64>| detect(g, framing(4096, 1024), &cfg()).unwrap_err();
-    let wide = Grid::new(vec![0.0; 13], FrameCount(1), BinCount(13)).unwrap();
+    let wide = Grid::try_from((vec![0.0; 13], FrameCount(1), BinCount(13))).unwrap();
     assert_eq!(invalid(&wide), Error::NotTwelveClasses { columns: 13 });
     let mut x = [0.5; CLASSES];
     x[4] = f64::NAN;
@@ -292,11 +292,11 @@ fn inputs_are_validated() {
     assert_eq!(invalid(&grid(&[x])), Error::NonFiniteInput);
     x[4] = -0.5;
     assert_eq!(invalid(&grid(&[x])), Error::NegativeInput);
-    let huge = Grid::new(
+    let huge = Grid::try_from((
         vec![0.0; (MAX_FRAMES.get() + 1) * CLASSES],
         FrameCount(MAX_FRAMES.get() + 1),
         BinCount(CLASSES),
-    )
+    ))
     .unwrap();
     assert_eq!(
         invalid(&huge),
@@ -305,7 +305,7 @@ fn inputs_are_validated() {
             max: MAX_FRAMES
         }
     );
-    let empty = Grid::new(Vec::new(), FrameCount(0), BinCount(CLASSES)).unwrap();
+    let empty = Grid::try_from((Vec::new(), FrameCount(0), BinCount(CLASSES))).unwrap();
     assert!(
         detect(&empty, framing(4096, 1024), &cfg())
             .unwrap()
@@ -330,11 +330,11 @@ fn inputs_are_validated() {
         );
     }
     // The most frames still smooth, in one pass.
-    let max = Grid::new(
+    let max = Grid::try_from((
         vec![0.0; MAX_FRAMES.get() * CLASSES],
         MAX_FRAMES,
         BinCount(CLASSES),
-    )
+    ))
     .unwrap();
     assert!(
         detect(&max, framing(4096, 1024), &cfg())

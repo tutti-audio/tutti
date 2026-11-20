@@ -793,7 +793,7 @@ pub fn chroma<S: Sample>(
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
     meter.feed(&samples, |frame| data.extend_from_slice(&frame.bins));
     Ok(Chroma {
-        grid: Grid::new(data, frames, BinCount(CLASSES))?,
+        grid: Grid::try_from((data, frames, BinCount(CLASSES)))?,
         tuning: tuning.get(),
         framing: cfg.framing,
     })

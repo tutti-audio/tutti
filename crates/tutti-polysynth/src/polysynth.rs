@@ -149,7 +149,8 @@ impl<F: SynthFloat> PolySynth<F> {
             .collect();
         let bank = Self::build_bank(&config, sample_rate, unison_count);
 
-        let master_volume = Param::new(Amplitude::UNITY);
+        let volume = Self::clamp_volume(config.volume);
+        let master_volume = Param::new(volume);
         let universal = UniversalReader::new(config.group, config.device);
         let bends = [Semitones::UNISON; 16];
 
@@ -163,7 +164,7 @@ impl<F: SynthFloat> PolySynth<F> {
             unison,
             bends,
             master_volume,
-            last_volume: Amplitude::UNITY,
+            last_volume: volume,
             universal,
             master_applied: MasterGain::UNITY,
             finished_indices: Vec::with_capacity(polyphony),
@@ -195,23 +196,11 @@ impl<F: SynthFloat> PolySynth<F> {
         self.process_midi_event(ump.into());
     }
 
-    /// A master volume as [`set_volume`](Self::set_volume) stores it:
-    /// floored at 0. Shared by the setter and a driven port's value.
+    /// A master volume as the synth reads it: floored at 0. Shared by the config's
+    /// [`volume`](SynthConfig::volume) and a driven port's value.
     #[inline]
     pub(crate) fn clamp_volume(volume: Amplitude) -> Amplitude {
         volume.max(Amplitude::SILENT)
-    }
-
-    /// Sets the master output gain as a linear [`Amplitude`]: `1.0` (the
-    /// default) is unity, `0.0` silence, and values above unity boost.
-    /// Negative values clamp to 0.
-    ///
-    /// Applied once per block to the summed mix, not per voice. Takes `&mut
-    /// self`, so it sets the gain a synth is inserted with; once in a graph the
-    /// gain is the synth's `ParamSet` entry, `Volume`, which a host writes and a
-    /// modulation lane takes as its knob.
-    pub fn set_volume(&mut self, volume: Amplitude) {
-        self.master_volume.store(Self::clamp_volume(volume));
     }
 
     /// Returns the current master gain as a linear amplitude.

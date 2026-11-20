@@ -23,10 +23,10 @@ use tutti_nodes::{
     ConvolverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
     DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode, GateConfig,
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
-    LadderType, LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
-    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, RingModConfig,
-    RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig,
-    TremoloNode,
+    LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode,
+    MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
+    RingModConfig, RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
+    TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -427,9 +427,11 @@ fn ring_mod() {
 #[test]
 fn lfo() {
     IsolateRow::new("LfoNode (sine, 3 Hz)", || {
-        LfoNode::new(LfoShape::Sine)
-            .with_rate(Hz::new(3.0))
-            .with_depth(Depth::clamped(0.8))
+        LfoNode::from(
+            LfoConfig::new(LfoShape::Sine)
+                .rate(Hz::new(3.0))
+                .depth(Depth::clamped(0.8)),
+        )
     })
     .control("rate", |l| {
         assert!(ParamNode::<f32>::param_set(l).set(UnitParam::Rate, 5.0))

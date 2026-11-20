@@ -36,7 +36,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    SoundFontUnit::new(font(), Settings::new()).expect("builds")
+    Settings::new().build(font()).expect("builds")
 }
 
 fn cc(channel: u8, controller: u8, value: u8) -> Ump {

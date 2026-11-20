@@ -21,7 +21,7 @@ use tutti_units::{SampleRate, Samples};
 pub const BLOCK: usize = 64;
 
 /// A [`PolySynth`] driven by hand. Derefs to the synth, so its own methods
-/// (`set_volume`, `active_voice_count`, …) are reachable.
+/// (`volume`, `active_voice_count`, …) are reachable.
 pub struct Hand {
     direct: Direct<PolySynth<f32>>,
     queued: Vec<Event>,

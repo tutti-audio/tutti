@@ -3,6 +3,7 @@
 //! graph's mix aligned to the kernel's latency, the cut at `tail + latency` inside a block
 //! and a block-aligned park. Every figure is the definition of a delay.
 
+use crate::{ControlSet, ControlSignals, Kernel, KernelNode};
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_graph::contract::{Driven, assert_declared_tail, drive_input, prepared};
@@ -10,7 +11,6 @@ use tutti_graph::{Buses, Node, ParamNode, Shape};
 use tutti_graph::{
     Env, PlayClock, Prepare, Standalone, Status, TransportChanges, TransportPosition,
 };
-use tutti_nodes::{ControlSet, ControlSignals, Kernel, KernelNode};
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
