@@ -13,7 +13,7 @@ use tutti_export::{Normalize, RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::Osc;
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::{Db, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;

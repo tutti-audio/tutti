@@ -69,6 +69,7 @@ mod bypass;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
+mod drive;
 #[cfg(feature = "plugin")]
 mod editor;
 mod error;

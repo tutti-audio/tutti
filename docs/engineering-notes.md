@@ -27,7 +27,7 @@ So `--no-default-features` does **not** test this — it drops the codec and mid
 features instead. Name the feature:
 
 ```bash
-cargo check -p tutti-transport -p tutti-engine
+cargo check -p tutti-timeline -p tutti-engine
 ```
 
 ## The import-path gate
@@ -108,7 +108,7 @@ crates/             everything shipped, directory name = package name
                     #   `Param<U>` and the ids.
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
                     #   executor. Design doc 013.
-  tutti-transport   # Transport: tempo, loop, motion state machine, timed commands
+  tutti-timeline   # Transport: tempo, loop, motion state machine, timed commands
   tutti-engine      # Engine: the per-block graph render over a transport
   tutti-cpal        # Device layer: CPAL stream, RT callback, driver lifecycle
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
@@ -457,7 +457,7 @@ param takes nothing. `P` is a packed `UnitAddr` (index in the high byte, the
 plain `{ UnitParam::X as u16 }` and a node with several names the others with
 `{ UnitAddr::new(UnitParam::X, i).to_u16() }` (doc 013, "Param addresses").
 `AudioNode`, the component wrapping a `NodeKey`, is `bevy-tutti`'s; the engine
-and `tutti-session` key a node by `NodeKey`, and `tutti-transport` and
+and `tutti-session` key a node by `NodeKey`, and `tutti-timeline` and
 `tutti-engine` have no `bevy` feature.
 
 The session runs a frame as the phases of `tutti_session::PHASES`, and
@@ -594,6 +594,18 @@ knowing because the same shapes recur:
   `read` across a message with descriptors drops them, so a buffered reader that reads
   ahead would have to `recvmsg` everywhere. Windows keeps a named, delete-on-close
   file whose name travels in the frame.
+- **A plugin state is the same kind of object, in either direction.** State is the one
+  payload whose size a plugin chooses (up to `MAX_STATE_BYTES`, a gigabyte), so it never
+  travels in a frame: `LoadState`, `StageState` and `StateReady` declare its length and
+  the bytes follow as a memory object made as the slab is (a sealed `memfd` on Linux, an
+  unlinked shared memory object on macOS, a named delete-on-close file on Windows, where
+  the transport keeps the last one sent alive until the next). The receiver checks the
+  declared length against the cap and the object (exactly, on every platform that keeps
+  lengths exact), checks the seals on Linux, copies the bytes out once with `read` and
+  closes the descriptor. It reads rather than maps: a read of an object whose holder
+  truncates it returns short, where a mapping of an unsealed one (macOS) would fault.
+  Nothing needs a byte-count progress deadline any more, because there is no transfer to
+  measure: a state request has one deadline (`Timeouts::state`), as a query has.
 - **`set_nonblocking` is not the way out, and was tried.** It took Windows from
   37 failures to 47. `PIPE_NOWAIT` makes `ReadFile` report *success with zero
   bytes*, which this transport reads as EOF, so a quiet peer was reported as a
@@ -830,10 +842,10 @@ mode is one. The server's `LoadPlugin` activated at once and the state came
 after `PluginLoaded`, so such a plugin kept the default: every first load with
 a state, a crash-recovery reload, and a graph fork (four runs in six came up in
 the default mode). The state is now staged before the load
-(`ControlRequest::StageStateChunk`), the loader restores it between opening the
+(`ControlRequest::StageState`), the loader restores it between opening the
 plugin and activating it, and the `PluginLoaded` reply (buses, latency) is the
 state's; a plugin that refuses the state loads at its defaults and the reply
-says so. The load declares the state it restores (`LoadPlugin { state: Some(StagedState { len }) }`) and the server refuses one that does not match what it holds; a stage is discarded by any other request. The server says `Working::Restoring` just before the restore, and from then the host waits a flat 60 s (a restore is one opaque call with nothing in it to measure progress by) and blames a failure on the state (`IpcError::StateRestore`, which the session answers by withholding the snapshot); a failure before it, in the library or its init, is a load failure and blames nothing. `PluginClient::new_with_state`, `Plugin::open_with_state` and
+says so. The load declares the state it restores (`LoadPlugin { state: Some(StagedState { len }) }`) and the server refuses one that does not match what it holds; a stage is discarded by any other request. The server says `Working::Restoring` just before the restore, and from then the host waits a flat 60 s (a restore is one opaque call with nothing in it to measure progress by) and blames a failure on the state (`IpcError::StateRestore`, which the session answers by withholding the snapshot); a failure before it, in the library or its init, is a load failure and blames nothing. `PluginClient::new_with_state`, `Plugin::open_served_restoring`, `Plugin::open_in_process_restoring` and
 `PluginLoad::run` carry it; the in-process VST2 fork restores the program and
 the state before it activates. The AU change mirrors the others and is not
 built here (macOS only).

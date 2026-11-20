@@ -7,7 +7,7 @@ use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{HasParam, IntoNode, NodeParts};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_units::{Amplitude, Beat, PlaybackRate};
 
 use crate::streamer::{Stream, StreamReader};

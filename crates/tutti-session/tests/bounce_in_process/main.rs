@@ -14,12 +14,13 @@ use crate::pooled::{LoadPlugin, Spec};
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_export::Produced;
-use tutti_plugin::catalog::{Hosting, PluginRef};
+use tutti_plugin_db::Hosting;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, ExportClock, PeerState, Range, Root, Session, Stem,
 };
 use tutti_tempo::TempoMap;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 

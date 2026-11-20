@@ -3,7 +3,7 @@
 //! effect; the shared plugin's descriptor lists both.)
 
 use crate::instrument_support::subjects::Plugin;
-use tutti_plugin::catalog::PluginRole;
+use tutti_plugin_types::PluginRole;
 use tutti_session::{Error, NotInstrument};
 
 #[test]

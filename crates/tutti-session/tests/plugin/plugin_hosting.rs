@@ -6,8 +6,9 @@ use crate::support::clap_probe;
 use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
-use tutti_plugin::catalog::{Hosting, PluginRef};
+use tutti_plugin_db::Hosting;
 use tutti_plugin_types::IpcError;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent};
 use tutti_units::Samples;
 
@@ -74,7 +75,7 @@ fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolE
 /// A session on a polled executor the test shares: the futures it is handed wait
 /// until the test polls the executor, or the session's `update` does.
 fn holding() -> (Session, tutti_platform::Executor) {
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .executor(executor.clone())
@@ -84,7 +85,7 @@ fn holding() -> (Session, tutti_platform::Executor) {
 }
 
 fn run_held(executor: &tutti_platform::Executor) {
-    executor.poll(usize::MAX);
+    executor.run_until_stalled();
 }
 
 /// **The blacklist is asked when the load runs, not when the entry is built**:
@@ -147,7 +148,9 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
         None,
     ) {
         Err(LoadError::Plugin(error)) => match &*error {
-            IpcError::NotOutOfProcess { format, .. } => assert_eq!(*format, "VST2"),
+            IpcError::NotOutOfProcess { format, .. } => {
+                assert_eq!(*format, tutti_plugin_types::PluginFormat::Vst2)
+            }
             other => panic!("expected NotOutOfProcess, got {other:?}"),
         },
         other => panic!("expected NotOutOfProcess, got {other:?}"),

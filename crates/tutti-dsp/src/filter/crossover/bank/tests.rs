@@ -5,13 +5,13 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_units::{Hz, SampleRate};
 
 use super::*;
-use crate::{Complex64, CrossoverControls, CrossoverModel, SOLVE_CEILING};
+use crate::{Complex64, CrossoverBands, CrossoverControls, CrossoverModel, SOLVE_CEILING};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn model(freqs: &[f64]) -> CrossoverModel {
     let f: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
-    CrossoverModel::new(&f, RATE).unwrap()
+    crate::testing::crossover_model(&f, RATE)
 }
 
 /// The grid the node's ramp takes: a design arrives in 16 frames.
@@ -414,7 +414,7 @@ fn the_bands_stay_within_the_models_bound() {
                 Hz::ZERO,
             ],
         };
-        let m = CrossoverModel::designed(3, &controls, RATE).unwrap();
+        let m = CrossoverModel::designed(CrossoverBands::of(3), &controls, RATE);
         let noise: Vec<f64> = (0..20_000)
             .map(|i| ((i * 7919) % 2003) as f64 / 1001.0 - 1.0)
             .collect();
@@ -473,7 +473,7 @@ fn a_five_hz_split_at_192_khz_holds_its_bands_and_noise_in_f32() {
     const FC: f64 = 5.0;
     let whole = FS as usize;
     let w = 2.0 * PI * FC / FS;
-    let model = CrossoverModel::new(&[Hz::new(FC)], SampleRate::of(FS)).unwrap();
+    let model = crate::testing::crossover_model(&[Hz::new(FC)], SampleRate::of(FS));
     let input: Vec<f32> = (0..2 * whole)
         .map(|n| libm::sin(w * n as f64) as f32)
         .collect();

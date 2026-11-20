@@ -26,7 +26,7 @@ use tutti_graph::{
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -82,7 +82,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         key,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     live.spec_mut().connect_events(
@@ -150,7 +150,7 @@ fn render_gain(
         PLUGIN,
         "plugin",
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
     if let Some(lane) = feeder {

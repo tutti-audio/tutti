@@ -13,6 +13,7 @@
 //! its latency, a target placed an update late) are not repeated here.
 
 use crate::common;
+use tutti_buffers::BusTopology;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 
 use std::cell::Cell;
@@ -29,7 +30,7 @@ use tutti_modulation::{
     RouteTarget, Source, SourceKey, TargetKey,
 };
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
-use tutti_nodes::{Feed, ReconcileError};
+use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MixRef, ModInput, ModKeys, ModRefusal,
     ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef,
@@ -179,7 +180,7 @@ impl Node for Late {
 #[test]
 fn an_export_is_the_live_render_on_a_native_param() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+    use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
     let (mut s, mut side) = rig(2);
     let (a, _) = s.graph().add(ProbeUnit::new(500.0));
@@ -933,13 +934,16 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
 #[test]
 fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
     let (mut s, _side) = rig(2);
-    let (chorus, _) = s.graph().add(tutti_nodes::ModDelayNode::<f32>::chorus(
-        tutti_buffers::BusTopology::STEREO,
+    let (chorus, _) = s.graph().add(tutti_nodes::ModDelayNode::<f32>::from(
+        ModDelayConfig::chorus(tutti_buffers::BusTopology::STEREO),
     ));
-    let (phaser, _) = s.graph().add(tutti_nodes::PhaserNode::<f32>::stereo(
-        tutti_nodes::Stages::of(4),
-        tutti_nodes::PhaserControls::DEFAULT,
-    ));
+    let (phaser, _) = s.graph().add(
+        tutti_nodes::PhaserNode::<f32>::try_from(
+            PhaserConfig::new(BusTopology::STEREO, tutti_nodes::Stages::of(4))
+                .controls(tutti_nodes::PhaserControls::DEFAULT),
+        )
+        .unwrap(),
+    );
     // The phaser's mix is the graph's (`MixRef`), not a param of the node.
     let targets = [
         ModTarget::from(ParamRef::unit(chorus, UnitParam::Rate)),

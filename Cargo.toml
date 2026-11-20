@@ -7,7 +7,7 @@ members = [
     "testing/tutti-verify",
     "testing/tutti-book",
     "crates/tutti-engine",
-    "crates/tutti-transport",
+    "crates/tutti-timeline",
     "crates/tutti-tempo",
     "crates/tutti-curve",
     # The sample formats (`Sample`, `Float`, `I24`) and the borrowed mono, interleaved
@@ -106,6 +106,9 @@ missing_panics_doc = "warn"
 
 [workspace.dependencies]
 thiserror = { version = "2", default-features = false }
+# `tutti-platform`'s `Executor`: the run queue, and the `Task` a spawn returns.
+async-executor = "1.14.1"
+async-task = "4.7.1"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 libloading = "0.9"

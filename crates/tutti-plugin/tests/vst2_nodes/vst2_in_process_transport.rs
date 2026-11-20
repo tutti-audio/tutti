@@ -30,7 +30,7 @@ use tutti_music::LoopRange;
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_transport::ProjectMeter;
+use tutti_timeline::ProjectMeter;
 use tutti_units::Latency;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_vst2_test_plugin::ProcessCapture;
@@ -135,8 +135,8 @@ fn scene_map(blocks: usize) -> tutti_tempo::TempoMap {
 }
 
 /// A reader of [`scene_map`], for the nodes under test.
-fn scene_tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::fixed(std::sync::Arc::new(scene_map(64)))
+fn scene_tempo() -> tutti_timeline::TempoReader {
+    tutti_timeline::TempoReader::fixed(std::sync::Arc::new(scene_map(64)))
 }
 
 /// The live node fed by a silent source of `arrival` frames' latency on both
@@ -367,16 +367,16 @@ fn plugin_set_meter_reaches_an_in_process_vst2() {
     let _lock = lock_probe();
     reset_probe();
     let plugin = tutti_plugin::catalog::Plugin::open(
-        Some(main_thread()),
+        main_thread(),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::vst2_probe(),
         )),
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the probe opens");
     let handle = plugin.handle().clone();
-    assert!(plugin.set_meter(seven_eight()), "a VST2 takes the meter");
+    plugin.node_controls().set_meter(seven_eight());
     let (mut r, _) = rig(plugin.bind(scene_tempo()), 0);
     let seen = render_scenes(&mut r, 1);
     assert_eq!(seen[0].1.numerator, 7);

@@ -1,8 +1,8 @@
 //! The host's half of one lane's conversation with the server, as a state
 //! machine that does no I/O.
 //!
-//! The host sends a request, and the server answers it, perhaps with several
-//! frames, perhaps late, perhaps never. A [`Conversation`] keeps what the host
+//! The host sends a request, and the server answers it, perhaps late, perhaps
+//! never. A [`Conversation`] keeps what the host
 //! is owed: each request by its key (the id the request carried and the reply
 //! echoes), the instant it is due, and whether the host has stopped waiting for
 //! it. The thread that drives a lane only reads frames and clocks and feeds
@@ -42,18 +42,13 @@ pub(crate) enum Fault {
     },
 }
 
-/// What a frame that carries a request's key is.
+/// What a reply that carries a request's key is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Heard<T> {
-    /// The frame answers a request the lane still waits for. `ends` is whether
-    /// it is the last frame of the answer: the request is done then, and not
-    /// before.
-    Answer {
-        /// Whether no frame of this answer follows.
-        ends: bool,
-    },
-    /// The frame belongs to a request the lane gave up on, which carried this
-    /// tag. The request is forgotten once its last frame is heard.
+    /// The frame answers a request the lane still waits for: the request is done.
+    Answer,
+    /// The frame answers a request the lane gave up on, which carried this tag.
+    /// The request is forgotten.
     Abandoned(T),
 }
 
@@ -99,8 +94,7 @@ impl<K: Copy + Eq, T: Copy> Conversation<K, T> {
 
     /// Notes that request `key`, tagged `tag`, was sent at `now`. The server
     /// has `window` to answer, and `window` more for each sign of life
-    /// ([`hear`](Self::hear) of a frame that does not end it), but never until
-    /// after `ceiling` from `now`.
+    /// ([`extend`](Self::extend)), but never until after `ceiling` from `now`.
     pub(crate) fn open(
         &mut self,
         key: K,
@@ -168,36 +162,25 @@ impl<K: Copy + Eq, T: Copy> Conversation<K, T> {
         }
     }
 
-    /// What a frame for request `key` is, heard at `now`.
-    ///
-    /// A frame that does not end an awaited request's answer is a sign of life
-    /// ([`extend`](Self::extend)): a state arriving a chunk at a time is
-    /// alive while chunks arrive.
+    /// What the reply to request `key` is: the request is
+    /// forgotten either way.
     ///
     /// # Errors
     ///
     /// [`Fault::Unknown`] when no request with `key` is awaited or abandoned.
-    pub(crate) fn hear(&mut self, key: K, ends: bool, now: Instant) -> Result<Heard<T>, Fault> {
+    pub(crate) fn hear(&mut self, key: K) -> Result<Heard<T>, Fault> {
         let at = self
             .entries
             .iter()
             .position(|e| e.key == key)
             .ok_or(Fault::Unknown)?;
-        let abandoned = self.entries[at].abandoned;
-        if abandoned {
-            let tag = self.entries[at].tag;
-            if ends {
-                self.entries.remove(at);
-                self.abandoned -= 1;
-            }
-            return Ok(Heard::Abandoned(tag));
-        }
-        if ends {
-            self.entries.remove(at);
+        let entry = self.entries.remove(at).ok_or(Fault::Unknown)?;
+        if entry.abandoned {
+            self.abandoned -= 1;
+            Ok(Heard::Abandoned(entry.tag))
         } else {
-            self.extend(key, now);
+            Ok(Heard::Answer)
         }
-        Ok(Heard::Answer { ends })
     }
 
     /// How long the lane may wait for `key`'s answer at `now`: zero once it is
@@ -273,13 +256,9 @@ mod tests {
         c.abandon(1).unwrap();
         c.open(2, 'b', at(t, 11), WINDOW, CEILING);
 
-        assert_eq!(
-            c.hear(2, true, at(t, 12)),
-            Ok(Heard::Answer { ends: true }),
-            "the awaited request's answer"
-        );
-        assert_eq!(c.hear(1, true, at(t, 13)), Ok(Heard::Abandoned('a')));
-        assert_eq!(c.hear(1, true, at(t, 14)), Err(Fault::Unknown), "it ended");
+        assert_eq!(c.hear(2), Ok(Heard::Answer), "the awaited request's answer");
+        assert_eq!(c.hear(1), Ok(Heard::Abandoned('a')));
+        assert_eq!(c.hear(1), Err(Fault::Unknown), "it ended");
     }
 
     /// **A reply to no request is the server's fault**, and so is a second
@@ -287,25 +266,10 @@ mod tests {
     #[test]
     fn a_reply_to_no_request_is_a_fault() {
         let (mut c, t) = conversation();
-        assert_eq!(c.hear(9, true, t), Err(Fault::Unknown));
+        assert_eq!(c.hear(9), Err(Fault::Unknown));
         c.open(1, 'a', t, WINDOW, CEILING);
-        assert_eq!(c.hear(1, true, t), Ok(Heard::Answer { ends: true }));
-        assert_eq!(c.hear(1, true, t), Err(Fault::Unknown), "answered once");
-    }
-
-    /// **An abandoned request that answers in several frames stays open until
-    /// its last**: each frame before it is late and carries the tag, the last
-    /// closes the request, and a frame after that is a fault.
-    #[test]
-    fn the_rest_of_an_abandoned_multi_frame_answer_is_late_until_its_last() {
-        let (mut c, t) = conversation();
-        c.open(7, 's', t, WINDOW, CEILING);
-        c.abandon(7).unwrap();
-        for _ in 0..3 {
-            assert_eq!(c.hear(7, false, at(t, 20)), Ok(Heard::Abandoned('s')));
-        }
-        assert_eq!(c.hear(7, true, at(t, 21)), Ok(Heard::Abandoned('s')));
-        assert_eq!(c.hear(7, false, at(t, 22)), Err(Fault::Unknown));
+        assert_eq!(c.hear(1), Ok(Heard::Answer));
+        assert_eq!(c.hear(1), Err(Fault::Unknown), "answered once");
     }
 
     /// **The window is data: a request is due `window` after it was sent, at
@@ -320,22 +284,6 @@ mod tests {
         assert!(c.is_due(1, at(t, 10)));
         assert_eq!(c.left(1, at(t, 30)), Some(Duration::ZERO));
         assert_eq!(c.left(2, t), None, "not awaited");
-    }
-
-    /// **A frame of an answer that has not ended is a sign of life: the window
-    /// restarts from it**, so a state that arrives a chunk at a time is alive
-    /// while chunks arrive, and fails a window after the last one.
-    #[test]
-    fn a_frame_that_does_not_end_the_answer_restarts_the_window() {
-        let (mut c, t) = conversation();
-        c.open(1, 'a', t, WINDOW, CEILING);
-        assert_eq!(
-            c.hear(1, false, at(t, 9)),
-            Ok(Heard::Answer { ends: false })
-        );
-        assert_eq!(c.left(1, at(t, 9)), Some(WINDOW), "restarted at the frame");
-        assert!(!c.is_due(1, at(t, 18)));
-        assert!(c.is_due(1, at(t, 19)), "a window after the last frame");
     }
 
     /// **A sign of life extends a request's wait, up to its ceiling and no
@@ -396,19 +344,17 @@ mod tests {
         assert!(!c.restart(9, t, WINDOW, CEILING), "no such request");
     }
 
-    /// **Only a request's own frames move its deadline**: a frame for another
-    /// request, and the news the lane hears between (which a conversation is
-    /// never told of), leave it where it was, so a chatty server does not hold
-    /// a request open.
+    /// **Only a request's own signs of life move its deadline**: a late reply
+    /// for another request, and a sign of life for one that is not awaited,
+    /// leave it where it was, so a chatty server does not hold a request open.
     #[test]
     fn another_requests_frames_do_not_extend_a_wait() {
         let (mut c, t) = conversation();
         c.open(1, 'a', t, WINDOW, CEILING);
         c.abandon(1).unwrap();
         c.open(2, 'b', at(t, 1), WINDOW, CEILING);
-        for secs in 2..9 {
-            assert_eq!(c.hear(1, false, at(t, secs)), Ok(Heard::Abandoned('a')));
-        }
+        assert!(!c.extend(1, at(t, 5)), "1 is given up on");
+        assert_eq!(c.hear(1), Ok(Heard::Abandoned('a')));
         assert_eq!(c.left(2, at(t, 9)), Some(Duration::from_secs(2)));
         assert!(c.is_due(2, at(t, 11)));
     }
@@ -425,8 +371,8 @@ mod tests {
         }
         c.open(3, 'a', t, WINDOW, CEILING);
         assert_eq!(c.abandon(3), Err(Fault::Flooded { abandoned: 4 }));
-        assert_eq!(c.hear(0, true, t), Ok(Heard::Abandoned('a')));
-        assert_eq!(c.hear(1, true, t), Ok(Heard::Abandoned('a')));
+        assert_eq!(c.hear(0), Ok(Heard::Abandoned('a')));
+        assert_eq!(c.hear(1), Ok(Heard::Abandoned('a')));
         c.open(4, 'a', t, WINDOW, CEILING);
         assert_eq!(c.abandon(4), Ok(()), "late replies give their room back");
     }

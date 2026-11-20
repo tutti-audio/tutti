@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tutti_graph::{NodeKey, PrerollTable};
 use tutti_platform::monotonic_ns;
 use tutti_tempo::TempoMap;
-use tutti_transport::{FadeOut, MotionEvent, TimedError};
+use tutti_timeline::{FadeOut, MotionEvent, TimedError};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
 use crate::{AppKey, Clock, Playhead, Session};

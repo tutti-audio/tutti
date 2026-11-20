@@ -5,13 +5,8 @@
 //!   commands and responses.
 //! - [`shm`] — named shared-memory audio storage for bulk sample transfer.
 //!
-//! [`state_chunk`] is not a third transport: it is the splitting and
-//! reassembly plugin state needs in order to *use* [`control`], whose frames
-//! are deliberately too small to carry a preset whole.
-
 pub mod control;
 pub mod shm;
-pub mod state_chunk;
 
 // The control stream's platform difference (socket naming, waiting for bytes)
 // is `sys`'s: this `mod` line carries the transport's only platform `cfg`.

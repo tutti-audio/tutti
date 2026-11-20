@@ -20,7 +20,7 @@ use tutti_plugin_types::{
     ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginTail, Prepare, PresetId,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -169,12 +169,12 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
             ControlRequest::GetCurrentPreset => Some(ControlReply::CurrentPreset {
                 id: Some(PresetId::Number(PRESET)),
             }),
-            ControlRequest::SaveState { .. } => Some(ControlReply::StateChunk {
-                seq: 0,
-                total: STATE.len() as u64,
-                last: true,
-                bytes: STATE.to_vec(),
-            }),
+            ControlRequest::SaveState { .. } => {
+                if tutti_plugin_ipc::send_state_reply(stream, id, &STATE).is_err() {
+                    break;
+                }
+                None
+            }
             ControlRequest::SetSampleRate { rate } => {
                 log.lock()
                     .unwrap()

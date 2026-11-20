@@ -83,7 +83,7 @@ impl Driver {
         let config = DiskStreamerConfig::default();
         if threaded {
             let bells = tutti_rt::Bells::new().expect("a tick thread");
-            let executor = tutti_platform::Executor::threaded();
+            let executor = tutti_platform::Executor::new();
             let streamer = DiskStreamer::build(rate, config, seams, &executor, &bells)
                 .expect("the future starts");
             Self::Threaded(Box::new(Threaded {
@@ -251,29 +251,28 @@ fn a_dropped_streamer_publishes_streamer_gone() {
     );
 }
 
-/// Polls `executor` until `done`, for at most a count of polls that only guards a
-/// hang: the streamer's task is woken by the bells' tick thread, which no count of
-/// polls orders against.
-fn polled_until(executor: &tutti_platform::Executor, mut done: impl FnMut() -> bool) -> bool {
+/// Polls `done` until it holds, for at most a count of polls that only guards a hang: the
+/// streamer's task is woken by the bells' tick thread and runs on its own thread, which no
+/// count of polls orders against.
+fn polled_until(mut done: impl FnMut() -> bool) -> bool {
     for _ in 0..1_000_000 {
         if done() {
             return true;
         }
-        let _ = executor.poll(8);
         std::thread::yield_now();
     }
     done()
 }
 
-/// **A dropped streamer's future ends on its next poll and publishes
-/// `Faulted(StreamerGone)`**: the drop raises the stop flag and rings, never joins, and
-/// the executor's next poll runs the future to its end.
+/// **A dropped streamer's future ends and publishes `Faulted(StreamerGone)`**: the drop
+/// raises the stop flag and rings, never joins, and the future's own thread runs it to its
+/// end, on an executor that nothing drives as on any other.
 #[test]
-fn a_dropped_streamer_future_publishes_streamer_gone_on_its_next_poll() {
+fn a_dropped_streamer_future_publishes_streamer_gone() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = constant_file(dir.path(), "a.wav", 8_000, 1, 0.25);
     let bells = tutti_rt::Bells::new().expect("a tick thread");
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let streamer = DiskStreamer::<Running, f32>::build(
         tutti_units::SampleRate::SR_8K,
         DiskStreamerConfig::default(),
@@ -285,7 +284,7 @@ fn a_dropped_streamer_future_publishes_streamer_gone_on_its_next_poll() {
     let mut opening = Some(streamer.open(&path, Placement::HEAD));
     let mut opened = None;
     assert!(
-        polled_until(&executor, || {
+        polled_until(|| {
             match opening.take().map(PendingOpen::poll) {
                 Some(Open::Ready(stream, reader)) => opened = Some((stream, reader)),
                 Some(Open::Pending(again)) => opening = Some(again),
@@ -294,7 +293,7 @@ fn a_dropped_streamer_future_publishes_streamer_gone_on_its_next_poll() {
             }
             opened.is_some()
         }),
-        "the polled streamer never answered the open"
+        "the streamer never answered the open"
     );
     let (stream, _reader) = opened.expect("opened");
     assert_ne!(
@@ -303,15 +302,7 @@ fn a_dropped_streamer_future_publishes_streamer_gone_on_its_next_poll() {
     );
     drop(streamer);
     assert!(
-        !matches!(
-            stream.status().phase,
-            StreamPhase::Faulted(StreamFault::StreamerGone)
-        ),
-        "the future only ends when polled"
-    );
-    assert!(
-        polled_until(&executor, || stream.status().phase
-            == StreamPhase::Faulted(StreamFault::StreamerGone)),
+        polled_until(|| stream.status().phase == StreamPhase::Faulted(StreamFault::StreamerGone)),
         "the future never ended"
     );
 }

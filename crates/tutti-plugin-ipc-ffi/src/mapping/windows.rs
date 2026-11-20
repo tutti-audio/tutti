@@ -84,6 +84,10 @@ impl Connection<'_> {
     }
 }
 
+/// Whether the platform rounds an object's length up past what it was sized to:
+/// a file is exactly its size.
+pub(super) const ROUNDS_UP: bool = false;
+
 /// What ends the name: the creator's handle to the file, kept for as long as
 /// its mapping lives. The name stays openable while it is held. It exists from
 /// the moment the creator's file does, so a failure after that closes it and
@@ -147,6 +151,20 @@ fn open_with(opts: &OpenOptions, name: &str) -> Result<(File, Backing), SlabErro
         })?,
     };
     Ok((file, backing))
+}
+
+/// Writes `bytes` at the start of the freshly made `file`.
+pub(super) fn fill(mut file: &File, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    file.write_all(bytes)
+}
+
+/// Appends the first `len` bytes of `file` to `out`, from the start whatever
+/// offset the descriptor was left at.
+pub(super) fn read_front(mut file: &File, len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0))?;
+    file.take(len as u64).read_to_end(out).map(drop)
 }
 
 /// Nothing to check beyond the length and the header the caller checks.
@@ -223,5 +241,33 @@ mod tests {
         let err = MappingWriter::open(&handle, size).expect_err("a foreign file must not open");
         std::fs::remove_file(path(&name)).unwrap();
         assert!(matches!(err, SlabError::BadMagic { .. }), "{err}");
+    }
+
+    /// **A blob is readable by its name while its lease is held, and gone once the
+    /// lease is dropped**: nothing travels on this platform, the name in the
+    /// frame is the whole of it, so the lease is what keeps the file for the
+    /// reader, and the file does not outlive it.
+    #[test]
+    fn a_blob_is_readable_by_name_while_its_lease_is_held_and_gone_after() {
+        use crate::Blob;
+        let blob = Blob::create(&[5u8; 100]).unwrap();
+        let wire = blob.wire();
+        let lease = blob.send(Connection::detached()).unwrap();
+        let got = Blob::receive(Connection::detached(), wire.clone())
+            .unwrap()
+            .read(100, 1000)
+            .unwrap();
+        assert_eq!(got, vec![5u8; 100]);
+        let wrong = Blob::receive(Connection::detached(), wire.clone())
+            .unwrap()
+            .read(99, 1000)
+            .expect_err("another length than the file's");
+        assert!(matches!(wrong, SlabError::BlobSize { .. }), "{wrong}");
+        drop(lease);
+        let gone = Blob::receive(Connection::detached(), wire)
+            .unwrap()
+            .read(100, 1000)
+            .expect_err("the file outlived its lease");
+        assert!(matches!(gone, SlabError::File { .. }), "{gone}");
     }
 }

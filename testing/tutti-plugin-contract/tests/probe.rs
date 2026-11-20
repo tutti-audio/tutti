@@ -1,4 +1,4 @@
-//! The plugin probe, a separate process: a `tutti_plugin::catalog::Catalog` task
+//! The plugin probe, a separate process: a `tutti_plugin_db::Catalog` task
 //! (`register`, `measure`) spawns `plugin-probe`, which loads the file just far enough to read the
 //! descriptor of every plugin it holds and writes them to a result file.
 //!
@@ -17,20 +17,20 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_plugin::catalog::{
-    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator,
-    PluginDescriptor, PluginId, PluginRef, ProbeFailure, ScanPoll,
-};
 use tutti_plugin_contract::{
     Clap, Format, Vst2, Vst3, Vst3Cpp, bundle_of, clap_path, library, spec, state_with_fault,
     state_with_rings, vst3_cpp_module, vst3_module,
 };
 use tutti_plugin_db::PluginDb;
+use tutti_plugin_db::{
+    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, ProbeFailure, ScanPoll,
+};
 use tutti_plugin_ipc::{Ipc, IpcConfig, Launched};
 use tutti_plugin_types::{
     Editor, InProcess, IpcError, IpcResult, LatencyVerdict, LoadStage, MainThreadMarker, MaxBlock,
     Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash, TailVerdict,
 };
+use tutti_plugin_types::{Locator, PluginDescriptor, PluginId, PluginRef};
 use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};
 use tutti_vst2_author::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME};
 use tutti_vst2_host::Vst2Loaded;
@@ -62,7 +62,7 @@ fn run_task(
             ScanPoll::Died => panic!("the task's worker died"),
         }
     };
-    match result.failures.into_iter().next() {
+    match result.failures().into_iter().next() {
         Some(failed) => Err(failed.failure),
         None => Ok(catalog.db().clone()),
     }

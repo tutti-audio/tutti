@@ -131,12 +131,16 @@ use tutti_plugin_types::{MainThreadMarker, StateUse};
 use tutti_rt::LockExt;
 
 use tutti_graph::NodeKey;
-use tutti_plugin::catalog::{AudioConfig, Hosting, Loadable, Plugin as HostPlugin, PluginRef};
-use tutti_plugin::error::StateError;
+use tutti_plugin::catalog::Plugin as HostPlugin;
+use tutti_plugin::catalog::{ResolvedHosting, RestoreRefused};
+use tutti_plugin_db::Loadable;
 use tutti_plugin_host::{Liveness, LivenessVerdict};
 use tutti_plugin_host::{
     NodeControls, PluginControls, PluginHandle, PluginSignal, PluginStatus, Subscription,
 };
+use tutti_plugin_ipc::AudioConfig;
+use tutti_plugin_types::PluginRef;
+use tutti_plugin_types::StateError;
 use tutti_plugin_types::{
     IpcError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail,
 };
@@ -216,20 +220,14 @@ impl PluginLoad {
     pub(crate) fn run(self) -> PluginLoaded {
         let loadable = self.loadable.clone();
         let config = self.config.clone();
-        let refused = self
+        let opened = match self
             .loadable
             .check()
-            .err()
-            .or_else(|| tutti_plugin::catalog::placement(&self.loadable).err());
-        let opened = if let Some(refusal) = refused {
-            Opened::Done(Box::new(Open::refused(refusal)))
-        } else if matches!(
-            tutti_plugin::catalog::placement(&self.loadable),
-            Ok(Hosting::InProcess)
-        ) {
-            Opened::OnMain(Box::new(self))
-        } else {
-            Opened::Done(Box::new(self.open(None)))
+            .and_then(|()| tutti_plugin::catalog::placement(&self.loadable))
+        {
+            Err(refusal) => Opened::Done(Box::new(Open::refused(refusal))),
+            Ok(ResolvedHosting::InProcess) => Opened::OnMain(Box::new(self)),
+            Ok(ResolvedHosting::OutOfProcess) => Opened::Done(Box::new(self.open(Opening::Served))),
         };
         PluginLoaded {
             loadable,
@@ -238,21 +236,40 @@ impl PluginLoad {
         }
     }
 
-    /// [`run`](Self::run)'s open, on this thread. `main` is the proof that it is
-    /// the main thread, which a plugin hosted in process needs.
-    fn open(self, main: Option<MainThreadMarker>) -> Open {
+    /// [`run`](Self::run)'s open, on this thread.
+    fn open(self, at: Opening) -> Open {
         // The state goes in **before the plugin is activated** (`open_with_state`):
         // a plugin may take its mode from the state at activation. A refusal
         // does not abort the load: a plugin at its defaults beats no plugin. But
         // it is not silent.
-        let (plugin, restore) = match HostPlugin::open_with_state(
-            main,
-            &self.work,
-            &self.config,
-            &self.loadable,
-            self.rate,
-            self.state.as_deref().map(PeerState::bytes),
-        ) {
+        let state = self.state.as_deref().map(PeerState::bytes);
+        let opened = match (at, state) {
+            (Opening::Served, None) => {
+                HostPlugin::open_served(&self.config, &self.work, &self.loadable, self.rate)
+                    .map(|plugin| (plugin, None))
+            }
+            (Opening::Served, Some(state)) => HostPlugin::open_served_restoring(
+                &self.config,
+                &self.work,
+                &self.loadable,
+                self.rate,
+                state,
+            )
+            .map(|(plugin, restore)| (plugin, Some(restore))),
+            (Opening::OnMain(main), None) => {
+                HostPlugin::open_in_process(main, &self.work, &self.loadable, self.rate)
+                    .map(|plugin| (plugin, None))
+            }
+            (Opening::OnMain(main), Some(state)) => HostPlugin::open_in_process_restoring(
+                main,
+                &self.work,
+                &self.loadable,
+                self.rate,
+                state,
+            )
+            .map(|(plugin, restore)| (plugin, Some(restore))),
+        };
+        let (plugin, restore) = match opened {
             Ok((plugin, restore)) => (Ok(plugin), restore),
             // The server died, or stopped answering, inside the step that
             // restores the state it was staged (`StateRestore`; a failure
@@ -260,10 +277,11 @@ impl PluginLoad {
             // is what the load is held against (the reload's landing withholds it).
             Err(e @ tutti_plugin_types::IpcError::StateRestore { .. }) if self.state.is_some() => {
                 let reason = e.to_string();
-                (Err(e), Some(Err(reason)))
+                (Err(e), Some(Err(RestoreRefused::Served(reason))))
             }
             Err(e) => (Err(e), None),
         };
+        let restore = restore.map(|restore| restore.map_err(|refused| refused.to_string()));
         if let (Ok(plugin), Some(Err(e))) = (&plugin, &restore) {
             tracing::warn!(
                 "{}: saved state was not restored ({e}); the plugin is loaded at its \
@@ -324,6 +342,14 @@ impl Open {
 /// again (the plugin's list was unavailable).
 pub(crate) type ParamValues =
     Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
+
+/// Where a load is opened: on the job's thread, or on the main thread an
+/// in-process plugin is confined to.
+#[derive(Clone, Copy)]
+enum Opening {
+    Served,
+    OnMain(MainThreadMarker),
+}
 
 /// What a `PluginLoad`'s run did.
 enum Opened {
@@ -386,7 +412,16 @@ impl PluginLoaded {
     fn finish(self, main: Option<MainThreadMarker>) -> (Loadable, AudioConfig, Open) {
         let open = match self.opened {
             Opened::Done(open) => *open,
-            Opened::OnMain(load) => (*load).open(main),
+            Opened::OnMain(load) => match main {
+                Some(main) => (*load).open(Opening::OnMain(main)),
+                None => Open::refused(IpcError::LoadFailed {
+                    path: Some(load.loadable.plugin().path().to_path_buf()),
+                    stage: tutti_plugin_types::LoadStage::Opening,
+                    reason: "a plugin hosted in the host process loads on the main thread and \
+                             needs it"
+                        .into(),
+                }),
+            },
         };
         (self.loadable, self.config, open)
     }
@@ -1569,13 +1604,13 @@ pub enum RestoreError {
 /// `Phase::RenderMode`'s record: the mode last announced.
 #[derive(Debug)]
 pub(crate) struct RenderModeState {
-    pub(crate) announced: tutti_plugin::RenderMode,
+    pub(crate) announced: tutti_plugin_types::RenderMode,
 }
 
 impl Default for RenderModeState {
     fn default() -> Self {
         Self {
-            announced: tutti_plugin::RenderMode::Realtime,
+            announced: tutti_plugin_types::RenderMode::Realtime,
         }
     }
 }
@@ -2260,7 +2295,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// The render mode last announced to the hosted plugins.
-    pub fn render_mode(&self) -> tutti_plugin::RenderMode {
+    pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
         self.plugins.render_mode.announced
     }
 
@@ -2512,9 +2547,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         #[cfg(feature = "export")]
         {
             let wanted = if self.bounce.in_flight() {
-                tutti_plugin::RenderMode::Offline
+                tutti_plugin_types::RenderMode::Offline
             } else {
-                tutti_plugin::RenderMode::Realtime
+                tutti_plugin_types::RenderMode::Realtime
             };
             let changed = self.plugins.render_mode.announced != wanted;
             for hosted in self.graph.plugins.values_mut() {
@@ -2608,11 +2643,11 @@ mod tests {
         fn save_state(
             &self,
             _: tutti_plugin_types::StateUse,
-        ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
+        ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
             self.saves.fetch_add(1, Ordering::SeqCst);
             self.state
                 .clone()
-                .ok_or(tutti_plugin::error::StateError::NoStateRoute)
+                .ok_or(tutti_plugin_types::StateError::NoStateRoute)
         }
         fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
             false
@@ -2655,7 +2690,7 @@ mod tests {
     /// A detached session snapshotting every second, hosting a fake that
     /// answers `state` at a dc node.
     fn rig(state: Option<Vec<u8>>) -> Rig {
-        let executor = Executor::polled();
+        let executor = Executor::new();
         let mut session = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
             .executor(executor.clone())
@@ -2743,7 +2778,7 @@ mod tests {
         /// ends wait for [`land`](Self::land).
         fn run_jobs(&self) -> usize {
             let executor = self.executor.clone();
-            std::thread::spawn(move || executor.poll(usize::MAX))
+            std::thread::spawn(move || executor.run_until_stalled())
                 .join()
                 .unwrap()
         }
@@ -2763,14 +2798,6 @@ mod tests {
             out
         }
 
-        /// Drops the jobs that wait unrun, by dropping the executor that holds them:
-        /// each ends `Dropped`, and the end waits for [`land`](Self::land).
-        fn drop_jobs_unrun(&mut self) {
-            let fresh = Executor::polled();
-            drop(std::mem::replace(&mut self.executor, fresh.clone()));
-            crate::jobs::tests::replace_executor(&mut self.session, fresh);
-        }
-
         /// Runs the one job that waits, on another thread, and lands its end.
         fn run_and_land(&mut self) -> Vec<SessionEvent> {
             assert_eq!(self.run_jobs(), 1, "one job waits");
@@ -2784,7 +2811,7 @@ mod tests {
             let plugin = PluginRef::file("fake.clap");
             self.recovering(
                 plugin.clone(),
-                Loadable::uncatalogued(plugin).hosting(Hosting::InProcess),
+                Loadable::uncatalogued(plugin).hosting(tutti_plugin_db::Hosting::InProcess),
             );
         }
 
@@ -2817,8 +2844,7 @@ mod tests {
     /// inside the interval ask for nothing; the first at or past it asks
     /// once; while that job is unlanded nothing more is asked, however late
     /// (the job ran, its end is unlanded); landing it stores the bytes and
-    /// restarts the cadence; a job dropped unrun ends `Dropped` and frees the
-    /// plugin too.
+    /// restarts the cadence.
     #[test]
     fn snapshots_are_taken_on_the_interval_one_at_a_time() {
         let mut rig = rig(Some(vec![1, 2, 3]));
@@ -2850,20 +2876,6 @@ mod tests {
         rig.land();
         assert_eq!(rig.plugins_at(6_000), 0, "inside the interval");
         assert_eq!(rig.plugins_at(6_500), 1, "a landed job frees it");
-        // The next job is dropped unrun, and its end lands: the plugin is free
-        // again, on the interval from when it was asked for.
-        rig.land();
-        rig.start_at(12_000);
-        rig.drop_jobs_unrun();
-        let saves = rig.saves.load(Ordering::SeqCst);
-        rig.land();
-        assert_eq!(
-            rig.saves.load(Ordering::SeqCst),
-            saves,
-            "the dropped job never ran"
-        );
-        assert_eq!(rig.plugins_at(12_500), 0, "inside the interval");
-        assert_eq!(rig.plugins_at(13_000), 1, "a dropped job frees it");
     }
 
     /// **A declined save keeps the previous snapshot.** A refusal (the
@@ -3369,7 +3381,7 @@ mod tests {
     /// the blacklist's refusal, and nothing is opened.
     #[test]
     fn a_reload_of_a_plugin_blacklisted_since_its_load_is_refused() {
-        use tutti_plugin::catalog::{Catalog, CatalogConfig, PluginDb};
+        use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb};
         let file =
             std::env::temp_dir().join(format!("tutti-reload-bl-{}.clap", std::process::id()));
         std::fs::write(&file, b"x").unwrap();

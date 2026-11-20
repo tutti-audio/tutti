@@ -15,8 +15,8 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::{Const, Osc};
-use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_transport::{MotionEvent, Transport};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+use tutti_timeline::{MotionEvent, Transport};
 use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 
 pub const SAMPLE_RATE: f64 = 48_000.0;
@@ -57,7 +57,11 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
         ed.insert(
             filter,
             "filter",
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(2_000.0), Q::new(0.7)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(2_000.0))
+                    .q(Q::new(0.7)),
+            ),
         );
         ed.spec_mut().topology.edges.insert(
             InPort {

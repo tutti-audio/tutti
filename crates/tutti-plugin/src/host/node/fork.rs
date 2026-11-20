@@ -72,7 +72,7 @@
 //!    host value the live plugin was sent once and then edited away from in
 //!    its own editor is never re-sent live; seeded, the fork does not send
 //!    it either, and the export renders what playback plays.
-//! 5. **Bind it**, tell it [`RenderMode::Offline`](crate::RenderMode) when
+//! 5. **Bind it**, tell it [`RenderMode::Offline`](tutti_plugin_types::RenderMode) when
 //!    it renders offline (an offline fork, or a live fork of a plugin that
 //!    ran offline), and **for an offline fork only:** make its pipeline wait for
 //!    each chunk (`Ipc::watch`, before the plugin is activated; the live
@@ -214,7 +214,7 @@ pub(crate) struct ServedFork {
     /// same map (the project's, live or offline), through a reader cloned from
     /// this one at the gather, on the control thread, where a registration
     /// may allocate.
-    tempo: tutti_transport::TempoReader,
+    tempo: tutti_timeline::TempoReader,
 }
 
 impl ServedFork {
@@ -223,7 +223,7 @@ impl ServedFork {
     }
 
     /// A source over any client, its fork lending the map through `tempo`.
-    fn reading<S>(client: &PluginClient<S>, tempo: tutti_transport::TempoReader) -> Self {
+    fn reading<S>(client: &PluginClient<S>, tempo: tutti_timeline::TempoReader) -> Self {
         Self {
             tempo,
             bridge: Arc::downgrade(&client.bridge),
@@ -297,7 +297,7 @@ struct Capture {
     sources: ForkedSources,
     /// A reader of the project's tempo map of the fork's own, registered at
     /// the gather.
-    tempo: tutti_transport::TempoReader,
+    tempo: tutti_timeline::TempoReader,
     mode: ForkMode,
 }
 
@@ -350,7 +350,7 @@ impl Capture {
         if self.snapshot.offline(self.mode) {
             // Advisory: a plugin without the concept keeps rendering as it
             // would live, which is not an error (`Features::RENDER_MODE`).
-            let _ = fork.set_render_mode(RenderMode::Offline);
+            let _ = fork.bridge.audio().set_render_mode(RenderMode::Offline);
             // Not pinned end to end here: the out-of-process reference
             // plugin is CLAP, which has no system-time field. The in-process
             // VST2 fork drops its clock the same way, and
@@ -400,7 +400,7 @@ impl PluginClient<Unbound> {
     pub fn fork_instance(
         &self,
         mode: ForkMode,
-        tempo: tutti_transport::TempoReader,
+        tempo: tutti_timeline::TempoReader,
     ) -> Result<PluginClient<Bound>, PluginForkError> {
         ServedFork::reading(self, tempo).instance(mode)
     }
@@ -436,18 +436,6 @@ impl PluginClient<Bound> {
     /// state. A partly started fork is shut down before this returns.
     pub fn fork_instance(&self, mode: ForkMode) -> Result<PluginClient<Bound>, PluginForkError> {
         ServedFork::of(self).instance(mode)
-    }
-
-    /// The [`ForkSource`] [`IntoNode::into_parts`](tutti_graph::IntoNode::into_parts) hands the editor: a fork
-    /// of this plugin by state transfer ([`fork_instance`](Self::fork_instance)).
-    ///
-    /// For a host that inserts the plugin through its own node builder rather
-    /// than `IntoNode`, and must still hand the editor a way to fork it:
-    /// `NodeParts { node, controls, fork: Some(client.fork_source()) }`.
-    /// Holds nothing that keeps this instance alive (see
-    /// [`PluginForkError::LiveGone`]).
-    pub fn fork_source(&self) -> Box<dyn ForkSource> {
-        Box::new(ServedFork::of(self))
     }
 
     /// On a fork ([`fork_instance`](Self::fork_instance)): the probe that

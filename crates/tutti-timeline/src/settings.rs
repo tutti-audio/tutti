@@ -47,7 +47,7 @@ pub struct TransportSettings {
     /// cell was a second writer anyone could be:
     ///
     /// ```compile_fail,E0616
-    /// let t = tutti_transport::Transport::new(48_000.0);
+    /// let t = tutti_timeline::Transport::new(48_000.0);
     /// t.settings().beat.store(8.0, std::sync::atomic::Ordering::Release);
     /// ```
     ///
@@ -61,7 +61,7 @@ pub struct TransportSettings {
     /// before it. Crate-private, like [`beat`](Self::beat):
     ///
     /// ```compile_fail,E0616
-    /// let t = tutti_transport::Transport::new(48_000.0);
+    /// let t = tutti_timeline::Transport::new(48_000.0);
     /// t.settings().segment_generation.store(0, std::sync::atomic::Ordering::Release);
     /// ```
     pub(crate) segment_generation: Arc<AtomicU64>,
@@ -80,7 +80,7 @@ pub struct TransportSettings {
     /// can set it.
     ///
     /// ```compile_fail,E0616
-    /// let t = tutti_transport::Transport::new(48_000.0);
+    /// let t = tutti_timeline::Transport::new(48_000.0);
     /// t.settings().paused.store(false, std::sync::atomic::Ordering::Release);
     /// ```
     pub(crate) paused: Arc<AtomicBool>,

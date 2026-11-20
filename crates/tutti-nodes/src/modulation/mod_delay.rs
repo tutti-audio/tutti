@@ -10,10 +10,13 @@ use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, DELAY_SLEW, GAIN_RAMP, Lerp, ModDelayBank, ModDelayControls, ModDelayLayout,
-    Ramp, Stagger, StaggerError, Steps, Sweep,
+    Ramp, Steps,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
+
+#[cfg(doc)]
+use tutti_dsp::{Stagger, Sweep};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -22,15 +25,13 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// A [`KernelNode`] over [`ModDelayKernel`]: each channel has its own delay line swept by
 /// one LFO, staggered per channel by a [`Stagger`] (channel `c` runs `c` times a step ahead
-/// of channel 0, or an offset of its own). At width 2 with the [`chorus`](Self::chorus) or
-/// [`flanger`](Self::flanger) preset it is a stereo chorus or flanger.
+/// of channel 0, or an offset of its own). At width 2 with the [`chorus`](ModDelayConfig::chorus)
+/// or [`flanger`](ModDelayConfig::flanger) preset it is a stereo chorus or flanger.
 ///
-/// - [`chorus`](Self::chorus), [`flanger`](Self::flanger) and
-///   [`general_midi_chorus`](Self::general_midi_chorus): the presets, on a checked
-///   [`BusTopology`] (an `n`-channel one on the engine's order for that width is
-///   `BusTopology::assumed(n)?`, which refuses a width past one bus), starting at their
-///   controls ([`ModDelayControls::CHORUS`] and kin).
-/// - [`new`](Self::new): a [`Sweep`] and a [`Stagger`] of your own.
+/// Made from a [`ModDelayConfig`] (`ModDelayNode::from`) on a checked [`BusTopology`] (an
+/// `n`-channel one on the engine's order for that width is `BusTopology::assumed(n)?`, which
+/// refuses a width past one bus): a preset starting at its controls
+/// ([`ModDelayControls::CHORUS`] and kin), or a [`Sweep`] and a [`Stagger`] of your own.
 ///
 /// # The controls
 ///
@@ -76,57 +77,72 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
 pub type ModDelayNode<F> = KernelNode<ModDelayKernel<F>>;
 
-impl<F: Float + Lerp> ModDelayNode<F> {
-    /// A swept delay on the bus `input`, as wide as it, built to `sweep`, its channels'
-    /// sweeps offset by `stagger` and running at `controls`.
-    ///
-    /// The lines are sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands
-    /// it, which is what makes the longest delay hold at whatever rate the graph runs at.
-    /// Allocates.
-    ///
-    /// # Errors
-    ///
-    /// [`StaggerError::Length`] when `stagger` names an offset for each channel and not for
-    /// `input`'s.
-    pub fn new(
-        input: BusTopology,
-        sweep: Sweep,
-        stagger: Stagger,
-        controls: ModDelayControls,
-    ) -> Result<Self, StaggerError> {
-        Ok(Self::from_layout(
-            ModDelayLayout::new(input, sweep, stagger)?,
-            controls,
-        ))
+/// What a [`ModDelayNode`] is made from: the [`ModDelayLayout`] of its lines and the controls it
+/// starts at.
+///
+/// The layout holds the bus, the [`Sweep`] and the [`Stagger`] of its channels, checked against
+/// each other where it is built
+/// ([`ModDelayLayoutBuilder::build`](tutti_dsp::ModDelayLayoutBuilder::build)).
+/// [`chorus`](Self::chorus), [`flanger`](Self::flanger) and
+/// [`general_midi_chorus`](Self::general_midi_chorus) take the layout and the controls
+/// together, as [`ModDelayLayout`]'s presets and [`ModDelayControls`]' constants have them.
+#[derive(Clone, Copy, Debug)]
+pub struct ModDelayConfig {
+    layout: ModDelayLayout,
+    controls: ModDelayControls,
+}
+
+impl ModDelayConfig {
+    /// A swept delay built to `layout`, at [`ModDelayControls::DEFAULT`].
+    #[must_use]
+    pub const fn new(layout: ModDelayLayout) -> Self {
+        Self {
+            layout,
+            controls: ModDelayControls::DEFAULT,
+        }
     }
 
     /// A chorus on the bus `input`: [`ModDelayLayout::chorus`] at
     /// [`ModDelayControls::CHORUS`].
     #[must_use]
     pub fn chorus(input: BusTopology) -> Self {
-        Self::from_layout(ModDelayLayout::chorus(input), ModDelayControls::CHORUS)
+        Self::new(ModDelayLayout::chorus(input)).controls(ModDelayControls::CHORUS)
     }
 
     /// A flanger on the bus `input`: [`ModDelayLayout::flanger`] at
     /// [`ModDelayControls::FLANGER`].
     #[must_use]
     pub fn flanger(input: BusTopology) -> Self {
-        Self::from_layout(ModDelayLayout::flanger(input), ModDelayControls::FLANGER)
+        Self::new(ModDelayLayout::flanger(input)).controls(ModDelayControls::FLANGER)
     }
 
     /// The General MIDI chorus on the bus `input`: [`ModDelayLayout::general_midi_chorus`] at
-    /// [`ModDelayControls::GENERAL_MIDI_CHORUS`]. It has no feedback, so it declares a finite
-    /// tail.
+    /// [`ModDelayControls::GENERAL_MIDI_CHORUS`]. It has no feedback, so its node declares a
+    /// finite tail.
     #[must_use]
     pub fn general_midi_chorus(input: BusTopology) -> Self {
-        Self::from_layout(
-            ModDelayLayout::general_midi_chorus(input),
-            ModDelayControls::GENERAL_MIDI_CHORUS,
-        )
+        Self::new(ModDelayLayout::general_midi_chorus(input))
+            .controls(ModDelayControls::GENERAL_MIDI_CHORUS)
     }
 
-    fn from_layout(layout: ModDelayLayout, controls: ModDelayControls) -> Self {
-        Self::with_kernel(ModDelayKernel::new(layout), ModDelaySet, controls)
+    /// The controls the cells start at.
+    #[must_use]
+    pub const fn controls(mut self, controls: ModDelayControls) -> Self {
+        self.controls = controls;
+        self
+    }
+}
+
+impl<F: Float + Lerp> From<ModDelayConfig> for ModDelayNode<F> {
+    /// The lines are sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it,
+    /// which is what makes the longest delay hold at whatever rate the graph runs at.
+    /// Allocates.
+    fn from(config: ModDelayConfig) -> Self {
+        Self::with_kernel(
+            ModDelayKernel::new(config.layout),
+            ModDelaySet,
+            config.controls,
+        )
     }
 }
 
@@ -328,7 +344,7 @@ mod tests {
     use super::*;
     use crate::test_support::drive_kernel;
     use tutti_buffers::{ChannelLayout, MaxBlock};
-    use tutti_dsp::MaxDelay;
+    use tutti_dsp::{MaxDelay, Stagger, Sweep};
     use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Latency, Samples, UnitParam};
@@ -355,7 +371,7 @@ mod tests {
     /// cell with it, and the set has the three controls in the layout's order.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
-        let node = ModDelayNode::<f32>::flanger(BusTopology::STEREO);
+        let node = ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::STEREO));
         assert_eq!(
             node.param_set().params().collect::<Vec<_>>(),
             [UnitParam::Rate, UnitParam::Depth, UnitParam::Feedback]
@@ -370,7 +386,7 @@ mod tests {
     /// finite ceiling.
     #[test]
     fn the_shape_declares_the_three_controls_no_latency_and_its_tail() {
-        let chorus = ModDelayNode::<f32>::chorus(bus(3));
+        let chorus = ModDelayNode::<f32>::from(ModDelayConfig::chorus(bus(3)));
         let shape = chorus.shape();
         assert_eq!(
             shape.params.as_slice(),
@@ -390,36 +406,16 @@ mod tests {
         assert_eq!(chorus.param_base(1), Some(0.005));
         assert_eq!(chorus.param_base(2), Some(0.3));
         assert_eq!(chorus.param_base(3), None, "no fourth param");
-        let flanger = ModDelayNode::<f32>::flanger(BusTopology::MONO);
+        let flanger = ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::MONO));
         assert_eq!(flanger.shape().tail, Tail::Unknown);
         let mut gm = prepared(
-            ModDelayNode::<f32>::general_midi_chorus(BusTopology::STEREO),
+            ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(BusTopology::STEREO)),
             RATE,
             64,
         );
         assert_eq!(gm.shape().tail, Tail::Finite(Samples::new(240)));
         assert_eq!(gm.shape().latency, Latency::new(Samples::new(0)));
         assert_declared_tail(&mut gm, RATE);
-    }
-
-    /// A stagger that names an offset per channel must name the bus's.
-    #[test]
-    fn a_stagger_of_the_wrong_length_is_refused_at_construction() {
-        let two = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
-        assert!(
-            ModDelayNode::<f32>::new(
-                BusTopology::STEREO,
-                Sweep::CHORUS,
-                two,
-                ModDelayControls::CHORUS
-            )
-            .is_ok()
-        );
-        assert_eq!(
-            ModDelayNode::<f32>::new(bus(3), Sweep::CHORUS, two, ModDelayControls::CHORUS)
-                .unwrap_err(),
-            StaggerError::Length { width: 3, got: 2 }
-        );
     }
 
     // ---- the kernel: segments, corners and the sweep ----------------------------------
@@ -434,7 +430,10 @@ mod tests {
             Seconds::new(0.04),
             Feedback::MAX_STABLE,
         );
-        ModDelayLayout::new(bus(width), sweep, stagger).expect("a stagger that fits")
+        ModDelayLayout::builder(bus(width), sweep)
+            .stagger(stagger)
+            .build()
+            .expect("a stagger that fits")
     }
 
     fn prepared_kernel(layout: ModDelayLayout, rate: SampleRate) -> ModDelayKernel<f32> {
@@ -707,12 +706,10 @@ mod tests {
         let len = 8_000;
         let ramp: Vec<f32> = (0..len).map(|n| n as f32).collect();
         let mut k = prepared_kernel(
-            ModDelayLayout::new(
-                bus(3),
-                Sweep::CHORUS,
-                Stagger::of_step(PhaseIncrement::new(0.25)),
-            )
-            .unwrap(),
+            ModDelayLayout::builder(bus(3), Sweep::CHORUS)
+                .stagger(Stagger::of_step(PhaseIncrement::new(0.25)))
+                .build()
+                .unwrap(),
             RATE,
         );
         let y = drive_kernel(
@@ -744,21 +741,23 @@ mod tests {
         }
         // A whole cycle of stagger is none.
         let mut k = prepared_kernel(
-            ModDelayLayout::new(
-                bus(2),
-                Sweep::CHORUS,
-                Stagger::of_step(PhaseIncrement::new(1.0)),
-            )
-            .unwrap(),
+            ModDelayLayout::builder(bus(2), Sweep::CHORUS)
+                .stagger(Stagger::of_step(PhaseIncrement::new(1.0)))
+                .build()
+                .unwrap(),
             RATE,
         );
         let both = drive_kernel(&mut k, &[(0, c)], &[ramp.clone(), ramp.clone()]);
         assert_eq!(both[0], both[1], "a full-cycle stagger is no stagger");
         // The offsets can be named: channel 1 half a cycle ahead, the two delays mirrored
         // about the base.
-        let named = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
+        let named =
+            Stagger::try_from(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)][..]).unwrap();
         let mut k = prepared_kernel(
-            ModDelayLayout::new(bus(2), Sweep::CHORUS, named).unwrap(),
+            ModDelayLayout::builder(bus(2), Sweep::CHORUS)
+                .stagger(named)
+                .build()
+                .unwrap(),
             RATE,
         );
         let y = drive_kernel(&mut k, &[(0, c)], &[ramp.clone(), ramp]);
@@ -778,7 +777,11 @@ mod tests {
     /// differs.
     #[test]
     fn six_channels_are_six_swept_lines() {
-        let mut node = prepared(ModDelayNode::<f32>::chorus(bus(6)), RATE, 128);
+        let mut node = prepared(
+            ModDelayNode::<f32>::from(ModDelayConfig::chorus(bus(6))),
+            RATE,
+            128,
+        );
         assert!(node.param_set().set(UnitParam::Feedback, 0.0));
         let len = 4_096usize;
         let ramp: Vec<f32> = (0..len).map(|n| n as f32).collect();
@@ -854,8 +857,14 @@ mod tests {
         };
         let make = || {
             prepared(
-                ModDelayNode::<f32>::new(BusTopology::STEREO, Sweep::CHORUS, Stagger::NONE, c)
-                    .unwrap(),
+                ModDelayNode::<f32>::from(
+                    ModDelayConfig::new(
+                        ModDelayLayout::builder(BusTopology::STEREO, Sweep::CHORUS)
+                            .build()
+                            .unwrap(),
+                    )
+                    .controls(c),
+                ),
                 RATE,
                 64,
             )
@@ -878,7 +887,7 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |at: usize| -> Vec<f32> {
-            let node = ModDelayNode::<f32>::chorus(BusTopology::MONO);
+            let node = ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::MONO));
             let set = node.param_set();
             let mut node = prepared(node, RATE, 2_048);
             let mut out = Vec::new();
@@ -901,7 +910,7 @@ mod tests {
     /// writing to one's cells leaves the other's unmoved.
     #[test]
     fn a_clone_shares_nothing() {
-        let a = ModDelayNode::<f32>::flanger(BusTopology::MONO);
+        let a = ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::MONO));
         let set = a.param_set();
         let loud: Vec<f32> = (0..256).map(|n| ((n * 7) % 13) as f32 - 6.0).collect();
         let mut a = prepared(a, RATE, 64);
@@ -942,7 +951,7 @@ mod tests {
                 .collect()
         };
         let chorus = || {
-            let node = ModDelayNode::<f32>::chorus(BusTopology::MONO);
+            let node = ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::MONO));
             assert!(node.param_set().set(UnitParam::Feedback, 0.0));
             node
         };
@@ -975,7 +984,11 @@ mod tests {
             .map(|n| ((n * 7 + 3) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |block: usize, driven: bool| -> Vec<f32> {
-            let mut node = prepared(ModDelayNode::<f32>::chorus(BusTopology::MONO), RATE, 1_024);
+            let mut node = prepared(
+                ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::MONO)),
+                RATE,
+                1_024,
+            );
             let mut out = Vec::new();
             for (n, chunk) in x.chunks(block).enumerate() {
                 let at = n * block;
@@ -1034,11 +1047,15 @@ mod tests {
                 .flat_map(|c| drive(node, RATE, Planes::new(&[c]).unwrap(), &[]).remove(0))
                 .collect()
         };
-        let mut used = prepared(ModDelayNode::<f32>::chorus(BusTopology::MONO), RATE, 64);
+        let mut used = prepared(
+            ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::MONO)),
+            RATE,
+            64,
+        );
         blocks(&mut used);
         moved(&used);
         used.reset();
-        let fresh = ModDelayNode::<f32>::chorus(BusTopology::MONO);
+        let fresh = ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::MONO));
         moved(&fresh);
         let mut fresh = prepared(fresh, RATE, 64);
         assert_eq!(blocks(&mut used), blocks(&mut fresh));
@@ -1049,7 +1066,6 @@ mod tests {
     /// the wide signal, to 2^-45.
     #[test]
     fn an_f64_kernel_with_no_depth_is_a_fixed_delay_in_f64() {
-        use tutti_dsp::Sweep;
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
         let (d, len) = (16usize, 200usize);
         let rate = SampleRate::of(1_024.0);
@@ -1074,7 +1090,9 @@ mod tests {
         let want: Vec<f64> = (0..len)
             .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
             .collect();
-        let layout = ModDelayLayout::new(BusTopology::MONO, sweep, Stagger::NONE).unwrap();
+        let layout = ModDelayLayout::builder(BusTopology::MONO, sweep)
+            .build()
+            .unwrap();
         let mut k = ModDelayKernel::<f64>::new(layout);
         k.prepare(rate, MaxBlock::of(Samples::new(len)));
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);

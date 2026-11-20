@@ -31,10 +31,10 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, ForkMode, ForkTarget, IntoNode, Prepare, Renderer, TransportPosition};
 use tutti_graph::{OutPort, Source};
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_plugin::{PresetId, RenderMode};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::PluginForkError;
+use tutti_plugin_types::{PresetId, RenderMode};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -140,11 +140,11 @@ impl Drop for ProbeEnv {
 }
 
 fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
-    load_with(tutti_transport::TempoReader::constant(Bpm::of(120.0)).expect("a tempo"))
+    load_with(tutti_timeline::TempoReader::constant(Bpm::of(120.0)).expect("a tempo"))
 }
 
 /// The probe loaded in process and bound to `tempo`, the project's tempo map.
-fn load_with(tempo: tutti_transport::TempoReader) -> (PluginNode<Vst2Loaded>, PluginHandle) {
+fn load_with(tempo: tutti_timeline::TempoReader) -> (PluginNode<Vst2Loaded>, PluginHandle) {
     let path = tutti_fixtures::vst2_probe();
     let (client, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
@@ -351,9 +351,9 @@ fn a_plugin_handed_back_by_into_client_forks() {
     reset_probe();
     let _env = ProbeEnv::new(true);
     let plugin = tutti_plugin::catalog::Plugin::open(
-        Some(main_thread()),
+        main_thread(),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::vst2_probe(),
         )),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
@@ -370,7 +370,7 @@ fn a_plugin_handed_back_by_into_client_forks() {
     let key = NodeKey(5);
     let editor = live_graph(
         key,
-        plugin.bind(tutti_transport::TempoReader::constant(Bpm::of(120.0)).expect("a tempo")),
+        plugin.bind(tutti_timeline::TempoReader::constant(Bpm::of(120.0)).expect("a tempo")),
     );
     let (fork_ed, fork_exec) = editor
         .fork(
@@ -399,11 +399,11 @@ fn a_fork_reads_its_transport_from_the_render() {
     // The tempo the plugin is told is the project map's: a constant 93 BPM,
     // which the render's transport carries too.
     let (client, handle) =
-        load_with(tutti_transport::TempoReader::constant(Bpm::of(93.0)).expect("a tempo"));
+        load_with(tutti_timeline::TempoReader::constant(Bpm::of(93.0)).expect("a tempo"));
     let seven_eight = TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH);
     client
         .controls()
-        .set_meter(tutti_transport::ProjectMeter::new(MeterMap::new([
+        .set_meter(tutti_timeline::ProjectMeter::new(MeterMap::new([
             MeterChange::new(Beat::new(0.0), seven_eight),
         ])));
 

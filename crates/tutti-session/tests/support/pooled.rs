@@ -13,9 +13,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, PluginId, PluginRef};
+use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
+use tutti_plugin_types::{Locator, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_session::{AnyPlugin, Key, LoadError, PeerState, PoolEvent, Session, SessionEvent};
 
@@ -78,7 +79,7 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
                 std::thread::sleep(Duration::from_millis(2));
             }
             ScanPoll::Done(result) => {
-                assert!(result.failures.is_empty(), "{:?}", result.failures);
+                assert!(result.failures().is_empty(), "{:?}", result.failures());
                 break;
             }
             ScanPoll::Died => panic!("the probe's worker died"),

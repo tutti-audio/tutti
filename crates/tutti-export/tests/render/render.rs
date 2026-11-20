@@ -22,7 +22,7 @@ use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
-use tutti_transport::{FrozenClock, RenderClock};
+use tutti_timeline::{FrozenClock, RenderClock};
 use tutti_units::Seconds;
 use tutti_units::{Amplitude, Drive, Hz, SampleRate};
 
@@ -428,10 +428,13 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
 /// nodes that genuinely have none is load-bearing, not cosmetic.
 #[test]
 fn a_stateless_node_reports_no_tail_rather_than_an_unknown_one() {
+    use tutti_buffers::ChannelLayout;
     use tutti_graph::Node;
+    use tutti_nodes::{DistortionConfig, ShapeKind};
 
-    let dist =
-        tutti_nodes::DistortionNode::<f32>::new(tutti_nodes::ShapeKind::Tanh, Drive::new(1.0));
+    let dist = tutti_nodes::DistortionNode::<f32>::from(
+        DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     // A kernel node's tail is unknown until it has a rate.
     let dist = tutti_graph::contract::prepared(dist, RATE, 64);
     assert_eq!(dist.shape().tail, tutti_units::Tail::None);

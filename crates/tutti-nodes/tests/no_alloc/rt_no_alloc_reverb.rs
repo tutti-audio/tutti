@@ -14,7 +14,8 @@ use tutti_graph::ParamSet;
 use tutti_graph::Status;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_nodes::{
-    FdnControls, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig, PlateReverbNode,
+    FdnConfig, FdnControls, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig,
+    PlateReverbNode,
 };
 use tutti_units::{SampleRate, Seconds, UnitAddr, UnitParam};
 
@@ -74,7 +75,7 @@ fn controls(freezable: bool) -> Vec<Control> {
 /// move). The output of every block is finite and under [`BOUND`].
 fn gate(layout: FdnLayout, blocks: usize, between: impl FnMut(&ParamSet, usize)) {
     gate_of(
-        FdnNode::<f32>::live(layout, FdnControls::DEFAULT),
+        FdnNode::<f32>::from(FdnConfig::new().layout(layout)),
         blocks,
         between,
     );
@@ -175,7 +176,7 @@ fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
 /// status, on an alternating input of `amplitude`.
 fn direct(layout: FdnLayout, controls: FdnControls, amplitude: f32) -> Direct<FdnNode<f32>> {
     let mut rig = Direct::new(
-        FdnNode::<f32>::live(layout, controls),
+        FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(controls)),
         SampleRate::SR_48K,
         64,
     );

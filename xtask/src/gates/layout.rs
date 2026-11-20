@@ -71,7 +71,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-voicing",
         "tutti-sf2",
     ],
-    &["tutti-transport", "tutti-plugin-types", "tutti-measure"],
+    &["tutti-timeline", "tutti-plugin-types", "tutti-measure"],
     &[
         "tutti-engine",
         "tutti-nodes",
@@ -150,7 +150,7 @@ const ONLY: &[(&str, &[&str])] = &[
         &["tutti-ump", "tutti-units", "tutti-midi-protocol"],
     ),
     (
-        "tutti-transport",
+        "tutti-timeline",
         &[
             "tutti-music",
             "tutti-units",
@@ -158,6 +158,27 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-rt",
             "tutti-graph",
             "tutti-tempo",
+        ],
+    ),
+    // The facade over the hosting: the generic host, the wire, the catalog and
+    // the vocabulary, the graph a plugin is a node of, and the format hosts an
+    // in-process load or an editor needs.
+    (
+        "tutti-plugin",
+        &[
+            "tutti-buffers",
+            "tutti-graph",
+            "tutti-plugin-db",
+            "tutti-plugin-host",
+            "tutti-plugin-ipc",
+            "tutti-plugin-types",
+            "tutti-rt",
+            "tutti-timeline",
+            "tutti-units",
+            "tutti-au-host",
+            "tutti-clap-host",
+            "tutti-vst2-host",
+            "tutti-vst3-host",
         ],
     ),
     // The probe client's child guard and its host-pid variable.
@@ -189,7 +210,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-plugin-types",
             "tutti-buffers",
             "tutti-graph",
-            "tutti-transport",
+            "tutti-timeline",
             "tutti-tempo",
             "tutti-music",
             "tutti-units",
