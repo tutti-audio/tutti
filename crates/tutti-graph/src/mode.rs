@@ -222,7 +222,7 @@ impl NodeMix {
     /// (index 255 of [`UnitParam::Wet`] is reserved:
     /// [`ParamPortsError::Reserved`](crate::ParamPortsError::Reserved)), so
     /// the events that drive it name this one fixed address. A control lane
-    /// for a mix is built with `ControlLaneNode::for_unit(NodeMix::ADDR, ..)`.
+    /// for a mix is built with `UnitLaneConfig::new(NodeMix::ADDR, ..)`.
     pub const ADDR: UnitAddr = UnitAddr::new(UnitParam::Wet, u8::MAX);
 
     /// The range a mix's port gets without an entry: the whole blend.

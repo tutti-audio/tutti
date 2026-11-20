@@ -1,4 +1,4 @@
-//! What the STFT geometry and the grid refuse at construction.
+//! What the STFT geometry and the grid refuse.
 //!
 //! `Result`, not `Option`, and not `assert!`: a caller who passes a hop wider
 //! than its window deserves to know which invariant broke.
@@ -11,12 +11,6 @@ use crate::stft::window::{CosineWindow, Window};
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StftError {
-    /// A zero-length analysis window.
-    #[error("analysis window is zero-length")]
-    ZeroWindow,
-    /// A zero hop: frames would never advance.
-    #[error("hop size is zero: frames would not advance")]
-    ZeroHop,
     /// Frames would not overlap, so the transform cannot reconstruct.
     #[error("hop {hop} exceeds window {window}: frames would not overlap")]
     HopExceedsWindow {
@@ -58,6 +52,3 @@ pub enum StftError {
         cols: usize,
     },
 }
-
-/// Result of a geometry or grid call, defaulting the error to [`StftError`].
-pub(crate) type Result<T> = core::result::Result<T, StftError>;

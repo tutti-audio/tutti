@@ -25,22 +25,22 @@ fn grid() -> Grid<i32> {
     let data = (0..3)
         .flat_map(|f| (0..4).map(move |b| f * 10 + b))
         .collect();
-    Grid::new(data, FrameCount(3), BinCount(4)).unwrap()
+    Grid::try_from((data, FrameCount(3), BinCount(4))).unwrap()
 }
 
 /// The invariant private fields exist to hold.
 #[test]
 fn a_length_that_disagrees_with_the_shape_is_rejected() {
     assert_eq!(
-        Grid::new(vec![0u8; 10], FrameCount(3), BinCount(4)),
+        Grid::try_from((vec![0u8; 10], FrameCount(3), BinCount(4))),
         Err(StftError::GridShapeMismatch {
             len: 10,
             rows: 3,
             cols: 4,
         })
     );
-    assert!(Grid::new(vec![0u8; 12], FrameCount(3), BinCount(4)).is_ok());
-    assert!(Grid::<u8>::new(Vec::new(), FrameCount(0), BinCount(4)).is_ok());
+    assert!(Grid::try_from((vec![0u8; 12], FrameCount(3), BinCount(4))).is_ok());
+    assert!(Grid::<u8>::try_from((Vec::new(), FrameCount(0), BinCount(4))).is_ok());
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn at_panics_on_a_frame_past_the_end() {
 /// A zero-bin grid still reports its frames, and `rows` agrees.
 #[test]
 fn rows_agrees_with_the_frame_count_even_with_no_bins() {
-    let g: Grid<f32> = Grid::new(Vec::new(), FrameCount(5), BinCount(0)).unwrap();
+    let g: Grid<f32> = Grid::try_from((Vec::new(), FrameCount(5), BinCount(0))).unwrap();
     assert_eq!(g.frames(), FrameCount(5));
     assert_eq!(g.rows().count(), 5, "rows must not disagree with frames()");
     assert!(g.rows().all(|r| r.is_empty()));

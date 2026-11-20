@@ -74,9 +74,8 @@
 //! resonance) are modulated live by `FilterModConfig`, CC74, CC71 and MPE slide.
 //!
 //! Nothing else on a synth that is in a graph is live but its `ParamSet`: the
-//! master volume, and with a unison engine the detune and stereo spread. Before
-//! insertion, `&mut self` setters take typed values (`set_volume(Amplitude)`),
-//! and a node cannot be reached by them once it is inserted.
+//! master volume, and with a unison engine the detune and stereo spread. The
+//! volume it starts at is `SynthConfig::volume`.
 //!
 //! `SynthConfig::polyphony` is a `NonZeroUsize` (a synth of no voices cannot be
 //! written) with no upper bound. Every voice is built up front, so it is a memory

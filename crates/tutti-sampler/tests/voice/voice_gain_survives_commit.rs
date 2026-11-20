@@ -39,8 +39,8 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     EventOut, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Standalone, TransportPosition,
 };
-use tutti_modulation::{Amount, Clock, ControlProgram, Law, Layer, LayerId, Polarity};
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_modulation::{Amount, Clock, ControlProgramBuilder, Law, Layer, LayerId, Polarity};
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceNodeHandle, VoiceSource};
 use tutti_units::{
     Amplitude, Beat, BeatsPerCycle, Bpm, Depth, Frame, PhaseIncrement, SampleRate, Samples,
@@ -281,8 +281,15 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
-    let lane = ControlLaneNode::for_unit(UnitParam::Volume, program, Some(knob), Some(range));
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(UnitParam::Volume, program)
+            .knob(knob)
+            .range(range),
+    );
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,

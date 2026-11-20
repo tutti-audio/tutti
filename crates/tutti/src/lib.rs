@@ -20,7 +20,7 @@
 //! callback does once per buffer.
 //!
 //! ```rust
-//! use tutti::nodes::{LfoNode, LfoShape};
+//! use tutti::nodes::{LfoConfig, LfoNode, LfoShape};
 //! use tutti::{ChannelLayout, Hz, InterleavedMut, Root, SampleRate, Session};
 //!
 //! let mut session = Session::new(SampleRate::SR_48K).expect("a session builds");
@@ -29,7 +29,7 @@
 //! // with its key; they set its parameters live.
 //! let (tone, _controls) = session
 //!     .graph()
-//!     .add(LfoNode::new(LfoShape::Sine).with_rate(Hz::new(440.0)));
+//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
 //! session.graph().connect(tone, Root).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -279,10 +279,10 @@ pub mod nodes {
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
-    pub use tutti_nodes::automation::Recorder as AutomationRecorder;
     pub use tutti_nodes::automation::{
-        AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls, LiveAutomationLane,
-        RecordMode, RecordingConfig, Trajectory,
+        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, Breakpoint, ControlLaneNode,
+        ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
+        Trajectory, UnitLaneConfig,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
@@ -295,36 +295,38 @@ pub mod nodes {
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
         BitCrusherControls, BitCrusherNode, BrickwallLimiterConfig, BrickwallLimiterNode,
         BusStripConfig, BusStripNode, ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel,
-        ClickLevelError, ClickSettings, ClickState, CompressorConfig, CompressorControls,
-        CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode, CrossoverConfig,
-        CrossoverControls, CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig,
-        CutFilterControls, CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
-        DelayConfig, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayNode,
-        DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
-        DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
-        EnvelopeFollowerNode, EqBandConfig, EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode,
-        FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
-        FreeverbConfig, FreeverbControls, FreeverbNode, FreezeMode, GateConfig, GateControls,
-        GateNode, HrtfBinauralConfig, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter,
-        KeySource, LadderControls, LadderFilterConfig, LadderFilterNode, LadderType,
-        LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode, LimiterConfig,
+        ClickLevelError, ClickNodeConfig, ClickSettings, ClickState, CompressorConfig,
+        CompressorControls, CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode,
+        CrossoverConfig, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
+        CutFilterConfig, CutFilterControls, CutFilterNode, DcBlockerConfig, DcBlockerControls,
+        DcBlockerNode, DelayConfig, DelayControls, DelayLayout, DelayLayoutBuilder,
+        DelayLayoutError, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig,
+        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
+        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
+        EqBandConfig, EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode, FeedbackRouting,
+        FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FreeverbConfig,
+        FreeverbControls, FreeverbNode, FreezeMode, GateConfig, GateControls, GateNode,
+        HrtfBinauralConfig, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource,
+        LadderControls, LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig,
+        LevellerControls, LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig,
         LimiterControls, LimiterNode, MetronomeMode, ModDelayConfig, ModDelayControls,
         ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandBands,
-        MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoteEnvelopeNode,
-        OscillatorNode, OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode,
-        PlateControls, PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind,
-        SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls,
-        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
-        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
-        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoteEnvelopeConfig,
+        NoteEnvelopeNode, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
+        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
+        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
+        StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder,
+        SweepError, SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls,
+        TiltFilterNode, TransientControls, TransientShaperConfig, TransientShaperNode, VbapError,
+        VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
         ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
-        EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
-        LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError,
-        SvfKernel, TiltFilterKernel,
+        EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelConfig,
+        KernelNode, LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel, PhaserKernel,
+        ReconcileError, SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
@@ -617,7 +619,8 @@ pub mod measure {
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
         BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, CosineWindow,
-        FrameCount, FrameIndex, Grid, StftError,
+        FrameCount, FrameIndex, Grid, HopSize, HopSizeError, StftError, WindowLength,
+        WindowLengthError,
     };
 }
 
@@ -829,10 +832,9 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
-        InstrumentHandle, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, Midi,
-        MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo,
-        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TrackError,
-        midi_sink,
+        InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport,
+        MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo, NoCommonTimelineError,
+        NotInstrument, SinkLoaded, SinkOptions, Stamping, TrackError, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

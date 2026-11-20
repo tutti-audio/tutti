@@ -29,26 +29,49 @@ use super::{SourceNode, SourcePorts};
 /// leaves it.
 pub type EnvelopeFollowerNode = SourceNode<LevelFollower>;
 
-impl SourceNode<LevelFollower> {
-    /// A follower of an `input`-wide signal, sending as `source`, with
-    /// the attack and release of `ballistics`.
+/// What an [`EnvelopeFollowerNode`] is made from: the width of the signal it follows, the
+/// source id it sends as and the attack and release of its level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnvelopeFollowerConfig {
+    input: ChannelLayout,
+    source: SourceId,
+    ballistics: Ballistics,
+}
+
+impl EnvelopeFollowerConfig {
+    /// A follower of an `input`-wide signal, sending as `source`, with the attack and
+    /// release of `ballistics`.
     #[must_use]
-    pub fn new(source: SourceId, ballistics: Ballistics, input: ChannelLayout) -> Self {
-        Self::with_source(source, LevelFollower::new(ballistics), input)
+    pub const fn new(input: ChannelLayout, source: SourceId, ballistics: Ballistics) -> Self {
+        Self {
+            input,
+            source,
+            ballistics,
+        }
     }
 
-    /// The node `decl` describes (what `tutti_modulation::compile` gives each
-    /// follower), following an `input`-wide signal: `None` when `decl` is
-    /// not a follower or its times are not valid ones (`compile` refuses those). The rate
-    /// comes at `prepare`.
+    /// The config `decl` describes (what `tutti_modulation::compile` gives each follower),
+    /// following an `input`-wide signal: `None` when `decl` is not a follower or its times
+    /// are not valid ones (`compile` refuses those).
     #[must_use]
-    pub fn from_decl(decl: &SignalSource, input: ChannelLayout) -> Option<Self> {
+    pub fn from_decl(input: ChannelLayout, decl: &SignalSource) -> Option<Self> {
         match decl.kind {
             SignalKind::Follower { attack, release } => {
-                Some(Self::new(decl.id, Ballistics::new(attack, release)?, input))
+                Some(Self::new(input, decl.id, Ballistics::new(attack, release)?))
             }
             SignalKind::NoteEnvelope { .. } => None,
         }
+    }
+}
+
+/// The follower of `config`; its rate comes at `prepare`.
+impl From<EnvelopeFollowerConfig> for EnvelopeFollowerNode {
+    fn from(config: EnvelopeFollowerConfig) -> Self {
+        Self::with_source(
+            config.source,
+            LevelFollower::new(config.ballistics),
+            config.input,
+        )
     }
 }
 

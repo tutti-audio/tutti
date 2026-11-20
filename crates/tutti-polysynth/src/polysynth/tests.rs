@@ -2284,7 +2284,7 @@ fn the_unison_ceiling_sizes_the_voices_and_the_bank() {
 fn a_fork_renders_the_volume_and_unison_it_was_taken_with() {
     use tutti_graph::ParamFork;
     let live = || {
-        let mut synth = synth(SynthConfig {
+        let synth = synth(SynthConfig {
             polyphony: NonZeroUsize::new(4).unwrap(),
             voice_mode: VoiceMode::Poly,
             oscillator: OscillatorType::Saw,
@@ -2294,9 +2294,9 @@ fn a_fork_renders_the_volume_and_unison_it_was_taken_with() {
                 stereo_spread: Spread::new(0.5),
                 phase_randomize: false,
             }),
+            volume: tutti_units::Amplitude::new(0.5),
             ..Default::default()
         });
-        synth.set_volume(tutti_units::Amplitude::new(0.5));
         synth.synth
     };
     let render = |fork: PolySynth| {

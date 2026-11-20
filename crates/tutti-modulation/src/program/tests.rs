@@ -75,7 +75,10 @@ fn bound(
 }
 
 fn program(layers: Vec<Layer>) -> ControlProgram {
-    ControlProgram::new(None, layers, vec![]).expect("a valid program")
+    ControlProgramBuilder::new()
+        .layers(layers)
+        .build()
+        .expect("a valid program")
 }
 
 /// A 500 at beat 0 → 0 at beat 4 trajectory.
@@ -264,7 +267,10 @@ fn an_inputs_offset_is_depth_times_span_times_x() {
             },
         },
     ];
-    let p = ControlProgram::new(None, vec![], inputs).expect("valid");
+    let p = ControlProgramBuilder::new()
+        .inputs(inputs)
+        .build()
+        .expect("valid");
     // 0.5 × 64 × 0.75 = 24.
     assert_eq!(
         p.value_at(None, Some(100.0), &at_beat(0.0), 64.0, &[Some(0.75), None]),
@@ -441,12 +447,11 @@ fn every_non_linear_curve_kinks_a_bipolar_sine() {
 /// corner is on the play clock: `Corners` keeps the two apart.
 #[test]
 fn automation_and_seconds_corners_are_on_their_clocks() {
-    let p = ControlProgram::new(
-        Some(ramp()),
-        vec![layer(1, seconds(2.0), LfoShape::Square, amount(0.1))],
-        vec![],
-    )
-    .expect("valid");
+    let p = ControlProgramBuilder::new()
+        .automation(ramp())
+        .layers(vec![layer(1, seconds(2.0), LfoShape::Square, amount(0.1))])
+        .build()
+        .expect("valid");
     let c = p.next_corner(&at_play(1_000.0, 1));
     assert_eq!(c.beat, Some(Beat::new(4.0)));
     // Edge 0.5 at 2 Hz is 12 000 frames.
@@ -545,7 +550,10 @@ impl Curve for Thawed {
 /// live cell through it.
 #[test]
 fn a_program_holds_the_frozen_curve() {
-    let p = ControlProgram::new(Some(Arc::new(Thawed)), vec![], vec![]).expect("valid");
+    let p = ControlProgramBuilder::new()
+        .automation(Arc::new(Thawed))
+        .build()
+        .expect("valid");
     assert_eq!(p.value_at(None, None, &at_beat(1.0), 1.0, &[]), Some(2.0));
     let p = ControlProgram::from_curve(Arc::new(Thawed));
     assert_eq!(p.value_at(None, None, &at_beat(1.0), 1.0, &[]), Some(2.0));
@@ -657,7 +665,10 @@ fn a_drawn_wave_follows_its_points() {
 fn new_refuses_what_a_lane_cannot_hold() {
     let l = |id| layer(id, beats(1.0), LfoShape::Sine, amount(0.1));
     assert_eq!(
-        ControlProgram::new(None, (0..17).map(l).collect(), vec![]).unwrap_err(),
+        ControlProgramBuilder::new()
+            .layers((0..17).map(l))
+            .build()
+            .unwrap_err(),
         ProgramError::TooManyLayers { count: 17 }
     );
     let input = |id| InputLayer {
@@ -666,11 +677,17 @@ fn new_refuses_what_a_lane_cannot_hold() {
         amount: amount(0.1),
     };
     assert_eq!(
-        ControlProgram::new(None, vec![], (0..9).map(input).collect()).unwrap_err(),
+        ControlProgramBuilder::new()
+            .inputs((0..9).map(input))
+            .build()
+            .unwrap_err(),
         ProgramError::TooManyInputs { count: 9 }
     );
     assert_eq!(
-        ControlProgram::new(None, vec![l(4), l(4)], vec![]).unwrap_err(),
+        ControlProgramBuilder::new()
+            .layers(vec![l(4), l(4)])
+            .build()
+            .unwrap_err(),
         ProgramError::DuplicateLayer(LayerId(4))
     );
     let bad = Layer {
@@ -689,10 +706,18 @@ fn new_refuses_what_a_lane_cannot_hold() {
         ..l(5)
     };
     assert_eq!(
-        ControlProgram::new(None, vec![bad], vec![]).unwrap_err(),
+        ControlProgramBuilder::new()
+            .layers(vec![bad])
+            .build()
+            .unwrap_err(),
         ProgramError::BadDrawnWave(LayerId(5))
     );
-    assert!(ControlProgram::new(None, (0..16).map(l).collect(), vec![]).is_ok());
+    assert!(
+        ControlProgramBuilder::new()
+            .layers((0..16).map(l))
+            .build()
+            .is_ok()
+    );
 }
 
 /// A depth-by amount other than the unit one shapes the scale, and a curved
@@ -842,7 +867,10 @@ fn new_refuses_a_nan() {
     };
     for bad in [nan_rate, nan_const, nan_depth_by] {
         assert_eq!(
-            ControlProgram::new(None, vec![bad], vec![]).unwrap_err(),
+            ControlProgramBuilder::new()
+                .layers(vec![bad])
+                .build()
+                .unwrap_err(),
             ProgramError::NotANumber(LayerId(3))
         );
     }

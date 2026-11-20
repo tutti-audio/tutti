@@ -86,7 +86,8 @@ mod tests {
     use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, U7};
     use tutti_units::{SampleRate, Samples};
 
-    use crate::{Settings, SoundFont, SoundFontUnit};
+    use crate::{Settings, SoundFontUnit};
+    use tutti_sf2::SoundFont;
 
     use tutti_fixtures::midi;
 
@@ -108,8 +109,9 @@ mod tests {
     /// A unit on preset `preset`.
     fn unit(soundfont: &Arc<SoundFont>, preset: U7) -> SoundFontUnit<f32> {
         let settings = Settings::new();
-        let mut unit =
-            SoundFontUnit::new(Arc::clone(soundfont), settings).expect("the unit builds");
+        let mut unit = settings
+            .build(Arc::clone(soundfont))
+            .expect("the unit builds");
         unit.program_change(MidiChannel::FIRST, preset);
         unit
     }

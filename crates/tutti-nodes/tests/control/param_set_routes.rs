@@ -23,12 +23,12 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, Layer, LayerId, LfoShape, Polarity, Waveform,
+    Amount, Clock, ControlProgramBuilder, Layer, LayerId, LfoShape, Polarity, Waveform,
 };
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
     CompressorConfig, CompressorControls, CompressorNode, KeySource, LadderFilterConfig,
-    LadderFilterNode, LadderType, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
+    LadderFilterNode, LadderType, LfoConfig, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
     ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, SvfFilterConfig, SvfFilterNode,
     SvfType,
 };
@@ -156,13 +156,20 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let knob = filter
         .param_set()
         .cell(UnitParam::Cutoff)
         .expect("addressed");
     let range = ed.param_range_cell(at).expect("committed");
-    let lane = ControlLaneNode::for_unit(UnitParam::Cutoff, program, Some(knob), Some(range));
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(UnitParam::Cutoff, program)
+            .knob(knob)
+            .range(range),
+    );
     ed.insert(NodeKey(2), "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -241,10 +248,17 @@ fn render_chorus(
             },
             depth_by: None,
         };
-        let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+        let program = ControlProgramBuilder::new()
+            .layers(vec![layer])
+            .build()
+            .expect("valid");
         let knob = params.cell(UnitParam::Rate).expect("the chorus has a rate");
         let range = ed.param_range_cell(at).expect("committed");
-        let lane = ControlLaneNode::for_unit(UnitParam::Rate, program, Some(knob), Some(range));
+        let lane = ControlLaneNode::from(
+            UnitLaneConfig::new(UnitParam::Rate, program)
+                .knob(knob)
+                .range(range),
+        );
         ed.insert(NodeKey(9_000), "lane", lane);
         ed.spec_mut().connect_param(
             at,
@@ -373,9 +387,11 @@ fn convolver_addresses_nothing() {
 /// after the render.
 fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64) {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let lfo = LfoNode::new(LfoShape::Sine)
-        .with_rate(Hz::new(1.0))
-        .with_depth(Depth::of(0.25));
+    let lfo = LfoNode::from(
+        LfoConfig::new(LfoShape::Sine)
+            .rate(Hz::new(1.0))
+            .depth(Depth::of(0.25)),
+    );
     let (n, params) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
     let at = ParamIn {
@@ -405,11 +421,18 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let range = ed
         .param_range_cell(at)
         .expect("the LFO declares it as a port");
-    let lane = ControlLaneNode::for_unit(param, program, Some(knob.clone()), Some(range));
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(param, program)
+            .knob(knob.clone())
+            .range(range),
+    );
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -508,12 +531,15 @@ where
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let knob = params.cell(param).expect("the node addresses it");
     let range = ed
         .param_range_cell(at)
         .expect("the node declares it as a port");
-    let lane = ControlLaneNode::for_unit(param, program, Some(knob), Some(range));
+    let lane = ControlLaneNode::from(UnitLaneConfig::new(param, program).knob(knob).range(range));
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -702,9 +728,11 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
     use tutti_graph::contract::ParamPulse;
     use tutti_units::{Frame, UnitAddr};
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let lfo = LfoNode::new(LfoShape::Square)
-        .with_rate(Hz::new(1.0))
-        .with_depth(Depth::of(0.25));
+    let lfo = LfoNode::from(
+        LfoConfig::new(LfoShape::Square)
+            .rate(Hz::new(1.0))
+            .depth(Depth::of(0.25)),
+    );
     let (n, _) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
     let pulse = g.add(Unforkable(ParamPulse::new(
@@ -775,10 +803,17 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let knob = params.cell(UnitParam::GainDb).expect("addressed");
     let range = ed.param_range_cell(at).expect("a port");
-    let lane = ControlLaneNode::for_unit(UnitParam::GainDb, program, Some(knob), Some(range));
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(UnitParam::GainDb, program)
+            .knob(knob)
+            .range(range),
+    );
     let lane_out = EventOut {
         node: NodeKey(9_000),
         port: 0,
