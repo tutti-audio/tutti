@@ -7,7 +7,7 @@ use tutti_clap_test_plugin::{
     GUI_CMD_REQUEST_RESIZE, GUI_HEIGHT, GUI_REQUESTED_RESIZE_H, GUI_REQUESTED_RESIZE_W, GUI_WIDTH,
     GuiMode,
 };
-use tutti_plugin_ipc::{BridgeMessage, HostMessage};
+use tutti_plugin_ipc::{ControlFrame, ControlReply, ControlRequest, News};
 use tutti_plugin_types::ContentScale;
 
 use super::*;
@@ -46,7 +46,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
     let wanted = Size::Physical(PhysicalSize::new(801, 601));
     let mut script = Script::new([
         Step::Send(load_message()),
-        Step::Send(HostMessage::OpenEditor {
+        Step::Send(ControlRequest::OpenEditor {
             parent: Some(0x40_0001),
             scale: ContentScale::IDENTITY,
         }),
@@ -54,10 +54,10 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
         Until::step(|heard| {
             heard
                 .iter()
-                .any(|m| matches!(m, BridgeMessage::EditorWantsSize { .. }))
+                .any(|m| matches!(m, ControlFrame::News(News::EditorWantsSize { .. })))
         }),
-        Step::Send(HostMessage::SetEditorSize { size: wanted }),
-        Step::Send(HostMessage::CloseEditor),
+        Step::Send(ControlRequest::SetEditorSize { size: wanted }),
+        Step::Send(ControlRequest::CloseEditor),
         Until::step(move |_| probe.gui_capture().destroyed),
     ]);
 
@@ -67,7 +67,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
         .heard
         .iter()
         .find_map(|m| match m {
-            BridgeMessage::EditorOpened { result } => Some(result.clone()),
+            ControlFrame::Reply(ControlReply::EditorOpened { result }) => Some(result.clone()),
             _ => None,
         })
         .expect("the open is answered");
@@ -81,7 +81,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
     assert!(
         script.heard.iter().any(|m| matches!(
             m,
-            BridgeMessage::EditorWantsSize { size }
+            ControlFrame::News(News::EditorWantsSize { size })
                 if *size == Size::Physical(PhysicalSize::new(GUI_REQUESTED_RESIZE_W, GUI_REQUESTED_RESIZE_H))
         )),
         "the plugin's resize request reached the host: {:?}",
@@ -91,7 +91,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
         .heard
         .iter()
         .find_map(|m| match m {
-            BridgeMessage::EditorSized { result } => Some(result.clone()),
+            ControlFrame::Reply(ControlReply::EditorSized { result }) => Some(result.clone()),
             _ => None,
         })
         .expect("the resize is answered");
@@ -122,15 +122,15 @@ fn unloading_a_plugin_closes_its_editor_and_says_so() {
     let (mut session, _slab) = session("unload");
     let mut script = Script::new([
         Step::Send(load_message()),
-        Step::Send(HostMessage::OpenEditor {
+        Step::Send(ControlRequest::OpenEditor {
             parent: Some(0x40_0001),
             scale: ContentScale::IDENTITY,
         }),
-        Step::Send(HostMessage::UnloadPlugin),
+        Step::Send(ControlRequest::UnloadPlugin),
         Until::step(|heard| {
             heard
                 .iter()
-                .any(|m| matches!(m, BridgeMessage::EditorClosed))
+                .any(|m| matches!(m, ControlFrame::News(News::EditorClosed)))
         }),
     ]);
 
@@ -140,7 +140,7 @@ fn unloading_a_plugin_closes_its_editor_and_says_so() {
         script
             .heard
             .iter()
-            .any(|m| matches!(m, BridgeMessage::EditorClosed)),
+            .any(|m| matches!(m, ControlFrame::News(News::EditorClosed))),
         "{:?}",
         script.heard
     );

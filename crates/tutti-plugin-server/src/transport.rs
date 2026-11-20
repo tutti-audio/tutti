@@ -6,42 +6,51 @@
 //!
 use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 use std::io::Read;
+use std::marker::PhantomData;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
-    BridgeMessage, FrameBuf, HostMessage, MAX_FRAME_BYTES, read_frame, write_frame,
+    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, ControlFrame,
+    ControlRequest, FrameBuf, Framed, read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeResult, Deadline, MIDI_STACK_CAPACITY};
+use tutti_plugin_types::{BridgeResult, Deadline};
 
 use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
 
-/// The longest request the audio connection takes: whatever the protocol
-/// allows ([`MAX_FRAME_BYTES`]). A block's request carries automation at the
-/// host's point budget for the activated block and queue count, which is
-/// megabytes at a large block, so the buffer holds the protocol's whole bound
-/// rather than a guess. The memory is zeroed pages the OS maps on first touch:
-/// a connection that never carries a large block never makes them resident.
-const AUDIO_REQUEST_BYTES: usize = MAX_FRAME_BYTES;
+/// The longest request the audio connection takes: the protocol's own cap for
+/// a block's request ([`AUDIO_REQUEST_FRAME_BYTES`]). A block's request carries
+/// automation at the host's point budget for the activated block and queue
+/// count, which is megabytes at a large block, so the buffer holds the whole
+/// bound rather than a guess. The memory is zeroed pages the OS maps on first
+/// touch: a connection that never carries a large block never makes them
+/// resident.
+const AUDIO_REQUEST_BYTES: usize = AUDIO_REQUEST_FRAME_BYTES;
 
 /// The longest reply the audio connection sends, in bytes: a block's reply
 /// with its MIDI at the cap, each event at the most its varints take.
-pub(crate) const AUDIO_REPLY_BYTES: usize = MIDI_STACK_CAPACITY * 32 + 256;
+pub(crate) const AUDIO_REPLY_BYTES: usize = AUDIO_REPLY_FRAME_BYTES;
+
+/// The audio connection's transport: blocks in, block replies out.
+pub(crate) type AudioTransport = dyn Transport<AudioRequest, AudioReply>;
+
+/// The control connection's transport: requests in, answers and news out.
+pub(crate) type ControlTransport = dyn Transport<ControlRequest, ControlFrame>;
 
 /// One framed, blocking message channel to the host.
 ///
 /// A trait rather than the concrete socket so [`crate::session::Session`] can be
 /// driven from a test double without a real socket pair.
-pub(crate) trait Transport: Send {
+pub(crate) trait Transport<In, Out>: Send {
     /// Block until one complete host message arrives.
     ///
     /// # Errors
     ///
     /// Returns an error on EOF (the host disconnected), a short read, a length
-    /// prefix over `MAX_FRAME_BYTES` (a peer that cannot frame), or a payload
+    /// prefix over the lane's frame cap (a peer that cannot frame), or a payload
     /// postcard cannot decode — the last meaning a protocol-version mismatch the
     /// `Ready` handshake failed to catch.
-    fn recv(&mut self) -> BridgeResult<HostMessage>;
+    fn recv(&mut self) -> BridgeResult<In>;
 
     /// Wait up to `timeout` (`None`: for ever) for the host to have something to
     /// read: `Ok(true)` when a [`recv`](Self::recv) now will find a frame begun
@@ -77,7 +86,7 @@ pub(crate) trait Transport: Send {
     ///
     /// Returns an error if the payload cannot be serialized, or if the write
     /// fails — a broken pipe here means the host went away.
-    fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()>;
+    fn send(&mut self, msg: &Out) -> BridgeResult<()>;
 }
 
 /// How long the rest of an audio frame may take to arrive once its first byte
@@ -120,7 +129,7 @@ where
 
 /// [`Transport`] over the platform's local socket (Unix domain socket, or a
 /// Windows named pipe).
-pub(crate) struct SocketTransport {
+pub(crate) struct SocketTransport<In, Out> {
     stream: PlatformStream,
     /// The audio connection's frame buffers, of fixed capacity, so a block's
     /// frames allocate nothing on the render thread; `None` for a connection
@@ -129,9 +138,10 @@ pub(crate) struct SocketTransport {
     /// Never rung: the wake argument of the wait for the rest of a frame, which
     /// only its deadline ends.
     quiet: Option<Bell>,
+    lane: PhantomData<fn(Out) -> In>,
 }
 
-impl SocketTransport {
+impl<In, Out> SocketTransport<In, Out> {
     /// Wrap an already-accepted stream. The stream must be in blocking mode;
     /// see [`TransportListener::accept`] for why that is not incidental.
     pub(crate) fn new(stream: PlatformStream) -> Self {
@@ -139,9 +149,12 @@ impl SocketTransport {
             stream,
             frames: None,
             quiet: None,
+            lane: PhantomData,
         }
     }
+}
 
+impl SocketTransport<AudioRequest, AudioReply> {
     /// Wraps the audio connection's stream, which the render thread reads and
     /// writes through buffers built here: a frame is never read into, or
     /// serialized into, memory that is sized on that thread.
@@ -154,14 +167,15 @@ impl SocketTransport {
             stream,
             frames: Some(FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES)),
             quiet: Some(Bell::new()?),
+            lane: PhantomData,
         })
     }
 }
 
-impl Transport for SocketTransport {
-    fn recv(&mut self) -> BridgeResult<HostMessage> {
+impl<In: Framed, Out: Framed> Transport<In, Out> for SocketTransport<In, Out> {
+    fn recv(&mut self) -> BridgeResult<In> {
         // The frame is bounded before it is allocated (see
-        // [`MAX_FRAME_BYTES`]). The server is the more exposed end: it loads
+        // [`CONTROL_FRAME_BYTES`](tutti_plugin_ipc::CONTROL_FRAME_BYTES)). The server is the more exposed end: it loads
         // untrusted plugin binaries, and one that corrupts its memory could
         // otherwise turn a bad length into a 4 GiB allocation.
         //
@@ -201,7 +215,7 @@ impl Transport for SocketTransport {
         Some(&self.stream)
     }
 
-    fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
+    fn send(&mut self, msg: &Out) -> BridgeResult<()> {
         // Reachable with an oversize body through `StateData`, whose chunk is
         // whatever the plugin hands back from `get_state`.
         match self.frames.as_mut() {
@@ -245,13 +259,13 @@ impl TransportListener {
     /// `accept(2)` returns inherits the listener's flag, and every read on it
     /// then fails with `WouldBlock`). A host that dies while this waits is the
     /// host watch's to end the process ([`crate::server`]).
-    pub(crate) fn accept(&self) -> BridgeResult<SocketTransport> {
+    pub(crate) fn accept(&self) -> BridgeResult<SocketTransport<ControlRequest, ControlFrame>> {
         Ok(SocketTransport::new(self.accept_stream()?))
     }
 
     /// [`accept`](Self::accept) for the audio connection, whose transport reads
     /// and writes through fixed buffers ([`SocketTransport::audio`]).
-    pub(crate) fn accept_audio(&self) -> BridgeResult<SocketTransport> {
+    pub(crate) fn accept_audio(&self) -> BridgeResult<SocketTransport<AudioRequest, AudioReply>> {
         Ok(SocketTransport::audio(self.accept_stream()?)?)
     }
 
@@ -266,7 +280,7 @@ mod recv_tests {
     use std::io::Write;
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
-    use tutti_plugin_ipc::MAX_FRAME_BYTES;
+    use tutti_plugin_ipc::{CONTROL_FRAME_BYTES, ControlRequest};
     use tutti_plugin_types::BridgeError;
 
     /// A length prefix over the cap is a framing violation by the host, not
@@ -280,11 +294,12 @@ mod recv_tests {
         server
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .expect("read timeout");
-        let mut transport = SocketTransport::new(PlatformStream::from(OwnedFd::from(server)));
-        let len = u32::try_from(MAX_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
+        let mut transport: SocketTransport<ControlRequest, ControlFrame> =
+            SocketTransport::new(PlatformStream::from(OwnedFd::from(server)));
+        let len = u32::try_from(CONTROL_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
         host.write_all(&len.to_be_bytes()).expect("write prefix");
         match transport.recv() {
-            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, MAX_FRAME_BYTES + 1),
+            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, CONTROL_FRAME_BYTES + 1),
             other => panic!("expected FrameTooLarge, got {other:?}"),
         }
     }
@@ -298,7 +313,7 @@ mod wait_tests {
     use std::os::unix::net::UnixStream;
     use std::time::Duration;
 
-    fn pair() -> (UnixStream, SocketTransport) {
+    fn pair() -> (UnixStream, SocketTransport<ControlRequest, ControlFrame>) {
         let (host, server) = UnixStream::pair().expect("socket pair");
         (
             host,
@@ -392,7 +407,7 @@ mod audio_frame_tests {
                 );
             }
         }
-        let block = HostMessage::ProcessAudio(ProcessAudioData {
+        let block = AudioRequest::ProcessAudio(ProcessAudioData {
             seq: 1,
             num_samples: FRAMES,
             param_changes: changes,
@@ -406,7 +421,7 @@ mod audio_frame_tests {
             wire.len()
         );
         let mut frames = FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES);
-        let HostMessage::ProcessAudio(back) = frames.read(&mut wire.as_slice()).unwrap() else {
+        let AudioRequest::ProcessAudio(back) = frames.read(&mut wire.as_slice()).unwrap() else {
             panic!("a block");
         };
         let points: usize = back

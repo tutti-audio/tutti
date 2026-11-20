@@ -14,14 +14,14 @@ use tutti_graph::{
     Env, Event, Harmony, Node, Offset, ParamEvent, ParamRamp, PlayClock, TransportChanges,
     TransportPosition,
 };
-use tutti_plugin_ipc::{HostMessage, ProcessAudioData};
+use tutti_plugin_ipc::{AudioRequest, ControlRequest, ProcessAudioData};
 use tutti_ump::MidiChannel;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, Frame, Samples};
 
 use super::mock_server::{
-    BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, ReplyGate, SR, STEP_BEAT, STEP_FRAME, at, beat_at,
-    new_node, rig, rig_gated, tempo,
+    BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, ReplyGate, SR, STEP_BEAT, STEP_FRAME, Said, at,
+    beat_at, new_node, rig, rig_gated, tempo,
 };
 
 use tutti_ump::{Message, NoteNumber, NoteVelocity, U7, Voice2};
@@ -38,14 +38,12 @@ fn sent(record: &Record) -> Vec<Sent> {
         .lock()
         .unwrap()
         .iter()
-        .map(
-            |bytes| match postcard::from_bytes(bytes).expect("a host frame") {
-                HostMessage::ProcessAudio(data) => Sent::Chunk(Box::new(data)),
-                HostMessage::Reset => Sent::Reset,
-                HostMessage::SetSampleRate { .. } => Sent::Rate,
-                other => panic!("not an audio-path frame: {other:?}"),
-            },
-        )
+        .map(|said| match said {
+            Said::Audio(AudioRequest::ProcessAudio(data)) => Sent::Chunk(Box::new(data.clone())),
+            Said::Audio(AudioRequest::Reset) => Sent::Reset,
+            Said::Control(ControlRequest::SetSampleRate { .. }) => Sent::Rate,
+            _ => panic!("not an audio-path frame"),
+        })
         .collect()
 }
 

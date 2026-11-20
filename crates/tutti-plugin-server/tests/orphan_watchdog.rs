@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
-use tutti_plugin_ipc::{BridgeMessage, read_frame, socket_name};
+use tutti_plugin_ipc::{ControlFrame, ControlReply, read_frame, socket_name};
 
 /// The guard on an orphaned server's exit: it is a hang guard, and a server
 /// that watches the wrong process never exits at all, so it fails whatever this
@@ -184,8 +184,8 @@ fn connect(socket: &Path, mut server_gone: impl FnMut() -> bool) -> Stream {
     });
     let mut stream = connected.expect("the wait ended on a connection");
     assert!(matches!(
-        read_frame::<_, BridgeMessage>(&mut stream),
-        Ok(BridgeMessage::Ready { .. })
+        read_frame::<_, ControlFrame>(&mut stream),
+        Ok(ControlFrame::Reply(ControlReply::Ready { .. }))
     ));
     stream
 }
@@ -254,7 +254,7 @@ fn a_server_behind_a_wrapper_does_not_take_its_host_for_gone() {
         .expect("spawning the wrapper");
 
     let mut stream = connect(&socket, || wrapper.try_wait().expect("polling").is_some());
-    tutti_plugin_ipc::write_frame(&mut stream, &tutti_plugin_ipc::HostMessage::Shutdown)
+    tutti_plugin_ipc::write_frame(&mut stream, &tutti_plugin_ipc::ControlRequest::Shutdown)
         .expect("ask the server to shut down");
     assert!(wrapper.wait().expect("the wrapper ends").success());
 

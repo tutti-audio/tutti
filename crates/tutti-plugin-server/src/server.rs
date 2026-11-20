@@ -7,10 +7,10 @@
 
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
-use crate::transport::{Transport, TransportListener};
+use crate::transport::{ControlTransport, Transport, TransportListener};
 use std::path::PathBuf;
 use tutti_platform::StopToken;
-use tutti_plugin_ipc::{BridgeMessage, PROTOCOL_VERSION};
+use tutti_plugin_ipc::{AudioReply, ControlFrame, ControlReply, PROTOCOL_VERSION};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 
@@ -146,7 +146,7 @@ impl PluginServer {
     ///    event loop (`main_loop`), which keeps the plugin's
     ///    `Controller`, its editor and the idle tick.
     ///
-    /// Each phase opens with a [`BridgeMessage::Ready`] carrying
+    /// Each phase opens with a [`ControlReply::Ready`] carrying
     /// `PROTOCOL_VERSION`; the host refuses a version it does not know.
     ///
     /// # Errors
@@ -179,9 +179,9 @@ impl PluginServer {
 
         // First connection: handshake.
         let mut handshake = listener.accept()?;
-        handshake.send(&BridgeMessage::Ready {
+        handshake.send(&ControlFrame::Reply(ControlReply::Ready {
             protocol_version: PROTOCOL_VERSION,
-        })?;
+        }))?;
         if self.handshake_phase(&mut handshake)? {
             return Ok(());
         }
@@ -189,13 +189,13 @@ impl PluginServer {
 
         // Second connection: audio. Third: control.
         let mut audio = listener.accept_audio()?;
-        audio.send(&BridgeMessage::Ready {
+        audio.send(&AudioReply::Ready {
             protocol_version: PROTOCOL_VERSION,
         })?;
         let mut control = listener.accept()?;
-        control.send(&BridgeMessage::Ready {
+        control.send(&ControlFrame::Reply(ControlReply::Ready {
             protocol_version: PROTOCOL_VERSION,
-        })?;
+        }))?;
         let side = self
             .render
             .take()
@@ -274,7 +274,7 @@ impl PluginServer {
         }
     }
 
-    fn handshake_phase(&mut self, transport: &mut dyn Transport) -> BridgeResult<bool> {
+    fn handshake_phase(&mut self, transport: &mut ControlTransport) -> BridgeResult<bool> {
         loop {
             let msg = match transport.recv() {
                 Ok(m) => m,
@@ -287,18 +287,18 @@ impl PluginServer {
             // A load says it is restoring a state before it does (the host's wait
             // changes with it); the transport is the interim sink.
             let reaction = self.session.handle_with(self.main, msg, &mut |m| {
-                let _ = transport.send(&m);
+                let _ = transport.send(&m.into());
             })?;
             match reaction {
                 Reaction::Shutdown => return Ok(true),
                 Reaction::Reply(m) => {
-                    if transport.send(&m).is_err() {
+                    if transport.send(&m.into()).is_err() {
                         return Ok(false);
                     }
                 }
                 Reaction::ReplyMany(ms) => {
-                    for m in &ms {
-                        if transport.send(m).is_err() {
+                    for m in ms {
+                        if transport.send(&m.into()).is_err() {
                             return Ok(false);
                         }
                     }
@@ -313,7 +313,7 @@ impl PluginServer {
     /// host leaves.
     fn control_phase(
         &mut self,
-        transport: &mut dyn Transport,
+        transport: &mut ControlTransport,
         render: &RenderThread,
     ) -> BridgeResult<()> {
         let main = self.main;

@@ -6,8 +6,8 @@
 //! so the server doesn't have to weave field borrows.
 //!
 //! Input/output cross this layer as value types ([`AudioBlock`],
-//! [`AudioOutput`]). The server decodes `HostMessage::ProcessAudio` into an
-//! `AudioBlock` and builds the wire `BridgeMessage::AudioProcessed` from the
+//! [`AudioOutput`]). The server decodes `AudioRequest::ProcessAudio` into an
+//! `AudioBlock` and builds the wire `AudioReply::AudioProcessed` from the
 //! resulting `AudioOutput`.
 
 use crate::served::Render;
@@ -210,7 +210,7 @@ pub(crate) struct AudioBlock<'a> {
 pub(crate) struct AudioOutput {
     /// Wall-clock microseconds this block spent inside the plugin, measured by
     /// the server. A *diagnostic*, not the plugin's reported PDC latency —
-    /// that arrives as a `BridgeMessage::LatencyChanged` in `Samples`.
+    /// that arrives as a `News::LatencyChanged` in `Samples`.
     pub latency_us: u64,
     /// The block's audio was not published: its input slot was recycled, or an
     /// output channel was not written. The host reads it as silence.

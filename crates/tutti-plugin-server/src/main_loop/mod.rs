@@ -43,7 +43,7 @@ use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, StateError
 
 use crate::render::RenderThread;
 use crate::session::{Reaction, Session};
-use crate::transport::Transport;
+use crate::transport::ControlTransport;
 
 /// How often the idle tick runs while nothing else wakes the loop: about 30 Hz,
 /// the rate a plugin's editor idle is conventionally driven at.
@@ -109,7 +109,7 @@ impl Native {
     /// The wait fails.
     pub(crate) fn wait(
         &mut self,
-        transport: &mut dyn Transport,
+        transport: &mut ControlTransport,
         timeout: Duration,
         wakeups: &Wakeups,
         bell: &Bell,
@@ -134,7 +134,7 @@ impl Native {
 /// `session` fails in a way it cannot answer as a reply.
 pub(crate) fn serve(
     session: &mut Session,
-    transport: &mut dyn Transport,
+    transport: &mut ControlTransport,
     main: MainThreadMarker,
     render: &RenderThread,
 ) -> BridgeResult<()> {
@@ -187,7 +187,7 @@ fn host_left(error: &BridgeError) -> bool {
 /// [`serve`] with a tick every `period`.
 pub(crate) fn serve_every(
     session: &mut Session,
-    transport: &mut dyn Transport,
+    transport: &mut ControlTransport,
     backend: &mut Native,
     main: MainThreadMarker,
     render: &RenderThread,
@@ -217,7 +217,7 @@ pub(crate) fn serve_every(
         }
         if ticker.take_due(Instant::now()) {
             for event in session.tick(main) {
-                transport.send(&event)?;
+                transport.send(&event.into())?;
             }
         }
         // A tick that lost the plugin ends the server before it waits.
@@ -241,13 +241,13 @@ pub(crate) fn serve_every(
         // say) and rang the bell: what it raised leaves now, not on the tick.
         if bell.rung() {
             for event in session.drain_async_events(main) {
-                transport.send(&event)?;
+                transport.send(&event.into())?;
             }
         }
         let now = Instant::now();
         if !ready.is_empty() || wakeups.is_due(now) {
             for event in session.wake(main, &ready, now) {
-                transport.send(&event)?;
+                transport.send(&event.into())?;
             }
         }
         if !readable {
@@ -256,16 +256,16 @@ pub(crate) fn serve_every(
         let msg = transport.recv()?;
         match session.handle(main, msg)? {
             Reaction::Shutdown => return Ok(()),
-            Reaction::Reply(m) => transport.send(&m)?,
+            Reaction::Reply(m) => transport.send(&m.into())?,
             Reaction::ReplyMany(ms) => {
-                for m in &ms {
-                    transport.send(m)?;
+                for m in ms {
+                    transport.send(&m.into())?;
                 }
             }
             Reaction::None => {}
         }
         for event in session.drain_async_events(main) {
-            transport.send(&event)?;
+            transport.send(&event.into())?;
         }
     }
 }

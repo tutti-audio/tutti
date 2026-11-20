@@ -7,7 +7,7 @@ use crate::config::BridgeConfig;
 use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
-use crate::{BridgeMessage, HostMessage, StagedState};
+use crate::{ControlFrame, ControlReply, ControlRequest, StagedState};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -150,7 +150,7 @@ pub(super) fn launch_with(
 }
 
 /// `launch_with`, restoring the request's state into the plugin before it is
-/// activated: staged ahead of the load (`HostMessage::StageStateChunk`),
+/// activated: staged ahead of the load (`ControlRequest::StageStateChunk`),
 /// applied by the server between opening the plugin and activating it, so the
 /// activation, and the reply's buses and latency, are the state's.
 pub(super) fn launch_with_state(
@@ -290,13 +290,25 @@ fn connect_when_listening(
     }
 }
 
+/// The next frame of a launch's connection, which is an answer: the plugin has
+/// nothing to say unprompted before it is loaded, so news is no part of one.
+fn recv_reply(stream: &mut ControlStream, timeout: Duration) -> BridgeResult<ControlReply> {
+    match ipc::recv_within::<ControlFrame>(stream, timeout)? {
+        ControlFrame::Reply(reply) => Ok(reply),
+        ControlFrame::News(news) => Err(BridgeError::UnexpectedMessage {
+            expected: "a reply",
+            got: format!("{news:?}").into(),
+        }),
+    }
+}
+
 fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<ControlStream> {
     let mut stream = connect_when_listening(&config.socket_path, server, config.timeouts.connect)?;
     let timeout = config.timeouts.call;
     // A server from before version 27 frames its `Ready` in bincode, which does
     // not decode as one message of ours: say which binary is stale rather than
     // report a bare codec error.
-    let ready = ipc::recv_within(&mut stream, timeout).map_err(|e| match e {
+    let ready = recv_reply(&mut stream, timeout).map_err(|e| match e {
         undecodable @ (BridgeError::Serialization(_) | BridgeError::TrailingBytes { .. }) => {
             BridgeError::StaleServer {
                 cause: Box::new(undecodable),
@@ -305,7 +317,7 @@ fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<Contr
         other => other,
     })?;
     match ready {
-        BridgeMessage::Ready { protocol_version } => {
+        ControlReply::Ready { protocol_version } => {
             crate::protocol::check_protocol_version(protocol_version)?;
             Ok(stream)
         }
@@ -359,7 +371,7 @@ fn load_plugin(
 )> {
     ipc::send(
         stream,
-        &HostMessage::LoadPlugin {
+        &ControlRequest::LoadPlugin {
             path: request.origin.path().to_path_buf(),
             format: request.format,
             plugin: request.origin.id().cloned(),
@@ -381,17 +393,17 @@ fn load_plugin(
     let mut phase = LoadPhase::Opening;
     loop {
         let reply =
-            ipc::recv_within(stream, phase.window(&config.timeouts)).map_err(|e| phase.blame(e))?;
+            recv_reply(stream, phase.window(&config.timeouts)).map_err(|e| phase.blame(e))?;
         match reply {
-            BridgeMessage::RestoringState => phase = LoadPhase::Restoring,
-            BridgeMessage::PluginLoaded {
+            ControlReply::RestoringState => phase = LoadPhase::Restoring,
+            ControlReply::PluginLoaded {
                 id,
                 descriptor,
                 loaded,
                 negotiated_format,
                 state_error,
             } => return Ok((id, descriptor, loaded, negotiated_format, state_error)),
-            BridgeMessage::Error { message } => {
+            ControlReply::Error { message } => {
                 return Err(BridgeError::load_from_server(
                     request.origin.path(),
                     message,
@@ -420,17 +432,18 @@ fn stage_state(
     for (seq, last, bytes) in crate::transport::state_chunk::split(state) {
         ipc::send(
             stream,
-            &HostMessage::StageStateChunk {
+            &ControlRequest::StageStateChunk {
                 seq,
+                total: state.len() as u64,
                 last,
                 bytes: bytes.to_vec(),
             },
         )?;
     }
     let timeout = config.timeouts.call;
-    match ipc::recv_within(stream, timeout)? {
-        BridgeMessage::StateLoaded { error: None } => Ok(Ok(())),
-        BridgeMessage::StateLoaded { error: Some(e) } => Ok(Err(e)),
+    match recv_reply(stream, timeout)? {
+        ControlReply::StateLoaded { error: None } => Ok(Ok(())),
+        ControlReply::StateLoaded { error: Some(e) } => Ok(Err(e)),
         other => Err(unexpected_message("StateLoaded", &other)),
     }
 }
@@ -476,11 +489,14 @@ fn setup_shm(
     let layout = slab_layout_for(loaded, format, config.max_buffer_size);
     let slab = AudioSlab::create(shm_name.clone(), layout.clone())?;
 
-    ipc::send(stream, &HostMessage::SetupSharedMemory { shm_name, layout })?;
+    ipc::send(
+        stream,
+        &ControlRequest::SetupSharedMemory { shm_name, layout },
+    )?;
 
     let timeout = config.timeouts.call;
-    match ipc::recv_within(stream, timeout)? {
-        BridgeMessage::SharedMemoryReady => Ok(slab),
+    match recv_reply(stream, timeout)? {
+        ControlReply::SharedMemoryReady => Ok(slab),
         ref other => Err(unexpected_message("SharedMemoryReady", other)),
     }
 }
@@ -1149,9 +1165,9 @@ mod tests {
         );
 
         let err = handshake_against(
-            postcard::to_allocvec(&BridgeMessage::Ready {
+            postcard::to_allocvec(&ControlFrame::Reply(ControlReply::Ready {
                 protocol_version: STALE_VERSION,
-            })
+            }))
             .unwrap(),
         );
         match err {
@@ -1181,9 +1197,9 @@ mod tests {
 
         const BEFORE_STATUS: u32 = 31;
         let err = handshake_against(
-            postcard::to_allocvec(&BridgeMessage::Ready {
+            postcard::to_allocvec(&ControlFrame::Reply(ControlReply::Ready {
                 protocol_version: BEFORE_STATUS,
-            })
+            }))
             .unwrap(),
         );
         assert!(
@@ -1204,9 +1220,9 @@ mod tests {
     /// never read and the codec error is what the operator would otherwise see.
     #[test]
     fn a_bincode_era_server_is_refused_with_a_rebuild_hint() {
-        let ready = postcard::to_allocvec(&BridgeMessage::Ready {
+        let ready = postcard::to_allocvec(&ControlFrame::Reply(ControlReply::Ready {
             protocol_version: 0,
-        })
+        }))
         .unwrap()[0];
         let mut bincode_ready = vec![ready, 0, 0, 0];
         bincode_ready.extend_from_slice(&26u32.to_le_bytes());

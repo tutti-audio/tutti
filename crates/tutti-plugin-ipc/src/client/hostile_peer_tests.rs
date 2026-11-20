@@ -25,7 +25,10 @@ use super::PluginBridge;
 use crate::client::audio::BridgeThread;
 use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
-use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION, SlabLayout};
+use crate::{
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News,
+    PROTOCOL_VERSION, SlabLayout,
+};
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -94,8 +97,8 @@ fn no_editor(
 
 /// The answer to the request the bridge sends after a render mode: the server
 /// answers its control lane in order, so this says the mode is applied.
-fn applied_fence() -> BridgeMessage {
-    BridgeMessage::CurrentPreset { id: None }
+fn applied_fence() -> ControlReply {
+    ControlReply::CurrentPreset { id: None }
 }
 
 fn stereo_layout() -> SlabLayout {
@@ -108,7 +111,7 @@ fn stereo_layout() -> SlabLayout {
     }
 }
 
-fn recv_host_msg(stream: &Stream) -> std::io::Result<HostMessage> {
+fn recv_host_msg<T: Framed>(stream: &Stream) -> std::io::Result<T> {
     let mut stream = stream;
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf)?;
@@ -118,9 +121,14 @@ fn recv_host_msg(stream: &Stream) -> std::io::Result<HostMessage> {
     postcard::from_bytes(&buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
-fn send_bridge_msg(stream: &Stream, msg: &BridgeMessage) -> std::io::Result<()> {
+fn send_bridge_msg<T: Framed>(stream: &Stream, msg: &T) -> std::io::Result<()> {
     let mut stream = stream;
     crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
+}
+
+/// A control reply as the frame the control connection carries it in.
+fn send_reply(stream: &Stream, msg: &ControlReply) -> std::io::Result<()> {
+    send_bridge_msg(stream, &ControlFrame::Reply(msg.clone()))
 }
 
 /// Write a raw frame the host must cope with but which no honest server would
@@ -140,9 +148,16 @@ fn send_raw_frame(stream: &Stream, len: u32, body: &[u8]) -> std::io::Result<()>
 /// [`Action::Die`] closes the socket the way a segfaulting server does: no
 /// shutdown message, no goodbye, just EOF at the host's next read.
 enum Action {
-    /// Boxed: `BridgeMessage` inlines a ~5 KB MIDI vec, and an unboxed variant
-    /// would make every `Action` that large.
-    Reply(Box<BridgeMessage>),
+    /// Answer a control request.
+    Reply(Box<ControlReply>),
+    /// Answer a block or an `ApplyParameters` on the audio connection. Boxed:
+    /// an `AudioReply` inlines a ~5 KB MIDI vec, and an unboxed variant would
+    /// make every `Action` that large.
+    Audio(Box<AudioReply>),
+    /// Say something unprompted on the control connection.
+    Event(News),
+    /// Say several things unprompted, in order.
+    Events(Vec<News>),
     /// Answer nothing and keep the connection open (a hung server).
     Silent,
     /// Close the connection immediately (a crashed server).
@@ -155,14 +170,14 @@ enum Action {
     /// produce a multi-frame answer, so without this the chunked path could
     /// only be tested one chunk long — the length at which it is
     /// indistinguishable from the single-frame shape it replaced.
-    ReplyMany(Vec<BridgeMessage>),
+    ReplyMany(Vec<ControlReply>),
     /// Answer with a sequence of frames, pausing `gap` before each.
     ///
     /// A slow-but-progressing peer: the thing a progress deadline must tolerate
     /// and a total budget cannot. `ReplyMany` sends back-to-back and so proves
     /// nothing about either.
     ReplyManySlowly {
-        msgs: Vec<BridgeMessage>,
+        msgs: Vec<ControlReply>,
         gap: Duration,
     },
     /// Advertise `len`, then dribble one byte every `gap` — forever.
@@ -196,34 +211,51 @@ const PROBE_WAITING: u8 = 1;
 const PROBE_NOT_YET: u8 = 2;
 
 /// One connection of the mock server: answers each request as `respond` says.
-fn serve_lane(
+fn serve_lane<Req: Framed>(
     stream: interprocess::local_socket::Stream,
-    respond: &std::sync::Mutex<Box<dyn Fn(HostMessage) -> Action + Send>>,
+    respond: &std::sync::Mutex<Box<dyn Fn(Req) -> Action + Send>>,
 ) {
     let mut next = None;
     loop {
         let msg = match next.take() {
             Some(msg) => msg,
-            None => match recv_host_msg(&stream) {
+            None => match recv_host_msg::<Req>(&stream) {
                 Ok(msg) => msg,
                 Err(_) => return, // host hung up
             },
         };
         match (respond.lock().unwrap())(msg) {
             Action::Reply(m) => {
-                if send_bridge_msg(&stream, &m).is_err() {
+                if send_reply(&stream, &m).is_err() {
                     return;
                 }
             }
+            Action::Audio(m) => {
+                if send_bridge_msg(&stream, &*m).is_err() {
+                    return;
+                }
+            }
+            Action::Event(event) => {
+                if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
+                    return;
+                }
+            }
+            Action::Events(events) => {
+                for event in events {
+                    if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
+                        return;
+                    }
+                }
+            }
             Action::ReplyMany(ms) => {
-                if ms.iter().any(|m| send_bridge_msg(&stream, m).is_err()) {
+                if ms.iter().any(|m| send_reply(&stream, m).is_err()) {
                     return;
                 }
             }
             Action::ReplyManySlowly { msgs, gap } => {
                 for m in &msgs {
                     std::thread::sleep(gap);
-                    if send_bridge_msg(&stream, m).is_err() {
+                    if send_reply(&stream, m).is_err() {
                         return;
                     }
                 }
@@ -252,16 +284,16 @@ fn serve_lane(
             Action::EventsThenProbe { count, gap, probe } => {
                 for n in 0..count {
                     std::thread::sleep(gap);
-                    let event = BridgeMessage::LatencyChanged {
+                    let event = News::LatencyChanged {
                         samples: tutti_plugin_types::Samples::new(n),
                     };
-                    if send_bridge_msg(&stream, &event).is_err() {
+                    if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
                         return;
                     }
                 }
                 use interprocess::local_socket::traits::Stream as _;
                 let _ = stream.set_recv_timeout(Some(Duration::from_millis(300)));
-                let waiting = recv_host_msg(&stream).ok();
+                let waiting = recv_host_msg::<Req>(&stream).ok();
                 let _ = stream.set_recv_timeout(None);
                 probe.store(
                     if waiting.is_some() {
@@ -276,9 +308,9 @@ fn serve_lane(
             Action::SplitEvents { split } => {
                 let mut s = &stream;
                 for n in 0.. {
-                    let body = postcard::to_allocvec(&BridgeMessage::LatencyChanged {
+                    let body = postcard::to_allocvec(&ControlFrame::News(News::LatencyChanged {
                         samples: tutti_plugin_types::Samples::new(n),
-                    })
+                    }))
                     .unwrap();
                     let prefix = (body.len() as u32).to_be_bytes();
                     if s.write_all(&prefix).is_err() {
@@ -299,7 +331,7 @@ fn serve_lane(
 }
 
 /// How a mock lane answers: a script over the messages of its connection.
-type Responder = Arc<std::sync::Mutex<Box<dyn Fn(HostMessage) -> Action + Send>>>;
+type Responder<Req> = Arc<std::sync::Mutex<Box<dyn Fn(Req) -> Action + Send>>>;
 
 struct MockServer {
     bridge: Arc<PluginBridge>,
@@ -312,7 +344,7 @@ struct MockServer {
 }
 
 impl MockServer {
-    fn start(label: &str, respond: impl Fn(HostMessage) -> Action + Send + 'static) -> Self {
+    fn start(label: &str, respond: impl Fn(ControlRequest) -> Action + Send + 'static) -> Self {
         // The production deadline, not the shortened one. Only the two tests
         // *about* the deadline shorten it: a 400 ms progress budget applied to
         // every mock made `a_state_larger_than_one_frame_round_trips` fail, and
@@ -334,7 +366,7 @@ impl MockServer {
     fn start_with_state_progress_timeout(
         label: &str,
         state_progress: Duration,
-        respond: impl Fn(HostMessage) -> Action + Send + 'static,
+        respond: impl Fn(ControlRequest) -> Action + Send + 'static,
     ) -> Self {
         let timeouts = {
             let mut t = Timeouts::default();
@@ -349,20 +381,19 @@ impl MockServer {
     fn start_with_timeouts(
         label: &str,
         timeouts: Timeouts,
-        respond: impl Fn(HostMessage) -> Action + Send + 'static,
+        respond: impl Fn(ControlRequest) -> Action + Send + 'static,
     ) -> Self {
-        // One script for both lanes: a test's script sees the requests of both
-        // as it saw the one's.
-        let respond: Responder = Arc::new(std::sync::Mutex::new(Box::new(respond)));
-        Self::start_on(label, timeouts, [Arc::clone(&respond), respond])
+        // The script answers the control connection; the audio connection
+        // hears blocks and says nothing.
+        Self::start_lanes_under(label, timeouts, |_| Action::Silent, respond)
     }
 
     /// As [`start_with_timeouts`](Self::start_with_timeouts), each lane with a
     /// script of its own: a lane held in one answer does not hold the other.
     fn start_lanes(
         label: &str,
-        audio: impl Fn(HostMessage) -> Action + Send + 'static,
-        control: impl Fn(HostMessage) -> Action + Send + 'static,
+        audio: impl Fn(AudioRequest) -> Action + Send + 'static,
+        control: impl Fn(ControlRequest) -> Action + Send + 'static,
     ) -> Self {
         // A request that is not answered stays outstanding past any test.
         Self::start_lanes_under(label, unreachable_deadline(), audio, control)
@@ -372,16 +403,21 @@ impl MockServer {
     fn start_lanes_under(
         label: &str,
         timeouts: Timeouts,
-        audio: impl Fn(HostMessage) -> Action + Send + 'static,
-        control: impl Fn(HostMessage) -> Action + Send + 'static,
+        audio: impl Fn(AudioRequest) -> Action + Send + 'static,
+        control: impl Fn(ControlRequest) -> Action + Send + 'static,
     ) -> Self {
-        fn lane(respond: impl Fn(HostMessage) -> Action + Send + 'static) -> Responder {
+        fn lane<Req>(respond: impl Fn(Req) -> Action + Send + 'static) -> Responder<Req> {
             Arc::new(std::sync::Mutex::new(Box::new(respond)))
         }
-        Self::start_on(label, timeouts, [lane(audio), lane(control)])
+        Self::start_on(label, timeouts, lane(audio), lane(control))
     }
 
-    fn start_on(label: &str, timeouts: Timeouts, lanes: [Responder; 2]) -> Self {
+    fn start_on(
+        label: &str,
+        timeouts: Timeouts,
+        audio: Responder<AudioRequest>,
+        control: Responder<ControlRequest>,
+    ) -> Self {
         let timeouts = {
             let mut t = timeouts;
             t.reply_margin = REPLY_MARGIN;
@@ -411,27 +447,33 @@ impl MockServer {
 
         // Two connections, as the server accepts them: audio, then control.
         // Each is served on its own thread by its lane's responder.
-        let mut servers = Vec::new();
-        for (lane, respond) in ["audio", "control"].into_iter().zip(lanes) {
-            let stream = listener.accept().expect("accept");
-            send_bridge_msg(
-                &stream,
-                &BridgeMessage::Ready {
-                    protocol_version: PROTOCOL_VERSION,
-                },
-            )
-            .expect("handshake");
-            servers.push(
-                std::thread::Builder::new()
-                    .name(format!("mock-hostile-{label}-{lane}"))
-                    .spawn(move || serve_lane(stream, &respond))
-                    .expect("spawn mock"),
-            );
-        }
-        let mut servers = servers.into_iter();
-        let server = servers.next().expect("the audio lane");
+        let stream = listener.accept().expect("accept");
+        send_bridge_msg(
+            &stream,
+            &AudioReply::Ready {
+                protocol_version: PROTOCOL_VERSION,
+            },
+        )
+        .expect("handshake");
+        let server = std::thread::Builder::new()
+            .name(format!("mock-hostile-{label}-audio"))
+            .spawn(move || serve_lane(stream, &audio))
+            .expect("spawn mock");
+        let stream = listener.accept().expect("accept");
+        send_reply(
+            &stream,
+            &ControlReply::Ready {
+                protocol_version: PROTOCOL_VERSION,
+            },
+        )
+        .expect("handshake");
         // The control lane's thread ends with the connection; nothing joins it.
-        drop(servers);
+        drop(
+            std::thread::Builder::new()
+                .name(format!("mock-hostile-{label}-control"))
+                .spawn(move || serve_lane(stream, &control))
+                .expect("spawn mock"),
+        );
 
         Self {
             bridge,
@@ -539,11 +581,11 @@ fn a_server_that_dies_mid_session_marks_the_bridge_crashed() {
     SEEN.store(0, Ordering::SeqCst);
 
     let mock = MockServer::start("mid-death", |msg| match msg {
-        HostMessage::GetParameter { .. } => {
+        ControlRequest::GetParameter { .. } => {
             // Answer the first request, die on the second. Answering once is
             // what makes this "died mid-session" rather than "never worked".
             if SEEN.fetch_add(1, Ordering::SeqCst) == 0 {
-                Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                Action::Reply(Box::new(ControlReply::ParameterValue {
                     value: Some(Normalized::of(0.5)),
                 }))
             } else {
@@ -694,12 +736,10 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     use parking_lot::Mutex as PlMutex;
 
     let mock = MockServer::start("unprompted", |msg| match msg {
-        HostMessage::SetRenderMode { .. } => {
-            Action::Reply(Box::new(BridgeMessage::LatencyChanged {
-                samples: tutti_plugin_types::Samples::new(77),
-            }))
-        }
-        HostMessage::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        ControlRequest::SetRenderMode { .. } => Action::Event(News::LatencyChanged {
+            samples: tutti_plugin_types::Samples::new(77),
+        }),
+        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let heard: Arc<PlMutex<Vec<usize>>> = Arc::new(PlMutex::new(Vec::new()));
@@ -745,15 +785,15 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     };
     let sent = real.clone();
     let mock = MockServer::start("silly-layout", move |msg| match msg {
-        HostMessage::SetRenderMode { .. } => Action::ReplyMany(vec![
-            BridgeMessage::PluginIoChanged {
+        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
+            News::PluginIoChanged {
                 layout: Some(silly.clone()),
             },
-            BridgeMessage::PluginIoChanged {
+            News::PluginIoChanged {
                 layout: Some(sent.clone()),
             },
         ]),
-        HostMessage::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let layouts: Arc<PlMutex<Vec<Layout>>> = Arc::new(PlMutex::new(Vec::new()));
@@ -787,8 +827,8 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
 fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     let layout = stereo_layout();
     let ready = MockServer::start("slab-ready", |msg| match msg {
-        HostMessage::SetupSharedMemory { .. } => {
-            Action::Reply(Box::new(BridgeMessage::SharedMemoryReady))
+        ControlRequest::SetupSharedMemory { .. } => {
+            Action::Reply(Box::new(ControlReply::SharedMemoryReady))
         }
         _ => Action::Silent,
     });
@@ -801,7 +841,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     );
 
     let refusing = MockServer::start("slab-refused", |msg| match msg {
-        HostMessage::SetupSharedMemory { .. } => Action::Reply(Box::new(BridgeMessage::Error {
+        ControlRequest::SetupSharedMemory { .. } => Action::Reply(Box::new(ControlReply::Error {
             message: "the slab does not open".into(),
         })),
         _ => Action::Silent,
@@ -829,7 +869,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     assert!(!answered, "no answer is a refusal");
 
     let dying = MockServer::start("slab-dies", |msg| match msg {
-        HostMessage::SetupSharedMemory { .. } => Action::Die,
+        ControlRequest::SetupSharedMemory { .. } => Action::Die,
         _ => Action::Silent,
     });
     let dying_bridge = Arc::clone(&dying.bridge);
@@ -907,7 +947,7 @@ fn calls_after_a_crash_fail_fast_instead_of_waiting_out_the_timeout() {
 #[test]
 fn a_crash_during_save_state_does_not_block_the_caller_forever() {
     let mock = MockServer::start("save-death", |msg| match msg {
-        HostMessage::SaveState { .. } => Action::Die,
+        ControlRequest::SaveState { .. } => Action::Die,
         _ => Action::Silent,
     });
 
@@ -936,7 +976,7 @@ fn a_crash_during_save_state_does_not_block_the_caller_forever() {
 ///
 /// `recv` reads a 4-byte big-endian length. The length comes off the wire, so
 /// `0xFFFFFFFF` asks the host to allocate 4 GiB before a single byte of body
-/// has been validated. `MAX_FRAME_BYTES` is what stops it: the length is
+/// has been validated. `CONTROL_FRAME_BYTES` is what stops it: the length is
 /// checked *before* the `vec![0u8; len]`, so nothing is allocated at all.
 ///
 /// The body deliberately does not follow: a server that advertises 4 GiB and
@@ -954,7 +994,7 @@ fn a_crash_during_save_state_does_not_block_the_caller_forever() {
 fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
     let mock =
         MockServer::start_with_timeouts("huge-len", unreachable_deadline(), |msg| match msg {
-            HostMessage::GetParameter { .. } => Action::Raw(u32::MAX, vec![0u8; 4]),
+            ControlRequest::GetParameter { .. } => Action::Raw(u32::MAX, vec![0u8; 4]),
             _ => Action::Silent,
         });
 
@@ -978,7 +1018,7 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
 /// The pair is the point. `an_absurd_length_prefix…` uses `u32::MAX`, which any
 /// plausible bound rejects — it cannot tell a real limit from a stray sanity
 /// check, and would still pass if the constant were off by orders of magnitude.
-/// Straddling `MAX_FRAME_BYTES` pins the constant the transport actually reads.
+/// Straddling `CONTROL_FRAME_BYTES` pins the constant the transport actually reads.
 ///
 /// The under-cap half deliberately advertises a length it never fills, and the
 /// two branches are told apart by the failure each leaves: a rejected length
@@ -986,11 +1026,13 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
 /// timeout.
 #[test]
 fn the_frame_cap_is_the_boundary_it_claims_to_be() {
-    use crate::MAX_FRAME_BYTES;
+    use crate::CONTROL_FRAME_BYTES;
 
     let over =
         MockServer::start_with_timeouts("cap-over", unreachable_deadline(), |msg| match msg {
-            HostMessage::GetParameter { .. } => Action::Raw(MAX_FRAME_BYTES as u32 + 1, Vec::new()),
+            ControlRequest::GetParameter { .. } => {
+                Action::Raw(CONTROL_FRAME_BYTES as u32 + 1, Vec::new())
+            }
             _ => Action::Silent,
         });
     let bridge = Arc::clone(&over.bridge);
@@ -1002,14 +1044,14 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
             over.bridge.audio().crash_cause(),
             Some(PluginFailure::StreamClosed)
         ),
-        "MAX_FRAME_BYTES + 1 was not refused by closing the stream: {:?}",
+        "CONTROL_FRAME_BYTES + 1 was not refused by closing the stream: {:?}",
         over.bridge.audio().crash_cause()
     );
 
     let mut quick = Timeouts::default();
     quick.param = Duration::from_millis(300);
     let under = MockServer::start_with_timeouts("cap-under", quick, |msg| match msg {
-        HostMessage::GetParameter { .. } => Action::Raw(MAX_FRAME_BYTES as u32, Vec::new()),
+        ControlRequest::GetParameter { .. } => Action::Raw(CONTROL_FRAME_BYTES as u32, Vec::new()),
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&under.bridge);
@@ -1021,7 +1063,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
             under.bridge.audio().crash_cause(),
             Some(PluginFailure::TimedOut { .. })
         ),
-        "a frame of exactly MAX_FRAME_BYTES was refused rather than accepted and \
+        "a frame of exactly CONTROL_FRAME_BYTES was refused rather than accepted and \
          waited on — the bound is off by one in the direction that rejects \
          legitimate traffic: {:?}",
         under.bridge.audio().crash_cause()
@@ -1047,7 +1089,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
 /// The bridge looks healthy and answers nothing, forever.
 ///
 /// **Two mechanisms close this, and this test covers the first.** Here the
-/// advertised length is over `MAX_FRAME_BYTES`, so it is rejected before any
+/// advertised length is over `CONTROL_FRAME_BYTES`, so it is rejected before any
 /// read starts and there is no multi-syscall read for the dribble to extend.
 /// An *under*-cap dribble reaches the read and is stopped by the total-elapsed
 /// deadline instead — see
@@ -1060,7 +1102,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
 #[test]
 fn a_dribbling_peer_cannot_hold_the_bridge_thread_open() {
     let mock = MockServer::start("dribble", |msg| match msg {
-        HostMessage::GetParameter { .. } => Action::Dribble {
+        ControlRequest::GetParameter { .. } => Action::Dribble {
             len: u32::MAX,
             gap: Duration::from_millis(50),
         },
@@ -1097,7 +1139,7 @@ fn a_garbage_payload_is_rejected_rather_than_decoded() {
     // framing, unlike the truncated and oversized cases.
     const GARBAGE_LEN: usize = 64;
     let mock = MockServer::start("garbage", |msg| match msg {
-        HostMessage::GetParameter { .. } => {
+        ControlRequest::GetParameter { .. } => {
             Action::Raw(GARBAGE_LEN as u32, vec![0xABu8; GARBAGE_LEN])
         }
         _ => Action::Silent,
@@ -1121,7 +1163,7 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
     let mock = MockServer::start("truncated", |msg| match msg {
         // Advertise 4 KiB, send 8 bytes, then the closure returns and the
         // server loops — the remaining bytes never come.
-        HostMessage::GetParameter { .. } => Action::Raw(4096, vec![0u8; 8]),
+        ControlRequest::GetParameter { .. } => Action::Raw(4096, vec![0u8; 8]),
         _ => Action::Silent,
     });
 
@@ -1138,7 +1180,7 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
 
 /// A well-formed message of the *wrong type* must not satisfy a pending request.
 ///
-/// Every byte here is valid — this is a legal `BridgeMessage`, just not the one
+/// Every byte here is valid — this is a legal `ControlReply`, just not the one
 /// that was asked for. A host that matched on "some reply arrived" rather than
 /// on the variant would accept it and return a value it never received. The
 /// existing `trailing_unsolicited_events_dont_poison_next_reply` covers
@@ -1147,8 +1189,9 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
 fn a_valid_but_wrong_reply_type_does_not_satisfy_the_request() {
     let mock = MockServer::start("wrong-type", |msg| match msg {
         // Asked for a parameter value; answer with state data instead.
-        HostMessage::GetParameter { .. } => Action::Reply(Box::new(BridgeMessage::StateChunk {
+        ControlRequest::GetParameter { .. } => Action::Reply(Box::new(ControlReply::StateChunk {
             seq: 0,
+            total: 4,
             last: true,
             bytes: vec![1, 2, 3, 4],
         })),
@@ -1184,14 +1227,14 @@ fn submit_block(bridge: &PluginBridge, seq: u64) {
 /// the connection typed, and counts no reply.
 #[test]
 fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
-    let mock = MockServer::start("wrong-kind-block", |msg| match msg {
-        HostMessage::ProcessAudio(_) => Action::Reply(Box::new(BridgeMessage::StateChunk {
-            seq: 0,
-            last: true,
-            bytes: vec![1],
-        })),
-        _ => Action::Silent,
-    });
+    let mock = MockServer::start_lanes(
+        "wrong-kind-block",
+        |msg| match msg {
+            AudioRequest::ProcessAudio(_) => Action::Audio(Box::new(AudioReply::ParametersApplied)),
+            _ => Action::Silent,
+        },
+        |_| Action::Silent,
+    );
 
     submit_block(&mock.bridge, 1);
     mock.wait_for_crash("the junk reply to end the connection");
@@ -1207,16 +1250,20 @@ fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
 /// fate ring and make every later fate that maps to it read as unanswered.
 #[test]
 fn a_reply_to_a_block_never_sent_is_a_protocol_error() {
-    let mock = MockServer::start("future-seq", |msg| match msg {
-        HostMessage::ProcessAudio(_) => Action::Reply(Box::new(BridgeMessage::AudioProcessed {
-            latency_us: 0,
-            seq: u64::MAX >> 1,
-            midi_out: Default::default(),
-            status: Default::default(),
-            refused: false,
-        })),
-        _ => Action::Silent,
-    });
+    let mock = MockServer::start_lanes(
+        "future-seq",
+        |msg| match msg {
+            AudioRequest::ProcessAudio(_) => Action::Audio(Box::new(AudioReply::AudioProcessed {
+                latency_us: 0,
+                seq: u64::MAX >> 1,
+                midi_out: Default::default(),
+                status: Default::default(),
+                refused: false,
+            })),
+            _ => Action::Silent,
+        },
+        |_| Action::Silent,
+    );
 
     submit_block(&mock.bridge, 1);
     mock.wait_for_crash("the reply to a block never sent to end the connection");
@@ -1250,9 +1297,9 @@ fn a_silent_server_is_bounded_by_the_timeout() {
 fn a_refused_rate_is_reported_without_crashing_the_bridge() {
     let calls = std::sync::atomic::AtomicU32::new(0);
     let mock = MockServer::start("refused_rate", move |msg| match msg {
-        HostMessage::SetSampleRate { rate } => {
+        ControlRequest::SetSampleRate { rate } => {
             let first = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
-            Action::Reply(Box::new(BridgeMessage::SampleRateSet {
+            Action::Reply(Box::new(ControlReply::SampleRateSet {
                 rate,
                 error: first.then(|| "no".to_string()),
             }))
@@ -1287,12 +1334,12 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
 #[test]
 fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
     let mock = MockServer::start_with_timeouts("late_rate", rate_timeout(300), |msg| match msg {
-        HostMessage::SetSampleRate { rate } => Action::ReplyManySlowly {
-            msgs: vec![BridgeMessage::SampleRateSet { rate, error: None }],
+        ControlRequest::SetSampleRate { rate } => Action::ReplyManySlowly {
+            msgs: vec![ControlReply::SampleRateSet { rate, error: None }],
             gap: Duration::from_millis(800),
         },
-        HostMessage::GetParameter { .. } => {
-            Action::Reply(Box::new(BridgeMessage::ParameterValue {
+        ControlRequest::GetParameter { .. } => {
+            Action::Reply(Box::new(ControlReply::ParameterValue {
                 value: Some(Normalized::of(0.5)),
             }))
         }
@@ -1345,22 +1392,22 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
     let mock =
         MockServer::start_with_timeouts("late_then_refused", rate_timeout(1_000), move |msg| {
             match msg {
-                HostMessage::SetSampleRate { rate } => {
+                ControlRequest::SetSampleRate { rate } => {
                     if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
                         // A: accepted, but only once the test has seen the bridge give up.
                         if released.recv().is_err() {
                             return Action::Silent;
                         }
-                        Action::Reply(Box::new(BridgeMessage::SampleRateSet { rate, error: None }))
+                        Action::Reply(Box::new(ControlReply::SampleRateSet { rate, error: None }))
                     } else {
-                        Action::Reply(Box::new(BridgeMessage::SampleRateSet {
+                        Action::Reply(Box::new(ControlReply::SampleRateSet {
                             rate,
                             error: Some("no".to_string()),
                         }))
                     }
                 }
-                HostMessage::GetParameter { .. } => {
-                    Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                ControlRequest::GetParameter { .. } => {
+                    Action::Reply(Box::new(ControlReply::ParameterValue {
                         value: Some(Normalized::of(0.5)),
                     }))
                 }
@@ -1400,7 +1447,7 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
 fn dropping_the_bridge_ends_a_hung_rate_change() {
     let (asked, request_seen) = crossbeam_channel::bounded(1);
     let mut mock = MockServer::start("hung_rate", move |msg| {
-        if matches!(msg, HostMessage::SetSampleRate { .. }) {
+        if matches!(msg, ControlRequest::SetSampleRate { .. }) {
             let _ = asked.try_send(());
         }
         Action::Silent
@@ -1431,7 +1478,7 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
 fn a_bridge_asked_to_stop_tells_the_server_to_shut_down() {
     let (heard, shutdown_seen) = crossbeam_channel::bounded(1);
     let mock = MockServer::start("shutdown", move |msg| {
-        if matches!(msg, HostMessage::Shutdown) {
+        if matches!(msg, ControlRequest::Shutdown) {
             let _ = heard.try_send(());
         }
         Action::Silent
@@ -1477,7 +1524,7 @@ mod shell_server {
         let stdin = Arc::new(std::sync::Mutex::new(child.stdin.take().expect("piped")));
         let tell = Arc::clone(&stdin);
         let mut mock = MockServer::start("guard_shutdown", move |msg| {
-            if matches!(msg, HostMessage::Shutdown) {
+            if matches!(msg, ControlRequest::Shutdown) {
                 let _ = writeln!(tell.lock().unwrap());
             }
             Action::Silent
@@ -1500,7 +1547,7 @@ mod shell_server {
 
 /// A dribble **under** the size cap must still end, on the clock.
 ///
-/// This is the hazard `MAX_FRAME_BYTES` does not touch, and the reason the
+/// This is the hazard `CONTROL_FRAME_BYTES` does not touch, and the reason the
 /// deadline exists as a separate mechanism. The advertised length here is a
 /// perfectly ordinary one — the size of a real reply — so the size check passes
 /// it and the host enters `read_exact`. Every real preset frame is in this
@@ -1518,8 +1565,8 @@ mod shell_server {
 #[test]
 fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
     let mock = MockServer::start("dribble-under", |msg| match msg {
-        HostMessage::GetParameter { .. } => Action::Dribble {
-            // Comfortably under MAX_FRAME_BYTES: the size check must let this
+        ControlRequest::GetParameter { .. } => Action::Dribble {
+            // Comfortably under CONTROL_FRAME_BYTES: the size check must let this
             // through, or the test proves nothing about the deadline.
             len: 4096,
             gap: Duration::from_millis(50),
@@ -1538,12 +1585,12 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
 
 /// A large state survives the round trip, in both directions.
 ///
-/// A state over `MAX_FRAME_BYTES` must travel as chunks, not fail as a *crash*
+/// A state over `CONTROL_FRAME_BYTES` must travel as chunks, not fail as a *crash*
 /// (`save_state` answering "the bridge process crashed"), which would be
 /// indistinguishable from a segfault and lose the user's preset under a wrong
 /// explanation.
 ///
-/// **Sized by `STATE_CHUNK_BYTES`, not by `MAX_FRAME_BYTES`.** What this test
+/// **Sized by `STATE_CHUNK_BYTES`, not by `CONTROL_FRAME_BYTES`.** What this test
 /// has to prove is that a state spanning *several* chunks reassembles in order
 /// and intact, and the chunk size is what decides that — a 68 MiB fixture
 /// would prove the same property while moving 68 MiB through a socket, which
@@ -1562,10 +1609,11 @@ fn a_state_larger_than_one_frame_round_trips() {
     let expected = big.clone();
 
     let mock = MockServer::start("big-state", move |msg| match msg {
-        HostMessage::SaveState { .. } => Action::ReplyMany(
+        ControlRequest::SaveState { .. } => Action::ReplyMany(
             crate::transport::state_chunk::split(&big)
-                .map(|(seq, last, bytes)| BridgeMessage::StateChunk {
+                .map(|(seq, last, bytes)| ControlReply::StateChunk {
                     seq,
+                    total: big.len() as u64,
                     last,
                     bytes: bytes.to_vec(),
                 })
@@ -1689,9 +1737,10 @@ fn a_chunked_state_transfer_reassembles_in_order() {
     // One byte per chunk; the byte pattern catches a chunk dropped or
     // reordered by a progress-accounting bug.
     let expected: Vec<u8> = (0..CHUNKS).map(|i| (i % 251) as u8).collect();
-    let msgs: Vec<BridgeMessage> = (0..CHUNKS)
-        .map(|i| BridgeMessage::StateChunk {
+    let msgs: Vec<ControlReply> = (0..CHUNKS)
+        .map(|i| ControlReply::StateChunk {
             seq: i as u32,
+            total: CHUNKS as u64,
             last: i == CHUNKS - 1,
             bytes: vec![(i % 251) as u8],
         })
@@ -1701,7 +1750,7 @@ fn a_chunked_state_transfer_reassembles_in_order() {
         "slow-state",
         Duration::from_secs(60),
         move |msg| match msg {
-            HostMessage::SaveState { .. } => Action::ReplyManySlowly {
+            ControlRequest::SaveState { .. } => Action::ReplyManySlowly {
                 msgs: msgs.clone(),
                 gap: GAP,
             },
@@ -1763,10 +1812,11 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
         "stalled-save",
         STATE_PROGRESS_TIMEOUT,
         move |msg| match msg {
-            HostMessage::SaveState { .. } => Action::ReplyManySlowly {
+            ControlRequest::SaveState { .. } => Action::ReplyManySlowly {
                 msgs: (0..2)
-                    .map(|i| BridgeMessage::StateChunk {
+                    .map(|i| ControlReply::StateChunk {
                         seq: i,
+                        total: 96,
                         last: false,
                         bytes: vec![7u8; 32],
                     })
@@ -1775,8 +1825,8 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
             },
             // Answered, so the health probe below is a real round trip rather
             // than another timeout.
-            HostMessage::GetParameterList => {
-                Action::Reply(Box::new(BridgeMessage::ParameterList {
+            ControlRequest::GetParameterList => {
+                Action::Reply(Box::new(ControlReply::ParameterList {
                     parameters: Vec::new(),
                 }))
             }
@@ -1828,9 +1878,9 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
         move |msg| match msg {
             // Chunks are accepted and never acknowledged: the transfer makes
             // full progress and then hangs on the answer.
-            HostMessage::LoadStateChunk { .. } => Action::Silent,
-            HostMessage::GetParameterList => {
-                Action::Reply(Box::new(BridgeMessage::ParameterList {
+            ControlRequest::LoadStateChunk { .. } => Action::Silent,
+            ControlRequest::GetParameterList => {
+                Action::Reply(Box::new(ControlReply::ParameterList {
                     parameters: Vec::new(),
                 }))
             }
@@ -1894,8 +1944,8 @@ fn a_late_query_reply_is_not_the_next_querys_answer() {
     let mock = MockServer::start("late-query", {
         let asked = Arc::clone(&asked);
         move |msg| match msg {
-            HostMessage::GetParameter { .. } => {
-                let value = |v| BridgeMessage::ParameterValue {
+            ControlRequest::GetParameter { .. } => {
+                let value = |v| ControlReply::ParameterValue {
                     value: Some(Normalized::of(v)),
                 };
                 if asked.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -1945,15 +1995,15 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
         let asked = Arc::clone(&asked);
         let probe = Arc::clone(&probe);
         move |msg| match msg {
-            HostMessage::GetParameter { .. } if asked.fetch_add(1, Ordering::SeqCst) == 0 => {
+            ControlRequest::GetParameter { .. } if asked.fetch_add(1, Ordering::SeqCst) == 0 => {
                 Action::EventsThenProbe {
                     count: 60,
                     gap: Duration::from_millis(100),
                     probe: Arc::clone(&probe),
                 }
             }
-            HostMessage::GetParameterList => {
-                Action::Reply(Box::new(BridgeMessage::ParameterList {
+            ControlRequest::GetParameterList => {
+                Action::Reply(Box::new(ControlReply::ParameterList {
                     parameters: Vec::new(),
                 }))
             }
@@ -1995,7 +2045,7 @@ fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
     let mut shorter = Timeouts::default();
     shorter.param = Duration::from_secs(1);
     let mock = MockServer::start_with_timeouts("split-events", shorter, |msg| match msg {
-        HostMessage::GetParameter { .. } => Action::SplitEvents {
+        ControlRequest::GetParameter { .. } => Action::SplitEvents {
             split: Duration::from_millis(200),
         },
         _ => Action::Silent,
@@ -2022,18 +2072,19 @@ fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
         "stalled-rest",
         STATE_PROGRESS_TIMEOUT,
         |msg| match msg {
-            HostMessage::SaveState { .. } => Action::ReplyManySlowly {
+            ControlRequest::SaveState { .. } => Action::ReplyManySlowly {
                 msgs: (0..2)
-                    .map(|seq| BridgeMessage::StateChunk {
+                    .map(|seq| ControlReply::StateChunk {
                         seq,
+                        total: 64,
                         last: seq == 1,
                         bytes: vec![7u8; 32],
                     })
                     .collect(),
                 gap: STATE_PROGRESS_TIMEOUT * 3 / 2,
             },
-            HostMessage::GetParameterList => {
-                Action::Reply(Box::new(BridgeMessage::ParameterList {
+            ControlRequest::GetParameterList => {
+                Action::Reply(Box::new(ControlReply::ParameterList {
                     parameters: Vec::new(),
                 }))
             }
@@ -2076,14 +2127,14 @@ fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
     let mock = {
         let log = Arc::clone(&log);
         MockServer::start_with_timeouts("queued", timeouts, move |msg| match msg {
-            HostMessage::GetParameterList => {
+            ControlRequest::GetParameterList => {
                 log.lock().unwrap().push("list");
                 let _ = seen.try_send(());
                 Action::Silent
             }
-            HostMessage::GetParameter { .. } => {
+            ControlRequest::GetParameter { .. } => {
                 log.lock().unwrap().push("value");
-                Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                Action::Reply(Box::new(ControlReply::ParameterValue {
                     value: Some(Normalized::of(0.25)),
                 }))
             }
@@ -2109,9 +2160,9 @@ fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
 // ── The two lanes ────────────────────────────────────────────────────────────
 
 /// The audio lane's script for these tests: every block is answered.
-fn answer_blocks(msg: HostMessage) -> Action {
+fn answer_blocks(msg: AudioRequest) -> Action {
     match msg {
-        HostMessage::ProcessAudio(data) => Action::Reply(Box::new(BridgeMessage::AudioProcessed {
+        AudioRequest::ProcessAudio(data) => Action::Audio(Box::new(AudioReply::AudioProcessed {
             latency_us: 0,
             seq: data.seq,
             midi_out: Default::default(),
@@ -2133,15 +2184,15 @@ fn answered(mock: &mut MockServer, seq: u64) -> bool {
 fn hold_first_query(
     seen: crossbeam_channel::Sender<()>,
     release: crossbeam_channel::Receiver<()>,
-) -> impl Fn(HostMessage) -> Action + Send + 'static {
+) -> impl Fn(ControlRequest) -> Action + Send + 'static {
     let first = std::sync::atomic::AtomicBool::new(true);
     move |msg| match msg {
-        HostMessage::GetParameter { .. } => {
+        ControlRequest::GetParameter { .. } => {
             if first.swap(false, Ordering::SeqCst) {
                 seen.send(()).expect("the test is listening");
                 release.recv().expect("the test releases the request");
             }
-            Action::Reply(Box::new(BridgeMessage::ParameterValue {
+            Action::Reply(Box::new(ControlReply::ParameterValue {
                 value: Some(Normalized::of(0.5)),
             }))
         }
@@ -2188,12 +2239,12 @@ fn a_settle_reaches_the_server_after_the_rate_change_queued_before_it() {
     let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
     let control = {
         let log = Arc::clone(&log);
-        move |msg: HostMessage| match msg {
-            HostMessage::SetSampleRate { rate } => {
+        move |msg: ControlRequest| match msg {
+            ControlRequest::SetSampleRate { rate } => {
                 log.lock().unwrap().push("rate");
-                Action::Reply(Box::new(BridgeMessage::SampleRateSet { rate, error: None }))
+                Action::Reply(Box::new(ControlReply::SampleRateSet { rate, error: None }))
             }
-            HostMessage::GetCurrentPreset => {
+            ControlRequest::GetCurrentPreset => {
                 log.lock().unwrap().push("fence");
                 Action::Reply(Box::new(applied_fence()))
             }
@@ -2217,7 +2268,7 @@ fn a_crash_the_control_lane_sees_is_answered_by_the_audio_lane() {
         "control-death",
         |_| Action::Silent,
         |msg| match msg {
-            HostMessage::GetParameter { .. } => Action::Die,
+            ControlRequest::GetParameter { .. } => Action::Die,
             _ => Action::Silent,
         },
     );
@@ -2238,7 +2289,7 @@ fn a_control_call_on_a_full_queue_is_busy() {
     let (seen, seen_rx) = crossbeam_channel::bounded(1);
     let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
     let mock = MockServer::start_lanes("full", answer_blocks, move |msg| match msg {
-        HostMessage::GetCurrentPreset => {
+        ControlRequest::GetCurrentPreset => {
             let _ = seen.try_send(());
             let _ = release.recv();
             Action::Reply(Box::new(applied_fence()))
@@ -2286,7 +2337,7 @@ fn a_shutdown_ends_when_a_control_request_is_stuck_in_the_server() {
     };
     let mut mock =
         MockServer::start_lanes_under("stuck-shutdown", timeouts, answer_blocks, move |msg| {
-            if matches!(msg, HostMessage::GetParameter { .. }) {
+            if matches!(msg, ControlRequest::GetParameter { .. }) {
                 let _ = seen.try_send(());
             }
             Action::Silent
@@ -2317,7 +2368,7 @@ fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
         t
     };
     let mock = MockServer::start_lanes_under("unapplied", timeouts, answer_blocks, move |msg| {
-        if matches!(msg, HostMessage::OpenEditor { .. }) {
+        if matches!(msg, ControlRequest::OpenEditor { .. }) {
             let _ = seen.try_send(());
         }
         Action::Silent
@@ -2360,9 +2411,9 @@ fn log_after_window(
 fn log_blocks(
     log: Arc<std::sync::Mutex<Vec<&'static str>>>,
     block_seen: crossbeam_channel::Sender<()>,
-) -> impl Fn(HostMessage) -> Action + Send + 'static {
+) -> impl Fn(AudioRequest) -> Action + Send + 'static {
     move |msg| {
-        if matches!(msg, HostMessage::ProcessAudio(_)) {
+        if matches!(msg, AudioRequest::ProcessAudio(_)) {
             log.lock().unwrap().push("block");
             let _ = block_seen.try_send(());
         }
@@ -2380,12 +2431,12 @@ fn a_render_mode_is_applied_before_the_next_block() {
     let (block_seen, block_rx) = crossbeam_channel::bounded(1);
     let control = {
         let log = Arc::clone(&log);
-        move |msg: HostMessage| match msg {
-            HostMessage::SetRenderMode { .. } => {
+        move |msg: ControlRequest| match msg {
+            ControlRequest::SetRenderMode { .. } => {
                 log_after_window(&log, &block_rx, "mode");
                 Action::Silent
             }
-            HostMessage::GetCurrentPreset => {
+            ControlRequest::GetCurrentPreset => {
                 log.lock().unwrap().push("fence");
                 Action::Reply(Box::new(applied_fence()))
             }
@@ -2418,10 +2469,10 @@ fn a_rate_change_is_applied_before_the_next_block() {
     let (block_seen, block_rx) = crossbeam_channel::bounded(1);
     let control = {
         let log = Arc::clone(&log);
-        move |msg: HostMessage| match msg {
-            HostMessage::SetSampleRate { rate } => {
+        move |msg: ControlRequest| match msg {
+            ControlRequest::SetSampleRate { rate } => {
                 log_after_window(&log, &block_rx, "rate");
-                Action::Reply(Box::new(BridgeMessage::SampleRateSet { rate, error: None }))
+                Action::Reply(Box::new(ControlReply::SampleRateSet { rate, error: None }))
             }
             _ => Action::Silent,
         }
@@ -2454,8 +2505,8 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
     let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
     let audio = {
         let log = Arc::clone(&log);
-        move |msg: HostMessage| {
-            if matches!(msg, HostMessage::ProcessAudio(_)) {
+        move |msg: AudioRequest| {
+            if matches!(msg, AudioRequest::ProcessAudio(_)) {
                 log.lock().unwrap().push("block");
             }
             answer_blocks(msg)
@@ -2463,18 +2514,18 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
     };
     let control = {
         let log = Arc::clone(&log);
-        move |msg: HostMessage| match msg {
-            HostMessage::SetRenderMode { .. } => {
+        move |msg: ControlRequest| match msg {
+            ControlRequest::SetRenderMode { .. } => {
                 log.lock().unwrap().push("mode");
                 Action::Silent
             }
-            HostMessage::GetCurrentPreset => {
+            ControlRequest::GetCurrentPreset => {
                 log.lock().unwrap().push("fence");
                 fence_seen.send(()).expect("the test listens");
                 release.recv().expect("the test releases the fence");
                 Action::Reply(Box::new(applied_fence()))
             }
-            HostMessage::SetAutomationState { .. } => {
+            ControlRequest::SetAutomationState { .. } => {
                 log.lock().unwrap().push("command");
                 Action::Silent
             }

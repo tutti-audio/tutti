@@ -33,8 +33,11 @@ use tutti_fixtures::machine_lock;
 const BATCH_SIZE: usize = 64;
 use crate::BlockPayload;
 use crate::unique_socket_path;
+use crate::{
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, PROTOCOL_VERSION,
+    SlabLayout,
+};
 use crate::{AudioSlab, Chunks, FATES, RING_SLOTS, Replies, SlabWriter};
-use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION, SlabLayout};
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
@@ -143,7 +146,7 @@ fn drive(
 
 /// `None` on a clean EOF — the host side closing the socket at teardown is
 /// normal shutdown, not a failure, so it must not panic the server thread.
-fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> Option<HostMessage> {
+fn recv_host_msg<T: Framed>(stream: &interprocess::local_socket::Stream) -> Option<T> {
     use std::io::Read;
     let mut stream = stream;
     let mut len_buf = [0u8; 4];
@@ -163,22 +166,22 @@ fn accept_control(listener: &interprocess::local_socket::Listener) {
     let control = listener.accept().unwrap();
     send_bridge_msg(
         &control,
-        &BridgeMessage::Ready {
+        &ControlFrame::Reply(ControlReply::Ready {
             protocol_version: PROTOCOL_VERSION,
-        },
+        }),
     );
-    std::thread::spawn(move || while recv_host_msg(&control).is_some() {});
+    std::thread::spawn(move || while recv_host_msg::<ControlRequest>(&control).is_some() {});
 }
 
-fn send_bridge_msg(stream: &interprocess::local_socket::Stream, msg: &BridgeMessage) {
+fn send_bridge_msg<T: Framed>(stream: &interprocess::local_socket::Stream, msg: &T) {
     try_send_bridge_msg(stream, msg).unwrap();
 }
 
 /// [`send_bridge_msg`] that reports a closed peer instead of panicking, for a
 /// reply the test no longer waits for.
-fn try_send_bridge_msg(
+fn try_send_bridge_msg<T: Framed>(
     stream: &interprocess::local_socket::Stream,
-    msg: &BridgeMessage,
+    msg: &T,
 ) -> std::io::Result<()> {
     let mut stream = stream;
     crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
@@ -297,7 +300,7 @@ fn bridge_with_server_mode(
     let server_stream = listener.accept().unwrap();
     send_bridge_msg(
         &server_stream,
-        &BridgeMessage::Ready {
+        &AudioReply::Ready {
             protocol_version: PROTOCOL_VERSION,
         },
     );
@@ -318,14 +321,14 @@ fn bridge_with_server_mode(
             let mut scratch = vec![0.0f32; BATCH_SIZE];
             loop {
                 let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    recv_host_msg(&server_stream)
+                    recv_host_msg::<AudioRequest>(&server_stream)
                 })) {
                     Ok(Some(msg)) => msg,
                     // Clean EOF or a panicking read: the host is gone, stop.
                     Ok(None) | Err(_) => break,
                 };
                 let reply = match msg {
-                    HostMessage::ProcessAudio(data) => {
+                    AudioRequest::ProcessAudio(data) => {
                         hold_for_permit(&stall);
                         if let Some(gate) = gate.as_ref().filter(|_| data.seq == 1) {
                             let _ = gate.got.send(());
@@ -357,7 +360,7 @@ fn bridge_with_server_mode(
                             // the bridge's progress are told.
                             published.notify();
                         }
-                        BridgeMessage::AudioProcessed {
+                        AudioReply::AudioProcessed {
                             latency_us: 0,
                             seq,
                             midi_out: Default::default(),
@@ -1569,7 +1572,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     let server_stream = listener.accept().unwrap();
     send_bridge_msg(
         &server_stream,
-        &BridgeMessage::Ready {
+        &AudioReply::Ready {
             protocol_version: PROTOCOL_VERSION,
         },
     );
@@ -1591,13 +1594,13 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
             let mut stalled_once = false;
             loop {
                 let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    recv_host_msg(&server_stream)
+                    recv_host_msg::<AudioRequest>(&server_stream)
                 })) {
                     Ok(Some(msg)) => msg,
                     Ok(None) | Err(_) => break,
                 };
                 let reply = match msg {
-                    HostMessage::ProcessAudio(data) => {
+                    AudioRequest::ProcessAudio(data) => {
                         if !(first_only && stalled_once) {
                             stalled_once = true;
                             hold_for_permit(&stall);
@@ -1625,7 +1628,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
                         }]
                         .into_iter()
                         .collect();
-                        BridgeMessage::AudioProcessed {
+                        AudioReply::AudioProcessed {
                             latency_us: 0,
                             seq,
                             midi_out,
@@ -1980,19 +1983,19 @@ fn two_stale_blocks(
         released.recv().unwrap();
         send_bridge_msg(
             &server_stream,
-            &BridgeMessage::Ready {
+            &AudioReply::Ready {
                 protocol_version: PROTOCOL_VERSION,
             },
         );
         accept_control(&control_listener);
-        while let Some(msg) = recv_host_msg(&server_stream) {
-            if let HostMessage::ProcessAudio(data) = msg {
+        while let Some(msg) = recv_host_msg::<AudioRequest>(&server_stream) {
+            if let AudioRequest::ProcessAudio(data) = msg {
                 let midi: Vec<tutti_plugin_types::WireMidi> = data.midi_events.to_vec();
                 let _ = got_tx.send((data.seq, midi));
                 // The test asserts on `got`, which is sent above: once it has
                 // block 4 it drops the bridge, so the last reply may find the
                 // peer closed. That ends the server, as a closed read does.
-                let reply = BridgeMessage::AudioProcessed {
+                let reply = AudioReply::AudioProcessed {
                     latency_us: 0,
                     seq: data.seq,
                     midi_out: Default::default(),

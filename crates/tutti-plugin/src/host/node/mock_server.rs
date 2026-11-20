@@ -11,8 +11,9 @@ use tutti_graph::Offset;
 use tutti_graph::contract::Direct;
 use tutti_plugin_host::client_over;
 use tutti_plugin_ipc::{
-    AudioSlab, BridgeMessage, HostMessage, Ipc, IpcParts, PROTOCOL_VERSION, PluginBridge,
-    ProcessAudioData, ProcessGuard, RING_SLOTS, SlabLayout, SlabWriter, unique_socket_path,
+    AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, Ipc,
+    IpcParts, PROTOCOL_VERSION, PluginBridge, ProcessAudioData, ProcessGuard, RING_SLOTS,
+    SlabLayout, SlabWriter, unique_socket_path,
 };
 use tutti_plugin_types::{
     ChannelLayout, EditorPresence, Features, LoadedPlugin, MaxBlock, ParameterChanges,
@@ -51,7 +52,14 @@ pub(super) const PRESET: i32 = 42;
 pub(super) const STATE: [u8; 3] = [3, 1, 4];
 
 /// The bytes of every audio-path frame the mock server was sent.
-pub(super) type Record = Arc<Mutex<Vec<Vec<u8>>>>;
+pub(super) type Record = Arc<Mutex<Vec<Said>>>;
+
+/// A request the server was sent that a test reads back, on either connection.
+#[allow(clippy::large_enum_variant)] // a test record, built once
+pub(super) enum Said {
+    Audio(AudioRequest),
+    Control(ControlRequest),
+}
 
 /// A bridge, its mock server, and what the server was sent.
 pub(super) struct Rig {
@@ -94,81 +102,89 @@ fn no_editor(
 }
 
 /// A frame off the socket, whole, with its decoding. `None` at EOF.
-fn read_frame(stream: &interprocess::local_socket::Stream) -> Option<(Vec<u8>, HostMessage)> {
+fn read_frame<T: Framed>(stream: &interprocess::local_socket::Stream) -> Option<T> {
     use std::io::Read;
     let mut stream = stream;
     let mut len = [0u8; 4];
     stream.read_exact(&mut len).ok()?;
     let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
     stream.read_exact(&mut bytes).ok()?;
-    let message = postcard::from_bytes(&bytes).ok()?;
-    Some((bytes, message))
+    postcard::from_bytes(&bytes).ok()
 }
 
-fn send(stream: &interprocess::local_socket::Stream, message: &BridgeMessage) -> bool {
+fn send<T: Framed>(stream: &interprocess::local_socket::Stream, message: &T) -> bool {
     let mut stream = stream;
     tutti_plugin_ipc::write_frame(&mut stream, message).is_ok()
 }
 
-/// One connection of the mock server: answers what it is sent. The audio
-/// connection carries the blocks and resets (the slab is its), the control
-/// one the rest.
-fn serve_lane(
+/// The audio connection: a block is answered from the slab and logged, as is a
+/// reset.
+fn serve_audio(
     stream: &interprocess::local_socket::Stream,
-    mut slab: Option<SlabWriter>,
+    mut slab: SlabWriter,
     log: &Record,
     gate: Option<ReplyGate>,
 ) {
     let mut scratch = vec![0.0f32; CHUNK];
-    while let Some((bytes, message)) = read_frame(stream) {
+    while let Some(message) = read_frame::<AudioRequest>(stream) {
         let reply = match message {
-            HostMessage::GetParameterList => Some(BridgeMessage::ParameterList {
+            AudioRequest::ProcessAudio(data) => {
+                log.lock()
+                    .unwrap()
+                    .push(Said::Audio(AudioRequest::ProcessAudio(data.clone())));
+                let reply = answer(&mut slab, &mut scratch, data);
+                if let Some(gate) = &gate {
+                    let _ = gate.published.send(());
+                    let _ = gate.release.recv_timeout(Duration::from_secs(60));
+                }
+                Some(reply)
+            }
+            AudioRequest::Reset => {
+                log.lock().unwrap().push(Said::Audio(AudioRequest::Reset));
+                None
+            }
+            AudioRequest::ApplyParameters { .. } => Some(AudioReply::ParametersApplied),
+        };
+        if let Some(reply) = reply
+            && !send(stream, &reply)
+        {
+            break;
+        }
+    }
+}
+
+/// The control connection: the queries a node makes at load and a rate change.
+fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
+    while let Some(message) = read_frame::<ControlRequest>(stream) {
+        let reply = match message {
+            ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
                 parameters: PARAMS
                     .iter()
                     .map(|&id| ParameterInfo::new(ParamId::new(id), "p"))
                     .collect(),
             }),
-            HostMessage::GetPresetList => Some(BridgeMessage::PresetList {
+            ControlRequest::GetPresetList => Some(ControlReply::PresetList {
                 presets: Vec::new(),
             }),
-            // What `AudioBridge::settle` asks, which a watched
-            // plugin's retune waits on.
-            HostMessage::GetCurrentPreset => Some(BridgeMessage::CurrentPreset {
+            ControlRequest::GetCurrentPreset => Some(ControlReply::CurrentPreset {
                 id: Some(PresetId::Number(PRESET)),
             }),
-            HostMessage::SaveState { .. } => Some(BridgeMessage::StateChunk {
+            ControlRequest::SaveState { .. } => Some(ControlReply::StateChunk {
                 seq: 0,
+                total: STATE.len() as u64,
                 last: true,
                 bytes: STATE.to_vec(),
             }),
-            HostMessage::ProcessAudio(data) => {
-                log.lock().unwrap().push(bytes);
-                slab.as_mut().map(|slab| {
-                    let reply = answer(slab, &mut scratch, data);
-                    // The audio is published; the reply is held until the
-                    // test releases it, as a server the scheduler has not run
-                    // yet.
-                    if let Some(gate) = &gate {
-                        let _ = gate.published.send(());
-                        let _ = gate.release.recv_timeout(Duration::from_secs(60));
-                    }
-                    reply
-                })
-            }
-            // The bridge holds every block behind a rate change until the
-            // server answers it.
-            HostMessage::SetSampleRate { rate } => {
-                log.lock().unwrap().push(bytes);
-                Some(BridgeMessage::SampleRateSet { rate, error: None })
-            }
-            HostMessage::Reset => {
-                log.lock().unwrap().push(bytes);
-                None
+            ControlRequest::SetSampleRate { rate } => {
+                log.lock()
+                    .unwrap()
+                    .push(Said::Control(ControlRequest::SetSampleRate { rate }));
+                Some(ControlReply::SampleRateSet { rate, error: None })
             }
             _ => None,
         };
         if let Some(reply) = reply
-            && !send(stream, &reply)
+            && !send(stream, &ControlFrame::Reply(reply))
         {
             break;
         }
@@ -215,25 +231,32 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
     // The audio connection first, then the control one, as the server accepts
     // them; the host connects the second after the first one's `Ready`.
     let audio = listener.accept().unwrap();
-    let ready = BridgeMessage::Ready {
-        protocol_version: PROTOCOL_VERSION,
-    };
-    send(&audio, &ready);
+    send(
+        &audio,
+        &AudioReply::Ready {
+            protocol_version: PROTOCOL_VERSION,
+        },
+    );
     let control = listener.accept().unwrap();
-    send(&control, &ready);
+    send(
+        &control,
+        &ControlFrame::Reply(ControlReply::Ready {
+            protocol_version: PROTOCOL_VERSION,
+        }),
+    );
     let record: Record = Arc::default();
     let log = Arc::clone(&record);
     std::thread::Builder::new()
         .name("mock-differential-control".into())
         .spawn({
             let log = Arc::clone(&record);
-            move || serve_lane(&control, None, &log, None)
+            move || serve_control(&control, &log)
         })
         .unwrap();
     let server = std::thread::Builder::new()
         .name("mock-differential-server".into())
         .spawn(move || {
-            serve_lane(&audio, Some(server_slab), &log, gate);
+            serve_audio(&audio, server_slab, &log, gate);
             let _ = std::fs::remove_file(&path);
         })
         .unwrap();
@@ -270,7 +293,7 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
 }
 
 /// The plugin: every channel doubled, the chunk's MIDI echoed as its MIDI-out.
-fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) -> BridgeMessage {
+fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) -> AudioReply {
     let n = data.num_samples;
     if slab.has_input(data.seq) {
         for ch in 0..2 {
@@ -284,7 +307,7 @@ fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) ->
         }
         slab.publish(data.seq);
     }
-    BridgeMessage::AudioProcessed {
+    AudioReply::AudioProcessed {
         latency_us: 0,
         seq: data.seq,
         midi_out: data.midi_events,
