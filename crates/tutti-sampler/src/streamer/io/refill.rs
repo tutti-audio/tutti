@@ -76,8 +76,11 @@ fn varifill_chunk(
 
     let chunk_size = (base_chunk as f64 * clamped) as usize;
 
-    chunk_size.max(1024)
+    chunk_size.max(MIN_CHUNK)
 }
+
+/// The fewest frames one refill of a ring reads.
+pub(in crate::streamer) const MIN_CHUNK: usize = 1024;
 
 /// Refill every live stream's ring in turn, serially, each under its own
 /// containment ([`Record::contained`]): a stream whose refill panics is

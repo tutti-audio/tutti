@@ -79,3 +79,41 @@ fn a_data_length_far_past_the_source_decodes_the_frames_present() {
     assert_eq!(wave.channels(), 1);
     assert_eq!(wave.len().get(), 16);
 }
+
+/// **A stepped decode of a stereo ramp takes several steps and holds the ramp
+/// exactly.** Frame `i` is `i / 4096` left and its negative right, which a float
+/// WAV reads back bit for bit; a step asked for 512 frames stops once it has them,
+/// so the 4 096-frame file is not one step.
+#[test]
+fn a_stepped_decode_of_a_ramp_takes_several_steps_and_holds_the_ramp() {
+    const FRAMES: usize = 4_096;
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 8_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::new(&mut bytes, spec).expect("a writer");
+    for i in 0..FRAMES {
+        let v = i as f32 / 4_096.0;
+        writer.write_sample(v).expect("writes");
+        writer.write_sample(-v).expect("writes");
+    }
+    writer.finalize().expect("finalizes");
+
+    let mut decode = WaveDecode::<f32>::open(bytes.into_inner()).expect("opens");
+    let mut steps = 0;
+    let wave = loop {
+        steps += 1;
+        if let Some(wave) = decode.step(Samples::new(512)).expect("decodes") {
+            break wave;
+        }
+    };
+    assert!(steps > 1, "the whole file was one step");
+    assert_eq!(wave.len().get(), FRAMES);
+    for i in 0..FRAMES {
+        let v = i as f32 / 4_096.0;
+        assert_eq!((wave.at(0, i), wave.at(1, i)), (v, -v), "frame {i}");
+    }
+}

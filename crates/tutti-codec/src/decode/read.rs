@@ -390,53 +390,140 @@ fn metadata_of(reader: Box<dyn FormatReader>) -> Result<WaveMetadata, DecodeErro
 }
 
 /// Decode the first audio track of a probed container to its end.
-fn decode<S: Sample>(mut reader: Box<dyn FormatReader>) -> Result<Wave<S>, DecodeError> {
-    let (track, params) = first_audio_track(&*reader)?;
-    let track_id = track.id;
-
-    let total_frames = total_frames_of(track, params);
-    let sample_rate = sample_rate_of(params)?;
-    let mut decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
-    let (topology, placement) = topology_of(params.channels.as_ref());
-
-    // Pre-allocate using the metadata frame count when available (WAV, FLAC).
-    let mut wave: Option<Wave<S>> = total_frames.map(|total| {
-        let mut wave = Wave::with_placement(topology, placement, sample_rate);
-        wave.reserve(Samples::new(reserved_frames(total, wave.channels())));
-        wave
-    });
-
+fn decode<S: Sample>(reader: Box<dyn FormatReader>) -> Result<Wave<S>, DecodeError> {
+    let mut decode = WaveDecode::start(reader)?;
     loop {
-        let packet = match reader.next_packet() {
-            Ok(Some(packet)) => packet,
-            // A clean end of stream. A file with no packet at all is empty, not a
-            // wave.
-            Ok(None) => return wave.ok_or_else(end_of_stream),
-            // Any read error ends the stream.
-            Err(err) => return wave.ok_or_else(|| convert(err)),
-        };
-
-        // A packet of another track is not ours to decode.
-        if packet.track_id != track_id {
-            continue;
+        if let Some(wave) = decode.step(Samples::new(usize::MAX))? {
+            return Ok(wave);
         }
+    }
+}
 
-        let buffer_len = decoder.decode(&packet).map_err(convert)?;
-        let wave_output = match &mut wave {
-            Some(wave) => wave,
-            none => {
-                let spec = decoder.spec();
-                let rate = SampleRate::from_hz(spec.rate()).ok_or(DecodeError::NoSampleRate)?;
-                let (topology, placement) = topology_of(Some(spec.channels()));
-                none.insert(Wave::with_placement(topology, placement, rate))
+/// A whole-file decode in steps: the work of [`read_wave`], one bounded piece at a
+/// time, for a caller that must not hold its thread for the length of the file.
+///
+/// [`step`](Self::step) decodes packets until it has at least a number of frames,
+/// and answers the [`Wave`] once the file ends. Decoding and file I/O block, so a
+/// step is a blocking call as long as its frames take.
+///
+/// ```no_run
+/// use tutti_codec::WaveDecode;
+/// use tutti_units::Samples;
+///
+/// let mut decode = WaveDecode::<f32>::open("long.mp3")?;
+/// let wave = loop {
+///     if let Some(wave) = decode.step(Samples::new(65_536))? {
+///         break wave;
+///     }
+/// };
+/// println!("{} s", wave.duration());
+/// # Ok::<(), tutti_codec::DecodeError>(())
+/// ```
+pub struct WaveDecode<S: Sample> {
+    reader: Box<dyn FormatReader>,
+    decoder: PacketDecoder<S>,
+    track_id: u32,
+    wave: Option<Wave<S>>,
+}
+
+impl<S: Sample> std::fmt::Debug for WaveDecode<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WaveDecode")
+            .field("track_id", &self.track_id)
+            .field("frames", &self.wave.as_ref().map(|wave| wave.len().get()))
+            .finish_non_exhaustive()
+    }
+}
+
+impl<S: Sample> WaveDecode<S> {
+    /// Opens `src` at its first audio track; no audio is decoded yet.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`read_wave`] that precede decoding: the source cannot be
+    /// opened, its container is not one this build reads, it has no audio track,
+    /// or the track states no sample rate.
+    pub fn open(src: impl Into<Asset>) -> Result<Self, DecodeError> {
+        Self::start(probe_asset(&src.into()).map_err(convert)?)
+    }
+
+    fn start(reader: Box<dyn FormatReader>) -> Result<Self, DecodeError> {
+        let (track, params) = first_audio_track(&*reader)?;
+        let track_id = track.id;
+        let total_frames = total_frames_of(track, params);
+        let sample_rate = sample_rate_of(params)?;
+        let decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
+        let (topology, placement) = topology_of(params.channels.as_ref());
+
+        // Pre-allocate using the metadata frame count when available (WAV, FLAC).
+        let wave = total_frames.map(|total| {
+            let mut wave = Wave::with_placement(topology, placement, sample_rate);
+            wave.reserve(Samples::new(reserved_frames(total, wave.channels())));
+            wave
+        });
+        Ok(Self {
+            reader,
+            decoder,
+            track_id,
+            wave,
+        })
+    }
+
+    /// Decodes packets until at least `frames` more frames are in, or the file
+    /// ends. `Some` is the finished wave (after which the decode is spent);
+    /// `None` means call again.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`read_wave`]: a packet that does not decode, or a stream with
+    /// no audio at all. A read error after audio was decoded ends the stream and
+    /// answers the wave so far.
+    pub fn step(&mut self, frames: Samples) -> Result<Option<Wave<S>>, DecodeError> {
+        let before = self.wave.as_ref().map_or(0, |wave| wave.len().get());
+        loop {
+            let packet = match self.reader.next_packet() {
+                Ok(Some(packet)) => packet,
+                // A clean end of stream. A file with no packet at all is empty, not a
+                // wave.
+                Ok(None) => return self.finish(None),
+                // Any read error ends the stream.
+                Err(err) => return self.finish(Some(err)),
+            };
+
+            // A packet of another track is not ours to decode.
+            if packet.track_id != self.track_id {
+                continue;
             }
-        };
 
-        // A primed-over packet holds no frames and so no planes.
-        if buffer_len > 0 {
-            Planes::from_vecs(decoder.planes())
-                .and_then(|planes| wave_output.append_planes(planes))
-                .map_err(|e| DecodeError::Malformed(e.to_string().into()))?;
+            let buffer_len = self.decoder.decode(&packet).map_err(convert)?;
+            let wave_output = match &mut self.wave {
+                Some(wave) => wave,
+                none => {
+                    let spec = self.decoder.spec();
+                    let rate =
+                        SampleRate::from_hz(spec.rate()).ok_or(DecodeError::NoSampleRate)?;
+                    let (topology, placement) = topology_of(Some(spec.channels()));
+                    none.insert(Wave::with_placement(topology, placement, rate))
+                }
+            };
+
+            // A primed-over packet holds no frames and so no planes.
+            if buffer_len > 0 {
+                Planes::from_vecs(self.decoder.planes())
+                    .and_then(|planes| wave_output.append_planes(planes))
+                    .map_err(|e| DecodeError::Malformed(e.to_string().into()))?;
+            }
+            if wave_output.len().get().saturating_sub(before) >= frames.get() {
+                return Ok(None);
+            }
+        }
+    }
+
+    /// The end of the stream: the wave, or why there is none.
+    fn finish(&mut self, read_error: Option<Error>) -> Result<Option<Wave<S>>, DecodeError> {
+        match self.wave.take() {
+            Some(wave) => Ok(Some(wave)),
+            None => Err(read_error.map_or_else(end_of_stream, convert)),
         }
     }
 }

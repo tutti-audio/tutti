@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tutti_rt::{Publisher, Reader};
 
-use super::bell::Bell;
+use tutti_rt::Bell;
 
 /// A published value that a voice and, for a streamed one, the
 /// streamer read: the loop or direction a stream is asked for.
@@ -19,7 +19,7 @@ use super::bell::Bell;
 pub struct ControlCell<T> {
     cell: Publisher<T>,
     /// The streamer to wake after a publish; `None` for a resident voice's.
-    bell: Option<Arc<Bell>>,
+    bell: Option<Bell>,
 }
 
 impl<T> ControlCell<T> {
@@ -34,7 +34,7 @@ impl<T> ControlCell<T> {
     }
 
     /// A cell holding `value` whose publishes wake the streamer `bell` rings.
-    pub(crate) fn ringing(value: T, bell: Arc<Bell>) -> Self {
+    pub(crate) fn ringing(value: T, bell: Bell) -> Self {
         Self {
             cell: Publisher::new(value),
             bell: Some(bell),
@@ -46,7 +46,7 @@ impl<T> ControlCell<T> {
     pub fn publish(&self, value: impl Into<Arc<T>>) {
         self.cell.publish(value);
         if let Some(bell) = &self.bell {
-            bell.ring_control();
+            bell.ring();
         }
     }
 
@@ -96,22 +96,31 @@ impl<T: std::fmt::Debug> std::fmt::Debug for ControlCell<T> {
 mod tests {
     use super::*;
 
-    /// **A publish to a streamed cell leaves the streamer work to do, and one
-    /// to a resident cell does not**: the bell's pending work is what its
-    /// sleep returns on, so a parked streamer wakes without its backstop. The
-    /// streamer's next cycle clears it.
+    /// **A publish to a streamed cell rings the streamer's bell, and one to a
+    /// resident cell does not.**
     #[test]
-    fn a_publish_to_a_streamed_cell_wakes_the_streamer() {
-        let (bell, _parker) = Bell::new();
-        let streamed = ControlCell::ringing(0u8, Arc::clone(&bell));
+    fn a_publish_to_a_streamed_cell_rings_the_streamer() {
+        use std::future::Future;
+        use std::pin::pin;
+        use std::task::{Context, Poll, Waker};
+
+        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let (bell, mut listener) = bells.bell();
+        let streamed = ControlCell::ringing(0u8, bell);
         let resident = ControlCell::new(0u8);
-        assert!(!bell.has_work());
+        let mut cx = Context::from_waker(Waker::noop());
         resident.publish(1);
-        assert!(!bell.has_work(), "a resident voice's cell rings nothing");
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Pending,
+            "a resident voice's cell rings nothing"
+        );
         streamed.publish(1);
-        assert!(bell.has_work(), "the streamer has a request to take");
-        bell.begin_cycle();
-        assert!(!bell.has_work(), "taken by the cycle that began");
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Ready(()),
+            "the streamer has a request to take"
+        );
         assert_eq!((streamed.seq(), *streamed.current()), (1, 1));
     }
 }

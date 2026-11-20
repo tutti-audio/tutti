@@ -14,12 +14,14 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crossbeam_channel::{Receiver, TryRecvError};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use tutti_buffers::ChannelLayout;
 use tutti_rt::{PosReader, Publisher};
 use tutti_units::{SamplePosition, SampleRate, Samples};
 
-use super::bell::Bell;
 use super::block::{Block, RingReader};
 use super::cells::Cells;
 use super::command::StreamId;
@@ -27,6 +29,7 @@ use super::control::StreamFile;
 use super::control_cell::ControlCell;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
+use super::reply::{ReplyReceiver, Unanswered};
 use super::status::StatusCell;
 use super::stream::{Stream, StreamerPort};
 use crate::voice::Direction;
@@ -137,7 +140,7 @@ pub(crate) struct Opened<F: RingFloat> {
     pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
-    pub(crate) bell: Arc<Bell>,
+    pub(crate) bell: tutti_rt::Bell,
 }
 
 impl<F: RingFloat> std::fmt::Debug for Opened<F> {
@@ -178,7 +181,7 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 #[must_use = "an open nobody polls is abandoned"]
 pub struct PendingOpen<F: RingFloat> {
     id: StreamId,
-    reply: Receiver<Result<Opened<F>, OpenError>>,
+    reply: ReplyReceiver<Result<Opened<F>, OpenError>>,
     /// The streamer's command queue, which the stream it answers with sends
     /// on.
     port: StreamerPort<F>,
@@ -187,7 +190,7 @@ pub struct PendingOpen<F: RingFloat> {
 impl<F: RingFloat> PendingOpen<F> {
     pub(crate) fn new(
         id: StreamId,
-        reply: Receiver<Result<Opened<F>, OpenError>>,
+        reply: ReplyReceiver<Result<Opened<F>, OpenError>>,
         port: StreamerPort<F>,
     ) -> Self {
         Self { id, reply, port }
@@ -206,41 +209,21 @@ impl<F: RingFloat> PendingOpen<F> {
         match self.reply.try_recv() {
             Ok(Ok(opened)) => self.ready(opened),
             Ok(Err(error)) => Open::Failed(error),
-            Err(TryRecvError::Empty) => Open::Pending(self),
-            // The streamer dropped the reply unanswered: its thread is gone.
-            Err(TryRecvError::Disconnected) => Open::Failed(OpenError::StreamerGone),
-        }
-    }
-
-    /// Blocks until the streamer answers: the open as a job for a thread
-    /// that has nothing else to do (the session's executor), where
-    /// [`poll`](Self::poll) is for one that has. It sleeps on the reply, so
-    /// no loop of polls is needed; but a streamer nobody drives (a
-    /// `DiskStreamer::manual` no one steps)
-    /// never answers, and this never returns.
-    ///
-    /// # Errors
-    ///
-    /// The open's own failure, as the streamer answered it;
-    /// [`OpenError::StreamerGone`] when the streamer exits first.
-    pub fn wait(self) -> Result<(Stream<F>, StreamReader<F>), OpenError> {
-        match self.reply.recv() {
-            Ok(Ok(opened)) => {
-                let Open::Ready(stream, reader) = self.ready(opened) else {
-                    unreachable!("`ready` answers `Ready`")
-                };
-                Ok((stream, reader))
-            }
-            Ok(Err(error)) => Err(error),
-            Err(_) => Err(OpenError::StreamerGone),
+            Err(Unanswered::Empty) => Open::Pending(self),
+            // The streamer dropped the reply unanswered: its future is gone.
+            Err(Unanswered::Disconnected) => Open::Failed(OpenError::StreamerGone),
         }
     }
 
     fn ready(self, opened: Opened<F>) -> Open<F> {
+        Self::ready_with(self.port, opened)
+    }
+
+    fn ready_with(port: StreamerPort<F>, opened: Opened<F>) -> Open<F> {
         Open::Ready(
             Stream::new(
                 opened.id,
-                self.port,
+                port,
                 Arc::clone(&opened.status),
                 Arc::clone(&opened.cells),
                 Arc::clone(&opened.file),
@@ -250,6 +233,36 @@ impl<F: RingFloat> PendingOpen<F> {
             ),
             StreamReader::new(opened),
         )
+    }
+}
+
+/// Awaiting an open resolves with the stream and its reader once the streamer
+/// answers, and wakes the task when it does: the open as a future, where
+/// [`poll`](PendingOpen::poll) is for a caller that has other work between looks.
+///
+/// # Errors
+///
+/// The open's own failure, as the streamer answered it; [`OpenError::StreamerGone`]
+/// when the streamer's future ends first.
+impl<F: RingFloat> Future for PendingOpen<F> {
+    type Output = Result<(Stream<F>, StreamReader<F>), OpenError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        match this.reply.poll_recv(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(Ok(opened))) => {
+                // `ready` takes the port by value: a spent `PendingOpen` is not
+                // polled again.
+                let port = this.port.clone();
+                let Open::Ready(stream, reader) = Self::ready_with(port, opened) else {
+                    unreachable!("`ready_with` answers `Ready`")
+                };
+                Poll::Ready(Ok((stream, reader)))
+            }
+            Poll::Ready(Ok(Err(error))) => Poll::Ready(Err(error)),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(OpenError::StreamerGone)),
+        }
     }
 }
 

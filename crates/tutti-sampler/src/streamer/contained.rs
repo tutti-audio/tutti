@@ -65,7 +65,8 @@ fn cut_flac(dir: &Path) -> PathBuf {
 /// The two drivers, so one case runs on both.
 enum Driver {
     Hand(Box<DiskStreamer<Manual<f32>, f32>>),
-    Threaded(DiskStreamer<Running, f32>),
+    /// Its bells, which wake the future's task, live as long as it does.
+    Threaded(DiskStreamer<Running, f32>, tutti_rt::Bells),
 }
 
 impl Driver {
@@ -73,7 +74,11 @@ impl Driver {
         let rate = tutti_units::SampleRate::of(rate);
         let config = DiskStreamerConfig::default();
         if threaded {
-            Self::Threaded(DiskStreamer::build(rate, config, seams).expect("the thread starts"))
+            let bells = tutti_rt::Bells::new().expect("a tick thread");
+            let executor = tutti_platform::Executor::threaded();
+            let streamer = DiskStreamer::build(rate, config, seams, &executor, &bells)
+                .expect("the future starts");
+            Self::Threaded(streamer, bells)
         } else {
             Self::Hand(Box::new(
                 DiskStreamer::<Manual<f32>, f32>::manual_with(rate, config, seams).expect("builds"),
@@ -88,7 +93,7 @@ impl Driver {
                 let opening = s.open(path, Placement::HEAD);
                 wait_for_open(s.as_mut(), opening).expect("the file opens")
             }
-            Self::Threaded(s) => {
+            Self::Threaded(s, _) => {
                 wait_for_open_threaded(s.open(path, Placement::HEAD)).expect("the file opens")
             }
         };
@@ -108,7 +113,7 @@ impl Driver {
                 Self::Hand(s) => {
                     let _ = s.step();
                 }
-                Self::Threaded(_) => {}
+                Self::Threaded(..) => {}
             }
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -265,11 +270,10 @@ fn a_dropped_streamer_publishes_streamer_gone() {
             "setup: a served stream (threaded: {threaded})"
         );
         drop(driver);
-        assert_eq!(
-            stream.status().phase,
-            StreamPhase::Faulted(StreamFault::StreamerGone),
-            "threaded: {threaded}"
-        );
+        // The threaded streamer's future ends on its next poll, after the drop.
+        tutti_fixtures::wait_until("the streamer to publish its end", WAIT, || {
+            stream.status().phase == StreamPhase::Faulted(StreamFault::StreamerGone)
+        });
     }
 }
 
@@ -395,34 +399,6 @@ fn a_panic_while_a_loop_is_captured_faults_that_stream() {
 // Fallible construction.
 // ---------------------------------------------------------------------------
 
-fn refuse(
-    _name: &str,
-    _priority: Option<tutti_platform::PriorityRequest>,
-    _body: Box<dyn FnOnce(&tutti_platform::StopToken) + Send>,
-) -> std::io::Result<tutti_platform::ThreadHandle<()>> {
-    Err(std::io::Error::other("no threads"))
-}
-
-/// **`DiskStreamer::start` returns `Err` when the spawn fails**, where it used
-/// to panic: the streamer's thread is refused through the spawn seam.
-#[test]
-fn a_refused_spawn_is_an_error() {
-    let seams = Seams {
-        spawn: refuse,
-        ..Seams::default()
-    };
-    let built = DiskStreamer::<Running, f32>::build(
-        tutti_units::SampleRate::SR_48K,
-        DiskStreamerConfig::default(),
-        seams,
-    );
-    assert!(
-        matches!(&built, Err(crate::Error::Spawn(e)) if e.to_string() == "no threads"),
-        "{:?}",
-        built.map(|_| ())
-    );
-}
-
 // ---------------------------------------------------------------------------
 // The decode lane.
 // ---------------------------------------------------------------------------
@@ -476,73 +452,55 @@ fn a_file_that_cannot_seek_opens_through_the_decode_lane() {
     }
 }
 
-/// **A non-seekable file opens while another stream keeps refilling**: the
-/// decode is held open at a gate on the decode thread, and a stream on the
-/// shared thread is still refilled meanwhile; the open then completes when the
-/// gate does.
+/// **A non-seekable file opens while another stream keeps refilling**: the decode
+/// reads a chunk per cycle, so a stream on the same streamer is refilled in the
+/// cycles the decode takes, and the open completes when the decode does.
 #[test]
-fn a_decode_held_open_does_not_stop_another_stream() {
+fn a_decode_in_flight_does_not_stop_another_stream() {
     const RATE: u32 = 4_000;
     let dir = tempfile::tempdir().expect("a temp dir");
     let long = constant_file(dir.path(), "long.wav", RATE, 40, 0.25);
     let near_end = u64::from(RATE) * 38;
-    let gate = Gate::closed();
+    // A chunk of 256 frames: the fixture takes many cycles to decode.
     let seams = Seams {
-        decode_hook: Some(gate.hook()),
+        decode_chunk: Some(Samples::new(256)),
         ..Seams::default()
     };
-    let mut driver = Driver::start(f64::from(RATE), true, seams);
-    let _release = gate.clone();
-    let (_busy, mut reader) = driver.open(&long);
+    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual_with(
+        tutti_units::SampleRate::of(f64::from(RATE)),
+        Default::default(),
+        seams,
+    )
+    .expect("builds");
+    let busy = sampler.open(&long, Placement::HEAD);
+    let (_busy, mut reader) = wait_for_open(&mut sampler, busy).expect("opens");
     let before = reader.ring.window().1;
 
-    let Driver::Threaded(streamer) = &driver else {
-        unreachable!()
-    };
-    let mut opening = streamer.open(mp3(dir.path()), Placement::HEAD);
-    // Let the streamer reach the decode, which holds at the gate.
-    std::thread::sleep(Duration::from_millis(50));
+    let mut opening = sampler.open(mp3(dir.path()), Placement::HEAD);
+    // The first cycle starts the decode, which one chunk does not finish.
+    let _ = sampler.step();
     opening = match opening.poll() {
         Open::Pending(again) => again,
-        other => panic!("the decode is held, yet the open answered: {other:?}"),
+        other => panic!("one chunk of the decode answered the open: {other:?}"),
     };
 
     drop(reader.block(
         Samples::new(near_end as usize),
         [span(near_end, near_end + 4), span(0, 0)],
     ));
-    driver.until("the other stream's refill, with the decode held", || {
-        reader.ring.window().1 > before
-    });
+    let _ = sampler.step();
+    assert!(
+        reader.ring.window().1 > before,
+        "the other stream was not refilled while the decode ran"
+    );
     assert!(
         matches!(opening.poll(), Open::Pending(_)),
-        "the gate is still closed"
+        "the decode is still running"
     );
-    gate.open();
-}
-
-/// **A decode thread that cannot start fails the open with `Io`**, where the
-/// open would wait for good: the lane's spawn is refused through the seam
-/// (the streamer's own thread is not started: hand-stepped).
-#[test]
-fn a_refused_decode_thread_fails_the_open() {
-    let seams = Seams {
-        spawn: refuse,
-        ..Seams::default()
-    };
-    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual_with(
-        tutti_units::SampleRate::SR_44K1,
-        Default::default(),
-        seams,
-    )
-    .expect("builds");
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let opening = sampler.open(mp3(dir.path()), Placement::HEAD);
-    let answer = wait_for_open(&mut sampler, opening);
+    let _ = sampler.step_until_idle(10_000);
     assert!(
-        matches!(&answer, Err(OpenError::Io(std::io::ErrorKind::Other))),
-        "{:?}",
-        answer.map(|_| ())
+        matches!(opening.poll(), Open::Ready(..)),
+        "the open completes once the decode does"
     );
 }
 

@@ -1,18 +1,18 @@
-//! The decode lane: whole-file decodes off the streamer's thread.
+//! The decode lane: whole-file decodes off the streamer's cycles.
 //!
 //! A file that cannot seek (mp3, ogg: no frame count, or a decoder that will
 //! not seek) is decoded whole before its stream can exist, and that takes as
 //! long as the file is. Done inside the command drain it stopped every other
 //! stream's refill for its duration and back-pressured the caller's bounded
-//! queue. It is one thread here, started on first use and fed one job at a
-//! time (a burst of opens costs one core, never the streamer's), and its
-//! result comes back through the streamer's own command queue as
-//! [`Decoded`](super::command::StreamerCommand::Decoded), so the streamer
-//! wakes for it as it wakes for any command.
+//! queue. Each decode is a future that yields between
+//! chunks of [`DECODE_CHUNK`] frames, so one poll stays short; its result comes
+//! back through the streamer's own command queue as
+//! [`Decoded`](super::command::StreamerCommand::Decoded), so the streamer wakes for
+//! it as it wakes for any command.
 //!
-//! The thread is detached, not joined: it ends after the job it is on when the
-//! lane is dropped (the job queue disconnects), or when the streamer's queue is
-//! gone (its send fails).
+//! A decode ends after the answer it sends, or when the streamer's queue is gone
+//! (its send fails). The lane holds the decodes and the streamer's cycles poll them,
+//! so no executor is held by the streamer's future.
 
 // With no codec feature there is no decode to run: the lane is never asked for
 // a job, and `load_wave` reads only the cache. A feature-matrix artifact, so
@@ -26,13 +26,17 @@
 )]
 
 use std::any::Any;
-use std::io;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Waker};
+#[cfg(codec)]
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::TrySendError;
 use tutti_buffers::Wave;
-use tutti_platform::{Asset, PriorityRequest, StopToken, ThreadHandle, spawn_named};
+use tutti_platform::Asset;
+use tutti_units::Samples;
 
 use super::StreamerSender;
 use super::cache::LruCache;
@@ -40,57 +44,35 @@ use super::cache::LruCache;
 use super::cache::wave_bytes;
 use super::command::{Decoded, StreamId, StreamerCommand};
 use super::handlers::Handles;
+use super::loop_body::yield_now;
 use super::metrics::{Metrics, ReadMeter};
 use crate::OpenError;
 use tutti_rt::RingFloat;
 
-/// How a thread is started: the seam a test replaces to see a spawn fail.
-pub(super) type Spawner = fn(
-    &str,
-    Option<PriorityRequest>,
-    Box<dyn FnOnce(&StopToken) + Send>,
-) -> io::Result<ThreadHandle<()>>;
-
-/// The OS's thread: what ships.
-fn os_spawn(
-    name: &str,
-    priority: Option<PriorityRequest>,
-    body: Box<dyn FnOnce(&StopToken) + Send>,
-) -> io::Result<ThreadHandle<()>> {
-    spawn_named(name, priority, body)
-}
+/// The frames one poll of a decode reads before it yields.
+const DECODE_CHUNK: Samples = Samples::new(1 << 16);
 
 /// A hook a test runs where the streamer reads a file: the stream and the
 /// frame it reads. It may block, or panic.
 #[cfg(test)]
 pub(super) type ReadHook = Arc<dyn Fn(StreamId, usize) + Send + Sync>;
 
-/// A hook a test runs on the decode thread, before a file is decoded. It may
+/// A hook a test runs where a decode starts, before a file is decoded. It may
 /// block, to hold a decode open.
 #[cfg(test)]
 pub(super) type DecodeHook = Arc<dyn Fn(&Asset) + Send + Sync>;
 
-/// What a test can replace: how threads start, and what runs where the
-/// streamer reads a file. Production is [`Seams::default`].
-#[derive(Clone)]
+/// What a test can replace: what runs where the streamer reads a file and where a
+/// decode starts. Production is [`Seams::default`].
+#[derive(Clone, Default)]
 pub(super) struct Seams {
-    pub(super) spawn: Spawner,
     #[cfg(test)]
     pub(super) read_hook: Option<ReadHook>,
     #[cfg(test)]
     pub(super) decode_hook: Option<DecodeHook>,
-}
-
-impl Default for Seams {
-    fn default() -> Self {
-        Self {
-            spawn: os_spawn,
-            #[cfg(test)]
-            read_hook: None,
-            #[cfg(test)]
-            decode_hook: None,
-        }
-    }
+    /// The frames a decode reads per poll, in place of [`DECODE_CHUNK`].
+    #[cfg(test)]
+    pub(super) decode_chunk: Option<Samples>,
 }
 
 /// Why `asset` could not be turned into audio: the source itself when it
@@ -102,100 +84,105 @@ pub(super) fn unreadable(asset: &Asset) -> OpenError {
     }
 }
 
-/// A whole-file decode asked of the lane.
-struct Job {
-    id: StreamId,
-    asset: Asset,
-}
+/// A decode as the lane holds it.
+type Decode = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-/// The decode thread's queue, started on first use. Streamer-thread-local.
+/// The decode lane: the decodes in flight, polled by the streamer's own cycles, one
+/// chunk each. Streamer-local, so the streamer's future holds no executor.
 pub(super) struct DecodeLane<F: RingFloat> {
     /// The streamer's own queue, where a result is sent.
     reports: StreamerSender<F>,
-    /// The job queue, once the thread has started.
-    jobs: Option<Sender<Job>>,
+    /// In a `Mutex` only for `Sync` (a streamer is held by shared reference); the lane
+    /// is streamer-local and only ever reaches it through `get_mut`.
+    active: Mutex<Vec<Decode>>,
 }
 
 impl<F: RingFloat> DecodeLane<F> {
     pub(super) fn new(reports: StreamerSender<F>) -> Self {
         Self {
             reports,
-            jobs: None,
+            active: Mutex::new(Vec::new()),
         }
     }
 
-    /// Asks for `asset` to be decoded whole for stream `id`, starting the thread
-    /// if this is the first job. The answer arrives as a `Decoded` command.
-    ///
-    /// # Errors
-    ///
-    /// [`OpenError::Io`] when the thread cannot be started, so the open fails
-    /// where it would have waited for good.
-    pub(super) fn submit(
-        &mut self,
-        shared: &Handles<F>,
-        id: StreamId,
-        asset: Asset,
-    ) -> Result<(), OpenError> {
-        let job = Job { id, asset };
-        let job = match &self.jobs {
-            Some(jobs) => match jobs.send(job) {
-                Ok(()) => return Ok(()),
-                // The thread is gone (a panic that escaped the job's own
-                // containment): start another.
-                Err(returned) => returned.0,
-            },
-            None => job,
-        };
-        let jobs = self.start(shared)?;
-        let sent = jobs.send(job);
-        self.jobs = Some(jobs);
-        sent.map_err(|_| OpenError::Io(io::ErrorKind::BrokenPipe))
-    }
-
-    fn start(&self, shared: &Handles<F>) -> Result<Sender<Job>, OpenError> {
-        let (jobs, queue) = crossbeam_channel::unbounded::<Job>();
+    /// Starts decoding `asset` whole for stream `id`. The answer arrives as a
+    /// `Decoded` command, after enough [`poll`](Self::poll)s.
+    pub(super) fn submit(&mut self, shared: &Handles<F>, id: StreamId, asset: Asset) {
         let reports = self.reports.clone();
         let (cache, metrics) = (Arc::clone(&shared.cache), Arc::clone(&shared.metrics));
         #[cfg(test)]
         let decode_hook = shared.seams.decode_hook.clone();
-        let body = move |_: &StopToken| {
-            let mut meter = ReadMeter::new();
-            for Job { id, asset } in queue {
-                // A panic in the decoder is this file's failure, not the
-                // thread's: the next job runs.
-                let wave = catch_unwind(AssertUnwindSafe(|| {
-                    #[cfg(test)]
-                    if let Some(hook) = &decode_hook {
-                        hook(&asset);
-                    }
-                    load_wave(&cache, &metrics, &mut meter, &asset)
-                }));
-                let wave = match wave {
-                    Ok(Some(wave)) => Ok(wave),
-                    Ok(None) => Err(unreadable(&asset)),
-                    Err(payload) => {
-                        tracing::error!(
-                            "decoding {} panicked: {}",
-                            asset.name(),
-                            panic_message(payload.as_ref())
-                        );
-                        Err(OpenError::Format)
-                    }
-                };
-                let cmd = StreamerCommand::Decoded {
-                    id,
-                    wave: Decoded(wave),
-                };
-                if reports.send(cmd).is_err() {
-                    break;
-                }
+        #[cfg(test)]
+        let chunk = shared.seams.decode_chunk.unwrap_or(DECODE_CHUNK);
+        #[cfg(not(test))]
+        let chunk = DECODE_CHUNK;
+        self.active_mut().push(Box::pin(async move {
+            #[cfg(test)]
+            if let Some(hook) = &decode_hook {
+                hook(&asset);
             }
-        };
-        (shared.seams.spawn)("tutti-decode", None, Box::new(body))
-            .map_err(|error| OpenError::Io(error.kind()))?
-            .detach();
-        Ok(jobs)
+            let wave = decode_whole(&cache, &metrics, &asset, chunk).await;
+            send_decoded(&reports, id, wave).await;
+        }));
+    }
+
+    /// Polls every decode once, which reads one chunk of each; whether any is still
+    /// running. The streamer polls again after yielding, so the waker is not used.
+    pub(super) fn poll(&mut self) -> bool {
+        let mut cx = Context::from_waker(Waker::noop());
+        let active = self.active_mut();
+        active.retain_mut(|decode| decode.as_mut().poll(&mut cx).is_pending());
+        !active.is_empty()
+    }
+
+    fn active_mut(&mut self) -> &mut Vec<Decode> {
+        self.active
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// The wave of `asset` or why there is none. A panic in the decoder is this file's
+/// failure, not the executor's.
+async fn decode_whole<F: RingFloat>(
+    cache: &LruCache<F>,
+    metrics: &Metrics,
+    asset: &Asset,
+    chunk: Samples,
+) -> Result<Arc<Wave<F>>, OpenError> {
+    match load_wave(cache, metrics, asset, chunk).await {
+        Ok(Some(wave)) => Ok(wave),
+        Ok(None) => Err(unreadable(asset)),
+        Err(payload) => {
+            tracing::error!(
+                "decoding {} panicked: {}",
+                asset.name(),
+                panic_message(payload.as_ref())
+            );
+            Err(OpenError::Format)
+        }
+    }
+}
+
+/// Sends the answer without blocking: a full queue yields and tries again, a
+/// gone streamer drops it.
+async fn send_decoded<F: RingFloat>(
+    reports: &StreamerSender<F>,
+    id: StreamId,
+    wave: Result<Arc<Wave<F>>, OpenError>,
+) {
+    let mut cmd = StreamerCommand::Decoded {
+        id,
+        wave: Decoded(wave),
+    };
+    loop {
+        match reports.try_send(cmd) {
+            Err(TrySendError::Full(back)) => {
+                cmd = back;
+                yield_now().await;
+            }
+            Ok(()) | Err(TrySendError::Disconnected(_)) => return,
+        }
     }
 }
 
@@ -205,40 +192,51 @@ impl<F: RingFloat> DecodeLane<F> {
 /// With no codec feature enabled there is no decoder to call, so the miss arm is
 /// gated out and a miss is simply `None`. The cache *lookup* stays live in both
 /// builds: entries reach it from elsewhere, and a hit needs no decoder.
-fn load_wave<F: RingFloat>(
+async fn load_wave<F: RingFloat>(
     cache: &LruCache<F>,
     metrics: &Metrics,
-    meter: &mut ReadMeter,
     asset: &Asset,
-) -> Option<Arc<Wave<F>>> {
+    chunk: Samples,
+) -> Result<Option<Arc<Wave<F>>>, Box<dyn Any + Send>> {
     // Taken once: a hit and the insert after a miss use the same key. An asset
     // with no identity is decoded each time and never cached.
     let key = asset.identity();
     if let Some(cached) = key.as_ref().and_then(|key| cache.get(key)) {
-        return Some(cached);
+        return Ok(Some(cached));
     }
 
-    // `read_wave` is `tutti-codec`'s decode path, which is compiled only when a
+    // `WaveDecode` is `tutti-codec`'s decode path, which is compiled only when a
     // codec feature is on — calling it unconditionally breaks the
     // `--no-default-features` build.
     #[cfg(codec)]
     {
-        if let Ok(w) = tutti_codec::read_wave::<F>(asset.clone()) {
-            let arc_wave = Arc::new(w);
-            meter.record_read(wave_bytes(&arc_wave), metrics);
-            if let Some(key) = key {
-                cache.insert(key, arc_wave.clone());
+        let mut meter = ReadMeter::new();
+        let Ok(mut decode) = tutti_codec::WaveDecode::<F>::open(asset.clone()) else {
+            return Ok(None);
+        };
+        loop {
+            match catch_unwind(AssertUnwindSafe(|| decode.step(chunk)))? {
+                Ok(Some(wave)) => {
+                    let arc_wave = Arc::new(wave);
+                    meter.record_read(wave_bytes(&arc_wave), metrics);
+                    if let Some(key) = key {
+                        cache.insert(key, arc_wave.clone());
+                    }
+                    return Ok(Some(arc_wave));
+                }
+                Ok(None) => yield_now().await,
+                Err(_) => return Ok(None),
             }
-            return Some(arc_wave);
         }
     }
 
     // Silences the unused-parameter warning in the codec-free build, where the
     // only way to reach this line is a cache miss with nothing able to fill it.
     #[cfg(not(codec))]
-    let _ = (metrics, meter);
-
-    None
+    {
+        let _ = (metrics, ReadMeter::new(), chunk);
+        Ok(None)
+    }
 }
 
 /// What a panic said, for the log.

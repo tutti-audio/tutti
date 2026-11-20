@@ -13,14 +13,15 @@ use tutti_rt::AtomicSampleRate;
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
 use super::StreamerSender;
-use super::bell::Bell;
 use super::cache::LruCache;
 use super::cells::Cells;
 use super::command::{Decoded, Reply, StreamId, StreamerCommand};
 use super::config::BufferConfig;
 use super::control::StreamFile;
 use super::control_cell::ControlCell;
-use super::decode::{DecodeLane, Seams, panic_message};
+use super::decode::{DecodeLane, panic_message};
+#[cfg(test)]
+use super::decode::Seams;
 use super::loops::{LeadIn, Mapping, RingLoop, apply_mapping, buffer_size_for_file};
 use super::metrics::Metrics;
 use super::open::{OpenError, Opened};
@@ -43,11 +44,31 @@ pub(super) struct Handles<F: RingFloat> {
     pub cache: Arc<LruCache<F>>,
     pub metrics: Arc<Metrics>,
     /// What wakes the streamer: every stream's reader rings it.
-    pub bell: Arc<Bell>,
+    pub bell: tutti_rt::Bell,
     /// The session rate each stream's [`SrcRatio`] is derived against.
     pub session_rate: SessionRate,
     /// What a test replaces (production: none).
+    #[cfg(test)]
     pub seams: Seams,
+}
+
+#[cfg(test)]
+impl<F: RingFloat> Handles<F> {
+    /// Handles for a test that drives a cycle itself: a bell nobody awaits and an
+    /// executor that is never polled.
+    pub(super) fn detached(config: &BufferConfig, rate: SampleRate) -> Self {
+        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        Self {
+            cache: Arc::new(LruCache::new(
+                config.cache_max_entries,
+                config.cache_max_bytes,
+            )),
+            metrics: Arc::new(Metrics::new()),
+            bell: bells.bell().0,
+            session_rate: SessionRate::new(rate),
+            seams: Seams::default(),
+        }
+    }
 }
 
 /// The session (graph) rate, one cell shared by the control side and the
@@ -250,7 +271,7 @@ fn begin<F: RingFloat>(
         // A source that cannot be opened is no job: it fails now, where the
         // lane would only fail it later.
         asset.open().map_err(|error| OpenError::Io(error.kind()))?;
-        lane.submit(shared, id, asset.clone())?;
+        lane.submit(shared, id, asset.clone());
         Ok(Begun::Decoding)
     }
 }
@@ -438,8 +459,8 @@ fn build_stream<F: RingFloat>(
     let control = ring.control_cell();
     // The loop and direction the control side asks for: the record reads
     // them, the stream's handle (and the voice node, for a node) publishes.
-    let looping = ControlCell::ringing(None::<Loop>, Arc::clone(&shared.bell));
-    let direction = ControlCell::ringing(Direction::Forward, Arc::clone(&shared.bell));
+    let looping = ControlCell::ringing(None::<Loop>, shared.bell.clone());
+    let direction = ControlCell::ringing(Direction::Forward, shared.bell.clone());
     let record = Record::new(
         producer,
         Arc::clone(&cells),
@@ -464,7 +485,7 @@ fn build_stream<F: RingFloat>(
             direction,
             place,
             width,
-            bell: Arc::clone(&shared.bell),
+            bell: shared.bell.clone(),
         },
     ))
 }

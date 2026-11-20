@@ -28,6 +28,7 @@ mod metrics;
 mod open;
 mod prefetch;
 mod record;
+mod reply;
 mod status;
 mod step;
 mod stream;
@@ -77,6 +78,8 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
+use tutti_platform::Executor;
+use tutti_rt::Bells;
 use tutti_platform::Asset;
 use tutti_rt::Mint;
 use tutti_rt::RingFloat;
@@ -159,7 +162,6 @@ pub struct DiskStreamer<D, F: RingFloat> {
     shared: Handles<F>,
     /// The driver: the thread, which only its drop uses, or the caller's
     /// cycle.
-    #[cfg_attr(not(any(test, feature = "testing")), allow(dead_code))]
     driver: D,
     /// The next stream's identity, minted here on the control side.
     next_stream: Mint,
@@ -177,39 +179,63 @@ impl<D, F: RingFloat> std::fmt::Debug for DiskStreamer<D, F> {
 
 impl<F: RingFloat> DiskStreamer<Running, F> {
     /// Creates the streaming engine at `sample_rate` (the engine's rate) and
-    /// spawns the streamer thread. Its streams decode into `F` and its rings
-    /// hold `F`.
+    /// spawns the streamer future on `executor`. Its streams decode into `F` and
+    /// its rings hold `F`. `bells` makes the bell the audio thread rings to wake
+    /// it.
     ///
     /// Configure with [`DiskStreamerConfig`] (`Default` + struct-update); pass
-    /// `Default::default()` for the tuned defaults. Allocates and spawns a
-    /// thread: control thread only.
+    /// `Default::default()` for the tuned defaults. Allocates and spawns: control
+    /// thread only. A threaded executor gives the streamer a thread of its own at a
+    /// raised priority; a polled or host executor runs it at the caller's or the
+    /// host's, and a polled one runs it only inside its `poll`.
     ///
     /// # Errors
     ///
-    /// [`Error::Spawn`](crate::Error::Spawn) when the OS refuses to spawn the
-    /// streamer thread. Every stream and every refill depends on it, so there
-    /// is no streamer to return: a stream command with no consumer would
+    /// [`Error::Spawn`](crate::Error::Spawn) when the executor refuses the future
+    /// (the OS refusing the thread). Every stream and every refill depends on it,
+    /// so there is no streamer to return: a stream command with no consumer would
     /// stall silently.
-    pub fn start(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
-        Self::build(sample_rate.into(), config, Seams::default())
+    pub fn start(
+        sample_rate: impl Into<SampleRate>,
+        config: DiskStreamerConfig,
+        executor: &Executor,
+        bells: &Bells,
+    ) -> Result<Self> {
+        Self::build(sample_rate.into(), config, Seams::default(), executor, bells)
     }
 
-    /// [`start`](Self::start) with what a test replaces: how a thread starts, and
-    /// the hooks where a file is read and decoded.
-    fn build(sample_rate: SampleRate, config: DiskStreamerConfig, seams: Seams) -> Result<Self> {
-        Self::from_built(Built::new(256, sample_rate, config.buffer_config, seams))
+    /// [`start`](Self::start) with what a test replaces: the hooks where a file is
+    /// read and decoded.
+    fn build(
+        sample_rate: SampleRate,
+        config: DiskStreamerConfig,
+        seams: Seams,
+        executor: &Executor,
+        bells: &Bells,
+    ) -> Result<Self> {
+        Self::from_built(
+            Built::new(256, sample_rate, config.buffer_config, seams, bells),
+            executor,
+        )
     }
 
-    /// The streamer over `built`, its thread started.
-    fn from_built(built: Built<F>) -> Result<Self> {
+    /// The streamer over `built`, its future spawned.
+    fn from_built(built: Built<F>, executor: &Executor) -> Result<Self> {
         let (streamer_tx, shared) = (built.command_sender(), built.shared());
 
         Ok(DiskStreamer {
             streamer_tx,
             shared,
-            driver: built.start()?,
+            driver: built.start(executor)?,
             next_stream: Mint::new(),
         })
+    }
+
+    /// Rings the streamer's bell with no command, so it takes a cycle: the
+    /// control side's tick, which sweeps every ring's retired controls. A session
+    /// calls it once per `update`.
+    pub fn wake(&self) {
+        self.driver.wake();
     }
 }
 
@@ -238,7 +264,8 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
         config: DiskStreamerConfig,
         seams: Seams,
     ) -> Result<Self> {
-        let built = Built::new(256, sample_rate, config.buffer_config, seams);
+        let bells = Bells::new().map_err(crate::Error::Spawn)?;
+        let built = Built::new(256, sample_rate, config.buffer_config, seams, &bells);
         let (streamer_tx, shared) = (built.command_sender(), built.shared());
 
         Ok(DiskStreamer {
@@ -332,7 +359,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         width: Option<tutti_buffers::ChannelLayout>,
     ) -> PendingOpen<F> {
         let id = StreamId::mint(&self.next_stream);
-        let (reply, answer) = crossbeam_channel::bounded(1);
+        let (reply, answer) = reply::reply();
         // A refused send drops the command and with it `reply`, which is how
         // a gone streamer reaches the caller: the answer is disconnected.
         let _ = self.streamer_tx.send(StreamerCommand::Open {

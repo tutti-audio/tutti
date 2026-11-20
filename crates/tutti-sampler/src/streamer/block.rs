@@ -8,12 +8,11 @@
 
 use std::marker::PhantomData;
 use std::ops::Range;
-use std::sync::Arc;
 
 use tutti_rt::{Loan, PosClaim, PosFrame, PosReader, Reader};
 use tutti_units::Samples;
 
-use super::bell::Bell;
+use tutti_rt::Bell;
 use super::io::refill::{Refill, needs_refill};
 use super::loops::RingControl;
 use crate::{Direction, Loop};
@@ -35,7 +34,7 @@ pub(crate) struct RingReader<F: RingFloat> {
 /// What a reader needs to ask the streamer for a refill.
 #[derive(Debug)]
 struct Wake {
-    bell: Arc<Bell>,
+    bell: Bell,
     frames: usize,
 }
 
@@ -50,7 +49,7 @@ impl<F: RingFloat> RingReader<F> {
 
     /// This reader, ringing `bell` when a block finds its ring of `frames`
     /// slots wanting the streamer ([`needs_refill`]).
-    pub(crate) fn ringing(mut self, bell: Arc<Bell>, frames: usize) -> Self {
+    pub(crate) fn ringing(mut self, bell: Bell, frames: usize) -> Self {
         self.wake = Some(Wake { bell, frames });
         self
     }
@@ -82,7 +81,7 @@ impl<F: RingFloat> RingReader<F> {
                 end,
             );
             if !matches!(need, Refill::Satisfied { .. }) {
-                wake.bell.ring_refill();
+                wake.bell.ring();
             }
         }
         Block {

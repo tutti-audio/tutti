@@ -29,7 +29,7 @@ use super::StreamerSender;
 use super::command::StreamerCommand;
 use super::config::BufferConfig;
 use super::handlers::{Handles, Local, follow_steering, handle_command};
-use super::io::refill::{FILL_THRESHOLD, refill_all, refill_all_parallel};
+use super::io::refill::{FILL_THRESHOLD, MIN_CHUNK, refill_all, refill_all_parallel};
 use super::record::{Record, Streams};
 use tutti_rt::RingFloat;
 
@@ -98,6 +98,39 @@ impl<F: RingFloat> StreamerCycle<F> {
         }
     }
 
+    /// Cycles until one reports anything but [`Busy`](StepOutcome::Busy), at most `budget`
+    /// of them; the last outcome. The first cycle runs alone, so a command that
+    /// opens a ring is applied before `budget` is spent on it.
+    pub(crate) fn step_until_idle(
+        &mut self,
+        shared: &Handles<F>,
+        mut drain: impl FnMut() -> Option<StreamerCommand<F>>,
+        budget: usize,
+    ) -> StepOutcome {
+        let mut outcome = self.step(shared, &mut drain);
+        for _ in 1..budget {
+            if outcome != StepOutcome::Busy {
+                break;
+            }
+            outcome = self.step(shared, &mut drain);
+        }
+        outcome
+    }
+
+    /// How many cycles refill every ring once from empty: each cycle fills a ring
+    /// by at least [`MIN_CHUNK`] frames.
+    pub(crate) fn fill_steps(&self) -> usize {
+        let rings = self
+            .local
+            .streams
+            .records()
+            .iter()
+            .map(|record| record.out.frames().div_ceil(MIN_CHUNK))
+            .max()
+            .unwrap_or(0);
+        rings + 2
+    }
+
     /// Run one cycle: drain every queued command, free every ring's retired
     /// controls, then — when any channel is streaming — refill the rings.
     ///
@@ -114,7 +147,14 @@ impl<F: RingFloat> StreamerCycle<F> {
         while let Some(cmd) = drain() {
             handle_command(cmd, shared, &self.config, &mut self.local);
         }
+        // One chunk of every whole-file decode in flight. Its answer is applied by
+        // the next cycle's drain, so while any runs this cycle reports more to do.
+        let decoding = self.local.lane.poll();
+        let outcome = self.refill(shared);
+        if decoding { StepOutcome::Busy } else { outcome }
+    }
 
+    fn refill(&mut self, shared: &Handles<F>) -> StepOutcome {
         // The loop and direction each live stream's control side asks for, so
         // the refill below writes the new mapping this cycle.
         follow_steering(&self.config, &mut self.local);
@@ -195,17 +235,11 @@ fn buffers_healthy<F: RingFloat>(streams: &Streams<F>) -> bool {
 mod tests {
     use crate::testing::loop_frames;
     use std::path::PathBuf;
-    use std::sync::Arc;
 
     use tutti_units::SampleRate;
 
-    use super::super::bell::Bell;
-    use super::super::cache::LruCache;
     use super::super::command::StreamId;
-    use super::super::decode::Seams;
-    use super::super::handlers::SessionRate;
     use super::super::loops::{Arrangement, RingMap};
-    use super::super::metrics::Metrics;
     use super::super::record::{Cmd, step};
     use super::*;
 
@@ -216,16 +250,7 @@ mod tests {
     #[test]
     fn a_cycle_is_idle_until_a_stream_is_live() {
         let config = BufferConfig::default();
-        let shared = Handles {
-            cache: Arc::new(LruCache::new(
-                config.cache_max_entries,
-                config.cache_max_bytes,
-            )),
-            metrics: Arc::new(Metrics::new()),
-            bell: Bell::new().0,
-            session_rate: SessionRate::new(SampleRate::SR_48K),
-            seams: Seams::default(),
-        };
+        let shared = Handles::detached(&config, SampleRate::SR_48K);
         let (reports, _queue) = crossbeam_channel::bounded(8);
         let mut cycle = StreamerCycle::new(config, StreamerSender::from(reports));
         assert_eq!(cycle.step(&shared, || None), StepOutcome::Idle, "no stream");
@@ -254,16 +279,7 @@ mod tests {
     #[test]
     fn a_cycle_frees_a_control_the_reader_held_across_its_replacement() {
         let config = BufferConfig::default();
-        let shared = Handles {
-            cache: Arc::new(LruCache::new(
-                config.cache_max_entries,
-                config.cache_max_bytes,
-            )),
-            metrics: Arc::new(Metrics::new()),
-            bell: Bell::new().0,
-            session_rate: SessionRate::new(SampleRate::SR_48K),
-            seams: Seams::default(),
-        };
+        let shared = Handles::detached(&config, SampleRate::SR_48K);
         let (reports, _queue) = crossbeam_channel::bounded(8);
         let reports = StreamerSender::from(reports);
         let mut cycle = StreamerCycle::new(config, reports);
@@ -295,16 +311,7 @@ mod tests {
     #[test]
     fn a_cycle_frees_a_control_the_reader_held_across_a_loop_publish() {
         let config = BufferConfig::default();
-        let shared = Handles {
-            cache: Arc::new(LruCache::new(
-                config.cache_max_entries,
-                config.cache_max_bytes,
-            )),
-            metrics: Arc::new(Metrics::new()),
-            bell: Bell::new().0,
-            session_rate: SessionRate::new(SampleRate::SR_48K),
-            seams: Seams::default(),
-        };
+        let shared = Handles::detached(&config, SampleRate::SR_48K);
         let (reports, _queue) = crossbeam_channel::bounded(8);
         let reports = StreamerSender::from(reports);
         let mut cycle = StreamerCycle::new(config, reports);
