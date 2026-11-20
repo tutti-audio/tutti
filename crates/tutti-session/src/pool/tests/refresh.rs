@@ -1,6 +1,6 @@
 //! `refresh_pool`: a file entry's stamp is taken at its load, the pool's diff
 //! never reads the file, and a refresh loads again the entries whose file
-//! changed. The jobs run when a test says.
+//! changed. A refresh is run and applied by the test.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_platform::Asset;
 
 use super::{Spawned, events, session, state};
-use crate::{Declared, Life, LoadError, PoolEntry, PoolKey, PoolLoad, RefreshReport, Sharing};
+use crate::{
+    Declared, Life, LoadError, PoolEntry, PoolKey, PoolLoad, RefreshError, RefreshReport, Sharing,
+};
 
 /// A kind that reads a whole file: the loaded value is its bytes.
 struct Read {
@@ -68,11 +70,10 @@ fn bytes(session: &crate::DetachedSession, key: &'static str) -> Vec<u8> {
         .to_vec()
 }
 
-/// Runs a refresh to its landing: the stat job, then the update that lands it.
-fn refreshed(s: &mut crate::DetachedSession, spawned: &Spawned) -> RefreshReport {
-    let job = s.refresh_pool();
-    spawned.run_until_stalled();
-    job.wait(s).expect("the job finished")
+/// Runs a refresh and applies it.
+fn refreshed(s: &mut crate::DetachedSession, _: &Spawned) -> RefreshReport {
+    let done = s.refresh_pool().run();
+    s.apply(done).expect("the refresh is current")
 }
 
 fn loaded(dir: &Path, text: &[u8]) -> (crate::DetachedSession, Spawned, PathBuf, Arc<AtomicUsize>) {
@@ -166,12 +167,11 @@ fn a_refresh_loads_again_the_entry_whose_file_changed_and_keeps_the_old_value_un
 }
 
 #[test]
-fn a_dropped_refresh_job_starts_no_reload() {
+fn a_refresh_that_is_never_applied_starts_no_reload() {
     let dir = tempfile::tempdir().unwrap();
     let (mut s, spawned, path, reads) = loaded(dir.path(), b"one");
     std::fs::write(&path, b"longer").unwrap();
-    let job = s.refresh_pool();
-    drop(job);
+    drop(s.refresh_pool().run());
     spawned.run_until_stalled();
     let _ = s.update();
     assert!(spawned.run_until_stalled() == 0, "no reload started");
@@ -245,24 +245,55 @@ fn a_file_that_cannot_be_read_is_named_and_its_entry_keeps_its_value() {
 }
 
 #[test]
-fn an_entry_that_reloaded_meanwhile_is_not_reloaded_by_the_refresh_that_began_before() {
+fn a_refresh_whose_entry_reloaded_since_is_refused_as_stale() {
     let dir = tempfile::tempdir().unwrap();
     let (mut s, spawned, path, reads) = loaded(dir.path(), b"one");
     std::fs::write(&path, b"changed").unwrap();
-    let wait = s.refresh_pool();
-    // The app declares another path under the key while the check runs.
+    let done = s.refresh_pool().run();
+    // The app declares another path under the key after the refresh was cut.
     let other = dir.path().join("b.bin");
     std::fs::write(&other, b"other").unwrap();
     s.pool(read("a", &other, &reads)).unwrap();
     spawned.run_until_stalled();
-    let mut landed = s.update();
-    spawned.run_until_stalled();
-    let _ = s.update();
-    let found = super::took(&mut landed, &wait)
-        .expect("landed")
-        .expect("finished");
-    assert!(found.reloaded().is_empty(), "the stamp it checked is gone");
+    let _ = events(&mut s);
+    assert_eq!(s.apply(done).unwrap_err(), RefreshError::Stale);
+    assert!(spawned.run_until_stalled() == 0, "nothing reloaded");
     assert_eq!(bytes(&s, "a"), b"other");
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_refresh_whose_entry_was_released_is_refused_as_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, spawned, path, reads) = loaded(dir.path(), b"one");
+    std::fs::write(&path, b"changed").unwrap();
+    let done = s.refresh_pool().run();
+    s.pool(read("z", &path, &reads)).unwrap();
+    let _ = events(&mut s);
+    assert!(state(&s, "a").is_none(), "released");
+    assert_eq!(s.apply(done).unwrap_err(), RefreshError::Stale);
+    assert!(spawned.run_until_stalled() == 0, "nothing reloaded");
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn an_output_of_another_session_is_refused_as_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, _spawned_a, path, reads_a) = loaded(dir.path(), b"one");
+    let (mut b, spawned_b) = session();
+    let reads_b = Arc::new(AtomicUsize::new(0));
+    b.pool(read("a", &path, &reads_b)).unwrap();
+    spawned_b.run_until_stalled();
+    let _ = events(&mut b);
+    let generation = |s: &crate::DetachedSession| s.pool.entries.stamped_files()[0].generation;
+    assert_eq!(generation(&a), generation(&b), "the generations match");
+    std::fs::write(&path, b"changed").unwrap();
+    let done = a.refresh_pool().run();
+    assert_eq!(b.apply(done).unwrap_err(), RefreshError::Stale);
+    assert!(spawned_b.run_until_stalled() == 0, "nothing reloaded");
+    assert_eq!(state(&b, "a").as_deref(), Some("loaded"));
+    assert_eq!(reads_b.load(Ordering::SeqCst), 1);
+    assert_eq!(reads_a.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -316,7 +347,7 @@ fn an_entry_with_no_stamp_is_stamped_by_the_refresh_and_loads_again() {
             .entries
             .stamped_files()
             .iter()
-            .all(|(_, _, was)| was.is_none())
+            .all(|stamped| stamped.was.is_none())
     );
     let found = refreshed(&mut s, &spawned);
     assert_eq!(
