@@ -71,7 +71,7 @@ fn a_declared_unassigned_root_keeps_its_buses_by_index() {
 /// six gives, so only the swapped declaration shows the engine read it.)
 #[test]
 fn a_declared_surround_root_folds_by_the_surround_rules() {
-    let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
+    let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
     let mut s = offline(Session::builder().root_topology(five_one), 2).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
@@ -281,18 +281,20 @@ fn an_export_is_placed_from_the_declaration() {
     assert_eq!(planes(&mut declared), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 
-/// The device's placement is stated or assumed, and the session says which: a
+/// The device's placement is stated or the default layout, and the session says which: a
 /// device with nothing stated is the engine's order for its width and reads
-/// `Assumed`; one the build was told about reads `Stated`, with the topology it
+/// `Default`; one the build was told about reads `Stated`, with the topology it
 /// was told.
 #[test]
-fn the_output_device_reads_stated_or_assumed() {
-    let assumed = offline(Session::builder(), 6).unwrap();
-    let placed = assumed.output_device().expect("an engine renders it");
-    assert_eq!(placed.placement, Placement::Assumed);
+fn the_output_device_reads_stated_or_default() {
+    let default_device = offline(Session::builder(), 6).unwrap();
+    let placed = default_device
+        .output_device()
+        .expect("an engine renders it");
+    assert_eq!(placed.placement, Placement::Default);
     assert_eq!(
         placed.topology,
-        ChannelTopology::assumed(ChannelLayout::from(6u16))
+        ChannelTopology::default_for(ChannelLayout::from(6u16))
     );
 
     let wired = ChannelTopology::new([
@@ -315,7 +317,7 @@ fn the_output_device_reads_stated_or_assumed() {
 
 /// A stated device is folded into by speaker: a stereo project into a device
 /// stated right then left lands its left on the device's second channel, where
-/// the assumed stereo device is the identity.
+/// the default stereo device is the identity.
 #[test]
 fn a_stated_device_receives_the_root_by_speaker() {
     let swapped = ChannelTopology::new([Speaker::FrontRight, Speaker::FrontLeft]).unwrap();
@@ -331,7 +333,7 @@ fn a_stated_device_receives_the_root_by_speaker() {
 /// built, naming the widths, and builds nothing.
 #[test]
 fn a_statement_of_another_width_than_the_device_is_refused() {
-    let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
+    let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
     match offline(Session::builder().device_topology(five_one), 2) {
         Err(Error::Output(FoldError::Buffer(tutti_buffers::BufferError::WidthMismatch {
             src,

@@ -4,6 +4,7 @@
 mod support;
 
 mod block_clock;
+mod block_meter;
 mod engine_graph;
 mod env_beat;
 mod graph_contract;

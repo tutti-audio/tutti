@@ -131,7 +131,7 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
 #[test]
 fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
     let (n, d, amount) = (6usize, 8usize, 0.5f64);
-    let bus = BusTopology::assumed(6u16.into()).expect("six channels are one bus");
+    let bus = BusTopology::default_for(6u16.into()).expect("six channels are one bus");
     // Channel c is fed by channel c - 1.
     let layout = DelayLayout::builder(bus, MAX, InterpolationMode::Linear)
         .routing(FeedbackRouting::ring(bus))

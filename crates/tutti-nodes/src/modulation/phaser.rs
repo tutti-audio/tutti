@@ -39,7 +39,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// Made from a [`PhaserConfig`] (`PhaserNode::try_from`): any width on a checked
 /// [`BusTopology`] (an `n`-channel one on the engine's order for that width is
-/// `BusTopology::assumed(n)?`), `stages` stages sweeping 200 to 4000 Hz with no stagger unless
+/// `BusTopology::default_for(n)?`), `stages` stages sweeping 200 to 4000 Hz with no stagger unless
 /// the config gives its own [`SweepRange`] and [`Stagger`].
 ///
 /// # The controls
@@ -367,7 +367,7 @@ mod tests {
     const RATE: SampleRate = SampleRate::SR_48K;
 
     fn bus(width: u16) -> BusTopology {
-        BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
+        BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
     }
 
     /// A fork starts from the values last set through the node's `ParamSet` and shares no

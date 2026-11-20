@@ -695,9 +695,9 @@ impl<C: Clock> SessionBuilder<C> {
     /// States what the output device's channels are: an interface wired as
     /// 5.1 on its six outputs, say. The graph root is folded into it by
     /// speaker. Without it the device is taken to be the engine's order for
-    /// its width ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1,
+    /// its width ([`ChannelTopology::default_for`]: mono, stereo, quad, 5.1, 7.1,
     /// 7.1.4, and independent channels at any other width) and is read back as
-    /// [`Placement::Assumed`](tutti_buffers::Placement::Assumed)
+    /// [`Placement::Default`](tutti_buffers::Placement::Default)
     /// ([`Session::output_device`]).
     ///
     /// The statement is the device's width: a build whose device has another
@@ -960,14 +960,13 @@ impl<C: Clock> SessionBuilder<C> {
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
 
-        // The metronome. It reads the beat, play and record state from its
-        // block's `Env`, and the count-in flag off the transport (read only).
+        // The metronome. It reads the beat, the play, record and count-in state
+        // and the meter from its block's `Env`.
         // It is not wired to the output: what it feeds is the host's
         // declaration, like every other node's.
-        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(
-            &transport,
-            Arc::clone(&click_settings),
-        )));
+        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(Arc::clone(
+            &click_settings,
+        ))));
 
         // The engine's MIDI as graph nodes: the sync node (sends nothing until a
         // host sets its messages). An input port's input node and an output's
@@ -1024,7 +1023,8 @@ impl<C: Clock> SessionBuilder<C> {
             &executor,
             &bells,
         )?;
-        let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts.plugins);
+        let (plugins, _early_work) =
+            crate::session::parts::PluginPart::new(&self.opts.plugins, &executor);
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
         let session = Session {
@@ -1105,7 +1105,7 @@ impl<C: Clock> SessionBuilder<C> {
                 .into());
             }
             Some(stated) => stated.clone(),
-            None => ChannelTopology::assumed(device),
+            None => ChannelTopology::default_for(device),
         };
         match &self.opts.root {
             // The same check `Graph::declare_root` makes a step later; made
@@ -1118,7 +1118,7 @@ impl<C: Clock> SessionBuilder<C> {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
                 tutti_graph::fold_to_topology::<C::Float>(
-                    &ChannelTopology::assumed(width),
+                    &ChannelTopology::default_for(width),
                     &placed,
                 )?;
             }

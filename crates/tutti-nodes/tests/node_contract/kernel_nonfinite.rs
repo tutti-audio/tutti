@@ -24,6 +24,10 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TiltFilterConfig,
     TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
+use tutti_nodes::{
+    CombFilterConfig, CombFilterNode, CombForm, FrequencyShifterConfig, FrequencyShifterNode,
+};
+use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
@@ -150,6 +154,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             ))),
         ),
         (
+            "graphic eq",
+            Box::new(GraphicEqNode::from(GraphicEqConfig::new(
+                BusTopology::STEREO,
+                GraphicBands::ThirdOctave,
+            ))),
+        ),
+        (
             "tilt filter",
             Box::new(TiltFilterNode::from(TiltFilterConfig::new(
                 ChannelLayout::STEREO,
@@ -262,6 +273,20 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "ring mod",
             Box::new(RingModNode::from(RingModConfig::new(ChannelLayout::STEREO))),
+        ),
+        (
+            "comb (feedback)",
+            Box::new(CombFilterNode::<f32>::from(CombFilterConfig::new(
+                ChannelLayout::STEREO,
+                CombForm::Feedback,
+                Seconds::new(0.002),
+            ))),
+        ),
+        (
+            "frequency shifter",
+            Box::new(FrequencyShifterNode::<f32>::from(
+                FrequencyShifterConfig::new(ChannelLayout::STEREO).shift(Hz::new(300.0)),
+            )),
         ),
         (
             "multiband",

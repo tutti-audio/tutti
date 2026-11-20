@@ -500,6 +500,7 @@ mod tests {
             origin: PluginRef::file("test.vst3"),
             format: PluginFormat::Vst3,
             load_editor: None,
+            executor: tutti_platform::Executor::new().downgrade(),
         };
         let (controls, _) =
             PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);

@@ -18,7 +18,7 @@ fn frames(x: f64) -> ReadPosition {
 }
 
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(width.into()).expect("a test width is one bus")
+    BusTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {

@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant, WeakExecutor};
 
 use tutti_buffers::Float;
 use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle};
@@ -57,6 +57,9 @@ pub(crate) struct PluginPart {
     /// What every plugin this session loads hands to the main thread: the closes of
     /// a drop off the main thread. The handle is cloned into each load.
     pub(crate) work: MainWorkHandle,
+    /// The session's executor, reached by the loads this session queues without
+    /// keeping it alive.
+    pub(crate) executor: WeakExecutor,
     /// The receiving end of `work`, drained on the main thread by the session's
     /// update. Declared last, so it drops after everything the part holds: a
     /// close handed over while the session drops is still collected, and
@@ -70,7 +73,7 @@ impl PluginPart {
     /// stored as `Session`'s first field. Fields drop in order, so it runs the
     /// work already handed over before any plugin closes, and the part's
     /// `main_work`, dropped last, runs what the closing plugins hand over.
-    pub(crate) fn new(options: &PluginOptions) -> (Self, EarlyWork) {
+    pub(crate) fn new(options: &PluginOptions, executor: &Executor) -> (Self, EarlyWork) {
         let (main_work, work) = MainWork::new();
         let main_work = SharedWork::new(main_work);
         let early = EarlyWork(main_work.clone());
@@ -83,6 +86,7 @@ impl PluginPart {
                 render_mode: RenderModeState::default(),
                 pooled_swaps: BTreeSet::new(),
                 work,
+                executor: executor.downgrade(),
                 main_work,
             },
             early,

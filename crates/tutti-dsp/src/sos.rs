@@ -1,5 +1,6 @@
 //! [`Sos`]: a cascade of second-order sections, the design and analysis form of an IIR
-//! filter of any order, and the [`Butterworth`], [`LinkwitzRiley`], [`MatchedBell`], [`Tilt`] and
+//! filter of any order, and the [`Butterworth`], [`ChebyshevI`], [`ChebyshevII`], [`Elliptic`],
+//! [`LinkwitzRiley`], [`MatchedBell`], [`Tilt`], [`Cookbook`], [`GraphicBands`] and
 //! [`KWeighting`] designs that make one.
 //!
 //! A [`Sos`] is plain data: a list of [`Biquad`]s whose product is the response. A first-order section is a [`Biquad`] with `b2 = a2 = 0`.
@@ -7,9 +8,15 @@
 //! `svf_form` is its equivalent), never as direct-form biquads, which misbehave when their
 //! coefficients move and at a low cutoff in `f32`.
 
+mod analog;
 mod bank;
 mod bell;
 mod butterworth;
+mod chebyshev;
+mod cookbook;
+mod elliptic;
+mod graphic;
+mod jacobi;
 mod k_weighting;
 mod tilt;
 
@@ -18,12 +25,19 @@ use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 use crate::filter::{integrator_gains, section_l1};
 use crate::{Biquad, Complex64, DecayTime, Lti, SvfDesign, System, svf_step};
 
+pub use analog::{
+    PassbandRipple, PassbandRippleError, StopbandAttenuation, StopbandAttenuationError,
+};
 pub use bank::{MAX_SECTIONS, SosBank, SosCoefficients};
 pub use bell::MatchedBell;
 pub use butterworth::{
     Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley,
     MAX_GAIN_MAGNITUDE, SosError,
 };
+pub use chebyshev::{ChebyshevI, ChebyshevII};
+pub use cookbook::Cookbook;
+pub use elliptic::{Elliptic, EllipticTolerances};
+pub use graphic::GraphicBands;
 pub use k_weighting::KWeighting;
 pub use tilt::Tilt;
 
@@ -218,3 +232,9 @@ mod tests;
 
 #[cfg(test)]
 mod eq_tests;
+
+#[cfg(test)]
+mod cookbook_tests;
+
+#[cfg(test)]
+mod ripple_tests;

@@ -20,7 +20,7 @@ pub(crate) struct PluginPart;
 pub(crate) struct EarlyWork;
 
 impl PluginPart {
-    pub(crate) fn new(_: &PluginOptions) -> (Self, EarlyWork) {
+    pub(crate) fn new(_: &PluginOptions, _: &tutti_platform::Executor) -> (Self, EarlyWork) {
         (Self, EarlyWork)
     }
 

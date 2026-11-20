@@ -361,6 +361,7 @@ fn render_applied_leaves_a_queued_commit_for_the_next_block() {
         &tutti_graph::TransportChanges::NONE,
         &[],
         &mut [],
+        None,
     );
     assert!(exec.plan().is_none(), "still queued");
     let out = render(&mut exec, 16, 2);

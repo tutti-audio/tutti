@@ -22,7 +22,10 @@ mod clip_node;
 // A stream or a clip opened on the spawner lands in `update()` (doc 030, A5 and A6).
 #[cfg(feature = "sampler")]
 mod sampler_loads;
-// The pool and a disk stream on an `f64` session.
+// A load is a value and its handle the app's (`load_audio`).
+#[cfg(feature = "sampler")]
+mod audio_loads;
+// A load and a disk stream on an `f64` session.
 #[cfg(feature = "sampler")]
 mod f64_loads;
 // A voice of either tier arrives where the compiler puts it (doc 025 stage 5).

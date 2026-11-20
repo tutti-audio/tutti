@@ -48,8 +48,8 @@ pub struct Wave<S: Sample = f32> {
 
 /// Two waves are equal when their samples, rate and speakers are: the
 /// [`placement`](Wave::placement) says where the topology came from, not what
-/// the wave is, so a wave and its WAV round trip (a stated mono against an
-/// assumed one) are equal.
+/// the wave is, so a wave and its WAV round trip (a stated mono against the
+/// default one) are equal.
 impl<S: Sample> PartialEq for Wave<S> {
     fn eq(&self, other: &Self) -> bool {
         self.sample_rate == other.sample_rate
@@ -59,10 +59,10 @@ impl<S: Sample> PartialEq for Wave<S> {
     }
 }
 
-/// What a bare channel count is taken to mean: [`ChannelTopology::assumed`].
-fn assumed(channels: usize) -> (ChannelTopology, Placement) {
+/// What a bare channel count is taken to mean: [`ChannelTopology::default_for`].
+fn default_for(channels: usize) -> (ChannelTopology, Placement) {
     let layout = ChannelLayout::try_from(channels).expect("a wave has at most u16::MAX channels");
-    (ChannelTopology::assumed(layout), Placement::Assumed)
+    (ChannelTopology::default_for(layout), Placement::Default)
 }
 
 impl<S: Sample> core::fmt::Debug for Wave<S> {
@@ -91,7 +91,7 @@ impl<S: Sample> Wave<S> {
     ///
     /// If `channels` is above `u16::MAX`, which no layout holds.
     pub fn with_capacity(channels: usize, sample_rate: SampleRate, capacity: Samples) -> Self {
-        let (topology, placement) = assumed(channels);
+        let (topology, placement) = default_for(channels);
         Self {
             vec: (0..channels)
                 .map(|_| Vec::with_capacity(capacity.get()))
@@ -107,8 +107,8 @@ impl<S: Sample> Wave<S> {
     /// one channel per speaker, with a [`Stated`](Placement::Stated) placement.
     ///
     /// [`new`](Self::new) takes a bare count, and a count is not a placement:
-    /// it takes [`ChannelTopology::assumed`] and reports
-    /// [`Placement::Assumed`]. Use this when the source says more.
+    /// it takes [`ChannelTopology::default_for`] and reports
+    /// [`Placement::Default`]. Use this when the source says more.
     pub fn with_topology(topology: ChannelTopology, sample_rate: SampleRate) -> Self {
         Self::with_placement(topology, Placement::Stated, sample_rate)
     }
@@ -116,7 +116,7 @@ impl<S: Sample> Wave<S> {
     /// Creates an empty wave as [`with_topology`](Self::with_topology) does,
     /// reporting `placement` as the basis of `topology` (a decoder whose
     /// container stated a count and no placement passes
-    /// [`Placement::Assumed`]).
+    /// [`Placement::Default`]).
     pub fn with_placement(
         topology: ChannelTopology,
         placement: Placement,
@@ -142,7 +142,7 @@ impl<S: Sample> Wave<S> {
     pub fn zero(channels: usize, sample_rate: SampleRate, duration: impl Into<Seconds>) -> Self {
         let length = duration.into().to_samples(sample_rate).get();
         assert!(channels > 0 || length == 0);
-        let (topology, placement) = assumed(channels);
+        let (topology, placement) = default_for(channels);
         Self {
             vec: vec![vec![S::SILENCE; length]; channels],
             sample_rate,
@@ -153,9 +153,9 @@ impl<S: Sample> Wave<S> {
     }
 
     /// Creates a wave holding a copy of `planes`, one channel per plane, with
-    /// the assumed topology of that width.
+    /// the default layout for that width.
     pub fn from_planes(sample_rate: SampleRate, planes: Planes<'_, S>) -> Self {
-        let (topology, placement) = assumed(planes.channels());
+        let (topology, placement) = default_for(planes.channels());
         Self {
             vec: planes.iter().map(|p| p.samples().to_vec()).collect(),
             sample_rate,
@@ -167,7 +167,7 @@ impl<S: Sample> Wave<S> {
 
     /// Creates a mono wave holding a copy of `samples`.
     pub fn from_mono(sample_rate: SampleRate, samples: Mono<'_, S>) -> Self {
-        let (topology, placement) = assumed(1);
+        let (topology, placement) = default_for(1);
         Self {
             vec: vec![samples.samples().to_vec()],
             sample_rate,
@@ -178,7 +178,7 @@ impl<S: Sample> Wave<S> {
     }
 
     /// Creates a wave holding the frames of `block`, deinterleaved, with the
-    /// assumed topology of its width.
+    /// default layout for its width.
     pub fn from_interleaved(sample_rate: SampleRate, block: Interleaved<'_, S>) -> Self {
         let mut wave = Self::with_capacity(block.channels(), sample_rate, block.frames());
         // A new wave is the block's width, the one thing `append` refuses.
@@ -230,7 +230,7 @@ impl<S: Sample> Wave<S> {
         &self.topology
     }
 
-    /// Returns whether [`topology`](Self::topology) was stated or assumed from
+    /// Returns whether [`topology`](Self::topology) was stated or the default layout for
     /// the channel count.
     #[inline]
     pub fn placement(&self) -> Placement {

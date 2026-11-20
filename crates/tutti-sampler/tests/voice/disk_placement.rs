@@ -12,7 +12,7 @@
 //! channel mask hand-written: channel `c` holds the constant `(c + 1) / 16`
 //! (a dyadic value, so the read is exact), which makes a channel in the wrong
 //! place a wrong value. The expected figures come from the engine's speaker
-//! order (`ChannelTopology::assumed`), not from the placement under test.
+//! order (`ChannelTopology::default_for`), not from the placement under test.
 
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
@@ -198,7 +198,7 @@ fn a_wav_order_seven_one_is_permuted_to_the_engines_order() {
         ])
         .unwrap()
     };
-    let engine = ChannelTopology::assumed(ChannelLayout::from(8u16));
+    let engine = ChannelTopology::default_for(ChannelLayout::from(8u16));
     let want: Vec<f32> = engine
         .positions()
         .unwrap()

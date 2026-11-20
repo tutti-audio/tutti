@@ -157,13 +157,15 @@ const ONLY: &[(&str, &[&str])] = &[
         ],
     ),
     // The facade over the hosting: the generic host, the wire, the catalog and
-    // the vocabulary, the graph a plugin is a node of, and the format hosts an
-    // in-process load or an editor needs.
+    // the vocabulary, the graph a plugin is a node of, the executor a served
+    // plugin's exit watch runs on, and the format hosts an in-process load or an
+    // editor needs.
     (
         "tutti-plugin",
         &[
             "tutti-buffers",
             "tutti-graph",
+            "tutti-platform",
             "tutti-plugin-db",
             "tutti-plugin-host",
             "tutti-plugin-ipc",
@@ -256,7 +258,10 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-platform",
         ],
     ),
-    ("tutti-dsp", &["tutti-units", "tutti-buffers", "tutti-rt"]),
+    (
+        "tutti-dsp",
+        &["tutti-units", "tutti-music", "tutti-buffers", "tutti-rt"],
+    ),
     ("tutti-curve", &["tutti-units"]),
     ("tutti-buffers", &["tutti-units"]),
     (

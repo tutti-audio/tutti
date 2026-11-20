@@ -9,11 +9,11 @@
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals, GAIN_RAMP,
-    Lerp,
+    COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals, DelayTiming,
+    GAIN_RAMP, Lerp,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Feedback, SampleRate, Seconds, Tail};
+use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
 
 #[cfg(doc)]
 use tutti_buffers::BusTopology;
@@ -72,6 +72,16 @@ impl DelayConfig {
 /// feedback and cross-feedback are bounded as a **pair**
 /// ([`Feedback::stable_pair`]), so the loop gain stays under [`Feedback::MAX_STABLE`]
 /// whatever they, or the routing, say.
+///
+/// # Tempo-synced times
+///
+/// A layout built with [`DelayLayoutBuilder::synced`](tutti_dsp::DelayLayoutBuilder::synced) times
+/// each channel by a [`NoteDuration`](tutti_music::NoteDuration) instead of seconds: the node reads the
+/// transport's tempo once per block ([`Kernel::tempo`]) and the channel's time is the note's beats
+/// at that tempo (`beats * 60 / bpm` seconds), clamped into the line. A tempo that moves moves the
+/// time through the same ramp as a time control, at no more than
+/// [`DELAY_SLEW`](tutti_dsp::DELAY_SLEW) frames of delay per frame, and a stopped transport has its
+/// set tempo. The time control does nothing on such a delay.
 ///
 /// The output is the delayed signal alone (the wet signal). The blend with the dry input
 /// is the graph's: `Editor::set_mix` mixes the output with the input, which this node
@@ -157,6 +167,8 @@ pub struct DelayKernel<F: Float> {
     /// The lines, sized when the rate is known: `None` until [`prepare`](Kernel::prepare).
     bank: Option<DelayBank<F>>,
     ramps: DelayRamps<F>,
+    /// The tempo the times were last aimed at: `None` until a block tells it.
+    tempo: Option<Bpm>,
     /// Whether the first retarget after `prepare` has been applied.
     applied: bool,
 }
@@ -168,6 +180,7 @@ impl<F: Float + Lerp> DelayKernel<F> {
             layout,
             bank: None,
             ramps: DelayRamps::new(0),
+            tempo: None,
             applied: false,
         }
     }
@@ -197,7 +210,22 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         self.bank = Some(DelayBank::new(&self.layout, rate));
         self.ramps = DelayRamps::new(steps);
+        self.tempo = None;
         self.applied = false;
+    }
+
+    /// Aims a delay timed in notes at `tempo`, when it is not the one its times are aimed
+    /// at: a tempo that moves moves the times through their ramp, and the first block's lands
+    /// at once with the first retarget. A delay timed in seconds ignores the tempo.
+    fn tempo(&mut self, tempo: Bpm) {
+        if !matches!(self.layout.timing(), DelayTiming::Synced(_)) {
+            return;
+        }
+        let Some(bank) = &self.bank else { return };
+        if self.tempo != Some(tempo) {
+            bank.retarget_tempo(&mut self.ramps, tempo);
+            self.tempo = Some(tempo);
+        }
     }
 
     fn reset(&mut self) {
@@ -272,7 +300,7 @@ mod tests {
     }
 
     fn bus(width: u16) -> BusTopology {
-        BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
+        BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
     }
 
     /// `node` prepared at [`RATE`], over `inputs` (one `Vec` per channel) frame by frame,
@@ -848,5 +876,61 @@ mod tests {
         let moves = [(0, controls(frames(d as f64), 0.6, 0.0))];
         let y = drive_kernel(&mut k, &moves, &[x]).remove(0);
         assert_close_f64(&y, &want, 2.0f64.powi(-45));
+    }
+
+    /// A synced delay under a transport is delayed by its note at the transport's tempo, on the
+    /// first block: `beats * 60 / bpm` seconds, which at 1024 frames a second is a whole number
+    /// of frames here. A quarter at 120 bpm is 0.5 s (512 frames), a dotted quarter at 60 bpm
+    /// 1.5 s (1536), and the same quarter under a stopped transport at 120 bpm is the same 512.
+    #[test]
+    fn a_synced_delay_echoes_at_its_notes_time_at_the_transports_tempo() {
+        use tutti_dsp::NoteTimes;
+        use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+        use tutti_music::{NoteDuration, NoteModifier, NoteValue};
+        use tutti_units::{Beat, Bpm, Frame};
+
+        let cases = [
+            (NoteDuration::QUARTER, true, 120.0, 512),
+            (
+                NoteDuration::new(NoteValue::QUARTER, NoteModifier::Dotted),
+                true,
+                60.0,
+                1536,
+            ),
+            (NoteDuration::QUARTER, false, 120.0, 512),
+        ];
+        for (note, playing, bpm, echo) in cases {
+            let layout = DelayLayout::builder(
+                BusTopology::MONO,
+                MaxDelay::of(Seconds::new(4.0)),
+                InterpolationMode::Linear,
+            )
+            .synced(NoteTimes::all(note))
+            .build()
+            .unwrap();
+            let mut node = prepared(DelayNode::<f32>::from(DelayConfig::new(layout)), RATE, 2048);
+            let mut x = vec![0.0f32; 2048];
+            x[0] = 1.0;
+            let env = Env {
+                frame: Frame::new(0),
+                sample_rate: RATE,
+                block_len: Samples::new(2048),
+                transport: TransportPosition::new(playing, Bpm::of(bpm), Beat::new(0.0), None),
+                changes: TransportChanges::NONE,
+                play: PlayClock::ZERO,
+            };
+            let y = tutti_graph::contract::drive_input(
+                &mut node,
+                &env,
+                Planes::new(&[&x[..]]).unwrap(),
+                &[],
+                &[],
+            )
+            .audio
+            .remove(0);
+            for (i, &v) in y.iter().enumerate() {
+                assert_eq!(v, f32::from(i == echo), "{note:?} at {bpm} bpm, frame {i}");
+            }
+        }
     }
 }

@@ -19,14 +19,14 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
-    BusStripNode, ChannelTimes, CompressorConfig, CompressorControls, CompressorNode,
-    ConvolverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
-    DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
-    LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode,
-    MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
-    RingModConfig, RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
-    TremoloConfig, TremoloNode,
+    BusStripNode, ChannelTimes, CombFilterConfig, CombFilterNode, CombForm, CompressorConfig,
+    CompressorControls, CompressorNode, ConvolverNode, DelayConfig, DelayControls, DelayLayout,
+    DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig,
+    EqBandNode, FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
+    LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
+    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind,
+    Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -35,8 +35,8 @@ use tutti_nodes::{
     TransientShaperNode,
 };
 use tutti_nodes::{
-    PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
-    TiltFilterNode,
+    GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
+    StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode,
 };
 use tutti_units::{
     Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
@@ -276,6 +276,25 @@ fn tilt_filter() {
 }
 
 #[test]
+fn graphic_eq() {
+    IsolateRow::new("GraphicEqNode (stereo, octave)", || {
+        let node = GraphicEqNode::from(GraphicEqConfig::new(
+            BusTopology::STEREO,
+            GraphicBands::Octave,
+        ));
+        assert!(
+            node.param_set()
+                .set(UnitAddr::new(UnitParam::GainDb, 4), 6.0)
+        );
+        node
+    })
+    .control("band gain", |d| {
+        assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 4), -9.0))
+    })
+    .check();
+}
+
+#[test]
 fn dynamic_eq() {
     IsolateRow::new("DynamicEqNode<f32> (stereo, side-chain)", || {
         DynamicEqNode::<f32>::from(
@@ -409,6 +428,36 @@ fn auto_pan() {
     })
     .control("depth", |p| {
         assert!(p.param_set().set(UnitParam::Depth, 1.0))
+    })
+    .check();
+}
+
+#[test]
+fn comb_filter() {
+    for form in [CombForm::Feedforward, CombForm::Feedback] {
+        IsolateRow::new("CombFilterNode (stereo)", move || {
+            CombFilterNode::from(CombFilterConfig::new(
+                ChannelLayout::STEREO,
+                form,
+                Seconds::new(0.004),
+            ))
+        })
+        .control("coefficient", |r| {
+            assert!(r.param_set().set(UnitParam::Feedback, 0.8))
+        })
+        .check();
+    }
+}
+
+#[test]
+fn frequency_shifter() {
+    IsolateRow::new("FrequencyShifterNode (stereo)", || {
+        FrequencyShifterNode::from(
+            FrequencyShifterConfig::new(ChannelLayout::STEREO).shift(Hz::new(200.0)),
+        )
+    })
+    .control("shift", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, -90.0))
     })
     .check();
 }

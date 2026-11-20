@@ -1,11 +1,12 @@
-//! [`CutFilterNode`]: a Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per
-//! octave, run as a cascade of state-variable sections.
+//! [`CutFilterNode`]: a Butterworth, Linkwitz-Riley, Chebyshev or elliptic high-pass or
+//! low-pass, run as a cascade of state-variable sections.
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    Butterworth, ButterworthOrder, CutResponse, DecayTime, LinkwitzRiley, SimdLanes,
-    SosCoefficients, System, TAIL_FLOOR,
+    Butterworth, ButterworthOrder, ChebyshevI, ChebyshevII, CutResponse, DecayTime, Elliptic,
+    EllipticTolerances, LinkwitzRiley, PassbandRipple, SimdLanes, SosCoefficients,
+    StopbandAttenuation, System, TAIL_FLOOR,
 };
 use tutti_graph::Shape;
 use tutti_units::{Hz, SampleRate, Samples, Tail};
@@ -23,7 +24,9 @@ const LADDER: usize = 14;
 /// The control of a [`CutFilterNode`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CutFilterControls {
-    /// The cutoff: `-3 dB` for a Butterworth filter, `-6 dB` for a Linkwitz-Riley one. Read
+    /// The cutoff: `-3 dB` for a Butterworth filter, `-6 dB` for a Linkwitz-Riley one, the
+    /// passband edge of a Chebyshev I or elliptic one and the stopband edge of a Chebyshev II
+    /// one. Read
     /// within [`MIN_CUT_CUTOFF`] and 0.99 of the Nyquist.
     pub cutoff: Hz,
 }
@@ -44,6 +47,29 @@ pub enum CutAlignment {
     /// A [`LinkwitzRiley`] filter of twice this order (the Butterworth order it squares):
     /// `12 * order` dB per octave, `-6 dB` at the cutoff.
     LinkwitzRiley(ButterworthOrder),
+    /// A [`ChebyshevI`] filter: equiripple in the passband, `-ripple` dB at the cutoff.
+    ChebyshevI {
+        /// The order.
+        order: ButterworthOrder,
+        /// The passband ripple.
+        ripple: PassbandRipple,
+    },
+    /// A [`ChebyshevII`] filter: equiripple in the stopband, `-attenuation` dB at the cutoff,
+    /// the stopband edge.
+    ChebyshevII {
+        /// The order.
+        order: ButterworthOrder,
+        /// The stopband attenuation.
+        attenuation: StopbandAttenuation,
+    },
+    /// An [`Elliptic`] filter: equiripple in both bands, `-ripple` dB at the cutoff, the
+    /// passband edge.
+    Elliptic {
+        /// The order.
+        order: ButterworthOrder,
+        /// The passband ripple and the stopband attenuation.
+        tolerances: EllipticTolerances,
+    },
 }
 
 /// What a [`CutFilterNode`] is made from: its width, response and alignment, and optionally
@@ -82,7 +108,8 @@ impl CutFilterConfig {
     }
 }
 
-/// A high-pass or low-pass of any width, a [`Butterworth`] or [`LinkwitzRiley`] design run
+/// A high-pass or low-pass of any width, a [`Butterworth`], [`LinkwitzRiley`], [`ChebyshevI`],
+/// [`ChebyshevII`] or [`Elliptic`] design run
 /// as a cascade of state-variable sections ([`SosBank`](tutti_dsp::SosBank)) in `f64`.
 ///
 /// The cutoff is a live [`Hz`] cell (`UnitParam::Cutoff`), designed on a 16-frame grid
@@ -167,6 +194,15 @@ impl<F: Float + SimdLanes> CutFilterKernel<F> {
             CutAlignment::LinkwitzRiley(half) => {
                 LinkwitzRiley::new(response, half).design_into(cutoff, rate, into)
             }
+            CutAlignment::ChebyshevI { order, ripple } => {
+                ChebyshevI::new(response, order, ripple).design_into(cutoff, rate, into)
+            }
+            CutAlignment::ChebyshevII { order, attenuation } => {
+                ChebyshevII::new(response, order, attenuation).design_into(cutoff, rate, into)
+            }
+            CutAlignment::Elliptic { order, tolerances } => {
+                Elliptic::new(response, order, tolerances).design_into(cutoff, rate, into)
+            }
         })
     }
 }
@@ -249,7 +285,7 @@ mod tests {
     use tutti_dsp::TAIL_FLOOR;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Cost, Node, ParamNode};
-    use tutti_units::UnitParam;
+    use tutti_units::{Db, UnitParam};
 
     const LP: CutResponse = CutResponse::LowPass;
     const HP: CutResponse = CutResponse::HighPass;
@@ -297,6 +333,84 @@ mod tests {
         let t = libm::tan(PI * f / RATE.get()) / libm::tan(PI * fc / RATE.get());
         let ratio = if response == LP { t } else { 1.0 / t };
         1.0 / (1.0 + ratio.powi(2 * i32::from(order))).sqrt()
+    }
+
+    /// The analog Chebyshev I magnitude at the bilinear image of `f`: `1 / sqrt(1 + e^2
+    /// T_N(w)^2)` with `w` the prewarped frequency over the prewarped cutoff and `T_N` from
+    /// its `cos` and `cosh` forms.
+    fn chebyshev_one(response: CutResponse, order: u8, ripple: f64, fc: f64, f: f64) -> f64 {
+        let t = libm::tan(PI * f / RATE.get()) / libm::tan(PI * fc / RATE.get());
+        let w = if response == LP { t } else { 1.0 / t };
+        let n = f64::from(order);
+        let poly = if w <= 1.0 {
+            libm::cos(n * libm::acos(w))
+        } else {
+            libm::cosh(n * libm::acosh(w))
+        };
+        let e2 = libm::pow(10.0, ripple / 10.0) - 1.0;
+        1.0 / libm::sqrt(1.0 + e2 * poly * poly)
+    }
+
+    /// A settled rendered sine has the analog Chebyshev I magnitude at the prewarped
+    /// frequency, in both responses and across the passband edge.
+    #[test]
+    fn a_rendered_sine_has_the_chebyshev_one_magnitude() {
+        for response in [LP, HP] {
+            for order in [3u8, 4, 7] {
+                let ripple = 1.5;
+                let alignment = CutAlignment::ChebyshevI {
+                    order: ButterworthOrder::of(order),
+                    ripple: PassbandRipple::new(Db::new(ripple)).unwrap(),
+                };
+                for f in [51, 137, 171, 256, 683].map(bin) {
+                    let want = chebyshev_one(response, order, ripple, 1000.0, f);
+                    let got = gain(CutFilterConfig::new(1u16, response, alignment), f);
+                    assert!(
+                        (got - want).abs() < 5e-7 + 1e-4 * want,
+                        "{response:?} {order} at {f}: {got} vs {want}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A Chebyshev II low-pass stays under `-attenuation` dB from its cutoff up, and an
+    /// elliptic one from its stopband edge up and within `ripple` of unity below the cutoff.
+    #[test]
+    fn rendered_sines_meet_the_stopband_and_passband_bounds() {
+        let (ripple, attenuation) = (1.0, 50.0);
+        let order = ButterworthOrder::of(6);
+        let (ripple_db, attenuation_db) = (
+            PassbandRipple::new(Db::new(ripple)).unwrap(),
+            StopbandAttenuation::new(Db::new(attenuation)).unwrap(),
+        );
+        let limit = libm::pow(10.0, -attenuation / 20.0);
+        let two = CutAlignment::ChebyshevII {
+            order,
+            attenuation: attenuation_db,
+        };
+        let tolerances = EllipticTolerances::new(ripple_db, attenuation_db).unwrap();
+        let elliptic = CutAlignment::Elliptic { order, tolerances };
+        let edge = Elliptic::new(LP, order, tolerances)
+            .stopband_edge(Hz::new(1000.0), RATE)
+            .unwrap()
+            .get();
+        for f in [bin(171), bin(300), bin(600)] {
+            let got = gain(CutFilterConfig::new(1u16, LP, two), f);
+            assert!(got <= limit * 1.01, "Chebyshev II at {f}: {got}");
+        }
+        for f in [edge * 1.0001, edge * 1.5, edge * 3.0] {
+            let got = gain(CutFilterConfig::new(1u16, LP, elliptic), f);
+            assert!(got <= limit * 1.01, "elliptic at {f}: {got}");
+        }
+        let floor = libm::pow(10.0, -ripple / 20.0);
+        for f in [bin(17), bin(51), bin(120), bin(160)] {
+            let got = gain(CutFilterConfig::new(1u16, LP, elliptic), f);
+            assert!(
+                got <= 1.0 + 1e-4 && got >= floor - 1e-4,
+                "elliptic at {f}: {got}"
+            );
+        }
     }
 
     /// A fork starts from the cutoff last set and shares no cell.
