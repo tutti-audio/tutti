@@ -163,14 +163,14 @@ impl std::task::Wake for Wakes {
     }
 }
 
-/// **Dropping a session wakes the streamer's task, so a host executor that outlives
-/// the session ends it.** The session runs on a host executor that keeps every future
-/// it is handed. The streamer's future is polled once, so it waits on its bell with the
-/// task's waker stored; the session is dropped; the waker has been woken by then, and
-/// the next poll ends the future. A wake lost with the bells would leave the task, and
-/// everything its future holds, alive for good.
+/// **A dropped session rings its streamer, and the next poll of the streamer's future
+/// ends it.** The session runs on a host executor that keeps every future it is handed.
+/// The streamer's future is polled once, so it waits on its bell with the task's waker
+/// stored; the session is dropped; the next poll ends the future. The wake of the stored
+/// waker itself races the bells' shutdown, and `tutti-rt`'s loom model pins that race;
+/// this asserts it was delivered in the usual case.
 #[test]
-fn dropping_a_session_wakes_the_streamer_task_on_a_host_executor() {
+fn a_dropped_session_rings_its_streamer_and_the_next_poll_ends() {
     use std::future::Future;
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
