@@ -4,7 +4,8 @@
 //! [`Session::record`] arms a take on an [`Input`]. It opens a plan tap on the
 //! input's inlet node, so the take is made of what the graph was given, frame
 //! for frame on the graph's own clock ([`TapReader::next_frame`]), and runs the
-//! pump into a sink on the session's executor. Nothing is resampled or shifted
+//! pump into a sink on the session's executor, which the audio thread wakes by a
+//! bell as the tap fills. Nothing is resampled or shifted
 //! in the file: where the take belongs is metadata, a [`Placement`] the take
 //! states term by term.
 //!
@@ -45,8 +46,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, channel};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use thiserror::Error;
 use tutti_buffers::ChannelLayout;
@@ -54,12 +54,12 @@ use tutti_buffers::{Float, Interleaved, InterleavedMut, Sink, SinkFailed};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
+use tutti_rt::{Bell, Listener};
 use tutti_tempo::TempoMap;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::WorkerError;
-use crate::jobs::{Landings, Stream};
-use crate::recorder::IDLE_PARK;
+use crate::jobs::{Landings, Stream, StreamRun};
 use crate::{Input, Session, SessionEvent, Trim};
 
 /// How many frames the pump moves a pass.
@@ -605,6 +605,10 @@ pub enum TakeError {
     /// [`Sink`]'s contract, which has `finalize` report the first failure.
     #[error("the sink refused a write and its finalize reported no error")]
     SinkRefused,
+    /// The executor refused to start the take's pump (a thread the OS would not
+    /// give), before any file or tap was opened.
+    #[error("the take's pump could not start: {0}")]
+    NotStarted(std::io::ErrorKind),
     /// The take's job panicked or was dropped by the executor.
     #[error("the take's job did not finish: {0}")]
     Job(#[from] WorkerError),
@@ -612,10 +616,6 @@ pub enum TakeError {
     /// reached: it holds nothing.
     #[error("the take ended before its punch-in")]
     NeverStarted,
-    /// [`Take::finish`] found no result: the take's job ended without one
-    /// (the update reports why as [`TakeEvent::Failed`]).
-    #[error("the take ended without a result")]
-    NoResult,
     /// A take written to a sink of the caller's has no file to make a clip
     /// from.
     #[error("the take was not written to a file")]
@@ -642,13 +642,24 @@ impl sealed::Sealed for Rolling {}
 impl InFlight for Armed {}
 impl InFlight for Rolling {}
 
-/// Stops the pump when the last handle of the take goes.
+/// Stops the pump when the last handle of the take goes: the flag, then a ring to
+/// wake a pump that awaits its tap.
 #[derive(Debug)]
-struct StopOnDrop(Arc<AtomicBool>);
+struct StopOnDrop {
+    stop: Arc<AtomicBool>,
+    bell: Bell,
+}
+
+impl StopOnDrop {
+    fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        self.bell.ring();
+    }
+}
 
 impl Drop for StopOnDrop {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
+        self.stop();
     }
 }
 
@@ -658,14 +669,13 @@ impl Drop for StopOnDrop {
 /// Both states [`finish`](Take::finish), which stops it at once; a take with a
 /// punch-out ends by itself. **Dropping the handle stops the take too**, without
 /// waiting: the pump closes its sink on the executor and the end is still
-/// reported ([`TakeEvent::Finished`]).
+/// reported ([`TakeEvent::Finished`]), in a later [`update`](Session::update).
 #[must_use = "dropping a take stops it; keep it while it records, or finish it"]
 pub struct Take<S> {
     id: TakeId,
     window: Window,
     shared: Arc<Shared>,
     stop: StopOnDrop,
-    result: Receiver<Result<Recorded, TakeError>>,
     state: std::marker::PhantomData<fn() -> S>,
 }
 
@@ -697,7 +707,6 @@ impl<S> Take<S> {
             window: self.window,
             shared: self.shared,
             stop: self.stop,
-            result: self.result,
             state: std::marker::PhantomData,
         }
     }
@@ -735,21 +744,16 @@ impl Take<Rolling> {
 }
 
 impl<S: InFlight> Take<S> {
-    /// Stops the take at once, waits for its sink to close and returns what it
-    /// holds. A take with a punch-out that already ended returns what it
-    /// recorded.
+    /// Stops the take at once and returns without waiting. The pump sees the stop on
+    /// its next wake and closes its sink; what the take holds arrives in a later
+    /// [`Session::update`] as [`TakeEvent::Finished`], or [`TakeEvent::Failed`] when the
+    /// sink failed or the pump ended without a result. A take with a punch-out that
+    /// already ended reports the same way.
     ///
-    /// Blocks for at most one pump pass. The end is also reported to
-    /// [`Session::update`] ([`TakeEvent::Finished`]).
-    ///
-    /// # Errors
-    ///
-    /// [`TakeError::Sink`] when the sink failed, [`TakeError::NoResult`] when
-    /// the job ended without a result.
-    #[must_use = "the result says whether the take closed cleanly"]
-    pub fn finish(self) -> Result<Recorded, TakeError> {
-        self.stop.0.store(true, Ordering::Release);
-        self.result.recv().unwrap_or(Err(TakeError::NoResult))
+    /// Never blocks and never joins: on a [`polled`](tutti_platform::Executor::polled)
+    /// executor the pump closes the sink inside the `update` that polls it.
+    pub fn finish(self) {
+        self.stop.stop();
     }
 }
 

@@ -479,7 +479,7 @@ impl Jobs {
     /// Runs `work` on the executor and lands its result in a later
     /// [`Session::update`], on the control thread.
     ///
-    /// `land` (and every lander of [`submit_dedicated`](Self::submit_dedicated))
+    /// `land` (and every lander of a streaming job)
     /// runs on the thread that calls `update()`, which need not be the main
     /// thread: a landing takes no main-thread proof (the plugin reload's does
     /// not), and what must be done on the main
@@ -547,10 +547,7 @@ impl Jobs {
     /// outlive it and follow the end. For work that runs as long as a take.
     ///
     /// An executor that refuses the future lands [`WorkerError::NotStarted`].
-    #[cfg_attr(
-        not(any(test, feature = "capture")),
-        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
-    )]
+    #[cfg(test)]
     pub(crate) fn submit_dedicated<M, R, W, L>(&mut self, name: &str, work: W, land: L)
     where
         M: Send + 'static,
@@ -602,12 +599,40 @@ impl Jobs {
         );
     }
 
-    fn start<M, R, F, W, L>(&mut self, place: Place<'_>, make: W, mut land: L)
+    fn start<M, R, F, W, L>(&mut self, place: Place<'_>, make: W, land: L)
     where
         M: Send + 'static,
         R: Send + 'static,
         F: Future<Output = R> + Send + 'static,
-        W: FnOnce(Landings<M>) -> F,
+        W: FnOnce(Landings<M>) -> F + Send + 'static,
+        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+    {
+        let run = self.open_stream(land);
+        let id = run.landings.id;
+        let future = Box::pin(run.run(make));
+        let started = match place {
+            Place::Pool => self.executor.spawn(future),
+            Place::Dedicated(name) => self.executor.spawn_dedicated(name, None, future),
+        };
+        // A refused start drops the future unrun, so `Unfinished` has queued
+        // `Dropped`; `land_jobs` reports the refusal instead.
+        if let Err(error) = started {
+            self.refused.insert(id, error.kind());
+        }
+    }
+
+    /// Registers a streaming job's lander and gives back the half the job's future
+    /// holds, made before that future exists: a take starts its pump first and hands
+    /// it this once the file and the tap are open. Dropped unrun, the run lands
+    /// [`WorkerError::Dropped`].
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
+    )]
+    pub(crate) fn open_stream<M, R, L>(&mut self, mut land: L) -> StreamRun<M, R>
+    where
+        M: Send + 'static,
+        R: Send + 'static,
         L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         let id = Slot(self.next.mint().get());
@@ -634,30 +659,79 @@ impl Jobs {
             land(session, landed, events);
         });
         self.landers.insert(id, lander);
-        let mut unfinished = Unfinished {
-            end: Some((self.tx.clone(), id)),
-        };
-        let body = make(landings.clone());
-        let future = Box::pin(async move {
-            let end = Contained(Box::pin(body))
-                .await
-                .map(|result| Box::new(result) as Box<dyn Any + Send>)
-                .map_err(|payload| WorkerError::Panicked {
-                    message: panic_message(payload.as_ref()),
-                });
-            unfinished.done();
-            // After every message: they went down the same channel first.
-            let _ = landings.tx.send(Arrival::End(id, end));
-        });
-        let started = match place {
-            Place::Pool => self.executor.spawn(future),
-            Place::Dedicated(name) => self.executor.spawn_dedicated(name, None, future),
-        };
-        // A refused start drops the future unrun, so `Unfinished` has queued
-        // `Dropped`; `land_jobs` reports the refusal instead.
-        if let Err(error) = started {
-            self.refused.insert(id, error.kind());
+        StreamRun {
+            landings,
+            unfinished: Unfinished {
+                end: Some((self.tx.clone(), id)),
+            },
+            _result: PhantomData,
         }
+    }
+
+    /// Spawns `future` on the executor with a thread of its own where it has them: work
+    /// that is not a job and runs as long as a take.
+    ///
+    /// # Errors
+    ///
+    /// The executor's refusal to start it. The future is not run.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
+    )]
+    pub(crate) fn spawn_long(
+        &self,
+        name: &str,
+        future: impl Future<Output = ()> + Send + 'static,
+    ) -> std::io::Result<()> {
+        self.executor.spawn_dedicated(name, None, future)
+    }
+
+    /// The session's bells: a future that awaits the audio thread makes its bell here.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
+    )]
+    pub(crate) fn bells(&self) -> &Bells {
+        &self.bells
+    }
+}
+
+/// A streaming job's reporting half: what the job's future runs through.
+pub(crate) struct StreamRun<M, R> {
+    landings: Landings<M>,
+    unfinished: Unfinished,
+    _result: PhantomData<fn() -> R>,
+}
+
+impl<M: Send + 'static, R: Send + 'static> StreamRun<M, R> {
+    /// The landings the job sends its messages through.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
+    )]
+    pub(crate) fn landings(&self) -> &Landings<M> {
+        &self.landings
+    }
+
+    /// Runs the job's body, then lands its end exactly once, after every message:
+    /// its result, or [`WorkerError::Panicked`] when it panicked. `make` builds the
+    /// body from the landings.
+    pub(crate) async fn run<F>(mut self, make: impl FnOnce(Landings<M>) -> F)
+    where
+        F: Future<Output = R>,
+    {
+        let end = Contained(Box::pin(make(self.landings.clone())))
+            .await
+            .map(|result| Box::new(result) as Box<dyn Any + Send>)
+            .map_err(|payload| WorkerError::Panicked {
+                message: panic_message(payload.as_ref()),
+            });
+        self.unfinished.done();
+        // After every message: they went down the same channel first.
+        let _ = self
+            .landings
+            .tx
+            .send(Arrival::End(self.landings.id, end));
     }
 }
 

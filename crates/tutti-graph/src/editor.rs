@@ -320,7 +320,7 @@ struct TapOpened {
     /// Its lanes: the writer the executor holds has as many rings.
     width: usize,
     /// Raised when every node it read was removed.
-    end: Arc<tutti_rt::FaultLatch>,
+    end: Arc<crate::tap::TapEnd>,
 }
 
 /// A panic payload as text.

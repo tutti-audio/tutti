@@ -38,7 +38,7 @@ use std::sync::{Arc, Weak};
 use crate::TapId;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
-use tutti_rt::{ControlDrop, FaultLatch};
+use tutti_rt::{Bell, ControlDrop, FaultLatch};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_units::{Frame, Samples};
 
@@ -64,6 +64,38 @@ pub struct TapWriter<F: Float = f32> {
     /// Frames refused, counted per frame (the rings take whole blocks or none:
     /// they are `Refuse` and count nothing), shared with the reader.
     lost: Arc<AtomicU64>,
+    /// Rung after each block written, for a reader that awaits frames.
+    bell: Option<Bell>,
+}
+
+/// How a tap ends: the latch the editor raises when every node the tap read was
+/// removed, and the bell it rings so a reader that awaits frames sees the end.
+pub(crate) struct TapEnd {
+    latch: FaultLatch,
+    bell: Option<Bell>,
+}
+
+impl TapEnd {
+    /// A tap end that rings `bell` when it is raised.
+    fn new(bell: Option<Bell>) -> Self {
+        Self {
+            latch: FaultLatch::new(),
+            bell,
+        }
+    }
+
+    /// Raises the latch, then rings: the reader asks the latch before it reads the
+    /// rings, so a frame written before the end is never missed.
+    pub(crate) fn raise(&self) {
+        self.latch.raise(());
+        if let Some(bell) = &self.bell {
+            bell.ring();
+        }
+    }
+
+    fn is_raised(&self) -> bool {
+        self.latch.is_raised()
+    }
 }
 
 /// Whether a lane's reader is still held.
@@ -135,6 +167,17 @@ impl<F: Float> TapWriter<F> {
             );
         }
         self.count_lost(frames - take);
+        if take > 0 {
+            self.ring();
+        }
+    }
+
+    /// Rings the reader's bell, if it has one.
+    #[inline]
+    fn ring(&self) {
+        if let Some(bell) = &self.bell {
+            bell.ring();
+        }
     }
 
     /// The channel layout of a block this writer takes: `width` channels.
@@ -213,6 +256,9 @@ pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
         tap.lost
             .fetch_add((frames - take) as u64, Ordering::Relaxed);
     }
+    if take > 0 {
+        tap.ring();
+    }
 }
 
 /// The caller's end of a tap: every lane, read together.
@@ -236,7 +282,7 @@ pub struct TapReader<F: Float = f32> {
     /// The editor holds a `Weak` of this: when it dies, the reader is gone.
     alive: Arc<()>,
     /// Raised when the tap was taken out of the plan for good.
-    end: Arc<FaultLatch>,
+    end: Arc<TapEnd>,
 }
 
 impl<F: Float> std::fmt::Debug for TapReader<F> {
@@ -256,17 +302,27 @@ impl<F: Float> TapReader<F> {
     /// one here, and its reader has no [`id`](Self::id).
     #[must_use]
     pub fn pair(width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
-        Self::build(None, width, capacity)
+        Self::build(None, width, capacity, None)
     }
 
     /// The reader of the tap `id` names, and its writer.
-    pub(crate) fn named(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
-        Self::build(Some(id), width, capacity)
+    pub(crate) fn named(
+        id: TapId,
+        width: usize,
+        capacity: Samples,
+        bell: Option<Bell>,
+    ) -> (Self, TapWriter<F>) {
+        Self::build(Some(id), width, capacity, bell)
     }
 
-    fn build(id: Option<TapId>, width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
+    fn build(
+        id: Option<TapId>,
+        width: usize,
+        capacity: Samples,
+        bell: Option<Bell>,
+    ) -> (Self, TapWriter<F>) {
         let lost = Arc::new(AtomicU64::new(0));
-        let end = Arc::new(FaultLatch::new());
+        let end = Arc::new(TapEnd::new(bell.clone()));
         let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
         let (cons, prods): (Vec<_>, Vec<_>) = (0..width)
             .map(|_| ring::<F>(capacity.get().max(1), Overflow::Refuse))
@@ -289,6 +345,7 @@ impl<F: Float> TapReader<F> {
             runs: run_prod,
             next: Frame::ZERO,
             lost,
+            bell,
         };
         (reader, writer)
     }
@@ -302,7 +359,7 @@ impl<F: Float> TapReader<F> {
 
     /// The latch the editor raises when the tap leaves the plan because every
     /// node it read was removed.
-    pub(crate) fn end_latch(&self) -> Arc<FaultLatch> {
+    pub(crate) fn end_latch(&self) -> Arc<TapEnd> {
         Arc::clone(&self.end)
     }
 
