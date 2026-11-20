@@ -147,7 +147,7 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
         |b| {
             b.plugin_hang(quick_hang_policy())
                 .plugin_recovery(Some(quick_reload_policy()))
-                .spawn_with(move |job| {
+                .executor(tutti_platform::Executor::new(move |job| {
                     if seen.load(Ordering::SeqCst) {
                         let pid = pid_cell.load(Ordering::SeqCst);
                         assert!(
@@ -155,8 +155,8 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
                             "the hung server {pid} was still alive when its replacement was loaded"
                         );
                     }
-                    job.run();
-                })
+                    tutti_fixtures::run_future(job);
+                }))
         },
     );
     let (node, _) = wired_probe(&mut s);

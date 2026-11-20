@@ -1,4 +1,4 @@
-//! The session's sampler: a disk stream opened on the session's spawner, and
+//! The session's sampler: a disk stream opened on the session's executor, and
 //! what lands from it in [`Session::update`](crate::Session::update).
 //!
 //! The streamer opens a file on a thread of its own, so an open takes as long
@@ -78,14 +78,14 @@ pub enum SamplerError {
     /// streamer thread is gone.
     #[error(transparent)]
     Open(#[from] OpenError),
-    /// The open's job did not finish: it panicked, or the spawner dropped it.
+    /// The open's job did not finish: it panicked, or the executor dropped it.
     #[error(transparent)]
     Job(#[from] WorkerError),
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Opens `path` as a disk stream, its reader starting at `place`, on the
-    /// session's spawner. Returns at once; the stream lands as
+    /// session's executor. Returns at once; the stream lands as
     /// [`SamplerEvent::Opened`] with the returned id in a later
     /// [`update`](Self::update), on the thread that calls `update()`. A file
     /// that cannot be opened lands as [`SamplerEvent::OpenFailed`], a job that
@@ -112,7 +112,11 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let opening = streamer.open(asset, place);
         let id = SamplerLoad::mint(&self.sampler.opens);
         let landed = Arc::clone(&self.sampler.streams);
-        self.jobs.submit(
+        // blocks: `PendingOpen::wait` parks on the streamer's reply, with no deadline: on a
+        // polled executor it stalls `update` for good, since the streamer runs in the same poll.
+        // The streamer lane makes it await the reply.
+        self.jobs.submit_blocking(
+            "tutti-open",
             move || opening.wait(),
             move |_, done, events| {
                 let event = match done {

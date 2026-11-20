@@ -39,7 +39,7 @@
 //! # Stages
 //!
 //! A [`Load`] has one to two stages, each on a named thread: a worker of the
-//! session's spawner ([`Load::on_worker`]), a worker and then the main thread
+//! session's executor ([`Load::on_worker`]), a worker and then the main thread
 //! ([`Load::on_worker_then_main`]), the session's own thread
 //! ([`Load::on_session`]), or none ([`Load::ready`]). At most
 //! [`PoolConfig::parallel_loads`] worker stages run at once; the rest wait in
@@ -99,7 +99,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
     /// The set is diffed against the one declared before, by key and by
-    /// identity. A new key starts a load on the session's spawner; a key whose
+    /// identity. A new key starts a load on the session's executor; a key whose
     /// identity is unchanged keeps its entry, loaded once; a key whose
     /// identity changed reloads, its old value staying until the new one
     /// lands; a key the set no longer names is held while a node or a snapshot

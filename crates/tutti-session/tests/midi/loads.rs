@@ -299,11 +299,11 @@ fn two_loads_land_in_update_each_for_its_own_job() {
     assert_eq!((events(got_a), events(got_b)), (2, 4));
 }
 
-/// A spawner that drops the job lands the load as `Worker(Dropped)`.
+/// An executor that drops the future lands the load as `Worker(Dropped)`.
 #[test]
 fn a_dropped_job_lands_as_a_worker_error() {
     let mut s = Session::builder()
-        .spawn_with(drop)
+        .executor(tutti_platform::Executor::new(drop))
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
     let outcome = load(&mut s, "never-read.mid".into());

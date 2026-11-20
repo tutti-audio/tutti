@@ -719,7 +719,7 @@ fn silent_smpl_with_sm24(
         Some(&vec![0; 4200]),
         Some(&vec![0x80; sm24_bytes]),
     );
-    std::sync::Arc::new(tutti_sf2::SoundFont::from_reader(&mut std::io::Cursor::new(file)).unwrap())
+    std::sync::Arc::new(tutti_sf2::SoundFont::open(file).unwrap())
 }
 
 /// 6.2: the player renders the `smpl` points alone when `sm24` is ignored, and

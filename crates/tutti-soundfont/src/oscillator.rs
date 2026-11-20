@@ -214,7 +214,6 @@ impl Oscillator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
     use tutti_fixtures::sf2::{Inst, Preset, bytes, with_pool};
     use tutti_sf2::SoundFont;
 
@@ -237,7 +236,7 @@ mod tests {
             }],
         );
         let file = with_pool(&file, (2, 4), Some(&smpl), low.then_some(&low_bytes[..]));
-        let font = SoundFont::from_reader(&mut Cursor::new(file)).unwrap();
+        let font = SoundFont::open(file).unwrap();
         let points = high
             .iter()
             .zip(&low_bytes)

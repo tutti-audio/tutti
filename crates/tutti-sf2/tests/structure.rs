@@ -3,8 +3,6 @@
 //! the global zone; and the DWORDs of a header are unsigned.
 //! SF2 2.04 sections 7.2, 7.6, 7.10 and 8.1.2.
 
-use std::io::Cursor;
-
 use tutti_fixtures::sf2::{Inst, Preset, bytes};
 use tutti_sf2::{Error, InstrumentGenerator, SoundFont};
 
@@ -33,7 +31,7 @@ fn chunk(file: &[u8], id: &[u8; 4]) -> usize {
 }
 
 fn load(file: Vec<u8>) -> Result<SoundFont, Error> {
-    SoundFont::from_reader(&mut Cursor::new(file))
+    SoundFont::open(file)
 }
 
 /// Writes a little-endian word or double word at `at`.

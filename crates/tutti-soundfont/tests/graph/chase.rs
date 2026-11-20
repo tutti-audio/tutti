@@ -29,9 +29,10 @@ const RATE: SampleRate = SampleRate::SR_48K;
 const G: MidiGroup = MidiGroup::FIRST;
 
 fn font() -> Arc<SoundFont> {
-    let mut file = std::fs::File::open(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2"))
-        .expect("the test soundfont");
-    Arc::new(SoundFont::from_reader(&mut file).expect("parses"))
+    Arc::new(
+        SoundFont::open(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2"))
+            .expect("the test soundfont loads"),
+    )
 }
 
 fn unit() -> SoundFontUnit<f32> {

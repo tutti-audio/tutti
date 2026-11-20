@@ -41,7 +41,7 @@ use tutti_engine::BlockDates;
 ///   rate, the width and the callback, so none of those is a setter, and
 ///   `build` returns a `LiveSession` with the stream running.
 ///
-/// Everything else (workers, MIDI, plugins, the root topology, the spawner) is
+/// Everything else (workers, MIDI, plugins, the root topology, the executor) is
 /// set the same way on every clock.
 ///
 /// ```
@@ -125,7 +125,7 @@ pub(crate) struct Options {
     midi_ports: tutti_midi_runtime::MidiInputPorts,
     unresolved_warning: std::time::Duration,
     pub(crate) plugins: crate::session::parts::PluginOptions,
-    spawner: crate::jobs::Spawner,
+    executor: tutti_platform::Executor,
     pool: crate::PoolConfig,
 }
 
@@ -163,7 +163,7 @@ impl Default for Options {
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
             unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
             plugins: Default::default(),
-            spawner: crate::jobs::Spawner::default(),
+            executor: tutti_platform::Executor::default(),
             pool: crate::PoolConfig::default(),
         }
     }
@@ -734,31 +734,44 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// The spawner the session runs its blocking work on:
-    /// a file load, a plugin round trip, a recording's pump. It is handed
-    /// each [`Task`](crate::Task) and calls [`Task::run`](crate::Task::run) on a
-    /// thread of its own (`tokio::task::spawn_blocking`, a rayon pool); what
-    /// the job reports lands in [`Session::update`]. The default is a named
-    /// `tutti_platform::spawn_named` thread per task; dropping the session stops
-    /// them within 100 ms, and a thread still running then (a worker blocked on
-    /// the main thread) is detached with a `tracing` warning and outlives the
-    /// session. A task the spawner drops unrun ends as
-    /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), so a spawner that
-    /// refuses work loses none silently.
+    /// The [`Executor`](tutti_platform::Executor) that runs the session's background
+    /// work: its jobs (a file load, a plugin round trip), its disk streamer and a
+    /// recording's pump. Each is a future, and what a job reports lands in
+    /// [`Session::update`].
     ///
-    /// A recording take (`Session::record`, feature `capture`) holds one job for the whole take:
-    /// over a bounded pool with no worker free it does not start until one is.
+    /// The default is [`Executor::default`](tutti_platform::Executor::default): threaded
+    /// where a thread can start, polled on the web. A choice is one of:
+    ///
+    /// - [`Executor::threaded`](tutti_platform::Executor::threaded): a small pool
+    ///   runs the jobs and a long-lived future has a thread of its own.
+    /// - [`Executor::polled`](tutti_platform::Executor::polled): work runs only
+    ///   inside `update`, which polls up to a fixed count of woken futures per call.
+    ///   Nothing runs between updates, so a live stream is fed only as often as the
+    ///   app updates.
+    /// - [`Executor::new`](tutti_platform::Executor::new): a host's own (Bevy's pool,
+    ///   tokio). The future may block while it is polled (a file read), and the host
+    ///   owns the priority; the streamer's priority request applies only to the
+    ///   threaded form. The app still calls `update`, which lands what the futures
+    ///   report.
+    ///
+    /// A future the executor drops unrun lands as
+    /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), and one it refuses to
+    /// start (a thread the OS would not give) as
+    /// [`WorkerError::NotStarted`](crate::WorkerError::NotStarted), so an executor
+    /// that refuses work loses none silently. Dropping the session drops its clone of
+    /// the executor; the last clone of a threaded one joins its threads, so a job
+    /// still running then holds the drop until it returns. Dropping the session joins
+    /// in-flight jobs; every blocking plugin job is bounded by its own deadline.
     ///
     /// ```
     /// # use tutti_session::Session;
-    /// let builder = Session::builder().spawn_with(|job| {
-    ///     std::thread::spawn(move || job.run());
-    /// });
+    /// use tutti_platform::Executor;
+    /// let builder = Session::builder().executor(Executor::polled());
     /// # let _ = builder;
     /// ```
     #[must_use]
-    pub fn spawn_with(mut self, spawn: impl Fn(crate::Task) + Send + Sync + 'static) -> Self {
-        self.opts.spawner = crate::jobs::Spawner::new(spawn);
+    pub fn executor(mut self, executor: tutti_platform::Executor) -> Self {
+        self.opts.executor = executor;
         self
     }
 
@@ -836,7 +849,7 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// How often a healthy hosted plugin's state is captured, measured on
     /// [`PhaseCx::now`](crate::PhaseCx::now)
-    /// (a job on the session's spawner, [`spawn_with`](Self::spawn_with)).
+    /// (a job on the session's [`executor`](Self::executor)).
     /// Default 8 s.
     #[cfg(feature = "plugin")]
     #[must_use]
@@ -975,6 +988,7 @@ impl<C: Clock> SessionBuilder<C> {
         running: N::Running,
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
+        let bells = tutti_rt::Bells::new().map_err(crate::Error::Bells)?;
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),
@@ -1006,7 +1020,7 @@ impl<C: Clock> SessionBuilder<C> {
             devices: Default::default(),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
-            jobs: crate::jobs::Jobs::new(self.opts.spawner.clone()),
+            jobs: crate::jobs::Jobs::new(self.opts.executor.clone(), bells),
             plugins,
         };
         session.provide_values(&table, click_settings);

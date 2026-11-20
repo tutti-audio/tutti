@@ -8,6 +8,7 @@
 use crate::common::{
     self, DEFAULTS, metrical, note, placed, sequences, track, unspecified, without_defaults,
 };
+use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
@@ -29,7 +30,7 @@ fn meta(delta: u32, kind: u8, data: &[u8]) -> RawEvent {
 }
 
 fn read(format: u16, tracks: &[Vec<RawEvent>]) -> MidiFile {
-    MidiFile::from_bytes(&build_smf(format, Division::Metrical(TPQ), tracks)).unwrap()
+    read_bytes(build_smf(format, Division::Metrical(TPQ), tracks)).unwrap()
 }
 
 /// The three formats a file can be authored in.
@@ -109,7 +110,7 @@ fn played() -> Track {
 /// The body of the only track of `file`, from after its MTrk length, without
 /// the default tempo and time signature it is written with.
 fn body(file: &MidiFile) -> Vec<u8> {
-    without_defaults(&file.to_bytes()[22..])
+    without_defaults(&encoded(file)[22..])
 }
 
 fn offset(h: u8, m: u8, s: u8, f: u8, rate: SmpteFrameRate, ff: u8) -> SmpteOffset {
@@ -176,7 +177,7 @@ fn a_format_2_pattern_is_its_number_or_its_place() {
             .collect::<Vec<_>>()
     };
     assert_eq!(numbers(&file), [7, 1, 0xFFFF]);
-    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let back = read_bytes(encoded(&file)).unwrap();
     assert_eq!(numbers(&back), [7, 1, 0xFFFF]);
 }
 
@@ -195,7 +196,7 @@ fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
     )
     .unwrap();
     assert_eq!(body(&written)[..6], [0x00, 0xFF, 0x00, 0x02, 0x00, 0x05]);
-    let back = MidiFile::from_bytes(&written.to_bytes()).unwrap();
+    let back = read_bytes(encoded(&written)).unwrap();
     assert_eq!(
         (back.sequence_number(0), back.sequence_number(1)),
         (Some(5), None)
@@ -279,7 +280,7 @@ fn prefixes_keep_the_tracks_of_a_format_0_file_apart() {
         (0, note(1, 72)),
     ])
     .unwrap();
-    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let back = read_bytes(encoded(&file)).unwrap();
     let names: Vec<_> = back.tracks()[0]
         .events_with_channel()
         .filter_map(|(_, e, c)| match e {
@@ -408,7 +409,7 @@ fn a_format_1_smpte_offset_is_the_first_tracks() {
         body(&written)[..9],
         [0x00, 0xFF, 0x54, 0x05, 1 << 5 | 1, 2, 3, 4, 5]
     );
-    let back = MidiFile::from_bytes(&written.to_bytes()).unwrap();
+    let back = read_bytes(encoded(&written)).unwrap();
     assert_eq!(
         (back.smpte_offset(0), back.smpte_offset(1)),
         (Some(at), None)
@@ -582,9 +583,9 @@ fn all_copyright_notices_are_one_event_first_in_the_first_track() {
     for layout in layouts {
         let file = MidiFile::smf(DIVISION, layout).unwrap();
         assert_eq!(body(&file)[..7], [0, 0xFF, 0x02, 0x03, b'(', b'C', b')']);
-        let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+        let back = read_bytes(encoded(&file)).unwrap();
         assert_eq!(back.copyright(), Some(&b"(C)"[..]));
-        assert_eq!(back.to_bytes(), file.to_bytes());
+        assert_eq!(encoded(&back), encoded(&file));
     }
 }
 
@@ -629,11 +630,11 @@ fn a_cloned_read_track_carries_no_opening_metas() {
         ),
         (None, None, None)
     );
-    let bytes = file.to_bytes();
+    let bytes = encoded(&file);
     for wire in [[0xFF, 0x02], [0xFF, 0x00], [0xFF, 0x54]] {
         assert!(!bytes.windows(2).any(|w| w == wire), "{wire:02X?}");
     }
-    let back = MidiFile::from_bytes(&bytes).unwrap();
+    let back = read_bytes(&bytes).unwrap();
     assert_eq!(placed(&back), []);
 }
 
@@ -659,7 +660,7 @@ fn a_format_2_pattern_writes_its_own_smpte_offset() {
     )
     .unwrap();
     assert_eq!(body(&file)[..4], [0x00, 0xFF, 0x54, 0x05]);
-    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let back = read_bytes(encoded(&file)).unwrap();
     assert_eq!(
         [0, 1, 2].map(|i| back.smpte_offset(i)),
         [Some(a), None, Some(b)]
@@ -683,7 +684,7 @@ fn a_track_carries_16_channels() {
         );
     }
     let file = smf(Format::Zero, vec![t]).unwrap();
-    let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let back = read_bytes(encoded(&file)).unwrap();
     let channels: Vec<u8> = back.tracks()[0]
         .notes()
         .iter()
@@ -703,7 +704,7 @@ fn a_track_chunk_always_has_an_event() {
     let mut bytes = build_smf(0, Division::Metrical(TPQ), &[vec![]]);
     bytes.truncate(bytes.len() - 4);
     bytes[18..22].copy_from_slice(&0u32.to_be_bytes());
-    let read = MidiFile::from_bytes(&bytes).unwrap();
+    let read = read_bytes(&bytes).unwrap();
     assert!(unspecified(&read, 0).is_empty());
     assert_eq!(read.tracks()[0].end(), Tick(0));
 }
@@ -812,7 +813,7 @@ fn a_late_opening_meta_is_dropped_and_listed() {
             ),
         ]
     );
-    let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let again = read_bytes(encoded(&file)).unwrap();
     assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
 }
 
@@ -930,7 +931,7 @@ fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
         ]
     );
     assert_eq!(body(&file)[..6], [0, 0xFF, 0x00, 2, 0, 7]);
-    let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let again = read_bytes(encoded(&file)).unwrap();
     assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
     // Late as well: both changes are listed.
     let late = read(
@@ -966,7 +967,7 @@ fn a_dropped_late_event_does_not_move_the_end_of_a_track_with_no_end_of_track() 
     bytes.truncate(bytes.len() - 4);
     let length = u32::from_be_bytes(bytes[18..22].try_into().unwrap()) - 4;
     bytes[18..22].copy_from_slice(&length.to_be_bytes());
-    let file = MidiFile::from_bytes(&bytes).unwrap();
+    let file = read_bytes(&bytes).unwrap();
     assert_eq!(file.tracks()[0].end(), Tick(100));
     assert_eq!(unspecified(&file, 0).len(), 2);
     assert_eq!(
@@ -1023,7 +1024,7 @@ fn an_f0_event_with_an_8_bit_byte_is_read_as_an_escape() {
             },
         ]
     );
-    let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let again = read_bytes(encoded(&file)).unwrap();
     assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
 }
 
@@ -1077,7 +1078,7 @@ fn an_unended_divided_sysex_is_closed_and_listed() {
     assert_eq!(events[2], complete(&[3, 4]));
     assert_eq!(events[3], complete(&[5]));
     assert_eq!(placed(&file), [closed(0), closed(3)]);
-    let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
+    let again = read_bytes(encoded(&file)).unwrap();
     assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
     // Ended: the packets stay as the file has them.
     let ended = read(
@@ -1176,7 +1177,7 @@ fn chunk_bodies(bytes: &[u8]) -> Vec<Vec<u8>> {
 /// Spec: smf/formats#11, smf/formats#13
 #[test]
 fn a_format_0_file_is_written_with_tempo_and_time_signature_first() {
-    let bodies = chunk_bodies(&smf(Format::Zero, vec![played()]).unwrap().to_bytes());
+    let bodies = chunk_bodies(&encoded(&smf(Format::Zero, vec![played()]).unwrap()));
     assert_eq!(bodies.len(), 1);
     assert_eq!(bodies[0][..15], DEFAULTS);
     assert_eq!(bodies[0][15..19], [0x00, 0x90, 60, 100]);
@@ -1187,11 +1188,9 @@ fn a_format_0_file_is_written_with_tempo_and_time_signature_first() {
 /// Spec: smf/formats#11, smf/formats#14
 #[test]
 fn a_format_1_file_is_written_with_tempo_and_time_signature_in_the_first_track() {
-    let bodies = chunk_bodies(
-        &smf(Format::One, vec![played(), played()])
-            .unwrap()
-            .to_bytes(),
-    );
+    let bodies = chunk_bodies(&encoded(
+        &smf(Format::One, vec![played(), played()]).unwrap(),
+    ));
     assert_eq!(bodies.len(), 2);
     assert_eq!(bodies[0][..15], DEFAULTS);
     assert_eq!(bodies[1][..4], [0x00, 0x90, 60, 100]);
@@ -1202,11 +1201,9 @@ fn a_format_1_file_is_written_with_tempo_and_time_signature_in_the_first_track()
 /// Spec: smf/formats#11, smf/formats#15
 #[test]
 fn a_format_2_file_is_written_with_tempo_and_time_signature_in_each_pattern() {
-    let bodies = chunk_bodies(
-        &smf(Format::Two, vec![played(), played()])
-            .unwrap()
-            .to_bytes(),
-    );
+    let bodies = chunk_bodies(&encoded(
+        &smf(Format::Two, vec![played(), played()]).unwrap(),
+    ));
     assert_eq!(bodies.len(), 2);
     for body in &bodies {
         assert_eq!(body[..15], DEFAULTS);
@@ -1220,7 +1217,7 @@ fn a_format_2_file_is_written_with_tempo_and_time_signature_in_each_pattern() {
 #[test]
 fn a_given_tempo_stays_and_the_missing_time_signature_joins_it() {
     let given = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)));
-    let bodies = chunk_bodies(&lead(LeadTrack::new(given).copyright("c")).to_bytes());
+    let bodies = chunk_bodies(&encoded(&lead(LeadTrack::new(given).copyright("c"))));
     // The copyright first, then the 90 BPM (666 667 us), then the signature.
     let mut expected = vec![
         0x00, 0xFF, 0x02, 0x01, b'c', 0x00, 0xFF, 0x51, 0x03, 0x0A, 0x2C, 0x2B,

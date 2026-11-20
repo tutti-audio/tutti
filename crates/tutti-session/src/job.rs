@@ -5,8 +5,9 @@
 //! on success, `J::Error` on failure. The answer lands once, in an
 //! [`update`](Session::update), as a [`SessionEvent::JobDone`] the app reads
 //! with [`JobOutput::take`]; or [`Job::wait`] runs updates until it finishes and
-//! returns it, the one blocking door. Dropping the job cancels it: its result,
-//! if the work still finishes, is discarded.
+//! returns it, the one blocking door. A `Job` is also a [`Future`]: awaited, it
+//! resolves once an `update` has landed it. Dropping the job cancels it: its
+//! result, if the work still finishes, is discarded.
 //!
 //! # Adding a kind (inside this crate)
 //!
@@ -16,8 +17,8 @@
 //!    `Output` and its `Error`. The error converts from [`WorkerError`] and
 //!    [`WaitError`] (`#[from]` variants).
 //! 2. In the session call, start the work with `Jobs::submit_job::<Kind, _, _, _>(work,
-//!    land)` and return the [`Job`] it gives. `work` runs on the spawner's
-//!    thread and may read its [`Cancel`]; `land` runs in the next
+//!    land)` and return the [`Job`] it gives. `work` runs on the session's
+//!    executor and may read its [`Cancel`]; `land` runs in the next
 //!    [`update`](Session::update) on the control thread and ends with
 //!    `Ticket::land(result)`.
 //! 3. A stage that must run on the main thread is posted to the session's main
@@ -33,9 +34,12 @@
 
 use std::any::Any;
 use std::fmt;
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use tutti_rt::LockExt;
@@ -138,10 +142,14 @@ pub enum WorkerError {
         /// type.
         message: String,
     },
-    /// The spawner dropped the job without running it (a pool shut down, a
-    /// thread that could not start), or the session ended it unanswered.
-    #[error("the spawner dropped a session job without running it")]
+    /// The executor dropped the job unrun or part-way (a shutdown, a host that
+    /// discards the future), or the session ended the job unanswered.
+    #[error("the executor dropped a session job without finishing it")]
     Dropped,
+    /// The executor refused to start the job: the OS refused a thread. The work never
+    /// ran.
+    #[error("the executor could not start a session job: {0}")]
+    NotStarted(std::io::ErrorKind),
 }
 
 const PENDING: u8 = 0;
@@ -155,6 +163,23 @@ pub(crate) struct Cell {
     cancelled: AtomicBool,
     /// The ticket is gone: nothing more will land.
     ended: AtomicBool,
+    /// The waker of the future awaiting the job: woken by the landing or the
+    /// ticket's end. Control-side threads only.
+    waker: Mutex<Option<Waker>>,
+    /// The job was polled as a future: its landing waits in the queue for that
+    /// poll, and the collect phase does not report it.
+    awaited: AtomicBool,
+}
+
+impl Cell {
+    /// Wakes the awaiting future, if there is one.
+    fn wake(&self) {
+        // Woken outside the lock: a `Waker` may do anything, including poll the job.
+        let waker = self.waker.lock_recover().take();
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
 }
 
 /// The worker's view of its job's cancellation.
@@ -215,7 +240,7 @@ impl<J: JobKind> Job<J> {
     /// and a second `wait`, or one after the app took the job's
     /// [`SessionEvent::JobDone`], answers [`WaitError::AlreadyLanded`]. A worker
     /// that panicked lands as [`WorkerError::Panicked`], so a wait never hangs
-    /// on it, nor on a job the spawner dropped or whose session side ended
+    /// on it, nor on a job the executor dropped or whose session side ended
     /// unanswered ([`WorkerError::Dropped`]).
     ///
     /// # Errors
@@ -259,6 +284,44 @@ impl<J: JobKind> Job<J> {
     }
 }
 
+impl<J: JobKind> Future for Job<J> {
+    type Output = Result<J::Output, J::Error>;
+
+    /// Resolves once an [`update`](Session::update) has landed the job, with what
+    /// [`Job::wait`] returns. The landing wakes the task.
+    ///
+    /// Await a job before the update that lands it, or any update before the app
+    /// takes its [`SessionEvent::JobDone`]: a landing the collect phase already
+    /// reported, or that the app or a [`wait`](Job::wait) took, is gone, and the
+    /// future answers [`WaitError::AlreadyLanded`].
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        // Registered before the checks: a landing or an end that follows finds the
+        // waker, and one that came first is found by the checks.
+        *this.cell.waker.lock_recover() = Some(cx.waker().clone());
+        this.cell.awaited.store(true, Ordering::Release);
+        let landed = {
+            let mut queue = this.queue.lock_recover();
+            let at = queue.iter().position(|landed| landed.id == this.id);
+            at.map(|at| queue.remove(at))
+        };
+        if let Some(mut landed) = landed {
+            return Poll::Ready(
+                landed
+                    .take(this)
+                    .unwrap_or_else(|| Err(WaitError::AlreadyLanded.into())),
+            );
+        }
+        if this.status() == JobStatus::Done {
+            return Poll::Ready(Err(WaitError::AlreadyLanded.into()));
+        }
+        if this.cell.ended.load(Ordering::Acquire) {
+            return Poll::Ready(Err(WorkerError::Dropped.into()));
+        }
+        Poll::Pending
+    }
+}
+
 /// How long [`Job::wait`] blocks on the arrivals between two updates.
 const WAIT_SLICE: Duration = Duration::from_millis(1);
 
@@ -297,9 +360,15 @@ impl<J: JobKind> fmt::Debug for Job<J> {
 pub struct JobOutput {
     id: JobId,
     result: Option<Box<dyn Any + Send>>,
+    cell: Arc<Cell>,
 }
 
 impl JobOutput {
+    /// A [`Job`] is polled as a future: it takes this landing itself.
+    pub(crate) fn awaited(&self) -> bool {
+        self.cell.awaited.load(Ordering::Acquire)
+    }
+
     /// The job that landed.
     #[must_use]
     pub fn id(&self) -> JobId {
@@ -352,6 +421,8 @@ impl<J: JobKind> Ticket<J> {
             status: AtomicU8::new(PENDING),
             cancelled: AtomicBool::new(false),
             ended: AtomicBool::new(false),
+            waker: Mutex::new(None),
+            awaited: AtomicBool::new(false),
         });
         (
             Job {
@@ -410,23 +481,28 @@ impl<J: JobKind> Ticket<J> {
     /// Queues the result to land in the next update, unless the job was
     /// dropped.
     pub(crate) fn land(self, result: Result<J::Output, J::Error>) {
-        let mut queue = self.queue.lock_recover();
-        // Under the lock the drop's purge takes: a landing is queued before
-        // the purge (and purged) or sees the drop here.
-        if self.cancelled() {
-            return;
+        {
+            let mut queue = self.queue.lock_recover();
+            // Under the lock the drop's purge takes: a landing is queued before
+            // the purge (and purged) or sees the drop here.
+            if self.cancelled() {
+                return;
+            }
+            self.cell.status.store(DONE, Ordering::Release);
+            queue.push(JobOutput {
+                id: self.id,
+                result: Some(Box::new(result)),
+                cell: Arc::clone(&self.cell),
+            });
         }
-        self.cell.status.store(DONE, Ordering::Release);
-        queue.push(JobOutput {
-            id: self.id,
-            result: Some(Box::new(result)),
-        });
+        self.cell.wake();
     }
 }
 
 impl<J: JobKind> Drop for Ticket<J> {
     fn drop(&mut self) {
         self.cell.ended.store(true, Ordering::Release);
+        self.cell.wake();
     }
 }
 
