@@ -3,7 +3,9 @@
 use std::os::windows::io::{AsHandle, AsRawHandle, OwnedHandle};
 use std::process::Child;
 use std::time::Duration;
-use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+
+use super::Waited;
+use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
 #[derive(Debug)]
@@ -35,13 +37,16 @@ impl Imp {
         })
     }
 
-    pub(super) fn wait(&self, timeout: Duration) -> bool {
+    /// Waits up to `timeout` for the process to end.
+    pub(super) fn wait(&self, timeout: Duration) -> Waited {
         let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
         // SAFETY: `handle` is an open process handle owned by `self` for the
         // whole call, and the wait takes no pointer.
         let result = unsafe { WaitForSingleObject(self.handle.as_raw_handle(), millis) };
-        // Only a timeout says "still running"; a failure to ask is "may have
-        // ended" and the owner's `try_wait` decides.
-        result != WAIT_TIMEOUT
+        match result {
+            WAIT_OBJECT_0 => Waited::Ended,
+            WAIT_TIMEOUT => Waited::Running,
+            _ => Waited::Failed,
+        }
     }
 }

@@ -30,13 +30,25 @@ mod platform {
             None
         }
 
-        pub(super) fn wait(&self, _timeout: std::time::Duration) -> bool {
+        pub(super) fn wait(&self, _timeout: std::time::Duration) -> super::Waited {
             match *self {}
         }
     }
 }
 
 mod host_watch;
+
+/// What one OS wait on a process found. A failure to ask is its own case: it
+/// says nothing about the process, so it is never read as an end.
+#[derive(Debug)]
+pub(super) enum Waited {
+    /// The OS signalled the process's end.
+    Ended,
+    /// The wait ran out, or a signal cut it short, with the process running.
+    Running,
+    /// The OS could not be asked; nothing the caller can act on says why.
+    Failed,
+}
 
 pub use host_watch::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 
@@ -94,7 +106,9 @@ impl ExitWait {
             pause(timeout.min(NAP));
             return true;
         };
-        inner.wait(timeout)
+        // A failure to ask is "may have ended": the owner's `try_wait` is the
+        // authority and reads the status.
+        !matches!(inner.wait(timeout), Waited::Running)
     }
 }
 

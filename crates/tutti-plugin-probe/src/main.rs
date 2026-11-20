@@ -51,7 +51,8 @@ use tutti_plugin_types::{
 };
 
 fn main() -> ExitCode {
-    // Held for the process: the host watch's thread joins when it drops.
+    // Held for the process. Its drop joins the host watch's thread, which can
+    // take up to one watch slice (a quarter of a second).
     let executor = Executor::new();
     let _watch = watch_host(&executor);
     let args = match args::parse(std::env::args_os().skip(1)) {

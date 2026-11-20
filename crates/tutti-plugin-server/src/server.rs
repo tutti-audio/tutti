@@ -8,11 +8,10 @@
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::{ControlTransport, Incoming, Transport, TransportListener};
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tutti_platform::{Executor, StopToken, Task, Threads};
+use tutti_platform::{Executor, StopToken, Task};
 use tutti_plugin_ipc::{
     AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
@@ -87,11 +86,9 @@ pub struct PluginServer {
     served: StopToken,
     /// The watch on the host, held for the life of the server; a drop cancels it.
     _host_watch: Option<Task<()>>,
-    /// Drives the executor's tasks, started in [`PluginServer::new`]; it stops
-    /// before the executor drops.
-    _threads: Threads,
     /// Where this process's background work runs: built on the main thread and
-    /// held until the server drops.
+    /// held until the server drops. Its drop joins the host watch's thread, which
+    /// can take up to one watch slice (a quarter of a second).
     _executor: Executor,
 }
 
@@ -124,9 +121,6 @@ impl PluginServer {
         let (session, render) = Session::new()?;
         let served = StopToken::new();
         let executor = Executor::new();
-        let threads = executor
-            .spawn_threads(NonZeroUsize::MIN)
-            .map_err(|_| IpcError::ProtocolError("the executor's thread cannot start"))?;
         let host_watch = watch_host(
             &executor,
             socket.clone(),
@@ -141,7 +135,6 @@ impl PluginServer {
             main,
             served,
             _host_watch: host_watch,
-            _threads: threads,
             _executor: executor,
         })
     }

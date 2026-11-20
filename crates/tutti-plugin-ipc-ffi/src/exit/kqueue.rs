@@ -11,6 +11,8 @@ use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use super::Waited;
+
 #[derive(Debug)]
 pub(super) struct Imp {
     /// The queue the exit event arrives on.
@@ -59,9 +61,10 @@ impl Imp {
         })
     }
 
-    pub(super) fn wait(&self, timeout: Duration) -> bool {
+    /// Waits up to `timeout` for the process to end.
+    pub(super) fn wait(&self, timeout: Duration) -> Waited {
         if self.seen.load(Ordering::Acquire) {
-            return true;
+            return Waited::Ended;
         }
         let timeout = Timespec {
             tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
@@ -72,14 +75,14 @@ impl Imp {
         // the event list is a live buffer of one slot.
         let ready = unsafe { kevent_timespec(&self.queue, &[], &mut taken[..], Some(&timeout)) };
         match ready {
-            Ok(([], _)) => false,
+            Ok(([], _)) => Waited::Running,
             Ok(_) => {
                 self.seen.store(true, Ordering::Release);
-                true
+                Waited::Ended
             }
-            // A failure to ask (a signal, say) is "may have ended": the owner's
-            // `try_wait` decides, and the next wait asks again.
-            Err(_) => true,
+            // A signal ends the wait early: the process still runs.
+            Err(rustix::io::Errno::INTR) => Waited::Running,
+            Err(_) => Waited::Failed,
         }
     }
 }
