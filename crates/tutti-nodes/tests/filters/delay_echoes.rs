@@ -9,7 +9,10 @@ use tutti_buffers::BusTopology;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::{impulse, sine};
 use tutti_graph::contract::{drive, prepared};
-use tutti_nodes::{DelayControls, DelayLayout, DelayNode, InterpolationMode, MaxDelay, Routing};
+use tutti_nodes::{
+    DelayConfig, DelayControls, DelayLayout, DelayNode, FeedbackRouting, InterpolationMode,
+    MaxDelay,
+};
 use tutti_units::{Amplitude, Feedback, Hz, SampleRate, Samples, Seconds};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances
@@ -60,7 +63,14 @@ fn render(node: DelayNode<f32>, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
 #[test]
 fn an_impulse_echoes_at_the_delay_scaled_by_the_feedback_each_period() {
     let (d, g) = (16usize, 0.5f64);
-    let node = DelayNode::<f32>::mono(MAX, controls(frames(d as f64), g, 0.0));
+    let node = DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::MONO,
+            MAX,
+            InterpolationMode::Linear,
+        ))
+        .controls(controls(frames(d as f64), g, 0.0)),
+    );
     let out = render(node, &[impulse(Samples::new(d * 8 + 5))]);
     for (i, &y) in out[0].iter().enumerate() {
         let want = if i >= d && i % d == 0 {
@@ -93,12 +103,11 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
         (InterpolationMode::Linear, w * w / 8.0 * 1.05),
         (InterpolationMode::CubicHermite, w * w * w / 8.0),
     ] {
-        let node = DelayNode::<f32>::new(
-            BusTopology::MONO,
-            MAX,
-            mode,
-            controls(frames(delay), 0.0, 0.0),
-        );
+        let node =
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX, mode))
+                    .controls(controls(frames(delay), 0.0, 0.0)),
+            );
         let out = render(node, std::slice::from_ref(&x));
         let worst = (20..512)
             .map(|n| (f64::from(out[0][n]) - (w * (n as f64 - delay)).sin()).abs())
@@ -124,10 +133,15 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
     let (n, d, amount) = (6usize, 8usize, 0.5f64);
     let bus = BusTopology::assumed(6u16.into()).expect("six channels are one bus");
     // Channel c is fed by channel c - 1.
-    let layout = DelayLayout::new(bus, MAX, InterpolationMode::Linear)
-        .with_routing(Routing::ring(bus))
-        .expect("a routing for the layout's bus");
-    let node = DelayNode::<f32>::from_layout(layout, controls(frames(d as f64), 0.0, amount));
+    let layout = DelayLayout::builder(bus, MAX, InterpolationMode::Linear)
+        .routing(FeedbackRouting::ring(bus))
+        .build()
+        .unwrap();
+    let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(controls(
+        frames(d as f64),
+        0.0,
+        amount,
+    )));
     // Stops before the echo wraps round to channel 0.
     let mut inputs = vec![vec![0.0; d * (n + 1)]; n];
     inputs[0][0] = 1.0;
@@ -154,7 +168,14 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
 #[test]
 fn the_stereo_cross_feedback_ping_pongs_the_echo() {
     let (d, amount) = (8usize, 0.5f64);
-    let node = DelayNode::<f32>::stereo(MAX, controls(frames(8.0), 0.0, amount));
+    let node = DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::STEREO,
+            MAX,
+            InterpolationMode::Linear,
+        ))
+        .controls(controls(frames(8.0), 0.0, amount)),
+    );
     let mut left = vec![0.0; d * 5];
     left[0] = 1.0;
     let out = render(node, &[left.clone(), vec![0.0; left.len()]]);

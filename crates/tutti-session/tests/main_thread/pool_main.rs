@@ -59,7 +59,7 @@ fn session_with_output() -> (
     Arc<Mutex<Option<ThreadId>>>,
     Arc<AtomicBool>,
 ) {
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let mut session = Session::builder()
         .executor(executor.clone())
         .build_detached(SampleRate::SR_48K)
@@ -75,7 +75,7 @@ fn session_with_output() -> (
             },
         ))
         .expect("this is the main thread");
-    executor.poll(usize::MAX);
+    executor.run_until_stalled();
     (session, dropped_on, dropped)
 }
 
@@ -140,7 +140,7 @@ impl PoolEntry for Dual {
 }
 
 fn held_session() -> (DetachedSession, tutti_platform::Executor) {
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let session = Session::builder()
         .executor(executor.clone())
         .build_detached(SampleRate::SR_48K)
@@ -149,7 +149,7 @@ fn held_session() -> (DetachedSession, tutti_platform::Executor) {
 }
 
 fn run_held(executor: &tutti_platform::Executor) -> usize {
-    executor.poll(usize::MAX)
+    executor.run_until_stalled()
 }
 
 fn retry_of_a_main_stage_load_is_refused_off_the_main_thread_until_an_update_ran_on_it() {

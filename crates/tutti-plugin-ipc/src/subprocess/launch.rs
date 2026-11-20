@@ -14,7 +14,7 @@ use std::process::Command;
 use std::time::Duration;
 use tutti_buffers::FloatWidth;
 use tutti_platform::Instant;
-use tutti_plugin_ipc_ffi::Reaped;
+use tutti_plugin_ipc_ffi::{Blob, Reaped};
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
@@ -151,7 +151,7 @@ pub(super) fn launch_with(
 }
 
 /// `launch_with`, restoring the request's state into the plugin before it is
-/// activated: staged ahead of the load (`ControlRequest::StageStateChunk`),
+/// activated: staged ahead of the load (`ControlRequest::StageState`),
 /// applied by the server between opening the plugin and activating it, so the
 /// activation, and the reply's buses and latency, are the state's.
 pub(super) fn launch_with_state(
@@ -424,10 +424,8 @@ impl<'t> Exchange<'t> {
                 Ok(Heard::Working)
             }
             ControlFrame::Working { .. } => Ok(Heard::Working),
-            ControlFrame::Reply { id: of, reply } => match self.conv.hear(of, reply.ends(), now) {
-                Ok(crate::conversation::Heard::Answer { .. }) if of == id => {
-                    Ok(Heard::Answer(reply))
-                }
+            ControlFrame::Reply { id: of, reply } => match self.conv.hear(of) {
+                Ok(crate::conversation::Heard::Answer) if of == id => Ok(Heard::Answer(reply)),
                 _ => Err(unexpected_message("the answer to the request", &reply)),
             },
             ref other => Err(unexpected_message("a reply", other)),
@@ -557,21 +555,18 @@ fn stage_state(
             tutti_plugin_types::MAX_STATE_BYTES
         )));
     }
-    // One request sent as several frames that share its id: the server answers
-    // once, on the last.
+    let blob = match Blob::create(state) {
+        Ok(blob) => blob,
+        Err(e) => return Ok(Err(format!("state could not be made into an object: {e}"))),
+    };
     let call = config.timeouts.call;
     let id = launch.open(call, call);
-    for (seq, last, bytes) in crate::transport::state_chunk::split(state) {
-        launch.send(
-            id,
-            ControlRequest::StageStateChunk {
-                seq,
-                total: state.len() as u64,
-                last,
-                bytes: bytes.to_vec(),
-            },
-        )?;
-    }
+    let body = ControlRequest::StageState {
+        len: state.len() as u64,
+        blob: blob.wire(),
+    };
+    // Held until the answer: where the object is read by name, it stays until then.
+    let _lease = ipc::send_blob(&mut launch.stream, id, body, blob)?;
     match launch.answer(id)? {
         ControlReply::StateLoaded { error: None } => Ok(Ok(())),
         ControlReply::StateLoaded { error: Some(e) } => Ok(Err(e)),

@@ -1,30 +1,19 @@
-//! The executor's timer: [`Sleep`], the queue of deadlines behind it, and what fires it.
+//! The executor's timer: [`Sleep`] and the queue of deadlines behind it.
 //!
 //! [`Due`] is the timing rule: a method of `now` that returns the sleeps due then.
-//! Its driver calls it with [`Instant::now`]: a timer thread that sleeps to the next
-//! deadline, or the caller's [`Executor::poll`](super::Executor::poll).
+//! [`Timers::fire`] calls it with [`Instant::now`], from a driving thread's loop or from
+//! [`Executor::run_until_stalled`](super::Executor::run_until_stalled) and
+//! [`Executor::try_tick`](super::Executor::try_tick).
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::future::Future;
-use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::thread::{self, ThreadId};
 
-use super::lock;
+use super::{lock, os};
 use crate::Instant;
-use crate::thread::{ThreadHandle, spawn_named};
-
-/// What fires the due sleeps.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Drive {
-    /// A platform thread of the executor's own, started with the first sleep.
-    Thread,
-    /// The caller's `poll`.
-    Poll,
-}
 
 /// The sleeps waiting for a deadline.
 #[derive(Default)]
@@ -92,23 +81,34 @@ impl Due {
 }
 
 #[derive(Default)]
-struct State {
-    due: Due,
+pub(super) struct State {
+    pub(super) due: Due,
     closed: bool,
 }
 
-/// The queue and the condvar a timer thread waits on.
+/// An executor's deadline queue, and the threads that fire it and park until it
+/// changes.
 #[derive(Default)]
-struct Core {
-    state: Mutex<State>,
-    changed: Condvar,
-    /// The timer thread, once it runs: the one thread the last drop does not join.
-    runner: OnceLock<ThreadId>,
+pub(super) struct Timers {
+    pub(super) state: Mutex<State>,
+    /// The threads parked for a task or a deadline: a deadline earlier than the
+    /// queue's earliest unparks them. None on the web.
+    pub(super) parked: os::Parked,
 }
 
-impl Core {
+impl std::fmt::Debug for Timers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Timers")
+    }
+}
+
+impl Timers {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
     /// Wakes every sleep due at `now`; returns how many.
-    fn fire(&self, now: Instant) -> usize {
+    pub(super) fn fire(&self, now: Instant) -> usize {
         let due = lock(&self.state).due.take_due(now);
         let fired = due.len();
         for (_, waker) in due {
@@ -117,129 +117,36 @@ impl Core {
         fired
     }
 
-    /// A timer thread's body: wakes the due sleeps and waits for the next deadline
-    /// until the queue closes.
-    fn run(&self) {
-        let _ = self.runner.set(thread::current().id());
-        let mut state = lock(&self.state);
-        loop {
-            if state.closed {
-                return;
-            }
-            let due = state.due.take_due(Instant::now());
-            if !due.is_empty() {
-                drop(state);
-                for (_, waker) in due {
-                    waker.wake();
-                }
-                state = lock(&self.state);
-                continue;
-            }
-            state = match state.due.next_deadline() {
-                None => self.changed.wait(state),
-                Some(deadline) => {
-                    let timeout = deadline.saturating_duration_since(Instant::now());
-                    match self.changed.wait_timeout(state, timeout) {
-                        Ok((state, _)) => Ok(state),
-                        Err(poisoned) => Err(PoisonError::new(poisoned.into_inner().0)),
-                    }
-                }
-            }
-            .unwrap_or_else(PoisonError::into_inner);
-        }
-    }
-
-    fn close(&self) {
+    /// Refuses further sleeps and drops the wakers of those waiting.
+    pub(super) fn close(&self) {
         let mut state = lock(&self.state);
         state.closed = true;
         state.due = Due::default();
-        self.changed.notify_all();
-    }
-}
-
-/// An executor's timers: the queue and its driver.
-pub(super) struct Timers {
-    core: Arc<Core>,
-    drive: Drive,
-    thread: Mutex<Option<ThreadHandle<()>>>,
-}
-
-impl std::fmt::Debug for Timers {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Timers")
-            .field("drive", &self.drive)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Timers {
-    pub(super) fn new(drive: Drive) -> Self {
-        Self {
-            core: Arc::default(),
-            drive,
-            thread: Mutex::new(None),
-        }
-    }
-
-    /// A sleep until `deadline`, starting the timer thread if this form has one and it
-    /// has not started.
-    pub(super) fn sleep_until(&self, deadline: Instant) -> io::Result<Sleep> {
-        if self.drive == Drive::Thread {
-            let mut thread = lock(&self.thread);
-            if thread.is_none() {
-                let core = Arc::clone(&self.core);
-                *thread = Some(spawn_named("tutti-timer", None, move |_| core.run())?);
-            }
-        }
-        Ok(Sleep {
-            core: Arc::clone(&self.core),
-            deadline,
-            id: None,
-        })
-    }
-
-    /// Wakes the sleeps due now when the caller drives the timers; nothing otherwise.
-    pub(super) fn fire_if_polled(&self) {
-        if self.drive == Drive::Poll {
-            self.core.fire(Instant::now());
-        }
-    }
-}
-
-impl Drop for Timers {
-    fn drop(&mut self) {
-        self.core.close();
-        let Some(handle) = lock(&self.thread).take() else {
-            return;
-        };
-        // A waker the timer thread wakes or drops can hold the last executor: that
-        // drop runs on the timer thread, which then leaves its loop on `closed`.
-        if self.core.runner.get() == Some(&thread::current().id()) {
-            handle.detach();
-        }
     }
 }
 
 /// A deadline as a future: resolves once [`Instant::now`] is at or past it.
 ///
 /// Made by [`Executor::sleep_until`](super::Executor::sleep_until). Dropping a pending
-/// `Sleep` removes it from the executor's timer and drops its waker. A `Sleep` whose
+/// `Sleep` removes it from the executor's queue and drops its waker. A `Sleep` whose
 /// executor has dropped never resolves.
 #[derive(Debug)]
 #[must_use = "a Sleep does nothing unless awaited"]
 pub struct Sleep {
-    core: Arc<Core>,
+    timers: Arc<Timers>,
     deadline: Instant,
     id: Option<u64>,
 }
 
-impl std::fmt::Debug for Core {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Core")
-    }
-}
-
 impl Sleep {
+    pub(super) fn new(timers: &Arc<Timers>, deadline: Instant) -> Self {
+        Self {
+            timers: Arc::clone(timers),
+            deadline,
+            id: None,
+        }
+    }
+
     /// The instant this sleep resolves at.
     #[must_use]
     pub fn deadline(&self) -> Instant {
@@ -248,7 +155,7 @@ impl Sleep {
 
     fn cancel(&mut self) {
         if let Some(id) = self.id.take() {
-            lock(&self.core.state).due.remove(id);
+            lock(&self.timers.state).due.remove(id);
         }
     }
 }
@@ -261,12 +168,15 @@ impl Future for Sleep {
             self.cancel();
             return Poll::Ready(());
         }
-        let core = Arc::clone(&self.core);
-        let mut state = lock(&core.state);
+        let timers = Arc::clone(&self.timers);
+        let mut state = lock(&timers.state);
         if !state.closed {
+            let earliest = state.due.next_deadline();
             let id = state.due.arm(self.id, self.deadline, cx.waker());
-            if self.id.replace(id) != Some(id) {
-                core.changed.notify_one();
+            let armed = self.id.replace(id) != Some(id);
+            drop(state);
+            if armed && earliest.is_none_or(|earliest| self.deadline < earliest) {
+                timers.parked.unpark_all();
             }
         }
         Poll::Pending

@@ -2,7 +2,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
+use super::os::Deadline;
 use super::*;
+use crate::Instant;
 
 /// Dropping the handle requests the stop and joins: the body had seen the stop
 /// by the time `drop` returned. A drop that did not join returns before the

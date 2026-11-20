@@ -3,7 +3,7 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_units::{Feedback, SampleRate, Seconds};
 
 use super::*;
-use crate::{ChannelTimes, GAIN_RAMP, MaxDelay, Routing};
+use crate::{ChannelTimes, FeedbackRouting, GAIN_RAMP, MaxDelay};
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -35,10 +35,10 @@ fn stereo() -> DelayLayout {
 
 /// A stereo delay with no routing between the channels and a time of its own for the right.
 fn stereo_apart(right: f64) -> DelayLayout {
-    stereo()
-        .with_routing(Routing::none(BusTopology::STEREO))
-        .unwrap()
-        .with_times(ChannelTimes::each(&[Seconds::new(right)]).unwrap())
+    DelayLayout::builder(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+        .routing(FeedbackRouting::none(BusTopology::STEREO))
+        .times(ChannelTimes::try_from(&[Seconds::new(right)][..]).unwrap())
+        .build()
         .unwrap()
 }
 
@@ -236,8 +236,9 @@ fn channel_times_are_linked_or_each_their_own() {
     );
     assert_eq!(heard(&k.run(&both)), [10, 40]);
     // Linked: every channel follows the control.
-    let linked = stereo()
-        .with_routing(Routing::none(BusTopology::STEREO))
+    let linked = DelayLayout::builder(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+        .routing(FeedbackRouting::none(BusTopology::STEREO))
+        .build()
         .unwrap();
     let mut k = runner(&linked, &controls(10.0 / 1024.0, 0.0, 0.0));
     assert_eq!(heard(&k.run(&both)), [10, 10]);

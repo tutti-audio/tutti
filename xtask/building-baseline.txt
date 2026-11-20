@@ -71,20 +71,9 @@ tutti-cpal  ctor-result  crates/tutti-cpal/src/mic.rs::MicIn::open
 tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with_range
 
 # tutti-dsp
-tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
-tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
 tutti-dsp  with-prefix  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::with_window_fn
-tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
-tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
 tutti-dsp  setter  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::set_sample_rate
 tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolver::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::normalized
-tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/times.rs::ChannelTimes::each
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/mod_delay.rs::ModDelayLayout::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/phaser.rs::SweepRange::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/sweep.rs::Stagger::each
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/sweep.rs::Sweep::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/resample/fft.rs::FftResampler::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::new
@@ -188,26 +177,12 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNod
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::true_stereo
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::from_layout
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::stereo
 tutti-nodes  node-ctor  crates/tutti-nodes/src/kernel.rs::KernelNode::with_kernel
 tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::LfoNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::chorus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::flanger
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::general_midi_chorus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::stereo
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::saw
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::sine
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::square
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::triangle
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::general_midi
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::live
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_fdn.rs::FdnNode::live
 tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::from_decl
 tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/note_envelope.rs::SourceNode::from_decl
@@ -227,8 +202,6 @@ tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverN
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
-tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new
 

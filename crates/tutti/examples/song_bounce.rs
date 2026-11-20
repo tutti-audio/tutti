@@ -12,7 +12,7 @@
 //! `Error`, so `?` runs the whole program.
 
 use tutti::modulation::Lfo;
-use tutti::nodes::{FreeverbNode, SvfFilterConfig, SvfFilterNode, SvfType};
+use tutti::nodes::{FreeverbConfig, FreeverbNode, SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
     Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MaxBlock, Pcm, Q,
     Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
@@ -87,7 +87,9 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
     ));
-    let (reverb, _) = s.graph().add(FreeverbNode::default());
+    let (reverb, _) = s
+        .graph()
+        .add(FreeverbNode::from(FreeverbConfig::general_midi()));
     s.graph().connect(first, filter)?;
     s.graph().connect(second, filter)?; // adds: both clips sum into the filter
     s.graph().connect(filter.bus_out(0), reverb.bus_in(0))?;

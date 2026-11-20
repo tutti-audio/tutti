@@ -23,7 +23,7 @@
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
 //!   bands sum to flat magnitude; IIR, so not linear-phase and no latency). Each
 //!   crossover is an indexed `Cutoff` param (`UnitAddr::new(UnitParam::Cutoff, i)`).
-//! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `Routing`),
+//! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `FeedbackRouting`),
 //!   a `KernelNode` over `DelayKernel` (`tutti_dsp::DelayBank`); the time and feedback are
 //!   read per frame when driven.
 //! - **Dynamics** — `CompressorNode`, `GateNode`, `BrickwallLimiterNode` and
@@ -286,12 +286,14 @@ mod oscillator;
 pub use oscillator::OscillatorNode;
 
 mod delay;
-pub use delay::{DelayKernel, DelayNode, DelaySet};
-// `InterpolationMode` and the delay's controls are in `DelayNode::new`'s signature;
-// the ring itself (`DelayLine`) is `tutti-dsp`'s only.
+pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
+// `InterpolationMode`, the routing, the channel times and the controls are in `DelayConfig`'s
+// signatures, and a refusal is a `DelayLayoutError`; the ring itself (`DelayLine`) is
+// `tutti-dsp`'s only.
 pub use tutti_dsp::{
-    ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, InterpolationMode, MaxDelay,
-    MaxDelayError, Routing, RoutingError,
+    ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, DelayLayoutBuilder,
+    DelayLayoutError, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
+    InterpolationMode, MaxDelay, MaxDelayError,
 };
 
 mod distortion;
@@ -383,11 +385,11 @@ pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl,
 // Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
 // player's General MIDI setup uses.
 mod reverb_freeverb;
-pub use reverb_freeverb::{FreeverbKernel, FreeverbNode, FreeverbSet};
+pub use reverb_freeverb::{FreeverbConfig, FreeverbKernel, FreeverbNode, FreeverbSet};
 
 // The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
-pub use reverb_fdn::{FdnKernel, FdnNode, FdnSet};
+pub use reverb_fdn::{FdnConfig, FdnKernel, FdnNode, FdnSet};
 
 // Dattorro's plate as a `KernelNode`.
 mod reverb_plate;
@@ -404,13 +406,14 @@ pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
 
 mod modulation;
 pub use modulation::{
-    ModDelayKernel, ModDelayNode, ModDelaySet, PhaserKernel, PhaserNode, PhaserSet,
+    ModDelayConfig, ModDelayKernel, ModDelayNode, ModDelaySet, PhaserConfig, PhaserKernel,
+    PhaserNode, PhaserSet,
 };
-// The sweep, its stagger and the controls are in `ModDelayNode::new`'s and `PhaserNode::new`'s
-// signatures.
+// The layout, the sweep, its stagger and the controls are in `ModDelayConfig`'s and
+// `PhaserConfig`'s signatures.
 pub use tutti_dsp::{
-    ModDelayControls, PhaserControls, Stages, StagesError, Stagger, StaggerError, Sweep,
-    SweepError, SweepRange, SweepRangeError,
+    ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder, PhaserControls, Stages, StagesError,
+    Stagger, StaggerError, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError,
 };
 
 // The control sources' node (`SourceNode<S: ControlSource>`) and the

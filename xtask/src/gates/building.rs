@@ -161,6 +161,10 @@ const MONO_ONLY: &str = "a mono-only node: an EQ band is one filter section on o
     the width is not a choice and the config takes none";
 const STEREO_PLATE: &str = "a stereo-only node: the plate's two tank halves feed the left and \
     right ears, so the width is not a choice and the config takes none";
+const MONO_IN_STEREO_OUT: &str = "a reverb with a fixed shape, mono in and stereo out: its width \
+    is not a choice and the config takes none";
+const OVER_A_LAYOUT: &str = "a node over a checked dsp layout: the layout's bus is the width, \
+    and the config takes the layout";
 const TEST_SUPPORT: &str =
     "test support behind the `testing` or `contract` feature, not an app's type";
 
@@ -549,6 +553,25 @@ pub(super) const ALLOW: &[Allow] = &[
         "PlateReverbConfig",
         WIDTH,
         STEREO_PLATE,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "FreeverbConfig",
+        WIDTH,
+        MONO_IN_STEREO_OUT,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "FdnConfig",
+        WIDTH,
+        MONO_IN_STEREO_OUT,
+    ),
+    ty("crates/tutti-nodes/", "DelayConfig", WIDTH, OVER_A_LAYOUT),
+    ty(
+        "crates/tutti-nodes/",
+        "ModDelayConfig",
+        WIDTH,
+        OVER_A_LAYOUT,
     ),
     ty("crates/tutti-measure/", "AlignConfig", WIDTH, MEASURES),
     ty("crates/tutti-measure/", "ChordConfig", WIDTH, MEASURES),

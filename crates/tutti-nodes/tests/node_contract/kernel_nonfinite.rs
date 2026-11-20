@@ -4,20 +4,19 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
-use tutti_dsp::{
-    FdnControls, FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType,
-};
+use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
     Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode,
     CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig, CrossoverControls,
-    CrossoverNode, DelayControls, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig,
-    DynamicEqNode, FdnNode, FreeverbNode, GateConfig, GateControls, GateNode, LadderFilterConfig,
-    LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayNode,
-    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode, PeakDetection,
-    PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
-    SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
+    CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
+    DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig,
+    FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode, LadderFilterConfig,
+    LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
+    ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+    PeakDetection, PhaserConfig, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
+    RingModNode, SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -72,13 +71,17 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             // A feedback line of a whole number of frames: one sample circulating in it falls
             // on a block's last frame only when the period lines up.
             "delay",
-            Box::new(DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds::new(0.05)),
-                DelayControls {
+            Box::new(DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(0.05)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(DelayControls {
                     time: Seconds::new(0.01),
                     feedback: Feedback::new(0.9),
                     ..DelayControls::DEFAULT
-                },
+                }),
             )),
         ),
         (
@@ -210,32 +213,37 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "chorus",
-            Box::new(ModDelayNode::<f32>::chorus(BusTopology::MONO)),
+            Box::new(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
+                BusTopology::MONO,
+            ))),
         ),
         (
             "flanger",
-            Box::new(ModDelayNode::<f32>::flanger(BusTopology::MONO)),
+            Box::new(ModDelayNode::<f32>::from(ModDelayConfig::flanger(
+                BusTopology::MONO,
+            ))),
         ),
         (
             "phaser",
-            Box::new(PhaserNode::<f32>::mono(
-                Stages::of(4),
-                PhaserControls::DEFAULT,
-            )),
+            Box::new(
+                PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+                    .unwrap(),
+            ),
         ),
         (
             "fdn",
-            Box::new(FdnNode::<f32>::live(
+            Box::new(FdnNode::<f32>::from(FdnConfig::new().layout(
                 FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
-                FdnControls::DEFAULT,
-            )),
+            ))),
         ),
         (
             "freeverb",
-            Box::new(FreeverbNode::<f32>::live(FreeverbControls {
-                room: Mix::new(0.9),
-                damp: Mix::new(0.2),
-            })),
+            Box::new(FreeverbNode::<f32>::from(FreeverbConfig::new().controls(
+                FreeverbControls {
+                    room: Mix::new(0.9),
+                    damp: Mix::new(0.2),
+                },
+            ))),
         ),
         (
             "plate",

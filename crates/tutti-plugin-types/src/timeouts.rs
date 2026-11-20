@@ -42,9 +42,9 @@ pub struct Timeouts {
     /// plugin call with no progress inside it to measure, so one flat and
     /// generous window: 60 s.
     pub state_restore: Duration,
-    /// The gap a state transfer may stand still between chunks before it is
-    /// declared stalled: 10 s.
-    pub state_progress: Duration,
+    /// How long the server has to save or restore a state, from the request,
+    /// before the request is declared stalled: 10 s.
+    pub state: Duration,
     /// The server's answer to a query (a parameter, a preset, the parameter
     /// list): 5 s.
     pub param: Duration,
@@ -70,7 +70,7 @@ impl Default for Timeouts {
             shutdown: Duration::from_secs(2),
             connect: Duration::from_secs(5),
             state_restore: Duration::from_secs(60),
-            state_progress: Duration::from_secs(10),
+            state: Duration::from_secs(10),
             param: Duration::from_secs(5),
             editor: Duration::from_secs(10),
             rate: Duration::from_secs(10),
@@ -112,14 +112,20 @@ impl Timeouts {
         self.rate.saturating_add(self.param_wait())
     }
 
-    /// How long the host lets a state transfer make no progress before it
-    /// declares it stalled: the bridge's per-chunk
-    /// [`state_progress`](Self::state_progress) deadline and the margin, so the
-    /// bridge's own stall report (which carries the bytes that moved) arrives
-    /// first.
+    /// The most a state request may be kept waiting by the server's signs of
+    /// life: ten windows. Without them the request is due at
+    /// [`state`](Self::state).
+    #[must_use]
+    pub fn state_ceiling(&self) -> Duration {
+        self.state.saturating_mul(10)
+    }
+
+    /// How long a caller waits for a state request's answer: the bridge's
+    /// [`state_ceiling`](Self::state_ceiling) and the margin, so the bridge's own
+    /// stall report arrives first.
     #[must_use]
     pub fn state_wait(&self) -> Duration {
-        self.state_progress.saturating_add(self.reply_margin)
+        self.state_ceiling().saturating_add(self.reply_margin)
     }
 
     /// Whether every deadline can be waited on.
@@ -134,7 +140,7 @@ impl Timeouts {
             ("shutdown", self.shutdown),
             ("connect", self.connect),
             ("state_restore", self.state_restore),
-            ("state_progress", self.state_progress),
+            ("state", self.state),
             ("param", self.param),
             ("editor", self.editor),
             ("rate", self.rate),
@@ -163,7 +169,7 @@ mod tests {
             shutdown: Duration::from_millis(1),
             connect: Duration::from_millis(1),
             state_restore: Duration::from_millis(1),
-            state_progress: Duration::from_millis(20),
+            state: Duration::from_millis(20),
             param: Duration::from_millis(30),
             editor: Duration::from_millis(40),
             rate: Duration::from_millis(50),
@@ -179,7 +185,7 @@ mod tests {
                 "the settle waits out a rate change"
             );
             assert!(t.settle_wait() > t.rate + t.param, "and a query after it");
-            assert!(t.state_wait() > t.state_progress, "a stalled transfer");
+            assert!(t.state_wait() > t.state, "a stalled transfer");
         }
     }
 

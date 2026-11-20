@@ -60,7 +60,7 @@
 //!   a matrix of impulse responses.
 //! - **Delay and modulation** (`delay/`, `modulation/`): [`DelayLine`], a fractional-read
 //!   ring with an [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a
-//!   [`DelayLayout`]: a [`MaxDelay`], its cross-feedback a checked [`Routing`], its time and
+//!   [`DelayLayout`]: a [`MaxDelay`], its cross-feedback a checked [`FeedbackRouting`], its time and
 //!   feedback [`Ramp`]s and the per-frame [`DelaySignals`]); the chorus and flanger
 //!   ([`ModDelayBank`] over a [`ModDelayLayout`]: its [`Sweep`] and [`Stagger`] checked, a
 //!   [`Ramp`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
@@ -192,9 +192,10 @@ pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError}
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
 pub use delay::{
-    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout, DelayLine,
-    DelayRamps, DelaySignals, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
-    Routing, RoutingError,
+    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout,
+    DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, FeedbackRouting,
+    FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay,
+    MaxDelayError,
 };
 pub use dither::shaping::NoiseShaping;
 pub use dither::sink::DitherSink;
@@ -226,13 +227,14 @@ pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_we
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{
-    MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayBank, ModDelayControls, ModDelayLayout, SweepDesign,
+    MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayBank, ModDelayControls, ModDelayLayout,
+    ModDelayLayoutBuilder, SweepDesign,
 };
 pub use modulation::phaser::{
     MAX_PHASER_CHANNELS, PhaserChain, PhaserControls, Stages, StagesError, SweepRange,
     SweepRangeError,
 };
-pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
+pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepBuilder, SweepError};
 pub use novelty::{
     bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
 };
@@ -255,7 +257,7 @@ pub(crate) use reverb::network::loop_gain;
 pub use reverb::network::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
-    OutputMap, Stage, Tap, Taps, rt60_from_gain,
+    NetworkOutputMap, Stage, Tap, Taps, rt60_from_gain,
 };
 pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};

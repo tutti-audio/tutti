@@ -2179,7 +2179,7 @@ mod tests {
             fn handle(_: &(), _: &Life) {}
         }
         let mut session = Session::builder()
-            .executor(tutti_platform::Executor::polled())
+            .executor(tutti_platform::Executor::new())
             .build_detached(RATE)
             .unwrap();
         let (dc, _) = session
