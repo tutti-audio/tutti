@@ -10,9 +10,7 @@ use tutti_platform::Instant;
 
 use super::listener::Listener;
 
-use tutti_alsa_ffi::{
-    Blocking, Client, Event, PortCaps, PortEntry, PortId, PortKind, Read, UmpVersion,
-};
+use tutti_alsa_ffi::{Client, Event, PortCaps, PortEntry, PortId, PortKind, Read, UmpVersion};
 use tutti_fixtures::main_thread;
 use tutti_fixtures::midi::{
     device_identity, m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
@@ -68,7 +66,7 @@ fn peer(caps: PortCaps) -> (Client, PortId) {
 
 /// A peer client delivered `version`.
 fn peer_in(caps: PortCaps, version: UmpVersion) -> (Client, PortId) {
-    let client = Client::open("tutti-virt-peer", Blocking::NonBlock, version).expect("a sequencer");
+    let client = Client::open("tutti-virt-peer", version).expect("a sequencer");
     let port = client
         .open_port("peer", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
         .expect("a port");
@@ -410,9 +408,8 @@ fn a_midi1_note_sent_into_a_midi2_endpoint_arrives_widened() {
     assert_eq!(got[0], want);
 }
 
-/// A sender outlives its endpoint and refuses by name once the endpoint is dropped:
-/// the sequencer's port
-/// is gone, so another client no longer sees it.
+/// A sender outlives its endpoint and refuses by name once the endpoint is
+/// dropped, and one sent while it lived was accepted.
 #[test]
 fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
     let spec = spec("sender-gone");

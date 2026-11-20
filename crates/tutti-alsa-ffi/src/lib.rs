@@ -71,7 +71,7 @@ mod sys;
 mod ump;
 
 pub use address::{Address, ClientId, PortCaps, PortId, PortKind};
-pub use client::{Blocking, Client, QueueClock, Read, UmpVersion};
+pub use client::{Client, QueueClock, Read, UmpVersion};
 #[cfg(feature = "testing")]
 pub use client::{LegacyEvent, clients_opened};
 pub use error::{Error, Operation, Result};

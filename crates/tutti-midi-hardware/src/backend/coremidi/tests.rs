@@ -1,6 +1,7 @@
 use super::*;
 use crate::virtual_endpoint::VirtualProtocol;
 use tutti_fixtures::midi;
+use tutti_ump::EndpointName;
 
 /// Enumeration must not panic on a machine with no MIDI devices, and must
 /// return well-formed records where there are some. CI boxes have none; a
@@ -51,10 +52,7 @@ fn an_unknown_id_does_not_open() {
 fn capability_is_read_from_the_endpoint_not_assumed() {
     // A MIDI-1.0-protocol virtual endpoint, found as the OS lists it.
     let name = format!("tutti-cap-midi1-{}", std::process::id());
-    let Ok(_endpoint) = UmpVirtualEndpoint::new(&name, VirtualProtocol::Midi1, |_| {}) else {
-        // No CoreMIDI here (sandbox/headless) — nothing to test against.
-        return;
-    };
+    let _endpoint = plain(&name, VirtualProtocol::Midi1, |_| {});
     let endpoint = tutti_coremidi_ffi::sources()
         .into_iter()
         .find(|source| source.name().as_deref() == Some(name.as_str()))
@@ -111,11 +109,9 @@ fn a_scheduled_packet_arrives_after_the_one_sent_now() {
     use tutti_ump::MidiChannel;
 
     let (tx, rx) = mpsc::channel();
-    let _destination =
-        UmpVirtualEndpoint::new("tutti-sched-out", VirtualProtocol::Midi2, move |ump| {
-            let _ = tx.send(ump);
-        })
-        .expect("a virtual UMP endpoint");
+    let _destination = plain("tutti-sched-out", VirtualProtocol::Midi2, move |ump| {
+        let _ = tx.send(ump);
+    });
     let backend = CoreMidiEndpoints::new();
     let id = backend
         .outputs()
@@ -142,4 +138,25 @@ fn a_scheduled_packet_arrives_after_the_one_sent_now() {
         (note(61), note(60)),
         "now first, then the scheduled one"
     );
+}
+
+/// A virtual endpoint of `name` with no Function Blocks, carrying `protocol`,
+/// passing each received message to `on_event`. An endpoint with no blocks is no
+/// main-thread object, so the fixture's stand-in marker is enough; never use it
+/// for blocks.
+pub(in crate::backend::coremidi) fn plain(
+    name: &str,
+    protocol: VirtualProtocol,
+    mut on_event: impl FnMut(tutti_ump::Ump) + Send + 'static,
+) -> UmpVirtualEndpoint {
+    let spec = VirtualSpec::new(
+        EndpointName::new(name).unwrap(),
+        midi::device_identity(),
+        None,
+    )
+    .protocol(protocol);
+    UmpVirtualEndpoint::create(&spec, tutti_fixtures::main_thread(), move |ump, _| {
+        on_event(ump);
+    })
+    .expect("a virtual UMP endpoint")
 }

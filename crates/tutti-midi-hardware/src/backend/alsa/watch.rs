@@ -56,7 +56,7 @@ use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_alsa_ffi::{
-    Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
+    Announced, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
 use tutti_platform::{ThreadHandle, spawn_named};
@@ -483,7 +483,7 @@ enum Woken {
 
 impl Announce {
     fn open(stop: UnixStream) -> Result<Self> {
-        let seq = super::client::open("tutti-watch", Blocking::NonBlock, UmpVersion::Midi2)?;
+        let seq = super::client::open("tutti-watch", UmpVersion::Midi2)?;
         // Write-only and not subscribable: nobody lists this port as a device.
         let port = seq.open_port("tutti-watch", PortCaps::WRITE, PortKind::APPLICATION)?;
         seq.connect_from_announce(port)?;

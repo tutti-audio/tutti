@@ -23,7 +23,7 @@
 //!
 //! [`UmpVirtualEndpoint`] owns the endpoint, disposed on drop.
 
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, PoisonError, RwLock, Weak};
 
 use tracing::debug;
 use tutti_coremidi_ffi::{UmpDestination, UmpEndpoint, UmpSender, UmpSource};
@@ -58,11 +58,14 @@ pub struct UmpVirtualEndpoint {
 
 /// The CoreMIDI objects an endpoint is.
 enum Endpoint {
-    /// A source and a destination of one name: no Function Blocks. The senders
-    /// hold the source weakly.
+    /// A source and a destination of one name: no Function Blocks.
     Pair {
+        /// Held by senders only weakly, and only under a read lock of `live`.
         source: Arc<UmpSource>,
         destination: UmpDestination,
+        /// Read-locked by a send for its whole call and cleared under the write
+        /// lock by `Drop`, so a drop waits for a send in flight and none follows.
+        live: Arc<RwLock<bool>>,
     },
     /// A UMP Endpoint that declares blocks.
     WithBlocks(UmpEndpoint),
@@ -74,6 +77,14 @@ impl core::fmt::Debug for UmpVirtualEndpoint {
         f.debug_struct("UmpVirtualEndpoint")
             .field("name", &self.name)
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for UmpVirtualEndpoint {
+    fn drop(&mut self) {
+        if let Endpoint::Pair { live, .. } = &self.endpoint {
+            *live.write().unwrap_or_else(PoisonError::into_inner) = false;
+        }
     }
 }
 
@@ -96,59 +107,31 @@ impl UmpVirtualEndpoint {
         mut producer: InputProducerHandle,
         main: MainThreadMarker,
     ) -> Result<Self> {
-        Self::stamped(
-            spec.name().as_str(),
-            spec.protocol,
-            Some(spec),
-            main,
-            move |event, arrived| {
-                // A full inlet counts the drop itself; a log line would run on
-                // CoreMIDI's thread.
-                let _ = producer.push(event, arrived);
-            },
-        )
+        Self::create(spec, main, move |event, arrived| {
+            // A full inlet counts the drop itself; a log line would run on
+            // CoreMIDI's thread.
+            let _ = producer.push(event, arrived);
+        })
     }
 
-    /// Creates a virtual endpoint named `name` carrying `protocol`, invoking
-    /// `on_event` for every UMP message received.
-    ///
-    /// `on_event` runs on CoreMIDI's delivery thread, so it must not block.
-    ///
-    /// # Errors
-    ///
-    /// [`MidiHardwareError::Os`] if CoreMIDI refuses either the client or an
-    /// endpoint.
-    #[cfg(test)]
-    pub(crate) fn new<F>(name: &str, protocol: VirtualProtocol, mut on_event: F) -> Result<Self>
-    where
-        F: FnMut(Ump) + Send + 'static,
-    {
-        Self::stamped(
-            name,
-            protocol,
-            None,
-            // An endpoint with no blocks is no main-thread object, so the
-            // fixture's stand-in marker is enough; never use it for blocks.
-            tutti_fixtures::main_thread(),
-            move |event, _arrived| on_event(event),
-        )
-    }
-
-    /// Creates a virtual endpoint named `name` carrying `protocol`, invoking
-    /// `on_event` for every UMP message received with the `Instant` its packet
-    /// reached CoreMIDI (the packet's host time).
-    fn stamped<F>(
-        name: &str,
-        protocol: VirtualProtocol,
-        spec: Option<&VirtualSpec>,
+    /// Creates the endpoint `spec` describes, invoking `on_event` for every UMP
+    /// message received with the `Instant` its packet reached CoreMIDI (the
+    /// packet's host time). `on_event` runs on CoreMIDI's delivery thread, so it
+    /// must not block.
+    pub(super) fn create<F>(
+        spec: &VirtualSpec,
         main: MainThreadMarker,
         mut on_event: F,
     ) -> Result<Self>
     where
         F: FnMut(Ump, tutti_platform::Instant) + Send + 'static,
     {
-        // The device watch's client starts before this endpoint's (`hub_first`):
-        // CoreMIDI sends notifications to the run loop of the process's first client.
+        let name = spec.name().as_str();
+        let protocol = protocol_of(spec.protocol);
+        // The device watch's client starts before either endpoint is made, a UMP
+        // Endpoint included (`hub_first`): CoreMIDI sends notifications to the run
+        // loop of the process's first client, and an endpoint's creation is what
+        // would otherwise make that client.
         let client = super::hub_first()?;
         let on_ump = move |time, event| {
             on_event(
@@ -156,26 +139,27 @@ impl UmpVirtualEndpoint {
                 super::host_time::Pairing::now().instant_of_stamp(time),
             );
         };
-        // A spec that declares blocks is a UMP Endpoint; anything else a pair.
-        let endpoint = match spec.filter(|spec| !spec.function_blocks().is_empty()) {
-            Some(spec) => Endpoint::WithBlocks(
+        let endpoint = if spec.function_blocks().is_empty() {
+            Endpoint::Pair {
+                source: Arc::new(UmpSource::new(client, name, protocol)?),
+                destination: UmpDestination::new(client, name, protocol, on_ump)?,
+                live: Arc::new(RwLock::new(true)),
+            }
+        } else {
+            Endpoint::WithBlocks(
                 UmpEndpoint::new(
                     main,
                     name,
-                    protocol_of(protocol),
+                    protocol,
                     spec.device(),
                     spec.instance(),
                     &super::block_infos(spec),
                     on_ump,
                 )
                 .map_err(super::open_error)?,
-            ),
-            None => Endpoint::Pair {
-                source: Arc::new(UmpSource::new(client, name, protocol_of(protocol))?),
-                destination: UmpDestination::new(client, name, protocol_of(protocol), on_ump)?,
-            },
+            )
         };
-        debug!(name, ?protocol, "Created virtual MIDI endpoint");
+        debug!(name, protocol = ?spec.protocol, "Created virtual MIDI endpoint");
         Ok(Self {
             endpoint,
             name: name.to_string(),
@@ -183,8 +167,11 @@ impl UmpVirtualEndpoint {
     }
 }
 
-/// A send on a source, which it does not keep alive.
-struct PairSender(Weak<UmpSource>);
+/// A send on a pair's source, which it does not keep alive.
+struct PairSender {
+    source: Weak<UmpSource>,
+    live: Arc<RwLock<bool>>,
+}
 
 impl SenderBackend for PairSender {
     /// # Errors
@@ -193,8 +180,9 @@ impl SenderBackend for PairSender {
     /// [`MidiHardwareError::Os`] when `MIDIReceivedEventList` returns a non-zero
     /// `OSStatus`.
     fn send(&self, ump: &Ump) -> Result<()> {
-        let source = self.0.upgrade().ok_or(MidiHardwareError::EndpointGone)?;
-        Ok(source.send(ump)?)
+        let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
+        let source = self.source.upgrade().filter(|_| *live);
+        Ok(source.ok_or(MidiHardwareError::EndpointGone)?.send(ump)?)
     }
 }
 
@@ -221,7 +209,10 @@ impl SenderBackend for EndpointSender {
 impl EndpointBackend for UmpVirtualEndpoint {
     fn sender(&self) -> Arc<dyn SenderBackend> {
         match &self.endpoint {
-            Endpoint::Pair { source, .. } => Arc::new(PairSender(Arc::downgrade(source))),
+            Endpoint::Pair { source, live, .. } => Arc::new(PairSender {
+                source: Arc::downgrade(source),
+                live: Arc::clone(live),
+            }),
             Endpoint::WithBlocks(endpoint) => Arc::new(EndpointSender(endpoint.sender())),
         }
     }

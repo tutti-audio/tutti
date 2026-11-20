@@ -14,8 +14,7 @@ use crate::error::{MidiHardwareError, MidiThread, Result};
 use crate::guard::Guard;
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
-    Blocking, Client, ClientHandle, Event, Poller, PortCaps, PortKind, QueueClock, Read,
-    UmpVersion, Wait,
+    Client, ClientHandle, Event, Poller, PortCaps, PortKind, QueueClock, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
 use tutti_platform::{ThreadHandle, spawn_named};
@@ -61,9 +60,9 @@ impl Drop for AlsaInput {
     fn drop(&mut self) {
         drop(self.stop.take());
         if let Some(thread) = self.thread.take() {
-            // Joining matters: the thread owns the `Client`, and letting it
-            // outlive this would leave the port subscribed to a device the
-            // caller believes it disconnected. But not for ever: a pump stuck in
+            // Joining matters: the thread holds the `Poller` that owns the
+            // `Client`, and letting it outlive this would leave the port
+            // subscribed to a device the caller believes it disconnected. But not for ever: a pump stuck in
             // alsa-lib is detached, and says so.
             match thread.stop_within(JOIN_BOUND) {
                 Ok(Ok(())) => {}
@@ -129,7 +128,7 @@ pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
     // Non-blocking, so the pump reads until the queue is empty and then waits in
     // `poll`, which the stop descriptor can interrupt. One client per connection
     // — see `client::open`.
-    let seq = super::client::open(CLIENT, Blocking::NonBlock, UmpVersion::Midi2)?;
+    let seq = super::client::open(CLIENT, UmpVersion::Midi2)?;
     // What the source can speak decides what this client is delivered: a MIDI
     // 1.0 source arrives as MIDI 1.0 UMP (type 2) and the input node's
     // `Midi2Translator` translates it, so the kernel never converts it.

@@ -7,7 +7,7 @@ use tutti_platform::Instant;
 
 use super::*;
 use crate::Devices;
-use crate::backend::coremidi::UmpVirtualEndpoint;
+use crate::backend::coremidi::tests::plain;
 use crate::endpoints::MidiEndpoints;
 use crate::virtual_endpoint::VirtualProtocol;
 use tutti_midi_device::DeviceEvent;
@@ -72,8 +72,7 @@ fn a_virtual_endpoint_comes_and_goes_and_the_watch_unregisters() {
     let devices = Watched::open();
     assert_eq!(registered(), 1);
 
-    let destination =
-        UmpVirtualEndpoint::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let destination = plain(&name, VirtualProtocol::Midi2, |_| {});
     let added = until(
         &devices,
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
@@ -97,8 +96,7 @@ fn a_virtual_endpoint_comes_and_goes_and_the_watch_unregisters() {
 fn a_change_is_reported_when_an_output_port_comes_first() {
     let pid = std::process::id();
     let first_name = format!("tutti-port-first-{pid}");
-    let first =
-        UmpVirtualEndpoint::new(&first_name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let first = plain(&first_name, VirtualProtocol::Midi2, |_| {});
     let backend = crate::backend::coremidi::CoreMidiEndpoints::new();
     let id = backend
         .outputs()
@@ -109,8 +107,7 @@ fn a_change_is_reported_when_an_output_port_comes_first() {
     let out = backend.open_output(id).expect("opens");
     let devices = Watched::open();
     let name = format!("tutti-after-port-{pid}");
-    let destination =
-        UmpVirtualEndpoint::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let destination = plain(&name, VirtualProtocol::Midi2, |_| {});
     until(
         &devices,
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
@@ -123,16 +120,14 @@ fn a_change_is_reported_when_an_output_port_comes_first() {
 #[test]
 fn a_change_is_reported_when_a_virtual_endpoint_comes_first() {
     let pid = std::process::id();
-    let source = UmpVirtualEndpoint::new(
+    let source = plain(
         &format!("tutti-source-{pid}"),
         VirtualProtocol::Midi2,
         |_| {},
-    )
-    .expect("creates");
+    );
     let devices = Watched::open();
     let name = format!("tutti-after-source-{pid}");
-    let destination =
-        UmpVirtualEndpoint::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let destination = plain(&name, VirtualProtocol::Midi2, |_| {});
     until(
         &devices,
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),

@@ -1,11 +1,13 @@
 use super::super::CoreMidiEndpoints;
+use super::super::tests::plain;
 use super::*;
+use crate::MidiHardwareError;
 use crate::endpoints::MidiEndpoints;
 use std::sync::mpsc;
 use std::time::Duration;
 use tutti_fixtures::{midi, unique_name};
 use tutti_graph::Offset;
-use tutti_ump::{DiscoveryFilter, Message, MidiChannel, Stream, Ump, UmpVersion, Utility};
+use tutti_ump::{DiscoveryFilter, Message, MidiChannel, Stream, Ump, UmpVersion};
 
 /// **A packet sent to the endpoint reaches its callback, every message of it, in
 /// order** (M2-104 §7.1: a UMP Stream message has no MIDI 1.0 form, so this
@@ -17,10 +19,9 @@ use tutti_ump::{DiscoveryFilter, Message, MidiChannel, Stream, Ump, UmpVersion, 
 fn a_packet_sent_to_the_endpoint_reaches_its_callback() {
     let (tx, rx) = mpsc::channel();
     let name = unique_name("tutti-vend-delivery");
-    let _endpoint = UmpVirtualEndpoint::new(&name, VirtualProtocol::Midi2, move |ump| {
+    let _endpoint = plain(&name, VirtualProtocol::Midi2, move |ump| {
         let _ = tx.send(ump);
-    })
-    .expect("a virtual UMP endpoint");
+    });
     let backend = CoreMidiEndpoints::new();
     let id = backend
         .outputs()
@@ -56,30 +57,22 @@ fn a_packet_sent_to_the_endpoint_reaches_its_callback() {
     assert_eq!(got, [discovery, note]);
 }
 
-/// A JR Timestamp is a single UMP Utility word, which has no MIDI 1.0 form: the
-/// endpoint's sender carries it to the wire without error.
+/// **A sender of an endpoint with no Function Blocks (a source and a destination
+/// under one name) refuses by name once the endpoint is dropped**, and one sent
+/// while it lived was accepted.
 #[test]
-fn a_jr_timestamp_word_sends() {
-    let endpoint = UmpVirtualEndpoint::new(
-        &unique_name("tutti-vend-jr"),
+fn a_pair_sender_refuses_by_name_once_the_endpoint_is_dropped() {
+    let endpoint = plain(
+        &unique_name("tutti-vend-gone"),
         VirtualProtocol::Midi2,
         |_| {},
-    )
-    .expect("creates");
-    let jr = Ump::from(Message::Utility(Utility::JrTimestamp(0x1234)));
-    assert!(endpoint.sender().send(&jr).is_ok());
-}
-
-/// A MIDI 2.0 channel-voice note on is two words, and the endpoint's sender carries
-/// both.
-#[test]
-fn a_two_word_note_on_sends() {
-    let endpoint = UmpVirtualEndpoint::new(
-        &unique_name("tutti-vend-note"),
-        VirtualProtocol::Midi2,
-        |_| {},
-    )
-    .expect("creates");
+    );
+    let sender = endpoint.sender();
     let note = midi::note_on(MidiChannel::of(1), 60, 0x8000);
-    assert!(endpoint.sender().send(&note).is_ok());
+    assert!(sender.send(&note).is_ok());
+    drop(endpoint);
+    assert!(matches!(
+        sender.send(&note),
+        Err(MidiHardwareError::EndpointGone)
+    ));
 }

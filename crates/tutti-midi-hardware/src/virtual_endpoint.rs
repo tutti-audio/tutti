@@ -30,6 +30,9 @@
 //!   which is what CoreMIDI offers for an endpoint with no blocks to declare (before
 //!   macOS 15 it is all CoreMIDI offers).
 //!
+//! On macOS a peer reads from the endpoint's source and writes to its destination;
+//! on Linux it subscribes to the one port in either direction.
+//!
 //! # Main thread
 //!
 //! Opening an endpoint takes a [`MainThreadMarker`], and a [`VirtualEndpoint`] is
@@ -152,8 +155,7 @@ pub(crate) trait EndpointBackend {
     /// What sends on the endpoint from any thread. It does not keep the endpoint
     /// alive: once the endpoint is dropped a send is
     /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone).
-    /// A send never reaches the OS after the endpoint is gone, and the drop waits for
-    /// a send in flight.
+    /// The drop waits for a send in flight, and no send reaches the OS after it.
     fn sender(&self) -> Arc<dyn SenderBackend>;
 
     /// Whether the endpoint is still delivering what peers write to it.
@@ -341,8 +343,7 @@ impl VirtualEndpoint {
 
     /// A handle that sends as [`send`](Self::send) does from any thread. It does
     /// not keep the endpoint alive: after the endpoint is dropped its sends are
-    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone),
-    /// and none reaches the OS after the drop (the drop waits for a send in flight).
+    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone).
     pub fn sender(&self) -> VirtualSender {
         VirtualSender {
             outbound: Arc::clone(&self.outbound),

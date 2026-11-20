@@ -54,7 +54,9 @@ pub struct ClientHandle(Weak<Mutex<Client>>);
 
 impl ClientHandle {
     /// Runs `call` on the client, one thread at a time with the poller's own
-    /// reads; `None` when the poller is gone.
+    /// reads; `None` when the poller is gone. For a control thread, not the audio
+    /// thread: it waits for the lock. A thread that holds the guard of
+    /// [`Poller::client`] must not call it, which would wait on itself.
     pub fn with<R>(&self, call: impl FnOnce(&Client) -> R) -> Option<R> {
         let client = self.0.upgrade()?;
         let guard = client.lock().unwrap_or_else(PoisonError::into_inner);
@@ -63,8 +65,10 @@ impl ClientHandle {
 }
 
 impl Poller {
-    /// The client that is polled, for reads and sends. The lock is held until the
-    /// guard drops, so a read is taken before a wait, never across one.
+    /// The client that is polled, for reads and sends, from the thread that waits
+    /// on this poller. The lock is held until the guard drops, so a read is taken
+    /// before a wait, never across one, and the guard is never held while a
+    /// [`ClientHandle`] of this poller is used on the same thread.
     pub fn client(&self) -> MutexGuard<'_, Client> {
         self.client.lock().unwrap_or_else(PoisonError::into_inner)
     }

@@ -6,8 +6,9 @@
 //! which lists endpoints with their `UniqueId`, name and protocol read from one
 //! object and takes one again by id, never by list position. Every CoreMIDI call is
 //! `tutti-coremidi-ffi`'s, behind safe handles: the process's one client, the input
-//! and output ports (UMP words in and out), the virtual endpoint ([`virtual_endpoint`]), the run loop of the device watch ([`watch`]) and the Mach
-//! clock (`host_time`); this crate forbids `unsafe`.
+//! and output ports (UMP words in and out), the virtual endpoint
+//! ([`virtual_endpoint`]), the run loop of the device watch ([`watch`]) and the
+//! Mach clock (`host_time`); this crate forbids `unsafe`.
 //!
 //! # Protocol is asked, not assumed
 //!
