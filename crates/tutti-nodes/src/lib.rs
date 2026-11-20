@@ -373,7 +373,7 @@ pub use strip::BusStripNode;
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlSignals, Kernel, KernelNode, MAX_SIGNALS};
+pub use kernel::{ControlSignals, Kernel, KernelConfig, KernelNode, MAX_SIGNALS};
 
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl, Params};
 
