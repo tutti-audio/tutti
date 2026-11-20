@@ -1,9 +1,9 @@
 //! `ump_endpoints` reads what a UMP Endpoint with Function Blocks declares.
 //!
 //! The test registers a virtual UMP Endpoint of its own (macOS 15's
-//! `MIDIUMPMutableEndpoint`), so the read has a real endpoint to find; where
-//! the OS has no such class, or refuses a virtual endpoint (a sandbox with no
-//! MIDI server), there is nothing to read and the test returns.
+//! `MIDIUMPMutableEndpoint`), so the read has a real endpoint to find. The class
+//! exists from macOS 15: the test asserts it is there on 15 or later, and that
+//! `ump_endpoints` says `Unsupported` before it.
 #![cfg(target_os = "macos")]
 // SAFETY arguments are on each block; the calls are Objective-C initialisers
 // with no preconditions beyond valid arguments.
@@ -21,7 +21,7 @@ use objc2_core_midi::{
     MIDIUMPFunctionBlockUIHint, MIDIUMPMutableEndpoint, MIDIUMPMutableFunctionBlock,
 };
 use objc2_foundation::{NSArray, NSString};
-use tutti_coremidi_ffi::{UmpEndpointInfo, ump_endpoints};
+use tutti_coremidi_ffi::{UmpEndpointInfo, UmpEndpointsError, ump_endpoints};
 use tutti_ump::{
     BlockDirection, FirstGroup, FunctionBlockCount, FunctionBlockInfo, FunctionBlocks, GroupSpan,
     Midi1Port, Protocol, UiHint,
@@ -36,8 +36,12 @@ const PORT: &str = "tutti-ffi-test Port";
 /// created in (§7.1.6.2).
 #[test]
 fn an_endpoint_reads_back_its_protocol_and_blocks() {
-    if AnyClass::get(c"MIDIUMPMutableEndpoint").is_none() {
-        return; // before macOS 15 there is no manager class
+    let has_class = AnyClass::get(c"MIDIUMPMutableEndpoint").is_some();
+    let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
+    assert_eq!(has_class, major >= 15, "the class exists from macOS 15");
+    if !has_class {
+        assert_eq!(ump_endpoints().err(), Some(UmpEndpointsError::Unsupported));
+        return;
     }
     // Nothing reads the manager before the endpoint exists: with no run loop in
     // this process the manager's list is the one it first took, and the backend
@@ -59,7 +63,7 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
                 revisionLevel: [0, 0, 0, 1],
             },
         );
-        let Some(endpoint) =
+        let endpoint =
             MIDIUMPMutableEndpoint::initWithName_deviceInfo_productInstanceID_MIDIProtocol_destinationCallback(
                 MIDIUMPMutableEndpoint::alloc(),
                 &NSString::from_str("tutti-ffi-test"),
@@ -68,9 +72,7 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
                 MIDIProtocolID::Protocol_2_0,
                 &*callback as *const _ as *mut _,
             )
-        else {
-            return; // virtual endpoint creation is not allowed here
-        };
+            .expect("CoreMIDI creates the virtual endpoint");
         let block = |name: &str, direction, first, span, midi1, hint| {
             MIDIUMPMutableFunctionBlock::initWithName_direction_firstGroup_totalGroupsSpanned_maxSysEx8Streams_MIDI1Info_UIHint_isEnabled(
                 MIDIUMPMutableFunctionBlock::alloc(),
@@ -84,7 +86,7 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
                 true,
             )
         };
-        let (Some(keys), Some(port)) = (
+        let (keys, port) = (
             block(
                 KEYS,
                 MIDIUMPFunctionBlockDirection::Bidirectional,
@@ -101,17 +103,18 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
                 MIDIUMPFunctionBlockMIDI1Info::RestrictedBandwidth,
                 MIDIUMPFunctionBlockUIHint::Sender,
             ),
-        ) else {
-            return;
-        };
+        );
+        let (keys, port) = (
+            keys.expect("a block is created"),
+            port.expect("a block is created"),
+        );
         let blocks = NSArray::from_retained_slice(&[keys, port]);
-        if endpoint
+        endpoint
             .registerFunctionBlocks_markAsStatic_error(&blocks, true)
-            .is_err()
-            || endpoint.setEnabled_error(true).is_err()
-        {
-            return;
-        }
+            .expect("the blocks register");
+        endpoint
+            .setEnabled_error(true)
+            .expect("the endpoint enables");
         endpoint
     };
 
