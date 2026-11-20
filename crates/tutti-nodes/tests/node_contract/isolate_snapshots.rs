@@ -495,9 +495,9 @@ fn bus_strip() {
         .check();
 }
 #[test]
-fn linear_phase_eq() {
+fn fir_convolver() {
     use tutti_dsp::{LinearPhaseDesign, Tilt};
-    use tutti_nodes::{LinearPhaseEqConfig, LinearPhaseEqNode};
+    use tutti_nodes::FirConvolverConfig;
     use tutti_units::{Db, Hz, SampleRate};
 
     let tilt = Tilt::new(Db::new(6.0))
@@ -506,13 +506,13 @@ fn linear_phase_eq() {
     let fir = LinearPhaseDesign::new(Hz::new(200.0))
         .design(SampleRate::SR_48K, &[tilt])
         .unwrap();
-    IsolateRow::new("LinearPhaseEqNode (mono)", move || {
-        LinearPhaseEqNode::<f32>::from(
-            LinearPhaseEqConfig::new(tutti_buffers::ChannelLayout::MONO, &fir)
-                .block_size(Samples::new(64)),
-        )
+    IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
+        FirConvolverConfig::new(tutti_buffers::ChannelLayout::MONO, &fir)
+            .block_size(Samples::new(64))
+            .build::<f32>()
+            .unwrap()
     })
-    .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
+    .control("gain", |c| c.set_gain(Amplitude::new(0.3)))
     .check();
 }
 #[test]

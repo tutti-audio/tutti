@@ -211,7 +211,8 @@ pub use filter::{
     svf_step,
 };
 pub use fir::{
-    Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, kaiser_beta,
+    Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,
+    kaiser_beta,
 };
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;

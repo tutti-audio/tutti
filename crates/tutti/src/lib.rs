@@ -245,10 +245,8 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 /// A linear-phase equalizer from bands, reachable from here alone:
 ///
 /// ```
-/// use tutti::nodes::{
-///     LinearPhaseDesign, LinearPhaseEqConfig, LinearPhaseEqNode, MatchedBell, Tilt,
-/// };
-/// use tutti::{ChannelLayout, Db, Hz, Q, SampleRate};
+/// use tutti::nodes::{ConvolverNode, FirConvolverConfig, LinearPhaseDesign, MatchedBell, Tilt};
+/// use tutti::{ChannelLayout, Db, Hz, Q, SampleRate, Samples};
 ///
 /// let rate = SampleRate::SR_48K;
 /// let bands = [
@@ -256,7 +254,11 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let _node = LinearPhaseEqNode::<f32>::from(LinearPhaseEqConfig::new(ChannelLayout::STEREO, &fir));
+/// let node: ConvolverNode<f32> = FirConvolverConfig::new(ChannelLayout::STEREO, &fir)
+///     .block_size(Samples::new(512))
+///     .build()
+///     .unwrap();
+/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
 /// ```
 pub mod nodes {
     pub use tutti_dsp::{
@@ -268,7 +270,7 @@ pub mod nodes {
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, FirError,
-        LinearPhaseDesign, LinkwitzRiley, Lti, MatchedBell, Sos, SosError, System, Tilt,
+        LinearPhaseDesign, LinkwitzRiley, Lti, MAX_GRID, MatchedBell, Sos, SosError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -295,11 +297,11 @@ pub mod nodes {
         CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayControls,
         DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
         DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
-        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls,
-        FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode,
-        IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType, LfoClock,
-        LfoNode, LimiterControls, LimiterNode, LinearPhaseEqConfig, LinearPhaseEqNode,
-        MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FirConvolverConfig,
+        FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode,
+        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
+        LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode, MetronomeMode,
+        ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
         NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
         PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,

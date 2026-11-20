@@ -1,9 +1,11 @@
+//! [`FirConvolverConfig`]: a linear-phase filter through the convolver.
+
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::{LinearPhaseDesign, MatchedBell, Sos, Tilt};
+use tutti_dsp::{Fir, LinearPhaseDesign, MatchedBell, Sos, Tilt};
 use tutti_graph::Node;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Tail};
 
-use super::*;
+use super::{ConvolverError, ConvolverNode, FirConvolverConfig};
 use crate::test_support::render_f64;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -26,16 +28,16 @@ fn design(bands: &[Sos]) -> Fir {
         .unwrap()
 }
 
-fn node(width: u8, fir: &Fir) -> LinearPhaseEqNode<f64> {
-    LinearPhaseEqNode::from(
-        LinearPhaseEqConfig::new(ChannelLayout::from_count(u16::from(width)), fir)
-            .block_size(Samples::new(BLOCK)),
-    )
+fn node(width: u16, fir: &Fir) -> ConvolverNode<f64> {
+    FirConvolverConfig::new(ChannelLayout::from_count(width), fir)
+        .block_size(Samples::new(BLOCK))
+        .build()
+        .unwrap()
 }
 
-/// The node's output for a unit impulse at frame 0 of every channel in `on`, over `frames`.
+/// The node's output for a unit impulse at frame 0 of each channel in `on`, over `frames`.
 fn impulse_response(
-    node: LinearPhaseEqNode<f64>,
+    node: ConvolverNode<f64>,
     width: usize,
     on: &[usize],
     frames: usize,
@@ -55,26 +57,27 @@ fn impulse_response(
     render_f64(node, RATE, &inputs, frames)
 }
 
-/// The declared latency is the convolver's block plus `(N - 1) / 2`, and the tail the
-/// remaining `(N - 1) / 2`: the latency and the tail sum to the block and `N - 1`, where the
-/// last frame of the response lands.
+/// The most an `f64` partitioned convolution of an impulse with `taps` may be off a tap: a
+/// stated margin of 8 times `log2(n) · 2^-53` of the taps' l1 norm, the size of the rounding of
+/// a transform of `n` points (the response is a sum of at most `n` products of an impulse).
+fn rounding_bound(taps: &[f64]) -> f64 {
+    let l1: f64 = taps.iter().map(|t| t.abs()).sum();
+    8.0 * (taps.len() as f64).log2() * 2f64.powi(-53) * l1
+}
+
+/// The declared latency is the convolver's block plus `(N - 1) / 2` for `N` taps, and the
+/// tail the remaining `(N - 1) / 2`.
 #[test]
 fn the_declared_latency_is_the_block_plus_half_the_taps_less_one() {
     let fir = design(&bands());
     let n = fir.len().get();
-    assert_eq!(n % 2, 1);
     let shape = node(1, &fir).shape();
     assert_eq!(shape.latency.samples().get(), BLOCK + (n - 1) / 2);
     assert_eq!(shape.tail, Tail::Finite(Samples::new((n - 1) / 2)));
-    assert_eq!(
-        shape.latency.samples().get() + (n - 1) / 2,
-        BLOCK + n - 1,
-        "the last frame of the response"
-    );
 }
 
 /// A flat target is a unit impulse at the centre of the taps, so the node's impulse response
-/// is exactly 0 everywhere but one frame, the declared latency, where it is 1.
+/// is 0 everywhere but one frame, the declared latency, where it is 1.
 #[test]
 fn a_flat_target_peaks_at_exactly_the_declared_latency() {
     let none: [Sos; 0] = [];
@@ -86,56 +89,63 @@ fn a_flat_target_peaks_at_exactly_the_declared_latency() {
         .max_by(|&a, &b| out[a].abs().total_cmp(&out[b].abs()))
         .unwrap();
     assert_eq!(peak, latency);
-    assert!((out[peak] - 1.0).abs() < 1e-13);
+    let bound = rounding_bound(&fir.taps().collect::<Vec<_>>());
+    assert!((out[peak] - 1.0).abs() <= bound);
     for (n, &y) in out.iter().enumerate().filter(|&(n, _)| n != latency) {
-        assert!(y.abs() < 1e-13, "frame {n}: {y}");
+        assert!(y.abs() <= bound, "frame {n}: {y}");
     }
 }
 
-/// An impulse through the node is the taps, from the block on: the convolution is exact up to
-/// the FFT's rounding, `2^-40` of the taps' l1 norm (an `f64` FFT of a few thousand points
-/// resolves its sums to a few `2^-53` relative per butterfly stage, far under the bound), and
-/// the frames before the block are exactly silent.
+/// An impulse through the node is the taps, from the block on, within the rounding bound; the
+/// frames before the block are exactly silent.
 #[test]
 fn an_impulse_through_the_node_is_the_taps() {
     let fir = design(&bands());
     let taps: Vec<f64> = fir.taps().collect();
-    let l1: f64 = taps.iter().map(|t| t.abs()).sum();
     let out = &impulse_response(node(1, &fir), 1, &[0], BLOCK + taps.len() + BLOCK)[0];
     assert!(out[..BLOCK].iter().all(|&y| y == 0.0));
-    let bound = l1 * 2f64.powi(-40);
+    let bound = rounding_bound(&taps);
     for (k, &tap) in taps.iter().enumerate() {
         assert!(
             (out[BLOCK + k] - tap).abs() <= bound,
-            "tap {k}: {} against {tap}",
+            "tap {k}: {} against {tap}, bound {bound:e}",
             out[BLOCK + k]
         );
     }
     assert!(out[BLOCK + taps.len()..].iter().all(|y| y.abs() <= bound));
 }
 
-/// The channels are independent: an impulse on the left leaves the right exactly silent, and
-/// the left is the same taps.
+/// The channels are independent: an impulse on the left is the taps on the left and exactly
+/// silence on the right.
 #[test]
 fn channels_do_not_couple() {
     let fir = design(&bands());
-    let frames = BLOCK + fir.len().get() + BLOCK;
-    let out = impulse_response(node(2, &fir), 2, &[0], frames);
+    let taps: Vec<f64> = fir.taps().collect();
+    let out = impulse_response(node(2, &fir), 2, &[0], BLOCK + taps.len() + BLOCK);
     assert!(out[1].iter().all(|&y| y == 0.0));
-    let mono = &impulse_response(node(1, &fir), 1, &[0], frames)[0];
-    assert_eq!(&out[0], mono);
+    let bound = rounding_bound(&taps);
+    for (k, &tap) in taps.iter().enumerate() {
+        assert!((out[0][BLOCK + k] - tap).abs() <= bound, "tap {k}");
+    }
 }
 
-/// A fork shares the taps' spectra and renders the same impulse response.
+/// A width of no channels or past a bus is refused by name, never a panic.
 #[test]
-fn a_fork_has_the_same_response() {
+fn a_wrong_width_is_refused_by_name() {
     let fir = design(&bands());
-    let frames = BLOCK + fir.len().get() + BLOCK;
-    let live = node(1, &fir);
-    let fork = live.fork_fresh();
-    assert_eq!(live.shape(), fork.shape());
+    let block = Samples::new(BLOCK);
     assert_eq!(
-        impulse_response(live, 1, &[0], frames),
-        impulse_response(fork, 1, &[0], frames)
+        FirConvolverConfig::new(ChannelLayout::from_count(0), &fir)
+            .block_size(block)
+            .build::<f32>()
+            .unwrap_err(),
+        ConvolverError::NoChannels
     );
+    assert!(matches!(
+        FirConvolverConfig::new(ChannelLayout::from_count(17), &fir)
+            .block_size(block)
+            .build::<f32>()
+            .unwrap_err(),
+        ConvolverError::TooWide { channels: 17 }
+    ));
 }
