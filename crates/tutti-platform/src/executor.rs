@@ -462,13 +462,19 @@ impl Executor {
     /// web (see the type's *Timers* section). Dropping the [`Sleep`] before it resolves
     /// removes it from the timer.
     ///
+    /// # Errors
+    /// The OS error when the timer thread, started by the first sleep on a form that
+    /// has one, cannot start, as [`spawn`](Self::spawn) refuses; a later sleep tries
+    /// the start again. A sleep on a form that fires through [`poll`](Self::poll)
+    /// never fails.
+    ///
     /// ```
     /// use std::time::Duration;
     /// use tutti_platform::{Executor, Instant};
     ///
     /// let executor = Executor::polled();
     /// let (tx, rx) = std::sync::mpsc::channel();
-    /// let sleep = executor.sleep_until(Instant::now());
+    /// let sleep = executor.sleep_until(Instant::now()).unwrap();
     /// executor
     ///     .spawn(async move {
     ///         sleep.await;
@@ -478,13 +484,16 @@ impl Executor {
     /// executor.poll(8);
     /// assert_eq!(rx.try_recv(), Ok("due"));
     /// ```
-    pub fn sleep_until(&self, deadline: Instant) -> Sleep {
+    pub fn sleep_until(&self, deadline: Instant) -> io::Result<Sleep> {
         self.timers.sleep_until(deadline)
     }
 
     /// A future that resolves `duration` from now: [`sleep_until`](Self::sleep_until) of
     /// that instant.
-    pub fn sleep(&self, duration: Duration) -> Sleep {
+    ///
+    /// # Errors
+    /// As [`sleep_until`](Self::sleep_until).
+    pub fn sleep(&self, duration: Duration) -> io::Result<Sleep> {
         self.sleep_until(Instant::now() + duration)
     }
 

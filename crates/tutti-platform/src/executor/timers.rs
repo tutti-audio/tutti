@@ -7,6 +7,7 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::task::{Context, Poll, Waker};
@@ -178,22 +179,19 @@ impl Timers {
 
     /// A sleep until `deadline`, starting the timer thread if this form has one and it
     /// has not started.
-    pub(super) fn sleep_until(&self, deadline: Instant) -> Sleep {
+    pub(super) fn sleep_until(&self, deadline: Instant) -> io::Result<Sleep> {
         if self.drive == Drive::Thread {
             let mut thread = lock(&self.thread);
             if thread.is_none() {
                 let core = Arc::clone(&self.core);
-                match spawn_named("tutti-timer", None, move |_| core.run()) {
-                    Ok(handle) => *thread = Some(handle),
-                    Err(error) => tracing::warn!(%error, "the timer thread did not start"),
-                }
+                *thread = Some(spawn_named("tutti-timer", None, move |_| core.run())?);
             }
         }
-        Sleep {
+        Ok(Sleep {
             core: Arc::clone(&self.core),
             deadline,
             id: None,
-        }
+        })
     }
 
     /// Wakes the sleeps due now when the caller drives the timers; nothing otherwise.

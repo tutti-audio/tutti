@@ -106,7 +106,9 @@ fn dropping_a_pending_sleep_frees_its_waker() {
     let timers = Timers::new(Drive::Poll);
     let counting = Arc::new(Counting(AtomicUsize::new(0)));
     let waker = Waker::from(Arc::clone(&counting));
-    let mut sleep = timers.sleep_until(Instant::now() + Duration::from_secs(3600));
+    let mut sleep = timers
+        .sleep_until(Instant::now() + Duration::from_secs(3600))
+        .unwrap();
     let mut cx = Context::from_waker(&waker);
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
     assert_eq!(
@@ -125,6 +127,6 @@ fn a_sleep_with_a_past_deadline_resolves_on_its_first_poll() {
     let timers = Timers::new(Drive::Poll);
     let waker = waker();
     let mut cx = Context::from_waker(&waker);
-    let mut sleep = timers.sleep_until(Instant::now());
+    let mut sleep = timers.sleep_until(Instant::now()).unwrap();
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_ready());
 }

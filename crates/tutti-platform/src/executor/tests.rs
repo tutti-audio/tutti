@@ -248,7 +248,7 @@ fn a_polled_sleep_with_a_past_deadline_resolves_within_one_poll() {
     let executor = Executor::polled();
     let flag = Arc::new(AtomicBool::new(false));
     let f = Arc::clone(&flag);
-    let sleep = executor.sleep_until(Instant::now());
+    let sleep = executor.sleep_until(Instant::now()).unwrap();
     executor
         .spawn(async move {
             sleep.await;
@@ -264,7 +264,7 @@ fn a_polled_future_awaiting_a_far_deadline_stays_pending_across_polls() {
     let executor = Executor::polled();
     let flag = Arc::new(AtomicBool::new(false));
     let f = Arc::clone(&flag);
-    let sleep = executor.sleep(Duration::from_secs(3600 * 24));
+    let sleep = executor.sleep(Duration::from_secs(3600 * 24)).unwrap();
     executor
         .spawn(async move {
             sleep.await;
@@ -282,7 +282,9 @@ fn a_polled_poll_wakes_a_sleep_whose_deadline_passed_after_it_pended() {
     let executor = Executor::polled();
     let polls = Arc::new(AtomicUsize::new(0));
     let p = Arc::clone(&polls);
-    let mut sleep = executor.sleep_until(Instant::now() + Duration::from_millis(20));
+    let mut sleep = executor
+        .sleep_until(Instant::now() + Duration::from_millis(20))
+        .unwrap();
     executor
         .spawn(std::future::poll_fn(move |cx| {
             p.fetch_add(1, Ordering::SeqCst);
@@ -304,7 +306,7 @@ fn a_polled_poll_wakes_a_sleep_whose_deadline_passed_after_it_pended() {
 fn a_threaded_sleep_with_a_past_deadline_resolves() {
     let executor = Executor::threaded();
     let (tx, rx) = mpsc::channel();
-    let sleep = executor.sleep_until(Instant::now());
+    let sleep = executor.sleep_until(Instant::now()).unwrap();
     executor
         .spawn(async move {
             sleep.await;
@@ -319,7 +321,7 @@ fn a_threaded_sleep_resolves_at_a_deadline_ahead() {
     let executor = Executor::threaded();
     let (tx, rx) = mpsc::channel();
     let deadline = Instant::now() + Duration::from_millis(10);
-    let sleep = executor.sleep_until(deadline);
+    let sleep = executor.sleep_until(deadline).unwrap();
     executor
         .spawn(async move {
             sleep.await;
@@ -334,8 +336,11 @@ fn an_earlier_deadline_inserted_later_wakes_the_timer_thread_first() {
     let executor = Executor::threaded();
     let (tx, rx) = mpsc::channel();
     for (label, sleep) in [
-        ("far", executor.sleep(Duration::from_secs(3600 * 24))),
-        ("near", executor.sleep(Duration::from_millis(10))),
+        (
+            "far",
+            executor.sleep(Duration::from_secs(3600 * 24)).unwrap(),
+        ),
+        ("near", executor.sleep(Duration::from_millis(10)).unwrap()),
     ] {
         let tx = tx.clone();
         executor
@@ -355,7 +360,7 @@ fn a_host_executor_sleep_resolves_on_its_native_timer_thread() {
     let executor = Executor::new(move |future| lock(&s).push(future));
     let flag = Arc::new(AtomicBool::new(false));
     let f = Arc::clone(&flag);
-    let sleep = executor.sleep_until(Instant::now());
+    let sleep = executor.sleep_until(Instant::now()).unwrap();
     executor
         .spawn(async move {
             sleep.await;
@@ -376,7 +381,7 @@ fn a_host_executor_sleep_resolves_on_its_native_timer_thread() {
 #[test]
 fn dropping_a_threaded_executor_joins_its_timer_thread_and_leaves_sleeps_pending() {
     let executor = Executor::threaded();
-    let mut sleep = executor.sleep(Duration::from_secs(3600 * 24));
+    let mut sleep = executor.sleep(Duration::from_secs(3600 * 24)).unwrap();
     let mut cx = Context::from_waker(Waker::noop());
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
     drop(executor);
