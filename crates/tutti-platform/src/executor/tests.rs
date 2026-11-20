@@ -1,6 +1,9 @@
+use std::num::NonZeroUsize;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
-use std::task::Waker;
+use std::task::{Context, Poll, Wake, Waker};
+use std::thread;
 use std::time::Duration;
 
 use super::*;
@@ -10,6 +13,15 @@ const HANG_GUARD: Duration = Duration::from_secs(30);
 
 fn _assert_send_sync<T: Send + Sync + Clone>() {}
 const _: fn() = _assert_send_sync::<Executor>;
+
+/// An executor and `n` threads that drive it.
+fn with_threads(n: usize) -> (Executor, Threads) {
+    let executor = Executor::new();
+    let threads = executor
+        .spawn_threads(NonZeroUsize::new(n).unwrap())
+        .unwrap();
+    (executor, threads)
+}
 
 /// A future that stores its waker, counts its polls and stays pending.
 fn pending_counted(
@@ -23,65 +35,120 @@ fn pending_counted(
     })
 }
 
-struct DropFlag(Arc<AtomicBool>);
+/// Sends on a channel when dropped.
+struct DropSignal(mpsc::Sender<()>);
 
-impl Drop for DropFlag {
+impl Drop for DropSignal {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
+        let _ = self.0.send(());
     }
 }
 
+/// Blocks the test thread on `task`, failing after a hang guard.
+fn wait<T>(task: Task<T>) -> T {
+    struct Notify(Mutex<mpsc::Sender<()>>);
+    impl Wake for Notify {
+        fn wake(self: Arc<Self>) {
+            let _ = lock(&self.0).send(());
+        }
+    }
+    let (tx, rx) = mpsc::channel();
+    let waker = Waker::from(Arc::new(Notify(Mutex::new(tx))));
+    let mut cx = Context::from_waker(&waker);
+    let mut task = task;
+    loop {
+        if let Poll::Ready(output) = Pin::new(&mut task).poll(&mut cx) {
+            return output;
+        }
+        rx.recv_timeout(HANG_GUARD)
+            .expect("the task never finished");
+    }
+}
+
+/// A thread name as the running code sees it.
+fn current_name() -> Option<String> {
+    thread::current().name().map(str::to_owned)
+}
+
 #[test]
-fn a_polled_executor_runs_a_future_only_inside_poll() {
-    let executor = Executor::polled();
+fn nothing_runs_until_driven_and_a_finished_task_is_not_polled_again() {
+    let executor = Executor::new();
     let flag = Arc::new(AtomicBool::new(false));
     let f = Arc::clone(&flag);
-    executor
-        .spawn(async move { f.store(true, Ordering::SeqCst) })
-        .unwrap();
+    let task = executor.spawn(async move { f.store(true, Ordering::SeqCst) });
     assert!(
         !flag.load(Ordering::SeqCst),
         "spawn must not run the future"
     );
-    assert_eq!(executor.poll(1), 1);
+    assert!(!task.is_finished());
+    assert_eq!(executor.run_until_stalled(), 1);
     assert!(flag.load(Ordering::SeqCst));
-    assert_eq!(executor.poll(1), 0, "a finished future is not polled again");
+    assert!(task.is_finished());
+    assert_eq!(
+        executor.run_until_stalled(),
+        0,
+        "a finished task is not polled again"
+    );
 }
 
 #[test]
-fn a_polled_executor_polls_a_pending_future_again_only_after_its_wake() {
-    let executor = Executor::polled();
+fn a_pending_task_is_polled_again_only_after_its_wake() {
+    let executor = Executor::new();
     let polls = Arc::new(AtomicUsize::new(0));
     let waker = Arc::new(Mutex::new(None));
     executor
         .spawn(pending_counted(Arc::clone(&polls), Arc::clone(&waker)))
-        .unwrap();
-    assert_eq!(executor.poll(1), 1);
+        .detach();
+    assert_eq!(executor.run_until_stalled(), 1);
     assert_eq!(polls.load(Ordering::SeqCst), 1);
-    assert_eq!(executor.poll(1), 0, "unwoken: not polled");
+    assert_eq!(executor.run_until_stalled(), 0, "unwoken: not polled");
     assert_eq!(polls.load(Ordering::SeqCst), 1);
     lock(&waker).take().unwrap().wake();
-    assert_eq!(executor.poll(1), 1);
+    assert_eq!(executor.run_until_stalled(), 1);
     assert_eq!(polls.load(Ordering::SeqCst), 2);
 }
 
 #[test]
-fn poll_runs_at_most_max_and_keeps_the_rest_queued_in_order() {
-    let executor = Executor::polled();
+fn try_tick_runs_one_task_per_call_in_spawn_order_and_is_false_when_idle() {
+    let executor = Executor::new();
+    assert!(!executor.try_tick(), "nothing is ready on a new executor");
     let order = Arc::new(Mutex::new(Vec::new()));
     for i in 0..3 {
         let order = Arc::clone(&order);
-        executor.spawn(async move { lock(&order).push(i) }).unwrap();
+        executor.spawn(async move { lock(&order).push(i) }).detach();
     }
-    assert_eq!(executor.poll(2), 2);
+    assert!(executor.try_tick());
+    assert_eq!(*lock(&order), [0]);
+    assert!(executor.try_tick());
     assert_eq!(*lock(&order), [0, 1]);
-    assert_eq!(executor.poll(2), 1);
+    assert!(executor.try_tick());
     assert_eq!(*lock(&order), [0, 1, 2]);
+    assert!(!executor.try_tick(), "all three ran");
 }
 
 #[test]
-fn a_self_waking_future_is_polled_once_per_poll_call() {
-    let executor = Executor::polled();
+fn try_tick_fires_a_due_sleep_before_it_runs_a_task() {
+    let executor = Executor::new();
+    let deadline = Instant::now() + Duration::from_millis(2);
+    let sleep = executor.sleep_until(deadline);
+    let task = executor.spawn(sleep);
+    assert!(executor.try_tick(), "the task polls and arms its sleep");
+    assert!(!task.is_finished());
+    // The clock passing the deadline is the event: no thread stands in for it.
+    while Instant::now() < deadline {
+        thread::yield_now();
+    }
+    assert!(
+        executor.try_tick(),
+        "the due sleep woke its task, which ran"
+    );
+    assert!(task.is_finished());
+    assert!(!executor.try_tick());
+}
+
+#[test]
+fn a_self_waking_task_runs_once_per_try_tick() {
+    let executor = Executor::new();
     let polls = Arc::new(AtomicUsize::new(0));
     let p = Arc::clone(&polls);
     executor
@@ -90,328 +157,278 @@ fn a_self_waking_future_is_polled_once_per_poll_call() {
             cx.waker().wake_by_ref();
             Poll::<()>::Pending
         }))
-        .unwrap();
-    assert_eq!(executor.poll(10), 1);
-    assert_eq!(polls.load(Ordering::SeqCst), 1);
-    assert_eq!(executor.poll(10), 1);
-    assert_eq!(polls.load(Ordering::SeqCst), 2);
-}
-
-#[test]
-fn a_threaded_executor_completes_a_future_without_poll() {
-    let executor = Executor::threaded();
-    let (tx, rx) = mpsc::channel();
-    executor.spawn(async move { tx.send(7).unwrap() }).unwrap();
-    assert_eq!(rx.recv_timeout(HANG_GUARD).unwrap(), 7);
-    assert_eq!(
-        executor.poll(1),
-        0,
-        "poll is a no-op on a threaded executor"
-    );
-}
-
-#[test]
-fn a_threaded_future_woken_from_outside_is_polled_again() {
-    let executor = Executor::threaded();
-    let (tx, rx) = mpsc::channel();
-    let waker = Arc::new(Mutex::new(None::<Waker>));
-    let w = Arc::clone(&waker);
-    let mut first = true;
-    executor
-        .spawn(std::future::poll_fn(move |cx| {
-            if first {
-                first = false;
-                *lock(&w) = Some(cx.waker().clone());
-                tx.send("pending").unwrap();
-                Poll::Pending
-            } else {
-                tx.send("done").unwrap();
-                Poll::Ready(())
-            }
-        }))
-        .unwrap();
-    assert_eq!(rx.recv_timeout(HANG_GUARD).unwrap(), "pending");
-    lock(&waker).take().unwrap().wake();
-    assert_eq!(rx.recv_timeout(HANG_GUARD).unwrap(), "done");
-}
-
-#[test]
-fn spawn_dedicated_runs_on_a_thread_with_the_given_name() {
-    let executor = Executor::threaded();
-    let (tx, rx) = mpsc::channel();
-    executor
-        .spawn_dedicated("tutti-test-ded", None, async move {
-            tx.send(thread::current().name().map(str::to_owned))
-                .unwrap();
-        })
-        .unwrap();
-    assert_eq!(
-        rx.recv_timeout(HANG_GUARD).unwrap().as_deref(),
-        Some("tutti-test-ded")
-    );
-}
-
-#[test]
-fn a_host_executor_receives_every_spawned_future() {
-    let received = Arc::new(Mutex::new(Vec::<BoxFuture>::new()));
-    let r = Arc::clone(&received);
-    let executor = Executor::new(move |future| lock(&r).push(future));
-    let ran = Arc::new(AtomicUsize::new(0));
-    for dedicated in [false, true] {
-        let ran = Arc::clone(&ran);
-        let future = async move {
-            ran.fetch_add(1, Ordering::SeqCst);
-        };
-        if dedicated {
-            executor.spawn_dedicated("ignored", None, future).unwrap();
-        } else {
-            executor.spawn(future).unwrap();
-        }
+        .detach();
+    for expected in 1..=3 {
+        assert!(executor.try_tick());
+        assert_eq!(polls.load(Ordering::SeqCst), expected);
     }
-    assert_eq!(executor.poll(5), 0);
-    let futures = mem::take(&mut *lock(&received));
-    assert_eq!(futures.len(), 2);
-    assert_eq!(
-        ran.load(Ordering::SeqCst),
-        0,
-        "the host has not run them yet"
-    );
-    let mut cx = Context::from_waker(Waker::noop());
-    for mut future in futures {
-        assert!(future.as_mut().poll(&mut cx).is_ready());
-    }
-    assert_eq!(ran.load(Ordering::SeqCst), 2);
 }
 
 #[test]
-fn dropping_a_threaded_executor_joins_and_drops_a_pending_pool_future() {
-    let executor = Executor::threaded();
-    let dropped = Arc::new(AtomicBool::new(false));
-    let waker = Arc::new(Mutex::new(None::<Waker>));
-    let (tx, rx) = mpsc::channel();
-    let (guard, w) = (DropFlag(Arc::clone(&dropped)), Arc::clone(&waker));
-    executor
-        .spawn(std::future::poll_fn(move |cx| {
-            let _ = &guard;
-            *lock(&w) = Some(cx.waker().clone());
-            tx.send(()).unwrap();
-            Poll::<()>::Pending
-        }))
-        .unwrap();
-    rx.recv_timeout(HANG_GUARD).unwrap();
-    assert!(!dropped.load(Ordering::SeqCst));
-    drop(executor);
-    assert!(
-        dropped.load(Ordering::SeqCst),
-        "the pending future is dropped"
-    );
-}
-
-#[test]
-fn dropping_a_threaded_executor_joins_and_drops_a_pending_dedicated_future() {
-    let executor = Executor::threaded();
-    let dropped = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = mpsc::channel();
-    let guard = DropFlag(Arc::clone(&dropped));
-    executor
-        .spawn_dedicated(
-            "tutti-test-forever",
-            None,
-            std::future::poll_fn(move |_| {
-                let _ = &guard;
-                tx.send(()).unwrap();
-                Poll::<()>::Pending
-            }),
-        )
-        .unwrap();
-    rx.recv_timeout(HANG_GUARD).unwrap();
-    drop(executor);
-    assert!(dropped.load(Ordering::SeqCst));
-}
-
-#[test]
-fn dropping_a_polled_executor_drops_its_futures() {
-    let executor = Executor::polled();
-    let dropped = Arc::new(AtomicBool::new(false));
-    let guard = DropFlag(Arc::clone(&dropped));
-    executor
-        .spawn(async move {
-            let _guard = guard;
-        })
-        .unwrap();
-    drop(executor);
-    assert!(dropped.load(Ordering::SeqCst));
-}
-
-#[test]
-fn a_polled_sleep_with_a_past_deadline_resolves_within_one_poll() {
-    let executor = Executor::polled();
+fn a_task_that_panics_counts_as_run_and_the_drive_carries_on() {
+    let executor = Executor::new();
     let flag = Arc::new(AtomicBool::new(false));
     let f = Arc::clone(&flag);
-    let sleep = executor.sleep_until(Instant::now()).unwrap();
     executor
-        .spawn(async move {
-            sleep.await;
-            f.store(true, Ordering::SeqCst);
-        })
-        .unwrap();
-    executor.poll(1);
+        .spawn(async { panic!("a task's own panic") })
+        .detach();
+    executor
+        .spawn(async move { f.store(true, Ordering::SeqCst) })
+        .detach();
+    assert_eq!(executor.run_until_stalled(), 2);
     assert!(flag.load(Ordering::SeqCst));
 }
 
 #[test]
-fn a_polled_future_awaiting_a_far_deadline_stays_pending_across_polls() {
-    let executor = Executor::polled();
+fn a_dropped_task_cancels_its_future() {
+    let executor = Executor::new();
+    let marker = Arc::new(());
+    let held = Arc::clone(&marker);
+    let task = executor.spawn(async move {
+        let _held = held;
+        std::future::pending::<()>().await;
+    });
+    executor.run_until_stalled();
+    assert_eq!(Arc::strong_count(&marker), 2, "the pending future holds it");
+    drop(task);
+    executor.run_until_stalled();
+    assert_eq!(Arc::strong_count(&marker), 1, "the future is dropped");
+}
+
+#[test]
+fn a_detached_task_runs_to_completion() {
+    let executor = Executor::new();
     let flag = Arc::new(AtomicBool::new(false));
     let f = Arc::clone(&flag);
-    let sleep = executor.sleep(Duration::from_secs(3600 * 24)).unwrap();
     executor
-        .spawn(async move {
-            sleep.await;
-            f.store(true, Ordering::SeqCst);
-        })
-        .unwrap();
-    for _ in 0..5 {
-        executor.poll(8);
-    }
-    assert!(!flag.load(Ordering::SeqCst));
-}
-
-#[test]
-fn a_polled_poll_wakes_a_sleep_whose_deadline_passed_after_it_pended() {
-    let executor = Executor::polled();
-    let polls = Arc::new(AtomicUsize::new(0));
-    let p = Arc::clone(&polls);
-    let mut sleep = executor
-        .sleep_until(Instant::now() + Duration::from_millis(20))
-        .unwrap();
-    executor
-        .spawn(std::future::poll_fn(move |cx| {
-            p.fetch_add(1, Ordering::SeqCst);
-            Pin::new(&mut sleep).poll(cx)
-        }))
-        .unwrap();
-    assert_eq!(executor.poll(8), 1);
-    // The deadline is real time away: poll until the sleep fires, bounded only
-    // against a hang.
-    let end = Instant::now() + HANG_GUARD;
-    while executor.poll(8) == 0 {
-        assert!(Instant::now() < end, "the sleep never woke");
-        std::thread::yield_now();
-    }
-    assert_eq!(polls.load(Ordering::SeqCst), 2);
-}
-
-#[test]
-fn a_threaded_sleep_with_a_past_deadline_resolves() {
-    let executor = Executor::threaded();
-    let (tx, rx) = mpsc::channel();
-    let sleep = executor.sleep_until(Instant::now()).unwrap();
-    executor
-        .spawn(async move {
-            sleep.await;
-            tx.send(()).unwrap();
-        })
-        .unwrap();
-    rx.recv_timeout(HANG_GUARD).unwrap();
-}
-
-#[test]
-fn a_threaded_sleep_resolves_at_a_deadline_ahead() {
-    let executor = Executor::threaded();
-    let (tx, rx) = mpsc::channel();
-    let deadline = Instant::now() + Duration::from_millis(10);
-    let sleep = executor.sleep_until(deadline).unwrap();
-    executor
-        .spawn(async move {
-            sleep.await;
-            tx.send(Instant::now()).unwrap();
-        })
-        .unwrap();
-    assert!(rx.recv_timeout(HANG_GUARD).unwrap() >= deadline);
-}
-
-#[test]
-fn an_earlier_deadline_inserted_later_wakes_the_timer_thread_first() {
-    let executor = Executor::threaded();
-    let (tx, rx) = mpsc::channel();
-    for (label, sleep) in [
-        (
-            "far",
-            executor.sleep(Duration::from_secs(3600 * 24)).unwrap(),
-        ),
-        ("near", executor.sleep(Duration::from_millis(10)).unwrap()),
-    ] {
-        let tx = tx.clone();
-        executor
-            .spawn(async move {
-                sleep.await;
-                tx.send(label).unwrap();
-            })
-            .unwrap();
-    }
-    assert_eq!(rx.recv_timeout(HANG_GUARD).unwrap(), "near");
-}
-
-#[test]
-fn a_host_executor_sleep_resolves_on_its_native_timer_thread() {
-    let spawned = Arc::new(Mutex::new(Vec::<BoxFuture>::new()));
-    let s = Arc::clone(&spawned);
-    let executor = Executor::new(move |future| lock(&s).push(future));
-    let flag = Arc::new(AtomicBool::new(false));
-    let f = Arc::clone(&flag);
-    let sleep = executor.sleep_until(Instant::now()).unwrap();
-    executor
-        .spawn(async move {
-            sleep.await;
-            f.store(true, Ordering::SeqCst);
-        })
-        .unwrap();
-    let mut future = lock(&spawned).pop().unwrap();
-    let waker = Waker::noop();
-    assert!(
-        future
-            .as_mut()
-            .poll(&mut Context::from_waker(waker))
-            .is_ready()
-    );
+        .spawn(async move { f.store(true, Ordering::SeqCst) })
+        .detach();
+    executor.run_until_stalled();
     assert!(flag.load(Ordering::SeqCst));
 }
 
 #[test]
-fn dropping_a_threaded_executor_joins_its_timer_thread_and_leaves_sleeps_pending() {
-    let executor = Executor::threaded();
-    let mut sleep = executor.sleep(Duration::from_secs(3600 * 24)).unwrap();
-    let mut cx = Context::from_waker(Waker::noop());
-    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
-    drop(executor);
-    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+fn a_sleep_with_a_past_deadline_resolves_within_one_drive() {
+    let executor = Executor::new();
+    let task = executor.spawn(executor.sleep_until(Instant::now()));
+    executor.run_until_stalled();
+    assert!(task.is_finished());
 }
 
-/// A waker the timer thread wakes can hold the last clone of the executor; its drop
-/// then runs on the timer thread, which must not join itself.
 #[test]
-fn the_last_executor_dropped_on_the_timer_thread_does_not_join_itself() {
-    use std::task::Wake;
+fn a_sleep_with_a_far_deadline_stays_pending_across_drives() {
+    let executor = Executor::new();
+    let task = executor.spawn(executor.sleep(Duration::from_secs(3600 * 24)));
+    for _ in 0..3 {
+        executor.run_until_stalled();
+    }
+    assert!(!task.is_finished());
+}
 
+#[test]
+fn dropping_an_undriven_executor_drops_its_pending_futures() {
+    let executor = Executor::new();
+    let marker = Arc::new(());
+    let held = Arc::clone(&marker);
+    executor
+        .spawn(async move {
+            let _held = held;
+            std::future::pending::<()>().await;
+        })
+        .detach();
+    executor.run_until_stalled();
+    assert_eq!(Arc::strong_count(&marker), 2);
+    drop(executor);
+    assert_eq!(Arc::strong_count(&marker), 1);
+}
+
+#[test]
+fn dropping_an_executor_drops_the_futures_that_never_ran() {
+    let executor = Executor::new();
+    let marker = Arc::new(());
+    let held = Arc::clone(&marker);
+    let task = executor.spawn(async move { drop(held) });
+    assert_eq!(Arc::strong_count(&marker), 2, "queued, not run");
+    drop(executor);
+    assert_eq!(Arc::strong_count(&marker), 1, "dropped with the executor");
+    drop(task);
+}
+
+#[test]
+fn a_thread_runs_a_task_and_its_output_resolves() {
+    let (executor, _threads) = with_threads(2);
+    assert_eq!(wait(executor.spawn(async { 6 * 7 })), 42);
+}
+
+#[test]
+fn a_dropped_task_cancels_on_a_thread() {
+    let (executor, _threads) = with_threads(1);
+    let (tx, rx) = mpsc::channel();
+    let (armed_tx, armed_rx) = mpsc::channel();
+    let signal = DropSignal(tx);
+    let task = executor.spawn(async move {
+        let _signal = signal;
+        armed_tx.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
+    armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    assert!(
+        rx.try_recv().is_err(),
+        "the future is alive while its task is"
+    );
+    drop(task);
+    rx.recv_timeout(HANG_GUARD).expect("the future is dropped");
+}
+
+#[test]
+fn a_detached_task_runs_on_a_thread() {
+    let (executor, _threads) = with_threads(1);
+    let (tx, rx) = mpsc::channel();
+    executor
+        .spawn(async move { tx.send("ran").unwrap() })
+        .detach();
+    assert_eq!(rx.recv_timeout(HANG_GUARD), Ok("ran"));
+}
+
+#[test]
+fn a_sleep_wakes_a_parked_thread_at_its_deadline() {
+    let (executor, _threads) = with_threads(1);
+    let sleep = executor.sleep(Duration::from_millis(5));
+    let (tx, rx) = mpsc::channel();
+    executor
+        .spawn(async move {
+            sleep.await;
+            tx.send("due").unwrap();
+        })
+        .detach();
+    assert_eq!(rx.recv_timeout(HANG_GUARD), Ok("due"));
+}
+
+#[test]
+fn a_near_sleep_spawned_after_a_far_one_wakes_a_parked_thread() {
+    let (executor, _threads) = with_threads(1);
+    let mut far = executor.sleep(Duration::from_secs(3600 * 24));
+    let (armed_tx, armed_rx) = mpsc::channel();
+    executor
+        .spawn(std::future::poll_fn(move |cx| {
+            let polled = Pin::new(&mut far).poll(cx);
+            let _ = armed_tx.send(());
+            polled
+        }))
+        .detach();
+    armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    let near = executor.sleep(Duration::from_millis(5));
+    let (tx, rx) = mpsc::channel();
+    executor
+        .spawn(async move {
+            near.await;
+            tx.send("near").unwrap();
+        })
+        .detach();
+    assert_eq!(rx.recv_timeout(HANG_GUARD), Ok("near"));
+}
+
+/// Several threads drive one queue: tasks that wait on each other all finish only if more
+/// than one thread runs.
+#[test]
+fn n_threads_drive_the_same_queue() {
+    let (executor, _threads) = with_threads(2);
+    let (a_tx, a_rx) = mpsc::sync_channel::<()>(0);
+    let (b_tx, b_rx) = mpsc::sync_channel::<()>(0);
+    let first = executor.spawn(async move {
+        a_tx.send(()).unwrap();
+        b_rx.recv().unwrap();
+    });
+    let second = executor.spawn(async move {
+        a_rx.recv().unwrap();
+        b_tx.send(()).unwrap();
+    });
+    wait(first);
+    wait(second);
+}
+
+/// A thread's exit runs its thread-local destructors, which the drop's join waits for: the
+/// signal is sent by the time `drop` returns.
+#[test]
+fn dropping_threads_joins_them() {
+    thread_local! {
+        static EXIT: std::cell::RefCell<Option<DropSignal>> = const { std::cell::RefCell::new(None) };
+    }
+    let (executor, threads) = with_threads(2);
+    let (tx, rx) = mpsc::channel();
+    let (armed_tx, armed_rx) = mpsc::channel();
+    executor
+        .spawn(async move {
+            EXIT.with(|exit| *exit.borrow_mut() = Some(DropSignal(tx)));
+            armed_tx.send(()).unwrap();
+        })
+        .detach();
+    armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    assert!(rx.try_recv().is_err(), "the thread is still running");
+    drop(threads);
+    assert!(
+        rx.try_recv().is_ok(),
+        "the drop returned before the thread ended"
+    );
+    drop(executor);
+}
+
+#[test]
+fn dropping_threads_leaves_the_queue_to_the_caller() {
+    let (executor, threads) = with_threads(1);
+    drop(threads);
+    let task = executor.spawn(async { 5 });
+    assert!(!task.is_finished(), "no thread drives it any more");
+    assert_eq!(executor.run_until_stalled(), 1);
+    assert_eq!(wait(task), 5);
+}
+
+#[test]
+fn the_last_drop_drops_the_pending_futures() {
+    let (executor, threads) = with_threads(2);
+    let marker = Arc::new(());
+    let held = Arc::clone(&marker);
+    let (armed_tx, armed_rx) = mpsc::channel();
+    executor
+        .spawn(async move {
+            let _held = held;
+            armed_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })
+        .detach();
+    armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    assert_eq!(Arc::strong_count(&marker), 2);
+    drop(threads);
+    drop(executor);
+    assert_eq!(
+        Arc::strong_count(&marker),
+        1,
+        "the threads ended and the future dropped before the drops returned"
+    );
+}
+
+/// A waker that a thread wakes can hold the `Threads`; its drop then runs on that thread,
+/// which must not join itself.
+#[test]
+fn threads_dropped_on_one_of_their_own_do_not_join_themselves() {
     struct Holder {
-        executor: Mutex<Option<Executor>>,
+        threads: Mutex<Option<Threads>>,
         dropped: Mutex<Option<mpsc::Sender<()>>>,
     }
     impl Wake for Holder {
         fn wake(self: Arc<Self>) {
-            drop(self.executor.lock().unwrap().take());
-            if let Some(tx) = self.dropped.lock().unwrap().take() {
+            drop(lock(&self.threads).take());
+            if let Some(tx) = lock(&self.dropped).take() {
                 let _ = tx.send(());
             }
         }
     }
 
-    let executor = Executor::threaded();
-    let mut sleep = executor.sleep(Duration::from_millis(5)).unwrap();
+    let (executor, threads) = with_threads(1);
+    let mut sleep = executor.sleep(Duration::from_millis(5));
     let (tx, rx) = mpsc::channel();
     let holder = Arc::new(Holder {
-        executor: Mutex::new(Some(executor)),
+        threads: Mutex::new(Some(threads)),
         dropped: Mutex::new(Some(tx)),
     });
     let waker = Waker::from(Arc::clone(&holder));
@@ -420,5 +437,147 @@ fn the_last_executor_dropped_on_the_timer_thread_does_not_join_itself() {
     drop(waker);
     drop(holder);
     // A hang guard, not a speed bound: a self-join never sends.
-    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Ok(()));
+    assert_eq!(rx.recv_timeout(HANG_GUARD), Ok(()));
 }
+
+#[test]
+fn a_sleep_outlives_its_executor_pending() {
+    let executor = Executor::new();
+    let mut sleep = executor.sleep(Duration::from_secs(3600 * 24));
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+    drop(executor);
+    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+}
+
+#[test]
+fn unblock_runs_off_the_calling_thread_and_its_output_resolves() {
+    let executor = Executor::new();
+    let caller = thread::current().id();
+    let (ran_on, name, value) =
+        wait(executor.unblock(move || (thread::current().id(), current_name(), 6 * 7)));
+    assert_ne!(ran_on, caller);
+    assert!(
+        name.as_deref()
+            .is_some_and(|n| n.starts_with("tutti-blocking-")),
+        "ran on {name:?}"
+    );
+    assert_eq!(value, 42);
+}
+
+/// A task that awaits an `unblock` finishes in the caller's drive: the closure runs on the
+/// pool, and the wake it ends with schedules the awaiter on the queue for the caller.
+#[test]
+fn a_task_awaiting_unblock_finishes_in_the_callers_drive() {
+    let executor = Executor::new();
+    let exec = executor.clone();
+    let awaiting = executor.spawn(async move { exec.unblock(|| 40 + 2).await });
+    // A caller's drive is a loop; the guard only stops a hang.
+    let give_up = Instant::now() + HANG_GUARD;
+    while !awaiting.is_finished() {
+        executor.run_until_stalled();
+        assert!(Instant::now() < give_up, "the awaiter never finished");
+        thread::yield_now();
+    }
+    assert_eq!(wait(awaiting), 42);
+}
+
+#[test]
+fn unblock_runs_many_closures_that_wait_on_each_other() {
+    let executor = Executor::new();
+    let (a_tx, a_rx) = mpsc::sync_channel::<()>(0);
+    let (b_tx, b_rx) = mpsc::sync_channel::<()>(0);
+    let first = executor.unblock(move || {
+        a_tx.send(()).unwrap();
+        b_rx.recv().unwrap();
+    });
+    let second = executor.unblock(move || {
+        a_rx.recv().unwrap();
+        b_tx.send(()).unwrap();
+    });
+    wait(first);
+    wait(second);
+}
+
+#[test]
+fn a_panicking_unblock_closure_leaves_the_pool_running() {
+    let executor = Executor::new();
+    let task = executor.unblock(|| -> u8 { panic!("a closure's own panic") });
+    let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| wait(task)));
+    assert!(outcome.is_err(), "awaiting the panicked task panics");
+    assert_eq!(wait(executor.unblock(|| 9)), 9);
+}
+
+#[test]
+fn spawn_dedicated_runs_on_a_thread_of_its_own() {
+    let (executor, _threads) = with_threads(1);
+    let pooled = wait(executor.spawn(async { current_name() }));
+    let dedicated = executor
+        .spawn_dedicated("tutti-test-ded", None, async { current_name() })
+        .unwrap();
+    assert_eq!(wait(dedicated).as_deref(), Some("tutti-test-ded"));
+    assert_eq!(pooled.as_deref(), Some("tutti-exec-0"));
+}
+
+#[test]
+fn a_dedicated_future_runs_with_no_threads_and_no_drive() {
+    let executor = Executor::new();
+    let task = executor
+        .spawn_dedicated("tutti-test-solo", None, async { 7 })
+        .unwrap();
+    assert_eq!(wait(task), 7);
+}
+
+#[test]
+fn a_dedicated_future_fires_the_executors_sleeps() {
+    let executor = Executor::new();
+    let sleep = executor.sleep(Duration::from_millis(5));
+    let task = executor
+        .spawn_dedicated("tutti-test-sleeper", None, async move {
+            sleep.await;
+            "due"
+        })
+        .unwrap();
+    assert_eq!(wait(task), "due");
+}
+
+#[test]
+fn a_dropped_dedicated_task_cancels_its_future_and_ends_the_thread() {
+    let executor = Executor::new();
+    let (tx, rx) = mpsc::channel();
+    let (armed_tx, armed_rx) = mpsc::channel();
+    let signal = DropSignal(tx);
+    let task = executor
+        .spawn_dedicated("tutti-test-cancel", None, async move {
+            let _signal = signal;
+            armed_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })
+        .unwrap();
+    armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    drop(task);
+    rx.recv_timeout(HANG_GUARD).expect("the future is dropped");
+}
+
+#[test]
+fn the_last_drop_stops_and_joins_a_pending_dedicated_thread() {
+    let executor = Executor::new();
+    let marker = Arc::new(());
+    let held = Arc::clone(&marker);
+    let (armed_tx, armed_rx) = mpsc::channel();
+    executor
+        .spawn_dedicated("tutti-test-forever", None, async move {
+            let _held = held;
+            armed_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })
+        .unwrap()
+        .detach();
+    armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    assert_eq!(Arc::strong_count(&marker), 2);
+    drop(executor);
+    assert_eq!(Arc::strong_count(&marker), 1);
+}
+
+#[cfg(target_os = "linux")]
+mod linux;

@@ -103,12 +103,10 @@ fn arming_a_fired_id_registers_it_again() {
 
 #[test]
 fn dropping_a_pending_sleep_frees_its_waker() {
-    let timers = Timers::new(Drive::Poll);
+    let timers = Arc::new(Timers::new());
     let counting = Arc::new(Counting(AtomicUsize::new(0)));
     let waker = Waker::from(Arc::clone(&counting));
-    let mut sleep = timers
-        .sleep_until(Instant::now() + Duration::from_secs(3600))
-        .unwrap();
+    let mut sleep = Sleep::new(&timers, Instant::now() + Duration::from_secs(3600));
     let mut cx = Context::from_waker(&waker);
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
     assert_eq!(
@@ -124,9 +122,42 @@ fn dropping_a_pending_sleep_frees_its_waker() {
 
 #[test]
 fn a_sleep_with_a_past_deadline_resolves_on_its_first_poll() {
-    let timers = Timers::new(Drive::Poll);
+    let timers = Arc::new(Timers::new());
     let waker = waker();
     let mut cx = Context::from_waker(&waker);
-    let mut sleep = timers.sleep_until(Instant::now()).unwrap();
+    let mut sleep = Sleep::new(&timers, Instant::now());
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_ready());
+}
+
+#[test]
+fn fire_wakes_the_sleeps_due_and_counts_them() {
+    let timers = Arc::new(Timers::new());
+    let base = Instant::now();
+    let counting = Arc::new(Counting(AtomicUsize::new(0)));
+    let waker = Waker::from(Arc::clone(&counting));
+    let mut cx = Context::from_waker(&waker);
+    let mut early = Sleep::new(&timers, at(base, 3_600_000));
+    let mut late = Sleep::new(&timers, at(base, 7_200_000));
+    assert!(Pin::new(&mut early).poll(&mut cx).is_pending());
+    assert!(Pin::new(&mut late).poll(&mut cx).is_pending());
+    assert_eq!(timers.fire(at(base, 1_000)), 0);
+    assert_eq!(timers.fire(at(base, 3_600_000)), 1);
+    assert_eq!(counting.0.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        lock(&timers.state).due.next_deadline(),
+        Some(at(base, 7_200_000))
+    );
+}
+
+#[test]
+fn a_closed_queue_arms_no_sleep() {
+    let timers = Arc::new(Timers::new());
+    timers.close();
+    let counting = Arc::new(Counting(AtomicUsize::new(0)));
+    let waker = Waker::from(Arc::clone(&counting));
+    let mut cx = Context::from_waker(&waker);
+    let mut sleep = Sleep::new(&timers, Instant::now() + Duration::from_secs(3600));
+    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+    assert_eq!(lock(&timers.state).due.next_deadline(), None);
+    assert_eq!(Arc::strong_count(&counting), 2, "no waker is kept");
 }

@@ -110,8 +110,8 @@ impl<F: RingFloat> Built<F> {
     ///
     /// # Errors
     ///
-    /// [`Error::Spawn`] when the executor refuses the future (a threaded one that
-    /// cannot start the thread). Every stream and every refill depends on it, so a
+    /// [`Error::Spawn`] when the OS refuses the streamer's thread. Every stream and every
+    /// refill depends on it, so a
     /// failure here (the OS out of threads) would otherwise degrade into an engine
     /// that accepts commands and stays mute; it is the caller's to see instead.
     pub(super) fn start(self, executor: &Executor) -> Result<Running, Error> {
@@ -132,12 +132,13 @@ impl<F: RingFloat> Built<F> {
         // Disk streaming should stay ahead of background work, not compete
         // with the audio threads (Ardour's streamer sets no CPU priority,
         // LinuxSampler's disk thread runs at nice -10): a raised, never
-        // real-time priority, nice -10 on Linux and ABOVE_NORMAL on Windows. Only a
-        // threaded executor applies it; a polled or host executor runs the
-        // streamer at the caller's or the host's priority.
+        // real-time priority, nice -10 on Linux and ABOVE_NORMAL on Windows. The
+        // streamer runs on a thread of its own at that priority (the web has none: there
+        // it is queued like any future).
         executor
             .spawn_dedicated("tutti-streamer", Some(PriorityRequest::Raised), future)
-            .map_err(Error::Spawn)?;
+            .map_err(Error::Spawn)?
+            .detach();
         Ok(Running { stop, bell })
     }
 
@@ -287,7 +288,7 @@ mod tests {
         let bells = Bells::new().expect("a tick thread");
         let built = built(8, &bells);
         let tx = built.command_sender();
-        let executor = Executor::threaded();
+        let executor = Executor::new();
         let streamer = built.start(&executor).expect("the future starts");
 
         for stream in [StreamId::of(90), StreamId::of(91)] {
@@ -308,7 +309,7 @@ mod tests {
         let bells = Bells::new().expect("a tick thread");
         let built = built(8, &bells);
         let tx = built.command_sender();
-        let executor = Executor::threaded();
+        let executor = Executor::new();
         let streamer = built.start(&executor).expect("the future starts");
         drop(streamer);
         // Probed without waiting, so a queue that never disconnects fails

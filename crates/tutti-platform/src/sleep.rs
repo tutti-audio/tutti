@@ -15,6 +15,9 @@
 //!   high-resolution waitable timer where the OS has one; macOS sleeps on
 //!   `nanosleep`.
 //!
+//! - The web: a page cannot block, and std's sleep panics there, so the call returns at
+//!   once, before the deadline. A web build has no thread to pace.
+//!
 //! Control-side thread code: it blocks, so it is never for the audio callback.
 
 #[cfg_attr(
@@ -22,17 +25,19 @@
     path = "sleep/absolute.rs"
 )]
 #[cfg_attr(
-    not(any(target_os = "linux", target_os = "android")),
+    not(any(target_os = "linux", target_os = "android", target_arch = "wasm32")),
     path = "sleep/none.rs"
 )]
+#[cfg_attr(target_arch = "wasm32", path = "sleep/web.rs")]
 mod os;
 mod relative;
 
 /// Blocks the calling thread until [`monotonic_ns`](crate::monotonic_ns)
 /// reads at least `deadline_ns`. A deadline already past returns at once.
 ///
-/// Never returns early: a signal that interrupts the sleep resumes it. It may
-/// return late, by the OS's scheduling and timer granularity.
+/// Never returns early on a native target: a signal that interrupts the sleep resumes
+/// it. It may return late, by the OS's scheduling and timer granularity. On the web it
+/// returns at once, since a page cannot block.
 ///
 /// ```
 /// use tutti_platform::{monotonic_ns, sleep_until_ns};

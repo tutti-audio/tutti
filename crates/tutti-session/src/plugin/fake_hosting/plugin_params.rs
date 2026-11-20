@@ -214,7 +214,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
     )
     .with_refresh_sink(refresh.clone());
     let mut s = Session::builder()
-        .executor(tutti_platform::Executor::polled())
+        .executor(tutti_platform::Executor::new())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
