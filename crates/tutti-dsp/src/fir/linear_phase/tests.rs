@@ -239,8 +239,8 @@ impl Lti for Shaped {
 
 /// Each refusal is by name: a resolution that is not positive or is at or above Nyquist, an
 /// attenuation that is not positive or is past the maximum, a length past the supported
-/// maximum, a band that is not one input and an output, and a band with a pole on the unit
-/// circle (no finite response).
+/// maximum, a band that is not one input and an output, a band with a pole on the unit
+/// circle (no finite response), and a band with a pole outside it (no decay).
 #[test]
 fn a_design_the_rate_cannot_hold_is_refused_by_name() {
     let bands = [bell(1000.0, 1.0, 3.0)];
@@ -312,6 +312,22 @@ fn a_design_the_rate_cannot_hold_is_refused_by_name() {
     assert_eq!(
         d.design(RATE, &[integrator]).unwrap_err(),
         FirError::NonFiniteTarget
+    );
+    // 1 / (1 - 1.5 z⁻¹): a pole at z = 1.5, finite on the whole circle (|H| ≤ 2) but never
+    // decaying.
+    let unstable = Sos::new(
+        vec![Biquad {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: -1.5,
+            a2: 0.0,
+        }],
+        RATE,
+    );
+    assert_eq!(
+        d.design(RATE, &[unstable]).unwrap_err(),
+        FirError::UnstableBand
     );
 }
 

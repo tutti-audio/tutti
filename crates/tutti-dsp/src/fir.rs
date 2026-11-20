@@ -380,10 +380,14 @@ pub enum FirError {
     /// A target magnitude with a value that is not finite, or a band with no response.
     #[error("the target magnitude has a value that is not finite")]
     NonFiniteTarget,
-    /// Bands that ring too long to sample on the largest grid, or never decay.
+    /// A band with a pole on or outside the unit circle: its response never decays, so no
+    /// grid samples it without wrapping.
+    #[error("a band has a pole on or outside the unit circle and never decays")]
+    UnstableBand,
+    /// Bands that ring too long to sample on the largest grid.
     #[error("the bands need a grid of {needed} points; the most is {max}")]
     GridTooLarge {
-        /// The points needed, `usize::MAX` for bands that do not decay.
+        /// The points needed.
         needed: usize,
         /// The most a design takes, [`MAX_GRID`].
         max: usize,

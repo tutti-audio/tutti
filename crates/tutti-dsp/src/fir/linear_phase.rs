@@ -96,8 +96,9 @@ impl LinearPhaseDesign {
     /// - [`FirError::NonFiniteTarget`] when a band has no response to give or answers with
     ///   a value that is not finite (a pole on the unit circle at a probed frequency).
     /// - [`FirError::TooLong`] when the length would exceed the supported maximum.
+    /// - [`FirError::UnstableBand`] when a band has a pole on or outside the unit circle.
     /// - [`FirError::GridTooLarge`] when the bands ring too long for [`MAX_GRID`] points to
-    ///   hold, or do not decay.
+    ///   hold.
     pub fn design<L: Lti>(&self, rate: SampleRate, bands: &[L]) -> Result<Fir, FirError> {
         let resolution = self.resolution.get();
         let attenuation = self.attenuation.get();
@@ -146,7 +147,9 @@ impl LinearPhaseDesign {
 
 /// The transform size for a `len`-tap design at `attenuation` dB over `bands`: a power of two
 /// at least four lengths and at least twice the frames the slowest band takes to decay to
-/// `10^(-A/20)`, which wraps outside the window.
+/// `10^(-A/20)`, which wraps outside the window. The decay is the poles': a zero nearer the
+/// unit circle than every pole (a deep, narrow cut) decays more slowly in `|H|`, so such a cut
+/// wraps a small residue the grid does not bound.
 fn grid_size<L: Lti>(len: usize, attenuation: f64, bands: &[L]) -> Result<usize, FirError> {
     let radius = bands
         .iter()
@@ -161,12 +164,10 @@ fn grid_size<L: Lti>(len: usize, attenuation: f64, bands: &[L]) -> Result<usize,
         // Frames for `radius^n` to reach `10^(-A/20)`: infinite at and past 1.
         (-attenuation / 20.0 * core::f64::consts::LN_10 / libm::log(radius)).ceil()
     };
-    let unbounded = radius >= 1.0 || !decay.is_finite();
-    let wanted = if unbounded {
-        usize::MAX
-    } else {
-        (4 * len).max(2 * decay as usize)
-    };
+    if radius >= 1.0 || !decay.is_finite() {
+        return Err(FirError::UnstableBand);
+    }
+    let wanted = (4 * len).max(2usize.saturating_mul(decay as usize));
     if wanted > MAX_GRID {
         return Err(FirError::GridTooLarge {
             needed: wanted,
