@@ -13,7 +13,6 @@ use crate::served::AnyServer;
 use crate::ties::Ties;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
 use tutti_plugin_ipc::{
     AudioSlab, ControlReply, ControlRequest, News, SlabHandle, SlabLayout, StagedState, Working,
 };
@@ -32,15 +31,15 @@ use tutti_plugin_types::{
 pub(crate) enum Reaction {
     /// Send this reply back to the host.
     Reply(ControlReply),
-    /// Send these replies back, in order, as one logical answer.
+    /// Send the plugin's saved state back: a `StateReady` frame and the object
+    /// holding these bytes.
     ///
-    /// Exists for plugin state, which does not fit a single frame and so is
-    /// answered as a `StateChunk` sequence. Modelled as one `Reaction` rather
-    /// than letting the handler write to the transport itself, so dispatch
-    /// stays a pure function of the request — the property the whole `Reaction`
-    /// enum exists to preserve, and what makes `handle` testable without a
-    /// socket.
-    ReplyMany(Vec<ControlReply>),
+    /// Exists for plugin state, which does not fit a frame and so is answered as
+    /// an object. Modelled as one `Reaction` rather than letting the handler
+    /// write to the transport itself, so dispatch stays a pure function of the
+    /// request: the property the whole `Reaction` enum exists to preserve, and
+    /// what makes `handle` testable without a socket.
+    State(Vec<u8>),
     /// No reply; keep looping.
     None,
     /// The host asked for shutdown; leave the loop.
@@ -58,21 +57,16 @@ impl Reaction {
     fn into_reply(self) -> ControlReply {
         match self {
             Reaction::Reply(m) => m,
-            // A single-frame `ReplyMany` is the same answer in the shape a state
-            // reply has; unwrapping it keeps every one-reply assertion in this
-            // file reading the same way.
-            Reaction::ReplyMany(mut ms) if ms.len() == 1 => ms.remove(0),
             other => panic!("expected one reply, got {other:?}"),
         }
     }
 
-    /// Every frame of a multi-frame answer, in order.
+    /// The bytes of a saved state.
     #[cfg(feature = "clap")]
-    fn into_replies(self) -> Vec<ControlReply> {
+    fn into_state(self) -> Vec<u8> {
         match self {
-            Reaction::Reply(m) => vec![m],
-            Reaction::ReplyMany(ms) => ms,
-            other => panic!("expected replies, got {other:?}"),
+            Reaction::State(data) => data,
+            other => panic!("expected a state, got {other:?}"),
         }
     }
 }
@@ -111,18 +105,6 @@ pub(crate) struct Session {
     /// What the render thread was last told its blocks read: the figures are
     /// sent again only when they change.
     published: RenderConfig,
-    /// Partially-received `LoadStateChunk` sequence, or `None` between loads.
-    ///
-    /// On the session rather than threaded through `handle` because a chunk
-    /// sequence spans several messages and `handle` sees one at a time. Cleared
-    /// on completion *and* on any failure, so a malformed sequence cannot leave
-    /// bytes behind that would corrupt the next load.
-    pub(crate) state_in: Option<Reassembler>,
-    /// A load sequence refused part-way, with why: its remaining chunks are
-    /// taken without reply and the refusal is the answer to its `last`.
-    pub(crate) state_in_refused: Option<ChunkError>,
-    /// A state staged for the next load (`StageStateChunk`), being received.
-    pub(crate) stage_in: Option<Reassembler>,
     /// A state received and waiting for the next load, which restores it into
     /// the plugin before activating it.
     pub(crate) staged: Option<Vec<u8>>,
@@ -173,9 +155,6 @@ impl Session {
             rate_refused: None,
             max_block: 0,
             published,
-            state_in: None,
-            state_in_refused: None,
-            stage_in: None,
             staged: None,
             editor_open: false,
             editor_closed_unasked: false,
@@ -445,28 +424,13 @@ impl Session {
             }
 
             M::SaveState { state_use } => Ok(self.handle_save_state(main, state_use)),
-            M::LoadStateChunk {
-                seq,
-                total,
-                last,
-                bytes,
-            } => {
-                let ends = last.is_some();
-                if ends {
-                    self.forget_informs();
-                }
-                let reply = self.handle_load_state_chunk(main, seq, total, last, &bytes);
-                if ends {
-                    self.forget_informs();
-                }
-                Ok(reply)
+            // The transport delivers a state with its object as
+            // `Incoming::LoadState` and `Incoming::StageState`; a frame that
+            // reaches here has none.
+            M::LoadState { .. } | M::StageState { .. } => Ok(ControlReply::Error {
+                message: "a state arrived without its object".into(),
             }
-            M::StageStateChunk {
-                seq,
-                total,
-                last,
-                bytes,
-            } => Ok(self.handle_stage_state_chunk(seq, total, last, &bytes)),
+            .into()),
 
             // The transport delivers a setup with its slab as `Incoming::SetupSlab`
             // (`setup_slab`); a frame that reaches here has no slab.
@@ -725,7 +689,6 @@ impl Session {
     /// Forgets a state staged for a load that has not come: the stage belongs to
     /// the one load that declares it.
     fn discard_staged(&mut self) {
-        self.stage_in = None;
         self.staged = None;
     }
 
@@ -747,7 +710,6 @@ impl Session {
         // this server (or a stage left by another load), and restoring it would
         // hand a plugin a state nobody meant for it.
         let staged = self.staged.take();
-        self.stage_in = None;
         // A load replaces what the server held, whether or not it succeeds:
         // a refused one must not leave the old plugin answering a host that
         // was told the load failed (and holding its instance while the next
@@ -826,13 +788,13 @@ impl Session {
         .into())
     }
 
-    /// Answer `SaveState` as a `StateChunk` sequence.
+    /// Answer `SaveState` with the state as an object.
     ///
-    /// Chunked because a plugin's state is the one payload whose size the
-    /// plugin picks, and a sample-embedding instrument's exceeds what a single
-    /// frame carries. The empty cases still emit one terminating chunk — a host
-    /// waits for `last`, so answering nothing would hang it rather than tell it
-    /// there is no state.
+    /// An object because a plugin's state is the one payload whose size the
+    /// plugin picks, and a sample-embedding instrument's exceeds what a frame
+    /// carries. The empty cases are an empty object: a host waits for the
+    /// answer, so answering nothing would hang it rather than tell it there is
+    /// no state.
     ///
     /// **A save never silences a block that is playing.** A parameter write
     /// waits in the Processor's ring until a block drains it, so a state saved
@@ -869,8 +831,8 @@ impl Session {
             },
             None => Vec::new(),
         };
-        // Refuse an over-limit state here rather than streaming a gigabyte the
-        // host is only going to reject on reassembly.
+        // Refuse an over-limit state here rather than sending a gigabyte the
+        // host is only going to reject.
         if data.len() > MAX_STATE_BYTES {
             return ControlReply::Error {
                 message: format!(
@@ -880,123 +842,48 @@ impl Session {
             }
             .into();
         }
-        Reaction::ReplyMany(
-            state_chunk::split(&data)
-                .map(|(seq, last, bytes)| ControlReply::StateChunk {
-                    seq,
-                    total: data.len() as u64,
-                    last,
-                    bytes: bytes.to_vec(),
-                })
-                .collect(),
-        )
+        Reaction::State(data)
     }
 
-    /// Accumulate one `StageStateChunk`, keeping the state for the next load.
-    ///
-    /// Answers, as `LoadStateChunk` does, only on the final chunk or a failure;
-    /// `error: None` means staged. Nothing is applied until `LoadPlugin`.
-    fn handle_stage_state_chunk(
-        &mut self,
-        seq: u32,
-        total: u64,
-        last: bool,
-        bytes: &[u8],
-    ) -> Reaction {
-        let acc = self.stage_in.get_or_insert_with(Reassembler::default);
-        match acc.push(seq, total, last, bytes) {
-            Ok(false) => Reaction::None,
-            Ok(true) => {
-                let data = self.stage_in.take().expect("just inserted").into_inner();
-                self.staged = Some(data);
-                ControlReply::StateLoaded { error: None }.into()
-            }
-            Err(e) => {
-                self.stage_in = None;
-                self.staged = None;
-                let error = e.to_string();
-                ControlReply::StateLoaded { error: Some(error) }.into()
-            }
+    /// Keeps `state`, which arrived as an object, for the next load. Answers as
+    /// a load does, `error: None` meaning staged: nothing is applied until
+    /// `LoadPlugin`.
+    pub(crate) fn stage_state(&mut self, state: Vec<u8>) -> Reaction {
+        self.staged = Some(state);
+        ControlReply::StateLoaded { error: None }.into()
+    }
+
+    /// Answers a state whose object the transport refused (`error` says why),
+    /// the stream still in step. A refused stage leaves nothing staged: the next
+    /// load must not restore a stage left by an earlier request.
+    pub(crate) fn refuse_state(&mut self, staging: bool, error: String) -> Reaction {
+        if staging {
+            self.discard_staged();
         }
+        ControlReply::StateLoaded { error: Some(error) }.into()
     }
 
-    /// Always answers, so the host's waiting caller is never left guessing.
+    /// Applies `state`, which arrived as an object, to the plugin that is open.
     ///
-    /// Every path produces a `StateLoaded`, including "no plugin loaded",
-    /// which is a refusal rather than a silence.
-    /// Accumulate one `LoadStateChunk`, applying the state once `last` lands.
-    ///
-    /// Answers **only** on the final chunk (or on a failure): a `StateLoaded`
-    /// per chunk would leave the host's single waiting caller matched against
-    /// the first of many replies, with the rest arriving as unsolicited traffic
-    /// that desynchronises the next request's reply.
-    ///
-    /// A malformed or over-limit sequence resets the accumulator and answers
-    /// with the reason. Resetting matters: leaving the partial buffer in place
-    /// would make the *next*, well-formed load fail too, turning one bad
-    /// project file into a permanently broken session.
-    fn handle_load_state_chunk(
+    /// Always answers, so the host's waiting caller is never left guessing:
+    /// every path produces a `StateLoaded`, "no plugin loaded" included, which
+    /// is a refusal rather than a silence.
+    pub(crate) fn load_state(
         &mut self,
         main: MainThreadMarker,
-        seq: u32,
-        total: u64,
-        ending: Option<StateUse>,
-        bytes: &[u8],
+        state: &[u8],
+        state_use: StateUse,
     ) -> Reaction {
-        let last = ending.is_some();
-        // **One answer per sequence, on its `last` chunk**, whatever went
-        // wrong before it: the host reads one `StateLoaded` per load, and an
-        // early answer left every later chunk of the sequence to fail again
-        // (as a new sequence at a `seq` past 0) and answer again, each read
-        // as the reply to a later request. A refusal waits for `last`; a chunk
-        // 0 starts a new sequence.
-        if seq == 0 {
-            self.state_in = None;
-            self.state_in_refused = None;
-        }
-        if self.state_in_refused.is_some() {
-            if !last {
-                return Reaction::None;
-            }
-            let error = self.state_in_refused.take().map(|e| e.to_string());
-            return ControlReply::StateLoaded { error }.into();
-        }
-        let acc = self.state_in.get_or_insert_with(Reassembler::default);
-        let complete = match acc.push(seq, total, last, bytes) {
-            Ok(done) => done,
-            Err(e) => {
-                self.state_in = None;
-                if last {
-                    return ControlReply::StateLoaded {
-                        error: Some(e.to_string()),
-                    }
-                    .into();
-                }
-                self.state_in_refused = Some(e);
-                return Reaction::None;
-            }
+        self.forget_informs();
+        let error = match self.plugin.as_mut() {
+            None => Some("no plugin is loaded".to_string()),
+            Some(plugin) => match plugin.plugin_mut().load_state(main, state, state_use) {
+                Ok(()) => None,
+                Err(e) => Some(format!("failed to load state: {e}")),
+            },
         };
-        if !complete {
-            return Reaction::None;
-        }
-        let data = self.state_in.take().expect("just inserted").into_inner();
-
-        let Some(plugin) = self.plugin.as_mut() else {
-            return ControlReply::StateLoaded {
-                error: Some("no plugin is loaded".to_string()),
-            }
-            .into();
-        };
-        let Some(state_use) = ending else {
-            return ControlReply::StateLoaded {
-                error: Some("the state sequence ended without naming its use".to_string()),
-            }
-            .into();
-        };
-        let error = match plugin.plugin_mut().load_state(main, &data, state_use) {
-            Ok(()) => None,
-            Err(e) => Some(format!("failed to load state: {e}")),
-        };
+        self.forget_informs();
+        self.publish();
         ControlReply::StateLoaded { error }.into()
     }
 }
@@ -1367,16 +1254,16 @@ mod tests {
                 .handle(main_thread(), msg)
                 .unwrap_or_else(|e| panic!("{name} errored with no plugin: {e:?}"));
 
+            if let Reaction::State(bytes) = r {
+                assert!(bytes.is_empty(), "{name}: got state bytes");
+                continue;
+            }
             match r.into_reply() {
                 ControlReply::ParameterValue { value } => {
                     assert!(value.is_none(), "{name}: got a value with no plugin")
                 }
                 ControlReply::ParameterList { parameters } => {
                     assert!(parameters.is_empty(), "{name}: got parameters")
-                }
-                ControlReply::StateChunk { bytes, last, .. } => {
-                    assert!(bytes.is_empty(), "{name}: got state bytes");
-                    assert!(last, "{name}: an empty state must terminate its sequence");
                 }
                 other => panic!("{name}: unexpected reply {other:?}"),
             }
@@ -1434,16 +1321,7 @@ mod tests {
     fn load_state_no_plugin_refuses_rather_than_going_silent() {
         let mut s = Rig::new();
         let reply = s
-            .handle(
-                main_thread(),
-                ControlRequest::LoadStateChunk {
-                    seq: 0,
-                    total: 3,
-                    last: Some(StateUse::Project),
-                    bytes: vec![1, 2, 3],
-                },
-            )
-            .unwrap()
+            .load_state(main_thread(), &[1, 2, 3], StateUse::Project)
             .into_reply();
         match reply {
             ControlReply::StateLoaded { error: Some(msg) } => {
@@ -1453,41 +1331,24 @@ mod tests {
         }
     }
 
-    /// **A refused load sequence is answered once, on its `last` chunk.** The
-    /// host reads one `StateLoaded` per load; an answer at the refused chunk
-    /// left every later chunk of the sequence to fail again and answer again,
-    /// each read as the reply to a later request. A chunk 0 starts afresh.
+    /// **A state whose object the transport refused is answered as a refused
+    /// load, and a refused stage leaves nothing staged**: the stage an earlier
+    /// request left must not be restored by the load that follows.
     #[test]
-    fn a_refused_load_sequence_is_answered_once_at_its_end() {
+    fn a_refused_state_is_answered_and_a_refused_stage_is_discarded() {
         let mut s = Rig::new();
-        let mut chunk = |seq, last: bool| {
-            s.handle(
-                main_thread(),
-                ControlRequest::LoadStateChunk {
-                    seq,
-                    total: 3,
-                    last: last.then_some(StateUse::Project),
-                    bytes: vec![1, 2, 3],
-                },
-            )
-            .unwrap()
-        };
-        assert_none(chunk(0, false));
-        assert_none(chunk(2, false)); // out of order: refused, not yet answered
-        assert_none(chunk(3, false));
-        match chunk(4, true).into_reply() {
+        match s
+            .refuse_state(false, "the object is not sealed".into())
+            .into_reply()
+        {
             ControlReply::StateLoaded { error: Some(msg) } => {
-                assert!(msg.contains("chunk 2"), "the refusal's own reason: {msg:?}");
+                assert!(msg.contains("not sealed"), "{msg:?}");
             }
-            other => panic!("expected the refusal at `last`, got {other:?}"),
+            other => panic!("expected the refusal, got {other:?}"),
         }
-        // A new sequence is not refused for the last one's fault.
-        match chunk(0, true).into_reply() {
-            ControlReply::StateLoaded { error: Some(msg) } => {
-                assert!(msg.contains("no plugin"), "{msg:?}");
-            }
-            other => panic!("expected the no-plugin refusal, got {other:?}"),
-        }
+        assert_state_loaded_reply(s.stage_state(vec![1, 2, 3]));
+        let _ = s.refuse_state(true, "the object is not sealed".into());
+        assert!(s.staged.is_none(), "a refused stage left the earlier one");
     }
 
     #[test]
@@ -2421,17 +2282,9 @@ mod tests {
     }
 
     /// Pull a SaveState blob out of a session, asserting it is non-empty.
-    ///
-    /// Reassembles the `StateChunk` sequence exactly as the host does, so these
-    /// tests exercise the chunked path rather than a shape that only happens to
-    /// be one frame. The sequence must terminate, and `Reassembler` rejects a
-    /// gap — so a server that mis-numbers its chunks fails here rather than
-    /// producing a silently short blob.
     #[cfg(feature = "clap")]
     fn save_state_bytes(s: &mut Rig) -> Vec<u8> {
-        let mut acc = Reassembler::default();
-        let mut done = false;
-        for m in s
+        let data = s
             .handle(
                 main_thread(),
                 ControlRequest::SaveState {
@@ -2439,71 +2292,22 @@ mod tests {
                 },
             )
             .unwrap()
-            .into_replies()
-        {
-            match m {
-                ControlReply::StateChunk {
-                    seq,
-                    total,
-                    last,
-                    bytes,
-                } => {
-                    assert!(!done, "chunks continued after `last`");
-                    done = acc
-                        .push(seq, total, last, &bytes)
-                        .expect("well-formed chunk sequence");
-                }
-                other => panic!("expected StateChunk, got {other:?}"),
-            }
-        }
-        assert!(done, "the state sequence never set `last`");
-        let data = acc.into_inner();
+            .into_state();
         assert!(!data.is_empty(), "state should be non-empty");
         data
     }
 
-    /// Feed a whole blob in as a chunk sequence and return the final reaction.
-    ///
-    /// Mirrors `save_state_bytes`: the host splits, so a test that pushed one
-    /// frame would leave the multi-chunk accumulation path untested.
+    /// Feed a whole blob in, as the transport does once its object is read, and
+    /// return the reaction.
     #[cfg(feature = "clap")]
     fn load_state_bytes(s: &mut Rig, data: &[u8]) -> Reaction {
-        let mut last_reaction = Reaction::None;
-        for (seq, last, bytes) in state_chunk::split(data) {
-            last_reaction = s
-                .handle(
-                    main_thread(),
-                    ControlRequest::LoadStateChunk {
-                        seq,
-                        total: data.len() as u64,
-                        last: last.then_some(StateUse::Project),
-                        bytes: bytes.to_vec(),
-                    },
-                )
-                .unwrap();
-        }
-        last_reaction
+        s.load_state(main_thread(), data, StateUse::Project)
     }
 
-    /// Stages `data` as a host does before a load: the whole sequence, and the
-    /// final reaction.
+    /// Stages `data` as a host does before a load, and returns the reaction.
     #[cfg(feature = "clap")]
     fn stage_state_bytes(s: &mut Rig, data: &[u8]) -> Reaction {
-        let mut last_reaction = Reaction::None;
-        for (seq, last, bytes) in state_chunk::split(data) {
-            last_reaction = s
-                .handle(
-                    main_thread(),
-                    ControlRequest::StageStateChunk {
-                        seq,
-                        total: data.len() as u64,
-                        last,
-                        bytes: bytes.to_vec(),
-                    },
-                )
-                .unwrap();
-        }
-        last_reaction
+        s.stage_state(data.to_vec())
     }
 
     #[cfg(feature = "clap")]
@@ -2561,19 +2365,6 @@ mod tests {
         assert!(s.plugin.is_none(), "the refused load left the first plugin");
     }
 
-    fn stage(s: &mut Rig, seq: u32, last: bool, bytes: &[u8]) -> Reaction {
-        s.handle(
-            main_thread(),
-            ControlRequest::StageStateChunk {
-                seq,
-                total: bytes.len() as u64,
-                last,
-                bytes: bytes.to_vec(),
-            },
-        )
-        .unwrap()
-    }
-
     fn assert_mismatch(reply: ControlReply) {
         match reply {
             ControlReply::Error { message } => {
@@ -2600,12 +2391,12 @@ mod tests {
         ));
 
         let mut s = Rig::new();
-        assert_state_loaded_reply(stage(&mut s, 0, true, &[1, 2, 3]));
+        assert_state_loaded_reply(s.stage_state(vec![1, 2, 3]));
         assert_mismatch(load_declaring(&mut s, None));
         assert!(s.staged.is_none(), "and the stage is gone");
 
         let mut s = Rig::new();
-        assert_state_loaded_reply(stage(&mut s, 0, true, &[1, 2, 3]));
+        assert_state_loaded_reply(s.stage_state(vec![1, 2, 3]));
         assert_mismatch(load_declaring(
             &mut s,
             Some(StagedState {
@@ -2632,18 +2423,13 @@ mod tests {
     }
 
     /// **A stage belongs to the load that declares it**: an unload that comes
-    /// between discards it, and so does a half-received one.
+    /// between discards it.
     #[test]
     fn a_stage_does_not_outlive_the_next_request() {
         let mut s = Rig::new();
-        assert_state_loaded_reply(stage(&mut s, 0, true, &[1]));
+        assert_state_loaded_reply(s.stage_state(vec![1]));
         let _ = s.handle(main_thread(), ControlRequest::UnloadPlugin);
         assert!(s.staged.is_none(), "an unload discards the stage");
-
-        assert!(matches!(stage(&mut s, 0, false, &[1]), Reaction::None));
-        assert!(s.stage_in.is_some());
-        let _ = s.handle(main_thread(), ControlRequest::UnloadPlugin);
-        assert!(s.stage_in.is_none(), "and a half-received one");
     }
 
     /// **A state staged before a load is restored by the load**, before the
@@ -2744,31 +2530,6 @@ mod tests {
         let mut s = Rig::new();
         let (heard, _) = load(&mut s, None);
         assert!(heard.is_empty(), "{heard:?}");
-    }
-
-    /// A staged sequence out of order is refused, and nothing is staged.
-    #[test]
-    #[cfg(feature = "clap")]
-    fn a_broken_staging_sequence_stages_nothing() {
-        let mut s = Rig::new();
-        assert_state_loaded(stage_state_bytes(&mut s, &[9, 9]));
-        let reply = s
-            .handle(
-                main_thread(),
-                ControlRequest::StageStateChunk {
-                    seq: 5,
-                    total: 1,
-                    last: true,
-                    bytes: vec![1],
-                },
-            )
-            .unwrap()
-            .into_reply();
-        assert!(
-            matches!(reply, ControlReply::StateLoaded { error: Some(_) }),
-            "{reply:?}"
-        );
-        assert!(s.staged.is_none());
     }
 
     #[test]

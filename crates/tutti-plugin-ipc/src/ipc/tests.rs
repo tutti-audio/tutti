@@ -103,6 +103,8 @@ struct Mock {
     /// The parameters the server declares when asked (`GetParameterList`).
     parameters: Arc<Mutex<Vec<ParameterInfo>>>,
     stream: Arc<interprocess::local_socket::Stream>,
+    /// The states the server was sent, each as the bytes of the object it read.
+    states: Arc<Mutex<Vec<Vec<u8>>>>,
     /// Whether the server refuses the slabs it is asked to open.
     refuse_slabs: Arc<std::sync::atomic::AtomicBool>,
     /// Buses the plugin announces while the server is asked to open a slab,
@@ -270,6 +272,8 @@ fn mock_with(
         }
     });
     let (log, served) = (Arc::clone(&received), Arc::clone(&stream));
+    let states: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
+    let stored = Arc::clone(&states);
     let answers = Arc::clone(&parameters);
     let refuse_slabs = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let refusing = Arc::clone(&refuse_slabs);
@@ -290,13 +294,27 @@ fn mock_with(
             else {
                 break;
             };
-            // A setup's slab follows its frame on the stream.
-            if let ControlRequest::SetupSharedMemory { slab, .. } = &message {
-                let received =
-                    SlabHandle::receive(crate::transport::connection(&served), slab.clone());
-                if received.is_err() {
-                    break;
+            // A setup's slab and a state's object follow their frame on the stream.
+            match &message {
+                ControlRequest::SetupSharedMemory { slab, .. } => {
+                    let received =
+                        SlabHandle::receive(crate::transport::connection(&served), slab.clone());
+                    if received.is_err() {
+                        break;
+                    }
                 }
+                ControlRequest::LoadState { len, blob, .. } => {
+                    let state = tutti_plugin_ipc_ffi::Blob::receive(
+                        crate::transport::connection(&served),
+                        blob.clone(),
+                    )
+                    .and_then(|object| object.read(*len, tutti_plugin_types::MAX_STATE_BYTES));
+                    match state {
+                        Ok(bytes) => stored.lock().unwrap().push(bytes),
+                        Err(_) => break,
+                    }
+                }
+                _ => {}
             }
             // Recorded before it is answered: a count read after the reply sees it.
             log.push(Sent::Control(message.clone()));
@@ -348,7 +366,7 @@ fn mock_with(
                     id,
                     &ControlReply::EditorSized { result: Ok(*size) },
                 ),
-                ControlRequest::LoadStateChunk { last: Some(_), .. } => {
+                ControlRequest::LoadState { .. } => {
                     reply_control(&served, id, &ControlReply::StateLoaded { error: None })
                 }
                 ControlRequest::GetParameter { .. } => {
@@ -393,6 +411,7 @@ fn mock_with(
             received,
             parameters,
             stream,
+            states,
             refuse_slabs,
             announce_during_setup,
             _bridge: thread,
@@ -1588,7 +1607,7 @@ fn a_write_in_a_block_pushed_before_a_load_reaches_the_server_before_the_load() 
         .expect("the block was sent");
     let load = log
         .iter()
-        .position(|m| matches!(m, Sent::Control(ControlRequest::LoadStateChunk { .. })))
+        .position(|m| matches!(m, Sent::Control(ControlRequest::LoadState { .. })))
         .expect("the load was sent");
     assert!(block < load, "the block, and its write, came first");
     let Sent::Audio(AudioRequest::ProcessAudio(data)) = &log[block] else {
@@ -1597,6 +1616,26 @@ fn a_write_in_a_block_pushed_before_a_load_reaches_the_server_before_the_load() 
     assert_eq!(
         last_change(&data.param_changes, ParamId::new(1)),
         Some(0.25)
+    );
+}
+
+/// **A state loaded through the served plugin reaches the server as one object
+/// of its own length**, past any size a frame carries: the server reads back
+/// the bytes the host sent, and the load is answered.
+#[test]
+fn a_loaded_state_reaches_the_server_as_one_object() {
+    use tutti_plugin_types::StateUse;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let state: Vec<u8> = (0..crate::CONTROL_FRAME_BYTES + 777)
+        .map(|i| (i % 251) as u8)
+        .collect();
+    assert!(ipc.load_state(&state, StateUse::Project).is_ok());
+    let states = server.states.lock().unwrap();
+    assert_eq!(states.len(), 1, "one object for the one load");
+    assert!(
+        states[0] == state,
+        "the server read other bytes than were sent"
     );
 }
 

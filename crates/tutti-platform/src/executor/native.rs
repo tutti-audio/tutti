@@ -20,7 +20,7 @@ use std::thread::{self, Thread, ThreadId};
 
 use super::{Executor, Handle, Shared, Task, Timers, lock};
 use crate::Instant;
-use crate::priority::PriorityRequest;
+use crate::priority::{PriorityOutcome, PriorityRequest};
 use crate::thread::{ThreadHandle, spawn_named};
 
 #[path = "native/blocking.rs"]
@@ -252,6 +252,9 @@ pub(super) fn spawn_dedicated<T: Send + 'static>(
             stop.is_stopped() || finished.done.load(Ordering::Acquire)
         });
     })?;
+    if let Some(outcome @ PriorityOutcome::Refused { .. }) = thread.priority() {
+        tracing::warn!(thread = name, %outcome, "dedicated thread runs without the priority it asked for");
+    }
     let mut dedicated = lock(&handle.own.dedicated);
     dedicated.retain(|worker| !worker.handle.is_finished());
     dedicated.push(Worker { handle: thread, id });
