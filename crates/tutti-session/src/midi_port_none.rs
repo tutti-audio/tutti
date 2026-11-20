@@ -38,4 +38,13 @@ impl Ports {
     ) -> bool {
         false
     }
+
+    /// No output port to close: the graph is not edited.
+    pub(crate) fn close_dropped_outputs<F: tutti_buffers::Float>(
+        &mut self,
+        _: &mut crate::graph::Graph<F>,
+        _: Option<&OutputTiming>,
+    ) -> bool {
+        false
+    }
 }

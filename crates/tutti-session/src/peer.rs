@@ -42,10 +42,10 @@ impl fmt::Display for ResourceId {
 #[derive(Clone, Debug)]
 pub(crate) struct ResourceIds {
     #[cfg_attr(
-        not(any(test, feature = "plugin", feature = "midi")),
+        not(any(test, feature = "plugin", feature = "midi-hardware")),
         expect(
             dead_code,
-            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi`)"
+            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi-hardware`)"
         )
     )]
     last: Arc<tutti_rt::Mint>,
@@ -61,10 +61,10 @@ impl ResourceIds {
     /// The next id: distinct from every one this source (and its clones)
     /// returned before.
     #[cfg_attr(
-        not(any(test, feature = "plugin", feature = "midi")),
+        not(any(test, feature = "plugin", feature = "midi-hardware")),
         expect(
             dead_code,
-            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi`)"
+            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi-hardware`)"
         )
     )]
     pub(crate) fn mint(&self) -> ResourceId {
