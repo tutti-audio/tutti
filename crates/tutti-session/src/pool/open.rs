@@ -10,7 +10,7 @@ use tutti_units::SampleRate;
 
 use crate::{Clock, Session};
 
-/// What [`Load::on_session`](crate::Load::on_session)'s stage may reach: the
+/// What [`PoolLoad::on_session`](crate::PoolLoad::on_session)'s stage may reach: the
 /// parts of the session an open needs, and nothing of the pool.
 ///
 /// The stage runs inside [`Session::update`](crate::Session::update), on the

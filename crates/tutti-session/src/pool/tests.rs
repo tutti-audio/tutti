@@ -9,7 +9,9 @@ use tutti_platform::Executor;
 use tutti_units::SampleRate;
 
 use super::table::HoldKind;
-use super::{Declared, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent, PoolKey, PoolState};
+use super::{
+    Declared, Life, LoadError, PoolEntry, PoolError, PoolEvent, PoolKey, PoolLoad, PoolState,
+};
 use crate::peer::sealed;
 use crate::{HandleError, Peer, PeerError, Presence, Resource, ResourceId, Session};
 use crate::{Job, JobKind, SessionEvent, WorkerError};
@@ -101,7 +103,7 @@ impl PoolEntry for Probe {
         self.version
     }
 
-    fn load(&self) -> Load<u32> {
+    fn load(&self) -> PoolLoad<u32> {
         let (version, initial, fail, panics, runs) = (
             self.version,
             self.initial,
@@ -109,7 +111,7 @@ impl PoolEntry for Probe {
             self.panics,
             Arc::clone(&self.runs),
         );
-        Load::on_worker(move || {
+        PoolLoad::on_worker(move || {
             runs.fetch_add(1, Ordering::SeqCst);
             assert!(!panics, "the load blew up");
             if fail {
@@ -525,8 +527,8 @@ fn a_handle_of_another_kind_or_an_undeclared_key_is_refused() {
         type Loaded = ();
         type Handle = ();
         fn identity(&self) {}
-        fn load(&self) -> Load<()> {
-            Load::on_worker(|| Ok(()))
+        fn load(&self) -> PoolLoad<()> {
+            PoolLoad::on_worker(|| Ok(()))
         }
         fn handle((): &(), _: &Life) {}
     }
@@ -572,9 +574,9 @@ impl PoolEntry for Twin {
         self.0
     }
 
-    fn load(&self) -> Load<u32> {
+    fn load(&self) -> PoolLoad<u32> {
         let version = self.0;
-        Load::on_worker(move || Ok(version))
+        PoolLoad::on_worker(move || Ok(version))
     }
 
     fn handle(loaded: &u32, _: &Life) -> u32 {

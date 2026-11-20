@@ -248,7 +248,7 @@ fn the_analyzer_ends_after_its_source_is_removed() {
     let _ = s.update();
     render(&mut s, 2);
     assert_eq!(analyzer.try_iter().count(), 2);
-    assert!(!analyzer.is_ended());
+    assert!(!analyzer.is_finished());
 
     s.remove(src).unwrap();
     let _ = s.update();
@@ -257,7 +257,7 @@ fn the_analyzer_ends_after_its_source_is_removed() {
         render(&mut s, 1);
         let _ = analyzer.try_iter().count();
     }
-    assert!(analyzer.is_ended());
+    assert!(analyzer.is_finished());
     render(&mut s, 1);
     assert_eq!(analyzer.try_iter().count(), 0);
 }
