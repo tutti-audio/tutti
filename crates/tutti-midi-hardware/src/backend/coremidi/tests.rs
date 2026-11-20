@@ -45,13 +45,13 @@ fn an_unknown_id_does_not_open() {
 /// modern Mac (the IAC buses included) genuinely reports MIDI 2.0, so
 /// `assert!(matches!(.., Midi1 | Midi2))` passes under a hardcoded `midi2()`
 /// too. The fixture has to *supply* the distinction,
-/// so this creates a MIDI-1.0 virtual source and requires the reader to say
+/// so this creates a MIDI-1.0 virtual endpoint and requires the reader to say
 /// so.
 #[test]
 fn capability_is_read_from_the_endpoint_not_assumed() {
-    // A MIDI-1.0-protocol virtual source, found as the OS lists it.
+    // A MIDI-1.0-protocol virtual endpoint, found as the OS lists it.
     let name = format!("tutti-cap-midi1-{}", std::process::id());
-    let Ok(_source) = UmpVirtualSource::new(&name, VirtualProtocol::Midi1) else {
+    let Ok(_endpoint) = UmpVirtualEndpoint::new(&name, VirtualProtocol::Midi1, |_| {}) else {
         // No CoreMIDI here (sandbox/headless) — nothing to test against.
         return;
     };
@@ -73,7 +73,7 @@ fn capability_is_read_from_the_endpoint_not_assumed() {
 /// (every endpoint on this machine reports MIDI 2.0), so a hardcoded
 /// `midi1()` would fail *there*. Pinning it here too would need a
 /// MIDI-2.0-protocol endpoint to hand `endpoint_capability` as a
-/// `Endpoint` — `UmpVirtualSource` keeps its `MIDIEndpointRef`
+/// `Endpoint` — `UmpVirtualEndpoint` keeps its `MIDIEndpointRef`
 /// private, and widening that API purely for a test is the wrong trade.
 /// Between the two, neither constant survives.
 #[test]
@@ -98,7 +98,7 @@ fn a_midi2_endpoint_is_covered_by_enumeration() {
 
 /// **A packet sent `At` a future instant is held by CoreMIDI until then, and
 /// one sent `Now` goes at once**: the stamp each gets is pinned in `host_time`'s
-/// tests; here CoreMIDI schedules them. A virtual UMP destination receives the
+/// tests; here CoreMIDI schedules them. A virtual UMP endpoint receives the
 /// note sent 2 s ahead after the one sent now, though it was queued first. No
 /// time is asserted: the order is what a hold changes, and the waits only guard
 /// a hang.
@@ -112,16 +112,16 @@ fn a_scheduled_packet_arrives_after_the_one_sent_now() {
 
     let (tx, rx) = mpsc::channel();
     let _destination =
-        UmpVirtualDestination::new("tutti-sched-out", VirtualProtocol::Midi2, move |ump| {
+        UmpVirtualEndpoint::new("tutti-sched-out", VirtualProtocol::Midi2, move |ump| {
             let _ = tx.send(ump);
         })
-        .expect("a virtual UMP destination");
+        .expect("a virtual UMP endpoint");
     let backend = CoreMidiEndpoints::new();
     let id = backend
         .outputs()
         .into_iter()
         .find(|e| e.name.contains("tutti-sched-out"))
-        .expect("the virtual destination is listed")
+        .expect("the virtual endpoint is listed")
         .id;
     let out = backend.open_output(id).expect("opens");
     out.follow(Protocol::Midi2);

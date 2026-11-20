@@ -19,7 +19,7 @@
 //! | `Client` | an open sequencer client in UMP MIDI-2.0 mode: it closes on drop, and ports, subscriptions, `read_event`, `send_to_subscribers`, `stamp_port` and `list_ports` are methods |
 //! | `UmpEndpoint`, `UmpBlock` | what the sequencer records of a client's UMP Endpoint (the protocol in use as a `tutti_ump::Protocol`, the protocols offered as an `EndpointInfoNotification`) and its Function Blocks (a `FunctionBlockInfo` and a name), from `Client::ump_endpoint`; `Client::publish_ump_endpoint` records them for the client itself |
 //! | `QueueClock` | the queue a stamped port reads its timestamps from, and the clock that says what time it is now |
-//! | `Poller` | a client and a stop descriptor it owns, waited on with `poll(2)`: `Client::into_poller`, then `wait` and `wait_for` |
+//! | `Poller`, `ClientHandle` | a client and a stop descriptor it owns, waited on with `poll(2)`: `Client::into_poller`, then `wait` and `wait_for`; a `ClientHandle` sends on the client from another thread without keeping it open |
 //! | `Event`, `Announced` | an event copied out of alsa-lib's buffer (a UMP message, an announcement or a notice), and what an announce-port event says |
 //! | `Address`, `ClientId`, `PortId`, `PortCaps`, `PortKind` | a port's client and number, what it allows, and what it is |
 //! | `Error`, `Operation` | the alsa-lib call that failed and the OS error it returned |
@@ -76,6 +76,6 @@ pub use client::{Blocking, Client, QueueClock, Read, UmpVersion};
 pub use client::{LegacyEvent, clients_opened};
 pub use error::{Error, Operation, Result};
 pub use event::{Announced, Event};
-pub use poll::{Poller, Wait};
+pub use poll::{ClientHandle, Poller, Wait};
 pub use ports::{PortEntry, Ports};
 pub use ump::{UmpBlock, UmpEndpoint};

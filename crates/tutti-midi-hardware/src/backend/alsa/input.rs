@@ -14,7 +14,8 @@ use crate::error::{MidiHardwareError, MidiThread, Result};
 use crate::guard::Guard;
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
-    Blocking, Client, Event, Poller, PortCaps, PortKind, QueueClock, Read, UmpVersion, Wait,
+    Blocking, Client, ClientHandle, Event, Poller, PortCaps, PortKind, QueueClock, Read,
+    UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
 use tutti_platform::{ThreadHandle, spawn_named};
@@ -39,6 +40,15 @@ pub struct AlsaInput {
     /// Raised by the pump when it ends on an error, never on a stop.
     died: Arc<FaultLatch<InputFault>>,
     thread: Option<ThreadHandle<()>>,
+    /// The pumped client, for a send on it from another thread.
+    client: ClientHandle,
+}
+
+impl AlsaInput {
+    /// A handle that runs a call on the pumped client, alongside the pump's reads.
+    pub(super) fn client(&self) -> ClientHandle {
+        self.client.clone()
+    }
 }
 
 impl InputConnection for AlsaInput {
@@ -162,6 +172,7 @@ pub(super) fn start(
         source,
     })?;
     let seq = seq.into_poller(OwnedFd::from(stop_rx))?;
+    let client = seq.handle();
     let died = Arc::new(FaultLatch::<InputFault>::new());
     let flag = Arc::clone(&died);
     let thread = spawn_named(MidiThread::MidiIn.name(), None, move |_| {
@@ -178,6 +189,7 @@ pub(super) fn start(
         stop: Some(stop_tx),
         died,
         thread: Some(thread),
+        client,
     })
 }
 
@@ -201,7 +213,9 @@ pub(super) fn pump(
     let mut clock = clock;
     let mut arrivals = Arrivals::default();
     loop {
-        let received = match seq.client().read_event() {
+        // The client is locked for the read only, not across the wait.
+        let read = seq.client().read_event();
+        let received = match read {
             Ok(Read::Event(event)) => event,
             // Empty queue is the common case, not a failure.
             Ok(Read::Empty) => {
@@ -233,7 +247,7 @@ pub(super) fn pump(
         let now = Instant::now();
         let now = match stamp {
             Some(t) => arrivals.at(t, now, || {
-                super::client::pair(&mut clock, seq.client()).ok()
+                super::client::pair(&mut clock, &seq.client()).ok()
             }),
             // A port that is not stamping: the read is the best there is.
             None => now,

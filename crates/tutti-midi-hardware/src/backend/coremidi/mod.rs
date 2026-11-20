@@ -6,8 +6,7 @@
 //! which lists endpoints with their `UniqueId`, name and protocol read from one
 //! object and takes one again by id, never by list position. Every CoreMIDI call is
 //! `tutti-coremidi-ffi`'s, behind safe handles: the process's one client, the input
-//! and output ports (UMP words in and out), the virtual endpoints ([`virtual_source`],
-//! [`virtual_destination`]), the run loop of the device watch ([`watch`]) and the Mach
+//! and output ports (UMP words in and out), the virtual endpoint ([`virtual_endpoint`]), the run loop of the device watch ([`watch`]) and the Mach
 //! clock (`host_time`); this crate forbids `unsafe`.
 //!
 //! # Protocol is asked, not assumed
@@ -49,11 +48,9 @@ use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_ump::{FunctionBlockInfo, Protocol, read_protocol};
 
 mod host_time;
-mod virtual_destination;
-mod virtual_source;
+mod virtual_endpoint;
 mod watch;
-pub(crate) use virtual_destination::UmpVirtualDestination;
-pub(crate) use virtual_source::UmpVirtualSource;
+pub(crate) use virtual_endpoint::UmpVirtualEndpoint;
 
 /// The process's one CoreMIDI client, started with the device watch's hub on first
 /// use. CoreMIDI sends notifications to the run loop of the thread that created the

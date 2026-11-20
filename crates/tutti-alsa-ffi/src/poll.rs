@@ -7,6 +7,7 @@
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::raw::{c_short, c_uint};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 use tutti_platform::Instant;
 
@@ -29,10 +30,12 @@ pub enum Wait {
 ///
 /// It owns both, so the descriptors it polls cannot be closed under it: the
 /// client closes with it, and so does the stop descriptor. Reads and sends go
-/// through [`client`](Self::client).
+/// through [`client`](Self::client), a lock held only while a call runs: a wait
+/// never holds it, so a send from another thread through a
+/// [`ClientHandle`] is not held up by an idle wait.
 #[derive(Debug)]
 pub struct Poller {
-    client: Client,
+    client: Arc<Mutex<Client>>,
     /// The client's input descriptors, as numbers the client owns. Room is kept
     /// for one more, which a wait uses for the stop descriptor.
     seq: Vec<libc::pollfd>,
@@ -41,11 +44,35 @@ pub struct Poller {
     stop: OwnedFd,
 }
 
+/// A client a [`Poller`] owns, reached from another thread for a send.
+///
+/// It does not keep the client open: once the poller is dropped, the client is
+/// closed and [`with`](Self::with) answers `None`. A call in flight when the
+/// poller is dropped keeps the client open until it returns.
+#[derive(Clone, Debug)]
+pub struct ClientHandle(Weak<Mutex<Client>>);
+
+impl ClientHandle {
+    /// Runs `call` on the client, one thread at a time with the poller's own
+    /// reads; `None` when the poller is gone.
+    pub fn with<R>(&self, call: impl FnOnce(&Client) -> R) -> Option<R> {
+        let client = self.0.upgrade()?;
+        let guard = client.lock().unwrap_or_else(PoisonError::into_inner);
+        Some(call(&guard))
+    }
+}
+
 impl Poller {
-    /// The client that is polled, for reads and sends.
+    /// The client that is polled, for reads and sends. The lock is held until the
+    /// guard drops, so a read is taken before a wait, never across one.
+    pub fn client(&self) -> MutexGuard<'_, Client> {
+        self.client.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A handle for sending on the client from another thread.
     #[must_use]
-    pub fn client(&self) -> &Client {
-        &self.client
+    pub fn handle(&self) -> ClientHandle {
+        ClientHandle(Arc::downgrade(&self.client))
     }
 }
 
@@ -83,7 +110,7 @@ impl Client {
         check(rc, Operation::PollDescriptors)?;
         polls.reserve_exact(1);
         Ok(Poller {
-            client: self,
+            client: Arc::new(Mutex::new(self)),
             seq: polls,
             stop,
         })

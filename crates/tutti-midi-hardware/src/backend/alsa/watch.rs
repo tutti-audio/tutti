@@ -517,7 +517,8 @@ impl Announce {
         let mut found = Drained::default();
         let mut errors = ErrorRun::default();
         loop {
-            let read = match self.seq.client().read_event() {
+            let polled = self.seq.client().read_event();
+            let read = match polled {
                 Ok(Read::Event(event)) => event,
                 Ok(Read::Empty) => return found,
                 Err(e) => {
@@ -594,7 +595,7 @@ pub(super) fn start(
     };
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
-    tracker.seed(|| announce.drain(), || snapshot(announce.seq.client()))?;
+    tracker.seed(|| announce.drain(), || snapshot(&announce.seq.client()))?;
     let thread = spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             loop {
@@ -607,7 +608,7 @@ pub(super) fn start(
                         tracker.step(
                             first,
                             || announce.drain(),
-                            || snapshot(announce.seq.client()),
+                            || snapshot(&announce.seq.client()),
                         );
                     }
                     Ok(Woken::Stopped) => return None,
