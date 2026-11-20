@@ -341,7 +341,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     ) -> SessionBuilder<crate::DeviceClock<F>> {
         SessionBuilder {
             opts: self.opts,
-            config: device,
+            config: tutti_cpal::OutputConfig::from(device),
             dates: (),
         }
     }
@@ -524,6 +524,18 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
 
 #[cfg(feature = "device")]
 impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
+    /// Opens the output device at `format`, at its default rate and width
+    /// ([`OutputConfig::sample_format`](tutti_cpal::OutputConfig::sample_format)).
+    /// A format the device does not offer fails [`build`](Self::build) with
+    /// [`tutti_cpal::Error::OutputFormatUnavailable`]. The choice holds across a
+    /// restart on the same session; a switch to another device
+    /// ([`Session::into_device`](crate::Session)) opens that device's default.
+    #[must_use]
+    pub fn sample_format(mut self, format: tutti_buffers::SampleFormat) -> Self {
+        self.config = self.config.sample_format(format);
+        self
+    }
+
     /// A session on the selected output device: the device opened first, the
     /// graph built at its rate and callback size, the callback live on
     /// return. The [`LiveSession`](crate::LiveSession) holds the
@@ -536,8 +548,8 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// built over it.
     pub fn build(self) -> Result<crate::LiveSession<&'static str, F>> {
         let host = tutti_cpal::DeviceHost::open(self.opts.host)?;
-        let device = self.config.clone();
-        let engine = tutti_cpal::AudioEngine::open(host, device.clone())?;
+        let engine = tutti_cpal::AudioEngine::open(host, self.config.clone())?;
+        let device = self.config.device().clone();
         self.build_on(engine, device, |engine, state| engine.start(state))
     }
 
@@ -560,7 +572,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         D: tutti_engine::StreamDriver<F>,
         D::Error: Into<tutti_cpal::Error>,
     {
-        let device = self.config.clone();
+        let device = self.config.device().clone();
         self.build_on(
             tutti_cpal::AudioEngine::from_spec(spec),
             device,

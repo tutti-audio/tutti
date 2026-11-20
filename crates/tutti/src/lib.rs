@@ -398,8 +398,9 @@ pub mod session {
     pub use tutti_cpal::MicConfig;
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
-        DeviceChange, DeviceListing, DeviceRoster, DeviceSelector, Direction as DeviceDirection,
-        Listed, Snapshot, SnapshotSource,
+        DeviceChange, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
+        Direction as DeviceDirection, Listed, OutputConfig, Snapshot, SnapshotSource,
+        SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, Lagging, OutputLevelError, OutputLevels, OutputMap,
