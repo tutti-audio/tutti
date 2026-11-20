@@ -33,8 +33,8 @@
 //!
 //! An entry that reads an asset takes the asset's [`Identity`](tutti_platform::Identity)
 //! on the worker that loads it (a file's is its path and stamp, bytes' is minted
-//! once), and [`Session::refresh_pool`] takes it again on a worker and loads
-//! again the entries whose asset changed; the diff itself never reads metadata.
+//! once), and [`Session::refresh_pool`] takes it again, where the app runs it, and
+//! [`Session::apply`] loads again the entries whose asset changed; the diff itself never reads metadata.
 //!
 //! # Stages
 //!
@@ -81,11 +81,10 @@ pub use entry::{
     stranded_loads,
 };
 pub(crate) use entry::{Defer, Staged};
-pub use job::{PoolJobError, PoolLoaded, RefreshPool};
+pub use job::{PoolJobError, PoolLoaded};
 pub use key::PoolKey;
 pub use open::OpenCx;
-pub(crate) use refresh::Checked;
-pub use refresh::RefreshReport;
+pub use refresh::{RefreshError, RefreshPool, RefreshReport, RefreshedPool};
 pub use report::{PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
@@ -212,14 +211,15 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         self.pool.entries.when_loaded(key, Box::new(then))
     }
 
-    /// Checks the assets the pool's entries read, on a worker, and loads again
-    /// the entries whose asset changed.
+    /// The check of the assets the pool's entries read, as a value the app
+    /// runs.
     ///
     /// Each entry that reads an asset took the asset's
     /// [`Identity`](tutti_platform::Identity) when it loaded (a file's is its
-    /// path with its length and modification time). The check takes each
-    /// identity again and compares: an entry whose identity differs reloads as
-    /// it does for a changed identity (the old value stays until the new one
+    /// path with its length and modification time). [`RefreshPool::run`] takes
+    /// each identity again, anywhere the app likes, and
+    /// [`apply`](Self::apply) compares: an entry whose identity differs reloads
+    /// as it does for a changed identity (the old value stays until the new one
     /// lands, as a [`PoolEvent::Reloaded`]), and two keys that share a load
     /// reload with one. An entry whose asset can no longer be opened keeps what
     /// it has, and is named as unreadable. An entry with no identity (its file
@@ -229,22 +229,17 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// never changes, so it never reloads, and an asset that never has an
     /// identity is not watched.
     ///
+    /// The refresh is cut from the pool as it stands now: an entry released,
+    /// declared again or loaded again before the apply makes it
+    /// [`RefreshError::Stale`], and nothing is applied; run the refresh again.
+    ///
     /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
     /// never does, so a key declared after its file changed shares the loaded
     /// entry until the next refresh, and a plugin binary that changed on disk
-    /// or a provided asset is never detected. The result arrives in a later
-    /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
-    /// Dropping the job cancels the reloads the check would start.
-    pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {
-        let assets = self.pool.entries.stamped_files();
-        self.jobs.submit_job(
-            move |_| refresh::check(assets),
-            move |session, done, ticket| match done {
-                // A dropped job reloads nothing.
-                Ok(checked) => ticket.complete(|| Ok(session.land_pool_refresh(checked))),
-                Err(failed) => ticket.land(Err(failed.into())),
-            },
-        )
+    /// or a provided asset is never detected. Dropping the value reloads
+    /// nothing.
+    pub fn refresh_pool(&self) -> RefreshPool {
+        RefreshPool::new(self.pool.entries.stamped_files())
     }
 
     /// Where the entry under `key` stands, `None` when the pool has none: never

@@ -16,7 +16,7 @@ use crate::pool::entry::{
     Staged, Step, Value,
 };
 use crate::pool::key::PoolKey;
-use crate::pool::refresh::{Checked, RefreshReport};
+use crate::pool::refresh::{Checked, RefreshError, RefreshReport, Stamped};
 use crate::pool::report::{PoolOutcome, PoolReport};
 use crate::{Clock, PoolLoaded, SessionEvent};
 
@@ -1148,26 +1148,40 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// The declared, loaded entries that read an asset, with the asset and the
     /// identity it was read under, `None` for one whose stat failed at its load
     /// (the refresh tries again).
-    pub(crate) fn stamped_files(&self) -> Vec<(PoolKey, Asset, Option<Identity>)> {
+    pub(crate) fn stamped_files(&self) -> Vec<Stamped> {
         self.slots
             .iter()
             .filter(|(_, slot)| slot.declared && matches!(slot.state, PoolState::Loaded))
             .filter_map(|(key, slot)| {
-                Some((key.clone(), slot.asset.clone()?, slot.loaded_from.clone()))
+                Some(Stamped {
+                    key: key.clone(),
+                    asset: slot.asset.clone()?,
+                    was: slot.loaded_from.clone(),
+                    generation: slot.generation,
+                })
             })
             .collect()
     }
 
     /// Loads again each entry whose asset's identity moved from the one it was
-    /// read under, and reports what moved and what could not be read. An entry
-    /// that changed since the check began (reloaded, undeclared, failed) is
-    /// left alone.
+    /// read under, and reports what moved and what could not be read.
+    ///
+    /// # Errors
+    ///
+    /// [`RefreshError::Stale`] when an entry checked no longer has the
+    /// generation it was cut at (released, declared again, loaded again);
+    /// nothing is applied then.
     pub(crate) fn reload_changed(
         &mut self,
         checked: Vec<Checked>,
-    ) -> (Vec<Start<C::Float>>, RefreshReport) {
+    ) -> Result<(Vec<Start<C::Float>>, RefreshReport), RefreshError> {
+        if checked.iter().any(|entry| {
+            self.slots.get(&entry.key).map(|slot| slot.generation) != Some(entry.generation)
+        }) {
+            return Err(RefreshError::Stale);
+        }
         let mut refreshed = RefreshReport::default();
-        for Checked { key, was, now } in checked {
+        for Checked { key, was, now, .. } in checked {
             let current = self.slots.get(&key).is_some_and(|slot| {
                 slot.declared && matches!(slot.state, PoolState::Loaded) && slot.loaded_from == was
             });
@@ -1199,7 +1213,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                 self.begin(key, load)
             })
             .collect();
-        (starts, refreshed)
+        Ok((starts, refreshed))
     }
 
     /// How many waits are registered.
