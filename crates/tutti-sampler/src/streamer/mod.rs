@@ -428,14 +428,6 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         let _ = self.streamer_tx.send(StreamerCommand::SessionRate);
     }
 
-    /// Cycles the streamer has begun: one per command drain and refill. A test reads it
-    /// to see that a ring woke the streamer. Requires the `testing` feature.
-    #[cfg(any(test, feature = "testing"))]
-    #[must_use]
-    pub fn cycles(&self) -> u64 {
-        self.shared.metrics.cycles()
-    }
-
     /// The streamer's wave cache (tests).
     #[cfg(test)]
     pub(crate) fn cache(&self) -> std::sync::Arc<cache::LruCache<F>> {

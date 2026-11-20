@@ -144,8 +144,6 @@ impl<F: RingFloat> StreamerCycle<F> {
         shared: &Handles<F>,
         mut drain: impl FnMut() -> Option<StreamerCommand<F>>,
     ) -> StepOutcome {
-        #[cfg(any(test, feature = "testing"))]
-        shared.metrics.count_cycle();
         while let Some(cmd) = drain() {
             handle_command(cmd, shared, &self.config, &mut self.local);
         }

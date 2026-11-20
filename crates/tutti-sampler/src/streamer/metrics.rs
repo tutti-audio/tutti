@@ -21,8 +21,6 @@
 )]
 
 use atomic_float::AtomicF64;
-#[cfg(any(test, feature = "testing"))]
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tutti_platform::Instant;
 use tutti_units::Seconds;
@@ -38,9 +36,6 @@ use tutti_units::Seconds;
 pub struct Metrics {
     /// Bytes per second over the trailing window; `0.0` before the first read.
     read_rate: AtomicF64,
-    /// Cycles the streamer has begun: read only by a test (`testing`).
-    #[cfg(any(test, feature = "testing"))]
-    cycles: AtomicU64,
 }
 
 impl Metrics {
@@ -55,18 +50,6 @@ impl Metrics {
     /// root of this against a 10 MB/s baseline.
     pub fn read_rate(&self) -> f64 {
         self.read_rate.load(Ordering::Relaxed)
-    }
-
-    /// The streamer began a cycle.
-    #[cfg(any(test, feature = "testing"))]
-    pub(super) fn count_cycle(&self) {
-        self.cycles.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Cycles begun so far.
-    #[cfg(any(test, feature = "testing"))]
-    pub(super) fn cycles(&self) -> u64 {
-        self.cycles.load(Ordering::Relaxed)
     }
 
     fn publish(&self, rate: f64) {
