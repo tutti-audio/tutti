@@ -4,7 +4,7 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_nodes::{
-    FdnControls, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig, PlateReverbNode,
+    FdnConfig, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig, PlateReverbNode,
 };
 use tutti_session::{Session, ValueErrorKind};
 use tutti_units::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
@@ -21,10 +21,11 @@ fn session() -> (Session, tutti_session::Background) {
 #[test]
 fn a_write_reaches_the_decay_it_names() {
     let (mut s, _bg) = session();
-    let (node, cells) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
-        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
-        FdnControls::DEFAULT,
-    ));
+    let (node, cells) = s
+        .graph()
+        .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new().layout(
+            FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
+        )));
     let at = |i| UnitAddr::new(UnitParam::Decay, i);
     s.set(node.decay_at(1).to(Seconds::new(5.0))).unwrap();
     s.set(node.freeze().to(true)).unwrap();
@@ -33,10 +34,9 @@ fn a_write_reaches_the_decay_it_names() {
     assert_eq!(cells.get(at(2)), Some(1.2), "high untouched");
     assert_eq!(cells.get(UnitParam::Freeze), Some(1.0));
 
-    let (plain, cells) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
-        FdnLayout::default(),
-        FdnControls::DEFAULT,
-    ));
+    let (plain, cells) = s
+        .graph()
+        .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new()));
     assert_eq!(
         s.set(plain.freeze().to(true)).unwrap_err().kind,
         ValueErrorKind::NoSuchTarget
@@ -49,14 +49,14 @@ fn a_write_reaches_the_decay_it_names() {
 #[test]
 fn the_graph_sees_each_reverbs_ceiling() {
     let (mut s, _bg) = session();
-    let (plain, _) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
-        FdnLayout::default(),
-        FdnControls::DEFAULT,
-    ));
-    let (frozen, _) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
-        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
-        FdnControls::DEFAULT,
-    ));
+    let (plain, _) = s
+        .graph()
+        .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new()));
+    let (frozen, _) = s
+        .graph()
+        .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new().layout(
+            FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
+        )));
     let _ = s.update();
     let Tail::Finite(n) = s.graph_ref().node_tail(plain).unwrap() else {
         panic!("finite")

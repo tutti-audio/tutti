@@ -24,7 +24,6 @@ mod dispatch;
 mod lifecycle;
 mod messages;
 mod payload_pool;
-mod progress;
 mod thread;
 
 use crate::ServerWatch;
@@ -96,10 +95,10 @@ use lifecycle::Lifecycle;
 use messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use parking_lot::Mutex;
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
-use progress::StateProgress;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tutti_plugin_ipc_ffi::Blob;
 use tutti_plugin_types::Timeouts;
 
 pub use messages::IpcEvent;
@@ -746,8 +745,8 @@ impl AudioBridge {
     // --- Main-thread sync request+response ---
 
     /// The plugin's state for `state_use`, read through the server. Blocks while
-    /// it travels: up to a stalled transfer's wait for a request already owed,
-    /// then for as long as the transfer makes progress.
+    /// the server saves it and sends it: up to [`Timeouts::state_wait`] for a
+    /// request already owed, and again for the answer.
     ///
     /// Ordered one way against blocks: the request is sent after the blocks
     /// submitted before it have been answered, so it sees what they did; blocks
@@ -762,25 +761,15 @@ impl AudioBridge {
         }
         // What the host wrote and no block has carried is in the state.
         self.flush_host_edits();
-        let progress = StateProgress::new(self.lifecycle.timeouts());
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
-            ControlCommand::SaveState {
-                state_use,
-                progress: progress.clone(),
-                reply,
-            }
+            ControlCommand::SaveState { state_use, reply }
         }) else {
             return Err(self.refused());
         };
         // As in `load_state`: a refusal to answer is not an empty state.
         // Collapsing it to `None`/`vec![]` is what let an unsaved preset look
         // like a plugin that had nothing to save.
-        //
-        // The wait ends on a stalled *transfer*, not on a total elapsed budget.
-        // A fixed total here was the effective ceiling on state size — it
-        // expired mid-stream on a large-but-legal state and reported it as a
-        // plugin that never answered.
-        progress.wait(ask_resp)
+        self.await_state(ask_resp)
     }
 
     /// Restores a state saved for `state_use` in the plugin. Blocks while it
@@ -800,33 +789,52 @@ impl AudioBridge {
         // The writes made so far were made against the values this load
         // replaces: none lands after it.
         self.reset_host_edits();
-        // Refuse here as well as in the dispatcher. Not redundant: this saves
-        // copying a gigabyte into a command that is only going to be rejected,
-        // and it answers on the calling thread rather than after a round trip
-        // through the bridge.
+        // Refused here, before an object is made of it: the object is a copy of
+        // the state, and the answer comes on the calling thread rather than after
+        // a round trip through the bridge.
         if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
             return Err(StateError::TooLarge {
                 bytes: data.len(),
                 limit: tutti_plugin_types::MAX_STATE_BYTES,
             });
         }
-        let progress = StateProgress::new(self.lifecycle.timeouts());
+        // The one copy of the state the host makes, on the calling thread: the
+        // bridge sends the object as it is.
+        let blob = Blob::create(data).map_err(|e| {
+            StateError::Rejected(format!("the state could not be made into an object: {e}"))
+        })?;
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
             ControlCommand::LoadState {
                 state_use,
-                data: data.to_vec(),
-                progress: progress.clone(),
+                len: data.len() as u64,
+                blob,
                 reply,
             }
         }) else {
             return Err(self.refused());
         };
         // A refusal to answer is not an acceptance.
-        //
-        // Same progress deadline as `save_state`, for the same reason: the write
-        // direction is chunked too, so a total budget capped how large a state
-        // could be *sent* just as it capped how large one could be received.
-        progress.wait(ask_resp)
+        self.await_state(ask_resp)
+    }
+
+    /// The answer to a state request, waited for up to [`Timeouts::state_wait`]:
+    /// the bridge's own deadline is [`Timeouts::state`], so its report
+    /// of a stall is the one that arrives, and this one is the backstop for a
+    /// bridge that ended without answering.
+    fn await_state<T>(
+        &self,
+        ask: Ask<std::result::Result<T, StateError>>,
+    ) -> std::result::Result<T, StateError> {
+        let timeouts = self.lifecycle.timeouts();
+        match ask.recv_timeout_borrowed(timeouts.state_wait()) {
+            Ok(answer) => answer,
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                Err(StateError::PluginCrashed)
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(StateError::Stalled {
+                after: timeouts.state,
+            }),
+        }
     }
 
     /// Queues a control request that owes a reply, and the reply's `Ask`. A

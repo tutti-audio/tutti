@@ -12,6 +12,10 @@ fn bus(width: u16) -> BusTopology {
 }
 
 /// A stereo delay: the default swap routing, the channels linked in time.
+fn stereo_builder() -> DelayLayoutBuilder {
+    DelayLayout::builder(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+}
+
 fn stereo() -> DelayLayout {
     DelayLayout::new(BusTopology::STEREO, MAX, InterpolationMode::Linear)
 }
@@ -77,19 +81,21 @@ fn gains(v: &[f64]) -> Vec<Gain> {
 fn a_routing_refuses_what_it_cannot_hold() {
     let two = BusTopology::STEREO;
     assert_eq!(
-        Routing::new(two, &gains(&[0.0, 1.0, 1.0])),
-        Err(RoutingError::Length {
+        FeedbackRouting::builder(two, &gains(&[0.0, 1.0, 1.0])).build(),
+        Err(FeedbackRoutingError::Length {
             width: 2,
             expected: 4,
             got: 3
         })
     );
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let e = Routing::new(two, &gains(&[0.0, bad, 1.0, 0.0])).unwrap_err();
+        let e = FeedbackRouting::builder(two, &gains(&[0.0, bad, 1.0, 0.0]))
+            .build()
+            .unwrap_err();
         assert!(
             matches!(
                 e,
-                RoutingError::NotFinite {
+                FeedbackRoutingError::NotFinite {
                     row: 0,
                     column: 1,
                     ..
@@ -97,17 +103,24 @@ fn a_routing_refuses_what_it_cannot_hold() {
             ),
             "{e:?}"
         );
-        assert!(Routing::normalized(two, &gains(&[0.0, bad, 1.0, 0.0])).is_err());
+        assert!(
+            FeedbackRouting::builder(two, &gains(&[0.0, bad, 1.0, 0.0]))
+                .normalized()
+                .build()
+                .is_err()
+        );
     }
     assert_eq!(
-        Routing::new(two, &gains(&[0.0, 1.0, 0.7, 0.4])),
-        Err(RoutingError::Row {
+        FeedbackRouting::builder(two, &gains(&[0.0, 1.0, 0.7, 0.4])).build(),
+        Err(FeedbackRoutingError::Row {
             row: 1,
             sum: Amplitude::new(1.1)
         })
     );
     // A row that sums to exactly 1, and a negative weight, are held.
-    let r = Routing::new(two, &gains(&[0.5, -0.5, 1.0, 0.0])).unwrap();
+    let r = FeedbackRouting::builder(two, &gains(&[0.5, -0.5, 1.0, 0.0]))
+        .build()
+        .unwrap();
     assert_eq!(
         [
             r.weight(0, 0),
@@ -129,7 +142,10 @@ fn a_routing_refuses_what_it_cannot_hold() {
 #[test]
 fn a_normalized_routing_scales_a_row_past_one_and_no_other() {
     let four = bus(4);
-    let r = Routing::normalized(four, &gains(&[1.0; 16])).unwrap();
+    let r = FeedbackRouting::builder(four, &gains(&[1.0; 16]))
+        .normalized()
+        .build()
+        .unwrap();
     for row in 0..4 {
         let sum: f64 = (0..4).map(|c| r.weight(row, c).magnitude().get()).sum();
         assert!((sum - 1.0).abs() < 1e-15, "row {row}: {sum}");
@@ -138,7 +154,10 @@ fn a_normalized_routing_scales_a_row_past_one_and_no_other() {
     let mut m = [0.0; 16];
     m[1] = 0.6;
     m[2] = -0.2;
-    let r = Routing::normalized(four, &gains(&m)).unwrap();
+    let r = FeedbackRouting::builder(four, &gains(&m))
+        .normalized()
+        .build()
+        .unwrap();
     assert_eq!(
         (r.weight(0, 1), r.weight(0, 2)),
         (Gain::new(0.6), Gain::new(-0.2))
@@ -150,7 +169,7 @@ fn a_normalized_routing_scales_a_row_past_one_and_no_other() {
 /// from.
 #[test]
 fn the_routing_presets_are_what_their_names_say() {
-    let swap = Routing::swap();
+    let swap = FeedbackRouting::swap();
     assert_eq!(
         [
             swap.weight(0, 1),
@@ -160,7 +179,7 @@ fn the_routing_presets_are_what_their_names_say() {
         ],
         [1.0, 1.0, 0.0, 0.0].map(Gain::new)
     );
-    let ring = Routing::ring(bus(4));
+    let ring = FeedbackRouting::ring(bus(4));
     for c in 0..4 {
         for j in 0..4 {
             assert_eq!(
@@ -170,9 +189,12 @@ fn the_routing_presets_are_what_their_names_say() {
             );
         }
     }
-    assert!(Routing::none(bus(3)).is_none() && !ring.is_none());
-    assert!(Routing::ring(BusTopology::MONO).is_none());
-    assert_eq!(Routing::ring(BusTopology::STEREO), Routing::swap());
+    assert!(FeedbackRouting::none(bus(3)).is_none() && !ring.is_none());
+    assert!(FeedbackRouting::ring(BusTopology::MONO).is_none());
+    assert_eq!(
+        FeedbackRouting::ring(BusTopology::STEREO),
+        FeedbackRouting::swap()
+    );
 }
 
 /// A routing is for one bus, and the layout says so: a routing for another width is
@@ -180,13 +202,16 @@ fn the_routing_presets_are_what_their_names_say() {
 #[test]
 fn a_layout_takes_a_routing_for_its_own_bus_and_defaults_by_its_width() {
     assert_eq!(
-        stereo().with_routing(Routing::ring(bus(3))).unwrap_err(),
-        RoutingError::Width {
+        stereo_builder()
+            .routing(FeedbackRouting::ring(bus(3)))
+            .build()
+            .unwrap_err(),
+        DelayLayoutError::Routing(FeedbackRoutingError::Width {
             routing: 3,
             family: 2
-        }
+        })
     );
-    assert_eq!(stereo().routing(), &Routing::swap());
+    assert_eq!(stereo().routing(), &FeedbackRouting::swap());
     for w in [1u16, 3, 6] {
         let f = DelayLayout::new(bus(w), MAX, InterpolationMode::Linear);
         assert!(f.routing().is_none(), "width {w}");
@@ -198,7 +223,7 @@ fn a_layout_takes_a_routing_for_its_own_bus_and_defaults_by_its_width() {
         MaxDelay::DEFAULT,
         InterpolationMode::None,
     );
-    assert_eq!(f.routing(), &Routing::swap());
+    assert_eq!(f.routing(), &FeedbackRouting::swap());
 }
 
 /// Channel times refuse a time that is not one, and the layout refuses a set that does not
@@ -209,40 +234,46 @@ fn channel_times_refuse_what_is_not_a_time_and_what_does_not_fit() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.001] {
         assert!(
             matches!(
-                ChannelTimes::each(&[Seconds::new(0.1), Seconds::new(bad)]),
+                ChannelTimes::try_from(&[Seconds::new(0.1), Seconds::new(bad)][..]),
                 Err(ChannelTimesError::NotATime { channel: 2, .. })
             ),
             "{bad}"
         );
     }
     assert!(matches!(
-        ChannelTimes::each(&[Seconds::ZERO; 16]),
+        ChannelTimes::try_from(&[Seconds::ZERO; 16][..]),
         Err(ChannelTimesError::TooMany { count: 16, max: 15 })
     ));
-    let times = ChannelTimes::each(&[Seconds::new(0.1), Seconds::new(0.2)]).unwrap();
+    let times = ChannelTimes::try_from(&[Seconds::new(0.1), Seconds::new(0.2)][..]).unwrap();
     assert_eq!(times.fixed(), [Seconds::new(0.1), Seconds::new(0.2)]);
     assert!(!times.is_linked() && ChannelTimes::linked().is_linked());
     assert_eq!(
-        stereo().with_times(times).unwrap_err(),
-        ChannelTimesError::Length {
+        stereo_builder().times(times).build().unwrap_err(),
+        DelayLayoutError::Times(ChannelTimesError::Length {
             width: 2,
             expected: 1,
             got: 2
-        }
+        })
     );
-    assert!(stereo().with_times(ChannelTimes::linked()).is_ok());
-    let past = ChannelTimes::each(&[Seconds::new(1.5)]).unwrap();
+    assert!(
+        stereo_builder()
+            .times(ChannelTimes::linked())
+            .build()
+            .is_ok()
+    );
+    let past = ChannelTimes::try_from(&[Seconds::new(1.5)][..]).unwrap();
     assert_eq!(
-        stereo().with_times(past).unwrap_err(),
-        ChannelTimesError::Past {
+        stereo_builder().times(past).build().unwrap_err(),
+        DelayLayoutError::Times(ChannelTimesError::Past {
             channel: 1,
             time: Seconds::new(1.5),
             max: Seconds::new(1.0)
-        }
+        })
     );
     assert!(
-        stereo()
-            .with_times(ChannelTimes::each(&[Seconds::new(1.0)]).unwrap())
+        stereo_builder()
+            .times(ChannelTimes::try_from(&[Seconds::new(1.0)][..]).unwrap())
+            .build()
             .is_ok(),
         "the longest is held"
     );

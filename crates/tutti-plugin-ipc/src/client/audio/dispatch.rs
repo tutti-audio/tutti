@@ -8,13 +8,11 @@ use super::channels::{BatchOutcome, Channels, ResponseWriter};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting, Unsolicited};
 use super::payload_pool::PayloadPool;
-use super::progress::StateProgress;
 use crate::ProcessAudioData;
 use crate::conversation::{Conversation, Fault, Heard};
 use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
-use crate::transport::state_chunk::{self, ChunkError, Reassembler};
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
 };
@@ -22,7 +20,7 @@ use crossbeam_channel::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_types::{Deadline, MidiIntake};
-use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, StateError};
+use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -310,13 +308,12 @@ impl AudioState {
         &mut self,
         reply: AudioReply,
         awaited: AudioKey,
-        now: Instant,
         channels: &Channels,
     ) -> IpcResult<Option<AudioReply>> {
         let key = audio_key(&reply).ok_or_else(|| fault(Fault::Unknown))?;
-        match self.conv.hear(key, true, now).map_err(fault)? {
-            Heard::Answer { .. } if key == awaited => Ok(Some(reply)),
-            Heard::Answer { .. } => Err(IpcError::ProtocolError(
+        match self.conv.hear(key).map_err(fault)? {
+            Heard::Answer if key == awaited => Ok(Some(reply)),
+            Heard::Answer => Err(IpcError::ProtocolError(
                 "an answer to a request this lane is not waiting for",
             )),
             Heard::Abandoned(AbandonedAudio::Block) => {
@@ -384,14 +381,14 @@ fn wait_audio(
         };
         match ipc::recv_resumable::<AudioReply>(stream, left, &mut state.partial) {
             Ok(reply) => {
-                if let Some(answer) = state.hear(reply, key, Instant::now(), channels)? {
+                if let Some(answer) = state.hear(reply, key, channels)? {
                     return Ok(Some(answer));
                 }
             }
             Err(IpcError::Timeout { partial: true, .. }) => {
                 let frame =
                     ipc::recv_resumable::<AudioReply>(stream, state.finish, &mut state.partial)?;
-                let answer = state.hear(frame, key, Instant::now(), channels)?;
+                let answer = state.hear(frame, key, channels)?;
                 if answer.is_none() {
                     state.give_up(key)?;
                 }
@@ -498,21 +495,19 @@ impl ControlState {
             ControlFrame::Ready { .. } => Err(IpcError::ProtocolError(
                 "a second handshake on a connection that is in use",
             )),
-            ControlFrame::Reply { id, reply } => {
-                match self.conv.hear(id, reply.ends(), now).map_err(fault)? {
-                    Heard::Answer { .. } if awaited == Some(id) => Ok(Some(reply)),
-                    Heard::Answer { .. } => Err(IpcError::ProtocolError(
-                        "an answer to a request this lane is not waiting for",
-                    )),
-                    Heard::Abandoned(Abandoned::Discard) => Ok(None),
-                    Heard::Abandoned(Abandoned::Rate) => {
-                        if let ControlReply::SampleRateSet { rate, error } = reply {
-                            inbox.late_rate_answer(rate, error);
-                        }
-                        Ok(None)
+            ControlFrame::Reply { id, reply } => match self.conv.hear(id).map_err(fault)? {
+                Heard::Answer if awaited == Some(id) => Ok(Some(reply)),
+                Heard::Answer => Err(IpcError::ProtocolError(
+                    "an answer to a request this lane is not waiting for",
+                )),
+                Heard::Abandoned(Abandoned::Discard) => Ok(None),
+                Heard::Abandoned(Abandoned::Rate) => {
+                    if let ControlReply::SampleRateSet { rate, error } = reply {
+                        inbox.late_rate_answer(rate, error);
                     }
+                    Ok(None)
                 }
-            }
+            },
         }
     }
 
@@ -947,86 +942,52 @@ pub(super) fn handle_control(
                 ControlRequest::SetTrackInfo { info: *info },
             )?;
         }
-        ControlCommand::SaveState {
-            state_use,
-            progress,
-            reply,
-        } => {
+        ControlCommand::SaveState { state_use, reply } => {
             let Lane { stream, state } = lane;
-            let window = progress.deadline();
-            // A state has no ceiling: each chunk restarts the window, and the
-            // transfer lasts as long as it moves.
+            let window = lifecycle.timeouts().state;
+            // The server's `Working` while it saves restarts the window, up to the
+            // ceiling.
             let id = ask(
                 stream,
                 state,
                 ControlRequest::SaveState { state_use },
                 Abandoned::Discard,
                 window,
-                Duration::MAX,
+                lifecycle.timeouts().state_ceiling(),
             )?;
-            reply.send(recv_state(stream, inbox, state, id, &progress)?);
+            reply.send(recv_state(stream, inbox, state, id, window)?);
         }
         ControlCommand::LoadState {
             state_use,
-            data,
-            progress,
+            len,
+            blob,
             reply,
         } => {
-            // Refuse over-limit state *here*, before a byte is written, and
-            // answer the caller rather than propagating.
-            //
-            // Propagating would be wrong twice over: `?` returns before
-            // `reply.send`, so the `Reply` drops and the caller waits out
-            // the progress deadline to learn a length comparison the host made
-            // instantly; and a lane's loop treats every handler error as
-            // connection-level, so one oversized preset would `crash()` a
-            // healthy session. Nothing was sent, so the stream is still
-            // synchronised and there is nothing to crash about. Contrast
-            // `recv_by`, where an over-cap length genuinely *has*
-            // desynchronised the stream.
-            if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
-                reply.send(Err(StateError::TooLarge {
-                    bytes: data.len(),
-                    limit: tutti_plugin_types::MAX_STATE_BYTES,
-                }));
-                return Ok(());
-            }
+            let body = ControlRequest::LoadState {
+                state_use,
+                len,
+                blob: blob.wire(),
+            };
             let Lane { stream, state } = lane;
-            // One request, sent as several frames that share its id: the server
-            // answers once, on the last.
+            let window = lifecycle.timeouts().state;
             let id = state.fresh();
-            let window = progress.deadline();
-            state
-                .conv
-                .open(id, Abandoned::Discard, Instant::now(), window, window);
-            for (seq, last, bytes) in state_chunk::split(&data) {
-                let n = bytes.len();
-                ipc::send(
-                    stream,
-                    &Request {
-                        id,
-                        body: ControlRequest::LoadStateChunk {
-                            seq,
-                            total: data.len() as u64,
-                            last: last.then_some(state_use),
-                            bytes: bytes.to_vec(),
-                        },
-                    },
-                )?;
-                // Report the write before waiting on the acknowledgement. A
-                // socket that accepts chunks is a transfer that is moving, and
-                // it is the only progress this direction has to show: the
-                // server answers once, on `last`, so a caller watching for a
-                // reply alone cannot distinguish a slow write from a stall.
-                progress.advance(n);
-            }
-            // Wait for the answer, as `SaveState` above does. Answering the
-            // caller straight after the write would report that the request had
-            // been *sent*, never whether the plugin accepted it.
+            state.conv.open(
+                id,
+                Abandoned::Discard,
+                Instant::now(),
+                window,
+                lifecycle.timeouts().state_ceiling(),
+            );
+            // Held until the answer: where the object is read by name, it stays
+            // until then.
+            let _lease = ipc::send_blob(stream, id, body, blob)?;
+            // Wait for the answer. Answering the caller straight after the write
+            // would report that the request had been *sent*, never whether the
+            // plugin accepted it.
             //
-            // A timeout here is **not** connection-level, for the same reason
-            // the over-limit branch above is not: the socket is synchronised and
-            // the session is healthy — the plugin simply has not answered yet.
+            // A timeout here is **not** connection-level: the socket is
+            // synchronised and the session is healthy, the plugin simply has not
+            // answered yet.
             // Propagating would `crash()` it, and the caller would receive
             // `Stalled` (which says "the session is fine, retrying is
             // reasonable") against a session that had just been torn down.
@@ -1038,7 +999,7 @@ pub(super) fn handle_control(
                 Waited::Reply(other) => Err(StateError::Rejected(format!(
                     "unexpected reply to LoadState: {other:?}"
                 ))),
-                Waited::Pending | Waited::GaveUp => Err(progress.stalled()),
+                Waited::Pending | Waited::GaveUp => Err(StateError::Stalled { after: window }),
             };
             reply.send(value);
         }
@@ -1330,79 +1291,52 @@ pub(super) fn read_news(lane: &mut Lane<ControlState>, inbox: &mut Unsolicited) 
     }
 }
 
-/// Collect a chunked `StateChunk` sequence into one state.
+/// Takes the plugin's state from the answer to request `id`: the
+/// `StateReady` frame and the object that followed it.
 ///
 /// Returns the caller's `IpcResult` rather than propagating, because none of
-/// the ways this fails is a connection failure: an over-limit state, a
-/// misordered sequence and a stalled one are all *this plugin's* problem, and
-/// crashing the bridge for any of them would take down a session whose socket is
-/// fine ([`StateError::Stalled`] promises the caller a healthy session to retry
-/// against). Only a genuine transport error (`?`) still propagates, and that
-/// is the one case where the stream really is unusable.
+/// the ways this fails is a connection failure: an over-limit state, an object
+/// of another length than declared and a late answer are all *this plugin's*
+/// problem, and crashing the bridge for any of them would take down a session
+/// whose socket is fine ([`StateError::Stalled`] promises the caller a healthy
+/// session to retry against). Only a genuine transport error (`?`) still
+/// propagates, and that is the one case where the stream really is unusable.
 ///
-/// **Whenever this stops before the answer has ended, the rest is late**: the
-/// server sends the whole sequence whatever this end made of it, and the
-/// conversation recognises the chunks by the request's id and drops them
-/// ([`Abandoned::Discard`]) until the last, so a later request never reads one as its
-/// answer.
-///
-/// Each chunk restarts the request's window (`progress`'s deadline), not a share
-/// of it: the budget is per reply, and a plugin serialising a large state can
-/// legitimately pause between chunks. The overall wait is still bounded, because
-/// a sequence that stops arriving gives up one window after its last chunk. The
-/// deadline comes from `progress`, so it is the same figure the waiting caller
-/// uses, and `progress` is advanced per chunk so the *caller's* wait is bounded
-/// the same way: this bounds the bridge thread's read, that the main thread's
-/// block on the reply, and a fix to only one leaves the other as the ceiling.
+/// The object was read off the stream with its frame, so a refusal here leaves
+/// the stream in step. An answer that arrives after the lane gave up is
+/// recognised by its id and dropped ([`Abandoned::Discard`]).
 fn recv_state(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     state: &mut ControlState,
     id: ReqId,
-    progress: &StateProgress,
+    window: Duration,
 ) -> IpcResult<std::result::Result<Vec<u8>, StateError>> {
-    let mut acc = Reassembler::default();
-    loop {
-        let msg = match wait_for(stream, inbox, state, id, None)? {
-            Waited::Reply(msg) => msg,
-            Waited::Pending | Waited::GaveUp => return Ok(Err(progress.stalled())),
-        };
-        let ControlReply::StateChunk {
-            seq,
-            total,
-            last,
-            bytes,
-        } = msg
-        else {
-            // A reply of another type is the whole answer (the server's
-            // `Error` when the plugin cannot save); the state is not coming.
-            return Ok(Err(StateError::Rejected(format!(
-                "unexpected reply while reading plugin state: {msg:?}"
-            ))));
-        };
-        progress.advance(bytes.len());
-        let refused = match acc.push(seq, total, last, &bytes) {
-            Ok(true) => return Ok(Ok(acc.into_inner())),
-            Ok(false) => continue,
-            Err(ChunkError::TooLarge { bytes, limit }) => StateError::TooLarge { bytes, limit },
-            Err(ChunkError::OutOfOrder { got, expected }) => StateError::Rejected(format!(
-                "plugin sent state chunk {got} where {expected} was expected"
-            )),
-            Err(ChunkError::Empty { seq }) => StateError::Rejected(format!(
-                "plugin sent an empty state chunk {seq} before the last"
-            )),
-            Err(
-                refused @ (ChunkError::NoRoom { .. }
-                | ChunkError::TotalChanged { .. }
-                | ChunkError::NotTotal { .. }),
-            ) => StateError::Rejected(refused.to_string()),
-        };
-        if !last {
-            // The rest of the answer is late: dropped until its last chunk.
-            state.give_up(id)?;
-        }
-        return Ok(Err(refused));
-    }
+    let msg = match wait_for(stream, inbox, state, id, None)? {
+        Waited::Reply(msg) => msg,
+        Waited::Pending | Waited::GaveUp => return Ok(Err(StateError::Stalled { after: window })),
+    };
+    let ControlReply::StateReady { len, .. } = msg else {
+        // A reply of another type is the whole answer (the server's `Error`
+        // when the plugin cannot save); the state is not coming.
+        return Ok(Err(StateError::Rejected(format!(
+            "unexpected reply while reading plugin state: {msg:?}"
+        ))));
+    };
+    let Some(object) = state.partial.take_blob() else {
+        return Ok(Err(StateError::Rejected(
+            "the plugin's state object did not arrive".to_owned(),
+        )));
+    };
+    Ok(object
+        .read(len, tutti_plugin_types::MAX_STATE_BYTES)
+        .map_err(|e| match e {
+            SlabError::BlobTooLarge { declared, limit } => StateError::TooLarge {
+                bytes: usize::try_from(declared).unwrap_or(usize::MAX),
+                limit,
+            },
+            other => StateError::Rejected(other.to_string()),
+        }))
 }
 
 /// Record the plugin's answer to a rate change: the refusal while it refuses,
@@ -1467,14 +1401,14 @@ mod tests {
         }
     }
 
-    fn chunk(id: u64, seq: u32, last: bool) -> ControlFrame {
+    fn state_ready(id: u64) -> ControlFrame {
         ControlFrame::Reply {
             id: ReqId::new(id),
-            reply: ControlReply::StateChunk {
-                seq,
-                total: 8,
-                last,
-                bytes: vec![1; 4],
+            reply: ControlReply::StateReady {
+                len: 0,
+                blob: tutti_plugin_ipc_ffi::Blob::create(&[])
+                    .expect("an empty blob")
+                    .wire(),
             },
         }
     }
@@ -1524,7 +1458,7 @@ mod tests {
             WINDOW,
         );
 
-        let late = state.hear(processed(3), AudioKey::Block(4), Instant::now(), &channels);
+        let late = state.hear(processed(3), AudioKey::Block(4), &channels);
         assert!(matches!(late, Ok(None)), "late, not the answer");
         assert!(matches!(
             replies.pop(),
@@ -1532,7 +1466,7 @@ mod tests {
         ));
         assert_eq!(channels.block_counts().late, 1);
 
-        let answer = state.hear(processed(4), AudioKey::Block(4), Instant::now(), &channels);
+        let answer = state.hear(processed(4), AudioKey::Block(4), &channels);
         assert!(matches!(
             answer,
             Ok(Some(AudioReply::AudioProcessed { seq: 4, .. }))
@@ -1550,7 +1484,6 @@ mod tests {
         let heard = state.hear(
             AudioReply::ParametersApplied { id },
             AudioKey::Block(1),
-            Instant::now(),
             &channels,
         );
         assert!(matches!(heard, Ok(None)));
@@ -1576,7 +1509,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    state.hear(reply, AudioKey::Block(1), Instant::now(), &channels),
+                    state.hear(reply, AudioKey::Block(1), &channels),
                     Err(IpcError::ProtocolError(_))
                 ),
                 "a reply to nothing this lane sent was accepted"
@@ -1594,7 +1527,7 @@ mod tests {
         id
     }
 
-    /// **A query's late reply and the rest of a stalled state are dropped by
+    /// **A query's late reply and a stalled state's late answer are dropped by
     /// their ids, and the answer to the next request is its own**, however the
     /// frames interleave.
     #[test]
@@ -1612,11 +1545,7 @@ mod tests {
             Ok(None)
         ));
         assert!(matches!(
-            state.hear(chunk(2, 0, false), Some(next), Instant::now(), &mut inbox),
-            Ok(None)
-        ));
-        assert!(matches!(
-            state.hear(chunk(2, 1, true), Some(next), Instant::now(), &mut inbox),
+            state.hear(state_ready(2), Some(next), Instant::now(), &mut inbox),
             Ok(None)
         ));
         let list = ControlFrame::Reply {
@@ -1631,9 +1560,69 @@ mod tests {
         ));
         assert!(
             state
-                .hear(chunk(2, 2, true), None, Instant::now(), &mut inbox)
+                .hear(state_ready(2), None, Instant::now(), &mut inbox)
                 .is_err(),
             "the state's answer had ended"
+        );
+    }
+
+    /// **A state request slower than its window lives on the server's beats, under
+    /// the ceiling, and without them is due at the window**: constructed instants,
+    /// no clock. The window and the ceiling are the ones the state handlers open
+    /// a request with.
+    #[test]
+    fn a_state_request_slower_than_its_window_lives_on_beats_under_the_ceiling() {
+        let timeouts = Timeouts::default();
+        let (window, ceiling) = (timeouts.state, timeouts.state_ceiling());
+        let start = Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        let working = |id| ControlFrame::Working {
+            id,
+            stage: crate::Working::Opening,
+        };
+        let open = |state: &mut ControlState| {
+            let id = ReqId::new(1);
+            state
+                .conv
+                .open(id, Abandoned::Discard, start, window, ceiling);
+            id
+        };
+        let mut inbox = Unsolicited::new();
+
+        // Without beats: due at the window.
+        let mut silent = control_state();
+        let id = open(&mut silent);
+        assert!(!silent.conv.is_due(id, at(window.as_secs() - 1)));
+        assert!(silent.conv.is_due(id, at(window.as_secs())));
+
+        // With a beat every few seconds: alive well past the window, due a window
+        // after the last beat, and never past the ceiling.
+        let mut beaten = control_state();
+        let id = open(&mut beaten);
+        for step in 1..=5u64 {
+            let now = at(step * (window.as_secs() - 2));
+            assert!(!beaten.conv.is_due(id, now), "beat {step} came in time");
+            assert!(matches!(
+                beaten.hear(working(id), Some(id), now, &mut inbox),
+                Ok(None)
+            ));
+        }
+        assert!(window.as_secs() * 3 < ceiling.as_secs());
+        let last = at(5 * (window.as_secs() - 2));
+        assert!(
+            !beaten
+                .conv
+                .is_due(id, last + window - Duration::from_secs(1))
+        );
+        assert!(beaten.conv.is_due(id, last + window));
+        assert!(
+            beaten
+                .hear(working(id), Some(id), at(ceiling.as_secs() - 1), &mut inbox)
+                .is_ok()
+        );
+        assert!(
+            beaten.conv.is_due(id, at(ceiling.as_secs())),
+            "the ceiling stands"
         );
     }
 

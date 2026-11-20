@@ -12,13 +12,13 @@ use super::routing::MAX_WIDTH;
 ///
 /// - [`linked`](Self::linked): every channel follows the control, so the channels track
 ///   (the default);
-/// - [`each`](Self::each): the channels past the first are delayed by these times, which
-///   do not move. A stereo ping-pong's right channel is the usual use.
+/// - [`try_from`](TryFrom) a slice of times: the channels past the first are delayed by
+///   these times, which do not move. A stereo ping-pong's right channel is the usual use.
 ///
 /// A range-checked value: every time is finite and
 /// not negative, and never clamped. That they fit the delay's width and its
 /// [`MaxDelay`](crate::MaxDelay) is the layout's to check, where it is built
-/// ([`DelayLayout::with_times`](crate::DelayLayout::with_times)).
+/// ([`DelayLayoutBuilder::build`](crate::DelayLayoutBuilder::build)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChannelTimes {
     count: usize,
@@ -79,12 +79,31 @@ impl ChannelTimes {
         }
     }
 
-    /// The channels past the first are delayed by `times`, channel 1 first.
-    ///
+    /// Whether every channel follows the time control.
+    #[must_use]
+    pub(crate) const fn is_linked(&self) -> bool {
+        self.linked
+    }
+
+    /// The fixed times of the channels past the first (empty when
+    /// [`linked`](Self::linked)).
+    #[must_use]
+    pub fn fixed(&self) -> &[Seconds] {
+        &self.times[..self.count]
+    }
+}
+
+/// The channels past the first are delayed by `times`, channel 1 first.
+///
+/// A time is checked to be finite and not negative, and the count to fit a bus; that they fit
+/// the delay's width and longest delay is the layout's to check.
+impl TryFrom<&[Seconds]> for ChannelTimes {
+    type Error = ChannelTimesError;
+
     /// # Errors
     ///
     /// [`ChannelTimesError::NotATime`] or [`TooMany`](ChannelTimesError::TooMany).
-    pub fn each(times: &[Seconds]) -> Result<Self, ChannelTimesError> {
+    fn try_from(times: &[Seconds]) -> Result<Self, ChannelTimesError> {
         if times.len() > MAX_WIDTH - 1 {
             return Err(ChannelTimesError::TooMany {
                 count: times.len(),
@@ -106,19 +125,6 @@ impl ChannelTimes {
             times: all,
             linked: false,
         })
-    }
-
-    /// Whether every channel follows the time control.
-    #[must_use]
-    pub(crate) const fn is_linked(&self) -> bool {
-        self.linked
-    }
-
-    /// The fixed times of the channels past the first (empty when
-    /// [`linked`](Self::linked)).
-    #[must_use]
-    pub fn fixed(&self) -> &[Seconds] {
-        &self.times[..self.count]
     }
 }
 

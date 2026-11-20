@@ -15,8 +15,9 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// A [`KernelNode`] over [`FreeverbKernel`], the combs and all-passes being
 /// [`FreeverbBank`]'s. Its blend with its input, for use as an insert, is the graph's mix
-/// (`Editor::set_mix`); it declares no latency. [`general_midi`](Self::general_midi) is the
-/// General MIDI reverb send of the SoundFont player.
+/// (`Editor::set_mix`); it declares no latency. Made from a [`FreeverbConfig`]
+/// (`FreeverbNode::from`), whose [`general_midi`](FreeverbConfig::general_midi) is the General
+/// MIDI reverb send of the SoundFont player.
 ///
 /// # The controls
 ///
@@ -38,37 +39,65 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// the session.
 pub type FreeverbNode<F> = KernelNode<FreeverbKernel<F>>;
 
-impl<F: Float + Lerp> FreeverbNode<F> {
-    /// A reverb whose room size and damping are cells, starting at `controls`. It has no rate
-    /// until the graph's `prepare` gives it one: it declares no latency and an unknown tail
-    /// before, and renders silence. Allocates: build it before the node goes live.
-    #[doc(hidden)]
+/// What a [`FreeverbNode`] is made from: the room size and damping it starts at, and whether
+/// they are cells.
+///
+/// [`new`](Self::new) is a reverb whose controls are cells; [`general_midi`](Self::general_midi)
+/// is the General MIDI reverb send, whose controls are fixed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FreeverbConfig {
+    controls: FreeverbControls,
+    cells: bool,
+}
+
+impl FreeverbConfig {
+    /// A reverb whose room size and damping are cells, starting at
+    /// [`FreeverbControls::GENERAL_MIDI`]. It has no rate until the graph's `prepare` gives it
+    /// one: it declares no latency and an unknown tail before, and renders silence.
     #[must_use]
-    pub fn live(controls: FreeverbControls) -> Self {
-        Self::with_kernel(
-            FreeverbKernel::new(None),
-            FreeverbSet { cells: true },
-            controls,
-        )
+    pub const fn new() -> Self {
+        Self {
+            controls: FreeverbControls::GENERAL_MIDI,
+            cells: true,
+        }
     }
 
     /// The General MIDI reverb send: room 0.5 and damping 0.5, mono in and stereo out, wet
-    /// only. Its controls are fixed, so its tail is the exact figure of that one room, and it
-    /// declares no cells.
+    /// only. Its controls are fixed, so its tail is the exact figure of that one room, and its
+    /// node declares no cells.
     #[must_use]
-    pub fn general_midi() -> Self {
-        let controls = FreeverbControls::GENERAL_MIDI;
-        Self::with_kernel(
-            FreeverbKernel::new(Some(controls)),
-            FreeverbSet { cells: false },
-            controls,
-        )
+    pub const fn general_midi() -> Self {
+        Self {
+            controls: FreeverbControls::GENERAL_MIDI,
+            cells: false,
+        }
+    }
+
+    /// The room size and damping the reverb starts at, or holds for good on the send.
+    #[must_use]
+    pub const fn controls(mut self, controls: FreeverbControls) -> Self {
+        self.controls = controls;
+        self
     }
 }
 
-impl<F: Float + Lerp> Default for FreeverbNode<F> {
+impl Default for FreeverbConfig {
     fn default() -> Self {
-        Self::general_midi()
+        Self::new()
+    }
+}
+
+impl<F: Float + Lerp> From<FreeverbConfig> for FreeverbNode<F> {
+    /// Allocates: build it before the node goes live.
+    fn from(config: FreeverbConfig) -> Self {
+        let fixed = (!config.cells).then_some(config.controls);
+        Self::with_kernel(
+            FreeverbKernel::new(fixed),
+            FreeverbSet {
+                cells: config.cells,
+            },
+            config.controls,
+        )
     }
 }
 

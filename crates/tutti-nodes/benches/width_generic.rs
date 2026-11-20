@@ -23,8 +23,9 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
-    DelayControls, DelayNode, InterpolationMode, LadderFilterNode, LadderType, MaxDelay,
-    ModDelayNode, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
+    DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode, LadderFilterNode,
+    LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages,
+    SvfFilterNode, SvfType,
 };
 use tutti_units::{Feedback, Hz, Q, Resonance, SampleRate, Seconds};
 
@@ -109,16 +110,18 @@ fn ladder(c: &mut Criterion) {
 
 fn delay(c: &mut Criterion) {
     for w in [2usize, 6] {
-        let node = DelayNode::<f32>::new(
-            BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                .expect("at most one bus wide"),
-            MaxDelay::of(Seconds::new(1.0)),
-            InterpolationMode::Linear,
-            DelayControls {
+        let node = DelayNode::<f32>::from(
+            DelayConfig::new(DelayLayout::new(
+                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
+                    .expect("at most one bus wide"),
+                MaxDelay::of(Seconds::new(1.0)),
+                InterpolationMode::Linear,
+            ))
+            .controls(DelayControls {
                 time: Seconds::new(0.25),
                 feedback: Feedback::new(0.4),
                 ..DelayControls::DEFAULT
-            },
+            }),
         );
         run_node(c, "delay", w, node, None);
     }
@@ -130,10 +133,10 @@ fn mod_delay(c: &mut Criterion) {
             c,
             "chorus",
             w,
-            ModDelayNode::<f32>::chorus(
+            ModDelayNode::<f32>::from(ModDelayConfig::chorus(
                 BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                     .expect("a test width is one bus"),
-            ),
+            )),
             None,
         );
     }
@@ -145,14 +148,11 @@ fn phaser(c: &mut Criterion) {
             c,
             "phaser",
             w,
-            PhaserNode::<f32>::new(
+            PhaserNode::<f32>::try_from(PhaserConfig::new(
                 BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                     .expect("a test width is one bus"),
                 Stages::of(6),
-                SweepRange::DEFAULT,
-                Stagger::NONE,
-                PhaserControls::DEFAULT,
-            )
+            ))
             .expect("a step fits any width"),
             None,
         );

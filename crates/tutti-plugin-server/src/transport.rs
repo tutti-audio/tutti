@@ -11,11 +11,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
-    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, ControlFrame,
-    ControlRequest, FrameBuf, Framed, ReqId, Request, SlabHandle, SlabLayout, read_frame,
-    write_frame,
+    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, BlobWire,
+    ControlFrame, ControlReply, ControlRequest, FrameBuf, Framed, ReqId, Request, SlabHandle,
+    SlabLayout, read_frame, write_frame,
 };
-use tutti_plugin_types::{Deadline, IpcResult};
+use tutti_plugin_ipc_ffi::{Blob, Lease};
+use tutti_plugin_types::{Deadline, IpcError, IpcResult, MAX_STATE_BYTES, SlabError, StateUse};
 
 use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
@@ -39,12 +40,12 @@ pub(crate) type AudioTransport = dyn Transport<AudioRequest, AudioReply>;
 /// The control connection's transport: requests in, answers and news out.
 pub(crate) type ControlTransport = dyn Transport<Incoming, ControlFrame>;
 
-/// What the control connection delivers: a request, or a slab setup with the
-/// slab it announced.
+/// What the control connection delivers: a request, or a slab setup or a state
+/// with the object it announced.
 ///
-/// A `SetupSharedMemory` frame is not delivered as a [`Request`]: the transport
-/// reads the slab that follows it and delivers both as `SetupSlab`, so a setup
-/// without its slab cannot reach the session.
+/// A `SetupSharedMemory`, `LoadState` or `StageState` frame is not delivered as
+/// a [`Request`]: the transport reads the object that follows it and delivers
+/// both, so a setup or a state without its object cannot reach the session.
 #[derive(Debug)]
 pub(crate) enum Incoming {
     /// Any request but a slab setup.
@@ -57,6 +58,32 @@ pub(crate) enum Incoming {
         layout: SlabLayout,
         /// The slab, as received.
         slab: SlabHandle,
+    },
+    /// The host's `LoadState` and the state in the object that came with it.
+    LoadState {
+        /// The request's id, which the answer echoes.
+        id: ReqId,
+        /// What the state is restored for.
+        state_use: StateUse,
+        /// The state: the object's bytes, checked against the declared length.
+        state: Vec<u8>,
+    },
+    /// The host's `StageState` and the state in the object that came with it.
+    StageState {
+        /// The request's id, which the answer echoes.
+        id: ReqId,
+        /// The state: the object's bytes, checked against the declared length.
+        state: Vec<u8>,
+    },
+    /// A `LoadState` or `StageState` whose object was refused: it was read off
+    /// the stream, so the stream is in step, and the host is answered.
+    StateRefused {
+        /// The request's id, which the answer echoes.
+        id: ReqId,
+        /// Whether it was a `StageState`.
+        staging: bool,
+        /// Why the object was refused.
+        error: String,
     },
 }
 
@@ -93,8 +120,75 @@ impl Inbound for Incoming {
                 let slab = SlabHandle::receive(crate::main_loop::connection(stream), slab)?;
                 Ok(Self::SetupSlab { id, layout, slab })
             }
+            ControlRequest::LoadState {
+                state_use,
+                len,
+                blob,
+            } => Ok(match take_state(stream, len, blob)? {
+                Ok(state) => Self::LoadState {
+                    id,
+                    state_use,
+                    state,
+                },
+                Err(e) => Self::StateRefused {
+                    id,
+                    staging: false,
+                    error: e.to_string(),
+                },
+            }),
+            ControlRequest::StageState { len, blob } => Ok(match take_state(stream, len, blob)? {
+                Ok(state) => Self::StageState { id, state },
+                Err(e) => Self::StateRefused {
+                    id,
+                    staging: true,
+                    error: e.to_string(),
+                },
+            }),
             body => Ok(Self::Request(Request { id, body })),
         }
+    }
+}
+
+/// The state in the object that follows a state frame, which declared `len`.
+///
+/// The outer error is a stream that did not carry the object (the connection
+/// cannot go on); the inner is an object that arrived and was refused (too
+/// long, of another length, not sealed), with the stream in step.
+fn take_state(
+    stream: &PlatformStream,
+    len: u64,
+    blob: BlobWire,
+) -> IpcResult<Result<Vec<u8>, SlabError>> {
+    let object = Blob::receive(crate::main_loop::connection(stream), blob)?;
+    Ok(object.read(len, MAX_STATE_BYTES))
+}
+
+/// Answers request `id` with `state`: a `StateReady` frame and the object that
+/// holds the bytes. An object the server cannot make is answered as an `Error`,
+/// as a plugin that cannot save is.
+///
+/// # Errors
+///
+/// The connection failed.
+pub(crate) fn send_state(
+    transport: &mut ControlTransport,
+    id: ReqId,
+    state: &[u8],
+) -> IpcResult<()> {
+    match Blob::create(state) {
+        Ok(object) => {
+            let reply = ControlReply::StateReady {
+                len: state.len() as u64,
+                blob: object.wire(),
+            };
+            transport.send_attached(&ControlFrame::Reply { id, reply }, object)
+        }
+        Err(e) => transport.send(&ControlFrame::Reply {
+            id,
+            reply: ControlReply::Error {
+                message: format!("the state could not be made into an object: {e}"),
+            },
+        }),
     }
 }
 
@@ -152,6 +246,21 @@ pub(crate) trait Transport<In, Out>: Send {
     /// Returns an error if the payload cannot be serialized, or if the write
     /// fails — a broken pipe here means the host went away.
     fn send(&mut self, msg: &Out) -> IpcResult<()>;
+
+    /// Write `msg`, which announces `object`, and then the object as the message
+    /// that follows it on the stream, both under one hold of the connection's
+    /// writer. Where the object is read by name (Windows) it is kept until the
+    /// next one is sent.
+    ///
+    /// # Errors
+    ///
+    /// As [`send`](Self::send), and a connection that carries no objects.
+    fn send_attached(&mut self, msg: &Out, object: Blob) -> IpcResult<()> {
+        let _ = (msg, object);
+        Err(IpcError::ProtocolError(
+            "this connection carries no objects",
+        ))
+    }
 
     /// A writer for the connection that another thread may call while this one
     /// is serving a request, to say the server is at work on it: its frames
@@ -252,6 +361,8 @@ pub(crate) struct SocketTransport<In, Out, W = Shared> {
     /// Never rung: the wake argument of the wait for the rest of a frame, which
     /// only its deadline ends.
     quiet: Option<Bell>,
+    /// What keeps the last object sent readable until the next is sent.
+    kept: Option<Lease>,
     lane: PhantomData<fn(Out) -> In>,
 }
 
@@ -264,6 +375,7 @@ impl<In, Out> SocketTransport<In, Out, Shared> {
             writing: Shared::default(),
             frames: None,
             quiet: None,
+            kept: None,
             lane: PhantomData,
         }
     }
@@ -283,6 +395,7 @@ impl SocketTransport<AudioRequest, AudioReply, Alone> {
             writing: Alone,
             frames: Some(FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES)),
             quiet: Some(Bell::new()?),
+            kept: None,
             lane: PhantomData,
         })
     }
@@ -341,6 +454,13 @@ impl<In: Inbound, Out: Framed, W: Writing> Transport<In, Out> for SocketTranspor
             Some(frames) => frames.write(&mut &*self.stream, msg),
             None => write_frame(&mut &*self.stream, msg),
         }
+    }
+
+    fn send_attached(&mut self, msg: &Out, object: Blob) -> IpcResult<()> {
+        let _writing = self.writing.hold();
+        write_frame(&mut &*self.stream, msg)?;
+        self.kept = Some(object.send(crate::main_loop::connection(&self.stream))?);
+        Ok(())
     }
 
     fn pulser(&self) -> Option<Pulser<Out>> {
@@ -431,6 +551,254 @@ mod recv_tests {
             Err(IpcError::FrameTooLarge(e)) => assert_eq!(e.len, CONTROL_FRAME_BYTES + 1),
             other => panic!("expected FrameTooLarge, got {other:?}"),
         }
+    }
+}
+
+/// A state crosses the control connection as an object in both directions, over
+/// a real socket and descriptor, and the server's receive refuses an object that
+/// is not what its frame declared.
+#[cfg(all(test, unix))]
+mod state_object_tests {
+    use super::*;
+    use std::os::fd::{AsFd, OwnedFd};
+    use std::os::unix::net::UnixStream;
+
+    const CAP_PLUS: u64 = MAX_STATE_BYTES as u64 + 1;
+
+    fn pair() -> (UnixStream, SocketTransport<Incoming, ControlFrame>) {
+        let (host, server) = UnixStream::pair().expect("socket pair");
+        (
+            host,
+            SocketTransport::new(PlatformStream::from(OwnedFd::from(server))),
+        )
+    }
+
+    /// The host side of a state request: its frame, then `object`.
+    fn host_sends(
+        host: &mut UnixStream,
+        body: impl FnOnce(u64, BlobWire) -> ControlRequest,
+        declared: u64,
+        object: Blob,
+    ) {
+        let request = Request {
+            id: ReqId::new(5),
+            body: body(declared, object.wire()),
+        };
+        write_frame(host, &request).expect("the frame");
+        let _lease = object.send(host.as_fd()).expect("the object");
+    }
+
+    fn load(declared: u64) -> impl FnOnce(u64, BlobWire) -> ControlRequest {
+        move |_, blob| ControlRequest::LoadState {
+            state_use: StateUse::Project,
+            len: declared,
+            blob,
+        }
+    }
+
+    /// More than the largest chunk the old framing sent, with a pattern a dropped
+    /// or reordered piece would break.
+    fn big() -> Vec<u8> {
+        (0..9 * 1024 * 1024 + 7).map(|i| (i % 251) as u8).collect()
+    }
+
+    /// **A state from the host arrives as the bytes it sent**, for a load and for
+    /// a stage, through the real descriptor.
+    #[test]
+    fn a_state_from_the_host_arrives_whole() {
+        let (mut host, mut transport) = pair();
+        let bytes = big();
+        host_sends(
+            &mut host,
+            load(bytes.len() as u64),
+            bytes.len() as u64,
+            Blob::create(&bytes).unwrap(),
+        );
+        match transport.recv().expect("a load") {
+            Incoming::LoadState { id, state, .. } => {
+                assert_eq!(id, ReqId::new(5));
+                assert!(state == bytes, "the state arrived changed");
+            }
+            other => panic!("expected the load, got {other:?}"),
+        }
+        host_sends(
+            &mut host,
+            |len, blob| ControlRequest::StageState { len, blob },
+            bytes.len() as u64,
+            Blob::create(&bytes).unwrap(),
+        );
+        match transport.recv().expect("a stage") {
+            Incoming::StageState { state, .. } => assert!(state == bytes),
+            other => panic!("expected the stage, got {other:?}"),
+        }
+    }
+
+    /// **A state to the host is a `StateReady` frame and an object**: the host
+    /// reads the frame, takes the object and gets the bytes the server sent.
+    #[test]
+    fn a_state_to_the_host_arrives_whole() {
+        let (mut host, mut transport) = pair();
+        let bytes = big();
+        send_state(&mut transport, ReqId::new(9), &bytes).expect("sent");
+        let frame: ControlFrame = read_frame(&mut host).expect("the frame");
+        let ControlFrame::Reply {
+            id,
+            reply: ControlReply::StateReady { len, blob },
+        } = frame
+        else {
+            panic!("expected StateReady, got {frame:?}");
+        };
+        assert_eq!((id, len), (ReqId::new(9), bytes.len() as u64));
+        let got = Blob::receive(host.as_fd(), blob)
+            .expect("the object")
+            .read(len, MAX_STATE_BYTES)
+            .expect("its bytes");
+        assert!(got == bytes, "the state arrived changed");
+    }
+
+    /// **An object shorter than its frame declared is refused as a refused
+    /// state, not delivered**, for a load and for a stage; the stream stays in
+    /// step. (The claim is past a page, so the platform that rounds objects up
+    /// refuses it too; the claim of less than the object holds is the ffi
+    /// crate's test.)
+    #[test]
+    fn a_declared_length_that_is_not_the_objects_is_refused_and_the_stream_goes_on() {
+        let (mut host, mut transport) = pair();
+        for declared in [1u64 << 20, 2 << 20] {
+            host_sends(
+                &mut host,
+                load(declared),
+                declared,
+                Blob::create(&[1u8; 100]).unwrap(),
+            );
+            match transport.recv().expect("a refusal, not an end") {
+                Incoming::StateRefused {
+                    staging: false,
+                    error,
+                    ..
+                } => {
+                    assert!(error.contains("declared"), "{error}");
+                }
+                other => panic!("expected the refusal, got {other:?}"),
+            }
+        }
+        host_sends(
+            &mut host,
+            |len, blob| ControlRequest::StageState { len, blob },
+            1 << 20,
+            Blob::create(&[1u8; 100]).unwrap(),
+        );
+        assert!(matches!(
+            transport.recv().expect("a refusal"),
+            Incoming::StateRefused { staging: true, .. }
+        ));
+        // In step: the next state still arrives.
+        host_sends(&mut host, load(3), 3, Blob::create(&[7, 8, 9]).unwrap());
+        assert!(matches!(
+            transport.recv().expect("a load"),
+            Incoming::LoadState { state, .. } if state == [7, 8, 9]
+        ));
+    }
+
+    /// **A declared length past `MAX_STATE_BYTES` is refused**, before the object
+    /// is read.
+    #[test]
+    fn a_declared_length_past_the_cap_is_refused() {
+        let (mut host, mut transport) = pair();
+        host_sends(
+            &mut host,
+            load(CAP_PLUS),
+            CAP_PLUS,
+            Blob::create(&[0u8; 16]).unwrap(),
+        );
+        match transport.recv().expect("a refusal") {
+            Incoming::StateRefused { error, .. } => {
+                assert!(error.contains("limit"), "{error}");
+            }
+            other => panic!("expected the refusal, got {other:?}"),
+        }
+    }
+
+    /// **A state frame with no object after it ends the connection by name**, and
+    /// does not wait for ever.
+    #[test]
+    fn a_missing_object_is_an_error() {
+        let (mut host, mut transport) = pair();
+        let blob = Blob::create(&[1, 2, 3]).unwrap();
+        let request = Request {
+            id: ReqId::new(1),
+            body: load(3)(3, blob.wire()),
+        };
+        write_frame(&mut host, &request).unwrap();
+        assert!(transport.recv().is_err(), "a state with no object arrived");
+    }
+
+    /// **A state request is beaten over the real control connection**: while the
+    /// work runs, the host reads `Working` frames for the request (as `Restoring`
+    /// for a load, `Opening` for a save), and the work waits on two of them, so
+    /// a beat that never came leaves it waiting.
+    #[test]
+    fn working_beats_a_state_request_over_the_connection() {
+        use tutti_plugin_ipc::Working;
+        for restoring in [true, false] {
+            let (mut host, transport) = pair();
+            let seen = crate::server::working(&transport, ReqId::new(9), restoring, || {
+                (0..2)
+                    .map(
+                        |_| match read_frame::<_, ControlFrame>(&mut host).expect("a beat") {
+                            ControlFrame::Working { id, stage } => {
+                                assert_eq!(id, ReqId::new(9));
+                                stage
+                            }
+                            other => panic!("a beat sends only `Working`, sent {other:?}"),
+                        },
+                    )
+                    .collect::<Vec<_>>()
+            });
+            let want = if restoring {
+                Working::Restoring
+            } else {
+                Working::Opening
+            };
+            assert_eq!(seen, [want; 2]);
+        }
+    }
+
+    /// **No descriptor leaks across states**: sending and receiving many states,
+    /// both ways, leaves the process with the descriptors it began with.
+    #[test]
+    fn many_states_leak_no_descriptors() {
+        // Counts this process's descriptors, so it relies on nextest's one process per test.
+        let open_fds = || std::fs::read_dir("/dev/fd").unwrap().count();
+        let (mut host, mut transport) = pair();
+        let before = open_fds();
+        for i in 0..64u8 {
+            host_sends(
+                &mut host,
+                load(1000),
+                1000,
+                Blob::create(&[i; 1000]).unwrap(),
+            );
+            assert!(matches!(
+                transport.recv().unwrap(),
+                Incoming::LoadState { .. }
+            ));
+            send_state(&mut transport, ReqId::new(1), &[i; 1000]).unwrap();
+            let frame: ControlFrame = read_frame(&mut host).unwrap();
+            let ControlFrame::Reply {
+                reply: ControlReply::StateReady { len, blob },
+                ..
+            } = frame
+            else {
+                panic!("expected StateReady");
+            };
+            let got = Blob::receive(host.as_fd(), blob)
+                .unwrap()
+                .read(len, MAX_STATE_BYTES)
+                .unwrap();
+            assert_eq!(got, vec![i; 1000]);
+        }
+        assert_eq!(open_fds(), before);
     }
 }
 

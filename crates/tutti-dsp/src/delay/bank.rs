@@ -10,7 +10,7 @@
 //!
 //! **Time** is channel 0's control, and the channels past the first follow it
 //! ([`ChannelTimes::linked`](crate::ChannelTimes::linked)) or hold a time of their own
-//! ([`ChannelTimes::each`](crate::ChannelTimes::each)). A
+//! ([`ChannelTimes`](crate::ChannelTimes) from a slice of times). A
 //! control signal drives the time and the feedback **per frame** ([`DelaySignals`]): a delay time
 //! moved at audio rate is a flanger, a control signal frame that is not finite falls back to the
 //! ramped value, and a control signal frame is the trajectory itself, not ramped. The time ramps at
@@ -24,7 +24,7 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Feedback, ReadPosition, SampleRate, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
-use super::routing::Routing;
+use super::routing::FeedbackRouting;
 use crate::{DelayLine, InterpolationMode, Lerp, Ramp, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay as a [`ReadPosition`], and the two feedbacks
@@ -116,7 +116,7 @@ pub struct DelayBank<F: Float> {
     /// coupled loop's).
     taps: Box<[F]>,
     interpolation: InterpolationMode,
-    routing: Routing,
+    routing: FeedbackRouting,
     /// The routing's weights at `F`, row-major by the line fed: widened once at build.
     weights: Box<[F]>,
     linked: bool,
