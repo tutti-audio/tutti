@@ -175,7 +175,7 @@ mod clap {
                 tutti_platform::Instant::now() < deadline,
                 "the plugin never recovered"
             );
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            std::thread::yield_now();
         }
         assert_eq!(s.apply(loaded).unwrap_err(), PluginApplyError::Stale);
     }

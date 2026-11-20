@@ -30,7 +30,7 @@ mod sealed {
 
     impl Cut {
         /// A cut from `session`, made when the session makes the value.
-        #[cfg(feature = "sampler")]
+        #[cfg(any(feature = "sampler", feature = "plugin"))]
         pub(crate) const fn of<K: AppKey, C: Clock>(session: &Session<K, C>) -> Self {
             Self {
                 session: session.id,
