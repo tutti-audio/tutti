@@ -602,7 +602,7 @@ fn hot_plug_session() -> (Session, tutti_midi_hardware::test_support::FakeCounte
     let (backend, fake) =
         tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
     let s = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -627,7 +627,7 @@ fn present(s: &mut Session, identity: tutti_ump::DeviceIdentity) {
             .to(tutti_session::MidiPolicy {
                 identity: Some(tutti_midi_device::MidiIdentity {
                     device: identity,
-                    name: tutti_midi_ci::EndpointName::new("Session").unwrap(),
+                    name: tutti_ump::EndpointName::new("Session").unwrap(),
                     instance: None,
                 }),
             }),
@@ -701,7 +701,7 @@ fn keyboards() -> (
         usize::MAX,
     );
     let mut s = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -1023,10 +1023,9 @@ fn a_port_that_loses_events_is_reported() {
 #[test]
 fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     use tutti_midi_ci::Muid;
-    use tutti_midi_ci::{
-        BlockName, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize,
-    };
+    use tutti_midi_ci::{CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize};
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
+    use tutti_ump::BlockName;
     use tutti_ump::{
         BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler, SysexStep,
     };
@@ -1156,13 +1155,14 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     use tutti_midi_ci::Muid;
     use tutti_midi_ci::{
-        BlockName, CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded,
-        DiscoveryData, MaxSysexSize, ProfileChannels, ProfileId, ProfileList, ProfileLists,
-        ProfileState, StandardProfile,
+        CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
+        MaxSysexSize, ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileState,
+        StandardProfile,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_midi_hardware::{ChannelCount, ProfilesChange};
     use tutti_session::ListedProfile;
+    use tutti_ump::BlockName;
     use tutti_ump::{
         BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
         SysexAssembler, SysexStep, U7,
@@ -1469,7 +1469,7 @@ impl MpePeer {
             GroupSpan::new(1).unwrap(),
         )
         .midi_ci(2, 0)
-        .name(tutti_midi_ci::BlockName::new("Main").unwrap())
+        .name(tutti_ump::BlockName::new("Main").unwrap())
         .build()
         .unwrap();
         let room = SysexAssembler::room_for(256, 1, 16);
@@ -1883,12 +1883,13 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
 fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     use tutti_midi_ci::Muid;
     use tutti_midi_ci::{
-        BlockName, CI_VERSION, ChannelControllers, CiCategories, CiDeviceId, CiHeader, CiMessage,
-        DataControl, Decoded, DiscoveryData, MaxSysexSize, NoteData, ProcessFeatures,
-        ReportRequest, ReportScope, SystemMessages,
+        CI_VERSION, ChannelControllers, CiCategories, CiDeviceId, CiHeader, CiMessage, DataControl,
+        Decoded, DiscoveryData, MaxSysexSize, NoteData, ProcessFeatures, ReportRequest,
+        ReportScope, SystemMessages,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_midi_hardware::ProcessChange;
+    use tutti_ump::BlockName;
     use tutti_ump::{
         BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
         SysexAssembler, SysexStep, U7,

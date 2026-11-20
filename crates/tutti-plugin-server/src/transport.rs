@@ -6,42 +6,116 @@
 //!
 use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 use std::io::Read;
+use std::marker::PhantomData;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
-    BridgeMessage, FrameBuf, HostMessage, MAX_FRAME_BYTES, read_frame, write_frame,
+    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, ControlFrame,
+    ControlRequest, FrameBuf, Framed, ReqId, Request, SlabHandle, SlabLayout, read_frame,
+    write_frame,
 };
-use tutti_plugin_types::{BridgeResult, Deadline, MIDI_STACK_CAPACITY};
+use tutti_plugin_types::{Deadline, IpcResult};
 
 use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
 
-/// The longest request the audio connection takes: whatever the protocol
-/// allows ([`MAX_FRAME_BYTES`]). A block's request carries automation at the
-/// host's point budget for the activated block and queue count, which is
-/// megabytes at a large block, so the buffer holds the protocol's whole bound
-/// rather than a guess. The memory is zeroed pages the OS maps on first touch:
-/// a connection that never carries a large block never makes them resident.
-const AUDIO_REQUEST_BYTES: usize = MAX_FRAME_BYTES;
+/// The longest request the audio connection takes: the protocol's own cap for
+/// a block's request ([`AUDIO_REQUEST_FRAME_BYTES`]). A block's request carries
+/// automation at the host's point budget for the activated block and queue
+/// count, which is megabytes at a large block, so the buffer holds the whole
+/// bound rather than a guess. The memory is zeroed pages the OS maps on first
+/// touch: a connection that never carries a large block never makes them
+/// resident.
+const AUDIO_REQUEST_BYTES: usize = AUDIO_REQUEST_FRAME_BYTES;
 
 /// The longest reply the audio connection sends, in bytes: a block's reply
 /// with its MIDI at the cap, each event at the most its varints take.
-pub(crate) const AUDIO_REPLY_BYTES: usize = MIDI_STACK_CAPACITY * 32 + 256;
+pub(crate) const AUDIO_REPLY_BYTES: usize = AUDIO_REPLY_FRAME_BYTES;
+
+/// The audio connection's transport: blocks in, block replies out.
+pub(crate) type AudioTransport = dyn Transport<AudioRequest, AudioReply>;
+
+/// The control connection's transport: requests in, answers and news out.
+pub(crate) type ControlTransport = dyn Transport<Incoming, ControlFrame>;
+
+/// What the control connection delivers: a request, or a slab setup with the
+/// slab it announced.
+///
+/// A `SetupSharedMemory` frame is not delivered as a [`Request`]: the transport
+/// reads the slab that follows it and delivers both as `SetupSlab`, so a setup
+/// without its slab cannot reach the session.
+#[derive(Debug)]
+pub(crate) enum Incoming {
+    /// Any request but a slab setup.
+    Request(Request),
+    /// The host's `SetupSharedMemory` and the slab that came with it.
+    SetupSlab {
+        /// The request's id, which the answer echoes.
+        id: ReqId,
+        /// The region geometry the host sized the slab for.
+        layout: SlabLayout,
+        /// The slab, as received.
+        slab: SlabHandle,
+    },
+}
+
+/// A message a connection delivers, built from the frame it reads and whatever
+/// follows that frame on the stream.
+pub(crate) trait Inbound: Sized {
+    /// The frame the message is read from.
+    type Frame: Framed;
+
+    /// Completes the message of `frame`, reading from `stream` what follows it.
+    ///
+    /// # Errors
+    ///
+    /// What follows the frame did not arrive as the frame announced.
+    fn complete(frame: Self::Frame, stream: &PlatformStream) -> IpcResult<Self>;
+}
+
+impl Inbound for AudioRequest {
+    type Frame = Self;
+
+    fn complete(frame: Self, _: &PlatformStream) -> IpcResult<Self> {
+        Ok(frame)
+    }
+}
+
+impl Inbound for Incoming {
+    type Frame = Request;
+
+    fn complete(Request { id, body }: Request, stream: &PlatformStream) -> IpcResult<Self> {
+        match body {
+            ControlRequest::SetupSharedMemory { slab, layout } => {
+                // The slab is the next message on the stream: an exact read
+                // right after the frame, so no read ahead can have taken it.
+                let slab = SlabHandle::receive(crate::main_loop::connection(stream), slab)?;
+                Ok(Self::SetupSlab { id, layout, slab })
+            }
+            body => Ok(Self::Request(Request { id, body })),
+        }
+    }
+}
+
+/// Writes a frame to a connection from a thread other than the one serving
+/// it ([`Transport::pulser`]).
+pub(crate) type Pulser<Out> = Box<dyn Fn(&Out) -> IpcResult<()> + Send + Sync>;
 
 /// One framed, blocking message channel to the host.
 ///
 /// A trait rather than the concrete socket so [`crate::session::Session`] can be
 /// driven from a test double without a real socket pair.
-pub(crate) trait Transport: Send {
+pub(crate) trait Transport<In, Out>: Send {
     /// Block until one complete host message arrives.
     ///
     /// # Errors
     ///
     /// Returns an error on EOF (the host disconnected), a short read, a length
-    /// prefix over `MAX_FRAME_BYTES` (a peer that cannot frame), or a payload
+    /// prefix over the lane's frame cap (a peer that cannot frame), or a payload
     /// postcard cannot decode — the last meaning a protocol-version mismatch the
     /// `Ready` handshake failed to catch.
-    fn recv(&mut self) -> BridgeResult<HostMessage>;
+    fn recv(&mut self) -> IpcResult<In>;
 
     /// Wait up to `timeout` (`None`: for ever) for the host to have something to
     /// read: `Ok(true)` when a [`recv`](Self::recv) now will find a frame begun
@@ -60,7 +134,7 @@ pub(crate) trait Transport: Send {
         &mut self,
         timeout: Option<std::time::Duration>,
         wake: &Bell,
-    ) -> BridgeResult<bool>;
+    ) -> IpcResult<bool>;
 
     /// The connection's own OS stream, for a wait that also covers descriptors
     /// of the plugin's ([`crate::main_loop`]); `None` for a transport that is
@@ -77,7 +151,15 @@ pub(crate) trait Transport: Send {
     ///
     /// Returns an error if the payload cannot be serialized, or if the write
     /// fails — a broken pipe here means the host went away.
-    fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()>;
+    fn send(&mut self, msg: &Out) -> IpcResult<()>;
+
+    /// A writer for the connection that another thread may call while this one
+    /// is serving a request, to say the server is at work on it: its frames
+    /// and this transport's own never interleave. `None` for a transport with
+    /// no such writer (a test's script).
+    fn pulser(&self) -> Option<Pulser<Out>> {
+        None
+    }
 }
 
 /// How long the rest of an audio frame may take to arrive once its first byte
@@ -118,10 +200,51 @@ where
     }
 }
 
+/// How a connection's frames are written: by one writer ([`Alone`]), or by
+/// two that must not interleave their bytes ([`Shared`]).
+pub(crate) trait Writing: Send + Sync {
+    /// Held while a frame is written.
+    fn hold(&self) -> Option<MutexGuard<'_, ()>>;
+
+    /// The lock a second writer takes to write a frame, when there is one.
+    fn shared(&self) -> Option<Arc<Mutex<()>>>;
+}
+
+/// The audio connection's writing: its render thread is the only writer, and
+/// there is no lock for it to take.
+pub(crate) struct Alone;
+
+impl Writing for Alone {
+    fn hold(&self) -> Option<MutexGuard<'_, ()>> {
+        None
+    }
+
+    fn shared(&self) -> Option<Arc<Mutex<()>>> {
+        None
+    }
+}
+
+/// The control connection's writing: the thread serving it, and the one that
+/// tells the host a load is at work ([`Transport::pulser`]), each hold the lock
+/// for the length of a frame.
+#[derive(Default)]
+pub(crate) struct Shared(Arc<Mutex<()>>);
+
+impl Writing for Shared {
+    fn hold(&self) -> Option<MutexGuard<'_, ()>> {
+        Some(self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    fn shared(&self) -> Option<Arc<Mutex<()>>> {
+        Some(Arc::clone(&self.0))
+    }
+}
+
 /// [`Transport`] over the platform's local socket (Unix domain socket, or a
 /// Windows named pipe).
-pub(crate) struct SocketTransport {
-    stream: PlatformStream,
+pub(crate) struct SocketTransport<In, Out, W = Shared> {
+    stream: Arc<PlatformStream>,
+    writing: W,
     /// The audio connection's frame buffers, of fixed capacity, so a block's
     /// frames allocate nothing on the render thread; `None` for a connection
     /// that is served off it.
@@ -129,19 +252,24 @@ pub(crate) struct SocketTransport {
     /// Never rung: the wake argument of the wait for the rest of a frame, which
     /// only its deadline ends.
     quiet: Option<Bell>,
+    lane: PhantomData<fn(Out) -> In>,
 }
 
-impl SocketTransport {
+impl<In, Out> SocketTransport<In, Out, Shared> {
     /// Wrap an already-accepted stream. The stream must be in blocking mode;
     /// see [`TransportListener::accept`] for why that is not incidental.
     pub(crate) fn new(stream: PlatformStream) -> Self {
         Self {
-            stream,
+            stream: Arc::new(stream),
+            writing: Shared::default(),
             frames: None,
             quiet: None,
+            lane: PhantomData,
         }
     }
+}
 
+impl SocketTransport<AudioRequest, AudioReply, Alone> {
     /// Wraps the audio connection's stream, which the render thread reads and
     /// writes through buffers built here: a frame is never read into, or
     /// serialized into, memory that is sized on that thread.
@@ -151,17 +279,19 @@ impl SocketTransport {
     /// The OS refused the bell of the frame wait.
     pub(crate) fn audio(stream: PlatformStream) -> std::io::Result<Self> {
         Ok(Self {
-            stream,
+            stream: Arc::new(stream),
+            writing: Alone,
             frames: Some(FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES)),
             quiet: Some(Bell::new()?),
+            lane: PhantomData,
         })
     }
 }
 
-impl Transport for SocketTransport {
-    fn recv(&mut self) -> BridgeResult<HostMessage> {
+impl<In: Inbound, Out: Framed, W: Writing> Transport<In, Out> for SocketTransport<In, Out, W> {
+    fn recv(&mut self) -> IpcResult<In> {
         // The frame is bounded before it is allocated (see
-        // [`MAX_FRAME_BYTES`]). The server is the more exposed end: it loads
+        // [`CONTROL_FRAME_BYTES`](tutti_plugin_ipc::CONTROL_FRAME_BYTES)). The server is the more exposed end: it loads
         // untrusted plugin binaries, and one that corrupts its memory could
         // otherwise turn a bad length into a 4 GiB allocation.
         //
@@ -169,22 +299,24 @@ impl Transport for SocketTransport {
         // oversize length as `ProcessCrashed`; here the peer is the host,
         // which has not crashed, so the error names the frame and the session
         // ends on it either way.
-        match (self.frames.as_mut(), self.quiet.as_ref()) {
+        let frame = match (self.frames.as_mut(), self.quiet.as_ref()) {
             (Some(frames), Some(quiet)) => {
+                let mut stream: &PlatformStream = &self.stream;
                 let mut reader = FrameReader {
-                    inner: &mut self.stream,
+                    inner: &mut stream,
                     began: false,
                     deadline: Deadline::after(Instant::now(), PARTIAL_FRAME_PATIENCE),
-                    wait: |stream: &PlatformStream, timeout| {
+                    wait: |stream: &&PlatformStream, timeout| {
                         crate::main_loop::wait_readable(stream, timeout, quiet)
                             .map_err(std::io::Error::other)
                     },
                     now: Instant::now,
                 };
-                frames.read(&mut reader)
+                frames.read(&mut reader)?
             }
-            _ => read_frame(&mut self.stream),
-        }
+            _ => read_frame(&mut &*self.stream)?,
+        };
+        In::complete(frame, &self.stream)
     }
 
     /// Waits for the host's next frame on the platform's wait
@@ -193,7 +325,7 @@ impl Transport for SocketTransport {
         &mut self,
         timeout: Option<std::time::Duration>,
         wake: &Bell,
-    ) -> BridgeResult<bool> {
+    ) -> IpcResult<bool> {
         crate::main_loop::wait_readable(&self.stream, timeout, wake)
     }
 
@@ -201,13 +333,22 @@ impl Transport for SocketTransport {
         Some(&self.stream)
     }
 
-    fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
+    fn send(&mut self, msg: &Out) -> IpcResult<()> {
         // Reachable with an oversize body through `StateData`, whose chunk is
         // whatever the plugin hands back from `get_state`.
+        let _writing = self.writing.hold();
         match self.frames.as_mut() {
-            Some(frames) => frames.write(&mut self.stream, msg),
-            None => write_frame(&mut self.stream, msg),
+            Some(frames) => frames.write(&mut &*self.stream, msg),
+            None => write_frame(&mut &*self.stream, msg),
         }
+    }
+
+    fn pulser(&self) -> Option<Pulser<Out>> {
+        let (stream, writing) = (Arc::clone(&self.stream), self.writing.shared()?);
+        Some(Box::new(move |msg| {
+            let _writing = writing.lock().unwrap_or_else(PoisonError::into_inner);
+            write_frame(&mut &*stream, msg)
+        }))
     }
 }
 
@@ -225,7 +366,7 @@ impl TransportListener {
     /// Returns an error if the path is not a valid socket name, or if the
     /// socket cannot be created — a directory that does not exist, or one this
     /// process may not write to.
-    pub(crate) fn bind(socket_path: &std::path::Path) -> BridgeResult<Self> {
+    pub(crate) fn bind(socket_path: &std::path::Path) -> IpcResult<Self> {
         // A no-op on Windows, where the endpoint is a pipe rather than a file.
         let _ = std::fs::remove_file(socket_path);
         // Must agree with the host's `connect`, which is why both go through the
@@ -245,17 +386,19 @@ impl TransportListener {
     /// `accept(2)` returns inherits the listener's flag, and every read on it
     /// then fails with `WouldBlock`). A host that dies while this waits is the
     /// host watch's to end the process ([`crate::server`]).
-    pub(crate) fn accept(&self) -> BridgeResult<SocketTransport> {
+    pub(crate) fn accept(&self) -> IpcResult<SocketTransport<Incoming, ControlFrame>> {
         Ok(SocketTransport::new(self.accept_stream()?))
     }
 
     /// [`accept`](Self::accept) for the audio connection, whose transport reads
     /// and writes through fixed buffers ([`SocketTransport::audio`]).
-    pub(crate) fn accept_audio(&self) -> BridgeResult<SocketTransport> {
+    pub(crate) fn accept_audio(
+        &self,
+    ) -> IpcResult<SocketTransport<AudioRequest, AudioReply, Alone>> {
         Ok(SocketTransport::audio(self.accept_stream()?)?)
     }
 
-    fn accept_stream(&self) -> BridgeResult<PlatformStream> {
+    fn accept_stream(&self) -> IpcResult<PlatformStream> {
         Ok(self.listener.accept()?)
     }
 }
@@ -266,8 +409,8 @@ mod recv_tests {
     use std::io::Write;
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
-    use tutti_plugin_ipc::MAX_FRAME_BYTES;
-    use tutti_plugin_types::BridgeError;
+    use tutti_plugin_ipc::CONTROL_FRAME_BYTES;
+    use tutti_plugin_types::IpcError;
 
     /// A length prefix over the cap is a framing violation by the host, not
     /// this process crashing: the error names the frame and the limit, and is
@@ -280,11 +423,12 @@ mod recv_tests {
         server
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .expect("read timeout");
-        let mut transport = SocketTransport::new(PlatformStream::from(OwnedFd::from(server)));
-        let len = u32::try_from(MAX_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
+        let mut transport: SocketTransport<Incoming, ControlFrame> =
+            SocketTransport::new(PlatformStream::from(OwnedFd::from(server)));
+        let len = u32::try_from(CONTROL_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
         host.write_all(&len.to_be_bytes()).expect("write prefix");
         match transport.recv() {
-            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, MAX_FRAME_BYTES + 1),
+            Err(IpcError::FrameTooLarge(e)) => assert_eq!(e.len, CONTROL_FRAME_BYTES + 1),
             other => panic!("expected FrameTooLarge, got {other:?}"),
         }
     }
@@ -298,7 +442,7 @@ mod wait_tests {
     use std::os::unix::net::UnixStream;
     use std::time::Duration;
 
-    fn pair() -> (UnixStream, SocketTransport) {
+    fn pair() -> (UnixStream, SocketTransport<Incoming, ControlFrame>) {
         let (host, server) = UnixStream::pair().expect("socket pair");
         (
             host,
@@ -310,6 +454,38 @@ mod wait_tests {
     /// ends the wait.** The loop's idle tick is the first; a block's request reaching
     /// the plugin as it arrives is the second: the readable wait's timeout
     /// outlasts the test harness's limit, so a wait that ran it out fails.
+    /// **Only the control connection has a second writer, and so a lock**: the
+    /// audio connection's transport (the render thread's) offers none and takes
+    /// none, by its type, and the control connection's frames written through
+    /// its pulser arrive whole, in order with its own.
+    #[test]
+    fn only_the_control_connection_has_a_shared_writer() {
+        let (host, control) = pair();
+        let (_audio_host, audio_server) = UnixStream::pair().expect("socket pair");
+        let audio = SocketTransport::audio(PlatformStream::from(OwnedFd::from(audio_server)))
+            .expect("the audio transport");
+        assert!(audio.pulser().is_none(), "the audio lane has one writer");
+
+        let mut control = control;
+        let pulse = control
+            .pulser()
+            .expect("the control lane has a second writer");
+        let frame = ControlFrame::Working {
+            id: tutti_plugin_ipc::ReqId::new(3),
+            stage: tutti_plugin_ipc::Working::Opening,
+        };
+        pulse(&frame).expect("the pulse is written");
+        control.send(&frame).expect("the frame is written");
+        let mut host = host;
+        for _ in 0..2 {
+            let got: ControlFrame = read_frame(&mut host).expect("a whole frame");
+            assert!(matches!(
+                got,
+                ControlFrame::Working { id, .. } if id == tutti_plugin_ipc::ReqId::new(3)
+            ));
+        }
+    }
+
     #[test]
     fn a_quiet_wait_ends_unreadable_and_a_byte_ends_it() {
         let (mut host, mut transport) = pair();
@@ -392,7 +568,7 @@ mod audio_frame_tests {
                 );
             }
         }
-        let block = HostMessage::ProcessAudio(ProcessAudioData {
+        let block = AudioRequest::ProcessAudio(ProcessAudioData {
             seq: 1,
             num_samples: FRAMES,
             param_changes: changes,
@@ -406,7 +582,7 @@ mod audio_frame_tests {
             wire.len()
         );
         let mut frames = FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES);
-        let HostMessage::ProcessAudio(back) = frames.read(&mut wire.as_slice()).unwrap() else {
+        let AudioRequest::ProcessAudio(back) = frames.read(&mut wire.as_slice()).unwrap() else {
             panic!("a block");
         };
         let points: usize = back

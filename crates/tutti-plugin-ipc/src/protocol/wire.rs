@@ -310,79 +310,78 @@ mod tests {
     /// desync between two binaries built apart.
     #[test]
     fn typed_parameter_and_rate_fields_keep_their_wire_widths() {
-        use crate::{BridgeMessage, HostMessage};
+        use crate::{ControlReply, ControlRequest, News};
         use tutti_plugin_types::ParamEdit;
         use tutti_units::Normalized;
         use tutti_units::ParamId;
         use tutti_units::SampleRate;
 
-        let set = HostMessage::SetParameter {
+        let text = ControlRequest::GetParameterText {
             param_id: ParamId::new(0x0102_0304),
             value: Normalized::of(0.25),
         };
-        // variant 3, id 0x0102_0304 as a varint, 0.25f64
+        // variant 14, id 0x0102_0304 as a varint, 0.25f64
         assert_eq!(
-            postcard::to_allocvec(&set).unwrap(),
-            [3, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
+            postcard::to_allocvec(&text).unwrap(),
+            [14, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
         );
 
-        let rate = HostMessage::SetSampleRate {
+        let rate = ControlRequest::SetSampleRate {
             rate: SampleRate::SR_48K,
         };
-        // variant 7, 48000.0f64
+        // variant 5, 48000.0f64
         assert_eq!(
             postcard::to_allocvec(&rate).unwrap(),
-            [7, 0, 0, 0, 0, 0, 112, 231, 64]
+            [5, 0, 0, 0, 0, 0, 112, 231, 64]
         );
 
-        let set_reply = BridgeMessage::SampleRateSet {
+        let set_reply = ControlReply::SampleRateSet {
             rate: SampleRate::SR_48K,
             error: None,
         };
-        // variant 22 (24 until v39 removed two earlier messages), 48000.0f64, no error
+        // variant 13, 48000.0f64, no error
         assert_eq!(
             postcard::to_allocvec(&set_reply).unwrap(),
-            [22, 0, 0, 0, 0, 0, 112, 231, 64, 0]
+            [13, 0, 0, 0, 0, 0, 112, 231, 64, 0]
         );
 
-        let some = BridgeMessage::ParameterValue {
+        let some = ControlReply::ParameterValue {
             value: Some(Normalized::of(0.25)),
         };
-        // variant 2, Some, 0.25f64
+        // variant 1, Some, 0.25f64
         assert_eq!(
             postcard::to_allocvec(&some).unwrap(),
-            [2, 1, 0, 0, 0, 0, 0, 0, 208, 63]
+            [1, 1, 0, 0, 0, 0, 0, 0, 208, 63]
         );
-        let none = BridgeMessage::ParameterValue { value: None };
-        assert_eq!(postcard::to_allocvec(&none).unwrap(), [2, 0]);
+        let none = ControlReply::ParameterValue { value: None };
+        assert_eq!(postcard::to_allocvec(&none).unwrap(), [1, 0]);
 
-        let changed = BridgeMessage::ParameterChanged {
+        let changed = News::ParameterChanged {
             edit: ParamEdit::change(ParamId::new(7), Normalized::of(0.5)),
         };
-        // variant 5 (7 until v39 removed two earlier messages), then the `ParamEdit`: its variant (`Change` is 1), id 7, 0.5f64
+        // variant 0, then the `ParamEdit`: its variant (`Change` is 1), id 7, 0.5f64
         // and the recording flag (true).
         assert_eq!(
             postcard::to_allocvec(&changed).unwrap(),
-            [5, 1, 7, 0, 0, 0, 0, 0, 0, 224, 63, 1]
+            [0, 1, 7, 0, 0, 0, 0, 0, 0, 224, 63, 1]
         );
-        let back: BridgeMessage =
-            postcard::from_bytes(&[5, 1, 7, 0, 0, 0, 0, 0, 0, 224, 63, 1]).unwrap();
+        let back: News = postcard::from_bytes(&[0, 1, 7, 0, 0, 0, 0, 0, 0, 224, 63, 1]).unwrap();
         assert!(matches!(
             back,
-            BridgeMessage::ParameterChanged { edit }
+            News::ParameterChanged { edit }
                 if edit == ParamEdit::change(ParamId::new(7), Normalized::of(0.5))
         ));
 
         // A gesture's begin and end hold the id alone: no value is on the wire
         // to read, and none is made up.
-        let begin = BridgeMessage::ParameterChanged {
+        let begin = News::ParameterChanged {
             edit: ParamEdit::Begin(ParamId::new(7)),
         };
-        assert_eq!(postcard::to_allocvec(&begin).unwrap(), [5, 0, 7]);
-        let end = BridgeMessage::ParameterChanged {
+        assert_eq!(postcard::to_allocvec(&begin).unwrap(), [0, 0, 7]);
+        let end = News::ParameterChanged {
             edit: ParamEdit::End(ParamId::new(7)),
         };
-        assert_eq!(postcard::to_allocvec(&end).unwrap(), [5, 2, 7]);
+        assert_eq!(postcard::to_allocvec(&end).unwrap(), [0, 2, 7]);
     }
 
     /// **A rate that is no rate fails the message**: a `SampleRate` decodes only
@@ -390,7 +389,7 @@ mod tests {
     /// never reach the server's clock or a plugin.
     #[test]
     fn a_rate_that_is_no_rate_does_not_decode() {
-        use crate::HostMessage;
+        use crate::ControlRequest;
         for bad in [
             0.0f64,
             -48_000.0,
@@ -398,18 +397,18 @@ mod tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
         ] {
-            let mut bytes = vec![7u8];
+            let mut bytes = vec![5u8];
             bytes.extend(bad.to_le_bytes());
             assert!(
-                postcard::from_bytes::<HostMessage>(&bytes).is_err(),
+                postcard::from_bytes::<ControlRequest>(&bytes).is_err(),
                 "{bad} decoded"
             );
         }
-        let mut ok = vec![7u8];
+        let mut ok = vec![5u8];
         ok.extend(48_000.0f64.to_le_bytes());
         assert!(matches!(
-            postcard::from_bytes::<HostMessage>(&ok),
-            Ok(HostMessage::SetSampleRate { .. })
+            postcard::from_bytes::<ControlRequest>(&ok),
+            Ok(ControlRequest::SetSampleRate { .. })
         ));
     }
 
@@ -417,13 +416,12 @@ mod tests {
     /// message, in each width and in the optional forms.
     /// **The editor messages are appended after every earlier variant, in the
     /// widths the spec's rules give.** A variant tag is a varint over declaration
-    /// order, so the earlier variants keep their numbers (`SetSampleRate` is 8
-    /// above) and the new ones sit at the end (host: 23 to 25; server: 28 to 31);
-    /// a size is a unit tag then two varints (physical) or two `f64` (logical), a
-    /// scale an `f64`, a parent an `Option<u64>`.
+    /// order (`OpenEditor` is 19 of the control requests, `EditorOpened` 16 of the
+    /// replies); a size is a unit tag then two varints (physical) or two `f64`
+    /// (logical), a scale an `f64`, a parent an `Option<u64>`.
     #[test]
     fn the_editor_messages_follow_every_earlier_variant() {
-        use crate::{BridgeMessage, HostMessage};
+        use crate::{ControlReply, ControlRequest, News};
         use dpi::{LogicalSize, PhysicalSize, Size};
         use tutti_plugin_types::ContentScale;
 
@@ -436,69 +434,66 @@ mod tests {
             postcard::to_allocvec(&Size::Logical(LogicalSize::new(1.0, 2.0))).unwrap(),
             [1, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0x40]
         );
-        let open = HostMessage::OpenEditor {
+        let open = ControlRequest::OpenEditor {
             parent: None,
             scale: ContentScale::IDENTITY,
         };
         assert_eq!(
             postcard::to_allocvec(&open).unwrap(),
-            [22, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
+            [19, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
-        let embedded = HostMessage::OpenEditor {
+        let embedded = ControlRequest::OpenEditor {
             parent: Some(300),
             scale: ContentScale::IDENTITY,
         };
         assert_eq!(
             postcard::to_allocvec(&embedded).unwrap(),
-            [22, 1, 0xac, 0x02, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
+            [19, 1, 0xac, 0x02, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
         assert_eq!(
-            postcard::to_allocvec(&HostMessage::CloseEditor).unwrap(),
-            [23]
+            postcard::to_allocvec(&ControlRequest::CloseEditor).unwrap(),
+            [20]
         );
-        let mut resize = vec![24];
+        let mut resize = vec![21];
         resize.extend(size_bytes);
         assert_eq!(
-            postcard::to_allocvec(&HostMessage::SetEditorSize { size }).unwrap(),
+            postcard::to_allocvec(&ControlRequest::SetEditorSize { size }).unwrap(),
             resize
         );
 
-        let mut opened = vec![26, 0, 1];
+        let mut opened = vec![16, 0, 1];
         opened.extend(size_bytes);
         assert_eq!(
-            postcard::to_allocvec(&BridgeMessage::EditorOpened {
+            postcard::to_allocvec(&ControlReply::EditorOpened {
                 result: Ok(Some(size))
             })
             .unwrap(),
             opened
         );
         assert_eq!(
-            postcard::to_allocvec(&BridgeMessage::EditorOpened {
+            postcard::to_allocvec(&ControlReply::EditorOpened {
                 result: Err("x".into())
             })
             .unwrap(),
-            [26, 1, 1, b'x']
+            [16, 1, 1, b'x']
         );
-        let mut sized = vec![27, 0];
+        let mut sized = vec![17, 0];
         sized.extend(size_bytes);
         assert_eq!(
-            postcard::to_allocvec(&BridgeMessage::EditorSized { result: Ok(size) }).unwrap(),
+            postcard::to_allocvec(&ControlReply::EditorSized { result: Ok(size) }).unwrap(),
             sized
         );
-        let mut wants = vec![28];
+        let mut wants = vec![7];
         wants.extend(size_bytes);
         assert_eq!(
-            postcard::to_allocvec(&BridgeMessage::EditorWantsSize { size }).unwrap(),
+            postcard::to_allocvec(&News::EditorWantsSize { size }).unwrap(),
             wants
         );
-        assert_eq!(
-            postcard::to_allocvec(&BridgeMessage::EditorClosed).unwrap(),
-            [29]
-        );
+        assert_eq!(postcard::to_allocvec(&News::EditorClosed).unwrap(), [8]);
         // The scale is a checked value on the wire: a NaN is refused.
-        let mut nan = vec![22, 0];
+        let mut nan = vec![19, 0];
         nan.extend(f64::NAN.to_le_bytes());
-        assert!(postcard::from_bytes::<HostMessage>(&nan).is_err());
+        assert!(postcard::from_bytes::<ControlRequest>(&nan).is_err());
     }
 
     /// **A logical size that is not finite and non-negative is refused on
@@ -506,7 +501,7 @@ mod tests {
     /// logical one decode.
     #[test]
     fn a_bad_logical_size_is_refused_on_decode() {
-        use crate::{BridgeMessage, HostMessage};
+        use crate::{ControlReply, ControlRequest, News};
         use dpi::{LogicalSize, PhysicalSize, Size};
 
         let logical = |w: f64, h: f64| Size::Logical(LogicalSize::new(w, h));
@@ -517,19 +512,19 @@ mod tests {
             logical(1.0, f64::NEG_INFINITY),
         ];
         let roundtrips = |size: Size| {
-            let host = postcard::to_allocvec(&HostMessage::SetEditorSize { size }).unwrap();
-            let wants = postcard::to_allocvec(&BridgeMessage::EditorWantsSize { size }).unwrap();
+            let host = postcard::to_allocvec(&ControlRequest::SetEditorSize { size }).unwrap();
+            let wants = postcard::to_allocvec(&News::EditorWantsSize { size }).unwrap();
             let sized =
-                postcard::to_allocvec(&BridgeMessage::EditorSized { result: Ok(size) }).unwrap();
-            let opened = postcard::to_allocvec(&BridgeMessage::EditorOpened {
+                postcard::to_allocvec(&ControlReply::EditorSized { result: Ok(size) }).unwrap();
+            let opened = postcard::to_allocvec(&ControlReply::EditorOpened {
                 result: Ok(Some(size)),
             })
             .unwrap();
             [
-                postcard::from_bytes::<HostMessage>(&host).is_ok(),
-                postcard::from_bytes::<BridgeMessage>(&wants).is_ok(),
-                postcard::from_bytes::<BridgeMessage>(&sized).is_ok(),
-                postcard::from_bytes::<BridgeMessage>(&opened).is_ok(),
+                postcard::from_bytes::<ControlRequest>(&host).is_ok(),
+                postcard::from_bytes::<News>(&wants).is_ok(),
+                postcard::from_bytes::<ControlReply>(&sized).is_ok(),
+                postcard::from_bytes::<ControlReply>(&opened).is_ok(),
             ]
         };
         for size in bad {
@@ -545,15 +540,9 @@ mod tests {
 
     #[test]
     fn a_normalized_outside_the_unit_range_is_refused() {
-        use crate::{BridgeMessage, HostMessage};
+        use crate::{ControlReply, ControlRequest};
         use tutti_units::Normalized;
         use tutti_units::ParamId;
-        let set_message = |raw: f64| {
-            // variant 3, id 1 (one varint byte each), then the f64.
-            let mut bytes = vec![3, 1];
-            bytes.extend(raw.to_le_bytes());
-            postcard::from_bytes::<HostMessage>(&bytes)
-        };
         let f64_tail = |message: &dyn Fn() -> Vec<u8>, raw: f64| {
             let mut bytes = message();
             let end = bytes.len();
@@ -561,53 +550,48 @@ mod tests {
             bytes
         };
         let get_text = || {
-            postcard::to_allocvec(&HostMessage::GetParameterText {
+            postcard::to_allocvec(&ControlRequest::GetParameterText {
                 param_id: ParamId::new(1),
                 value: Normalized::of(0.5),
             })
             .unwrap()
         };
         let value_of = |raw: f64| {
-            let mut bytes = postcard::to_allocvec(&BridgeMessage::ParameterValue {
+            let mut bytes = postcard::to_allocvec(&ControlReply::ParameterValue {
                 value: Some(Normalized::of(0.5)),
             })
             .unwrap();
             let end = bytes.len();
             bytes[end - 8..].copy_from_slice(&raw.to_le_bytes());
-            postcard::from_bytes::<BridgeMessage>(&bytes)
+            postcard::from_bytes::<ControlReply>(&bytes)
         };
         let from_text = || {
-            postcard::to_allocvec(&BridgeMessage::ParameterValueFromText {
+            postcard::to_allocvec(&ControlReply::ParameterValueFromText {
                 value: Some(Normalized::of(0.5)),
             })
             .unwrap()
         };
 
         assert!(matches!(
-            set_message(0.25).unwrap(),
-            HostMessage::SetParameter { value, .. } if value == Normalized::of(0.25)
+            postcard::from_bytes::<ControlRequest>(&f64_tail(&get_text, 0.25)).unwrap(),
+            ControlRequest::GetParameterText { value, .. } if value == Normalized::of(0.25)
         ));
         assert!(matches!(
-            postcard::from_bytes::<HostMessage>(&f64_tail(&get_text, 0.25)).unwrap(),
-            HostMessage::GetParameterText { value, .. } if value == Normalized::of(0.25)
-        ));
-        assert!(matches!(
-            postcard::from_bytes::<BridgeMessage>(&f64_tail(&from_text, 0.25)).unwrap(),
-            BridgeMessage::ParameterValueFromText { value } if value == Some(Normalized::of(0.25))
+            postcard::from_bytes::<ControlReply>(&f64_tail(&from_text, 0.25)).unwrap(),
+            ControlReply::ParameterValueFromText { value } if value == Some(Normalized::of(0.25))
         ));
         assert!(matches!(
             value_of(0.25).unwrap(),
-            BridgeMessage::ParameterValue { value } if value == Some(Normalized::of(0.25))
+            ControlReply::ParameterValue { value } if value == Some(Normalized::of(0.25))
         ));
         for raw in [7.5, -3.0, f64::NAN, f64::INFINITY] {
-            assert!(set_message(raw).is_err(), "set {raw}");
             assert!(value_of(raw).is_err(), "optional reply {raw}");
             assert!(
-                postcard::from_bytes::<HostMessage>(&f64_tail(&get_text, raw)).is_err(),
+                postcard::from_bytes::<ControlRequest>(&f64_tail(&get_text, raw)).is_err(),
                 "f64 {raw}"
             );
             assert!(
-                postcard::from_bytes::<BridgeMessage>(&f64_tail(&from_text, raw)).is_err(),
+                postcard::from_bytes::<ControlReply>(&f64_tail(&from_text, raw)).is_err(),
                 "optional f64 {raw}"
             );
         }

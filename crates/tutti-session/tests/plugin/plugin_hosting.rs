@@ -3,13 +3,12 @@
 
 use crate::pooled::{LoadEntry, LoadPlugin, Spec, catalog_of, probe};
 use crate::support::clap_probe;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
 use tutti_plugin::catalog::{Hosting, PluginRef};
-use tutti_plugin_types::BridgeError;
-use tutti_session::{LoadError, PoolEvent, Session, SessionEvent, Task};
+use tutti_plugin_types::IpcError;
+use tutti_session::{LoadError, PoolEvent, Session, SessionEvent};
 use tutti_units::Samples;
 
 fn session() -> Session {
@@ -72,23 +71,20 @@ fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolE
     }
 }
 
-/// A session whose spawner holds the jobs it is handed, and the jobs.
-fn holding() -> (Session, Arc<Mutex<Vec<Task>>>) {
-    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
-    let spawned = Arc::clone(&held);
+/// A session on a polled executor the test shares: the futures it is handed wait
+/// until the test polls the executor, or the session's `update` does.
+fn holding() -> (Session, tutti_platform::Executor) {
+    let executor = tutti_platform::Executor::polled();
     let s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
-        .spawn_with(move |job| spawned.lock().unwrap().push(job))
+        .executor(executor.clone())
         .build()
         .expect("an offline session builds");
-    (s, held)
+    (s, executor)
 }
 
-fn run_held(held: &Arc<Mutex<Vec<Task>>>) {
-    let jobs: Vec<Task> = held.lock().unwrap().drain(..).collect();
-    for job in jobs {
-        job.run();
-    }
+fn run_held(executor: &tutti_platform::Executor) {
+    executor.poll(usize::MAX);
 }
 
 /// **The blacklist is asked when the load runs, not when the entry is built**:
@@ -106,14 +102,14 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     let main = tutti_fixtures::main_thread();
 
     // Blacklisted before the load runs, and still: refused.
-    let (mut s, held) = holding();
+    let (mut s, executor) = holding();
     let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
-    run_held(&held);
+    run_held(&executor);
     match outcome(&mut s, main) {
         PoolEvent::Failed(LoadError::Plugin(error)) => match &*error {
-            BridgeError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
+            IpcError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
             other => panic!("expected a Blacklisted refusal, got {other:?}"),
         },
         other => panic!("expected a Blacklisted refusal at load, got {other:?}"),
@@ -123,12 +119,12 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     // keeps no descriptors, so its entry is built before the blacklist.
     assert!(catalog.unblacklist(&path));
     probe(&mut catalog, &path);
-    let (mut s, held) = holding();
+    let (mut s, executor) = holding();
     let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
     assert!(catalog.unblacklist(&path));
-    run_held(&held);
+    run_held(&executor);
     assert!(
         matches!(outcome(&mut s, main), PoolEvent::Loaded),
         "an unblacklisted plugin was refused"
@@ -151,7 +147,7 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
         None,
     ) {
         Err(LoadError::Plugin(error)) => match &*error {
-            BridgeError::NotOutOfProcess { format, .. } => assert_eq!(*format, "VST2"),
+            IpcError::NotOutOfProcess { format, .. } => assert_eq!(*format, "VST2"),
             other => panic!("expected NotOutOfProcess, got {other:?}"),
         },
         other => panic!("expected NotOutOfProcess, got {other:?}"),

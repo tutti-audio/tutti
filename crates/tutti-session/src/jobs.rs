@@ -1,21 +1,23 @@
-//! The session's spawner: work that blocks (a file load, a
-//! plugin round trip, a recording's pump) runs on a thread the host's
-//! spawner gives it, and what it reports lands on the control thread in
+//! The session's background work: a closure (a file load, a plugin round trip,
+//! a recording's pump) wrapped in a future and spawned on the session's
+//! [`Executor`], and what it reports lands on the control thread in
 //! [`Session::update`], in the order it was sent.
 //!
 //! A job borrows nothing of the session. It reports through its
 //! [`Landings`], which never blocks, and ends exactly once, after every
 //! message it sent: with its result, or with a [`WorkerError`] when it
-//! panicked or the spawner dropped it unrun. A typed [`Job`]
+//! panicked or the executor dropped it unrun. A typed [`Job`]
 //! (`job.rs`) is cancelled by its drop; a streaming job carries its own flag,
 //! and [`Landings::is_closed`] tells it when the session is gone, so it
 //! stops writing what no one will land.
 //!
-//! The default spawner starts each task on a thread of
-//! [`tutti_platform::spawn_named`]. When the session drops, `Jobs` stops and joins
-//! those threads within [`DROP_BOUND`]; a thread still running after it (a
-//! worker blocked on the main thread, say) is detached with a `tracing`
-//! warning and **outlives the session** until its work returns.
+//! The executor is the builder's choice
+//! ([`SessionBuilder::executor`](crate::SessionBuilder::executor)). Its threads are
+//! its own: when the last clone of a threaded executor drops, it joins them, so a
+//! job still running then holds the session's drop until its work returns. Dropping the
+//! session joins in-flight jobs; every blocking plugin job is bounded by its own deadline
+//! (`tutti_plugin_types::Timeouts`: the load, `param_wait` and `state_wait`), and a server
+//! that dies mid-round-trip fails the wait at once.
 
 #![cfg_attr(
     not(any(test, feature = "capture")),
@@ -28,57 +30,56 @@
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::future::Future;
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::task::{Context, Poll};
 use std::time::Duration;
-use tutti_platform::Instant;
 
-use tutti_platform::ThreadHandle;
-use tutti_rt::LockExt;
+use tutti_platform::Executor;
+use tutti_rt::{Bells, LockExt};
 
 use crate::job::{Cancel, Job, JobKind, JobOutputQueue, Ticket};
 use crate::{Clock, Session, SessionEvent, WorkerError};
 
-/// How long dropping the session waits for its job threads to stop.
-const DROP_BOUND: Duration = Duration::from_millis(100);
+/// Where a job runs on a threaded executor.
+#[derive(Clone, Copy)]
+enum Place<'a> {
+    /// The shared pool, for a short job.
+    Pool,
+    /// A thread of its own, named: a job that blocks or runs as long as a take.
+    Dedicated(&'a str),
+}
 
-/// One unit of blocking work the session hands to its spawner
-/// ([`SessionBuilder::spawn_with`](crate::SessionBuilder::spawn_with)). The
-/// spawner calls [`run`](Self::run) on a thread of its own; a task it drops
-/// unrun lands as [`WorkerError::Dropped`].
-#[must_use = "a task that is neither run nor kept lands as dropped"]
-pub struct Task {
-    work: Option<Box<dyn FnOnce() + Send>>,
-    /// Where an unrun task reports its end.
+/// The most futures one [`Session::update`] polls on a polled executor: a count,
+/// never a time. A threaded executor polls on its own threads and ignores it;
+/// under a polled one, work past it runs in the next update.
+const POLLS_PER_UPDATE: usize = 256;
+
+/// What a job's future owes the session if it ends without reporting: dropped,
+/// the end it sends is [`WorkerError::Dropped`]. A future the executor drops
+/// unrun (a shutdown, a host that discards it) sends it through this.
+struct Unfinished {
     end: Option<(Sender<Arrival>, Slot)>,
 }
 
-impl Task {
-    /// Runs the work on the calling thread, blocking until it ends. A panic
-    /// in it is caught and lands as [`WorkerError::Panicked`].
-    pub fn run(mut self) {
+impl Unfinished {
+    /// The job reported its own end.
+    fn done(&mut self) {
         self.end = None;
-        if let Some(work) = self.work.take() {
-            work();
-        }
     }
 }
 
-impl Drop for Task {
+impl Drop for Unfinished {
     fn drop(&mut self) {
         if let Some((tx, id)) = self.end.take() {
             // The session may be gone; then nothing waits for this end.
             let _ = tx.send(Arrival::End(id, Err(WorkerError::Dropped)));
         }
-    }
-}
-
-impl fmt::Debug for Task {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Task").finish_non_exhaustive()
     }
 }
 
@@ -97,6 +98,32 @@ pub(crate) struct Landings<M> {
     id: Slot,
     closed: Arc<AtomicBool>,
     _message: PhantomData<fn(M)>,
+}
+
+impl<M> Clone for Landings<M> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            id: self.id,
+            closed: Arc::clone(&self.closed),
+            _message: PhantomData,
+        }
+    }
+}
+
+/// A future whose panic is its output: what a job's body is polled as.
+struct Contained<F>(Pin<Box<F>>);
+
+impl<F: Future> Future for Contained<F> {
+    type Output = Result<F::Output, Box<dyn Any + Send>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match catch_unwind(AssertUnwindSafe(|| self.0.as_mut().poll(cx))) {
+            Ok(Poll::Pending) => Poll::Pending,
+            Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
+            Err(payload) => Poll::Ready(Err(payload)),
+        }
+    }
 }
 
 impl<M: Send + 'static> Landings<M> {
@@ -173,30 +200,6 @@ enum Arrival {
 /// A job's lander, typed away: it downcasts what its own work sent.
 type Lander = Box<dyn FnMut(&mut dyn JobSession, Arrival, &mut Vec<SessionEvent>) + Send>;
 
-/// Where the session starts its tasks.
-#[derive(Clone, Default)]
-pub(crate) enum Spawner {
-    /// A named thread per task, through [`tutti_platform::spawn_named`]; `Jobs`
-    /// keeps the handles. A thread that cannot start drops its task, which
-    /// lands as [`WorkerError::Dropped`].
-    #[default]
-    Threads,
-    /// The host's own (`SessionBuilder::spawn_with`).
-    Host(Arc<dyn Fn(Task) + Send + Sync>),
-}
-
-impl Spawner {
-    pub(crate) fn new(spawn: impl Fn(Task) + Send + Sync + 'static) -> Self {
-        Self::Host(Arc::new(spawn))
-    }
-}
-
-impl fmt::Debug for Spawner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Spawner").finish_non_exhaustive()
-    }
-}
-
 /// The channel a job's messages and ends come back on, read only by the
 /// control thread (`update` and `Job::wait`): off the audio thread, unbounded.
 struct Arrivals {
@@ -227,19 +230,21 @@ impl Arrivals {
     }
 }
 
-/// The session's jobs: the spawner, the channel their arrivals come back
-/// on, and the lander of each job still running.
+/// The session's jobs: the executor and bells they run on, the channel their
+/// arrivals come back on, and the lander of each job still running.
 pub(crate) struct Jobs {
-    spawn: Spawner,
+    executor: Executor,
+    bells: Bells,
     tx: Sender<Arrival>,
     arrivals: Arrivals,
     landers: HashMap<Slot, Lander>,
     next: tutti_rt::Mint,
     closed: Arc<AtomicBool>,
-    /// The default spawner's threads, until they end.
-    threads: Vec<ThreadHandle<()>>,
     /// What typed jobs landed, until the collect phase reports it.
     outputs: JobOutputQueue,
+    /// Jobs the executor refused to start, and why: their `Dropped` end lands as
+    /// [`WorkerError::NotStarted`].
+    refused: HashMap<Slot, std::io::ErrorKind>,
     /// Events a [`Job::wait`] updated through, for the app's next update.
     held: Vec<SessionEvent>,
 }
@@ -279,7 +284,7 @@ pub(crate) enum Landing<'a> {
     Snapshot {
         node: tutti_graph::NodeKey,
         token: &'a Arc<()>,
-        asked: Instant,
+        asked: tutti_platform::Instant,
         state: Result<Vec<u8>, tutti_plugin::error::StateError>,
     },
 }
@@ -300,11 +305,11 @@ impl fmt::Debug for PluginLanding<'_> {
 /// lander is typed to nothing of the clock, so the jobs in flight at a clock
 /// switch land on the converted session.
 pub(crate) trait JobSession {
-    /// A pool load's worker ended: its stamp and what it staged.
+    /// A pool load's worker ended: the identity it read under and what it staged.
     fn land_pool_load(
         &mut self,
         flight: u64,
-        stamp: Option<crate::pool::Stamp>,
+        loaded_from: Option<tutti_platform::Identity>,
         done: Result<crate::pool::Staged, crate::LoadError>,
     );
 
@@ -320,11 +325,11 @@ impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
     fn land_pool_load(
         &mut self,
         flight: u64,
-        stamp: Option<crate::pool::Stamp>,
+        loaded_from: Option<tutti_platform::Identity>,
         done: Result<crate::pool::Staged, crate::LoadError>,
     ) {
         self.pool.entries.worker_ended();
-        self.pool.entries.stamped(flight, stamp);
+        self.pool.entries.stamped(flight, loaded_from);
         match done {
             Ok(crate::pool::Staged::Done(value)) => self.pool.entries.land(flight, Ok(value)),
             Ok(crate::pool::Staged::Main(stage)) => self.pool.entries.stage_main(flight, stage),
@@ -346,10 +351,11 @@ impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
 }
 
 impl Jobs {
-    pub(crate) fn new(spawn: Spawner) -> Self {
+    pub(crate) fn new(executor: Executor, bells: Bells) -> Self {
         let (tx, rx) = channel();
         Self {
-            spawn,
+            executor,
+            bells,
             tx,
             arrivals: Arrivals {
                 rx,
@@ -358,8 +364,8 @@ impl Jobs {
             landers: HashMap::new(),
             next: tutti_rt::Mint::new(),
             closed: Arc::new(AtomicBool::new(false)),
-            threads: Vec::new(),
             outputs: JobOutputQueue::default(),
+            refused: HashMap::new(),
             held: Vec::new(),
         }
     }
@@ -376,7 +382,7 @@ impl Jobs {
         Ticket::new(&self.outputs)
     }
 
-    /// Runs `work` on the spawner as a typed job. `land` runs in a later
+    /// Runs `work` on the executor as a typed job. `land` runs in a later
     /// [`Session::update`] with the worker's end and the job's ticket.
     pub(crate) fn submit_job<J, R, W, L>(&mut self, work: W, land: L) -> Job<J>
     where
@@ -385,9 +391,39 @@ impl Jobs {
         W: FnOnce(&Cancel) -> R + Send + 'static,
         L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, Ticket<J>) + Send + 'static,
     {
+        self.submit_job_at(Place::Pool, work, land)
+    }
+
+    /// [`submit_job`](Self::submit_job) for work that blocks: a threaded executor gives
+    /// it a thread named `name`, so the pool never waits behind it.
+    #[cfg_attr(
+        not(feature = "plugin"),
+        expect(
+            dead_code,
+            reason = "the plugin state job (feature `plugin`) is its user"
+        )
+    )]
+    pub(crate) fn submit_job_blocking<J, R, W, L>(&mut self, name: &str, work: W, land: L) -> Job<J>
+    where
+        J: JobKind,
+        R: Send + 'static,
+        W: FnOnce(&Cancel) -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, Ticket<J>) + Send + 'static,
+    {
+        self.submit_job_at(Place::Dedicated(name), work, land)
+    }
+
+    fn submit_job_at<J, R, W, L>(&mut self, place: Place<'_>, work: W, land: L) -> Job<J>
+    where
+        J: JobKind,
+        R: Send + 'static,
+        W: FnOnce(&Cancel) -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, Ticket<J>) + Send + 'static,
+    {
         let (job, ticket) = self.new_job::<J>();
         let cancel = ticket.cancel();
-        self.submit(
+        self.submit_at(
+            place,
             move || {
                 cancel.started();
                 work(&cancel)
@@ -414,52 +450,43 @@ impl Jobs {
 
     /// Reports what typed jobs landed, in landing order.
     pub(crate) fn report_landed(&mut self, out: &mut Vec<SessionEvent>) {
-        let outputs = std::mem::take(&mut *self.outputs.lock_recover());
-        out.extend(outputs.into_iter().map(SessionEvent::JobDone));
+        let mut queue = self.outputs.lock_recover();
+        // A job its owner awaits stays for that poll.
+        let (awaited, reported): (Vec<_>, Vec<_>) = std::mem::take(&mut *queue)
+            .into_iter()
+            .partition(crate::JobOutput::awaited);
+        *queue = awaited;
+        drop(queue);
+        out.extend(reported.into_iter().map(SessionEvent::JobDone));
     }
 
-    /// Hands `task` to the spawner.
-    fn dispatch(&mut self, task: Task) {
-        match &self.spawn {
-            Spawner::Host(spawn) => spawn(task),
-            Spawner::Threads => {
-                self.threads.retain(|thread| !thread.is_finished());
-                // A start that fails drops its closure, and the task in it.
-                if let Ok(thread) =
-                    tutti_platform::spawn_named("tutti-job", None, move |_| task.run())
-                {
-                    self.threads.push(thread);
-                }
-            }
-        }
+    /// Ticks the bells, then polls the executor's woken futures, up to
+    /// [`POLLS_PER_UPDATE`]. Before the landings, so what a future sent lands in
+    /// the same update.
+    pub(crate) fn poll(&self) {
+        self.bells.tick();
+        self.executor.poll(POLLS_PER_UPDATE);
     }
 }
 
 impl Drop for Jobs {
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
-        let deadline = Instant::now() + DROP_BOUND;
-        for thread in self.threads.drain(..) {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if let Err(stuck) = thread.stop_within(left) {
-                tracing::warn!(
-                    "a session job thread is still running; it outlives the session until its work returns"
-                );
-                stuck.detach();
-            }
-        }
     }
 }
 
 impl Jobs {
-    /// Runs `work` on the spawner and lands its result in a later
+    /// Runs `work` on the executor and lands its result in a later
     /// [`Session::update`], on the control thread.
     ///
-    /// `land` (and every lander of [`submit_stream`](Self::submit_stream))
+    /// `land` (and every lander of a streaming job)
     /// runs on the thread that calls `update()`, which need not be the main
     /// thread: a landing takes no main-thread proof (the plugin reload's does
     /// not), and what must be done on the main
     /// thread is posted to the session's `MainWork` (`tutti_plugin_types`).
+    ///
+    /// A future must not block, and a closure here is one `poll` long: a job whose
+    /// `work` blocks (a plugin's round trip) says so with a `// blocks:` comment.
     pub(crate) fn submit<R, W, L>(&mut self, work: W, land: L)
     where
         R: Send + 'static,
@@ -468,8 +495,37 @@ impl Jobs {
             + Send
             + 'static,
     {
+        self.submit_at(Place::Pool, work, land);
+    }
+
+    /// [`submit`](Self::submit) for work that blocks (a plugin's round trip): a threaded
+    /// executor gives it a thread named `name`, so the pool never waits behind it.
+    #[cfg_attr(
+        not(feature = "plugin"),
+        expect(dead_code, reason = "the plugin jobs (feature `plugin`) are its users")
+    )]
+    pub(crate) fn submit_blocking<R, W, L>(&mut self, name: &str, work: W, land: L)
+    where
+        R: Send + 'static,
+        W: FnOnce() -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
+            + Send
+            + 'static,
+    {
+        self.submit_at(Place::Dedicated(name), work, land);
+    }
+
+    fn submit_at<R, W, L>(&mut self, place: Place<'_>, work: W, land: L)
+    where
+        R: Send + 'static,
+        W: FnOnce() -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
+            + Send
+            + 'static,
+    {
         let mut land = Some(land);
-        self.submit_stream(
+        self.start_stream(
+            place,
             move |_: &Landings<std::convert::Infallible>| work(),
             move |session, landed, events| {
                 let end = match landed {
@@ -484,24 +540,102 @@ impl Jobs {
         );
     }
 
-    /// Runs `work` on the spawner, landing each message it sends through
-    /// its [`Landings`] and then its end, exactly once and after every
-    /// message, in later [`Session::update`]s on the control thread.
+    /// Runs `work` on a thread of its own on a threaded executor (named `name`), landing
+    /// each message it sends through its [`Landings`] and then its end, exactly once and
+    /// after every message, in later [`Session::update`]s on the control thread.
     /// `work` sees the landings by reference, so nothing it sends can
-    /// outlive it and follow the end.
-    pub(crate) fn submit_stream<M, R, W, L>(&mut self, work: W, mut land: L)
+    /// outlive it and follow the end. For work that runs as long as a take.
+    ///
+    /// An executor that refuses the future lands [`WorkerError::NotStarted`].
+    #[cfg(test)]
+    pub(crate) fn submit_dedicated<M, R, W, L>(&mut self, name: &str, work: W, land: L)
     where
         M: Send + 'static,
         R: Send + 'static,
         W: FnOnce(&Landings<M>) -> R + Send + 'static,
         L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
-        let jobs = &mut *self;
-        let id = Slot(jobs.next.mint().get());
+        self.start_stream(Place::Dedicated(name), work, land);
+    }
+
+    fn start_stream<M, R, W, L>(&mut self, place: Place<'_>, work: W, land: L)
+    where
+        M: Send + 'static,
+        R: Send + 'static,
+        W: FnOnce(&Landings<M>) -> R + Send + 'static,
+        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+    {
+        self.start(place, move |landings| async move { work(&landings) }, land);
+    }
+
+    /// Runs `future` on the executor as a job whose work awaits (a reply, say), and
+    /// lands its result like [`submit`](Self::submit). The future must not block.
+    #[cfg_attr(
+        not(feature = "sampler"),
+        expect(dead_code, reason = "the stream open (feature `sampler`) is its user")
+    )]
+    pub(crate) fn submit_future<R, Fut, L>(&mut self, future: Fut, land: L)
+    where
+        R: Send + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
+            + Send
+            + 'static,
+    {
+        let mut land = Some(land);
+        self.start(
+            Place::Pool,
+            move |_: Landings<std::convert::Infallible>| future,
+            move |session, landed, events| {
+                let end = match landed {
+                    Stream::Message(never) => match never {},
+                    Stream::Done(result) => Ok(result),
+                    Stream::Failed(failed) => Err(failed),
+                };
+                if let Some(land) = land.take() {
+                    land(session, end, events);
+                }
+            },
+        );
+    }
+
+    fn start<M, R, F, W, L>(&mut self, place: Place<'_>, make: W, land: L)
+    where
+        M: Send + 'static,
+        R: Send + 'static,
+        F: Future<Output = R> + Send + 'static,
+        W: FnOnce(Landings<M>) -> F + Send + 'static,
+        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+    {
+        let run = self.open_stream(land);
+        let id = run.landings.id;
+        let future = Box::pin(run.run(make));
+        let started = match place {
+            Place::Pool => self.executor.spawn(future),
+            Place::Dedicated(name) => self.executor.spawn_dedicated(name, None, future),
+        };
+        // A refused start drops the future unrun, so `Unfinished` has queued
+        // `Dropped`; `land_jobs` reports the refusal instead.
+        if let Err(error) = started {
+            self.refused.insert(id, error.kind());
+        }
+    }
+
+    /// Registers a streaming job's lander and gives back the half the job's future
+    /// holds, made before that future exists: a take starts its pump first and hands
+    /// it this once the file and the tap are open. Dropped unrun, the run lands
+    /// [`WorkerError::Dropped`].
+    pub(crate) fn open_stream<M, R, L>(&mut self, mut land: L) -> StreamRun<M, R>
+    where
+        M: Send + 'static,
+        R: Send + 'static,
+        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+    {
+        let id = Slot(self.next.mint().get());
         let landings = Landings {
-            tx: jobs.tx.clone(),
+            tx: self.tx.clone(),
             id,
-            closed: Arc::clone(&jobs.closed),
+            closed: Arc::clone(&self.closed),
             _message: PhantomData,
         };
         let lander: Lander = Box::new(move |session, arrival, events| {
@@ -520,21 +654,68 @@ impl Jobs {
             };
             land(session, landed, events);
         });
-        jobs.landers.insert(id, lander);
-        let end_tx = jobs.tx.clone();
-        let job = Task {
-            work: Some(Box::new(move || {
-                let end = catch_unwind(AssertUnwindSafe(|| work(&landings)))
-                    .map(|result| Box::new(result) as Box<dyn Any + Send>)
-                    .map_err(|payload| WorkerError::Panicked {
-                        message: panic_message(payload.as_ref()),
-                    });
-                // After every message: they went down the same channel first.
-                let _ = landings.tx.send(Arrival::End(id, end));
-            })),
-            end: Some((end_tx, id)),
-        };
-        self.dispatch(job);
+        self.landers.insert(id, lander);
+        StreamRun {
+            landings,
+            unfinished: Unfinished {
+                end: Some((self.tx.clone(), id)),
+            },
+            _result: PhantomData,
+        }
+    }
+
+    /// Spawns `future` on the executor with a thread of its own where it has them: work
+    /// that is not a job and runs as long as a take.
+    ///
+    /// # Errors
+    ///
+    /// The executor's refusal to start it. The future is not run.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
+    )]
+    pub(crate) fn spawn_long(
+        &self,
+        name: &str,
+        future: impl Future<Output = ()> + Send + 'static,
+    ) -> std::io::Result<()> {
+        self.executor.spawn_dedicated(name, None, future)
+    }
+
+    /// The session's bells: a future that awaits the audio thread makes its bell here.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
+    )]
+    pub(crate) fn bells(&self) -> &Bells {
+        &self.bells
+    }
+}
+
+/// A streaming job's reporting half: what the job's future runs through.
+pub(crate) struct StreamRun<M, R> {
+    landings: Landings<M>,
+    unfinished: Unfinished,
+    _result: PhantomData<fn() -> R>,
+}
+
+impl<M: Send + 'static, R: Send + 'static> StreamRun<M, R> {
+    /// Runs the job's body, then lands its end exactly once, after every message:
+    /// its result, or [`WorkerError::Panicked`] when it panicked. `make` builds the
+    /// body from the landings.
+    pub(crate) async fn run<F>(mut self, make: impl FnOnce(Landings<M>) -> F)
+    where
+        F: Future<Output = R>,
+    {
+        let end = Contained(Box::pin(make(self.landings.clone())))
+            .await
+            .map(|result| Box::new(result) as Box<dyn Any + Send>)
+            .map_err(|payload| WorkerError::Panicked {
+                message: panic_message(payload.as_ref()),
+            });
+        self.unfinished.done();
+        // After every message: they went down the same channel first.
+        let _ = self.landings.tx.send(Arrival::End(self.landings.id, end));
     }
 }
 
@@ -543,12 +724,21 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// What arrives during a lander (a job it submits that ends at once)
     /// waits for the next update.
     pub(crate) fn land_jobs(&mut self, out: &mut Vec<SessionEvent>) {
-        self.jobs.threads.retain(|thread| !thread.is_finished());
         let arrived = self.jobs.arrivals.drain();
         for arrival in arrived {
             let (id, ends) = match &arrival {
                 Arrival::Message(id, _) => (*id, false),
                 Arrival::End(id, _) => (*id, true),
+            };
+            let arrival = match arrival {
+                Arrival::End(id, Err(WorkerError::Dropped)) => {
+                    let end = match self.jobs.refused.remove(&id) {
+                        Some(kind) => WorkerError::NotStarted(kind),
+                        None => WorkerError::Dropped,
+                    };
+                    Arrival::End(id, Err(end))
+                }
+                other => other,
             };
             // Out of the table while it runs: a lander may submit a job.
             let Some(mut lander) = self.jobs.landers.remove(&id) else {
@@ -571,7 +761,7 @@ pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::sync_channel;
@@ -581,6 +771,30 @@ mod tests {
 
     fn session(builder: crate::SessionBuilder) -> crate::DetachedSession {
         builder.build_detached(SampleRate::SR_48K).unwrap()
+    }
+
+    #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+    enum EchoError {
+        #[error(transparent)]
+        Worker(#[from] WorkerError),
+        #[error(transparent)]
+        Wait(#[from] crate::WaitError),
+    }
+
+    crate::job::job_kind!(Echo => u32, EchoError);
+
+    /// Gives the session `fresh` as its executor and drops the old one: the futures
+    /// it still holds are dropped unrun, which ends each of their jobs `Dropped`. The
+    /// caller drops its own clones of the old executor first.
+    pub(crate) fn replace_executor<K: crate::AppKey, C: Clock>(
+        s: &mut Session<K, C>,
+        fresh: Executor,
+    ) {
+        drop(std::mem::replace(&mut s.jobs.executor, fresh));
+    }
+
+    fn drop_executor(s: &mut crate::DetachedSession) {
+        replace_executor(s, Executor::polled());
     }
 
     /// Updates until `done` holds, or panics after a generous wait.
@@ -618,7 +832,7 @@ mod tests {
         go.send(()).unwrap();
         let _ = update_until(&mut s, || landed.lock().unwrap().is_some());
         let (worker, lander) = landed.lock().unwrap().unwrap();
-        assert_ne!(worker, lander, "the work ran on the spawner's thread");
+        assert_ne!(worker, lander, "the work ran on the executor's thread");
         assert_eq!(lander, std::thread::current().id(), "it landed in update");
     }
 
@@ -627,7 +841,8 @@ mod tests {
         let mut s = session(Session::builder());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let into = Arc::clone(&seen);
-        s.jobs.submit_stream(
+        s.jobs.submit_dedicated(
+            "test",
             |landings: &Landings<u32>| {
                 for n in 0..500 {
                     landings.send(n).unwrap();
@@ -668,8 +883,8 @@ mod tests {
     }
 
     #[test]
-    fn a_job_the_spawner_drops_lands_as_dropped_and_its_work_never_runs() {
-        let mut s = session(Session::builder().spawn_with(drop));
+    fn a_job_the_executor_drops_unrun_lands_as_dropped_and_its_work_never_runs() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
         let ran = Arc::new(AtomicBool::new(false));
         let landed = Arc::new(Mutex::new(None));
         let (r, into) = (Arc::clone(&ran), Arc::clone(&landed));
@@ -677,6 +892,7 @@ mod tests {
             move || r.store(true, Ordering::SeqCst),
             move |_, result, _| *into.lock().unwrap() = Some(result),
         );
+        drop_executor(&mut s);
         let _ = s.update();
         assert_eq!(
             landed.lock().unwrap().take(),
@@ -686,13 +902,47 @@ mod tests {
     }
 
     #[test]
-    fn the_hosts_spawner_runs_every_job() {
-        let spawned = Arc::new(Mutex::new(0_usize));
-        let count = Arc::clone(&spawned);
-        let mut s = session(Session::builder().spawn_with(move |job| {
-            *count.lock().unwrap() += 1;
-            job.run();
-        }));
+    fn wait_ends_dropped_when_the_executor_drops_the_future_unrun() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
+        let job: Job<Echo> = s.jobs.submit_job(
+            |_| 1_u32,
+            |_, done, ticket| ticket.land(done.map_err(EchoError::from)),
+        );
+        drop_executor(&mut s);
+        assert_eq!(
+            job.wait(&mut s),
+            Err(EchoError::Worker(WorkerError::Dropped))
+        );
+    }
+
+    #[test]
+    fn an_awaited_job_whose_work_the_executor_dropped_resolves_dropped() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
+        let awaiting = Executor::polled();
+        let job: Job<Echo> = s.jobs.submit_job(
+            |_| 7_u32,
+            |_, done, ticket| ticket.land(done.map_err(EchoError::from)),
+        );
+        let got = Arc::new(Mutex::new(None));
+        let into = Arc::clone(&got);
+        awaiting
+            .spawn(async move {
+                *into.lock().unwrap() = Some(job.await);
+            })
+            .unwrap();
+        assert_eq!(awaiting.poll(8), 1);
+        drop_executor(&mut s);
+        let _events = s.update();
+        assert_eq!(awaiting.poll(8), 1, "the landing woke the awaiting future");
+        assert_eq!(
+            got.lock().unwrap().take(),
+            Some(Err(EchoError::Worker(WorkerError::Dropped)))
+        );
+    }
+
+    #[test]
+    fn a_polled_sessions_jobs_run_and_land_in_the_order_they_were_spawned() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
         let landed = Arc::new(Mutex::new(Vec::new()));
         for n in 0..3_u8 {
             let into = Arc::clone(&landed);
@@ -701,36 +951,72 @@ mod tests {
                 move |_, r, _| into.lock().unwrap().push(r.unwrap()),
             );
         }
+        assert!(
+            landed.lock().unwrap().is_empty(),
+            "nothing runs before update"
+        );
         let _ = s.update();
-        assert_eq!(*spawned.lock().unwrap(), 3);
         assert_eq!(*landed.lock().unwrap(), [0, 1, 2]);
     }
 
     #[test]
+    fn a_polled_sessions_job_runs_and_lands_in_the_update_and_not_before() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
+        let ran = Arc::new(AtomicBool::new(false));
+        let landed = Arc::new(Mutex::new(None));
+        let (r, into) = (Arc::clone(&ran), Arc::clone(&landed));
+        s.jobs.submit(
+            move || {
+                r.store(true, Ordering::SeqCst);
+                std::thread::current().id()
+            },
+            move |_, result, _| {
+                *into.lock().unwrap() = Some((result.unwrap(), std::thread::current().id()));
+            },
+        );
+        assert!(!ran.load(Ordering::SeqCst), "no work runs outside update");
+        assert!(landed.lock().unwrap().is_none());
+        let _ = s.update();
+        let (worker, lander) = landed.lock().unwrap().take().expect("landed in the update");
+        assert_eq!(worker, std::thread::current().id(), "polled by update");
+        assert_eq!(lander, worker);
+    }
+
+    #[test]
+    fn a_polled_sessions_panicking_job_lands_failed_and_the_update_goes_on() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
+        let landed = Arc::new(Mutex::new(None));
+        let into = Arc::clone(&landed);
+        s.jobs.submit(
+            || -> u8 { panic!("the decode blew up") },
+            move |_, result, _| *into.lock().unwrap() = Some(result),
+        );
+        let _ = s.update();
+        assert_eq!(
+            landed.lock().unwrap().take().unwrap(),
+            Err(WorkerError::Panicked {
+                message: "the decode blew up".into()
+            })
+        );
+    }
+
+    #[test]
     fn a_job_outliving_its_session_sees_it_closed_and_its_sends_come_back() {
-        let mut s = session(Session::builder());
-        let (go, wait) = sync_channel::<()>(0);
-        let (opened, open) = sync_channel::<bool>(1);
-        let (report, seen) = sync_channel::<(Result<(), u8>, bool)>(1);
-        s.jobs.submit_stream(
+        let executor = Executor::polled();
+        let mut s = session(Session::builder().executor(executor.clone()));
+        let seen = Arc::new(Mutex::new(None));
+        let into = Arc::clone(&seen);
+        s.jobs.submit_dedicated(
+            "test",
             move |landings: &Landings<u8>| {
-                opened.send(landings.is_closed()).unwrap();
-                wait.recv().unwrap();
-                report
-                    .send((landings.send(7), landings.is_closed()))
-                    .unwrap();
+                *into.lock().unwrap() = Some((landings.send(7), landings.is_closed()));
             },
             |_, _, _| {},
         );
-        let wait_long = Duration::from_secs(10);
-        assert!(
-            !open.recv_timeout(wait_long).unwrap(),
-            "open while the session lived"
-        );
         drop(s);
-        go.send(()).unwrap();
-        let (sent, after) = seen.recv_timeout(wait_long).unwrap();
+        assert_eq!(executor.poll(usize::MAX), 1);
+        let (sent, closed) = seen.lock().unwrap().take().expect("the job ran");
         assert_eq!(sent, Err(7), "the message comes back");
-        assert!(after);
+        assert!(closed);
     }
 }

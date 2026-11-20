@@ -31,7 +31,9 @@
 //!   gate read a typed `KeySource`, through an optional `KeyFilter`; the limiter reports its
 //!   lookahead as latency), and
 //!   `TransientShaperNode` (the attack and the sustain of a signal raised or lowered apart,
-//!   one linked gain from a fast and a slow envelope), and
+//!   one linked gain from a fast and a slow envelope), `LevellerNode` (a loudness leveller:
+//!   one linked gain moving the BS.1770 short-term loudness to a target, within a boost and a
+//!   cut and held under a gate), and
 //!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
 //!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
@@ -201,7 +203,8 @@
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
-//!   [`TiltFilterNode`], [`EnvelopeFilterNode`]; the coefficient solvers
+//!   [`TiltFilterNode`], [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
+//!   linear-phase equalizer: a [`tutti_dsp::Fir`] through the convolver); the coefficient solvers
 //!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
 //!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
 //!   graph it is inserted in (`tutti_buffers::Float` with [`SimdLanes`]).
@@ -211,8 +214,10 @@
 //!   [`CrossoverError`].
 //! - Delay: [`DelayNode`] over `tutti_dsp::DelayBank`, built to a [`DelayLayout`], with
 //!   [`InterpolationMode`] and [`MaxDelay`].
-//! - Dynamics: [`CompressorNode`], [`GateNode`], [`LimiterNode`],
-//!   [`BrickwallLimiterNode`], [`TransientShaperNode`], and [`MultibandCompressorNode`] (2 to 4
+//! - Dynamics: [`CompressorNode`] ([`CompressorConfig`]), [`GateNode`] ([`GateConfig`]),
+//!   [`LimiterNode`] ([`LimiterConfig`]), [`BrickwallLimiterNode`] ([`BrickwallLimiterConfig`]), [`TransientShaperNode`], [`LevellerNode`] (made from a
+//!   [`LevellerConfig`], which can refuse a bus with no placement) and [`MultibandCompressorNode`] (made from a
+//!   [`MultibandCompressorConfig`], 2 to 4
 //!   bands over a Linkwitz-Riley crossover, every setting an indexed param: see
 //!   [`BAND_PARAMS`]) with its [`MultibandControls`].
 //! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayBank`, its [`Sweep`] and
@@ -235,8 +240,7 @@
 //!
 
 // The fallible constructions are the crossover's (`CrossoverControls::new`,
-// `CrossoverNode::new`, `MultibandCompressorNode::new`), all `CrossoverError`;
-// the rest of this crate has no `Error` type.
+// `CrossoverNode::new`), all `CrossoverError`; the rest of this crate has no `Error` type.
 
 // Per-block control reads and the ramps that keep them from stepping.
 mod buses;
@@ -325,17 +329,19 @@ pub use tutti_dsp::{
 
 mod dynamics;
 pub use dynamics::{
-    BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, BrickwallSet, CompressorKernel,
-    CompressorNode, CompressorSet, DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet,
-    GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode, LimiterSet, MultibandCompressorNode,
-    MultibandControls, TransientShaperConfig, TransientShaperKernel, TransientShaperNode,
-    TransientShaperSet,
+    BAND_PARAMS, BrickwallKernel, BrickwallLimiterConfig, BrickwallLimiterNode, BrickwallSet,
+    CompressorConfig, CompressorKernel, CompressorNode, CompressorSet, DynamicEqConfig,
+    DynamicEqKernel, DynamicEqNode, DynamicEqSet, GateConfig, GateKernel, GateNode, GateSet,
+    LevellerConfig, LevellerKernel, LevellerNode, LevellerSet, LimiterConfig, LimiterKernel,
+    LimiterNode, LimiterSet, MultibandCompressorConfig, MultibandCompressorNode, MultibandControls,
+    TransientShaperConfig, TransientShaperKernel, TransientShaperNode, TransientShaperSet,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
 pub use tutti_dsp::{
-    CompressorControls, DynamicEqControls, DynamicMode, GateControls, KeyFilter, KeySource,
-    LimiterControls, Lookahead, PeakDetection, TransientControls,
+    ChannelWeightError, CompressorControls, DynamicEqControls, DynamicMode, GateControls,
+    KeyFilter, KeySource, LevellerControls, LimiterControls, Lookahead, MultibandBands,
+    PeakDetection, TransientControls,
 };
 
 // Utilities: polarity, mid/side and stereo width.
@@ -416,7 +422,7 @@ pub use signal::{
 mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
-pub use convolution::{ConvolverError, ConvolverNode, IrLayout, PortSide};
+pub use convolution::{ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout, PortSide};
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a
 // test, example or bench wires a graph out of.

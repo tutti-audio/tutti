@@ -111,7 +111,9 @@ fn handle_parameter_roundtrip() {
         .expect("the in-process VST2 backend enumerates parameters");
     assert_eq!(params.len(), 4, "the probe declared 4 parameters");
 
-    handle.send_parameter(PARAM_0, n(0.5));
+    handle
+        .send_parameter(PARAM_0, n(0.5))
+        .expect("a declared parameter");
     let v = handle
         .parameter_value(PARAM_0)
         .expect("param 0 should exist");

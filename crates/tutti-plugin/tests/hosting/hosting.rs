@@ -4,7 +4,7 @@
 //! and a VST2 file refused for `OutOfProcess` with no server looked for.
 
 use tutti_plugin::catalog::{Hosting, Loadable, Plugin, PluginRef};
-use tutti_plugin_types::{BridgeError, SampleRate};
+use tutti_plugin_types::{IpcError, SampleRate};
 
 const RATE: f64 = 48_000.0;
 
@@ -25,7 +25,7 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
             &plugin,
             SampleRate::of(RATE),
         ) {
-            Err(BridgeError::NotOutOfProcess { format, .. }) => assert_eq!(format, "VST2"),
+            Err(IpcError::NotOutOfProcess { format, .. }) => assert_eq!(format, "VST2"),
             Err(other) => panic!("{name}: expected NotOutOfProcess, got {other:?}"),
             Ok(_) => panic!("{name}: a VST2 file must not be served"),
         }
@@ -93,7 +93,7 @@ mod clap {
             &asked,
             SampleRate::of(RATE),
         ) {
-            Err(BridgeError::LoadFailed { reason, .. }) => {
+            Err(IpcError::LoadFailed { reason, .. }) => {
                 assert!(reason.contains("main thread"), "{reason}");
             }
             other => panic!("an in-process load without the main thread: {other:?}"),

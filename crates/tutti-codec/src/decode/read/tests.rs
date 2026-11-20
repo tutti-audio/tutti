@@ -20,8 +20,8 @@ fn a_missing_file_is_an_io_error() {
 /// Bytes that are no container are refused, not decoded as silence.
 #[test]
 fn bytes_that_are_no_audio_are_an_error() {
-    assert!(read_wave_bytes::<f32>(vec![0x5a; 4096]).is_err());
-    assert!(read_wave_bytes::<f32>(Vec::new()).is_err());
+    assert!(read_wave::<f32>(vec![0x5a; 4096]).is_err());
+    assert!(read_wave::<f32>(Vec::new()).is_err());
 }
 
 /// A track that states no sample rate is refused with `NoSampleRate`, never
@@ -75,7 +75,45 @@ fn a_data_length_far_past_the_source_decodes_the_frames_present() {
     bytes.extend(b"data");
     bytes.extend(0x4500_0040u32.to_le_bytes());
     bytes.extend([0u8; 32]);
-    let wave = read_wave_bytes::<f32>(bytes).expect("decodes");
+    let wave = read_wave::<f32>(bytes).expect("decodes");
     assert_eq!(wave.channels(), 1);
     assert_eq!(wave.len().get(), 16);
+}
+
+/// **A stepped decode of a stereo ramp takes several steps and holds the ramp
+/// exactly.** Frame `i` is `i / 4096` left and its negative right, which a float
+/// WAV reads back bit for bit; a step asked for 512 frames stops once it has them,
+/// so the 4 096-frame file is not one step.
+#[test]
+fn a_stepped_decode_of_a_ramp_takes_several_steps_and_holds_the_ramp() {
+    const FRAMES: usize = 4_096;
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 8_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::new(&mut bytes, spec).expect("a writer");
+    for i in 0..FRAMES {
+        let v = i as f32 / 4_096.0;
+        writer.write_sample(v).expect("writes");
+        writer.write_sample(-v).expect("writes");
+    }
+    writer.finalize().expect("finalizes");
+
+    let mut decode = WaveDecode::<f32>::open(bytes.into_inner()).expect("opens");
+    let mut steps = 0;
+    let wave = loop {
+        steps += 1;
+        if let Some(wave) = decode.step(Samples::new(512)).expect("decodes") {
+            break wave;
+        }
+    };
+    assert!(steps > 1, "the whole file was one step");
+    assert_eq!(wave.len().get(), FRAMES);
+    for i in 0..FRAMES {
+        let v = i as f32 / 4_096.0;
+        assert_eq!((wave.at(0, i), wave.at(1, i)), (v, -v), "frame {i}");
+    }
 }

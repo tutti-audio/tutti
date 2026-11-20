@@ -1,8 +1,6 @@
 //! The `sm24` low bytes and when a reader lets them count (SF2 2.04 section
 //! 6.2), on fixture fonts whose `sdta` list and `ifil` are rewritten.
 
-use std::io::Cursor;
-
 use tutti_fixtures::sf2::{Inst, Preset, bytes, with_pool};
 use tutti_sf2::{Error, SamplePool, SoundFont};
 
@@ -22,7 +20,7 @@ fn base() -> Vec<u8> {
 }
 
 fn load(file: &[u8]) -> Result<SoundFont, Error> {
-    SoundFont::from_reader(&mut Cursor::new(file))
+    SoundFont::open(file.to_vec())
 }
 
 /// The fixture's points, and their bytes.

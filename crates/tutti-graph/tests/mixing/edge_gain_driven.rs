@@ -1,4 +1,4 @@
-//! Edge gain, stage G2 (doc 013, "Edge gain: a mixer is a weighted sum"): an
+//! Edge gain: an
 //! edge's gain can be **driven** by an event output (a control lane,
 //! `GraphSpec::connect_edge_gain`), with the param port's rules, and its
 //! source is aligned to the edge's sink (`DelayKey::EdgeGain`).

@@ -37,7 +37,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_plugin::PluginClient;
-use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
+use tutti_plugin::{IpcConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginForkError;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
@@ -124,7 +124,10 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     let _lock = machine_lock();
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
 
     let fork = probe
         .client
@@ -189,7 +192,10 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
     let handle: PluginHandle = probe.handle.clone();
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
 
     let fork = probe
         .client
@@ -203,7 +209,10 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
         .expect("the probe saves");
 
     // After the fork: the live instance moves to -15 dB.
-    probe.client.set_parameter(GAIN, gain_at(-15.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-15.0))
+        .expect("a declared parameter");
 
     const MIN_FORK_BLOCKS: usize = 40;
     let start = Arc::new(Barrier::new(2));
@@ -259,7 +268,9 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     // The live state moved only by its own parameter change: put the gain
     // back and it is byte for byte what it was at the fork. Through the
     // handle, the path a host has once the node is in a graph.
-    handle.send_parameter(GAIN, gain_at(-6.0));
+    handle
+        .send_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
     assert_eq!(
         handle
             .save_state(tutti_plugin_types::StateUse::Project)
@@ -384,7 +395,10 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
     let _lock = machine_lock();
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
 
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
@@ -486,13 +500,13 @@ fn a_fork_whose_server_dies_mid_render_is_a_crashed_fault() {
 fn a_fork_whose_server_hangs_is_a_timed_out_fault() {
     let _lock = machine_lock();
     let _env = env();
-    let config = BridgeConfig {
+    let config = IpcConfig {
         timeouts: {
             let mut t = Timeouts::default();
             t.call = Duration::from_secs(1);
             t
         },
-        ..BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     let _hang = ProbeEnv::new().block_from(5);
@@ -705,16 +719,19 @@ fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_export::Re
 fn an_export_through_a_failing_fork_fails_by_name() {
     let _lock = machine_lock();
     let _env = env();
-    let config = BridgeConfig {
+    let config = IpcConfig {
         timeouts: {
             let mut t = Timeouts::default();
             t.call = Duration::from_secs(1);
             t
         },
-        ..BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
     let (live, _exec) = live_graph(probe.client);
 
     let healthy = export_through_a_fork(&live).expect("a healthy fork exports");
@@ -1380,7 +1397,10 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     let _lock = machine_lock();
     let _env = env().preset_load();
     let probe = load_probe(SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
     let state = probe
         .handle
         .save_state(StateUse::Duplicate)
@@ -1390,7 +1410,7 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     std::fs::write(&preset, b"x").expect("a preset file");
 
     let launched = Ipc::launch(
-        BridgeConfig::at(unique_socket_path().expect("a socket path")),
+        IpcConfig::at(unique_socket_path().expect("a socket path")),
         &tutti_plugin_ipc::LoadRequest {
             origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: PluginFormat::Clap,
@@ -1427,8 +1447,12 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
     let _env = env();
     let a = load_probe(SAMPLE_RATE);
     let b = load_probe(SAMPLE_RATE);
-    a.client.set_parameter(GAIN, gain_at(-6.0));
-    b.client.set_parameter(GAIN, gain_at(-12.0));
+    a.client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
+    b.client
+        .set_parameter(GAIN, gain_at(-12.0))
+        .expect("a declared parameter");
     let (mut live, _exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),

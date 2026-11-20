@@ -66,7 +66,6 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-graph",
         "tutti-dsp",
         "tutti-modulation",
-        "tutti-metering",
         "tutti-codec",
         "tutti-tempo",
         "tutti-voicing",
@@ -138,18 +137,12 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     (
         "tutti-midi-network",
-        &[
-            "tutti-ump",
-            "tutti-midi-ci",
-            "tutti-units",
-            "tutti-platform",
-        ],
+        &["tutti-ump", "tutti-units", "tutti-platform"],
     ),
-    ("tutti-metering", &["tutti-units"]),
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
     (
         "tutti-codec",
-        &["tutti-units", "tutti-buffers", "tutti-rt", "tutti-platform"],
+        &["tutti-units", "tutti-buffers", "tutti-platform"],
     ),
     ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (
@@ -756,7 +749,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 52 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (6 members, 51 ranked)");
     }
 
     #[test]
@@ -921,13 +914,13 @@ mod tests {
         );
         let mut v = base();
         v.push((
-            "crates/tutti-metering",
-            "tutti-metering",
+            "crates/tutti-curve",
+            "tutti-curve",
             "[dependencies]\ntutti-units = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
         ));
         let r = run(&v);
         assert!(r.findings.iter().any(|l| l.contains(
-            "tutti-metering may depend on [\"tutti-units\"] only; it depends on {\"tutti-ump\"}"
+            "tutti-curve may depend on [\"tutti-units\"] only; it depends on {\"tutti-ump\"}"
         )));
     }
 

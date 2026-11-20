@@ -22,6 +22,4 @@ pub use extensions::{can_decode, decodable_extensions};
 #[cfg(decode)]
 pub use file_in::FileIn;
 #[cfg(decode)]
-pub use read::{
-    WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_from,
-};
+pub use read::{WaveDecode, WaveMetadata, read_wave, read_wave_metadata};

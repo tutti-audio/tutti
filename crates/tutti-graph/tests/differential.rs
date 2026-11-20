@@ -19,7 +19,7 @@ use common::{Kind, Pair, Word, bits, input_signal};
 use proptest::prelude::*;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Topology;
-use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapAlign, TapId, TapSpec};
+use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapId, TapOptions, TapSpec};
 use tutti_graph::{Edge, EdgeGain, EdgeId, FeedbackFrom, InPort, NodeSpec, OutPort, Sink, Source};
 use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec, Unforkable};
 use tutti_units::{Amplitude, Samples};
@@ -184,7 +184,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
         } else {
             None
         };
-        // Audio fan-in (doc 013, "Audio fan-in sums"): a port now and then
+        // Audio fan-in: a port now and then
         // takes several distinct sources (direct, global or feedback), which
         // the compiled op sums in `Edge` order, silent addends skipped, and
         // the reference folds from `+0.0`. A hub is wider than `MAX_PORTS`
@@ -514,7 +514,7 @@ fn schedule(which: usize, seed: u64, frames: usize) -> Vec<usize> {
 /// The executors each case runs: serial, and parallel on a participant
 /// count the seed picks from `common::WORKERS` — so every generated graph is
 /// held to the reference on both, and the parallel render is held to the
-/// serial one through it, sample for sample (doc 013, "The parallel executor").
+/// serial one through it, sample for sample.
 fn modes(seed: u64) -> [usize; 2] {
     [1, common::workers_for(seed)]
 }
@@ -606,7 +606,7 @@ proptest! {
             // harness compiles `spec` itself: give the editor the same nodes.
             pair.editor.spec_mut().topology.nodes = spec.topology.nodes.clone();
             pair.editor.spec_mut().topology.inputs = spec.topology.inputs;
-            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapAlign::ToOutput, Samples::new(1 << 16)).expect("the sources exist");
+            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapOptions::new(Samples::new(1 << 16))).expect("the sources exist");
             let mut heard = pair.editor.open_output_tap(TapId::of(2), channels, Samples::new(1 << 16)).expect("the sources exist");
             pair.switch(&valid, &desc.kinds);
             let width = tap.width();
@@ -976,8 +976,7 @@ fn the_generator_covers_what_the_suite_claims() {
 
 /// Declared costs for `desc`'s nodes, a pure function of the seed: about
 /// two in three declare `Cost::Light`, a few `Cost::Moderate`, the rest
-/// nothing (`Cost::Heavy`) — so cheap siblings pack (doc 013, "The cost
-/// model and coarsening") beside heavy tasks that keep the plan parallel.
+/// nothing (`Cost::Heavy`) — so cheap siblings pack beside heavy tasks that keep the plan parallel.
 fn random_costs(desc: &Desc, seed: u64) -> BTreeMap<NodeKey, tutti_graph::Cost> {
     let mut rng = Rng::new(seed ^ 0xC057);
     desc.kinds
@@ -1066,8 +1065,7 @@ fn the_fan_in_generator_covers_the_sum_op() {
 #[test]
 fn the_cost_generator_packs_and_spreads() {
     let (mut packed, mut packed_parallel, mut serial) = (0, 0, 0);
-    // Undeclared graphs, for the record (doc 013, the cost model's
-    // decision 2):
+    // Undeclared graphs, for the record:
     // multi-task plans the model keeps serial at four participants.
     let (mut plain_multi, mut plain_serial) = (0, 0);
     for seed in 0..512u64 {
@@ -2230,7 +2228,7 @@ fn the_fade_generator_covers_what_the_suite_claims() {
 }
 
 // ---------------------------------------------------------------------------
-// Edge gain (doc 013, "Edge gain"): weighted lanes on the generated graphs.
+// Edge gain: weighted lanes on the generated graphs.
 // ---------------------------------------------------------------------------
 
 /// The weights the generator picks from: unity (the plain add), zero (never
@@ -2432,7 +2430,7 @@ fn the_generator_draws_weighted_lanes() {
 }
 
 // ---------------------------------------------------------------------------
-// Driven edge gains (doc 013, "Edge gain", G2): lanes behind the entries.
+// Driven edge gains: lanes behind the entries.
 // ---------------------------------------------------------------------------
 
 /// The first key of the lane nodes: `fresh_key` draws below 1000, and
@@ -2575,7 +2573,7 @@ fn the_generator_draws_driven_lanes() {
 }
 
 // ---------------------------------------------------------------------------
-// Bypass and mute (doc 013, "Bypass and mute are graph state"): modes drawn
+// Bypass and mute: modes drawn
 // on the generated graphs.
 // ---------------------------------------------------------------------------
 
@@ -2687,7 +2685,7 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// Mix (doc 013, "Bypass and mute are graph state", M4): mixes drawn on the
+// Mix: mixes drawn on the
 // generated graphs, beside modes.
 // ---------------------------------------------------------------------------
 
@@ -2766,7 +2764,7 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// Driven mixes (doc 013, M4b): a control lane drives a node's mix.
+// Driven mixes: a control lane drives a node's mix.
 // ---------------------------------------------------------------------------
 
 /// The keys of the mix lane nodes (`Kind::MixDriver`), clear of every other
@@ -3024,7 +3022,7 @@ fn the_generator_draws_modes_on_every_kind_of_node() {
 }
 
 // ---------------------------------------------------------------------------
-// Bus edges (doc 013, "Buses and coercion between declared layouts", B2).
+// Bus edges.
 // ---------------------------------------------------------------------------
 
 /// A graph of nodes declaring buses, wired by bus edges (and some plain
@@ -3184,7 +3182,7 @@ fn the_bus_generator_reaches_folds_copies_and_mixes() {
 }
 
 // ---------------------------------------------------------------------------
-// Bus edges into the root (doc 013, "Buses", B4).
+// Bus edges into the root.
 // ---------------------------------------------------------------------------
 
 /// `bus_graph(seed)` with a declared root and bus edges into it, drawn from a

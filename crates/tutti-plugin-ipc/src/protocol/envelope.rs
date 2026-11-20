@@ -1,6 +1,8 @@
 //! Wire-envelope enums — the host↔server message types.
 //!
-//! [`HostMessage`] travels host → subprocess, [`BridgeMessage`] back. Both are
+//! Each connection has its own types: [`AudioRequest`] and [`AudioReply`] on the audio
+//! connection, [`ControlRequest`] and [`ControlFrame`] (a [`ControlReply`] or [`News`]) on the
+//! control one, so a message of the other connection has no variant to be written as. All are
 //! postcard-encoded, so **variant order is wire-significant**: a discriminant is a
 //! varint over declaration order, and inserting mid-enum renumbers every later
 //! variant. Append, and bump
@@ -11,6 +13,7 @@ use std::path::PathBuf;
 
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
+use crate::SlabWire;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MidiEventVec;
@@ -23,7 +26,7 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
-/// Wire-deserialization fallback for [`HostMessage::LoadPlugin::block_size`]
+/// Wire-deserialization fallback for [`ControlRequest::LoadPlugin::block_size`]
 /// when a message arrives without the field. The operative value at runtime
 /// comes from `config.max_buffer_size` (see `subprocess::launch`); this is
 /// only a safety net.
@@ -38,7 +41,7 @@ fn default_block_size() -> usize {
     DEFAULT_BLOCK_SIZE
 }
 
-/// A state staged for the next load: what [`HostMessage::LoadPlugin`] declares
+/// A state staged for the next load: what [`ControlRequest::LoadPlugin`] declares
 /// it is restoring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StagedState {
@@ -48,19 +51,146 @@ pub struct StagedState {
     pub state_use: StateUse,
 }
 
-/// A request travelling host → subprocess.
+/// The number a request on a connection carries and its answer echoes, which is
+/// how the host knows what a reply answers: a reply is the answer to the request
+/// of its id, whenever it comes and whatever else came before it.
+///
+/// The host numbers the requests of a connection from 1 and never repeats one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ReqId(u64);
+
+impl ReqId {
+    /// The request numbered `raw`.
+    #[must_use]
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    /// The number.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// A request on the control connection, with the id its answer carries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Request {
+    /// What the answer to this request echoes.
+    pub id: ReqId,
+    /// What is asked.
+    pub body: ControlRequest,
+}
+
+/// What the server is doing for a request that has no answer yet: a sign of
+/// life the host waits longer on, and for a load the point it has reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Working {
+    /// Opening the plugin: its library, instance and initialisation.
+    Opening,
+    /// Restoring the staged state into the opened plugin: one opaque plugin
+    /// call, after which a failure is the state's to answer for.
+    Restoring,
+}
+
+/// A request on the audio connection: a block, the parameters outside one, or a reset.
 ///
 /// Variant order is wire-significant; see the module docs.
-// `ProcessAudio` is inline, as `BridgeMessage::AudioProcessed` is: it is the
+// `ProcessAudio` is inline, as `AudioReply::AudioProcessed` is: it is the
 // message of every block, and a box would be an allocation at each end per
-// block. Bincode encodes a box and its contents alike.
+// block.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum HostMessage {
+pub enum AudioRequest {
+    /// Process one audio block. Audio rides the shared `AudioSlab`, in the ring
+    /// slot `seq` selects; the payload carries the per-block side-band.
+    ProcessAudio(ProcessAudioData),
+    /// Deliver parameter changes outside a block, on the audio connection, in
+    /// order with the blocks: the parameters the host wrote that no block has
+    /// carried, as one point per parameter on the first frame. The server
+    /// applies them through the format's own route for flushing parameters
+    /// (CLAP `params.flush`, VST3 `process` with no samples, a direct set for
+    /// VST2 and AU) between blocks, and answers
+    /// [`ParametersApplied`](AudioReply::ParametersApplied).
+    ApplyParameters {
+        /// What the acknowledgement echoes.
+        id: ReqId,
+        /// The changes, each parameter's newest value.
+        param_changes: tutti_plugin_types::ParameterChanges,
+    },
+    /// Clear the plugin's internal state — tails, delay lines, voices.
+    Reset,
+}
+
+/// A reply on the audio connection.
+///
+/// Variant order is wire-significant; see the module docs.
+// `AudioProcessed` holds the inline `MidiEventVec` (~5 KB). A reply is decoded
+// into one stack value and moved once to the lane thread's queue; boxing it
+// would put a heap allocation on every block's reply.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AudioReply {
+    /// Acknowledges a processed block. Audio output goes into the block's slot
+    /// in the shared `AudioSlab`'s output ring, published there before this
+    /// message is sent; the measured latency and any MIDI the plugin emitted
+    /// travel here. (Parameter / note-expression output is not routed back.)
+    /// `midi_out` is capped at `MIDI_STACK_CAPACITY` server-side; the host
+    /// refuses a longer list at decode.
+    ///
+    /// **This message is not what makes the audio readable.** The slab carries a
+    /// per-slot generation counter and answers that itself, so the host emits
+    /// silence for an unpublished block even if this arrives for it. The echoed
+    /// `seq` is for diagnostics and ordering.
+    AudioProcessed {
+        /// Wall-clock time the plugin spent in `process`, in microseconds.
+        latency_us: u64,
+        /// Echo of the request's [`ProcessAudioData::seq`].
+        #[serde(default)]
+        seq: u64,
+        /// MIDI the plugin emitted during the block.
+        #[serde(default, with = "super::wire::midi")]
+        midi_out: MidiEventVec,
+        /// What the plugin said of itself at the end of the block (CLAP's
+        /// process status). `Sleep` is sent only when the
+        /// block's output was silent, so the host may park on it.
+        #[serde(default)]
+        status: BlockStatus,
+        /// The server did not publish the block's audio, for any reason: its
+        /// input slot had been recycled before it ran, the block did not fit
+        /// the slab or the plugin's ports, an output channel was not written,
+        /// or the plugin refused the sample rate. The host reads the block as
+        /// silence, and counts a missed one refused.
+        #[serde(default)]
+        refused: bool,
+    },
+    /// Handshake sent once the subprocess is live. Carries the wire
+    /// [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION) so a host and subprocess
+    /// built from mismatched commits refuse to proceed rather than mis-parsing
+    /// each other's messages (postcard is not self-describing). `#[serde(default)]`
+    /// = 0 for an ancient binary that predates the field → treated as a mismatch.
+    Ready {
+        /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
+        #[serde(default)]
+        protocol_version: u32,
+    },
+    /// The changes of an [`ApplyParameters`](AudioRequest::ApplyParameters) are
+    /// in the plugin.
+    ParametersApplied {
+        /// The `id` of the request.
+        id: ReqId,
+    },
+}
+
+/// A request on the control connection: everything but a block.
+///
+/// Variant order is wire-significant; see the module docs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ControlRequest {
     /// Instantiate and activate the plugin, ready to process audio. A state
     /// staged before ([`StageStateChunk`](Self::StageStateChunk)) and declared
     /// in `state` is restored between the two; the server says
-    /// [`BridgeMessage::RestoringState`] just before it starts.
+    /// [`ControlFrame::Working`] (`Restoring`) just before it starts.
     LoadPlugin {
         /// Filesystem path to the plugin bundle or shared library.
         path: PathBuf,
@@ -79,7 +209,7 @@ pub enum HostMessage {
         plugin: Option<PluginId>,
         /// Sample rate, an `f64` on the wire because plugin ABIs denominate it so.
         sample_rate: SampleRate,
-        /// Maximum frames per [`ProcessAudio`](Self::ProcessAudio) block. The
+        /// Maximum frames per [`ProcessAudio`](AudioRequest::ProcessAudio) block. The
         /// plugin sizes its internal buffers from this, so a later block may not
         /// exceed it.
         #[serde(default = "default_block_size")]
@@ -88,9 +218,6 @@ pub enum HostMessage {
         /// with what it actually negotiated.
         #[serde(default = "default_format")]
         preferred_format: FloatWidth,
-        /// Name of the shared-memory audio slab, empty if not yet set up.
-        #[serde(default)]
-        shm_name: String,
         /// The state this load restores, staged before it
         /// ([`StageStateChunk`](Self::StageStateChunk)): what the host expects the
         /// server to hold. The server refuses a load whose declaration and stage
@@ -102,17 +229,6 @@ pub enum HostMessage {
     },
     /// Deactivate and destroy the plugin instance, keeping the subprocess alive.
     UnloadPlugin,
-    /// Process one audio block. Audio rides the shared `AudioSlab`, in the ring
-    /// slot `seq` selects; the payload carries the per-block side-band.
-    ProcessAudio(ProcessAudioData),
-    /// Set one parameter to a normalized value.
-    SetParameter {
-        /// Which parameter — opaque handle or positional index, per format.
-        param_id: ParamId,
-        /// Normalized `0.0..=1.0`; the loader maps it into the plugin's domain.
-        #[serde(with = "super::wire::normalized")]
-        value: Normalized,
-    },
     /// Enter or leave an automation gesture, so the plugin can record it.
     SetAutomationState {
         /// Format-neutral automation mode; the format loader encodes it onto its
@@ -127,16 +243,14 @@ pub enum HostMessage {
     /// Ask for every parameter the plugin declares.
     GetParameterList,
     /// Re-rate the plugin. Deactivates and reactivates it server-side, and is
-    /// answered by [`BridgeMessage::SampleRateSet`]: the host must learn
+    /// answered by [`ControlReply::SampleRateSet`]: the host must learn
     /// whether the plugin runs at the rate before it renders another block.
     SetSampleRate {
         /// Sample rate, an `f64` on the wire because plugin ABIs denominate it so.
         rate: SampleRate,
     },
-    /// Clear the plugin's internal state — tails, delay lines, voices.
-    Reset,
     /// Ask the plugin to serialize its state for `state_use`, answered by
-    /// `BridgeMessage::StateData`.
+    /// `ControlReply::StateData`.
     SaveState {
         /// What the state is saved for.
         state_use: StateUse,
@@ -146,7 +260,7 @@ pub enum HostMessage {
     /// State is the only message whose size a plugin chooses, and it routinely
     /// exceeds what a single frame may carry — see [`MAX_STATE_BYTES`]. So it
     /// travels as a sequence rather than one `LoadState`, and the receiver
-    /// reassembles. Every frame stays under [`MAX_FRAME_BYTES`], so the
+    /// reassembles. Every frame stays under [`CONTROL_FRAME_BYTES`], so the
     /// allocation and deadline bounds on the wire are untouched by a large
     /// state.
     ///
@@ -155,10 +269,14 @@ pub enum HostMessage {
     /// hand the plugin a corrupt blob it would then try to parse.
     ///
     /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
-    /// [`MAX_FRAME_BYTES`]: crate::MAX_FRAME_BYTES
+    /// [`CONTROL_FRAME_BYTES`]: crate::CONTROL_FRAME_BYTES
     LoadStateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
+        /// The length in bytes of the whole state, the same in every chunk: the
+        /// receiver sizes its buffer once from it, and refuses a total over its
+        /// limit before it allocates.
+        total: u64,
         /// `Some` on the final chunk, naming what the whole state is restored
         /// for, and `None` on every other: the sequence names its use once. A
         /// one-chunk state is `Some` on `seq` 0.
@@ -167,10 +285,13 @@ pub enum HostMessage {
         #[serde(with = "super::wire::bytes")]
         bytes: Vec<u8>,
     },
-    /// Point the subprocess at the shared-memory audio slab.
+    /// Point the subprocess at the shared-memory audio slab, which follows this
+    /// frame as a descriptor of its own on unix (`send_setup` writes both, and the
+    /// server's transport reads both before this reaches its session).
     SetupSharedMemory {
-        /// OS name of the shared-memory object to map.
-        shm_name: String,
+        /// What the frame carries of the slab: nothing on unix, where the
+        /// descriptor follows, and the slab's checked name on Windows.
+        slab: SlabWire,
         /// Region geometry, which both sides must agree on exactly.
         layout: SlabLayout,
     },
@@ -179,7 +300,7 @@ pub enum HostMessage {
     /// Tell the plugin whether it is rendering under realtime pressure.
     ///
     /// A sibling of [`SetSampleRate`](Self::SetSampleRate) rather than a field
-    /// on [`ProcessAudio`](Self::ProcessAudio): three of the four formats can
+    /// on [`ProcessAudio`](AudioRequest::ProcessAudio): three of the four formats can
     /// only accept this while the plugin is deactivated, and two of those
     /// rebuild buffers around it. Sending it per block would be both wasteful
     /// and unrepresentable.
@@ -231,11 +352,15 @@ pub enum HostMessage {
     /// state when it is activated; a state restored after is restored too late.
     /// So the state is staged first and the server applies it between opening the
     /// plugin and activating it. Answered once, on `last` (or on a failure), by
-    /// [`BridgeMessage::StateLoaded`]: `error: None` means staged, not
+    /// [`ControlReply::StateLoaded`]: `error: None` means staged, not
     /// applied.
     StageStateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
+        /// The length in bytes of the whole state, the same in every chunk: the
+        /// receiver sizes its buffer once from it, and refuses a total over its
+        /// limit before it allocates.
+        total: u64,
         /// Whether this is the final chunk.
         last: bool,
         /// Opaque, format-defined bytes. Never interpret them host-side.
@@ -245,7 +370,7 @@ pub enum HostMessage {
     /// Ask the plugin's format for the plain value `value` stands for
     /// (`Control::parameter_plain`): the conversion is the format's, so the
     /// host never computes it from a range. Answered by
-    /// [`BridgeMessage::ParameterPlain`].
+    /// [`ControlReply::ParameterPlain`].
     GetParameterPlain {
         /// Which parameter — opaque handle or positional index, per format.
         param_id: tutti_units::ParamId,
@@ -255,7 +380,7 @@ pub enum HostMessage {
     },
     /// Ask the plugin's format for the normalized value a plain one stands for
     /// (`Control::parameter_normalized`). Answered by
-    /// [`BridgeMessage::ParameterNormalized`].
+    /// [`ControlReply::ParameterNormalized`].
     GetParameterNormalized {
         /// Which parameter — opaque handle or positional index, per format.
         param_id: tutti_units::ParamId,
@@ -264,7 +389,7 @@ pub enum HostMessage {
     },
     /// Open the plugin's editor on the served instance itself, in this server
     /// process, answered by
-    /// [`BridgeMessage::EditorOpened`].
+    /// [`ControlReply::EditorOpened`].
     ///
     /// `parent` is the host window's platform number
     /// (`WindowHandle::as_u64`), where a window can be embedded across
@@ -282,7 +407,7 @@ pub enum HostMessage {
     /// answer.
     CloseEditor,
     /// Ask the open editor to take `size`, answered by
-    /// [`BridgeMessage::EditorSized`].
+    /// [`ControlReply::EditorSized`].
     SetEditorSize {
         /// The size the host's window has, in either unit: the server's format
         /// converts it at the scale the editor opened with. A `dpi::Size` crosses
@@ -302,15 +427,11 @@ pub enum HostMessage {
     },
 }
 
-/// A reply or notification travelling subprocess → host.
+/// What the server answers a [`ControlRequest`] with.
 ///
 /// Variant order is wire-significant; see the module docs.
-// `AudioProcessed` holds the inline `MidiEventVec` (~5 KB). A reply is decoded
-// into one stack value and moved once to the bridge thread's queue; boxing it
-// would put a heap allocation on every block's reply.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum BridgeMessage {
+pub enum ControlReply {
     /// The plugin was loaded successfully.
     PluginLoaded {
         /// The plugin the load opened: the chosen one, or the file's first when
@@ -325,43 +446,10 @@ pub enum BridgeMessage {
         /// host's preference.
         negotiated_format: FloatWidth,
         /// The plugin refused the staged state
-        /// ([`HostMessage::StageStateChunk`]): it loaded at its defaults. `None`
+        /// ([`ControlRequest::StageStateChunk`]): it loaded at its defaults. `None`
         /// when it took the state, and when none was staged.
         #[serde(default)]
         state_error: Option<String>,
-    },
-    /// Acknowledges a processed block. Audio output goes into the block's slot
-    /// in the shared `AudioSlab`'s output ring, published there before this
-    /// message is sent; the measured latency and any MIDI the plugin emitted
-    /// travel here. (Parameter / note-expression output is not routed back.)
-    /// `midi_out` is capped at `MIDI_STACK_CAPACITY` server-side; the host
-    /// refuses a longer list at decode.
-    ///
-    /// **This message is not what makes the audio readable.** The slab carries a
-    /// per-slot generation counter and answers that itself, so the host emits
-    /// silence for an unpublished block even if this arrives for it. The echoed
-    /// `seq` is for diagnostics and ordering.
-    AudioProcessed {
-        /// Wall-clock time the plugin spent in `process`, in microseconds.
-        latency_us: u64,
-        /// Echo of the request's [`ProcessAudioData::seq`].
-        #[serde(default)]
-        seq: u64,
-        /// MIDI the plugin emitted during the block.
-        #[serde(default, with = "super::wire::midi")]
-        midi_out: MidiEventVec,
-        /// What the plugin said of itself at the end of the block (CLAP's
-        /// process status). `Sleep` is sent only when the
-        /// block's output was silent, so the host may park on it.
-        #[serde(default)]
-        status: BlockStatus,
-        /// The server did not publish the block's audio, for any reason: its
-        /// input slot had been recycled before it ran, the block did not fit
-        /// the slab or the plugin's ports, an output channel was not written,
-        /// or the plugin refused the sample rate. The host reads the block as
-        /// silence, and counts a missed one refused.
-        #[serde(default)]
-        refused: bool,
     },
     /// One parameter's normalized value, or `None` if the plugin declined.
     ParameterValue {
@@ -375,9 +463,9 @@ pub enum BridgeMessage {
         parameters: Vec<ParameterInfo>,
     },
     /// One slice of the plugin's serialized state, answering
-    /// [`HostMessage::SaveState`], in order.
+    /// [`ControlRequest::SaveState`], in order.
     ///
-    /// The mirror of [`HostMessage::LoadStateChunk`] and chunked for the same
+    /// The mirror of [`ControlRequest::LoadStateChunk`] and chunked for the same
     /// reason: a sample-embedding instrument's state does not fit one frame.
     /// The host reassembles against [`MAX_STATE_BYTES`].
     ///
@@ -389,12 +477,132 @@ pub enum BridgeMessage {
     StateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
+        /// The length in bytes of the whole state, the same in every chunk: the
+        /// receiver sizes its buffer once from it, and refuses a total over its
+        /// limit before it allocates.
+        total: u64,
         /// Whether this is the final chunk.
         last: bool,
         /// Opaque, format-defined bytes. Never interpret them host-side.
         #[serde(with = "super::wire::bytes")]
         bytes: Vec<u8>,
     },
+    /// The plugin's preset list.
+    ///
+    /// Empty when the format cannot enumerate — CLAP, whose discovery is a
+    /// factory-level extension this host does not bind. That is **not** the
+    /// same as "this plugin has no presets"; a caller separates the two by
+    /// reading `Features::PRESET_LIST`, which is unprobed for CLAP and
+    /// `Some(false)` for a format that was asked and declined.
+    PresetList {
+        /// The plugin's presets, in its own order.
+        presets: Vec<Preset>,
+    },
+    /// Whether the plugin accepted a [`LoadPreset`](ControlRequest::LoadPreset).
+    ///
+    /// `false` is a refusal rather than an error, and is also the honest
+    /// answer for VST3: its programs are selected through the parameter path,
+    /// so there is no direct load to report on.
+    PresetLoaded {
+        /// Whether the plugin accepted the preset.
+        ok: bool,
+    },
+    /// The preset the plugin considers current, if it will say. `None` means
+    /// the format has no query (VST3, CLAP) or the plugin declined — never
+    /// "the first one".
+    CurrentPreset {
+        /// The current preset's opaque id, if the plugin will say.
+        id: Option<PresetId>,
+    },
+    /// The subprocess mapped the shared-memory slab and is ready to process.
+    SharedMemoryReady,
+    /// The subprocess failed at something it was asked to do.
+    ///
+    /// Fire-and-forget: nothing awaits this, so a request that a caller blocks
+    /// on needs its own reply variant rather than relying on this.
+    Error {
+        /// Human-readable reason, already formatted subprocess-side.
+        message: String,
+    },
+    /// The subprocess is exiting.
+    Shutdown,
+    /// The plugin's display string for the value that was asked about. `None`
+    /// means the plugin did not answer — the caller renders the raw number
+    /// rather than treating this as an empty label.
+    ParameterText {
+        /// The plugin's display string, or `None` if it did not answer.
+        text: Option<String>,
+    },
+    /// The value the plugin parsed a string into, normalized. `None` means it
+    /// could not parse it, and the caller must leave its field unchanged.
+    ParameterValueFromText {
+        /// The parsed value, normalized.
+        #[serde(with = "super::wire::normalized_opt")]
+        value: Option<Normalized>,
+    },
+    /// Acknowledges a `ControlRequest::LoadState`, carrying the plugin's refusal
+    /// if it had one.
+    ///
+    /// A caller awaits this frame, so the answer reports that the state was
+    /// *loaded* rather than merely that the request was sent. It carries the
+    /// message rather than a bool because the subprocess has already formatted
+    /// it and a caller wants to show the user *why* their preset did not load.
+    StateLoaded {
+        /// The plugin's refusal, or `None` on success.
+        error: Option<String>,
+    },
+    /// Answers a `ControlRequest::SetSampleRate`: the plugin runs at the rate, or
+    /// it does not.
+    ///
+    /// A refusal is not "keep the old rate": the plugin may have rolled back to
+    /// the rate it had or been left deactivated, and the host's blocks are
+    /// already at the new one, so neither renders the audio the host asked for.
+    /// The server renders silence for a refused plugin rather than let it be
+    /// heard at the wrong pitch, and the host retries it at every later rate
+    /// change.
+    SampleRateSet {
+        /// The rate that was asked for, echoed so a reply read late is never
+        /// attributed to a later request.
+        rate: SampleRate,
+        /// The plugin's reason, formatted subprocess-side, or `None` when it
+        /// now runs at `rate`.
+        error: Option<String>,
+    },
+    /// The plain value the format converted a normalized one to. `None` means
+    /// the format has none (a parameter it does not declare, or VST2 without an
+    /// integer range).
+    ParameterPlain {
+        /// The plain value, in the parameter's own unit.
+        plain: Option<f64>,
+    },
+    /// The normalized value the format converted a plain one to. `None` as for
+    /// [`ParameterPlain`](Self::ParameterPlain).
+    ParameterNormalized {
+        /// The normalized value.
+        #[serde(with = "super::wire::normalized_opt")]
+        value: Option<Normalized>,
+    },
+    /// Answers a [`ControlRequest::OpenEditor`]: the editor's size when it
+    /// embedded, `None` for a floating one, or why it did not open.
+    EditorOpened {
+        /// The size, or the refusal as the server formatted it.
+        #[serde(with = "super::wire::size_opt_result")]
+        result: Result<Option<Size>, String>,
+    },
+    /// Answers a [`ControlRequest::SetEditorSize`]: the size the editor took, or
+    /// why it did not.
+    EditorSized {
+        /// The size taken, or the refusal as the server formatted it.
+        #[serde(with = "super::wire::size_result")]
+        result: Result<Size, String>,
+    },
+}
+
+/// What the plugin says unprompted, on the control connection.
+///
+/// Variant order is wire-significant; see the module docs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum News {
     /// The plugin edited one of its own parameters, typically from its editor: a
     /// [`ParamEdit`](tutti_plugin_types::ParamEdit) (the parameter by the id the plugin reported,
     /// its normalized value as an `f64`, and where in a gesture it fell). A gesture's `Begin`,
@@ -442,134 +650,9 @@ pub enum BridgeMessage {
     /// (`kReloadComponent`). The host should resync all plugin state — it is
     /// effectively a fresh instance.
     PluginReloaded,
-    /// The plugin's preset list.
-    ///
-    /// Empty when the format cannot enumerate — CLAP, whose discovery is a
-    /// factory-level extension this host does not bind. That is **not** the
-    /// same as "this plugin has no presets"; a caller separates the two by
-    /// reading `Features::PRESET_LIST`, which is unprobed for CLAP and
-    /// `Some(false)` for a format that was asked and declined.
-    PresetList {
-        /// The plugin's presets, in its own order.
-        presets: Vec<Preset>,
-    },
-    /// Whether the plugin accepted a [`LoadPreset`](HostMessage::LoadPreset).
-    ///
-    /// `false` is a refusal rather than an error, and is also the honest
-    /// answer for VST3: its programs are selected through the parameter path,
-    /// so there is no direct load to report on.
-    PresetLoaded {
-        /// Whether the plugin accepted the preset.
-        ok: bool,
-    },
-    /// The preset the plugin considers current, if it will say. `None` means
-    /// the format has no query (VST3, CLAP) or the plugin declined — never
-    /// "the first one".
-    CurrentPreset {
-        /// The current preset's opaque id, if the plugin will say.
-        id: Option<PresetId>,
-    },
-    /// The subprocess mapped the shared-memory slab and is ready to process.
-    SharedMemoryReady,
-    /// The subprocess failed at something it was asked to do.
-    ///
-    /// Fire-and-forget: nothing awaits this, so a request that a caller blocks
-    /// on needs its own reply variant rather than relying on this.
-    Error {
-        /// Human-readable reason, already formatted subprocess-side.
-        message: String,
-    },
-    /// Handshake sent once the subprocess is live. Carries the wire
-    /// [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION) so a host and subprocess
-    /// built from mismatched commits refuse to proceed rather than mis-parsing
-    /// each other's messages (postcard is not self-describing). `#[serde(default)]`
-    /// = 0 for an ancient binary that predates the field → treated as a mismatch.
-    Ready {
-        /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
-        #[serde(default)]
-        protocol_version: u32,
-    },
-    /// The subprocess is exiting.
-    Shutdown,
-    /// The plugin's display string for the value that was asked about. `None`
-    /// means the plugin did not answer — the caller renders the raw number
-    /// rather than treating this as an empty label.
-    ParameterText {
-        /// The plugin's display string, or `None` if it did not answer.
-        text: Option<String>,
-    },
-    /// The value the plugin parsed a string into, normalized. `None` means it
-    /// could not parse it, and the caller must leave its field unchanged.
-    ParameterValueFromText {
-        /// The parsed value, normalized.
-        #[serde(with = "super::wire::normalized_opt")]
-        value: Option<Normalized>,
-    },
-    /// Acknowledges a `HostMessage::LoadState`, carrying the plugin's refusal
-    /// if it had one.
-    ///
-    /// A caller awaits this frame, so the answer reports that the state was
-    /// *loaded* rather than merely that the request was sent. It carries the
-    /// message rather than a bool because the subprocess has already formatted
-    /// it and a caller wants to show the user *why* their preset did not load.
-    StateLoaded {
-        /// The plugin's refusal, or `None` on success.
-        error: Option<String>,
-    },
-    /// Answers a `HostMessage::SetSampleRate`: the plugin runs at the rate, or
-    /// it does not.
-    ///
-    /// A refusal is not "keep the old rate": the plugin may have rolled back to
-    /// the rate it had or been left deactivated, and the host's blocks are
-    /// already at the new one, so neither renders the audio the host asked for.
-    /// The server renders silence for a refused plugin rather than let it be
-    /// heard at the wrong pitch, and the host retries it at every later rate
-    /// change.
-    SampleRateSet {
-        /// The rate that was asked for, echoed so a reply read late is never
-        /// attributed to a later request.
-        rate: SampleRate,
-        /// The plugin's reason, formatted subprocess-side, or `None` when it
-        /// now runs at `rate`.
-        error: Option<String>,
-    },
-    /// Sent while a load is in progress, just before the server restores the
-    /// staged state into the plugin it has opened: the point after which a
-    /// failure is the state's to answer for, and the host's wait is for a
-    /// restore (one opaque plugin call that may take as long as the state is
-    /// large) and not for an open.
-    RestoringState,
-    /// The plain value the format converted a normalized one to. `None` means
-    /// the format has none (a parameter it does not declare, or VST2 without an
-    /// integer range).
-    ParameterPlain {
-        /// The plain value, in the parameter's own unit.
-        plain: Option<f64>,
-    },
-    /// The normalized value the format converted a plain one to. `None` as for
-    /// [`ParameterPlain`](Self::ParameterPlain).
-    ParameterNormalized {
-        /// The normalized value.
-        #[serde(with = "super::wire::normalized_opt")]
-        value: Option<Normalized>,
-    },
-    /// Answers a [`HostMessage::OpenEditor`]: the editor's size when it
-    /// embedded, `None` for a floating one, or why it did not open.
-    EditorOpened {
-        /// The size, or the refusal as the server formatted it.
-        #[serde(with = "super::wire::size_opt_result")]
-        result: Result<Option<Size>, String>,
-    },
-    /// Answers a [`HostMessage::SetEditorSize`]: the size the editor took, or
-    /// why it did not.
-    EditorSized {
-        /// The size taken, or the refusal as the server formatted it.
-        #[serde(with = "super::wire::size_result")]
-        result: Result<Size, String>,
-    },
     /// The plugin asked its window to take `size` (CLAP's
     /// `gui.request_resize`): the host resizes the window it gave the editor
-    /// and answers with [`HostMessage::SetEditorSize`].
+    /// and answers with [`ControlRequest::SetEditorSize`].
     EditorWantsSize {
         /// The size the plugin asked for, in its format's unit.
         #[serde(with = "super::wire::size")]
@@ -577,7 +660,7 @@ pub enum BridgeMessage {
     },
     /// The server closed the editor on its own account: the plugin it belongs
     /// to was unloaded or replaced. Not an answer to a
-    /// [`HostMessage::CloseEditor`].
+    /// [`ControlRequest::CloseEditor`].
     EditorClosed,
     /// The plugin asked to be processed again (CLAP's `request_process`,
     /// from any of its threads), after it slept. The host wakes the node it
@@ -590,4 +673,55 @@ pub enum BridgeMessage {
         /// What it asked.
         request: tutti_plugin_types::TransportRequest,
     },
+}
+
+/// One frame the server sends on the control connection: an answer, a sign of
+/// life or news.
+///
+/// Variant order is wire-significant; see the module docs.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ControlFrame {
+    /// A frame of the answer to request `id`. A state is answered in several,
+    /// the last of which ends the answer ([`ControlReply::ends`]).
+    Reply {
+        /// The `id` of the request.
+        id: ReqId,
+        /// The answer.
+        reply: ControlReply,
+    },
+    /// Something the plugin did on its own.
+    News(News),
+    /// Request `id` has no answer yet and the server is at work on it: the
+    /// host's wait for it restarts.
+    Working {
+        /// The `id` of the request.
+        id: ReqId,
+        /// What the server is doing.
+        stage: Working,
+    },
+    /// Handshake sent once the subprocess is live: the first frame of the
+    /// connection. Carries the wire [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION)
+    /// so a host and subprocess built from mismatched commits refuse to
+    /// proceed rather than mis-parsing each other's messages (postcard is not
+    /// self-describing).
+    Ready {
+        /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
+        protocol_version: u32,
+    },
+}
+
+impl ControlReply {
+    /// Whether no frame of this answer follows it: a state chunk that is not
+    /// the last has more behind it.
+    #[must_use]
+    pub fn ends(&self) -> bool {
+        !matches!(self, Self::StateChunk { last: false, .. })
+    }
+}
+
+impl From<News> for ControlFrame {
+    fn from(news: News) -> Self {
+        Self::News(news)
+    }
 }

@@ -418,6 +418,7 @@ impl AuLoaded {
         }
         self.unit()
             .set_plist::<ClassInfo>(Scope::GLOBAL, Element::ZERO, data)?;
+        self.clear_written();
         let _ = crate::listener::notify_all_parameters(self.unit());
         Ok(())
     }
@@ -1176,7 +1177,9 @@ impl AuLoaded {
     /// advertise. A rejected load leaves the AU's parameters as they were; the
     /// AU is still renderable.
     pub fn load_factory_preset(&mut self, number: i32) -> Result<()> {
-        Ok(self.unit().set_present_preset(number)?)
+        self.unit().set_present_preset(number)?;
+        self.clear_written();
+        Ok(())
     }
 
     /// Reads back the preset the AU currently considers active.
@@ -1338,6 +1341,7 @@ impl AuLoaded {
         if from_document.is_err() {
             return self.set_class_info(data);
         }
+        self.clear_written();
         let _ = crate::listener::notify_all_parameters(self.unit());
         Ok(())
     }
@@ -1391,6 +1395,7 @@ impl AuLoaded {
     ) -> Result<crate::aupreset::AuPresetIdentity> {
         let identity =
             crate::aupreset::load_preset_file(self.unit(), self.handle.component(), path)?;
+        self.clear_written();
         // As in `set_state`: the state is loaded, so a failed notify is a stale
         // editor rather than a failed load.
         //

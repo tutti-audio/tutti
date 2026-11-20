@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use tutti_rt::FaultLatch;
+use crate::tap::TapEnd;
 use tutti_units::At;
 
 use super::CommitError;
@@ -36,7 +36,7 @@ pub(super) struct Link<F: Float> {
     /// Taps left out of the plan, each with the commit (by `sent`) that
     /// leaves them out once one was sent; their latch is raised once the
     /// executor has applied it.
-    ending_taps: Vec<(Option<u64>, Arc<FaultLatch>)>,
+    ending_taps: Vec<(Option<u64>, Arc<TapEnd>)>,
 }
 
 impl<F: Float> Link<F> {
@@ -133,7 +133,7 @@ impl<F: Float> Link<F> {
         let acked = self.acked;
         self.ending_taps.retain(|(at, end)| match at {
             Some(sent) if *sent <= acked => {
-                end.raise(());
+                end.raise();
                 false
             }
             _ => true,
@@ -142,7 +142,7 @@ impl<F: Float> Link<F> {
 
     /// Ends a tap the executor holds the writer of: its latch is raised once
     /// the next commit, which leaves it out, is applied.
-    pub(super) fn end_tap(&mut self, end: Arc<FaultLatch>) {
+    pub(super) fn end_tap(&mut self, end: Arc<TapEnd>) {
         self.ending_taps.push((None, end));
     }
 

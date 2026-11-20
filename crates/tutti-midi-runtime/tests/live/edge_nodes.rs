@@ -142,8 +142,8 @@ impl Input {
         self
     }
 
-    fn with_mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
-        self.node = self.node.with_mpe(mode);
+    fn mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
+        self.node = self.node.mpe(mode);
         self
     }
 }
@@ -698,11 +698,8 @@ fn a_requested_mpe_mode_is_adopted_once() {
         vec![bend],
     ]);
     let cell = Publisher::new(MpeMode::Disabled);
-    let (_ed, mut exec, _controls, seen) = input(
-        Input::new(wire).with_mpe(&cell),
-        MIDI_INPUT_PORTS as u16,
-        512,
-    );
+    let (_ed, mut exec, _controls, seen) =
+        input(Input::new(wire).mpe(&cell), MIDI_INPUT_PORTS as u16, 512);
     cell.publish(midi::lower_zone(6));
     for _ in 0..3 {
         block(&mut exec, 512);
@@ -903,11 +900,8 @@ fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
     );
     let wire = Script::new(vec![vec![range]]);
     let cell = Publisher::new(MpeMode::Disabled);
-    let (_ed, mut exec, _controls, seen) = input(
-        Input::new(wire).with_mpe(&cell),
-        MIDI_INPUT_PORTS as u16,
-        512,
-    );
+    let (_ed, mut exec, _controls, seen) =
+        input(Input::new(wire).mpe(&cell), MIDI_INPUT_PORTS as u16, 512);
     cell.publish(midi::lower_zone(6));
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -947,7 +941,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
         cc_ev(2, CCNumber::DATA_ENTRY_LSB, 0),
         note(1, 60, 5),
     ]]);
-    let node = Input::new(wire).with_mpe(&Publisher::new(midi::lower_zone(7)));
+    let node = Input::new(wire).mpe(&Publisher::new(midi::lower_zone(7)));
     let (_ed, mut exec, _c, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -995,7 +989,7 @@ fn a_fan_out_with_no_room_is_dropped_whole_and_counted() {
         note(1, 61, 509),
     ]);
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
-    let node = Input::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
+    let node = Input::new(Script::new(vec![batch])).mpe(&Publisher::new(midi::lower_zone(7)));
     let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -1026,7 +1020,7 @@ fn a_note_off_has_room_past_the_capacity() {
     ]);
     batch.extend((0..4).map(|k| at(508 + k, midi::note_off(MidiChannel::of(1), 61 + k as u8, 0))));
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
-    let node = Input::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
+    let node = Input::new(Script::new(vec![batch])).mpe(&Publisher::new(midi::lower_zone(7)));
     let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();

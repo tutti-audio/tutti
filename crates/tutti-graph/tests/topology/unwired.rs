@@ -13,8 +13,8 @@ use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor,
     EventEdge, EventIn, EventOut, Executor, FeedbackFrom, InPort, Io, Node, NodeKey, OutPort,
-    Prepare, Shape, Sink, Source, Status, TapAlign, TapId, TapSpec, TransportPosition, Unforkable,
-    Unwired,
+    Prepare, Shape, Sink, Source, Status, TapAlign, TapId, TapOptions, TapSpec, TransportPosition,
+    Unforkable, Unwired,
 };
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
@@ -477,8 +477,7 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
         .open_tap(
             TapId::of(1),
             vec![Source::Node(out(X, 0)), Source::Node(out(X, 1))],
-            TapAlign::Raw,
-            Samples::new(256),
+            TapOptions::new(Samples::new(256)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     ed.commit().expect("commits");

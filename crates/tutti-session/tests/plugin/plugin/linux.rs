@@ -1,14 +1,14 @@
 //! The server-death tests that read `/proc` or name the server's pid.
 
 use super::*;
-use tutti_plugin_types::{BridgeError, TerminationReason};
+use tutti_plugin_types::{IpcError, TerminationReason};
 
-/// **A reload that fails to load reports the `BridgeError` as the cause's
+/// **A reload that fails to load reports the `IpcError` as the cause's
 /// `source`.** The plugin is loaded from a copy of the reference plugin; the
 /// copy is deleted once it is running, and its first server aborts on its
 /// 40th block. Every replacement is then asked to load a file that is gone,
 /// so each attempt fails with the server's load error: `Reloading` and
-/// `GaveUp` carry `RecoveryFailure::ReloadFailed`, with the `BridgeError`
+/// `GaveUp` carry `RecoveryFailure::ReloadFailed`, with the `IpcError`
 /// behind it, not as text.
 #[test]
 fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
@@ -18,11 +18,11 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     // The copy is probed before the session's variables are set.
     crate::pooled::prime(&PluginRef::file(&copy));
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "40")], |b| {
-        b.plugin_recovery(Some(tutti_session::RecoveryPolicy {
+        b.plugin_recovery(tutti_session::RecoveryPolicy {
             max_failures: 2,
             backoff: Duration::from_millis(1),
             ..Default::default()
-        }))
+        })
     });
     let node = s
         .load_plugin_blocking(
@@ -80,8 +80,8 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     let source = attempt.source().expect("a failed load has a source");
     assert!(
         matches!(
-            source.downcast_ref::<BridgeError>(),
-            Some(BridgeError::LoadFailed { .. })
+            source.downcast_ref::<IpcError>(),
+            Some(IpcError::LoadFailed { .. })
         ),
         "the load's own error is the source: {source:?}"
     );
@@ -105,8 +105,8 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     };
     assert!(
         matches!(
-            last.source().and_then(|e| e.downcast_ref::<BridgeError>()),
-            Some(BridgeError::LoadFailed { .. })
+            last.source().and_then(|e| e.downcast_ref::<IpcError>()),
+            Some(IpcError::LoadFailed { .. })
         ),
         "{last:?}"
     );
@@ -133,11 +133,10 @@ fn process_ended(pid: u32) -> bool {
 #[test]
 fn a_plugin_that_stops_answering_is_ended_and_replaced() {
     let once = once_file("recovery-hang.once");
-    // The spawner is the load's moment: once the death is reported, a job it
-    // is handed (the reload) finds the hung server gone.
-    let reloading = Arc::new(AtomicBool::new(false));
+    // The reload runs in the first frame's collect after the death is reported:
+    // the drive checks the hung server is gone before that frame's jobs run.
     let hung_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let (seen, pid_cell) = (Arc::clone(&reloading), Arc::clone(&hung_pid));
+    let pid_cell = Arc::clone(&hung_pid);
     let mut s = session_built(
         &[
             PASSTHROUGH,
@@ -146,17 +145,7 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
         ],
         |b| {
             b.plugin_hang(quick_hang_policy())
-                .plugin_recovery(Some(quick_reload_policy()))
-                .spawn_with(move |job| {
-                    if seen.load(Ordering::SeqCst) {
-                        let pid = pid_cell.load(Ordering::SeqCst);
-                        assert!(
-                            process_ended(pid),
-                            "the hung server {pid} was still alive when its replacement was loaded"
-                        );
-                    }
-                    job.run();
-                })
+                .plugin_recovery(quick_reload_policy())
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -170,7 +159,13 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
     hung_pid.store(pid, Ordering::SeqCst);
 
     let mut drive = Drive::new();
-    drive.reloading = Some(reloading);
+    drive.at_reload = Some(Box::new(move || {
+        let pid = pid_cell.load(Ordering::SeqCst);
+        assert!(
+            process_ended(pid),
+            "the hung server {pid} was still alive when its replacement was loaded"
+        );
+    }));
     drive.until(&mut s, "recovered", |e| {
         matches!(
             e,

@@ -1,50 +1,5 @@
 //! All VST plugin editor related functionality.
 
-use std::os::raw::c_void;
-
-/// Implemented by plugin editors.
-#[allow(unused_variables)]
-pub trait Editor {
-    /// Get the size of the editor window.
-    fn size(&self) -> (i32, i32);
-
-    /// Get the coordinates of the editor window.
-    fn position(&self) -> (i32, i32);
-
-    /// Editor idle call. Called by host.
-    fn idle(&mut self) {}
-
-    /// Called when the editor window is closed.
-    fn close(&mut self) {}
-
-    /// Called when the editor window is opened.
-    ///
-    /// `parent` is a window pointer that the new window should attach itself to.
-    /// **It is dependent upon the platform you are targeting.**
-    ///
-    /// A few examples:
-    ///
-    ///  - On Windows, it should be interpreted as a `HWND`
-    ///  - On Mac OS X (64 bit), it should be interpreted as a `NSView*`
-    ///  - On X11 platforms, it should be interpreted as a `u32` (the ID number of the parent window)
-    ///
-    /// Return `true` if the window opened successfully, `false` otherwise.
-    fn open(&mut self, parent: *mut c_void) -> bool;
-
-    /// Return whether the window is currently open.
-    fn is_open(&mut self) -> bool;
-
-    /// Receive key up event. Return `true` if the key was used.
-    fn key_up(&mut self, keycode: KeyCode) -> bool {
-        false
-    }
-
-    /// Receive key down event. Return `true` if the key was used.
-    fn key_down(&mut self, keycode: KeyCode) -> bool {
-        false
-    }
-}
-
 /// Rectangle used to specify dimensions of editor window.
 #[doc(hidden)]
 #[repr(C)]
@@ -71,68 +26,127 @@ pub struct KeyCode {
     pub modifier: u8,
 }
 
+use crate::primitive_enum::primitive_enum;
+
 primitive_enum! {
     /// Platform independent key codes.
-    #[allow(missing_docs)]
     #[derive(Debug, Copy, Clone)]
     pub enum Key: isize {
+        /// No key.
         None = 0,
+        /// The SDK's VKEY_BACK.
         Back,
+        /// The SDK's VKEY_TAB.
         Tab,
+        /// The SDK's VKEY_CLEAR.
         Clear,
+        /// The SDK's VKEY_RETURN.
         Return,
+        /// The SDK's VKEY_PAUSE.
         Pause,
+        /// The SDK's VKEY_ESCAPE.
         Escape,
+        /// The SDK's VKEY_SPACE.
         Space,
+        /// The SDK's VKEY_NEXT.
         Next,
+        /// The SDK's VKEY_END.
         End,
+        /// The SDK's VKEY_HOME.
         Home,
+        /// The SDK's VKEY_LEFT.
         Left,
+        /// The SDK's VKEY_UP.
         Up,
+        /// The SDK's VKEY_RIGHT.
         Right,
+        /// The SDK's VKEY_DOWN.
         Down,
+        /// The SDK's VKEY_PAGEUP.
         PageUp,
+        /// The SDK's VKEY_PAGEDOWN.
         PageDown,
+        /// The SDK's VKEY_SELECT.
         Select,
+        /// The SDK's VKEY_PRINT.
         Print,
+        /// The SDK's VKEY_ENTER.
         Enter,
+        /// The SDK's VKEY_SNAPSHOT.
         Snapshot,
+        /// The SDK's VKEY_INSERT.
         Insert,
+        /// The SDK's VKEY_DELETE.
         Delete,
+        /// The SDK's VKEY_HELP.
         Help,
+        /// The SDK's VKEY_NUMPAD0.
         Numpad0,
+        /// The SDK's VKEY_NUMPAD1.
         Numpad1,
+        /// The SDK's VKEY_NUMPAD2.
         Numpad2,
+        /// The SDK's VKEY_NUMPAD3.
         Numpad3,
+        /// The SDK's VKEY_NUMPAD4.
         Numpad4,
+        /// The SDK's VKEY_NUMPAD5.
         Numpad5,
+        /// The SDK's VKEY_NUMPAD6.
         Numpad6,
+        /// The SDK's VKEY_NUMPAD7.
         Numpad7,
+        /// The SDK's VKEY_NUMPAD8.
         Numpad8,
+        /// The SDK's VKEY_NUMPAD9.
         Numpad9,
+        /// The SDK's VKEY_MULTIPLY.
         Multiply,
+        /// The SDK's VKEY_ADD.
         Add,
+        /// The SDK's VKEY_SEPARATOR.
         Separator,
+        /// The SDK's VKEY_SUBTRACT.
         Subtract,
+        /// The SDK's VKEY_DECIMAL.
         Decimal,
+        /// The SDK's VKEY_DIVIDE.
         Divide,
+        /// The SDK's VKEY_F1.
         F1,
+        /// The SDK's VKEY_F2.
         F2,
+        /// The SDK's VKEY_F3.
         F3,
+        /// The SDK's VKEY_F4.
         F4,
+        /// The SDK's VKEY_F5.
         F5,
+        /// The SDK's VKEY_F6.
         F6,
+        /// The SDK's VKEY_F7.
         F7,
+        /// The SDK's VKEY_F8.
         F8,
+        /// The SDK's VKEY_F9.
         F9,
+        /// The SDK's VKEY_F10.
         F10,
+        /// The SDK's VKEY_F11.
         F11,
+        /// The SDK's VKEY_F12.
         F12,
+        /// The SDK's VKEY_NUMLOCK.
         Numlock,
+        /// The SDK's VKEY_SCROLL.
         Scroll,
+        /// The SDK's VKEY_SHIFT.
         Shift,
+        /// The SDK's VKEY_CONTROL.
         Control,
+        /// The SDK's VKEY_ALT.
         Alt,
+        /// The SDK's VKEY_EQUALS.
         Equals,
     }
 }

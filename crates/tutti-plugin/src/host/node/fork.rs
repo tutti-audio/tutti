@@ -136,7 +136,7 @@ use tutti_units::{Latency, SampleRate};
 
 use super::{Bound, PluginClient, Unbound};
 use tutti_plugin_host::{ForkState, ForkedSources, PluginControls};
-use tutti_plugin_ipc::{IpcOrigin, Launched, OfflineWait, PluginBridge, PluginRenderFault};
+use tutti_plugin_ipc::{LaunchSpec, Launched, OfflineWait, PluginBridge, PluginRenderFault};
 use tutti_plugin_types::{Features, RenderMode, StateError, StateUse};
 use tutti_plugin_types::{PluginFailure, PluginForkError};
 
@@ -205,7 +205,7 @@ pub(crate) struct ServedFork {
     bridge: Weak<PluginBridge>,
     /// Where the live instance came from, which the fresh one is launched
     /// from again.
-    origin: IpcOrigin,
+    origin: LaunchSpec,
     /// What the live plugin can do: whether it has presets to carry across.
     features: Features,
     /// The live node's controls: its installed sources and its rate.
@@ -291,7 +291,7 @@ struct Capture {
     /// is not sent to the fork either, and the export renders what live
     /// playback plays.
     delivered: Vec<(tutti_units::ParamId, f64)>,
-    origin: IpcOrigin,
+    origin: LaunchSpec,
     /// The live node's rate, which the fresh instance is launched at.
     sample_rate: SampleRate,
     sources: ForkedSources,
@@ -467,7 +467,7 @@ mod tests {
     use super::super::mock_server::{PRESET, STATE, rig, tempo};
     use super::*;
     use std::time::Duration;
-    use tutti_plugin_ipc::{BridgeConfig, ServerWatch, unique_socket_path};
+    use tutti_plugin_ipc::{IpcConfig, ServerWatch, unique_socket_path};
     use tutti_plugin_types::PluginTail;
     use tutti_plugin_types::{PluginFormat, PluginRef, PresetId};
     use tutti_units::{SampleRate, Samples};
@@ -507,8 +507,8 @@ mod tests {
 
     /// A source over a live mock-served plugin, which lists presets.
     fn source_over(rig: &super::super::mock_server::Rig) -> ServedFork {
-        let origin = IpcOrigin {
-            config: BridgeConfig::at(unique_socket_path().expect("a socket path")),
+        let origin = LaunchSpec {
+            config: IpcConfig::at(unique_socket_path().expect("a socket path")),
             origin: PluginRef::file("test.vst3"),
             format: PluginFormat::Vst3,
             load_editor: None,
@@ -549,7 +549,7 @@ mod tests {
     /// saved state: the preset is read from the live plugin at the gather.
     #[test]
     fn a_served_forks_capture_carries_the_live_preset() {
-        let rig = rig("preset");
+        let rig = rig();
         let capture = source_over(&rig).capture(ForkMode::Live).expect("captures");
         let (preset, state) = restored_with(&capture);
         assert_eq!(preset, Some(PresetId::Number(PRESET)));
@@ -560,7 +560,7 @@ mod tests {
     /// reports as current.
     #[test]
     fn a_plugin_without_preset_loading_forks_without_a_preset() {
-        let rig = rig("no_preset");
+        let rig = rig();
         let mut source = source_over(&rig);
         source.features = Features::empty();
         let capture = source.capture(ForkMode::Live).expect("captures");
@@ -572,7 +572,7 @@ mod tests {
     /// and an offline fork is offline either way.
     #[test]
     fn a_served_live_fork_keeps_the_live_render_mode() {
-        let rig = rig("mode");
+        let rig = rig();
         let source = source_over(&rig);
         let live = source.capture(ForkMode::Live).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told nothing: realtime");

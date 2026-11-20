@@ -1,4 +1,4 @@
-//! [`Served<L>`]: one plugin of any [`OutOfProcess`] format, in this process.
+//! [`Server<L>`]: one plugin of any [`OutOfProcess`] format, in this process.
 //!
 //! The host crate of each format is the interpreter of its plugin's lifecycle
 //! (activation, restarts, requests). This is the server's one shell over them:
@@ -11,21 +11,21 @@
 //! What the formats still differ in, that only this process does, is
 //! [`ServerSide`]'s.
 //!
-//! What the plugin tells the host between blocks is [`Served::poll`]'s answer:
-//! each [`Notice`] of the core as the [`BridgeMessage`] that carries it.
+//! What the plugin tells the host between blocks is [`Server::poll`]'s answer:
+//! each [`Notice`] of the core as the [`News`] that carries it.
 
 use crate::ties::{Patience, Ties};
 use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::BridgeMessage;
+use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, LoadStage,
     LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
-    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginRef,
-    PluginResult, Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request,
-    SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
+    ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult, Prepare,
+    Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, SampleRate, Samples,
+    Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -35,7 +35,7 @@ mod any;
 mod au;
 mod format;
 
-pub(crate) use any::AnyServed;
+pub(crate) use any::AnyServer;
 pub(crate) use format::ServerSide;
 
 #[cfg(test)]
@@ -72,9 +72,9 @@ pub(crate) trait Render {
 
 /// What the session asks of the loaded plugin, with its format erased.
 ///
-/// Object-safe, implemented by [`Served<L>`] alone; the
+/// Object-safe, implemented by [`Server<L>`] alone; the
 /// `served!` table's enum lends it as a trait object.
-pub(crate) trait ServedPlugin {
+pub(crate) trait ServerPlugin {
     /// The file and plugin the load opened: the id is the plugin's, whatever
     /// the load chose.
     fn origin(&self) -> &PluginRef;
@@ -96,7 +96,7 @@ pub(crate) trait ServedPlugin {
     /// Acts on what the plugin asked of the host since the last call, and
     /// returns what the host should be told. Between blocks, on the thread
     /// that loaded the plugin.
-    fn poll(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage>;
+    fn poll(&mut self, main: MainThreadMarker) -> Vec<News>;
     /// Whether the plugin is lost: a call into it panicked, and nothing of it
     /// runs any more.
     fn is_lost(&self) -> bool;
@@ -120,17 +120,6 @@ pub(crate) trait ServedPlugin {
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo>;
     /// A parameter's value, normalized.
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized>;
-    /// Sets a parameter, or says why the plugin refuses it.
-    ///
-    /// # Errors
-    ///
-    /// As [`Control::set_parameter`].
-    fn set_parameter(
-        &mut self,
-        main: MainThreadMarker,
-        id: ParamId,
-        value: Normalized,
-    ) -> Result<(), ParamWriteError>;
     /// The host's automation mode.
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode);
     /// What the host says of the plugin's track.
@@ -202,7 +191,7 @@ pub(crate) trait ServedPlugin {
 
 /// A plugin of format `L` that the server runs: its [`Lifecycle`], the
 /// Processor's seat, the core's state, and what the host has not yet been told.
-pub(crate) struct Served<L: OutOfProcess> {
+pub(crate) struct Server<L: OutOfProcess> {
     lifecycle: Lifecycle<L>,
     state: State,
     hand: Hand<L::Processor>,
@@ -217,7 +206,7 @@ pub(crate) struct Served<L: OutOfProcess> {
     /// The parameter edits the plugin made since the last pass, reused.
     edits: Vec<ParamEdit>,
     /// What the host has not yet been told.
-    events: Vec<BridgeMessage>,
+    events: Vec<News>,
     /// A refusal was told since the last [`finish_refusals`](Self::finish_refusals).
     refused: bool,
     /// What wakes the render thread, and what it wakes. Its bell is rung by
@@ -234,7 +223,7 @@ const HOME_PATIENCE: Duration = Duration::from_secs(3);
 /// A Processor that is still on the render thread when the plugin is dropped
 /// must not outlive the Controller that destroys the plugin, so the plugin is
 /// leaked instead: only a render thread stuck inside the plugin reaches it.
-impl<L: OutOfProcess> Drop for Served<L> {
+impl<L: OutOfProcess> Drop for Server<L> {
     fn drop(&mut self) {
         if matches!(
             self.lifecycle,
@@ -260,7 +249,7 @@ fn load_failed(stage: LoadStage, reason: String) -> PluginError {
     PluginError::Load { stage, reason }
 }
 
-impl<L: ServerSide> Served<L> {
+impl<L: ServerSide> Server<L> {
     /// Loads the plugin `plugin` names, not activated.
     ///
     /// # Errors
@@ -495,11 +484,11 @@ impl<L: ServerSide> Served<L> {
         match notice {
             Notice::LatencyChanged(samples) => {
                 self.wiring.latency_samples = samples;
-                self.events.push(BridgeMessage::LatencyChanged { samples });
+                self.events.push(News::LatencyChanged { samples });
             }
             Notice::TailChanged(tail) => {
                 self.wiring.tail = tail;
-                self.events.push(BridgeMessage::TailChanged { tail });
+                self.events.push(News::TailChanged { tail });
             }
             Notice::IoChanged => {
                 self.refresh_wiring(main);
@@ -507,24 +496,23 @@ impl<L: ServerSide> Served<L> {
                 self.events.push(io);
             }
             Notice::ParamValuesChanged => {
-                self.events.push(BridgeMessage::PluginParamValuesChanged);
+                self.events.push(News::PluginParamValuesChanged);
             }
             Notice::ParamTitlesChanged => {
-                self.events.push(BridgeMessage::PluginParamTitlesChanged);
+                self.events.push(News::PluginParamTitlesChanged);
             }
             Notice::Reloaded => {
                 // A reload may change the buses: the host is told them first,
                 // so its picture is current when it re-reads everything.
                 self.refresh_wiring(main);
                 let io = self.io_changed();
-                if matches!(io, BridgeMessage::PluginIoChanged { layout: Some(_) }) {
+                if matches!(io, News::PluginIoChanged { layout: Some(_) }) {
                     self.events.push(io);
                 }
-                self.events.push(BridgeMessage::PluginReloaded);
+                self.events.push(News::PluginReloaded);
             }
             Notice::Transport(request) => {
-                self.events
-                    .push(BridgeMessage::TransportRequested { request });
+                self.events.push(News::TransportRequested { request });
             }
             // The wire carries no note-expression change, and nothing here acts
             // on one: the host reads the list when it opens a session.
@@ -563,13 +551,13 @@ impl<L: ServerSide> Served<L> {
 
     /// The `PluginIoChanged` the host is sent now: the buses the plugin has
     /// when they are not the ones the host was told last, and none otherwise.
-    fn io_changed(&mut self) -> BridgeMessage {
+    fn io_changed(&mut self) -> News {
         let now = Layout::from(&self.wiring);
         let layout = (now != self.announced).then(|| {
             self.announced = now.clone();
             now
         });
-        BridgeMessage::PluginIoChanged { layout }
+        News::PluginIoChanged { layout }
     }
 
     /// Reads the plugin's wiring again into what the host is given. A plugin
@@ -594,7 +582,7 @@ impl<L: ServerSide> Served<L> {
         matches!(self.lifecycle, Lifecycle::Active { .. })
     }
 
-    /// [`ServedPlugin::poll`]'s pass, leaving what the host should be told in
+    /// [`ServerPlugin::poll`]'s pass, leaving what the host should be told in
     /// `events`.
     ///
     /// The plugin's main-thread work runs first (`take_requests` serves what
@@ -647,7 +635,7 @@ impl<L: ServerSide> Served<L> {
     }
 
     /// Queues what the plugin edited of its own parameters since the last pass as
-    /// [`BridgeMessage::ParameterChanged`], one per [`ParamEdit`], in the order
+    /// [`News::ParameterChanged`], one per [`ParamEdit`], in the order
     /// the plugin made them: a gesture's `Begin`, its changes and its `End`
     /// reach the host in that order, since the wire and the host's inbox keep
     /// the order they were queued in.
@@ -655,11 +643,8 @@ impl<L: ServerSide> Served<L> {
         let mut edits = std::mem::take(&mut self.edits);
         edits.clear();
         L::take_edits(&mut self.lifecycle, main, &mut edits);
-        self.events.extend(
-            edits
-                .iter()
-                .map(|&edit| BridgeMessage::ParameterChanged { edit }),
-        );
+        self.events
+            .extend(edits.iter().map(|&edit| News::ParameterChanged { edit }));
         self.edits = edits;
     }
 
@@ -697,7 +682,7 @@ impl<L: ServerSide> Served<L> {
     }
 }
 
-impl<L: ServerSide> ServedPlugin for Served<L> {
+impl<L: ServerSide> ServerPlugin for Server<L> {
     fn origin(&self) -> &PluginRef {
         &self.origin
     }
@@ -714,11 +699,11 @@ impl<L: ServerSide> ServedPlugin for Served<L> {
         self.lifecycle.control()
     }
 
-    fn poll(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage> {
+    fn poll(&mut self, main: MainThreadMarker) -> Vec<News> {
         self.serve(main);
         self.forward_edits(main);
         if self.ties.bell.take() {
-            self.events.push(BridgeMessage::ProcessRequested);
+            self.events.push(News::ProcessRequested);
         }
         std::mem::take(&mut self.events)
     }
@@ -824,25 +809,9 @@ impl<L: ServerSide> ServedPlugin for Served<L> {
         self.lifecycle.control_ref()?.parameter(main, id)
     }
 
-    /// Normalized `0..=1`. On an active plugin the write is queued to the
-    /// Processor and reaches the plugin at the head of the next block.
-    fn set_parameter(
-        &mut self,
-        main: MainThreadMarker,
-        id: ParamId,
-        value: Normalized,
-    ) -> Result<(), ParamWriteError> {
-        match self.lifecycle.control() {
-            Some(control) => control.set_parameter(main, id, value),
-            // A lost plugin has nothing to write to: the write is refused, as
-            // a client's is.
-            None => Err(ParamWriteError::Lost(id)),
-        }
-    }
-
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
         if let Some(control) = self.lifecycle.control() {
-            control.set_automation_state(main, mode);
+            let _ = control.set_automation_state(main, mode);
         }
     }
 

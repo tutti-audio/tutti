@@ -10,13 +10,13 @@ use super::listener::Listener;
 
 use tutti_fixtures::midi::note_on;
 use tutti_graph::{EventCapacity, Offset};
-use tutti_midi_ci::EndpointName;
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::{
-    MidiHardwareOptions, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource,
+    MidiHardwareConfig, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource,
     VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
+use tutti_ump::EndpointName;
 use tutti_ump::{MidiChannel, Ump};
 
 const PATIENCE: Duration = Duration::from_secs(30);
@@ -31,7 +31,7 @@ fn session() -> (MidiSession, Listener) {
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let listener = Listener::over(&inlets);
     (
-        MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session"),
+        MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session"),
         listener,
     )
 }
@@ -119,10 +119,10 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
 /// Spec: m2-115/2.3#1
 #[test]
 fn a_midi1_destination_delivers_what_the_input_node_widens() {
-    let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
+    let spec = spec("midi1").protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over_input(&inlets);
-    let io = MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session");
+    let io = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
     let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");

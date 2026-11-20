@@ -72,7 +72,7 @@ use tutti_export::{
     JobError, Normalize, NormalizeSpec, Outcome, Output, Placement, Produced, Progress, Rendered,
     Resample, Target, Written,
 };
-use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapAlign, TapId};
+use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapId, TapOptions};
 use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
@@ -255,6 +255,18 @@ impl Master for BufferMaster {
     }
 }
 
+/// The channel placement a bounce gives the graph's outputs.
+#[derive(Debug, Clone, Default)]
+pub(crate) enum RootChoice {
+    /// The session's declared root topology.
+    #[default]
+    Session,
+    /// The engine's order for the width.
+    Engine,
+    /// The bounce's own topology.
+    Placed(ChannelTopology),
+}
+
 /// A bounce: what to render and where it goes, with every figure it does not
 /// name derived from the session when it starts. Start one with
 /// [`Session::bounce`] or [`Session::bounce_start`].
@@ -289,13 +301,14 @@ pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
     resample: Option<Resample>,
     latency: BounceLatency,
     tail: BounceTail,
-    root_topology: Option<Option<ChannelTopology>>,
+    root_topology: RootChoice,
     channels: Option<ChannelLayout>,
     file_topology: Option<ChannelTopology>,
     serial: bool,
     dither: Option<DitherShape>,
     on_event_loss: EventLossPolicy,
     normalize: Option<Normalize>,
+    create_new: bool,
     edit: Option<PrepareEdit<F>>,
 }
 
@@ -315,13 +328,14 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
             resample: None,
             latency: BounceLatency::default(),
             tail: BounceTail::default(),
-            root_topology: None,
+            root_topology: RootChoice::Session,
             channels: None,
             file_topology: None,
             serial: false,
             dither: Some(DitherShape::Triangular),
             on_event_loss: EventLossPolicy::default(),
             normalize: None,
+            create_new: false,
             edit: None,
         }
     }
@@ -377,6 +391,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         } = self;
         Bounce {
@@ -395,6 +410,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         }
     }
@@ -434,6 +450,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         } = self;
         let stems = stems
@@ -456,6 +473,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         })
     }
@@ -497,9 +515,16 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     }
 
     /// What the graph's output channels are, in place of the session's declared
-    /// root topology; `None` is the engine's order for the width.
-    pub fn root_topology(mut self, root: Option<ChannelTopology>) -> Self {
-        self.root_topology = Some(root);
+    /// root topology.
+    pub fn root_topology(mut self, root: ChannelTopology) -> Self {
+        self.root_topology = RootChoice::Placed(root);
+        self
+    }
+
+    /// The graph's output channels are the engine's order for the width,
+    /// whatever root topology the session declares.
+    pub fn undeclared_root(mut self) -> Self {
+        self.root_topology = RootChoice::Engine;
         self
     }
 
@@ -533,6 +558,21 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     /// this.
     pub fn on_event_loss(mut self, policy: EventLossPolicy) -> Self {
         self.on_event_loss = policy;
+        self
+    }
+
+    /// Refuses a path that already exists, for every file the bounce writes
+    /// (the master and each file stem), instead of replacing it.
+    ///
+    /// Each file is written beside its path and put in place when the bounce
+    /// finishes. A path that exists then fails the commit with
+    /// [`tutti_codec::Error::Commit`] of kind `AlreadyExists`, reported as
+    /// [`BounceError::Export`] (or inside
+    /// [`NotCommitted`](tutti_export::Error::NotCommitted) when earlier files
+    /// had landed). What is at the path is left alone and the complete file is
+    /// kept at the error's `kept` path: the app owns it, to move or delete.
+    pub fn create_new(mut self) -> Self {
+        self.create_new = true;
         self
     }
 
@@ -606,6 +646,7 @@ impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
             .field("dither", &self.dither)
             .field("on_event_loss", &self.on_event_loss)
             .field("normalize", &self.normalize)
+            .field("create_new", &self.create_new)
             .field("edit", &self.edit.is_some())
             .finish()
     }
@@ -1075,6 +1116,32 @@ pub enum BounceError {
     /// (naming its node's key), a lost event.
     #[error("bounce: {0}")]
     Export(tutti_export::Error),
+}
+
+/// `file` with the bounce's resample, dither and normalize, each only when set.
+fn file_options(
+    file: FileTarget,
+    resample: Option<Resample>,
+    dither: Option<DitherShape>,
+    normalize: Option<NormalizeSpec>,
+) -> FileTarget {
+    let file = match resample {
+        Some(resample) => file.resample(resample),
+        None => file,
+    };
+    let file = match dither {
+        Some(shape) => file.dither(shape),
+        None => file.no_dither(),
+    };
+    match normalize {
+        Some(normalize) => file.normalize(normalize),
+        None => file,
+    }
+}
+
+/// `file`, refusing an existing path when the bounce asks for it.
+fn refusing_existing(file: FileTarget, create_new: bool) -> FileTarget {
+    if create_new { file.create_new() } else { file }
 }
 
 impl From<tutti_export::Error> for BounceError {
@@ -1595,7 +1662,7 @@ fn open_stem_taps<F: Float>(
             let id = TapId::of(next);
             next += 1;
             editor
-                .open_tap(id, sources, TapAlign::ToOutput, capacity)
+                .open_tap(id, sources, TapOptions::new(capacity))
                 .map_err(|missing| match missing {
                     MissingSource::Port { node, port, .. } => {
                         BounceConfigError::StemChannelMissing {
@@ -1788,6 +1855,7 @@ where
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         } = bounce;
         if self.graph.outputs() == 0 {
@@ -1817,11 +1885,9 @@ where
                 let file = match file_topology {
                     Some(topology) => file.topology(topology),
                     None => file,
-                }
-                .resample(resample)
-                .dither(dither)
-                .normalize(normalize.map(NormalizeSpec::own));
-                file.into()
+                };
+                let file = file_options(file, resample, dither, normalize.map(NormalizeSpec::own));
+                refusing_existing(file, create_new).into()
             }
             None => {
                 let planes = BufferTarget::new(channels);
@@ -1874,11 +1940,13 @@ where
                             0,
                         )),
                     };
-                    FileTarget::new(path, format, layout)
-                        .resample(resample)
-                        .dither(dither)
-                        .normalize(gain)
-                        .into()
+                    let file = file_options(
+                        FileTarget::new(path, format, layout),
+                        resample,
+                        dither,
+                        gain,
+                    );
+                    refusing_existing(file, create_new).into()
                 }
                 StemTo::Buffers => BufferTarget::new(layout).into(),
             };
@@ -2098,7 +2166,6 @@ mod tests {
     #[test]
     fn a_bounce_is_refused_while_a_declared_pool_entry_is_pending() {
         use crate::{Declared, Life, Load, PoolEntry, PoolKey};
-        use std::sync::Mutex;
 
         struct Slow;
         impl PoolEntry for Slow {
@@ -2111,10 +2178,8 @@ mod tests {
             }
             fn handle(_: &(), _: &Life) {}
         }
-        let held = Arc::new(Mutex::new(Vec::new()));
-        let spawned = Arc::clone(&held);
         let mut session = Session::builder()
-            .spawn_with(move |job| spawned.lock().unwrap().push(job))
+            .executor(tutti_platform::Executor::polled())
             .build_detached(RATE)
             .unwrap();
         let (dc, _) = session
@@ -2127,9 +2192,6 @@ mod tests {
                 assert_eq!(keys, [PoolKey::new(&"slow")]);
             }
             other => panic!("refused naming the pending entry, got {other:?}"),
-        }
-        for job in held.lock().unwrap().drain(..) {
-            job.run();
         }
         let _ = session.update();
         assert!(session.bounce(short()).is_ok(), "landed, so it renders");
@@ -2420,12 +2482,14 @@ mod tests {
         let (dc, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.25)));
-        let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::<f32>::mono(
-            tutti_nodes::LimiterControls {
-                threshold: Db::new(-6.0),
-                ceiling: Db::new(-1.0),
-                ..tutti_nodes::LimiterControls::DEFAULT
-            },
+        let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::<f32>::from(
+            tutti_nodes::LimiterConfig::new(tutti_buffers::BusTopology::MONO).controls(
+                tutti_nodes::LimiterControls {
+                    threshold: Db::new(-6.0),
+                    ceiling: Db::new(-1.0),
+                    ..tutti_nodes::LimiterControls::DEFAULT
+                },
+            ),
         ));
         session
             .graph()

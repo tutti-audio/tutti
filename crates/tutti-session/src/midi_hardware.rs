@@ -37,7 +37,7 @@ use crate::midi::Midi;
 /// or the Product Instance Id alone announces the Endpoint again.
 ///
 /// ```
-/// use tutti_midi_ci::EndpointName;
+/// use tutti_ump::EndpointName;
 /// use tutti_midi_device::MidiIdentity;
 /// use tutti_session::MidiPolicy;
 /// use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};

@@ -9,20 +9,19 @@ use tutti_platform::Instant;
 use crate::common::{MF, blocks, note, play};
 use tutti_graph::Losses;
 use tutti_midi_ci::Muid;
-use tutti_midi_ci::{
-    CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointName, MaxSysexSize,
-};
+use tutti_midi_ci::{CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize};
 use tutti_midi_device::{
     Capabilities, Endpoint, EndpointId, MidiIdentity, PortDirection, Supports,
 };
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
-use tutti_midi_hardware::{MidiHardwareOptions, ProfilesChange};
+use tutti_midi_hardware::{MidiHardwareConfig, ProfilesChange};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::Peer as _;
 use tutti_session::{
     EventInPort, MidiPolicy, MidiPolicyError, MidiReport, PHASES, PhaseCx, Session, SessionEvent,
     SetRefusal, ValueErrorKind, midi_input, midi_output,
 };
+use tutti_ump::EndpointName;
 use tutti_ump::{
     DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MidiGroup, Protocol, Stream,
     StreamConfig, SysexAssembler, SysexStep, U7, Ump, UmpVersion,
@@ -54,14 +53,14 @@ fn policy(model: u8, name: &str) -> MidiPolicy {
 
 /// A session over a fake OS with one duplex UMP device, "Wire", connected.
 fn wired(last_group: u8) -> (Session, FakeCounters) {
-    wired_with(last_group, MidiHardwareOptions::new())
+    wired_with(last_group, MidiHardwareConfig::new())
 }
 
-/// As [`wired`], with the session opened with `options`.
-fn wired_with(last_group: u8, options: MidiHardwareOptions) -> (Session, FakeCounters) {
+/// As [`wired`], with the session opened with `config`.
+fn wired_with(last_group: u8, config: MidiHardwareConfig) -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let mut s = Session::builder()
-        .midi_hardware_over(backend, options)
+        .midi_hardware_over(backend, config)
         .midi_groups(MidiGroup::of(last_group))
         .sample_rate(SampleRate::of(48_000.0))
         .build()
@@ -487,7 +486,7 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
 fn under_jitter_reduction_the_endpoint_reports_that_it_receives_jr() {
     let (mut s, fake) = wired_with(
         0,
-        MidiHardwareOptions::new().input_timing(tutti_midi_hardware::InputTiming::JitterReduction),
+        MidiHardwareConfig::new().input_timing(tutti_midi_hardware::InputTiming::JitterReduction),
     );
     s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
         .unwrap();

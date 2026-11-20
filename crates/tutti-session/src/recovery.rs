@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_plugin_types::{BridgeError, PluginFailure};
+use tutti_plugin_types::{IpcError, PluginFailure};
 
 use crate::CrossfadeRefused;
 
@@ -163,14 +163,14 @@ impl std::fmt::Display for PortCounts {
 ///
 /// An error behind a failure is its [`source`](std::error::Error::source),
 /// typed. It is `Clone` (an event outlives the call that raised it), so the
-/// one error that is not, [`BridgeError`], is held in an `Arc`.
+/// one error that is not, [`IpcError`], is held in an `Arc`.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum RecoveryFailure {
     /// The replacement's load failed.
     ReloadFailed {
         /// The load's error.
-        source: Arc<BridgeError>,
+        source: Arc<IpcError>,
     },
     /// The replacement opened inside the host's process, which a served
     /// plugin's replacement must not.
@@ -193,7 +193,7 @@ pub enum RecoveryFailure {
         /// The graph's refusal.
         source: CrossfadeRefused,
     },
-    /// The reload's job was dropped by the session's spawner before it ran.
+    /// The reload's job was dropped by the session's executor before it ran.
     ReloadDropped,
     /// The reload's job panicked.
     ReloadPanicked {

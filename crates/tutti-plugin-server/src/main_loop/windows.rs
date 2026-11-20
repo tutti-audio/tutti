@@ -5,7 +5,7 @@
 //! touching the loop's logic.
 
 use tutti_plugin_ipc_ffi::Ready;
-use tutti_plugin_types::{BridgeResult, Wakeups};
+use tutti_plugin_types::{IpcResult, Wakeups};
 
 #[path = "windows_bell.rs"]
 mod bell;
@@ -14,6 +14,11 @@ pub(crate) use bell::Bell;
 
 pub(crate) type Listener = interprocess::local_socket::Listener;
 pub(crate) type Stream = interprocess::local_socket::Stream;
+
+/// What a slab is received over on `stream`: nothing, as its name is in the frame.
+pub(crate) fn connection(_: &Stream) -> tutti_plugin_ipc_ffi::Connection<'_> {
+    tutti_plugin_ipc_ffi::Connection::detached()
+}
 
 /// The reactor. A named pipe has no descriptor to add the plugin's to, so it
 /// holds nothing.
@@ -36,7 +41,7 @@ impl Native {
         timeout: std::time::Duration,
         bell: &Bell,
         _ready: &mut Vec<Ready>,
-    ) -> BridgeResult<bool> {
+    ) -> IpcResult<bool> {
         wait_readable(stream, Some(timeout), bell)
     }
 }
@@ -61,7 +66,7 @@ pub(crate) fn wait_readable(
     stream: &Stream,
     timeout: Option<std::time::Duration>,
     wake: &Bell,
-) -> BridgeResult<bool> {
+) -> IpcResult<bool> {
     use std::os::windows::io::AsHandle;
     use std::time::Duration;
     use tutti_platform::Instant;

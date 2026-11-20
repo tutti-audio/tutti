@@ -11,8 +11,10 @@ use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_fixtures::{Whole, main_thread};
 
 use tutti_buffers::FloatWidth;
-use tutti_plugin_types::{ChannelTable, MaxBlock, PluginError, Prepare, SampleRate, Samples};
-use tutti_vst2_host::{MidiEventVec, Vst2Error, Vst2Loaded, Vst2ProcessContext, Vst2Processor};
+use tutti_plugin_types::{
+    ChannelTable, MaxBlock, MidiEventVec, PluginError, Prepare, SampleRate, Samples,
+};
+use tutti_vst2_host::{Vst2Error, Vst2Loaded, Vst2ProcessContext, Vst2Processor};
 
 /// The two halves of one activation.
 pub type Active = tutti_fixtures::Active<Whole<Vst2Loaded>>;

@@ -23,9 +23,9 @@
 //! ([`UnitParam::arc`], [`Azimuth::shortest_arc_to`]) and wrap on read, not
 //! subtract frames.
 //!
-//! An event source **replaces** the base (doc 014 §5.6): a port takes at
+//! An event source **replaces** the base: a port takes at
 //! most one. Modulation (offsets, depth, LFOs) is not the graph's: a
-//! control lane sums it and sends the value (doc 014).
+//! control lane sums it and sends the value.
 //!
 //! The rules are documented on
 //! [`GraphSpec::connect_param`](crate::GraphSpec::connect_param).
@@ -1022,7 +1022,7 @@ impl<F: Float> ParamState<F> {
     }
 
     /// State for **one** port at blocks of up to `max` frames, clamping to
-    /// `ranges`: an edge gain's lane (doc 013, "Edge gain"), which runs the
+    /// `ranges`: an edge gain's lane, which runs the
     /// param port's step on its own.
     pub(crate) fn lane(max: usize, declick: usize, ranges: &ParamRanges) -> Self {
         Self::new(1, max, declick, ranges.readers())

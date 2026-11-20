@@ -320,7 +320,7 @@ struct TapOpened {
     /// Its lanes: the writer the executor holds has as many rings.
     width: usize,
     /// Raised when every node it read was removed.
-    end: Arc<tutti_rt::FaultLatch>,
+    end: Arc<crate::tap::TapEnd>,
 }
 
 /// A panic payload as text.
@@ -459,8 +459,7 @@ impl<F: Float> Editor<F> {
     /// at the end of its last block: `(play_epoch, play)` at the next
     /// block's first frame, before a play start there. One wait-free load;
     /// before the first block it is the executor's starting reading (play
-    /// 0). What the modulation compiler dates a rate edit's anchor from
-    /// (doc 014 §4.3).
+    /// 0). What the modulation compiler dates a rate edit's anchor from.
     pub fn play_reading(&self) -> crate::PlayReading {
         self.link.play_reading()
     }
@@ -522,8 +521,7 @@ impl<F: Float> Editor<F> {
         &self.shapes
     }
 
-    /// Declares the bus edge `from -> to` (doc 013, "Buses and coercion
-    /// between declared layouts"): the output bus `from` feeds the input bus
+    /// Declares the bus edge `from -> to`: the output bus `from` feeds the input bus
     /// `to`, folded between the two declared topologies. The fold is checked
     /// **here**, against the shapes the units declared, so a failure is the
     /// author's call and nothing is stored. The commit lowers it to weighted

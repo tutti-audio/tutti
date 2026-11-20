@@ -14,6 +14,8 @@ categories = ["multimedia::audio", "os", "wasm"]
 workspace = true
 
 [dependencies]
+# `Staged`: the warning for a leftover that cannot be removed.
+tracing.workspace = true
 # `Instant` and `SystemTime`, re-exported at the root: std's types on a native
 # target, `performance.now()` and `Date.now()` on the web.
 web-time = "1.1.0"
@@ -40,6 +42,7 @@ windows = { version = "0.62", features = [
 
 [dev-dependencies]
 assert_no_alloc = { version = "1", default-features = false }
+tempfile = "3.10"
 
 # `MainThreadMarker::new` against the process's real main thread: the default harness
 # runs every test on a spawned thread.

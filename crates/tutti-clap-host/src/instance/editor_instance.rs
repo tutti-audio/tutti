@@ -129,7 +129,7 @@ impl Editor for ClapEditor {
 
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
         // The editor instance is the one whose UI shows the indication.
-        Control::set_automation_state(&mut self.inner, main, mode);
+        let _ = Control::set_automation_state(&mut self.inner, main, mode);
     }
 
     fn take_requests(&mut self, _main: MainThreadMarker, out: &mut Vec<Request>) {
@@ -291,7 +291,7 @@ mod tests {
     /// The editor's plain value is normalized before it leaves for the audio
     /// instance.
     ///
-    /// This is the whole point of the bridge: `set_parameter_rt` on the far side
+    /// This is the whole point of the bridge: `PluginBridge::set_parameter_value` on the far side
     /// takes `0..=1`, while CLAP reports the plugin's own units. Forwarding
     /// 20000 Hz unconverted would clamp to full scale at the consumer and a
     /// cutoff dragged to 20 Hz would arrive as full-open — the audio going
@@ -363,7 +363,7 @@ mod tests {
     }
 
     /// A note event addresses no parameter, so it is no edit; either one
-    /// forwarded would call `set_parameter_rt` with a value that means
+    /// forwarded would call `set_parameter_value` with a value that means
     /// something else.
     #[test]
     fn an_event_that_is_not_a_parameter_edit_is_dropped() {

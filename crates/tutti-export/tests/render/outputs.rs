@@ -23,7 +23,7 @@ use tutti_export::{
 };
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutPort, Prepare, Shape,
-    Source, Status, TapAlign, TapId, TapReader,
+    Source, Status, TapId, TapOptions, TapReader,
 };
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
@@ -76,12 +76,7 @@ impl Rig {
             .collect();
         let reader = self
             .editor
-            .open_tap(
-                TapId::of(id),
-                sources,
-                TapAlign::ToOutput,
-                Samples::new(2048),
-            )
+            .open_tap(TapId::of(id), sources, TapOptions::new(Samples::new(2048)))
             .expect("the node exists");
         self.editor.commit().expect("commits");
         self.executor.apply_pending();
@@ -107,7 +102,7 @@ fn job(frames: usize) -> Job {
 }
 
 fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
-    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO).dither(None)
+    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO).no_dither()
 }
 
 fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
@@ -119,7 +114,7 @@ fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
         },
         ChannelLayout::STEREO,
     )
-    .dither(None)
+    .no_dither()
 }
 
 fn planes(produced: Produced) -> Vec<Vec<f32>> {
@@ -526,8 +521,7 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         .map(|n| dir.path().join(n))
         .collect();
     let float = |path: &std::path::Path, spec| {
-        FileTarget::new(path, Format::Wav(Pcm::Float32), ChannelLayout::STEREO)
-            .normalize(Some(spec))
+        FileTarget::new(path, Format::Wav(Pcm::Float32), ChannelLayout::STEREO).normalize(spec)
     };
     let mut produced = render(
         &mut graph,
@@ -596,9 +590,10 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
 }
 
 /// A rename that fails after another landed is `NotCommitted`, naming the file
-/// that landed, which is kept; the file that did not is not left behind and
-/// what was in its way is as it was. A first rename that fails is the plain
-/// error, with nothing landed.
+/// that landed, which is kept; the file that did not land is kept where the
+/// commit error names it, and what was in its way is as it was. A first rename
+/// that fails is the plain commit error, with nothing landed and the outputs
+/// after it removed.
 ///
 /// The second target is a directory, which a file cannot replace.
 #[test]
@@ -623,7 +618,15 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
     match err {
         Error::NotCommitted { landed, cause } => {
             assert_eq!(landed, std::slice::from_ref(&first));
-            assert!(matches!(cause, tutti_codec::Error::Io(_)), "{cause:?}");
+            let tutti_codec::Error::Commit(commit) = &cause else {
+                panic!("a failed rename is a commit error, got {cause:?}");
+            };
+            let kept = commit.kept().to_path_buf();
+            assert!(
+                std::fs::read(&kept).unwrap().starts_with(b"RIFF"),
+                "the unlanded file is kept whole"
+            );
+            std::fs::remove_file(&kept).unwrap();
         }
         other => panic!("{other:?}"),
     }
@@ -656,8 +659,16 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &mut Control::none(),
     )
     .expect_err("a file cannot replace a directory");
-    assert!(matches!(err, Error::Io(_)), "{err:?}");
+    let Error::Encode(tutti_codec::Error::Commit(commit)) = &err else {
+        panic!("a failed first rename is a commit error, got {err:?}");
+    };
+    std::fs::remove_file(commit.kept()).unwrap();
     assert!(!dir.path().join("third.wav").exists());
+    assert_eq!(
+        names(dir.path()),
+        ["first.wav", "second.wav"],
+        "only the targets remain"
+    );
 }
 
 /// Outputs that contradict each other are named errors before anything is
@@ -669,7 +680,11 @@ fn outputs_that_contradict_each_other_are_named_errors() {
     let dir = tempfile::tempdir().unwrap();
     let mode = Normalize::peak(Db::new(-6.0));
     let file = |n: &str, spec: Option<NormalizeSpec>| {
-        Output::master(wav(&dir.path().join(n), Pcm::Int16).normalize(spec))
+        let target = wav(&dir.path().join(n), Pcm::Int16);
+        Output::master(match spec {
+            Some(spec) => target.normalize(spec),
+            None => target,
+        })
     };
     let run = |outputs: Vec<Output>| {
         render(
@@ -750,7 +765,7 @@ fn an_unmeasurable_output_names_its_index() {
                     Format::Wav(Pcm::Float32),
                     ChannelLayout::STEREO,
                 )
-                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
+                .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
             ),
             Output::tap(
                 reader,
@@ -760,7 +775,7 @@ fn an_unmeasurable_output_names_its_index() {
                     Format::Wav(Pcm::Float32),
                     ChannelLayout::STEREO,
                 )
-                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
+                .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
             ),
         ],
         &mut Control::none(),
@@ -836,7 +851,7 @@ fn a_lufs_output_with_no_placement_is_refused_before_the_render() {
     let dir = tempfile::tempdir().unwrap();
     let mut graph = wide(3);
     let lufs = file_of(&dir.path().join("l.wav"), 3)
-        .normalize(Some(NormalizeSpec::own(Normalize::lufs(Db::new(-23.0)))));
+        .normalize(NormalizeSpec::own(Normalize::lufs(Db::new(-23.0))));
     let err = render(
         &mut graph,
         &job(2_000),
@@ -881,8 +896,7 @@ fn tone(width: u16) -> RenderGraph {
 fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.wav");
-    let target =
-        file_of(&path, 3).normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-12.0)))));
+    let target = file_of(&path, 3).normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
     let written = render(
         &mut tone(3),
         &job(48_000),
@@ -919,7 +933,7 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
 fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let target = file_of(&dir.path().join("p.wav"), 6)
-        .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-12.0)))));
+        .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
     let written = render(
         &mut tone(6),
         &job(48_000),

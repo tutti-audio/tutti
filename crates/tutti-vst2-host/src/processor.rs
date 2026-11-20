@@ -12,9 +12,10 @@
 
 use std::sync::Arc;
 use tutti_graph::UmpAt;
+use tutti_plugin_types::{MidiEventVec, TransportInfo};
 use tutti_rt::{Counter, Tally};
 
-use vst::host::RenderHandle;
+use vst::RenderHandle;
 
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{ByWidth, Float, InputOutput};
@@ -26,11 +27,11 @@ use tutti_units::Normalized;
 
 use crate::host::HostState;
 use crate::loaded::{AudioSide, LossesTold};
-use crate::midi::MidiIo;
-use crate::scratch::RenderScratch;
 use crate::time_info::{advance_time_info, build_vst2_time_info};
 use crate::transport_cell::TransportWriter;
-use crate::types::{MidiEventVec, TransportInfo, Vst2ProcessContext};
+use crate::types::Vst2ProcessContext;
+use vst::MidiIo;
+use vst::RenderScratch;
 
 /// The realtime half of an activation: renders blocks.
 ///
@@ -412,10 +413,13 @@ impl Vst2Processor {
                 refused += 1;
                 continue;
             };
-            // `Normalized` is already on the unit interval, so the cast cannot
+            // `Normalized` is already on the unit interval, so the narrowing cannot
             // hand the plugin a NaN or an out-of-range value.
             let value: Normalized = point.value;
-            if !crate::host::host_write(|| self.render.set_parameter(index, value.get() as f32)) {
+            if !self
+                .host
+                .write(index, value, |word| self.render.set_parameter(index, word))
+            {
                 refused += 1;
             }
         }
@@ -490,6 +494,17 @@ fn count_of(n: u64) -> usize {
 }
 
 impl Processor for Vst2Processor {
+    /// A direct `setParameter` of each parameter's last value, which the SDK
+    /// allows between blocks.
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+        let refused = self.write_automation(changes);
+        if refused == 0 {
+            Ok(())
+        } else {
+            Err(PluginError::Block("the plugin refused a parameter write"))
+        }
+    }
+
     /// Takes the node's own intake: events go to the plugin's own queue.
     fn event_input(&self) -> std::num::NonZeroU32 {
         tutti_plugin_types::MIDI_STACK_BOUND
@@ -518,5 +533,7 @@ impl Processor for Vst2Processor {
         self.midi.send.reset_midi();
         self.midi.reset_out();
         self.render.stop_process();
+        // The plugin starts over from its own state: no value it reports is a host write.
+        self.host.clear_written();
     }
 }

@@ -5,7 +5,7 @@
 //! VST3 has `IMidiMapping::getMidiControllerAssignment`, which answers "which
 //! parameter does CC 1 on channel 0 drive?"; CLAP has `clap_plugin_param_indication`
 //! and the note-ports/param mapping extensions. **VST 2.4 has no equivalent, and
-//! the `tutti-vst2-ffi` bindings confirm it**: the full `OpCode` enum (`tutti-vst2-ffi`'s
+//! the `tutti-vst2-ffi` bindings confirm it**: the full `EffectOpCode` enum (`tutti-vst2-ffi`'s
 //! `plugin.rs`) contains no opcode that takes a controller number, and none that
 //! returns a parameter index for anything. A VST2 plugin receives MIDI CCs as
 //! raw `MidiEvent`s in `effProcessEvents` and interprets them internally; the
@@ -42,9 +42,7 @@
 //! `effGetCurrentMidiProgram`, which is why the decode compares against the
 //! spec'd success value instead of testing `!= 0`.
 
-use vst::api;
-
-use tutti_plugin_types::{LinearRange, MainThreadMarker, ParamMapping, read_c_str};
+use tutti_plugin_types::{LinearRange, MainThreadMarker, ParamMapping, PlainMap, read_c_str};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -97,16 +95,16 @@ impl ParameterPropertyFlags {
     /// plugin-authored and VST2 reserves the high bits, so a plugin setting one
     /// must not invalidate the bits that are understood.
     fn from_bits(raw: i32) -> Self {
-        let bits = api::ParameterFlags::from_bits_truncate(raw);
+        let bits = vst::ParameterFlags::from_bits_truncate(raw);
         Self {
-            is_switch: bits.contains(api::ParameterFlags::IS_SWITCH),
-            uses_integer_min_max: bits.contains(api::ParameterFlags::USES_INTEGER_MIN_MAX),
-            uses_float_step: bits.contains(api::ParameterFlags::USES_FLOAT_STEP),
-            uses_int_step: bits.contains(api::ParameterFlags::USES_INT_STEP),
-            supports_display_index: bits.contains(api::ParameterFlags::SUPPORTS_DISPLAY_INDEX),
+            is_switch: bits.contains(vst::ParameterFlags::IS_SWITCH),
+            uses_integer_min_max: bits.contains(vst::ParameterFlags::USES_INTEGER_MIN_MAX),
+            uses_float_step: bits.contains(vst::ParameterFlags::USES_FLOAT_STEP),
+            uses_int_step: bits.contains(vst::ParameterFlags::USES_INT_STEP),
+            supports_display_index: bits.contains(vst::ParameterFlags::SUPPORTS_DISPLAY_INDEX),
             supports_display_category: bits
-                .contains(api::ParameterFlags::SUPPORTS_DISPLAY_CATEGORY),
-            can_ramp: bits.contains(api::ParameterFlags::CAN_RAMP),
+                .contains(vst::ParameterFlags::SUPPORTS_DISPLAY_CATEGORY),
+            can_ramp: bits.contains(vst::ParameterFlags::CAN_RAMP),
         }
     }
 }
@@ -152,18 +150,22 @@ impl IntegerRange {
 /// `0.0`.
 impl ParamMapping for IntegerRange {
     fn plain(&self, value: Normalized) -> f64 {
-        self.line().plain(value)
+        self.plain_map().plain(value)
     }
 
     fn normalized(&self, plain: f64) -> Normalized {
-        self.line().normalized(plain)
+        self.plain_map().normalized(plain)
     }
 }
 
 impl IntegerRange {
-    /// The line between the ends, backwards for an inverted range.
-    fn line(&self) -> LinearRange {
-        LinearRange::new(f64::from(self.min), f64::from(self.max))
+    /// The plain-value map of the range: the line between the ends, backwards
+    /// for an inverted range. The one place the map is built: this type's
+    /// [`ParamMapping`] is it, and the parameter's
+    /// [`plain_map`](tutti_plugin_types::ParameterInfo::plain_map) is it.
+    #[must_use]
+    pub fn plain_map(&self) -> PlainMap {
+        PlainMap::Linear(LinearRange::new(f64::from(self.min), f64::from(self.max)))
     }
 }
 
@@ -313,7 +315,7 @@ impl ParameterProperties {
     /// hand-built structs. That is not a convenience: no plugin available here
     /// implements the opcode, so a test that could only go through a real
     /// plugin would assert nothing.
-    pub(crate) fn decode(index: i32, raw: &api::ParameterProperties) -> Self {
+    pub(crate) fn decode(index: i32, raw: &vst::ParameterProperties) -> Self {
         let flags = ParameterPropertyFlags::from_bits(raw.flags);
 
         Self {
@@ -351,7 +353,7 @@ impl ParameterProperties {
 
     /// Decodes the category triple, or `None` when the plugin set the flag but
     /// left the index at VST2's `0` = uncategorised.
-    fn decode_category(raw: &api::ParameterProperties) -> Option<ParameterCategory> {
+    fn decode_category(raw: &vst::ParameterProperties) -> Option<ParameterCategory> {
         // Categories are 1-based. A zero index with the flag set means
         // "this parameter is in no category" — reporting it as category 0
         // would invent a group every uncategorised parameter shares.
@@ -372,21 +374,21 @@ impl ParameterProperties {
 impl MidiProgram {
     /// Decodes the raw struct. Separate from the query for the same reason as
     /// [`ParameterProperties::decode`].
-    fn decode(index: i32, raw: &api::MidiProgramName) -> Self {
+    fn decode(index: i32, raw: &vst::MidiProgramName) -> Self {
         Self {
             index,
             name: read_c_str(&raw.name),
             midi_program: raw.midi_program,
             bank: decode_bank(raw.midi_bank_msb, raw.midi_bank_lsb),
             parent_category: decode_parent_category(raw.parent_category_index),
-            is_omni: api::MidiProgramFlags::from_bits_truncate(raw.flags)
-                .contains(api::MidiProgramFlags::IS_OMNI),
+            is_omni: vst::MidiProgramFlags::from_bits_truncate(raw.flags)
+                .contains(vst::MidiProgramFlags::IS_OMNI),
         }
     }
 }
 
 impl MidiProgramCategory {
-    fn decode(index: i32, raw: &api::MidiProgramCategory) -> Self {
+    fn decode(index: i32, raw: &vst::MidiProgramCategory) -> Self {
         Self {
             index,
             name: read_c_str(&raw.name),
@@ -396,7 +398,7 @@ impl MidiProgramCategory {
 }
 
 impl MidiKeyName {
-    fn decode(program_index: i32, key_number: i32, raw: &api::MidiKeyName) -> Self {
+    fn decode(program_index: i32, key_number: i32, raw: &vst::MidiKeyName) -> Self {
         Self {
             program_index,
             key_number,
@@ -612,8 +614,8 @@ mod tests {
 
     /// Builds a raw properties struct with the flags word and nothing else set,
     /// so a test can prove the gated fields are not read.
-    fn raw_properties(flags: i32) -> api::ParameterProperties {
-        api::ParameterProperties {
+    fn raw_properties(flags: i32) -> vst::ParameterProperties {
+        vst::ParameterProperties {
             step_float: 0.0,
             small_step_float: 0.0,
             large_step_float: 0.0,
@@ -628,7 +630,7 @@ mod tests {
             category: 0,
             num_parameters_in_category: 0,
             reserved: 0,
-            category_label: [0; api::consts::MAX_CATEGORY_LABEL],
+            category_label: [0; vst::MAX_CATEGORY_LABEL],
             future: [0; 16],
         }
     }
@@ -658,7 +660,7 @@ mod tests {
         assert_eq!(ungated.integer_range, None);
         assert!(!ungated.flags.uses_integer_min_max);
 
-        raw.flags = api::ParameterFlags::USES_INTEGER_MIN_MAX.bits();
+        raw.flags = vst::ParameterFlags::USES_INTEGER_MIN_MAX.bits();
         let gated = ParameterProperties::decode(0, &raw);
         assert_eq!(gated.integer_range, Some(IntegerRange { min: 0, max: 127 }));
         // The range bit does not declare the steps.
@@ -675,7 +677,7 @@ mod tests {
         raw.large_step_integer = 12;
         assert_eq!(ParameterProperties::decode(0, &raw).integer_steps, None);
 
-        raw.flags = api::ParameterFlags::USES_INT_STEP.bits();
+        raw.flags = vst::ParameterFlags::USES_INT_STEP.bits();
         let decoded = ParameterProperties::decode(0, &raw);
         assert_eq!(
             decoded.integer_steps,
@@ -757,8 +759,8 @@ mod tests {
         assert_eq!(ungated.float_steps, None);
         assert_eq!(ungated.display_index, None);
 
-        raw.flags = (api::ParameterFlags::USES_FLOAT_STEP
-            | api::ParameterFlags::SUPPORTS_DISPLAY_INDEX)
+        raw.flags = (vst::ParameterFlags::USES_FLOAT_STEP
+            | vst::ParameterFlags::SUPPORTS_DISPLAY_INDEX)
             .bits();
         let gated = ParameterProperties::decode(0, &raw);
         assert_eq!(
@@ -780,7 +782,7 @@ mod tests {
     /// category renders them as a single bogus folder.
     #[test]
     fn category_zero_means_uncategorised_even_with_the_flag_set() {
-        let mut raw = raw_properties(api::ParameterFlags::SUPPORTS_DISPLAY_CATEGORY.bits());
+        let mut raw = raw_properties(vst::ParameterFlags::SUPPORTS_DISPLAY_CATEGORY.bits());
         raw.category = 0;
         raw.num_parameters_in_category = 4;
 
@@ -841,7 +843,7 @@ mod tests {
     /// `USES_INTEGER_MIN_MAX` declaration would be lost.
     #[test]
     fn undefined_flag_bits_are_ignored_not_fatal() {
-        let raw = raw_properties(api::ParameterFlags::USES_INTEGER_MIN_MAX.bits() | (1 << 20));
+        let raw = raw_properties(vst::ParameterFlags::USES_INTEGER_MIN_MAX.bits() | (1 << 20));
         let decoded = ParameterProperties::decode(0, &raw);
         assert!(decoded.flags.uses_integer_min_max);
         assert!(decoded.integer_range.is_some());
@@ -906,7 +908,7 @@ mod tests {
     /// Spec: vst2.struct.VstMidiProgramName
     #[test]
     fn kmidiisomni_decodes_from_bit_zero_of_the_program_flags() {
-        let mut raw = api::MidiProgramName {
+        let mut raw = vst::MidiProgramName {
             this_program_index: 2,
             name: label("Acoustic Kit"),
             midi_program: 32,
@@ -934,7 +936,7 @@ mod tests {
     /// a caller can match an answer to its question.
     #[test]
     fn key_names_carry_their_coordinates() {
-        let raw = api::MidiKeyName {
+        let raw = vst::MidiKeyName {
             this_program_index: 0,
             this_key_number: 36,
             keyname: label("Kick"),

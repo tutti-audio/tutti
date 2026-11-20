@@ -16,10 +16,12 @@ use tutti_plugin_types::{
 use tutti_units::ParamId;
 
 use super::DeclaredCache;
+use crate::Request as WireRequest;
 
 use crate::{
-    AudioSlab, BridgeEvent, BridgeMessage, HostMessage, Ipc, IpcController, IpcParts, IpcProcessor,
-    PROTOCOL_VERSION, PluginBridge, ProcessGuard, RING_SLOTS, SlabLayout, unique_socket_path,
+    AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, Ipc,
+    IpcController, IpcEvent, IpcParts, IpcProcessor, News, PROTOCOL_VERSION, PluginBridge,
+    ProcessGuard, RING_SLOTS, ReqId, SlabHandle, SlabLayout, unique_socket_path,
 };
 
 const CEILING: usize = 64;
@@ -27,8 +29,33 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// The size the mock server's editor opens at.
 const MOCK_EDITOR: dpi::Size = dpi::Size::Physical(dpi::PhysicalSize::new(640, 480));
 
+/// A request the mock server was sent, on either connection.
+#[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)] // a test record, built once
+enum Sent {
+    Audio(AudioRequest),
+    Control(ControlRequest),
+}
+
 /// What the mock server was sent, in order.
-type Received = Arc<Log<HostMessage>>;
+type Received = Arc<Log<Sent>>;
+
+/// Writes `message` to the peer as one frame.
+fn reply<T: Framed>(stream: &interprocess::local_socket::Stream, message: &T) {
+    let mut stream = stream;
+    crate::protocol::frame::write_frame(&mut stream, message).unwrap();
+}
+
+/// Writes the answer to request `id` to the control connection.
+fn reply_control(stream: &interprocess::local_socket::Stream, id: ReqId, reply_to: &ControlReply) {
+    reply(
+        stream,
+        &ControlFrame::Reply {
+            id,
+            reply: reply_to.clone(),
+        },
+    );
+}
 
 /// A record that a thread appends to and another waits on: an append notifies
 /// the [`Wake`], so a test waits for the event it needs and never polls.
@@ -81,18 +108,17 @@ struct Mock {
     /// Buses the plugin announces while the server is asked to open a slab,
     /// before it answers: a change that lands inside an activation.
     announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>>,
-    _bridge: crate::BridgeThread,
+    _bridge: crate::IpcThread,
 }
 
 impl Mock {
     /// The server says something unprompted, as a plugin does.
-    fn say(&self, message: &BridgeMessage) {
-        let mut stream = &*self.stream;
-        crate::protocol::frame::write_frame(&mut stream, message).unwrap();
+    fn say(&self, message: impl Into<ControlFrame>) {
+        reply(&self.stream, &message.into());
     }
 
     /// Waits for the server's record to satisfy `found`.
-    fn wait_for(&self, found: impl Fn(&[HostMessage]) -> bool) -> bool {
+    fn wait_for(&self, found: impl Fn(&[Sent]) -> bool) -> bool {
         self.received.wait_for(found)
     }
 }
@@ -113,8 +139,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
@@ -167,14 +193,13 @@ fn mock_with(
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
     };
-    let shm = tutti_fixtures::unique_name("ipc");
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
         .name(crate::socket_name(&path).unwrap())
         .create_sync()
         .unwrap();
-    let slab = AudioSlab::create(shm, layout).unwrap();
+    let (slab, _handle) = AudioSlab::create(layout).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
         origin,
@@ -194,22 +219,18 @@ fn mock_with(
     // The audio connection first, then the control one, as the server accepts
     // them. Blocks and resets arrive on the first and are only logged.
     let audio = Arc::new(listener.accept().unwrap());
-    let reply = |stream: &interprocess::local_socket::Stream, message: &BridgeMessage| {
-        let mut stream = stream;
-        crate::protocol::frame::write_frame(&mut stream, message).unwrap();
-    };
     // The host connects the control stream only once it has the audio one's
     // `Ready`.
     reply(
         &audio,
-        &BridgeMessage::Ready {
+        &AudioReply::Ready {
             protocol_version: PROTOCOL_VERSION,
         },
     );
     let stream = Arc::new(listener.accept().unwrap());
     reply(
         &stream,
-        &BridgeMessage::Ready {
+        &ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
         },
     );
@@ -232,10 +253,19 @@ fn mock_with(
                 if stream.read_exact(&mut bytes).is_err() {
                     break;
                 }
-                let Ok(message) = postcard::from_bytes::<HostMessage>(&bytes) else {
+                let Ok(message) = postcard::from_bytes::<AudioRequest>(&bytes) else {
                     break;
                 };
-                log.push(message);
+                let applied = match &message {
+                    AudioRequest::ApplyParameters { id, .. } => Some(*id),
+                    _ => None,
+                };
+                log.push(Sent::Audio(message));
+                // The parameters sent between blocks are answered, as the
+                // server's render thread answers them.
+                if let Some(id) = applied {
+                    reply(&audio, &AudioReply::ParametersApplied { id });
+                }
             }
         }
     });
@@ -256,24 +286,35 @@ fn mock_with(
             if stream.read_exact(&mut bytes).is_err() {
                 break;
             }
-            let Ok(message) = postcard::from_bytes::<HostMessage>(&bytes) else {
+            let Ok(WireRequest { id, body: message }) = postcard::from_bytes::<WireRequest>(&bytes)
+            else {
                 break;
             };
+            // A setup's slab follows its frame on the stream.
+            if let ControlRequest::SetupSharedMemory { slab, .. } = &message {
+                let received =
+                    SlabHandle::receive(crate::transport::connection(&served), slab.clone());
+                if received.is_err() {
+                    break;
+                }
+            }
             // Recorded before it is answered: a count read after the reply sees it.
-            log.push(message.clone());
+            log.push(Sent::Control(message.clone()));
             match &message {
-                HostMessage::SetSampleRate { rate } => reply(
+                ControlRequest::SetSampleRate { rate } => reply_control(
                     &served,
-                    &BridgeMessage::SampleRateSet {
+                    id,
+                    &ControlReply::SampleRateSet {
                         rate: *rate,
                         error: None,
                     },
                 ),
                 // The server's editor: a parent of 0 is a window it cannot embed
                 // into; any other opens at the size the test pins.
-                HostMessage::OpenEditor { parent, .. } => reply(
+                ControlRequest::OpenEditor { parent, .. } => reply_control(
                     &served,
-                    &BridgeMessage::EditorOpened {
+                    id,
+                    &ControlReply::EditorOpened {
                         result: match parent {
                             Some(0) => Err("the mock plugin has no editor".to_string()),
                             Some(_) => Ok(Some(MOCK_EDITOR)),
@@ -281,32 +322,42 @@ fn mock_with(
                         },
                     },
                 ),
-                HostMessage::SetupSharedMemory { .. } => {
+                ControlRequest::SetupSharedMemory { .. } => {
                     if let Some(layout) = announcing.lock().unwrap().take() {
                         reply(
                             &served,
-                            &BridgeMessage::PluginIoChanged {
+                            &ControlFrame::News(News::PluginIoChanged {
                                 layout: Some(layout),
-                            },
+                            }),
                         );
                     }
-                    reply(
+                    reply_control(
                         &served,
+                        id,
                         &if refusing.load(std::sync::atomic::Ordering::Acquire) {
-                            BridgeMessage::Error {
+                            ControlReply::Error {
                                 message: "the slab does not open".into(),
                             }
                         } else {
-                            BridgeMessage::SharedMemoryReady
+                            ControlReply::SharedMemoryReady
                         },
                     )
                 }
-                HostMessage::SetEditorSize { size } => {
-                    reply(&served, &BridgeMessage::EditorSized { result: Ok(*size) })
-                }
-                HostMessage::GetParameterList => reply(
+                ControlRequest::SetEditorSize { size } => reply_control(
                     &served,
-                    &BridgeMessage::ParameterList {
+                    id,
+                    &ControlReply::EditorSized { result: Ok(*size) },
+                ),
+                ControlRequest::LoadStateChunk { last: Some(_), .. } => {
+                    reply_control(&served, id, &ControlReply::StateLoaded { error: None })
+                }
+                ControlRequest::GetParameter { .. } => {
+                    reply_control(&served, id, &ControlReply::ParameterValue { value: None })
+                }
+                ControlRequest::GetParameterList => reply_control(
+                    &served,
+                    id,
+                    &ControlReply::ParameterList {
                         parameters: answers.lock().unwrap().clone(),
                     },
                 ),
@@ -415,7 +466,7 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
     assert_eq!(processor.chunk(), NonZeroUsize::new(30), "the block");
     assert!(
         received.wait_for(|log| log.iter().any(
-            |m| matches!(m, HostMessage::SetSampleRate { rate } if *rate == SampleRate::SR_96K)
+            |m| matches!(m, Sent::Control(ControlRequest::SetSampleRate { rate }) if *rate == SampleRate::SR_96K)
         )),
         "the rate is sent"
     );
@@ -456,7 +507,7 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     ipc.forward_events(Some(Arc::new(move |event| {
         sink.push(format!("{event:?}"));
     })));
-    let say = |latency| server.say(&BridgeMessage::LatencyChanged { samples: latency });
+    let say = |latency| server.say(News::LatencyChanged { samples: latency });
     let main = main_thread();
     let (_processor, mut controller) = activate(ipc, 32);
     assert_eq!(controller.latency(main), Samples::new(5));
@@ -478,7 +529,7 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     assert_eq!(asked.len(), 1, "once");
     assert!(server.wait_for(|got| {
         got.iter()
-            .any(|m| matches!(m, HostMessage::GetParameterList))
+            .any(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList)))
     }));
 }
 
@@ -503,7 +554,7 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
     let at_load = controller.layout();
     assert_eq!(at_load.input_widths(), vec![ChannelLayout::STEREO]);
 
-    server.say(&BridgeMessage::PluginIoChanged { layout: None });
+    server.say(News::PluginIoChanged { layout: None });
     let announced = tutti_plugin_types::Layout {
         inputs: vec![
             PluginBus::main(ChannelLayout::STEREO),
@@ -511,7 +562,7 @@ fn the_buses_a_plugin_announces_are_the_buses_the_host_sees() {
         ],
         outputs: at_load.outputs.clone(),
     };
-    server.say(&BridgeMessage::PluginIoChanged {
+    server.say(News::PluginIoChanged {
         layout: Some(announced.clone()),
     });
     // An idle bridge reads nothing: the next command's reply reads it.
@@ -552,7 +603,7 @@ fn announced_and_deactivated(ipc: Ipc, server: &Mock) -> (Ipc, tutti_plugin_type
         ],
         outputs: controller.layout().outputs,
     };
-    server.say(&BridgeMessage::PluginIoChanged {
+    server.say(News::PluginIoChanged {
         layout: Some(announced.clone()),
     });
     ask_until(
@@ -572,7 +623,7 @@ fn slab_setups(server: &Mock) -> Vec<SlabLayout> {
         .unwrap()
         .iter()
         .filter_map(|m| match m {
-            HostMessage::SetupSharedMemory { layout, .. } => Some(layout.clone()),
+            Sent::Control(ControlRequest::SetupSharedMemory { layout, .. }) => Some(layout.clone()),
             _ => None,
         })
         .collect()
@@ -723,7 +774,7 @@ fn a_failed_setup_is_followed_by_one_even_for_the_layout_held() {
         outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
     };
     let view = ipc.controller();
-    server.say(&BridgeMessage::PluginIoChanged {
+    server.say(News::PluginIoChanged {
         layout: Some(original.clone()),
     });
     ask_until(
@@ -768,9 +819,9 @@ fn recording_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     format: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
     *EDITOR_LOAD.lock().unwrap() = Some((plugin.clone(), format));
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "records the choice and loads nothing".into(),
@@ -834,9 +885,9 @@ fn a_remote_editor_opens_resizes_and_closes_over_the_wire() {
     assert!(server.wait_for(|got| matches!(
         got,
         [
-            HostMessage::OpenEditor { parent: Some(0x40_0001), scale: s },
-            HostMessage::SetEditorSize { size },
-            HostMessage::CloseEditor,
+            Sent::Control(ControlRequest::OpenEditor { parent: Some(0x40_0001), scale: s }),
+            Sent::Control(ControlRequest::SetEditorSize { size }),
+            Sent::Control(ControlRequest::CloseEditor),
         ] if *s == scale && *size == wanted
     )));
 }
@@ -849,7 +900,13 @@ fn a_remote_floating_editor_sends_no_parent() {
     let _machine = machine_lock();
     let (mut ipc, server) = mock_remote();
     ipc.open_floating_editor(main_thread()).expect("opens");
-    assert!(server.wait_for(|got| matches!(got, [HostMessage::OpenEditor { parent: None, .. }])));
+    assert!(server.wait_for(|got| matches!(
+        got,
+        [Sent::Control(ControlRequest::OpenEditor {
+            parent: None,
+            ..
+        })]
+    )));
 }
 
 /// **The server's refusal is the editor's error, in the server's words.**
@@ -884,8 +941,8 @@ fn what_the_servers_editor_says_unprompted_is_heard() {
     ipc.open_editor(main, host_window(0x40_0001), ContentScale::IDENTITY)
         .expect("opens");
     let asked = dpi::Size::Physical(dpi::PhysicalSize::new(1024, 768));
-    server.say(&BridgeMessage::EditorWantsSize { size: asked });
-    server.say(&BridgeMessage::EditorClosed);
+    server.say(News::EditorWantsSize { size: asked });
+    server.say(News::EditorClosed);
     // An idle bridge reads nothing: the next command's reply reads both.
     assert_eq!(
         ipc.bridge().audio().parameters().expect("answered").len(),
@@ -911,7 +968,7 @@ fn what_the_servers_editor_says_unprompted_is_heard() {
             .lock()
             .unwrap()
             .iter()
-            .any(|m| matches!(m, HostMessage::CloseEditor)),
+            .any(|m| matches!(m, Sent::Control(ControlRequest::CloseEditor))),
         "no close for an editor that is not open"
     );
 }
@@ -933,7 +990,7 @@ fn a_client_with_a_loader_sends_no_editor_message() {
     );
     assert!(server.wait_for(|got| {
         got.iter()
-            .any(|m| matches!(m, HostMessage::GetParameterList))
+            .any(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList)))
     }));
     assert!(
         !server
@@ -941,7 +998,7 @@ fn a_client_with_a_loader_sends_no_editor_message() {
             .lock()
             .unwrap()
             .iter()
-            .any(|m| matches!(m, HostMessage::OpenEditor { .. })),
+            .any(|m| matches!(m, Sent::Control(ControlRequest::OpenEditor { .. }))),
         "the editor is the host's"
     );
 }
@@ -971,10 +1028,10 @@ fn render_silence(processor: &mut IpcProcessor, frames: usize) {
 
 /// The sequences of the `ProcessAudio` messages the mock was sent, in order.
 fn process_seqs(server: &Mock, count: usize) -> Vec<u64> {
-    let seqs = |log: &[HostMessage]| {
+    let seqs = |log: &[Sent]| {
         log.iter()
             .filter_map(|m| match m {
-                HostMessage::ProcessAudio(data) => Some(data.seq),
+                Sent::Audio(AudioRequest::ProcessAudio(data)) => Some(data.seq),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -1044,9 +1101,9 @@ fn assert_off_the_budget(bridge: &PluginBridge, before: u64) {
 /// newest is skipped, not abandoned, and the count asserted is of abandoned
 /// ones. A bridge held one budget per chunk fails the server's hang guard.
 fn render_chunks(processor: &mut IpcProcessor, server: &Mock, chunks: usize) {
-    let sent = |log: &[HostMessage]| {
+    let sent = |log: &[Sent]| {
         log.iter()
-            .filter(|m| matches!(m, HostMessage::ProcessAudio(_)))
+            .filter(|m| matches!(m, Sent::Audio(AudioRequest::ProcessAudio(_))))
             .count()
     };
     let mut taken = sent(&server.received.lock().unwrap());
@@ -1122,7 +1179,7 @@ fn list_asks(server: &Mock) -> usize {
         .lock()
         .unwrap()
         .iter()
-        .filter(|m| matches!(m, HostMessage::GetParameterList))
+        .filter(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList)))
         .count()
 }
 
@@ -1184,12 +1241,12 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
     let arrived: Arc<Log<()>> = Arc::default();
     let heard = Arc::clone(&arrived);
     ipc.forward_events(Some(Arc::new(move |event| {
-        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamTitles)) {
+        if matches!(event, IpcEvent::Resync(ResyncKind::ParamTitles)) {
             heard.push(());
         }
     })));
     *server.parameters.lock().unwrap() = vec![param(3, true)];
-    server.say(&BridgeMessage::PluginParamTitlesChanged);
+    server.say(News::PluginParamTitlesChanged);
     assert!(
         arrived.wait_for(|log| !log.is_empty()),
         "the event never arrived"
@@ -1220,9 +1277,9 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     use tutti_plugin_types::ParamWriteError;
     use tutti_units::Normalized;
     let _machine = machine_lock();
-    let sets = |got: &[HostMessage]| {
+    let sets = |got: &[Sent]| {
         got.iter()
-            .filter(|m| matches!(m, HostMessage::SetParameter { .. }))
+            .filter(|m| matches!(m, Sent::Audio(AudioRequest::ApplyParameters { .. })))
             .count()
     };
     let (mut ipc, server) = mock();
@@ -1230,6 +1287,8 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    // A read of the plugin sends what no block has carried, ahead of itself.
+    let _ = ipc.parameter(main, ParamId::new(3));
     assert!(
         server.wait_for(|got| sets(got) == 1),
         "the first write reaches the server"
@@ -1242,14 +1301,12 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     let first = AtomicBool::new(true);
     let held_tx = Mutex::new(held_tx);
     ipc.forward_events(Some(Arc::new(move |event| {
-        if matches!(event, BridgeEvent::LatencyChanged { .. })
-            && first.swap(false, Ordering::SeqCst)
-        {
+        if matches!(event, IpcEvent::LatencyChanged { .. }) && first.swap(false, Ordering::SeqCst) {
             held_tx.lock().unwrap().send(()).unwrap();
             let _ = release_rx.lock().unwrap().recv();
         }
     })));
-    server.say(&BridgeMessage::LatencyChanged {
+    server.say(News::LatencyChanged {
         samples: tutti_plugin_types::Samples::new(64),
     });
     held_rx
@@ -1258,7 +1315,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
 
     // The list changes and the plugin says so, behind the held bridge.
     *server.parameters.lock().unwrap() = vec![param(3, true)];
-    server.say(&BridgeMessage::PluginParamTitlesChanged);
+    server.say(News::PluginParamTitlesChanged);
 
     std::thread::scope(|scope| {
         let (calling_tx, calling_rx) = mpsc::channel::<()>();
@@ -1278,7 +1335,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     });
     // The control stream is ordered: once a round trip has come back, a write
     // the refused one had put on it would be on the record.
-    let _ = ipc.parameters(main);
+    let _ = ipc.parameter(main, ParamId::new(3));
     assert_eq!(
         sets(&server.received.lock().unwrap()),
         1,
@@ -1302,11 +1359,11 @@ fn a_values_resync_keeps_the_declared_list() {
     let arrived: Arc<Log<()>> = Arc::default();
     let heard = Arc::clone(&arrived);
     ipc.forward_events(Some(Arc::new(move |event| {
-        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamValues)) {
+        if matches!(event, IpcEvent::Resync(ResyncKind::ParamValues)) {
             heard.push(());
         }
     })));
-    server.say(&BridgeMessage::PluginParamValuesChanged);
+    server.say(News::PluginParamValuesChanged);
     assert!(
         arrived.wait_for(|log| !log.is_empty()),
         "the event never arrived"
@@ -1362,4 +1419,220 @@ fn a_refill_older_than_a_forgetting_is_not_kept() {
     };
     cache.store(started, &list(true));
     assert_eq!(cache.get().unwrap()[0].1, ParamAccess::ReadOnly);
+}
+
+/// Submits one block of silence by hand, and returns the parameter changes the
+/// server was sent with it (the block with sequence `seq`).
+fn changes_sent_with_block(
+    ipc: &Ipc,
+    server: &Mock,
+    seq: u64,
+) -> tutti_plugin_types::ParameterChanges {
+    let accepted = ipc.bridge().audio().submit(
+        seq,
+        32,
+        Default::default(),
+        &mut tutti_plugin_types::ParameterChanges::new(),
+        Default::default(),
+        Default::default(),
+        tutti_plugin_types::TransportInfo::new(RATE),
+        Default::default(),
+    );
+    assert!(accepted.accepted());
+    let sent = |log: &[Sent]| {
+        log.iter()
+            .any(|m| matches!(m, Sent::Audio(AudioRequest::ProcessAudio(d)) if d.seq == seq))
+    };
+    assert!(server.wait_for(sent), "block {seq} reached the server");
+    server
+        .received
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|m| match m {
+            Sent::Audio(AudioRequest::ProcessAudio(d)) if d.seq == seq => {
+                Some(d.param_changes.clone())
+            }
+            _ => None,
+        })
+        .expect("the block was sent")
+}
+
+/// The last value a block's changes carry for `id`.
+fn last_change(changes: &tutti_plugin_types::ParameterChanges, id: ParamId) -> Option<f64> {
+    changes
+        .queues
+        .iter()
+        .find(|q| q.param_id == id)
+        .and_then(|q| q.points.last())
+        .map(|p| p.value.get())
+}
+
+/// **Writes do not drop for lack of room, and the latest to each parameter
+/// reaches the plugin with the next block.** Three times the control queue's
+/// room in writes, round-robin over three parameters, are made before any block
+/// is sent; the block carries each parameter's last value, on its first frame.
+#[test]
+fn many_served_writes_before_a_block_leave_each_parameter_at_its_latest() {
+    use tutti_plugin_types::AnyThread;
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false), param(2, false), param(3, false)];
+    let ids = [ParamId::new(1), ParamId::new(2), ParamId::new(3)];
+    let writes = 3 * crate::client::audio::COMMAND_QUEUE_SIZE;
+    for n in 0..writes {
+        let id = ids[n % 3];
+        let value = Normalized::of(n as f64 / writes as f64);
+        assert_eq!(AnyThread::set_parameter_value(&ipc, id, value), Ok(()));
+    }
+    let changes = changes_sent_with_block(&ipc, &server, 1);
+    for (k, id) in ids.iter().enumerate() {
+        let last = writes - 3 + k;
+        assert_eq!(
+            last_change(&changes, *id),
+            Some(last as f64 / writes as f64),
+            "{id:?}"
+        );
+        let queue = changes.queues.iter().find(|q| q.param_id == *id).unwrap();
+        assert_eq!(
+            queue.points.len(),
+            1,
+            "one value per parameter, not a queue"
+        );
+        assert_eq!(queue.points[0].sample_offset, 0, "on the first frame");
+    }
+}
+
+/// **A write to a parameter the plugin does not declare fails at the call**,
+/// naming it, from the table the first write built: the plugin's list is asked
+/// once, not once per write.
+#[test]
+fn a_served_write_to_an_unknown_parameter_is_unknown_at_the_call_without_asking_again() {
+    use tutti_plugin_types::{AnyThread, UnknownParam};
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    let half = Normalized::of(0.5);
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(3), half),
+        Ok(())
+    );
+    let asks = list_asks(&server);
+    for _ in 0..5 {
+        assert_eq!(
+            AnyThread::set_parameter_value(&ipc, ParamId::new(9), half),
+            Err(UnknownParam(ParamId::new(9)))
+        );
+    }
+    assert_eq!(
+        list_asks(&server),
+        asks,
+        "no write asked for the list again"
+    );
+}
+
+/// **A write queued before a state load never lands after it**: the load
+/// replaced the values the write was made against, so the next block carries
+/// nothing for it, and a write made after the load does.
+#[test]
+fn a_served_write_queued_before_a_state_load_does_not_land_after_it() {
+    use tutti_plugin_types::{AnyThread, StateUse};
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false), param(2, false)];
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.25)),
+        Ok(())
+    );
+    assert!(ipc.load_state(&[1, 2, 3], StateUse::Project).is_ok());
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(2), Normalized::of(0.75)),
+        Ok(())
+    );
+    let changes = changes_sent_with_block(&ipc, &server, 1);
+    assert_eq!(
+        last_change(&changes, ParamId::new(1)),
+        None,
+        "the stale write"
+    );
+    assert_eq!(last_change(&changes, ParamId::new(2)), Some(0.75));
+}
+
+/// **A write drained into a block pushed before a load lands before the load,
+/// never after it**: the audio lane sends the block, and the control lane's load
+/// waits for it (the stamp every control command carries), so the server has
+/// the write when it takes the load, and what the load replaces is not
+/// overwritten by it.
+#[test]
+fn a_write_in_a_block_pushed_before_a_load_reaches_the_server_before_the_load() {
+    use tutti_plugin_types::{AnyThread, StateUse};
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false)];
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.25)),
+        Ok(())
+    );
+    // The block carries the write (it is drained when the lane sends it), and
+    // the load is asked for once the lane has drained it.
+    let _ = changes_sent_with_block(&ipc, &server, 1);
+    assert!(ipc.load_state(&[1], StateUse::Project).is_ok());
+    let log = server.received.lock().unwrap();
+    let block = log
+        .iter()
+        .position(|m| matches!(m, Sent::Audio(AudioRequest::ProcessAudio(d)) if d.seq == 1))
+        .expect("the block was sent");
+    let load = log
+        .iter()
+        .position(|m| matches!(m, Sent::Control(ControlRequest::LoadStateChunk { .. })))
+        .expect("the load was sent");
+    assert!(block < load, "the block, and its write, came first");
+    let Sent::Audio(AudioRequest::ProcessAudio(data)) = &log[block] else {
+        unreachable!()
+    };
+    assert_eq!(
+        last_change(&data.param_changes, ParamId::new(1)),
+        Some(0.25)
+    );
+}
+
+/// **A read after writes no block has carried sends them on the audio lane,
+/// in order with the blocks**: a block pushed before the write reaches the
+/// server first, and the parameters follow it as their own message, before the
+/// request that asked.
+#[test]
+fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
+    use tutti_plugin_types::AnyThread;
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false)];
+    let _ = changes_sent_with_block(&ipc, &server, 1);
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.5)),
+        Ok(())
+    );
+    let _ = ipc.parameter(main_thread(), ParamId::new(1));
+    let log = server.received.lock().unwrap();
+    let block = log
+        .iter()
+        .position(|m| matches!(m, Sent::Audio(AudioRequest::ProcessAudio(_))))
+        .expect("the block");
+    let flush = log
+        .iter()
+        .position(|m| matches!(m, Sent::Audio(AudioRequest::ApplyParameters { .. })))
+        .expect("the parameters sent between blocks");
+    let read = log
+        .iter()
+        .position(|m| matches!(m, Sent::Control(ControlRequest::GetParameter { .. })))
+        .expect("the read");
+    assert!(block < flush && flush < read, "{block} {flush} {read}");
+    let Sent::Audio(AudioRequest::ApplyParameters { param_changes, .. }) = &log[flush] else {
+        unreachable!()
+    };
+    assert_eq!(last_change(param_changes, ParamId::new(1)), Some(0.5));
 }

@@ -1,11 +1,13 @@
 //! The plugin-authoring half of the old `vst-tutti` crate, for the test plugins.
 //!
-//! `tutti-vst2-ffi` is the host half (the ABI types, the loader, the host callback,
-//! the buffers). This crate is what a VST2 *plugin* needs on top: `plugin_main!`,
-//! `main` (which builds the `AEffect`), the plugin-side dispatcher, `PluginCache`
-//! and the `util` helpers. It re-exports the ffi crate's modules, so a plugin
-//! names `vst::api`, `vst::plugin::Plugin`, ... from one place. Derived from vst-rs
-//! 0.3.0 (MIT, see `LICENSE`).
+//! `tutti-vst2-ffi` is the host half (the ABI types, the loader, the host callback).
+//! This crate is what a VST2 *plugin* needs on top: the `Plugin` and `PluginParameters`
+//! traits, `HostCallback`, `Editor` and `ChannelInfo`
+//! (`plugin`, `editor`, `channels`), `plugin_main!`, `main` (which builds the
+//! `AEffect`), the plugin-side dispatcher, `PluginCache` and the `util` helpers. The
+//! shared items are re-exported from the ffi crate, so a plugin names `vst::api`,
+//! `vst::plugin::Plugin`, ... from one place. Derived from vst-rs 0.3.0 (MIT, see
+//! `LICENSE`).
 //!
 //! It is a test-only crate (`publish = false`): the only plugin the engine ships
 //! tests against is the reference plugin built on it.
@@ -18,11 +20,52 @@ extern crate tracing;
 
 use std::ptr;
 
-pub use tutti_vst2_ffi::{api, buffer, channels, editor, event, host, plugin, speaker};
+/// The ABI types of `tutti-vst2-ffi` a plugin names.
+pub mod api {
+    pub use tutti_vst2_ffi::{
+        AEffect, AutomationState, ChannelFlags, ChannelProperties, DispatcherProc, Event,
+        EventType, Events, GetChunkError, GetParameterProc, HostCallbackProc, MidiEvent,
+        MidiEventFlags, MidiKeyName, MidiProgramCategory, MidiProgramFlags, MidiProgramName,
+        ModifierKey, ParameterFlags, ParameterProperties, PluginEvent, PluginEvents, PluginFlags,
+        PluginMain, ProcessLevel, ProcessProc, ProcessProcF64, SetParameterProc, SmpteFrameRate,
+        SpeakerArrangementType, Supported, SysExEvent, SysExMessage, TimeInfo, TimeInfoFlags,
+    };
+
+    /// The SDK's buffer sizes and the magic number.
+    pub mod consts {
+        pub use tutti_vst2_ffi::{
+            MAX_CATEGORY_LABEL, MAX_EFFECT_NAME_LEN, MAX_LABEL, MAX_PARAM_STR_LEN,
+            MAX_PRESET_NAME_LEN, MAX_PRODUCT_STR_LEN, MAX_SHORT_LABEL, MAX_VENDOR_STR_LEN,
+            VST_MAGIC,
+        };
+    }
+}
+
+/// The audio buffer a plugin renders into.
+pub mod buffer {
+    pub use tutti_vst2_ffi::{
+        AudioBuffer, AudioBufferIterator, InputIterator, Inputs, OutputIterator, Outputs,
+    };
+}
+
+/// What a plugin calls the host through.
+pub mod host {
+    pub use tutti_vst2_ffi::{AudioMasterOpCode, Host};
+}
+
+/// Speaker arrangements.
+pub mod speaker {
+    pub use tutti_vst2_ffi::{
+        ArrangementRead, MAX_ARRANGEMENT_CHANNELS, Speaker, SpeakerArrangement,
+    };
+}
 
 mod aeffect;
 mod cache;
+pub mod channels;
 mod dispatch;
+pub mod editor;
+pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
 pub mod shell;
@@ -392,7 +435,7 @@ mod tests {
     /// gives a different address, a reused buffer gives the same one.
     #[test]
     fn edit_get_rect_reuses_one_buffer_rather_than_leaking_per_call() {
-        use crate::plugin::OpCode;
+        use crate::plugin::EffectOpCode;
 
         // SAFETY: `VSTPluginMain` returns the leaked `Box<AEffect>`; `pass_callback`
         // reports a VST version, so it is non-null and uniquely used by this test.
@@ -408,7 +451,7 @@ mod tests {
         let ok = unsafe {
             dispatch(
                 aeffect,
-                OpCode::EditorGetRect.into(),
+                EffectOpCode::EditorGetRect.into(),
                 0,
                 0,
                 &mut first as *mut _ as *mut c_void,
@@ -425,7 +468,7 @@ mod tests {
         unsafe {
             dispatch(
                 aeffect,
-                OpCode::EditorGetRect.into(),
+                EffectOpCode::EditorGetRect.into(),
                 0,
                 0,
                 &mut second as *mut _ as *mut c_void,
@@ -450,7 +493,7 @@ mod tests {
     #[test]
     fn edit_get_rect_reports_origin_and_extent() {
         use crate::editor::Rect;
-        use crate::plugin::OpCode;
+        use crate::plugin::EffectOpCode;
 
         // SAFETY: `VSTPluginMain` returns the leaked `Box<AEffect>`; `pass_callback`
         // reports a VST version, so it is non-null and uniquely used by this test.
@@ -462,7 +505,7 @@ mod tests {
         unsafe {
             dispatch(
                 aeffect,
-                OpCode::EditorGetRect.into(),
+                EffectOpCode::EditorGetRect.into(),
                 0,
                 0,
                 &mut out as *mut _ as *mut c_void,

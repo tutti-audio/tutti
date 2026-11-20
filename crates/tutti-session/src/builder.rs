@@ -41,7 +41,7 @@ use tutti_engine::BlockDates;
 ///   rate, the width and the callback, so none of those is a setter, and
 ///   `build` returns a `LiveSession` with the stream running.
 ///
-/// Everything else (workers, MIDI, plugins, the root topology, the spawner) is
+/// Everything else (workers, MIDI, plugins, the root topology, the executor) is
 /// set the same way on every clock.
 ///
 /// ```
@@ -115,7 +115,7 @@ pub(crate) struct Options {
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
     #[cfg(feature = "midi-hardware")]
-    midi_hardware: Option<tutti_midi_hardware::MidiHardwareOptions>,
+    midi_hardware: Option<tutti_midi_hardware::MidiHardwareConfig>,
     /// The backend the OS MIDI layer runs over, if not the platform's.
     #[cfg(feature = "midi-hardware")]
     midi_backend: Option<MidiBackend>,
@@ -125,7 +125,7 @@ pub(crate) struct Options {
     midi_ports: tutti_midi_runtime::MidiInputPorts,
     unresolved_warning: std::time::Duration,
     pub(crate) plugins: crate::session::parts::PluginOptions,
-    spawner: crate::jobs::Spawner,
+    executor: tutti_platform::Executor,
     pool: crate::PoolConfig,
 }
 
@@ -163,7 +163,7 @@ impl Default for Options {
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
             unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
             plugins: Default::default(),
-            spawner: crate::jobs::Spawner::default(),
+            executor: tutti_platform::Executor::default(),
             pool: crate::PoolConfig::default(),
         }
     }
@@ -341,7 +341,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     ) -> SessionBuilder<crate::DeviceClock<F>> {
         SessionBuilder {
             opts: self.opts,
-            config: device,
+            config: tutti_cpal::OutputConfig::from(device),
             dates: (),
         }
     }
@@ -391,11 +391,10 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let taps = engine.output_taps();
-        let mut engine = engine;
-        let load = engine.take_load_meter();
+        let readings = (engine.load(), engine.blocks());
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
-        session.output.load = load;
+        session.output.readings = Some(readings);
         session.transport.handle.set_clock(clock);
         session.output.taps = Some((taps, layout));
         Ok(session)
@@ -479,7 +478,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
-        let mut engine = parts.graph.engine(
+        let engine = parts.graph.engine(
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
@@ -487,7 +486,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let load = engine.take_load_meter();
+        let readings = (engine.load(), engine.blocks());
         let taps = engine.output_taps();
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
@@ -506,7 +505,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             },
             true,
         )?;
-        session.output.load = load;
+        session.output.readings = Some(readings);
         session.output.taps = Some((taps, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
@@ -524,6 +523,23 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
 
 #[cfg(feature = "device")]
 impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
+    /// Opens the output device at `format`, at its default rate and width
+    /// ([`OutputConfig::sample_format`](tutti_cpal::OutputConfig::sample_format)).
+    ///
+    /// The choice holds across every restart ([`Session::restart`](crate::Session),
+    /// the device watch's restarts, and a restart onto any other device). A
+    /// device that lacks the format fails that restart with
+    /// [`tutti_cpal::Error::OutputFormatUnavailable`], through the restart's
+    /// usual failure path, and never opens at another format. The same error
+    /// fails [`build`](Self::build). A switch from the system clock
+    /// ([`Session::into_device`](crate::Session)) takes its own
+    /// [`OutputConfig`](tutti_cpal::OutputConfig).
+    #[must_use]
+    pub fn sample_format(mut self, format: tutti_buffers::SampleFormat) -> Self {
+        self.config = self.config.sample_format(format);
+        self
+    }
+
     /// A session on the selected output device: the device opened first, the
     /// graph built at its rate and callback size, the callback live on
     /// return. The [`LiveSession`](crate::LiveSession) holds the
@@ -536,8 +552,8 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// built over it.
     pub fn build(self) -> Result<crate::LiveSession<&'static str, F>> {
         let host = tutti_cpal::DeviceHost::open(self.opts.host)?;
-        let device = self.config.clone();
-        let engine = tutti_cpal::AudioEngine::open(host, device.clone())?;
+        let engine = tutti_cpal::AudioEngine::open(host, self.config.clone())?;
+        let device = self.config.device().clone();
         self.build_on(engine, device, |engine, state| engine.start(state))
     }
 
@@ -560,7 +576,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         D: tutti_engine::StreamDriver<F>,
         D::Error: Into<tutti_cpal::Error>,
     {
-        let device = self.config.clone();
+        let device = self.config.device().clone();
         self.build_on(
             tutti_cpal::AudioEngine::from_spec(spec),
             device,
@@ -587,7 +603,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
         let mut parts = self.parts(spec.sample_rate, LIVE_MAX_BLOCK, spec.quantum, root)?;
-        let mut engine = parts.graph.engine(
+        let engine = parts.graph.engine(
             &parts.transport,
             spec.channels,
             self.opts.device_topology.clone(),
@@ -600,7 +616,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             crate::device::DeviceHandle::vacant(self.opts.host),
             true,
         )?;
-        session.output.load = engine.take_load_meter();
+        session.output.readings = Some((engine.load(), engine.blocks()));
         session.output.taps = Some((engine.output_taps(), spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the
@@ -734,31 +750,44 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// The spawner the session runs its blocking work on:
-    /// a file load, a plugin round trip, a recording's pump. It is handed
-    /// each [`Task`](crate::Task) and calls [`Task::run`](crate::Task::run) on a
-    /// thread of its own (`tokio::task::spawn_blocking`, a rayon pool); what
-    /// the job reports lands in [`Session::update`]. The default is a named
-    /// `tutti_platform::spawn_named` thread per task; dropping the session stops
-    /// them within 100 ms, and a thread still running then (a worker blocked on
-    /// the main thread) is detached with a `tracing` warning and outlives the
-    /// session. A task the spawner drops unrun ends as
-    /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), so a spawner that
-    /// refuses work loses none silently.
+    /// The [`Executor`](tutti_platform::Executor) that runs the session's background
+    /// work: its jobs (a file load, a plugin round trip), its disk streamer and a
+    /// recording's pump. Each is a future, and what a job reports lands in
+    /// [`Session::update`].
     ///
-    /// A recording take (`Session::record`, feature `capture`) holds one job for the whole take:
-    /// over a bounded pool with no worker free it does not start until one is.
+    /// The default is [`Executor::default`](tutti_platform::Executor::default): threaded
+    /// where a thread can start, polled on the web. A choice is one of:
+    ///
+    /// - [`Executor::threaded`](tutti_platform::Executor::threaded): a small pool
+    ///   runs the jobs and a long-lived future has a thread of its own.
+    /// - [`Executor::polled`](tutti_platform::Executor::polled): work runs only
+    ///   inside `update`, which polls up to a fixed count of woken futures per call.
+    ///   Nothing runs between updates, so a live stream is fed only as often as the
+    ///   app updates.
+    /// - [`Executor::new`](tutti_platform::Executor::new): a host's own (Bevy's pool,
+    ///   tokio). The future may block while it is polled (a file read), and the host
+    ///   owns the priority; the streamer's priority request applies only to the
+    ///   threaded form. The app still calls `update`, which lands what the futures
+    ///   report.
+    ///
+    /// A future the executor drops unrun lands as
+    /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), and one it refuses to
+    /// start (a thread the OS would not give) as
+    /// [`WorkerError::NotStarted`](crate::WorkerError::NotStarted), so an executor
+    /// that refuses work loses none silently. Dropping the session drops its clone of
+    /// the executor; the last clone of a threaded one joins its threads, so a job
+    /// still running then holds the drop until it returns. Dropping the session joins
+    /// in-flight jobs; every blocking plugin job is bounded by its own deadline.
     ///
     /// ```
     /// # use tutti_session::Session;
-    /// let builder = Session::builder().spawn_with(|job| {
-    ///     std::thread::spawn(move || job.run());
-    /// });
+    /// use tutti_platform::Executor;
+    /// let builder = Session::builder().executor(Executor::polled());
     /// # let _ = builder;
     /// ```
     #[must_use]
-    pub fn spawn_with(mut self, spawn: impl Fn(crate::Task) + Send + Sync + 'static) -> Self {
-        self.opts.spawner = crate::jobs::Spawner::new(spawn);
+    pub fn executor(mut self, executor: tutti_platform::Executor) -> Self {
+        self.opts.executor = executor;
         self
     }
 
@@ -774,13 +803,13 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
     /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
     /// entries, each input feeding the graph through an input node and an event
-    /// inlet of its own, with `options` (where input times come from). Who the
+    /// inlet of its own, with `config` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
     /// [`MidiPolicy`](crate::MidiPolicy). Default off.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
-    pub fn midi_hardware(mut self, options: tutti_midi_hardware::MidiHardwareOptions) -> Self {
-        self.opts.midi_hardware = Some(options);
+    pub fn midi_hardware(mut self, config: tutti_midi_hardware::MidiHardwareConfig) -> Self {
+        self.opts.midi_hardware = Some(config);
         self
     }
 
@@ -793,9 +822,9 @@ impl<C: Clock> SessionBuilder<C> {
     pub fn midi_hardware_over(
         mut self,
         backend: Box<dyn tutti_midi_hardware::MidiEndpoints>,
-        options: tutti_midi_hardware::MidiHardwareOptions,
+        config: tutti_midi_hardware::MidiHardwareConfig,
     ) -> Self {
-        self.opts.midi_hardware = Some(options);
+        self.opts.midi_hardware = Some(config);
         self.opts.midi_backend = Some(MidiBackend(backend));
         self
     }
@@ -836,7 +865,7 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// How often a healthy hosted plugin's state is captured, measured on
     /// [`PhaseCx::now`](crate::PhaseCx::now)
-    /// (a job on the session's spawner, [`spawn_with`](Self::spawn_with)).
+    /// (a job on the session's [`executor`](Self::executor)).
     /// Default 8 s.
     #[cfg(feature = "plugin")]
     #[must_use]
@@ -846,13 +875,11 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// What a hosted plugin's death or hang does. Default
-    /// `Some(RecoveryPolicy::default())`: the plugin reloads at its node with
-    /// its last snapshot. `None`: a pooled plugin's node stays silent at its
-    /// key and the entry reads lost, and a node of a plugin the host inserted
-    /// itself is removed ([`PluginChange::Died`](crate::PluginChange::Died));
-    /// the host decides, a prompt to the user for instance. A hang is detected
-    /// either way ([`plugin_hang`](Self::plugin_hang)): the hung server is
-    /// ended and its death is what this decides.
+    /// `RecoveryPolicy::default()`: the plugin reloads at its node with its
+    /// last snapshot, within the policy's budget. A hang is detected either
+    /// way ([`plugin_hang`](Self::plugin_hang)): the hung server is ended and
+    /// its death is what this decides. See
+    /// [`no_plugin_recovery`](Self::no_plugin_recovery) for a host that decides itself.
     ///
     /// It covers out-of-process plugins loaded through the session's load
     /// path ([`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)). It does not
@@ -862,8 +889,23 @@ impl<C: Clock> SessionBuilder<C> {
     /// removed or left as before.
     #[cfg(feature = "plugin")]
     #[must_use]
-    pub fn plugin_recovery(mut self, policy: Option<crate::RecoveryPolicy>) -> Self {
-        self.opts.plugins.recovery = policy;
+    pub fn plugin_recovery(mut self, policy: crate::RecoveryPolicy) -> Self {
+        self.opts.plugins.recovery = Some(policy);
+        self
+    }
+
+    /// A hosted plugin's death or hang is not recovered: a pooled plugin's node
+    /// stays silent at its key and the entry reads lost, and a node of a plugin
+    /// the host inserted itself is removed
+    /// ([`PluginChange::Died`](crate::PluginChange::Died)); the host decides, a
+    /// prompt to the user for instance. Replaces
+    /// [`plugin_recovery`](Self::plugin_recovery).
+    ///
+    /// It covers the same plugins as `plugin_recovery`.
+    #[cfg(feature = "plugin")]
+    #[must_use]
+    pub fn no_plugin_recovery(mut self) -> Self {
+        self.opts.plugins.recovery = None;
         self
     }
 
@@ -975,9 +1017,12 @@ impl<C: Clock> SessionBuilder<C> {
         running: N::Running,
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
+        let bells = tutti_rt::Bells::new().map_err(crate::Error::Bells)?;
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),
+            &self.opts.executor,
+            &bells,
         )?;
         let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts.plugins);
         let table = parts.graph.value_table();
@@ -1006,7 +1051,7 @@ impl<C: Clock> SessionBuilder<C> {
             devices: Default::default(),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
-            jobs: crate::jobs::Jobs::new(self.opts.spawner.clone()),
+            jobs: crate::jobs::Jobs::new(self.opts.executor.clone(), bells),
             plugins,
         };
         session.provide_values(&table, click_settings);

@@ -3,11 +3,12 @@
 //! a [`LaunchedServer`] ready for the RT bridge thread to connect.
 
 use crate::ProcessGuard;
-use crate::config::BridgeConfig;
+use crate::config::IpcConfig;
+use crate::conversation::Conversation;
 use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
-use crate::{BridgeMessage, HostMessage, StagedState};
+use crate::{ControlFrame, ControlReply, ControlRequest, ReqId, Request, StagedState, Working};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -17,8 +18,8 @@ use tutti_plugin_ipc_ffi::Reaped;
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
-use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{Helper, Locator, PluginFormat, PluginId, PluginRef};
+use tutti_plugin_types::{IpcError, IpcResult};
 use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
 use tutti_units::SampleRate;
 
@@ -115,7 +116,7 @@ impl Restore<'_> {
 ///
 /// The server cannot be found or spawned, it does not connect or answer the
 /// handshake in time, or it fails to load the plugin.
-pub fn launch(config: &BridgeConfig, request: &LoadRequest<'_>) -> BridgeResult<LaunchedServer> {
+pub fn launch(config: &IpcConfig, request: &LoadRequest<'_>) -> IpcResult<LaunchedServer> {
     launch_with_state(&Locator::Search, config, request)
 }
 
@@ -131,11 +132,11 @@ pub fn launch(config: &BridgeConfig, request: &LoadRequest<'_>) -> BridgeResult<
 #[cfg(all(test, unix))]
 pub(super) fn launch_with(
     locator: &Locator,
-    config: &BridgeConfig,
+    config: &IpcConfig,
     plugin_path: &Path,
     format: PluginFormat,
     sample_rate: SampleRate,
-) -> BridgeResult<LaunchedServer> {
+) -> IpcResult<LaunchedServer> {
     let origin = PluginRef::file(plugin_path);
     launch_with_state(
         locator,
@@ -150,30 +151,29 @@ pub(super) fn launch_with(
 }
 
 /// `launch_with`, restoring the request's state into the plugin before it is
-/// activated: staged ahead of the load (`HostMessage::StageStateChunk`),
+/// activated: staged ahead of the load (`ControlRequest::StageStateChunk`),
 /// applied by the server between opening the plugin and activating it, so the
 /// activation, and the reply's buses and latency, are the state's.
 pub(super) fn launch_with_state(
     locator: &Locator,
-    config: &BridgeConfig,
+    config: &IpcConfig,
     request: &LoadRequest<'_>,
-) -> BridgeResult<LaunchedServer> {
+) -> IpcResult<LaunchedServer> {
     config.timeouts.validate()?;
     let server = ProcessGuard::launched(spawn_process(locator, config)?, config)
-        .map_err(BridgeError::ExitUnwatched)?;
+        .map_err(IpcError::ExitUnwatched)?;
 
     // The guard is borrowed, not moved: the connect retry asks its watch so a
     // server that died on startup is reported at once, and the teardown below
     // still needs to drop it.
     let result = (|server: &ProcessGuard| {
-        let mut stream = handshake(config, server)?;
-        let shm_name = next_shm_name()?;
+        let mut launch = Launch::new(handshake(config, server)?, &config.timeouts);
         // A state the server would not take (over the limit, a broken sequence)
         // is a refusal like any other: the plugin loads at its defaults. A stage
         // that got no answer is not: the stream may have a late reply in flight,
         // so the launch ends.
         let staged = match &request.restore {
-            Some(restore) => Some(stage_state(&mut stream, config, restore.state)?),
+            Some(restore) => Some(stage_state(&mut launch, config, restore.state)?),
             None => None,
         };
         let declared = match (&staged, &request.restore) {
@@ -181,13 +181,13 @@ pub(super) fn launch_with_state(
             _ => None,
         };
         let (id, descriptor, loaded, format, loaded_error) =
-            load_plugin(&mut stream, config, request, &shm_name, declared)?;
+            load_plugin(&mut launch, config, request, declared)?;
         let state_restore = match staged {
             Some(Err(e)) => Some(Err(e)),
             Some(Ok(())) => Some(loaded_error.map_or(Ok(()), Err)),
             None => None,
         };
-        let slab = setup_shm(&mut stream, config, &loaded, format, shm_name)?;
+        let slab = setup_shm(&mut launch, config, &loaded, format)?;
         Ok((id, descriptor, loaded, format, slab, state_restore))
     })(&server);
 
@@ -214,10 +214,10 @@ pub(super) fn launch_with_state(
 /// Starts the server as the leader of a process group of its own, in the
 /// host's kill-on-close job on Windows, so its helpers and the server itself
 /// end with it.
-fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Reaped> {
+fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<Reaped> {
     let server_path = locator
         .resolve(Helper::Server)
-        .ok_or(BridgeError::ServerNotFound)?;
+        .ok_or(IpcError::ServerNotFound)?;
     tracing::debug!("spawning plugin-server: {}", server_path.display());
     if config.protect_host_memory {
         protect_host_memory_once();
@@ -231,7 +231,7 @@ fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Reape
         )
         .stderr(std::process::Stdio::inherit());
     tutti_plugin_ipc_ffi::own_group(&mut command);
-    let child = command.spawn().map_err(BridgeError::Io)?;
+    let child = command.spawn().map_err(IpcError::Io)?;
     // A host that cannot bind the server to its own end still hosts: the server
     // then outlives a host that dies, which its own watch on the host ends. A
     // child spawned before the assignment stays outside the job.
@@ -242,7 +242,7 @@ fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Reape
 }
 
 /// Clears the host's dumpable flag, once for the process, at the first server
-/// it spawns ([`BridgeConfig::protect_host_memory`]).
+/// it spawns ([`IpcConfig::protect_host_memory`]).
 fn protect_host_memory_once() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -272,14 +272,14 @@ fn connect_when_listening(
     socket: &Path,
     server: &ProcessGuard,
     patience: Duration,
-) -> BridgeResult<ControlStream> {
+) -> IpcResult<ControlStream> {
     let deadline = Instant::now() + patience;
     loop {
         match ipc::connect(socket) {
             Ok(stream) => return Ok(stream),
             Err(e) => {
                 if let Some(cause) = server.watch().cause() {
-                    return Err(BridgeError::ServerExited { cause });
+                    return Err(IpcError::ServerExited { cause });
                 }
                 if Instant::now() >= deadline {
                     return Err(e);
@@ -290,22 +290,27 @@ fn connect_when_listening(
     }
 }
 
-fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<ControlStream> {
+/// How many times [`Timeouts::load`] a load may be kept waiting by the server's
+/// signs of life: a server that is still working is waited for, but a plugin
+/// that works for ever is not.
+const LOAD_CEILING_FACTOR: u32 = 10;
+
+fn handshake(config: &IpcConfig, server: &ProcessGuard) -> IpcResult<ControlStream> {
     let mut stream = connect_when_listening(&config.socket_path, server, config.timeouts.connect)?;
     let timeout = config.timeouts.call;
     // A server from before version 27 frames its `Ready` in bincode, which does
     // not decode as one message of ours: say which binary is stale rather than
     // report a bare codec error.
-    let ready = ipc::recv_within(&mut stream, timeout).map_err(|e| match e {
-        undecodable @ (BridgeError::Serialization(_) | BridgeError::TrailingBytes { .. }) => {
-            BridgeError::StaleServer {
+    let ready = ipc::recv_within::<ControlFrame>(&mut stream, timeout).map_err(|e| match e {
+        undecodable @ (IpcError::Serialization(_) | IpcError::TrailingBytes { .. }) => {
+            IpcError::StaleServer {
                 cause: Box::new(undecodable),
             }
         }
         other => other,
     })?;
     match ready {
-        BridgeMessage::Ready { protocol_version } => {
+        ControlFrame::Ready { protocol_version } => {
             crate::protocol::check_protocol_version(protocol_version)?;
             Ok(stream)
         }
@@ -324,81 +329,216 @@ enum LoadPhase {
 }
 
 impl LoadPhase {
-    /// How long the next reply may take in this phase.
-    fn window(self, timeouts: &Timeouts) -> Duration {
-        match self {
-            Self::Opening => timeouts.load,
-            Self::Restoring => timeouts.state_restore,
-        }
-    }
-
     /// `error` as this phase answers for it: a restore's failure is the
-    /// state's ([`BridgeError::StateRestore`]); an open's is its own.
-    fn blame(self, error: BridgeError) -> BridgeError {
+    /// state's ([`IpcError::StateRestore`]); an open's is its own.
+    fn blame(self, error: IpcError) -> IpcError {
         match self {
             Self::Opening => error,
-            Self::Restoring => BridgeError::StateRestore {
+            Self::Restoring => IpcError::StateRestore {
                 cause: Box::new(error),
             },
         }
     }
 }
 
+/// A launch's requests and what has been heard of them: the part of a launch
+/// that does no I/O. Its requests are numbered and the answers matched to them
+/// by a [`Conversation`], whose deadlines the server's signs of life move, and
+/// the load's phase only ever goes forward.
+struct Exchange<'t> {
+    conv: Conversation<ReqId, ()>,
+    last_id: u64,
+    timeouts: &'t Timeouts,
+    phase: LoadPhase,
+    /// The window the request in flight is under, for the error that names it.
+    window: Duration,
+}
+
+/// What a frame heard in a launch came to.
+#[derive(Debug)]
+enum Heard {
+    /// The answer to the request waited for.
+    Answer(ControlReply),
+    /// A sign of life, which moved the wait.
+    Working,
+}
+
+impl<'t> Exchange<'t> {
+    fn new(timeouts: &'t Timeouts) -> Self {
+        Self {
+            conv: Conversation::new(),
+            last_id: 0,
+            timeouts,
+            phase: LoadPhase::Opening,
+            window: timeouts.call,
+        }
+    }
+
+    /// Numbers the next request, sent at `now`, which the server has `window`
+    /// to answer (restarting at each sign of life, up to `ceiling` from the
+    /// send).
+    fn open(&mut self, now: Instant, window: Duration, ceiling: Duration) -> ReqId {
+        self.last_id += 1;
+        let id = ReqId::new(self.last_id);
+        self.conv.open(id, (), now, window, ceiling);
+        self.phase = LoadPhase::Opening;
+        self.window = window;
+        id
+    }
+
+    /// What `frame`, heard at `now`, does to the wait for request `id`.
+    ///
+    /// At work opening the plugin restarts the load window, up to its ceiling;
+    /// at work restoring the state the request is under the restore's own
+    /// window and ceiling from that instant, and from then on a failure is the
+    /// state's to answer for. The phase never goes back: a sign of life that
+    /// says `Opening` after the restore began (the beat and the notice come from
+    /// two threads) is a sign of life and no more.
+    ///
+    /// # Errors
+    ///
+    /// A frame that is not an answer to `id` or a sign of life: nothing the
+    /// plugin says unprompted comes before it is loaded, so news is no part of
+    /// this connection.
+    fn hear(&mut self, frame: ControlFrame, id: ReqId, now: Instant) -> IpcResult<Heard> {
+        match frame {
+            ControlFrame::Working { id: of, stage } if of == id => {
+                match stage {
+                    Working::Opening => {
+                        self.conv.extend(id, now);
+                    }
+                    // The restore's window and ceiling are set once, as it
+                    // begins; the beat that follows only extends the wait
+                    // within that ceiling, or a restore that never ends would
+                    // be waited for for ever.
+                    Working::Restoring if self.phase == LoadPhase::Opening => {
+                        self.phase = LoadPhase::Restoring;
+                        self.window = self.timeouts.state_restore;
+                        let restore = self.timeouts.state_restore;
+                        self.conv.restart(id, now, restore, restore);
+                    }
+                    Working::Restoring => {
+                        self.conv.extend(id, now);
+                    }
+                }
+                Ok(Heard::Working)
+            }
+            ControlFrame::Working { .. } => Ok(Heard::Working),
+            ControlFrame::Reply { id: of, reply } => match self.conv.hear(of, reply.ends(), now) {
+                Ok(crate::conversation::Heard::Answer { .. }) if of == id => {
+                    Ok(Heard::Answer(reply))
+                }
+                _ => Err(unexpected_message("the answer to the request", &reply)),
+            },
+            ref other => Err(unexpected_message("a reply", other)),
+        }
+    }
+
+    /// How long request `id` may still be waited for at `now`.
+    fn left(&self, id: ReqId, now: Instant) -> Duration {
+        self.conv.left(id, now).unwrap_or(Duration::ZERO)
+    }
+
+    /// `error` as the wait names it: a timeout carries the window the request
+    /// was under, and a failure in the restore is the state's.
+    fn blame(&self, error: IpcError) -> IpcError {
+        self.phase.blame(match error {
+            IpcError::Timeout {
+                operation, partial, ..
+            } => IpcError::Timeout {
+                operation,
+                after: self.window,
+                partial,
+            },
+            other => other,
+        })
+    }
+}
+
+/// A launch's connection and its [`Exchange`].
+struct Launch<'t> {
+    stream: ControlStream,
+    exchange: Exchange<'t>,
+}
+
+impl<'t> Launch<'t> {
+    fn new(stream: ControlStream, timeouts: &'t Timeouts) -> Self {
+        Self {
+            stream,
+            exchange: Exchange::new(timeouts),
+        }
+    }
+
+    /// Numbers the next request (see [`Exchange::open`]).
+    fn open(&mut self, window: Duration, ceiling: Duration) -> ReqId {
+        self.exchange.open(Instant::now(), window, ceiling)
+    }
+
+    /// Sends a frame of the request `id`.
+    fn send(&mut self, id: ReqId, body: ControlRequest) -> IpcResult<()> {
+        ipc::send(&mut self.stream, &Request { id, body })
+    }
+
+    /// The answer to request `id`, the signs of life on the way moving the
+    /// wait.
+    fn answer(&mut self, id: ReqId) -> IpcResult<ControlReply> {
+        loop {
+            let left = self.exchange.left(id, Instant::now());
+            let frame = ipc::recv_within::<ControlFrame>(&mut self.stream, left)
+                .map_err(|e| self.exchange.blame(e))?;
+            if let Heard::Answer(reply) = self.exchange.hear(frame, id, Instant::now())? {
+                return Ok(reply);
+            }
+        }
+    }
+}
+
 fn load_plugin(
-    stream: &mut ControlStream,
-    config: &BridgeConfig,
+    launch: &mut Launch<'_>,
+    config: &IpcConfig,
     request: &LoadRequest<'_>,
-    shm_name: &str,
     state: Option<StagedState>,
-) -> BridgeResult<(
+) -> IpcResult<(
     PluginId,
     Box<PluginDescriptor>,
     LoadedPlugin,
     FloatWidth,
     Option<String>,
 )> {
-    ipc::send(
-        stream,
-        &HostMessage::LoadPlugin {
+    // The open (library, instance, init) runs under the bridge's load window,
+    // and the server's signs of life restart it. When the server says it has
+    // begun restoring the state, the wait changes: a restore is one opaque
+    // plugin call with no signal inside it to measure progress by, and a large
+    // state is legitimately slow to restore, so it gets a window of its own. A
+    // failure from then on is the state's to answer for
+    // ([`IpcError::StateRestore`]); one before it is a load failure, and
+    // blames nothing.
+    let load = config.timeouts.load;
+    let id = launch.open(load, load.saturating_mul(LOAD_CEILING_FACTOR));
+    launch.send(
+        id,
+        ControlRequest::LoadPlugin {
             path: request.origin.path().to_path_buf(),
             format: request.format,
             plugin: request.origin.id().cloned(),
             sample_rate: request.rate,
             block_size: config.max_buffer_size,
             preferred_format: config.preferred_format,
-            shm_name: shm_name.to_string(),
             state,
         },
     )?;
-
-    // The open (library, instance, init) runs under the bridge's timeout. When the
-    // server says it has begun restoring the state, the wait changes: a restore
-    // is one opaque plugin call with no signal inside it to measure progress by,
-    // and a large state is legitimately slow to restore, so it gets a window of
-    // its own. A failure from then on is the state's to answer for
-    // ([`BridgeError::StateRestore`]); one before it is a load failure, and
-    // blames nothing.
-    let mut phase = LoadPhase::Opening;
-    loop {
-        let reply =
-            ipc::recv_within(stream, phase.window(&config.timeouts)).map_err(|e| phase.blame(e))?;
-        match reply {
-            BridgeMessage::RestoringState => phase = LoadPhase::Restoring,
-            BridgeMessage::PluginLoaded {
-                id,
-                descriptor,
-                loaded,
-                negotiated_format,
-                state_error,
-            } => return Ok((id, descriptor, loaded, negotiated_format, state_error)),
-            BridgeMessage::Error { message } => {
-                return Err(BridgeError::load_from_server(
-                    request.origin.path(),
-                    message,
-                ));
-            }
-            ref other => return Err(unexpected_message("PluginLoaded", other)),
+    match launch.answer(id)? {
+        ControlReply::PluginLoaded {
+            id,
+            descriptor,
+            loaded,
+            negotiated_format,
+            state_error,
+        } => Ok((id, descriptor, loaded, negotiated_format, state_error)),
+        ControlReply::Error { message } => {
+            Err(IpcError::load_from_server(request.origin.path(), message))
         }
+        ref other => Err(unexpected_message("PluginLoaded", other)),
     }
 }
 
@@ -406,10 +546,10 @@ fn load_plugin(
 /// is the server's refusal (too large, a broken sequence): the plugin then loads
 /// without it. The outer `Err` is a stage that got no answer, and ends the launch.
 fn stage_state(
-    stream: &mut ControlStream,
-    config: &BridgeConfig,
+    launch: &mut Launch<'_>,
+    config: &IpcConfig,
     state: &[u8],
-) -> BridgeResult<std::result::Result<(), String>> {
+) -> IpcResult<std::result::Result<(), String>> {
     if state.len() > tutti_plugin_types::MAX_STATE_BYTES {
         return Ok(Err(format!(
             "state is {} bytes, over the {}-byte limit",
@@ -417,20 +557,24 @@ fn stage_state(
             tutti_plugin_types::MAX_STATE_BYTES
         )));
     }
+    // One request sent as several frames that share its id: the server answers
+    // once, on the last.
+    let call = config.timeouts.call;
+    let id = launch.open(call, call);
     for (seq, last, bytes) in crate::transport::state_chunk::split(state) {
-        ipc::send(
-            stream,
-            &HostMessage::StageStateChunk {
+        launch.send(
+            id,
+            ControlRequest::StageStateChunk {
                 seq,
+                total: state.len() as u64,
                 last,
                 bytes: bytes.to_vec(),
             },
         )?;
     }
-    let timeout = config.timeouts.call;
-    match ipc::recv_within(stream, timeout)? {
-        BridgeMessage::StateLoaded { error: None } => Ok(Ok(())),
-        BridgeMessage::StateLoaded { error: Some(e) } => Ok(Err(e)),
+    match launch.answer(id)? {
+        ControlReply::StateLoaded { error: None } => Ok(Ok(())),
+        ControlReply::StateLoaded { error: Some(e) } => Ok(Err(e)),
         other => Err(unexpected_message("StateLoaded", &other)),
     }
 }
@@ -467,20 +611,19 @@ fn slab_layout_for(
 }
 
 fn setup_shm(
-    stream: &mut ControlStream,
-    config: &BridgeConfig,
+    launch: &mut Launch<'_>,
+    config: &IpcConfig,
     loaded: &LoadedPlugin,
     format: FloatWidth,
-    shm_name: String,
-) -> BridgeResult<SlabWriter> {
+) -> IpcResult<SlabWriter> {
     let layout = slab_layout_for(loaded, format, config.max_buffer_size);
-    let slab = AudioSlab::create(shm_name.clone(), layout.clone())?;
+    let (slab, handle) = AudioSlab::create(layout.clone())?;
 
-    ipc::send(stream, &HostMessage::SetupSharedMemory { shm_name, layout })?;
-
-    let timeout = config.timeouts.call;
-    match ipc::recv_within(stream, timeout)? {
-        BridgeMessage::SharedMemoryReady => Ok(slab),
+    let call = config.timeouts.call;
+    let id = launch.open(call, call);
+    ipc::send_setup(&mut launch.stream, id, layout, &handle)?;
+    match launch.answer(id)? {
+        ControlReply::SharedMemoryReady => Ok(slab),
         ref other => Err(unexpected_message("SharedMemoryReady", other)),
     }
 }
@@ -509,25 +652,17 @@ pub(crate) fn swap_slab(
     ceiling: usize,
     held: &SlabLayout,
     unsure: bool,
-) -> BridgeResult<Option<SlabWriter>> {
+) -> IpcResult<Option<SlabWriter>> {
     let layout = slab_layout_for(loaded, format, ceiling);
     if layout == *held && !unsure {
         return Ok(None);
     }
-    let shm_name = next_shm_name()?;
-    let slab = AudioSlab::create(shm_name.clone(), layout.clone())?;
-    if bridge.audio().setup_shared_memory(shm_name, layout) {
+    let (slab, handle) = AudioSlab::create(layout.clone())?;
+    if bridge.audio().setup_shared_memory(handle, layout) {
         Ok(Some(slab))
     } else {
-        Err(BridgeError::SlabRefused)
+        Err(IpcError::SlabRefused)
     }
-}
-
-fn next_shm_name() -> BridgeResult<String> {
-    // Unguessable for the same reason as the socket (`unique_socket_path`):
-    // `/dev/shm` is shared, and `AudioSlab::create` refuses a name that
-    // exists, so a predictable one is a launch another user can block.
-    Ok(crate::config::unique_name("tutti_plugin")?)
 }
 
 #[cfg(test)]
@@ -612,13 +747,13 @@ mod tests {
             std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let config = BridgeConfig {
+        let config = IpcConfig {
             timeouts: {
                 let mut t = Timeouts::default();
                 t.call = Duration::from_millis(200);
                 t
             },
-            ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
+            ..IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
 
         let err = match launch_with(
@@ -672,20 +807,20 @@ mod tests {
         env: &[(&str, &str)],
         call: Duration,
         state_restore: Duration,
-    ) -> BridgeResult<LaunchedServer> {
+    ) -> IpcResult<LaunchedServer> {
         // Held for the launch: the server inherits the switches when it spawns.
         let mut switches = tutti_fixtures::ScopedEnv::new();
         for (k, v) in env {
             switches.set(k, v);
         }
-        let config = BridgeConfig {
+        let config = IpcConfig {
             timeouts: {
                 let mut t = Timeouts::default();
                 t.call = call;
                 t.state_restore = state_restore;
                 t
             },
-            ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
+            ..IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
         let origin = PluginRef::file(tutti_fixtures::clap_probe());
         launch_with_state(
@@ -704,7 +839,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn reap(server: BridgeResult<LaunchedServer>) {
+    fn reap(server: IpcResult<LaunchedServer>) {
         // The guard kills and reaps the server as it drops.
         drop(server);
     }
@@ -721,7 +856,7 @@ mod tests {
             call: Duration,
             state_restore: Duration,
             releaser: Option<fn(&Path)>,
-        ) -> BridgeResult<LaunchedServer> {
+        ) -> IpcResult<LaunchedServer> {
             let dir = tempfile::tempdir().expect("a private temp dir");
             let fifo = dir.path().join("restore-hold");
             let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
@@ -796,7 +931,7 @@ mod tests {
         fn a_restore_that_outlasts_its_window_is_blamed_on_the_state() {
             let launched = launch_held(Duration::from_secs(60), Duration::from_millis(200), None);
             assert!(
-                matches!(&launched, Err(BridgeError::StateRestore { .. })),
+                matches!(&launched, Err(IpcError::StateRestore { .. })),
                 "{:?}",
                 launched.as_ref().err()
             );
@@ -814,38 +949,174 @@ mod tests {
             Duration::from_secs(60),
         );
         assert!(
-            matches!(&launched, Err(BridgeError::StateRestore { .. })),
+            matches!(&launched, Err(IpcError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );
     }
 
-    /// The window of the wait a `LoadPlugin` reply is under: `load` while the
-    /// plugin opens (a sampler's initialisation is a healthy load, not a generic
-    /// call), `state_restore` once the server says it is restoring, and only a
-    /// restore's failure is the state's.
+    /// **Only a restore's failure is the state's**: an open that times out
+    /// blames nothing, and the same timeout once the server said it was
+    /// restoring is the state's, with the timeout as its cause. (The windows
+    /// are the conversation's, tested over constructed instants.)
     #[test]
-    fn a_restore_is_waited_on_for_its_own_window() {
-        let mut t = Timeouts::default();
-        t.call = Duration::from_secs(1);
-        t.load = Duration::from_secs(7);
-        t.state_restore = Duration::from_secs(20);
-        assert_eq!(LoadPhase::Opening.window(&t), Duration::from_secs(7));
-        assert_eq!(LoadPhase::Restoring.window(&t), Duration::from_secs(20));
-
-        let timed_out = || BridgeError::Timeout {
+    fn only_a_restores_failure_is_the_states() {
+        let timed_out = || IpcError::Timeout {
             operation: "a reply",
             after: Duration::from_millis(1),
             partial: false,
         };
         assert!(matches!(
             LoadPhase::Opening.blame(timed_out()),
-            BridgeError::Timeout { .. }
+            IpcError::Timeout { .. }
         ));
         assert!(matches!(
             LoadPhase::Restoring.blame(timed_out()),
-            BridgeError::StateRestore { cause } if matches!(*cause, BridgeError::Timeout { .. })
+            IpcError::StateRestore { cause } if matches!(*cause, IpcError::Timeout { .. })
         ));
+    }
+
+    fn exchange_timeouts() -> Timeouts {
+        let mut t = Timeouts::default();
+        t.load = Duration::from_secs(5);
+        t.state_restore = Duration::from_secs(120);
+        t
+    }
+
+    fn working(id: ReqId, stage: Working) -> ControlFrame {
+        ControlFrame::Working { id, stage }
+    }
+
+    /// **The server's signs of life restart the load's wait, and only for its
+    /// window**: each `Working` at work opening moves the deadline a load
+    /// window past the sign, and the wait is still due that window after the
+    /// last one.
+    #[test]
+    fn a_sign_of_life_restarts_the_loads_wait() {
+        let t = exchange_timeouts();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
+
+        let heard = exchange
+            .hear(working(id, Working::Opening), id, at(4))
+            .unwrap();
+        assert!(matches!(heard, Heard::Working));
+        assert_eq!(
+            exchange.left(id, at(4)),
+            Duration::from_secs(5),
+            "restarted at the sign"
+        );
+        assert_eq!(
+            exchange.left(id, at(9)),
+            Duration::ZERO,
+            "a window after the last"
+        );
+        assert_eq!(exchange.phase, LoadPhase::Opening);
+    }
+
+    /// **A restore has its own window and its own ceiling, from the instant the
+    /// server says it began**: with a 5 s load window (a 50 s ceiling) and a
+    /// 120 s restore, the restore is still waited for 100 s in, long past the
+    /// load's ceiling, and a failure from then on is the state's.
+    #[test]
+    fn a_restore_has_its_own_window_and_ceiling() {
+        let t = exchange_timeouts();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
+
+        exchange
+            .hear(working(id, Working::Restoring), id, at(3))
+            .unwrap();
+        assert_eq!(exchange.phase, LoadPhase::Restoring);
+        assert_eq!(exchange.left(id, at(3)), Duration::from_secs(120));
+        assert!(
+            exchange.left(id, at(100)) > Duration::ZERO,
+            "past the load's 50 s ceiling and still within the restore's"
+        );
+        assert_eq!(
+            exchange.left(id, at(123)),
+            Duration::ZERO,
+            "120 s after it began"
+        );
+        assert!(matches!(
+            exchange.blame(IpcError::Timeout {
+                operation: "a reply",
+                after: Duration::ZERO,
+                partial: false,
+            }),
+            IpcError::StateRestore { cause }
+                if matches!(*cause, IpcError::Timeout { after, .. } if after == Duration::from_secs(120))
+        ));
+    }
+
+    /// **A restore that beats for ever is not waited for for ever**: the server
+    /// says `Restoring` every second of a restore that hangs, and the wait still
+    /// ends at the ceiling set when the restore began, whatever the beat does.
+    #[test]
+    fn a_restoring_beat_does_not_move_the_ceiling() {
+        let t = exchange_timeouts();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
+
+        for second in 3..=400 {
+            exchange
+                .hear(working(id, Working::Restoring), id, at(second))
+                .unwrap();
+        }
+        // The restore began at 3 s with a 120 s ceiling: due at 123 s, however
+        // many beats came after.
+        assert_eq!(exchange.left(id, at(122)), Duration::from_secs(1));
+        assert_eq!(exchange.left(id, at(123)), Duration::ZERO);
+    }
+
+    /// **The phase never goes back**: a beat's `Opening` that arrives after the
+    /// restore began (the beat and the notice are two threads) leaves the load
+    /// in its restore, so a failure after it is still the state's.
+    #[test]
+    fn the_phase_only_goes_forward() {
+        let t = exchange_timeouts();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
+        exchange
+            .hear(working(id, Working::Restoring), id, at(1))
+            .unwrap();
+        exchange
+            .hear(working(id, Working::Opening), id, at(2))
+            .unwrap();
+        assert_eq!(exchange.phase, LoadPhase::Restoring);
+        assert!(matches!(
+            exchange.blame(IpcError::ProcessCrashed),
+            IpcError::StateRestore { .. }
+        ));
+    }
+
+    /// **The answer is the one of the request waited for**, and a frame that is
+    /// neither an answer nor a sign of life is refused.
+    #[test]
+    fn only_the_awaited_answer_ends_the_wait() {
+        let t = exchange_timeouts();
+        let now = Instant::now();
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(now, t.call, t.call);
+        let reply = |of| ControlFrame::Reply {
+            id: of,
+            reply: ControlReply::SharedMemoryReady,
+        };
+        assert!(exchange.hear(reply(ReqId::new(99)), id, now).is_err());
+        assert!(matches!(
+            exchange.hear(reply(id), id, now),
+            Ok(Heard::Answer(ControlReply::SharedMemoryReady))
+        ));
+        let other = ControlFrame::News(crate::News::EditorClosed);
+        assert!(exchange.hear(other, id, now).is_err());
     }
 
     /// **A plugin that dies before the restore is not blamed on the state**: it
@@ -859,7 +1130,7 @@ mod tests {
             Duration::from_secs(60),
         );
         assert!(
-            launched.is_err() && !matches!(&launched, Err(BridgeError::StateRestore { .. })),
+            launched.is_err() && !matches!(&launched, Err(IpcError::StateRestore { .. })),
             "{:?}",
             launched.as_ref().err()
         );
@@ -880,7 +1151,7 @@ mod tests {
     fn a_library_that_is_not_a_plugin_fails_the_launch_with_the_loaders_reason() {
         let dir = tempfile::tempdir().expect("a private temp dir");
         let config =
-            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
+            IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
         // A copy in this test's own directory, not `publish_with_extension`:
         // that names the link `real.with_extension(..)`, which on Linux is the
         // cdylib's own path.
@@ -905,7 +1176,7 @@ mod tests {
             }
         };
         match err {
-            BridgeError::LoadFailed { reason, .. } => {
+            IpcError::LoadFailed { reason, .. } => {
                 assert!(
                     !reason.contains("unsupported plugin format"),
                     "reason: {reason}"
@@ -954,7 +1225,7 @@ mod tests {
         }
     }
 
-    /// The default `BridgeConfig::max_buffer_size`. Named here so the sizing
+    /// The default `IpcConfig::max_buffer_size`. Named here so the sizing
     /// tests below read as "the shipped default", not as a magic number.
     const DEFAULT_MAX_BUFFER: usize = 8192;
 
@@ -1081,7 +1352,7 @@ mod tests {
 
     /// Drives the real [`handshake`] against a stand-in server whose first frame
     /// is `body`, and returns the error it must end in.
-    fn handshake_against(body: Vec<u8>) -> BridgeError {
+    fn handshake_against(body: Vec<u8>) -> IpcError {
         use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 
         // Unique per run. A fixed name collides with a leftover socket from an
@@ -1102,13 +1373,13 @@ mod tests {
             let _ = stream.write_all(&body);
         });
 
-        let config = BridgeConfig {
+        let config = IpcConfig {
             timeouts: {
                 let mut t = Timeouts::default();
                 t.call = Duration::from_secs(2);
                 t
             },
-            ..BridgeConfig::at(path.clone())
+            ..IpcConfig::at(path.clone())
         };
         // The listener above stands in for the server, so there is no child to
         // watch — but `handshake` takes a guard to notice a spawn that died. A
@@ -1149,13 +1420,13 @@ mod tests {
         );
 
         let err = handshake_against(
-            postcard::to_allocvec(&BridgeMessage::Ready {
+            postcard::to_allocvec(&ControlFrame::Ready {
                 protocol_version: STALE_VERSION,
             })
             .unwrap(),
         );
         match err {
-            BridgeError::ProtocolMismatch { expected, got } => {
+            IpcError::ProtocolMismatch { expected, got } => {
                 assert_eq!(expected, PROTOCOL_VERSION);
                 assert_eq!(got, STALE_VERSION);
             }
@@ -1181,7 +1452,7 @@ mod tests {
 
         const BEFORE_STATUS: u32 = 31;
         let err = handshake_against(
-            postcard::to_allocvec(&BridgeMessage::Ready {
+            postcard::to_allocvec(&ControlFrame::Ready {
                 protocol_version: BEFORE_STATUS,
             })
             .unwrap(),
@@ -1189,7 +1460,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                BridgeError::ProtocolMismatch { expected, got }
+                IpcError::ProtocolMismatch { expected, got }
                     if expected == PROTOCOL_VERSION && got == BEFORE_STATUS
             ),
             "expected a ProtocolMismatch naming 32 and 31, got: {err}"
@@ -1204,7 +1475,7 @@ mod tests {
     /// never read and the codec error is what the operator would otherwise see.
     #[test]
     fn a_bincode_era_server_is_refused_with_a_rebuild_hint() {
-        let ready = postcard::to_allocvec(&BridgeMessage::Ready {
+        let ready = postcard::to_allocvec(&ControlFrame::Ready {
             protocol_version: 0,
         })
         .unwrap()[0];
@@ -1212,7 +1483,7 @@ mod tests {
         bincode_ready.extend_from_slice(&26u32.to_le_bytes());
 
         match handshake_against(bincode_ready) {
-            stale @ BridgeError::StaleServer { .. } => {
+            stale @ IpcError::StaleServer { .. } => {
                 assert!(stale.to_string().contains("rebuild the plugin-server"));
             }
             other => panic!("expected StaleServer, got: {other}"),
@@ -1233,7 +1504,7 @@ mod tests {
 
         let mut child = spawn_stand_in(StandIn::BindsOnByte(path.clone()));
         let mut release = child.stdin.take().expect("the stand-in's stdin is piped");
-        let stand_in = ProcessGuard::launched(Reaped::new(child), &BridgeConfig::at(path.clone()))
+        let stand_in = ProcessGuard::launched(Reaped::new(child), &IpcConfig::at(path.clone()))
             .expect("the exit thread starts");
 
         let (running, is_running) = std::sync::mpsc::channel();
@@ -1274,7 +1545,7 @@ mod tests {
         // that dies on a missing dynamic library.
         let dead = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Exits)),
-            &BridgeConfig::at(path.clone()),
+            &IpcConfig::at(path.clone()),
         )
         .expect("the exit thread starts");
 
@@ -1282,7 +1553,7 @@ mod tests {
             .expect_err("a server that never binds cannot connect");
 
         assert!(
-            matches!(err, BridgeError::ServerExited { .. }),
+            matches!(err, IpcError::ServerExited { .. }),
             "the error must say the server died rather than blaming the socket, got: {err}"
         );
 
@@ -1399,7 +1670,7 @@ mod tests {
         use tutti_plugin_types::PluginFailure;
 
         let config =
-            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
+            IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
         let origin = PluginRef::file(tutti_fixtures::clap_probe());
         let launched = launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),

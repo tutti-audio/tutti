@@ -6,6 +6,9 @@ mod new_session;
 // Stems: a node's own output beside the master, aligned to it, in one pass.
 #[cfg(feature = "export")]
 mod bounce_stems;
+// A bounce's `create_new`: a path that exists is refused at the commit and the file kept.
+#[cfg(feature = "export")]
+mod bounce_create_new;
 // A bounce's dither: triangular unless it says otherwise.
 #[cfg(feature = "export")]
 mod bounce_dither;
@@ -28,6 +31,9 @@ mod export_parallel;
 // What a bounce keeps past its range for the sampler's nodes, and a voice pool's fork.
 #[cfg(all(feature = "export", feature = "sampler"))]
 mod bounce_sampler;
+// A session on a polled executor: its streamer and jobs run inside `update`.
+#[cfg(all(feature = "export", feature = "sampler"))]
+mod polled_streaming;
 // A sampler voice (memory and disk) exported through a fork.
 #[cfg(all(feature = "export", feature = "sampler"))]
 mod export_fork_sampler;

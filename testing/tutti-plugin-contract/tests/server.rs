@@ -12,16 +12,15 @@ use std::path::PathBuf;
 use tutti_fixtures::main_thread;
 
 use tutti_buffers::FloatWidth;
-use tutti_plugin::BridgeConfig;
 use tutti_plugin::PluginClient;
 use tutti_plugin_contract::spec::{self, Mode, Param};
 use tutti_plugin_contract::{
     Active, BLOCK, Clap, Format, RATE, Render, Transcript, Vst3, Vst3Cpp, bundle_of, clap_path,
     gesture_edits, patch_mode, prepare, select, vst3_cpp_module, vst3_module,
 };
-use tutti_plugin_ipc::{BridgeConfig as IpcConfig, BridgeEvent, Ipc, Launched};
+use tutti_plugin_ipc::{Ipc, IpcConfig, IpcEvent, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Control, Editor, LoadStage, MainThreadMarker, ParamEdit, SampleRate,
+    Control, Editor, IpcError, IpcResult, LoadStage, MainThreadMarker, ParamEdit, SampleRate,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -30,9 +29,7 @@ fn through_server<F: Format>(path: PathBuf) {
     // SAFETY: set before any thread of this test reads it.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let client = PluginClient::new(
-        BridgeConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         &tutti_fixtures::detached_work(),
         &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
             path,
@@ -116,8 +113,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> BridgeResult<Box<dyn Editor>> {
-    Err(BridgeError::LoadFailed {
+) -> IpcResult<Box<dyn Editor>> {
+    Err(IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "these tests load no editor".into(),
@@ -151,7 +148,7 @@ fn served<F: Format>(
     let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = std::sync::Arc::clone(&heard);
     ipc.forward_events(Some(std::sync::Arc::new(move |event| {
-        if let BridgeEvent::ParameterChanged { edit } = event {
+        if let IpcEvent::ParameterChanged { edit } = event {
             sink.lock().unwrap().push(edit);
         }
     })));
@@ -219,6 +216,28 @@ fn a_served_gesture_arrives_in_order<F: Format>(path: PathBuf) {
     );
 }
 
+/// **What a plugin says while it takes parameters outside a block crosses the
+/// wire as what it says in a block**: CLAP's plugin raises its gesture from
+/// `params.flush` too, and no block runs here. A write and a read of the plugin
+/// send the write as a flush; the gesture it raises arrives in order.
+#[test]
+fn clap_gesture_from_a_flush_crosses_the_process_boundary_in_order() {
+    use tutti_plugin_types::AnyThread;
+    let (mut a, heard) = served::<Clap>(clap_path());
+    select::<Clap, _>(a.controller_mut(), 0, spec::NOTICE_GESTURE_ON_LOAD);
+    let main = tutti_fixtures::main_thread();
+    AnyThread::set_parameter_value(a.controller(), Param::Level.id(), Normalized::of(0.5))
+        .expect("a declared parameter");
+    // The read sends the write ahead of itself, as a flush.
+    let _ = a.controller().parameter(main, Param::Level.id());
+    tutti_fixtures::wait_until(
+        "the gesture the flush raised to arrive",
+        HangGuard::LIMIT,
+        || heard.lock().unwrap().len() >= gesture_edits().len(),
+    );
+    assert_eq!(*heard.lock().unwrap(), gesture_edits());
+}
+
 /// A parameter value keeps its width across the wire: 0.3, which an `f32`
 /// cannot hold, is read back as sent (the wire carried an `f32` before version
 /// 31, which returned 0.30000001192092896).
@@ -263,9 +282,9 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
 }
 
 /// **A write to the read-only parameter on the realtime route is not applied by
-/// the server**: `AnyThread::set_parameter_value` sends it as it is (the client
-/// reads no cache there), and the server's own `Control::set_parameter` refuses
-/// it. The plugin's record of what the host sent has an event for `level`, the
+/// the server**: `AnyThread::set_parameter_value` sends it with the next block
+/// (the client checks only that the plugin declares it), and the server's own
+/// `Control::set_parameter` refuses it. The plugin's record of what the host sent has an event for `level`, the
 /// writable write sent the same way, and none for the meter.
 fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathBuf) {
     use tutti_plugin_contract::Kind;
@@ -277,14 +296,16 @@ fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathB
         a.controller(),
         Param::Meter.id(),
         Normalized::of(spec::WRITE),
-    );
+    )
+    .expect("a declared parameter");
     AnyThread::set_parameter_value(
         a.controller(),
         Param::Level.id(),
         Normalized::of(spec::WRITE),
-    );
-    // The writes travel on the control connection and the blocks on the audio
-    // one: blocks run until the writable one has landed.
+    )
+    .expect("a declared parameter");
+    // The writes ride the next block, or a read's flush on the audio
+    // connection: blocks run until the writable one has landed.
     let guard = HangGuard::new();
     let mut level = a.controller().parameter(main, Param::Level.id());
     while level.map(Normalized::get) != Some(spec::WRITE) {

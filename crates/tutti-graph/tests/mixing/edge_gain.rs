@@ -1,4 +1,4 @@
-//! Edge gain, stage G1 (doc 013, "Edge gain: a mixer is a weighted sum"): an
+//! Edge gain: an
 //! edge with an entry in `GraphSpec::gains` is a **weighted lane** of its
 //! sink's sum, `acc = acc + w * a`, with the weight moved by
 //! `Editor::set_edge_gain` and ramped across the block.
@@ -328,8 +328,7 @@ fn unity_weights_equal_the_unweighted_sum() {
 /// The one-edge corner: a plain edge is an alias and keeps a `-0.0` sample; a
 /// **unity entry** on the same edge is an `Op::WeightedSum` of one addend,
 /// `+0.0 + 1.0 * a`, which turns that `-0.0` into `+0.0`. Nothing audible
-/// differs, and this test pins the difference rather than hiding it (doc 013,
-/// "Edge gain", "Weight 1.0 is bit-identical to the plain sum").
+/// differs, and this test pins the difference rather than hiding it.
 #[test]
 fn a_unity_entry_on_a_one_edge_sink_turns_negative_zero_positive() {
     let neg = -0.0f32;

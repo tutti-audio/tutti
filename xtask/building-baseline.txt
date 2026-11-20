@@ -57,8 +57,6 @@ tutti-clap-host  setter  crates/tutti-clap-host/src/instance/thread_pool.rs::Cla
 # tutti-codec
 tutti-codec  ctor-result  crates/tutti-codec/src/aiff.rs::AiffWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create
-tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file
-tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file_planned
 tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
 tutti-codec  ctor-result  crates/tutti-codec/src/flac.rs::FlacWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
@@ -83,7 +81,6 @@ tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolve
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::normalized
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/times.rs::ChannelTimes::each
-tutti-dsp  ctor-result  crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::ordered
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::designed
@@ -117,9 +114,6 @@ tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channe
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
 tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
 tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
-tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::dither
-tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::normalize
-tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::resample
 
 # tutti-graph
 tutti-graph  with-prefix  crates/tutti-graph/src/param_event.rs::ParamRamp::with_shape
@@ -158,56 +152,7 @@ tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
 
-# tutti-midi-ci
-tutti-midi-ci  range-macro  crates/tutti-midi-ci/src/pe/limits.rs::text_type
-
-# tutti-midi-file
-tutti-midi-file  chain-result  crates/tutti-midi-file/src/file.rs::Track::push
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::clip
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::from_bytes
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::read
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::smf
-
-# tutti-midi-hardware
-tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_protocol
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/devices.rs::OpenOutput::set_config
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/port/manager.rs::HardwareMidiInputs::set_input_timing
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/port/manager.rs::HardwareMidiInputs::set_port_active
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/session.rs::MidiSession::set_profile
-
-# tutti-midi-network
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_command_timeout
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_fec
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_idle_interval
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_liveness_timeout
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_pending_timeout
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_ping_interval
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_reorder_wait
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_repeat_interval
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_requests
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_retransmit
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Credentials::with_secret
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Credentials::with_user
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::Command::parse
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::UmpData::new
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::Advertisement::start
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::FoundHost::from_service
-
-# tutti-midi-protocol
-tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/mpe/zone.rs::MpeZoneConfig::with_channel_response
-tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/universal/machine_control/values.rs::MmcTimeLabel::with_color_frame
-tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/universal/machine_control/values.rs::MmcTimeLabel::with_sign
-tutti-midi-protocol  ctor-result  crates/tutti-midi-protocol/src/universal/machine_control/segmentation.rs::MmcSegments::new
-
 # tutti-midi-runtime
-tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::with_mpe
-tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/outbound/jr_timestamp.rs::JrStream::with_clock
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/clock_map.rs::ClockMap::set_rate
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputControls::set_mpe_profile
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_clock
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_lead
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_translator.rs::MpeTranslator::set_mode
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_translator.rs::MpeTranslator::set_profile
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/out_node.rs::MidiOutNode::new
@@ -253,18 +198,6 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::stereo
 tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::with_bus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/eq_band.rs::EqBandNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::new
@@ -307,7 +240,6 @@ tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverN
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  ctor-result  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
@@ -339,7 +271,7 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProces
 tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc
-tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::BridgeConfig::at
+tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::IpcConfig::at
 tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/batcher.rs::Batcher::set_offline_wait
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_listener
@@ -347,7 +279,7 @@ tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::Audio
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_scale
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_size
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_automation_state_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_parameter_rt
+tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_parameter_value
 
 # tutti-plugin-types
 tutti-plugin-types  ctor-result  crates/tutti-plugin-types/src/format.rs::PluginFormat::from_extension
@@ -359,6 +291,7 @@ tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::Pa
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_group
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_overview
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_map
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_normalized_default
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_range
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_range
@@ -459,19 +392,14 @@ tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources_unf
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
-tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
-tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::new
-tutti-session  option-arg  crates/tutti-session/src/bounce.rs::Bounce::root_topology
-tutti-session  option-arg  crates/tutti-session/src/builder.rs::SessionBuilder::plugin_recovery
 
 # tutti-sf2
-tutti-sf2  ctor-result  crates/tutti-sf2/src/soundfont.rs::SoundFont::from_reader
 
 # tutti-soundfont
 tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_device

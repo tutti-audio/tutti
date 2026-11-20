@@ -1,4 +1,4 @@
-//! The session's sampler: a disk stream opened on the session's spawner, and
+//! The session's sampler: a disk stream opened on the session's executor, and
 //! what lands from it in [`Session::update`](crate::Session::update).
 //!
 //! The streamer opens a file on a thread of its own, so an open takes as long
@@ -15,9 +15,9 @@
 //! [`open_stream`](Session::open_stream) opens.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use tutti_platform::Asset;
 use tutti_sampler::{OpenError, Placement, Stream, StreamReader};
 
 use tutti_rt::LockExt;
@@ -78,14 +78,14 @@ pub enum SamplerError {
     /// streamer thread is gone.
     #[error(transparent)]
     Open(#[from] OpenError),
-    /// The open's job did not finish: it panicked, or the spawner dropped it.
+    /// The open's job did not finish: it panicked, or the executor dropped it.
     #[error(transparent)]
     Job(#[from] WorkerError),
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Opens `path` as a disk stream, its reader starting at `place`, on the
-    /// session's spawner. Returns at once; the stream lands as
+    /// session's executor. Returns at once; the stream lands as
     /// [`SamplerEvent::Opened`] with the returned id in a later
     /// [`update`](Self::update), on the thread that calls `update()`. A file
     /// that cannot be opened lands as [`SamplerEvent::OpenFailed`], a job that
@@ -101,7 +101,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     #[must_use = "the id matches the event that lands the open"]
     pub fn open_stream(
         &mut self,
-        path: impl Into<PathBuf>,
+        asset: impl Into<Asset>,
         place: Placement,
     ) -> Result<SamplerLoad, SamplerError> {
         let streamer = self
@@ -109,29 +109,26 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .streamer
             .as_ref()
             .ok_or(SamplerError::NoStreamer)?;
-        let opening = streamer.open(&path.into(), place);
+        let opening = streamer.open(asset, place);
         let id = SamplerLoad::mint(&self.sampler.opens);
         let landed = Arc::clone(&self.sampler.streams);
-        self.jobs.submit(
-            move || opening.wait(),
-            move |_, done, events| {
-                let event = match done {
-                    Ok(Ok(opened)) => {
-                        landed.lock_recover().insert(id, opened);
-                        SamplerEvent::Opened { id }
-                    }
-                    Ok(Err(error)) => SamplerEvent::OpenFailed {
-                        id,
-                        error: error.into(),
-                    },
-                    Err(failed) => SamplerEvent::OpenFailed {
-                        id,
-                        error: failed.into(),
-                    },
-                };
-                events.push(event.into());
-            },
-        );
+        self.jobs.submit_future(opening, move |_, done, events| {
+            let event = match done {
+                Ok(Ok(opened)) => {
+                    landed.lock_recover().insert(id, opened);
+                    SamplerEvent::Opened { id }
+                }
+                Ok(Err(error)) => SamplerEvent::OpenFailed {
+                    id,
+                    error: error.into(),
+                },
+                Err(failed) => SamplerEvent::OpenFailed {
+                    id,
+                    error: failed.into(),
+                },
+            };
+            events.push(event.into());
+        });
         Ok(id)
     }
 

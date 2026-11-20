@@ -1,74 +1,65 @@
-//! Streamer thread body: the main loop.
+//! The streamer's future: the main loop.
 //!
 //! The *work* of a cycle is
 //! [`StreamerCycle::step`](super::step::StreamerCycle::step), synchronous and
-//! shared with the test driver. What lives here is the sleeping: when a cycle
-//! finds nothing urgent the thread parks on the [`Bell`]
-//! until a source rings it (a command, a voice's ring wanting a refill,
-//! shutdown, a loop or direction published for it) or the backstop passes.
-//! Nothing polls.
+//! shared with the hand-stepped driver. What lives here is the waiting: when a cycle
+//! finds nothing urgent the future awaits its bell until a source rings it (a
+//! command, a voice's ring wanting a refill, shutdown, a loop or direction
+//! published for it, the control side's tick). Nothing polls and nothing times out.
 
-use std::thread;
-use std::time::Duration;
+use std::future::poll_fn;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::Poll;
 
 use crossbeam_channel::Receiver;
+use tutti_rt::{Listener, RingFloat};
 
-use super::bell::Bell;
 use super::command::StreamerCommand;
-use tutti_rt::Parker;
-
 use super::handlers::Handles;
 use super::step::{StepOutcome, StreamerCycle};
-use tutti_rt::RingFloat;
 
-/// How long the streamer sleeps at most when nothing rings it.
-///
-/// It is the bound on how late a refill can be if a ring is ever *missed* (the
-/// design has none: every source rings), and the control-side tick a cell that
-/// goes quiet still gets its `reclaim()` on (each cycle sweeps every ring's retired
-/// controls). 50 ms is
-/// well inside the smallest ring's drain time at its refill threshold and long
-/// enough that an idle streamer costs twenty wake-ups a second.
-pub(super) const BACKSTOP: Duration = Duration::from_millis(50);
-
-/// The streamer thread's main loop; returns when shutdown is signalled
-/// ([`Bell::shut`]).
-///
-/// Each cycle clears the bell's refill flag, drains the queue and does one
-/// [`StreamerCycle::step`], then sleeps unless the step has more to do. No wake
-/// is lost: whatever rings after the cycle began (a command pushed, a flag set)
-/// is read by the sleep's own check after it arms the parker, so the sleep
-/// returns at once.
-pub(super) fn streamer_loop<F: RingFloat>(
-    queue: &Receiver<StreamerCommand<F>>,
-    shared: Handles<F>,
-    mut cycle: StreamerCycle<F>,
-    mut parker: Parker,
-    backstop: Duration,
-) {
-    let bell = shared.bell.clone();
-    while !bell.is_shut() {
-        bell.begin_cycle();
-        match cycle.step(&shared, || queue.try_recv().ok()) {
-            // Nothing urgent, or nothing this loop can do about it (a ring
-            // that holds all its mapping writes, the tail of every clip):
-            // sleep until something rings.
-            StepOutcome::Idle | StepOutcome::Healthy | StepOutcome::Stalled => {
-                sleep(&bell, &mut parker, queue, backstop);
-            }
-
-            // A ring is below threshold and the cycle moved frames into it:
-            // come straight back, letting other threads run first.
-            StepOutcome::Busy => thread::yield_now(),
+/// Gives the executor its thread back once, and asks to be polled again: a loop
+/// that is still busy after its budget does not hold a polled executor's `update`.
+pub(super) async fn yield_now() {
+    let mut yielded = false;
+    poll_fn(|cx| {
+        if yielded {
+            Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
         }
-    }
+    })
+    .await;
 }
 
-fn sleep<F: RingFloat>(
-    bell: &Bell,
-    parker: &mut Parker,
-    queue: &Receiver<StreamerCommand<F>>,
-    backstop: Duration,
+/// The streamer's body: wait for a ring, step until the rings are filled, and end
+/// when `stop` is raised.
+///
+/// Each ring is followed by `step_until_idle`: the cycles that fill
+/// every open ring once from empty. A cycle still [`Busy`](StepOutcome::Busy) after
+/// them yields and goes on. No wake is lost: a ring that lands during a cycle is
+/// kept by the bell, so the next wait resolves at once.
+pub(super) async fn streamer_future<F: RingFloat>(
+    queue: Receiver<StreamerCommand<F>>,
+    shared: Handles<F>,
+    mut cycle: StreamerCycle<F>,
+    mut listener: Listener,
+    stop: Arc<AtomicBool>,
 ) {
-    bell.sleep(parker, || !queue.is_empty(), backstop);
+    loop {
+        listener.rung().await;
+        while !stop.load(Ordering::Acquire) {
+            let outcome = cycle.step_until_idle(&shared, || queue.try_recv().ok());
+            if outcome != StepOutcome::Busy {
+                break;
+            }
+            yield_now().await;
+        }
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
+    }
 }

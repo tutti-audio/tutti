@@ -91,8 +91,10 @@
 //!   Signature off the grid a Clip File requires moves to the nearest position and is
 //!   listed in [`Converted::moved`].
 //!
-//! [`MidiFileKind::detect`] tells the two containers apart by magic, not by
-//! extension. Nothing here touches an OS MIDI API.
+//! [`MidiFile::read`] takes a path, bytes or an app's own source (any
+//! `impl Into<Asset>`) and [`MidiFile::write`] a path or a writer (any
+//! `impl Into<Destination>`). [`MidiFileKind::detect`] tells the two containers
+//! apart by magic, not by extension. Nothing here touches an OS MIDI API.
 //!
 //! ## Quick start
 //!
@@ -111,7 +113,9 @@
 //!     .meta(four_quarters, Meta::tempo(Bpm::of(60.0)));
 //! let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
 //!
-//! let read = MidiFile::from_bytes(&file.to_bytes())?;
+//! let mut bytes = Vec::new();
+//! file.write(&mut bytes)?;
+//! let read = MidiFile::read(bytes)?;
 //! assert_eq!(read, file);
 //! assert_eq!(read.timebase().metrical().unwrap().seconds_at(Tick(8 * 480)), Seconds::new(6.0));
 //! let notes = read.tracks()[0].notes();
@@ -119,7 +123,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! A clip plays a file's messages as they are: [`MetricalView::timeline`] is a [`Timeline`]
+//! A clip plays a file's messages as they are: [`MetricalView::timeline`] is a [`SmfTimeline`]
 //! whose `packets` are `(Beat, Ump)` pairs (channel messages as their packets, SysEx
 //! as SysEx7 packets, a divided SysEx as a Start, Continues and an End each at its
 //! own event's beat, meta events left out: the tempo is [`MetricalView::tempo_map`]) and
@@ -138,7 +142,7 @@
 //!
 //! // Which container? By magic bytes, not by extension: a `.mid` extension on a
 //! // Clip File is a real thing that happens.
-//! if MidiFileKind::detect_path("song.mid")?.is_some() {
+//! if MidiFileKind::detect("song.mid")?.is_some() {
 //!     let file = MidiFile::read("song.mid")?;
 //!     for track in file.tracks() {
 //!         println!("{:?}: {} notes", track.name(), track.notes().len());
@@ -156,7 +160,6 @@ mod fault;
 mod file;
 mod kind;
 mod smf;
-mod write;
 
 pub use clip_file::ClipFileError;
 pub use config::{OutOfOrder, Refusal, TrackPart, TracksError};
@@ -167,13 +170,12 @@ pub use file::{
     MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
     MicrosPerQuarterOutOfRange, MidiFile, Moved, Normalized, OtherMetaKind,
     OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Pattern,
-    Placement, RefusedTimeSignature, SmfFormat, SmfPart, SmpteFractionalFrames,
+    Placement, RefusedTimeSignature, SmfFormat, SmfPart, SmfTimeline, SmpteFractionalFrames,
     SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView, SysEx,
-    TextKind, Tick, Timebase, Timeline, TimelineDrop, ToClipError, Track,
+    TextKind, Tick, Timebase, TimelineDrop, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{
     SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter,
     SmfTicksPerQuarterOutOfRange,
 };
-pub use write::WriteOptions;

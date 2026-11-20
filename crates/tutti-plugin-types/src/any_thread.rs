@@ -8,8 +8,8 @@
 
 use crate::{
     AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass, ParameterInfo,
-    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, bypass_value,
-    is_bypassed,
+    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, UnknownParam,
+    bypass_value, is_bypassed,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -25,9 +25,10 @@ use tutti_units::ParamId;
 ///   hosting hops there (through its owner's `MainWork`) and calls `Control`; off the main
 ///   thread the call waits for the next main-thread tick up to a deadline, and
 ///   answers "unavailable" when it passes (`None`, `false`,
-///   [`StateError::Unavailable`], or the write is dropped). An owner that has
-///   never run its collector has no main thread to hop to: the call answers
-///   "unavailable" at once, and a write is dropped rather than queued.
+///   [`StateError::Unavailable`]). An owner that has never run its collector
+///   has no main thread to hop to: the call answers "unavailable" at once.
+///   A parameter write needs no hop: it goes to a slot the node's next block
+///   drains.
 /// - **Served**, a bridge answers from any thread, concurrently with the main
 ///   thread's own calls, so no hop is added. A host
 ///   that blocks its main thread on a snapshot or a parameter read would be
@@ -52,12 +53,28 @@ pub trait AnyThread: Send + Sync {
     fn parameter_value(&self, id: ParamId) -> Option<Normalized>;
 
     /// Writes one parameter value, for a UI knob or an initial value.
-    /// Fire-and-forget, and never blocks the audio thread.
     ///
-    /// [`Normalized`], not a bare float: an in-process plugin is written
-    /// straight through, so the type is what stops an out-of-range or NaN
-    /// value there (a served one is clamped again on receipt).
-    fn set_parameter_value(&self, id: ParamId, value: Normalized);
+    /// **In process** the write is stored in the parameter's slot
+    /// ([`edit_slots`](crate::edit_slots())) and applied at the head of the
+    /// plugin's next block, or sooner when a read, a save or a fork of the
+    /// plugin comes first: it never waits for the plugin, is never dropped for
+    /// a locked instance or for lack of room, and a newer write to the same
+    /// parameter replaces one no block has taken. **A served** plugin's is
+    /// queued on its control connection, where a full queue refuses it, counted.
+    /// A lost or restarting plugin answers `Ok`, and its recovery restores from
+    /// the caller's mirror.
+    ///
+    /// **A control-side call**: it takes a lock (in process the slots' writer,
+    /// served the declared list), so it belongs to the session's control
+    /// threads and pool jobs, not to the audio thread.
+    ///
+    /// [`Normalized`], not a bare float: the type is what stops an
+    /// out-of-range or NaN value (a served one is clamped again on receipt).
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownParam`] when the plugin did not declare `id`.
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam>;
 
     /// The plain value `value` stands for, converted by the plugin's format
     /// ([`Control::parameter_plain`](crate::Control::parameter_plain)), so a
@@ -117,8 +134,10 @@ pub trait AnyThread: Send + Sync {
     fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
         match site {
             OwnBypass::Parameter(id) => {
-                self.set_parameter_value(id, bypass_value(bypassed));
-                BypassWrite::Sent
+                match self.set_parameter_value(id, bypass_value(bypassed)) {
+                    Ok(()) => BypassWrite::Sent,
+                    Err(UnknownParam(_)) => BypassWrite::Refused,
+                }
             }
             OwnBypass::Property => BypassWrite::Lost,
         }
@@ -201,8 +220,9 @@ mod tests {
         fn parameter_value(&self, _: ParamId) -> Option<Normalized> {
             None
         }
-        fn set_parameter_value(&self, id: ParamId, value: Normalized) {
+        fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
             self.written.lock().unwrap().push((id, value.get()));
+            Ok(())
         }
         fn parameter_plain(&self, _: ParamId, _: Normalized) -> Option<f64> {
             None

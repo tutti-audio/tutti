@@ -43,7 +43,7 @@ use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
-    OwnBypass, StateError, bypass_value, is_bypassed,
+    OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
 use tutti_units::Normalized;
@@ -59,14 +59,17 @@ pub(crate) struct ControlBackend<L: InProcess> {
     /// node. Drained here because telling a plugin its rate deactivates and
     /// activates it, which allocates.
     pub(crate) pending_sample_rate: Arc<PendingSampleRate>,
+    /// The host's parameter writes, which the node drains at the head of its
+    /// next block (`host_edits`).
+    pub(super) edits: super::host_edits::EditPost,
     /// Where what a pump finds is delivered: a re-read that found the
     /// plugin's latency, tail or pins moved, what it asked of the transport
     /// (`PluginHandle::subscribe`).
     pub(crate) reporting: Reporting,
     /// Whether the plugin is lost, and why: what the handle's health reads.
     pub(crate) lost: Arc<Lost>,
-    /// The plugin's format name, for the refusal of an advisory no in-process
-    /// format carries.
+    /// The plugin's format name, for the refusal of an advisory the plugin
+    /// does not take.
     pub(crate) format: &'static str,
     /// The collector of the plugin's owner: where an off-main call posts its
     /// work for the main thread's next tick.
@@ -136,15 +139,16 @@ where
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
     ) -> Option<R> {
         if let Some(main) = MainThreadMarker::new() {
-            return Some(work(main, &mut self.inner.lock()));
+            return Some(self.flushed(main, work));
         }
         if !self.work.is_pumped() {
             return None;
         }
         let (answer, wait) = sync_channel(1);
         let inner = Arc::clone(&self.inner);
+        let post = self.edits.clone();
         self.work.defer(move |main| {
-            let _ = answer.send(work(main, &mut inner.lock()));
+            let _ = answer.send(flushed(&post, main, &mut inner.lock(), work));
         });
         await_answer(
             &wait,
@@ -153,31 +157,95 @@ where
         )
     }
 
+    /// Queues the main-thread job that tells the plugin's edit controller of
+    /// the host's writes, unless one is queued: the controller hears each
+    /// parameter's newest value when the main thread runs, the way the
+    /// Processor heard it through a block. A collector that has never run has no
+    /// main thread to tell it: the writes wait for a read, a save or a pump.
+    fn inform_controller_later(&self) {
+        if !self.edits.claim_job() {
+            return;
+        }
+        if !self.work.is_pumped() {
+            self.edits.release_job();
+            return;
+        }
+        let inner = Arc::clone(&self.inner);
+        queue_inform(
+            self.work.clone(),
+            self.edits.clone(),
+            Arc::new(move |main, told| {
+                let Some(mut instance) = inner.try_lock() else {
+                    return false;
+                };
+                if let Some(control) = instance.control() {
+                    for &(id, value) in told {
+                        control.inform_controller(main, id, value);
+                    }
+                }
+                true
+            }),
+        );
+    }
+
+    /// `work` on the plugin under the instance's lock, after the host's
+    /// pending parameter writes are applied.
+    fn flushed<R>(
+        &self,
+        main: MainThreadMarker,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R,
+    ) -> R {
+        flushed(&self.edits, main, &mut self.inner.lock(), work)
+    }
+
     /// `work` on the plugin now, when this is the main thread and the instance is
     /// not locked; `None` otherwise. Never waits.
     fn try_main<R>(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R) -> Option<R> {
         let main = MainThreadMarker::new()?;
         let mut instance = self.inner.try_lock()?;
-        Some(work(main, &mut instance))
+        Some(flushed(&self.edits, main, &mut instance, work))
     }
+}
 
-    /// `work` on the main thread without waiting: at once on it, posted to the
-    /// owner's collector off it (refused while that collector has never run).
-    /// Skipped when the instance is locked.
-    fn post(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<L>) + Send + 'static) {
-        if let Some(main) = MainThreadMarker::new() {
-            if let Some(mut instance) = self.inner.try_lock() {
-                work(main, &mut instance);
-            }
-        } else if self.work.is_pumped() {
-            let inner = Arc::clone(&self.inner);
-            self.work.defer(move |main| {
-                if let Some(mut instance) = inner.try_lock() {
-                    work(main, &mut instance);
-                }
-            });
+/// Tells the plugin's edit controller of the host's writes on the main thread's
+/// next tick, through `tell`, which answers whether it could (`false`: the
+/// instance is locked, as it is while the main thread is inside a call of its
+/// own). A job whose `tell` could not puts what it took back and queues another,
+/// so no write waits on a lock for good.
+pub(super) fn queue_inform(
+    work: MainWorkHandle,
+    post: super::host_edits::EditPost,
+    tell: Arc<dyn Fn(MainThreadMarker, &[(ParamId, Normalized)]) -> bool + Send + Sync>,
+) {
+    let again = work.clone();
+    work.defer(move |main| {
+        let told = post.take_inform();
+        if told.is_empty() {
+            return;
         }
+        if !tell(main, &told) {
+            post.give_back(told);
+        }
+        // Written since the take, or not told: another job is owed.
+        if post.claim_job() {
+            queue_inform(again, post, tell);
+        }
+    });
+}
+
+/// `work` on `instance`, after the writes no block has taken are applied to the
+/// plugin: a read or a save made through the backend sees every write made
+/// before it.
+fn flushed<L: InProcess, R>(
+    post: &super::host_edits::EditPost,
+    main: MainThreadMarker,
+    instance: &mut Instance<L>,
+    work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R,
+) -> R {
+    if let Some(control) = instance.control() {
+        post.flush(main, control);
     }
+    work(main, instance)
 }
 
 impl<L> AnyThread for ControlBackend<L>
@@ -196,45 +264,41 @@ where
         self.on_main(move |main, instance| instance.control()?.parameter(main, id))?
     }
 
-    /// Fire-and-forget, and skipped while the instance is locked (a long
-    /// `editor_idle`): lost writes are recoverable, the GUI thread will retry on
-    /// the next idle. Off the main thread it is posted to it.
+    /// Stored in the parameter's slot, from any thread, with no instance lock
+    /// and no hop to the main thread: the node applies it at the head of its
+    /// next block (`host_edits`). A write is never skipped for a locked
+    /// instance, and a newer one replaces one no block has taken.
     ///
-    /// In-process, so this write reaches the plugin directly with no
-    /// subprocess boundary to re-clamp at: it is a `Normalized` rather than a
-    /// bare float precisely because nothing downstream would catch one that
-    /// was not.
-    fn set_parameter_value(&self, id: ParamId, value: Normalized) {
-        self.post(move |main, instance| {
-            if let Some(control) = instance.control() {
-                // Fire-and-forget: a write the plugin refuses (undeclared,
-                // read-only) is refused by `Control::set_parameter` here and
-                // not written; this route has no reply to carry the error. The
-                // session checks the same policy before it hands a write over.
-                let _ = control.set_parameter(main, id, value);
-            }
-        });
+    /// The slot holds a `Normalized`, so no out-of-range or NaN value reaches
+    /// the plugin. A read-only parameter is written like any other: the
+    /// session checks that policy before it hands a write over.
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+        self.edits.write(id, value)?;
+        self.inform_controller_later();
+        Ok(())
     }
 
-    /// The plugin's own bypass at `site`, written on the main thread and only
-    /// there: the write runs at once and is [`Lost`](BypassWrite::Lost) when the
-    /// instance is locked (a long `editor_idle`). Off the main thread it is
-    /// `Lost` without waiting for it: an in-process plugin's own bypass is kept
-    /// only by a session ticked on the main thread, where the session makes it.
+    /// The plugin's own bypass at `site`. A parameter bypass is a parameter
+    /// write ([`set_parameter_value`](Self::set_parameter_value)): stored, from
+    /// any thread, and applied at the next block. A property bypass is written
+    /// on the main thread and only there: the write runs at once and is
+    /// [`Lost`](BypassWrite::Lost) when the instance is locked (a long
+    /// `editor_idle`), and off the main thread without waiting for it: an
+    /// in-process plugin's own property bypass is kept only by a session ticked
+    /// on the main thread, where the session makes it.
     fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
-        self.try_main(|main, instance| {
-            let control = instance.control()?;
-            match site {
-                OwnBypass::Parameter(id) => Some(BypassWrite::of_write(control.set_parameter(
-                    main,
-                    id,
-                    bypass_value(bypassed),
-                ))),
-                OwnBypass::Property => Some(control.set_bypassed(main, bypassed)),
+        match site {
+            OwnBypass::Parameter(id) => {
+                match self.set_parameter_value(id, bypass_value(bypassed)) {
+                    Ok(()) => BypassWrite::Sent,
+                    Err(UnknownParam(_)) => BypassWrite::Refused,
+                }
             }
-        })
-        .flatten()
-        .unwrap_or(BypassWrite::Lost)
+            OwnBypass::Property => self
+                .try_main(|main, instance| Some(instance.control()?.set_bypassed(main, bypassed)))
+                .flatten()
+                .unwrap_or(BypassWrite::Lost),
+        }
     }
 
     /// The bypass the plugin holds now, read without waiting for the instance:
@@ -286,7 +350,7 @@ where
     /// can tell "the plugin has no state" from "asking it failed".
     ///
     /// `effGetChunk` and its kin are main-thread calls, and the health snapshot
-    /// runs this on the session's spawner: off the main thread it
+    /// runs this on the session's executor: off the main thread it
     /// is run by the main thread's next tick (`on_main`), and
     /// [`StateError::Unavailable`] if that does not come within the deadline.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
@@ -317,11 +381,25 @@ where
             .unwrap_or(false)
     }
 
-    /// No in-process format carries the VST3-style advisory.
-    fn set_automation_mode(&self, _mode: AutomationMode) -> Result<(), AutomationModeError> {
-        Err(AutomationModeError::Unsupported {
-            format: self.format.to_string(),
-        })
+    /// The format's automation-state call, on the main thread
+    /// ([`Control::set_automation_state`]): [`Unsupported`](AutomationModeError::Unsupported)
+    /// for a plugin without the channel, [`PluginDead`](AutomationModeError::PluginDead)
+    /// once it is lost, and [`Dropped`](AutomationModeError::Dropped) when the
+    /// main thread does not run the call (nothing pumps it, or it did not
+    /// within the deadline); a later call may land.
+    fn set_automation_mode(&self, mode: AutomationMode) -> Result<(), AutomationModeError> {
+        match self.on_main(move |main, instance| {
+            instance
+                .control()
+                .map(|control| control.set_automation_state(main, mode))
+        }) {
+            Some(Some(true)) => Ok(()),
+            Some(Some(false)) => Err(AutomationModeError::Unsupported {
+                format: self.format.to_string(),
+            }),
+            Some(None) => Err(AutomationModeError::PluginDead),
+            None => Err(AutomationModeError::Dropped),
+        }
     }
 }
 
@@ -361,6 +439,10 @@ where
         }
     }
 
+    fn before_restore(&self) {
+        self.edits.reset();
+    }
+
     fn editor_idle(&self, main: MainThreadMarker) {
         // Before the lock below, not inside it: the drain takes the same lock
         // and would deadlock under that guard. This runs on the main thread,
@@ -396,6 +478,109 @@ where
     }
 }
 
+/// The main-thread job that tells a plugin's edit controller of the host's
+/// writes, over the fake controller that records what it is told.
+#[cfg(test)]
+mod inform_tests {
+    use super::*;
+    use tutti_fixtures::main_thread;
+    use tutti_plugin_types::fake::{Call, FakePlugin};
+    use tutti_plugin_types::{Loaded, MainWork, MaxBlock, Prepare};
+
+    /// A fake whose controller is told through `queue_inform`, and the post
+    /// that feeds it.
+    fn rig() -> (
+        FakePlugin,
+        super::super::host_edits::EditPost,
+        Arc<Mutex<tutti_plugin_types::fake::FakeController>>,
+    ) {
+        let (fake, loaded) = FakePlugin::new();
+        fake.declare(&[(ParamId::new(1), false), (ParamId::new(2), false)]);
+        let prepare = Prepare::new(
+            tutti_units::SampleRate::SR_48K,
+            MaxBlock::new(tutti_plugin_types::Samples::new(64)).expect("a block"),
+        );
+        let Ok((_processor, controller)) = loaded.activate(main_thread(), prepare) else {
+            panic!("the fake activates");
+        };
+        let (post, _port) =
+            super::super::host_edits::host_edits([ParamId::new(1), ParamId::new(2)]);
+        (fake, post, Arc::new(Mutex::new(controller)))
+    }
+
+    fn informs(fake: &FakePlugin) -> Vec<(ParamId, f64)> {
+        fake.calls()
+            .into_iter()
+            .filter_map(|call| match call {
+                Call::InformController(id, value) => Some((id, value.get())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The `tell` of a controller that is always free.
+    fn tell_of(
+        controller: &Arc<Mutex<tutti_plugin_types::fake::FakeController>>,
+    ) -> Arc<dyn Fn(MainThreadMarker, &[(ParamId, Normalized)]) -> bool + Send + Sync> {
+        let controller = Arc::clone(controller);
+        Arc::new(move |main, told| {
+            let Some(mut controller) = controller.try_lock() else {
+                return false;
+            };
+            for &(id, value) in told {
+                tutti_plugin_types::Control::inform_controller(&mut *controller, main, id, value);
+            }
+            true
+        })
+    }
+
+    /// **A host write reaches the edit controller on the main thread, one value
+    /// per parameter, the newest.** Three writes to two parameters before the
+    /// main thread runs tell the controller of two values; a later write is told
+    /// by the next job.
+    #[test]
+    fn the_controller_is_told_each_parameters_newest_write_on_the_main_thread() {
+        let (collector, work) = MainWork::new();
+        let (fake, post, controller) = rig();
+        let (one, two) = (ParamId::new(1), ParamId::new(2));
+        post.write(one, Normalized::of(0.25)).unwrap();
+        post.write(two, Normalized::of(0.5)).unwrap();
+        post.write(one, Normalized::of(0.75)).unwrap();
+        assert!(post.claim_job());
+        queue_inform(work.clone(), post.clone(), tell_of(&controller));
+        assert!(
+            informs(&fake).is_empty(),
+            "nothing before the main thread runs"
+        );
+        collector.run(main_thread());
+        assert_eq!(informs(&fake), [(one, 0.75), (two, 0.5)]);
+
+        post.write(two, Normalized::of(0.125)).unwrap();
+        assert!(post.claim_job());
+        queue_inform(work, post, tell_of(&controller));
+        collector.run(main_thread());
+        assert_eq!(informs(&fake).last(), Some(&(two, 0.125)));
+    }
+
+    /// **A job that finds the instance busy waits for the next tick and loses
+    /// nothing.**
+    #[test]
+    fn a_busy_instance_is_told_on_the_next_tick() {
+        let (collector, work) = MainWork::new();
+        let (fake, post, controller) = rig();
+        let one = ParamId::new(1);
+        post.write(one, Normalized::of(0.25)).unwrap();
+        assert!(post.claim_job());
+        queue_inform(work, post, tell_of(&controller));
+        let held = controller.lock();
+        collector.run(main_thread());
+        assert!(informs(&fake).is_empty(), "busy: nothing told yet");
+        drop(held);
+        collector.run(main_thread());
+        assert_eq!(informs(&fake), [(one, 0.25)]);
+    }
+}
+
 /// The off-main-thread routing of the handle's methods (`on_main`), against the
 /// reference VST2 plugin. The expiry rule is `off_main_wait`'s, tested there
 /// over constructed instants.
@@ -413,23 +598,22 @@ mod off_main_tests {
 
     use crate::PluginHandle;
 
+    /// The node of the probe, prepared and driven by hand.
+    type Unit = tutti_graph::contract::Direct<crate::PluginNode<Vst2Loaded>>;
+
     /// The probe, loaded in process on this thread, which is not the main thread
     /// (the harness runs tests on threads it spawns), with a thread standing in for
     /// the main thread's tick: every call through the handle hops to it.
-    fn loaded() -> (
-        crate::InProcessClient<Vst2Loaded>,
-        PluginHandle,
-        tutti_fixtures::Pump,
-    ) {
+    fn loaded() -> (Unit, PluginHandle, tutti_fixtures::Pump) {
         let (collector, work) = MainWork::new();
         let pump = tutti_fixtures::pump(collector);
-        let (client, handle) = load(&work);
-        (client, handle, pump)
+        let (unit, handle) = load(&work);
+        (unit, handle, pump)
     }
 
-    /// The probe, loaded in process, with parameter 1 written to 0.75; its main-thread
-    /// work goes to `work`.
-    fn load(work: &MainWorkHandle) -> (crate::InProcessClient<Vst2Loaded>, PluginHandle) {
+    /// The probe, loaded in process, with parameter 1 written to 0.75 and one
+    /// block run, which applies it; its main-thread work goes to `work`.
+    fn load(work: &MainWorkHandle) -> (Unit, PluginHandle) {
         let (client, handle) = crate::load_client::<Vst2Loaded, f32>(
             main_thread(),
             work,
@@ -437,10 +621,13 @@ mod off_main_tests {
             SampleRate::SR_48K,
         )
         .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));
+        let mut unit = Unit::new(client.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
         handle
             .any_thread()
-            .set_parameter_value(ParamId::new(1), Normalized::of(0.75));
-        (client, handle)
+            .set_parameter_value(ParamId::new(1), Normalized::of(0.75))
+            .expect("a declared parameter");
+        unit.block();
+        (unit, handle)
     }
 
     /// **A pool thread's call on the handle is answered by the main thread's
@@ -449,7 +636,7 @@ mod off_main_tests {
     /// session's snapshot and parameter-mirror jobs do.
     #[test]
     fn a_pool_threads_calls_are_answered_by_the_main_threads_tick() {
-        let (_client, handle, _pump) = loaded();
+        let (_unit, handle, _pump) = loaded();
         let expected = handle
             .any_thread()
             .save_state(StateUse::Project)
@@ -474,7 +661,7 @@ mod off_main_tests {
     #[test]
     fn a_never_run_collector_gets_the_unavailable_answer_and_queues_nothing() {
         let (collector, work) = MainWork::new();
-        let (_client, handle) = load(&work);
+        let (_unit, handle) = load(&work);
         let id = ParamId::new(1);
         let (state, value) = std::thread::spawn(move || {
             (
@@ -495,7 +682,7 @@ mod off_main_tests {
     /// default that looks like an answer).
     #[test]
     fn the_parameter_reads_answer_on_the_main_thread() {
-        let (_client, handle, _pump) = loaded();
+        let (_unit, handle, _pump) = loaded();
         let any = handle.any_thread();
         let catalog = any.parameter_descriptors().expect("the probe lists");
         assert!(catalog.iter().any(|p| p.id() == ParamId::new(1)));
@@ -515,14 +702,15 @@ mod off_main_tests {
         );
     }
 
-    /// **A parameter write lands on the plugin** (on the main thread it runs at
-    /// once, under the instance's lock).
+    /// **A parameter write lands on the plugin** at the head of the next block.
     #[test]
     fn a_parameter_write_lands_on_the_plugin() {
-        let (_client, handle, _pump) = loaded();
+        let (mut unit, handle, _pump) = loaded();
         handle
             .any_thread()
-            .set_parameter_value(ParamId::new(1), Normalized::of(0.25));
+            .set_parameter_value(ParamId::new(1), Normalized::of(0.25))
+            .expect("a declared parameter");
+        unit.block();
         assert_eq!(
             handle
                 .any_thread()
@@ -532,11 +720,82 @@ mod off_main_tests {
         );
     }
 
+    /// **A write made while the instance is locked is not lost**: the instance
+    /// is held (as a long `editor_idle` holds it), a write is made and the main
+    /// thread ticks, and once the lock is released the next block applies the
+    /// write. A write that was posted to the main thread and skipped on a busy
+    /// instance would leave the plugin at the value before it.
+    #[test]
+    fn a_write_made_while_the_instance_is_locked_lands_on_the_next_block() {
+        let (collector, work) = MainWork::new();
+        // Run once, so a post is queued rather than refused as unpumped.
+        collector.run(main_thread());
+        let (mut unit, handle) = load(&work);
+        let instance = std::sync::Arc::clone(&unit.node.client.inner);
+        let held = instance.lock();
+        handle
+            .any_thread()
+            .set_parameter_value(ParamId::new(1), Normalized::of(0.25))
+            .expect("a declared parameter");
+        collector.run(main_thread());
+        drop(held);
+        unit.block();
+        let _pump = tutti_fixtures::pump(collector);
+        assert_eq!(
+            handle
+                .any_thread()
+                .parameter_value(ParamId::new(1))
+                .map(Normalized::get),
+            Some(0.25)
+        );
+    }
+
+    /// **A write made after a flush wins over it**, through the whole path: a
+    /// write, a read (which flushes it into the plugin), a later write, a block.
+    /// The plugin ends on the later write; a flush that landed after the block
+    /// would leave it on the first.
+    #[test]
+    fn a_write_after_a_flush_is_the_plugins_last_word() {
+        let (mut unit, handle, _pump) = loaded();
+        let id = ParamId::new(1);
+        handle
+            .any_thread()
+            .set_parameter_value(id, Normalized::of(0.25))
+            .expect("a declared parameter");
+        assert_eq!(
+            handle.any_thread().parameter_value(id).map(Normalized::get),
+            Some(0.25),
+            "the read flushes the first write into the plugin"
+        );
+        handle
+            .any_thread()
+            .set_parameter_value(id, Normalized::of(0.75))
+            .expect("a declared parameter");
+        unit.block();
+        assert_eq!(
+            handle.any_thread().parameter_value(id).map(Normalized::get),
+            Some(0.75)
+        );
+    }
+
+    /// **A write to a parameter the plugin does not declare fails at the call**,
+    /// naming it, from any thread.
+    #[test]
+    fn a_write_to_an_unknown_parameter_fails_at_the_call() {
+        let (_unit, handle, _pump) = loaded();
+        assert_eq!(
+            handle
+                .any_thread()
+                .set_parameter_value(ParamId::new(9_999), Normalized::of(0.5)),
+            Err(tutti_plugin_types::UnknownParam(ParamId::new(9_999)))
+        );
+    }
+
     /// **The state saved on the main thread is the plugin's own**: not
     /// `Unavailable` (nothing waited) and not empty.
     #[test]
     fn the_state_saves_on_the_main_thread() {
-        let (_client, handle, _pump) = loaded();
+        let (_unit, handle, _pump) = loaded();
         let state = handle
             .any_thread()
             .save_state(StateUse::Project)
@@ -548,25 +807,33 @@ mod off_main_tests {
     /// host callback, so there is nothing to decline).
     #[test]
     fn the_render_mode_is_accepted_on_the_main_thread() {
-        let (_client, handle, _pump) = loaded();
+        let (_unit, handle, _pump) = loaded();
         assert!(handle.any_thread().set_render_mode(RenderMode::Offline));
         assert!(handle.any_thread().set_render_mode(RenderMode::Realtime));
     }
 
-    /// **Off the main thread an in-process bypass is lost and unread**, whether
-    /// it is a parameter or a property: a tick on a pool thread neither writes
-    /// nor reads the plugin (the main thread's pump is not asked). A write that
-    /// took the main thread's hop would be answered by the pump, not lost.
+    /// **Off the main thread an in-process property bypass is lost and unread,
+    /// and a parameter bypass is stored but unread**: a tick on a pool thread
+    /// neither writes nor reads the plugin's property (the main thread's pump is
+    /// not asked), while a parameter bypass is a parameter write, which needs no
+    /// main thread. A write that took the main thread's hop would be answered by
+    /// the pump, not lost.
     #[test]
-    fn off_the_main_thread_an_in_process_bypass_is_lost_and_unread() {
-        let (_client, handle, _pump) = loaded();
-        for site in [
-            tutti_plugin_types::OwnBypass::Parameter(ParamId::new(1)),
-            tutti_plugin_types::OwnBypass::Property,
+    fn off_the_main_thread_an_in_process_bypass_is_stored_or_lost_and_unread() {
+        let (_unit, handle, _pump) = loaded();
+        for (site, written) in [
+            (
+                tutti_plugin_types::OwnBypass::Parameter(ParamId::new(1)),
+                tutti_plugin_types::BypassWrite::Sent,
+            ),
+            (
+                tutti_plugin_types::OwnBypass::Property,
+                tutti_plugin_types::BypassWrite::Lost,
+            ),
         ] {
             assert_eq!(
                 handle.any_thread().set_bypassed(site, true),
-                tutti_plugin_types::BypassWrite::Lost,
+                written,
                 "{site:?}"
             );
             assert_eq!(handle.any_thread().bypassed(site), None, "{site:?}");
@@ -579,7 +846,7 @@ mod off_main_tests {
     /// handle writes nothing.
     #[test]
     fn a_plugin_that_refuses_its_soft_bypass_claims_no_bypass_of_its_own() {
-        let (_client, handle, _pump) = loaded();
+        let (_unit, handle, _pump) = loaded();
         assert_eq!(handle.loaded().own_bypass, None);
         assert_eq!(
             handle.set_bypassed(true),
@@ -587,19 +854,13 @@ mod off_main_tests {
         );
     }
 
-    /// **No in-process format carries the automation advisory**, and says so
-    /// with `AutomationModeError::Unsupported` for its format, as the handle with
-    /// no such route always did.
+    /// **The automation advisory reaches an in-process plugin that takes it**:
+    /// the reference VST2 plugin carries the channel, so the call on the handle
+    /// answers `Ok` from a thread that is not the main one (the pump runs it).
     #[test]
-    fn the_automation_advisory_is_not_supported_in_process() {
-        let (_client, handle, _pump) = loaded();
-        let refused = handle
-            .set_automation_mode(AutomationMode::Writing)
-            .expect_err("no in-process format carries it");
-        assert!(
-            matches!(refused, AutomationModeError::Unsupported { ref format } if format == "vst2"),
-            "{refused:?}"
-        );
+    fn the_automation_advisory_is_delivered_in_process() {
+        let (_unit, handle, _pump) = loaded();
+        assert_eq!(handle.set_automation_mode(AutomationMode::Writing), Ok(()));
     }
 
     /// **A healthy in-process plugin reads alive, with no refusal and zero
@@ -607,7 +868,7 @@ mod off_main_tests {
     /// end.
     #[test]
     fn a_healthy_in_process_plugin_reads_alive() {
-        let (_client, handle, _pump) = loaded();
+        let (_unit, handle, _pump) = loaded();
         assert!(!handle.is_crashed());
         assert!(matches!(handle.status(), crate::PluginStatus::Alive));
         assert_eq!(
@@ -626,11 +887,11 @@ mod off_main_tests {
     /// **The rest of the calls have the same unavailable answer when nothing
     /// pumps the main thread**: the catalog and the text are `None`, a render
     /// mode is refused (`false`), never a default that looks like an answer.
-    /// (The advisory needs no main thread: it refuses at once.)
+    /// (The advisory runs on the main thread too: it answers `Dropped`.)
     #[test]
     fn an_unpumped_main_thread_refuses_the_other_calls_too() {
         let (_collector, work) = MainWork::new();
-        let (_client, handle) = load(&work);
+        let (_unit, handle) = load(&work);
         let (catalog, text, from_text, mode, automation) = std::thread::spawn(move || {
             (
                 handle.any_thread().parameter_descriptors(),
@@ -650,9 +911,6 @@ mod off_main_tests {
         assert!(text.is_none());
         assert!(from_text.is_none());
         assert!(!mode);
-        assert!(matches!(
-            automation,
-            Err(AutomationModeError::Unsupported { .. })
-        ));
+        assert_eq!(automation, Err(AutomationModeError::Dropped));
     }
 }

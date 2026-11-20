@@ -47,7 +47,7 @@
 //!
 //! Between the two there are queues and no mutable state. A commit travels
 //! to the audio thread over the editor's queue, retired values travel back
-//! over its return queue, and a job on the session's spawner reports over a
+//! over its return queue, and a job on the session's executor reports over a
 //! channel that [`Phase::Collect`] drains. A call on the [`Graph`] only stages
 //! an edit, in the graph value the control thread holds
 //! ([`Graph::is_edited`] says whether one waits); nothing reaches the audio
@@ -132,6 +132,8 @@ mod rt_log;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
+#[cfg(all(feature = "analyze", feature = "sampler"))]
+mod signal_windows;
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 mod state_job;
 #[cfg(feature = "device")]
@@ -146,7 +148,9 @@ mod value;
 mod watch;
 
 #[cfg(feature = "analyze")]
-pub use analyze::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
+pub use analyze::{
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+};
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
@@ -188,7 +192,6 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use job::{Job, JobId, JobKind, JobOutput, JobStatus, WaitError, WorkerError};
-pub use jobs::Task;
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
@@ -260,7 +263,7 @@ pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
-pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
+pub use plugin_params::{Param, ParamGesture, PluginParams};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
@@ -281,6 +284,8 @@ pub use session::ModInput;
 pub use session::{
     AppKey, CrossfadeControls, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent,
 };
+#[cfg(all(feature = "analyze", feature = "sampler"))]
+pub use signal_windows::windows_from_signal;
 #[cfg(feature = "device")]
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
@@ -294,7 +299,7 @@ pub use transport_handle::TransportHandle;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
-pub use tutti_dsp::DitherSink;
+pub use tutti_dsp::{DitherSink, NoiseShaping};
 pub use tutti_engine::{BlockDates, OutputPlacement, OutputTapOpen, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
@@ -323,6 +328,8 @@ pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTar
 #[cfg(feature = "sampler")]
 pub use value::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(feature = "plugin")]
-pub use value::{PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget};
+pub use value::{
+    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
+};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

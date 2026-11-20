@@ -35,7 +35,7 @@ use tutti_plugin::catalog::{
     AudioConfig, BindError, Catalog, Hosting, Loadable, PluginDescriptor, PluginId, PluginRef,
 };
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle, PluginFailure};
+use tutti_plugin_types::{Features, IpcError, MainThreadMarker, MainWorkHandle, PluginFailure};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
 
@@ -432,7 +432,7 @@ fn ports_of(handle: &PluginHandle) -> PluginPorts {
     }
 }
 
-fn plugin_failed(error: BridgeError) -> LoadError {
+fn plugin_failed(error: IpcError) -> LoadError {
     LoadError::Plugin(Arc::new(error))
 }
 

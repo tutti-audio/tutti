@@ -1,5 +1,4 @@
-//! A tempo map of steps, followed by the live engine and by an offline render
-//! (doc 020, stage 3).
+//! A tempo map of steps, followed by the live engine and by an offline render.
 //!
 //! The oracle is arithmetic written here, apart from the walker: a point's
 //! second is the sum of the segments before it, its frame is the first at or

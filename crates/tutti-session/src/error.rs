@@ -202,7 +202,7 @@ pub enum ConnectError {
 }
 
 /// Why a MIDI call of the session failed: one error for the area, each cause
-/// carried as its source. `tutti::midi::Error` in the umbrella; the session's
+/// carried as its source. `tutti::midi::MidiError` in the umbrella; the session's
 /// own [`Error::Midi`] holds it, and every cause below converts into both with
 /// `?`.
 #[cfg(feature = "midi")]
@@ -216,7 +216,7 @@ pub enum MidiError {
 
     /// A MIDI call named a target that is not in the graph, or takes no
     /// MIDI (it has no event input): `Midi::play_clip`, `Midi::input`,
-    /// `Midi::retarget`, `Midi::record`.
+    /// `Midi::retarget`, `Midi::tap`.
     #[error("{0:?} takes no MIDI: it is not in the graph, or has no event input")]
     NoEventInput(tutti_graph::NodeKey),
 
@@ -466,10 +466,10 @@ pub enum Error {
     Sampler(#[from] crate::SamplerError),
 
     /// Plugin-host bridge failure (VST2/VST3/CLAP). Wraps
-    /// `tutti_plugin_types::BridgeError`.
+    /// `tutti_plugin_types::IpcError`.
     #[cfg(feature = "plugin")]
     #[error("Plugin: {0}")]
-    Plugin(#[from] tutti_plugin_types::BridgeError),
+    Plugin(#[from] tutti_plugin_types::IpcError),
 
     /// A whole-bus connection was refused ([`Graph::connect`](crate::Graph::connect)).
     #[error(transparent)]
@@ -511,6 +511,11 @@ pub enum Error {
     #[cfg(feature = "capture")]
     #[error(transparent)]
     Take(#[from] crate::TakeError),
+
+    /// The session's bell tick thread did not start: the OS refused it
+    /// ([`SessionBuilder::build`](crate::SessionBuilder)).
+    #[error("the session's bell thread did not start: {0}")]
+    Bells(std::io::Error),
 
     /// Standard I/O error encountered while reading or writing audio data.
     #[error(transparent)]

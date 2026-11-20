@@ -12,10 +12,10 @@
 #![cfg_attr(not(any(codec, test)), allow(dead_code))]
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_buffers::{Float, Wave};
+use tutti_platform::Identity;
 use tutti_rt::LockExt;
 
 /// Bounded LRU cache with entry count and byte limits.
@@ -27,6 +27,11 @@ use tutti_rt::LockExt;
 /// the lock is released. The control side never reads it (a stream's file is
 /// its own [`StreamFile`](super::control::StreamFile)), so a plain map behind
 /// one lock is all it takes.
+///
+/// Entries are keyed by [`Identity`], taken from an asset's
+/// [`identity`](tutti_platform::Asset::identity): a file's carries its stamp, so a
+/// file rewritten since is another key and misses. An asset whose identity is
+/// `None` has no key: it is never cached, and is decoded each time it is opened.
 pub struct LruCache<F: Float> {
     inner: Mutex<Inner<F>>,
     max_entries: usize,
@@ -34,7 +39,7 @@ pub struct LruCache<F: Float> {
 }
 
 struct Inner<F: Float> {
-    entries: HashMap<PathBuf, CacheEntry<F>>,
+    entries: HashMap<Identity, CacheEntry<F>>,
     current_bytes: u64,
     /// Monotonic access counter — the source of every `last_access` stamp.
     ///
@@ -74,7 +79,7 @@ struct CacheEntry<F: Float> {
 /// streamer's stream link so it lives exactly as long as the stream.
 pub struct StreamPin {
     /// The counter of the entry this pin incremented, not the entry that
-    /// happens to sit under the path when it drops. `None` when there was no
+    /// happens to sit under the key when it drops. `None` when there was no
     /// entry to pin.
     pins: Option<Arc<AtomicU32>>,
 }
@@ -118,23 +123,23 @@ impl<F: Float> LruCache<F> {
         self.inner.lock_recover()
     }
 
-    /// The resident wave for `path`, if any, marking it most-recently-used.
+    /// The resident wave for `key`, if any, marking it most-recently-used.
     ///
     /// `None` is a plain miss — every caller treats it as "skip this region",
     /// never as an error.
-    pub fn get(&self, path: &Path) -> Option<Arc<Wave<F>>> {
+    pub fn get(&self, key: &Identity) -> Option<Arc<Wave<F>>> {
         let mut inner = self.lock();
         let tick = inner.next_tick();
-        inner.entries.get_mut(path).map(|entry| {
+        inner.entries.get_mut(key).map(|entry| {
             entry.last_access = tick;
             Arc::clone(&entry.wave)
         })
     }
 
-    /// Admit `wave` under `path`, evicting least-recently-used unpinned
+    /// Admit `wave` under `key`, evicting least-recently-used unpinned
     /// entries until it fits.
     ///
-    /// Re-inserting a resident path only refreshes its access time — the bytes
+    /// Re-inserting a resident key only refreshes its access time — the bytes
     /// are not counted twice. When nothing evictable remains the wave is
     /// admitted over budget, which is the deliberate trade: exceeding a byte
     /// target is recoverable, pulling a wave out from under a playing stream is
@@ -144,7 +149,7 @@ impl<F: Float> LruCache<F> {
     /// nothing: admitting it would empty the cache for one file and still
     /// leave it over budget. Its holder keeps it (a stream that cannot seek
     /// holds its file on its writer, `RegionOut::set_resident`).
-    pub fn insert(&self, path: PathBuf, wave: Arc<Wave<F>>) {
+    pub fn insert(&self, key: Identity, wave: Arc<Wave<F>>) {
         let size = wave_bytes(&wave);
         if size > self.max_bytes {
             return;
@@ -156,7 +161,7 @@ impl<F: Float> LruCache<F> {
         {
             let mut inner = self.lock();
             let tick = inner.next_tick();
-            if let Some(existing) = inner.entries.get_mut(&path) {
+            if let Some(existing) = inner.entries.get_mut(&key) {
                 existing.last_access = tick;
                 return;
             }
@@ -169,7 +174,7 @@ impl<F: Float> LruCache<F> {
             }
 
             inner.entries.insert(
-                path,
+                key,
                 CacheEntry {
                     wave,
                     last_access: tick,
@@ -182,17 +187,19 @@ impl<F: Float> LruCache<F> {
         drop(evicted);
     }
 
-    /// Pin the entry at `path` so the LRU will not evict it while the returned
+    /// Pin the entry at `key` so the LRU will not evict it while the returned
     /// [`StreamPin`] is alive. Held by an active stream (in its `Record`)
     /// so a fully-buffered — hence cold — stream is never evicted mid-read.
     ///
     /// If the entry is absent (never admitted: an incremental stream) the
     /// guard is inert. The guard holds the entry's own counter, so its drop
-    /// releases exactly what it took, whatever is under the path by then.
-    pub fn pin(&self, path: &Path) -> StreamPin {
-        let pins = self.lock().entries.get(path).map(|entry| {
+    /// releases exactly what it took, whatever is under the key by then. No key (an asset that is never cached) pins nothing.
+    pub fn pin(&self, key: Option<&Identity>) -> StreamPin {
+        let pins = key.and_then(|key| {
+            let inner = self.lock();
+            let entry = inner.entries.get(key)?;
             entry.pins.fetch_add(1, Ordering::Relaxed);
-            Arc::clone(&entry.pins)
+            Some(Arc::clone(&entry.pins))
         });
         StreamPin { pins }
     }
@@ -216,7 +223,7 @@ impl<F: Float> LruCache<F> {
             .iter()
             .filter(|(_, entry)| entry.pins.load(Ordering::Relaxed) == 0)
             .min_by_key(|(_, entry)| entry.last_access)
-            .map(|(path, _)| path.clone())?;
+            .map(|(key, _)| key.clone())?;
         let entry = inner.entries.remove(&oldest)?;
         inner.current_bytes -= entry.size_bytes;
         Some(entry)
@@ -251,13 +258,11 @@ mod tests {
     fn a_wave_larger_than_the_budget_is_refused() {
         // Two-channel waves of 100 frames: 800 bytes each.
         let cache = LruCache::new(10, 1_000);
-        cache.insert(PathBuf::from("small.wav"), make_wave(100));
-        cache.insert(PathBuf::from("huge.wav"), make_wave(1_000));
-        assert!(cache.get(Path::new("huge.wav")).is_none(), "admitted");
-        assert!(
-            cache.get(Path::new("small.wav")).is_some(),
-            "evicted for it"
-        );
+        let (small, huge) = (Identity::minted(), Identity::minted());
+        cache.insert(small.clone(), make_wave(100));
+        cache.insert(huge.clone(), make_wave(1_000));
+        assert!(cache.get(&huge).is_none(), "admitted");
+        assert!(cache.get(&small).is_some(), "evicted for it");
     }
 
     /// A pin released releases exactly what it took: a pin on an absent path
@@ -267,12 +272,12 @@ mod tests {
     fn a_pin_releases_only_what_it_took() {
         // One entry fits: any insert of another path must evict an unpinned one.
         let cache = Arc::new(LruCache::new(1, 1024 * 1024));
-        let path = PathBuf::from("p.wav");
-        let absent = cache.pin(&path);
+        let path = Identity::minted();
+        let absent = cache.pin(Some(&path));
         cache.insert(path.clone(), make_wave(100));
-        let live = cache.pin(&path);
+        let live = cache.pin(Some(&path));
         drop(absent);
-        cache.insert(PathBuf::from("other.wav"), make_wave(100));
+        cache.insert(Identity::minted(), make_wave(100));
         assert!(
             cache.get(&path).is_some(),
             "a pinned entry was evicted: another pin's drop unpinned it"
@@ -283,7 +288,7 @@ mod tests {
     #[test]
     fn test_cache_insert_and_get() {
         let cache = LruCache::new(10, 1024 * 1024);
-        let path = PathBuf::from("/test/file.wav");
+        let path = Identity::minted();
         let wave = make_wave(100);
 
         assert!(cache.get(&path).is_none());
@@ -299,9 +304,9 @@ mod tests {
     fn same_instant_accesses_still_order_deterministically() {
         // Budget for two of three waves, forcing one eviction on the third.
         let cache = LruCache::new(2, u64::MAX);
-        let a = PathBuf::from("/test/a.wav");
-        let b = PathBuf::from("/test/b.wav");
-        let c = PathBuf::from("/test/c.wav");
+        let a = Identity::minted();
+        let b = Identity::minted();
+        let c = Identity::minted();
 
         cache.insert(a.clone(), make_wave(10));
         cache.insert(b.clone(), make_wave(10));
@@ -333,9 +338,9 @@ mod tests {
     #[test]
     fn eviction_follows_access_order_not_insertion_order() {
         let cache = LruCache::new(2, u64::MAX);
-        let a = PathBuf::from("/test/a.wav");
-        let b = PathBuf::from("/test/b.wav");
-        let c = PathBuf::from("/test/c.wav");
+        let a = Identity::minted();
+        let b = Identity::minted();
+        let c = Identity::minted();
 
         cache.insert(a.clone(), make_wave(10));
         cache.insert(b.clone(), make_wave(10));
@@ -359,9 +364,9 @@ mod tests {
     #[test]
     fn reinsert_of_a_resident_path_promotes_it() {
         let cache = LruCache::new(2, u64::MAX);
-        let a = PathBuf::from("/test/a.wav");
-        let b = PathBuf::from("/test/b.wav");
-        let c = PathBuf::from("/test/c.wav");
+        let a = Identity::minted();
+        let b = Identity::minted();
+        let c = Identity::minted();
 
         cache.insert(a.clone(), make_wave(10));
         cache.insert(b.clone(), make_wave(10));
@@ -377,12 +382,12 @@ mod tests {
     fn test_cache_max_entries_eviction() {
         let cache = LruCache::new(3, u64::MAX);
 
-        for i in 0..3 {
-            cache.insert(PathBuf::from(format!("/test/file{}.wav", i)), make_wave(10));
+        for _ in 0..3 {
+            cache.insert(Identity::minted(), make_wave(10));
         }
         assert_eq!(cache.len(), 3);
 
-        let path4 = PathBuf::from("/test/file3.wav");
+        let path4 = Identity::minted();
         cache.insert(path4.clone(), make_wave(10));
 
         assert_eq!(cache.len(), 3);
@@ -393,19 +398,19 @@ mod tests {
     fn test_cache_max_bytes_eviction() {
         let cache = LruCache::new(100, 1000);
 
-        cache.insert(PathBuf::from("/test/a.wav"), make_wave(100));
-        cache.insert(PathBuf::from("/test/b.wav"), make_wave(100));
+        cache.insert(Identity::minted(), make_wave(100));
+        cache.insert(Identity::minted(), make_wave(100));
         assert_eq!(cache.len(), 2);
 
-        cache.insert(PathBuf::from("/test/c.wav"), make_wave(100));
+        cache.insert(Identity::minted(), make_wave(100));
         assert_eq!(cache.len(), 2);
     }
 
     #[test]
     fn test_cache_byte_accounting() {
         let cache = LruCache::new(10, 10000);
-        cache.insert(PathBuf::from("/test/a.wav"), make_wave(100));
-        cache.insert(PathBuf::from("/test/b.wav"), make_wave(200));
+        cache.insert(Identity::minted(), make_wave(100));
+        cache.insert(Identity::minted(), make_wave(200));
 
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.byte_len(), 1200);
@@ -415,14 +420,14 @@ mod tests {
     fn test_pin_prevents_eviction_of_lru_victim() {
         // Byte budget fits exactly two waves of 100 samples (400 bytes each).
         let cache = Arc::new(LruCache::new(100, 900));
-        let a = PathBuf::from("/test/a.wav");
-        let b = PathBuf::from("/test/b.wav");
-        let c = PathBuf::from("/test/c.wav");
+        let a = Identity::minted();
+        let b = Identity::minted();
+        let c = Identity::minted();
 
         // `a` is inserted first, so it is the LRU victim. Pin it: an active
         // stream is reading it.
         cache.insert(a.clone(), make_wave(100));
-        let _pin = cache.pin(&a);
+        let _pin = cache.pin(Some(&a));
         cache.insert(b.clone(), make_wave(100));
 
         // Inserting `c` would evict the LRU (`a`), but `a` is pinned. The evictor
@@ -440,14 +445,14 @@ mod tests {
     #[test]
     fn test_all_pinned_admits_over_budget() {
         let cache = Arc::new(LruCache::new(100, 900));
-        let a = PathBuf::from("/test/a.wav");
-        let b = PathBuf::from("/test/b.wav");
-        let c = PathBuf::from("/test/c.wav");
+        let a = Identity::minted();
+        let b = Identity::minted();
+        let c = Identity::minted();
 
         cache.insert(a.clone(), make_wave(100));
-        let _pa = cache.pin(&a);
+        let _pa = cache.pin(Some(&a));
         cache.insert(b.clone(), make_wave(100));
-        let _pb = cache.pin(&b);
+        let _pb = cache.pin(Some(&b));
 
         // Both resident entries are pinned; the newcomer can't evict either, so
         // it is admitted over-budget rather than dropping an active stream.
@@ -465,8 +470,8 @@ mod tests {
         // the first — unless it's pinned. This makes the eviction target
         // unambiguous (no LRU tie between same-millisecond entries).
         let cache = Arc::new(LruCache::new(100, 400));
-        let a = PathBuf::from("/test/a.wav");
-        let b = PathBuf::from("/test/b.wav");
+        let a = Identity::minted();
+        let b = Identity::minted();
 
         cache.insert(a.clone(), make_wave(100));
 
@@ -474,9 +479,9 @@ mod tests {
         // over-budget instead (the all-pinned escape). Keep `b` pinned too so
         // that once `a`'s pin drops, `a` is the *only* eviction candidate — no
         // LRU tie between same-millisecond entries.
-        let pin_a = cache.pin(&a);
+        let pin_a = cache.pin(Some(&a));
         cache.insert(b.clone(), make_wave(100));
-        let _pin_b = cache.pin(&b);
+        let _pin_b = cache.pin(Some(&b));
         assert!(
             cache.get(&a).is_some(),
             "pinned `a` survives the over-budget insert"
@@ -485,7 +490,7 @@ mod tests {
 
         // With `a`'s pin gone it is the sole unpinned entry: the next over-budget
         // insert reclaims it (`b` stays put, pinned).
-        let c = PathBuf::from("/test/c.wav");
+        let c = Identity::minted();
         cache.insert(c.clone(), make_wave(100));
         assert!(cache.get(&a).is_none(), "dropped pin → LRU can evict `a`");
         assert!(cache.get(&b).is_some(), "still-pinned `b` untouched");
@@ -494,7 +499,7 @@ mod tests {
     #[test]
     fn test_duplicate_insert_no_double_count() {
         let cache = LruCache::new(10, 10000);
-        let path = PathBuf::from("/test/a.wav");
+        let path = Identity::minted();
 
         cache.insert(path.clone(), make_wave(100));
         let bytes_after_first = cache.byte_len();

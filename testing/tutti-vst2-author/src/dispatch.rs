@@ -5,27 +5,27 @@ use std::os::raw::c_void;
 use std::{mem, slice};
 
 use tutti_vst2_ffi::{
-    api::{self, AEffect, consts::*},
-    buffer::AudioBuffer,
-    editor::{Key, KeyCode, Rect},
-    interfaces,
-    speaker::SpeakerArrangement,
+    Key, KeyCode, Rect, SpeakerArrangement, copy_string as ffi_copy_string,
+    read_string as ffi_read_string,
 };
+
+use crate::api::{self, AEffect, consts::*};
+use crate::buffer::AudioBuffer;
 
 use crate::aeffect::AEffectExt as _;
 
-/// [`interfaces::copy_string`] into the host's buffer for the opcode being dispatched.
+/// [`ffi_copy_string`] into the host's buffer for the opcode being dispatched.
 fn copy_string(ptr: *mut c_void, src: &str, max: usize) -> isize {
     // SAFETY: the host's buffer for a string opcode is at least `max` bytes, per this
     // crate's constants (the SDK's sizes), and writable for the call.
-    unsafe { interfaces::copy_string(ptr, src, max) }
+    unsafe { ffi_copy_string(ptr, src, max) }
 }
 
-/// [`interfaces::read_string`] of the host's string for the opcode being dispatched.
+/// [`ffi_read_string`] of the host's string for the opcode being dispatched.
 fn read_string(ptr: *mut c_void) -> String {
     // SAFETY: the VST2 ABI has the host pass, for a string-taking opcode, a NUL-terminated
     // string valid for the call.
-    unsafe { interfaces::read_string(ptr) }
+    unsafe { ffi_read_string(ptr) }
 }
 
 /// Deprecated process function.
@@ -141,10 +141,10 @@ fn dispatch_inner(
     ptr: *mut c_void,
     opt: f32,
 ) -> isize {
-    use crate::plugin::{CanDo, OpCode};
+    use crate::plugin::{CanDo, EffectOpCode};
 
     // Convert passed in opcode to enum
-    let opcode = OpCode::try_from(opcode);
+    let opcode = EffectOpCode::try_from(opcode);
     // Only query plugin or editor when needed to avoid creating multiple
     // concurrent mutable references to the same object.
     // SAFETY: VST2 ABI: `effect` is the `AEffect` this library created and the host
@@ -158,34 +158,34 @@ fn dispatch_inner(
     let params = unsafe { (*effect).get_params() };
 
     match opcode {
-        Ok(OpCode::Initialize) => get_plugin().init(),
+        Ok(EffectOpCode::Initialize) => get_plugin().init(),
         // SAFETY: `effClose` arrives once per instance; `effect` was made by
         // `Box::into_raw` in `VSTPluginMain`, so it is freed exactly once, after its
         // contents. Nothing in this arm uses `params` or the plugin afterwards.
-        Ok(OpCode::Shutdown) => unsafe {
+        Ok(EffectOpCode::Shutdown) => unsafe {
             (*effect).drop_plugin();
             drop(Box::from_raw(effect))
         },
 
-        Ok(OpCode::ChangePreset) => params.change_preset(value as i32),
-        Ok(OpCode::GetCurrentPresetNum) => return params.get_preset_num() as isize,
-        Ok(OpCode::SetCurrentPresetName) => params.set_preset_name(read_string(ptr)),
-        Ok(OpCode::GetCurrentPresetName) => {
+        Ok(EffectOpCode::ChangePreset) => params.change_preset(value as i32),
+        Ok(EffectOpCode::GetCurrentPresetNum) => return params.get_preset_num() as isize,
+        Ok(EffectOpCode::SetCurrentPresetName) => params.set_preset_name(read_string(ptr)),
+        Ok(EffectOpCode::GetCurrentPresetName) => {
             let num = params.get_preset_num();
             return copy_string(ptr, &params.get_preset_name(num), MAX_PRESET_NAME_LEN);
         }
 
-        Ok(OpCode::GetParameterLabel) => {
+        Ok(EffectOpCode::GetParameterLabel) => {
             return copy_string(ptr, &params.get_parameter_label(index), MAX_PARAM_STR_LEN);
         }
-        Ok(OpCode::GetParameterDisplay) => {
+        Ok(EffectOpCode::GetParameterDisplay) => {
             return copy_string(ptr, &params.get_parameter_text(index), MAX_PARAM_STR_LEN);
         }
-        Ok(OpCode::GetParameterName) => {
+        Ok(EffectOpCode::GetParameterName) => {
             return copy_string(ptr, &params.get_parameter_name(index), MAX_PARAM_STR_LEN);
         }
 
-        Ok(OpCode::SetSampleRate) => {
+        Ok(EffectOpCode::SetSampleRate) => {
             get_plugin().set_sample_rate(opt);
             // Let the plugin publish a latency it could not know at
             // construction. Real plugins do this constantly — a linear-phase EQ
@@ -200,8 +200,8 @@ fn dispatch_inner(
                 (*effect).initialDelay = get_plugin().get_info().initial_delay;
             }
         }
-        Ok(OpCode::SetBlockSize) => get_plugin().set_block_size(value as i64),
-        Ok(OpCode::StateChanged) => {
+        Ok(EffectOpCode::SetBlockSize) => get_plugin().set_block_size(value as i64),
+        Ok(EffectOpCode::StateChanged) => {
             if value == 1 {
                 get_plugin().resume();
             } else {
@@ -209,7 +209,7 @@ fn dispatch_inner(
             }
         }
 
-        Ok(OpCode::EditorGetRect) => {
+        Ok(EffectOpCode::EditorGetRect) => {
             if let Some(editor) = get_editor() {
                 let size = editor.size();
                 let pos = editor.position();
@@ -254,7 +254,7 @@ fn dispatch_inner(
                 return 1;
             }
         }
-        Ok(OpCode::EditorOpen) => {
+        Ok(EffectOpCode::EditorOpen) => {
             if let Some(editor) = get_editor() {
                 // `ptr` is a window handle to the parent window.
                 // See the documentation for `Editor::open` for details.
@@ -263,19 +263,19 @@ fn dispatch_inner(
                 }
             }
         }
-        Ok(OpCode::EditorClose) => {
+        Ok(EffectOpCode::EditorClose) => {
             if let Some(editor) = get_editor() {
                 editor.close();
             }
         }
 
-        Ok(OpCode::EditorIdle) => {
+        Ok(EffectOpCode::EditorIdle) => {
             if let Some(editor) = get_editor() {
                 editor.idle();
             }
         }
 
-        Ok(OpCode::GetData) => {
+        Ok(EffectOpCode::GetData) => {
             let mut chunks = if index == 0 {
                 params.get_bank_data()
             } else {
@@ -294,7 +294,7 @@ fn dispatch_inner(
             mem::forget(chunks);
             return len;
         }
-        Ok(OpCode::SetData) => {
+        Ok(EffectOpCode::SetData) => {
             // SAFETY: VST2 ABI: for `effSetChunk`, `ptr` addresses `value` bytes owned by
             // the host for the call. Not checked for null or a negative `value`.
             let chunks = unsafe { slice::from_raw_parts(ptr as *mut u8, value as usize) };
@@ -310,21 +310,21 @@ fn dispatch_inner(
             return 0;
         }
 
-        Ok(OpCode::ProcessEvents) => {
+        Ok(EffectOpCode::ProcessEvents) => {
             // SAFETY: VST2 ABI: for `effProcessEvents`, `ptr` is a valid `VstEvents` for the
             // call. Not checked for null.
             get_plugin().process_events(unsafe { &*(ptr as *const api::Events) });
         }
-        Ok(OpCode::CanBeAutomated) => return params.can_be_automated(index) as isize,
-        Ok(OpCode::StringToParameter) => {
+        Ok(EffectOpCode::CanBeAutomated) => return params.can_be_automated(index) as isize,
+        Ok(EffectOpCode::StringToParameter) => {
             return params.string_to_parameter(index, read_string(ptr)) as isize;
         }
 
-        Ok(OpCode::GetPresetName) => {
+        Ok(EffectOpCode::GetPresetName) => {
             return copy_string(ptr, &params.get_preset_name(index), MAX_PRESET_NAME_LEN);
         }
 
-        Ok(OpCode::GetInputInfo) => {
+        Ok(EffectOpCode::GetInputInfo) => {
             if index >= 0 && index < get_plugin().get_info().inputs {
                 // SAFETY: VST2 ABI: for `effGetInputProperties`, `ptr` is a host-owned
                 // `VstPinProperties` to fill. Not checked for null.
@@ -334,7 +334,7 @@ fn dispatch_inner(
                 }
             }
         }
-        Ok(OpCode::GetOutputInfo) => {
+        Ok(EffectOpCode::GetOutputInfo) => {
             if index >= 0 && index < get_plugin().get_info().outputs {
                 // SAFETY: VST2 ABI: for `effGetOutputProperties`, `ptr` is a host-owned
                 // `VstPinProperties` to fill. Not checked for null.
@@ -344,11 +344,11 @@ fn dispatch_inner(
                 }
             }
         }
-        Ok(OpCode::GetCategory) => {
+        Ok(EffectOpCode::GetCategory) => {
             return get_plugin().get_info().category.into();
         }
 
-        Ok(OpCode::ShellGetNextPlugin) => {
+        Ok(EffectOpCode::ShellGetNextPlugin) => {
             return match get_plugin().shell_next_plugin() {
                 Some((id, name)) => {
                     copy_string(ptr, &name, MAX_PRODUCT_STR_LEN);
@@ -358,19 +358,19 @@ fn dispatch_inner(
             };
         }
 
-        Ok(OpCode::BeginSetPreset) => {
+        Ok(EffectOpCode::BeginSetPreset) => {
             get_plugin().begin_set_preset();
             return 1;
         }
-        Ok(OpCode::EndSetPreset) => {
+        Ok(EffectOpCode::EndSetPreset) => {
             get_plugin().end_set_preset();
             return 1;
         }
 
         // `value` is the flag: 1 = bypass, 0 = resume processing.
-        Ok(OpCode::SoftBypass) => return isize::from(get_plugin().set_bypass(value != 0)),
+        Ok(EffectOpCode::SoftBypass) => return isize::from(get_plugin().set_bypass(value != 0)),
 
-        Ok(OpCode::GetEffectName) => {
+        Ok(EffectOpCode::GetEffectName) => {
             // Leave the buffer alone when the plugin declines. An unanswered
             // optional opcode is a no-write, which is how a host tells "no
             // effect name" from one — copying the product string in here would
@@ -381,19 +381,21 @@ fn dispatch_inner(
             };
         }
 
-        Ok(OpCode::GetVendorName) => {
+        Ok(EffectOpCode::GetVendorName) => {
             return copy_string(ptr, &get_plugin().get_info().vendor, MAX_VENDOR_STR_LEN);
         }
-        Ok(OpCode::GetProductName) => {
+        Ok(EffectOpCode::GetProductName) => {
             return copy_string(ptr, &get_plugin().get_info().name, MAX_PRODUCT_STR_LEN);
         }
-        Ok(OpCode::GetVendorVersion) => return get_plugin().get_info().version as isize,
-        Ok(OpCode::VendorSpecific) => return get_plugin().vendor_specific(index, value, ptr, opt),
-        Ok(OpCode::CanDo) => {
+        Ok(EffectOpCode::GetVendorVersion) => return get_plugin().get_info().version as isize,
+        Ok(EffectOpCode::VendorSpecific) => {
+            return get_plugin().vendor_specific(index, value, ptr, opt);
+        }
+        Ok(EffectOpCode::CanDo) => {
             let can_do = CanDo::from_str(&read_string(ptr));
             return get_plugin().can_do(can_do).into();
         }
-        Ok(OpCode::GetTailSize) => {
+        Ok(EffectOpCode::GetTailSize) => {
             if get_plugin().get_tail_size() == 0 {
                 return 1;
             } else {
@@ -401,12 +403,12 @@ fn dispatch_inner(
             }
         }
 
-        //OpCode::GetParamInfo => { /*TODO*/ }
-        Ok(OpCode::GetApiVersion) => return 2400,
+        //EffectOpCode::GetParamInfo => { /*TODO*/ }
+        Ok(EffectOpCode::GetApiVersion) => return 2400,
 
         // `index` is the ASCII character, `value` the virtual key, and `opt`'s bits the
         // modifier mask; the answer is 1 when the editor used the key.
-        Ok(OpCode::EditorKeyDown) => {
+        Ok(EffectOpCode::EditorKeyDown) => {
             return match (get_editor(), Key::try_from(value)) {
                 (Some(editor), Ok(key)) => isize::from(editor.key_down(KeyCode {
                     character: index as u8 as char,
@@ -416,7 +418,7 @@ fn dispatch_inner(
                 _ => 0,
             };
         }
-        Ok(OpCode::EditorKeyUp) => {
+        Ok(EffectOpCode::EditorKeyUp) => {
             return match (get_editor(), Key::try_from(value)) {
                 (Some(editor), Ok(key)) => isize::from(editor.key_up(KeyCode {
                     character: index as u8 as char,
@@ -427,7 +429,7 @@ fn dispatch_inner(
             };
         }
         // `value` is the input `VstSpeakerArrangement*` and `ptr` the output.
-        Ok(OpCode::SetSpeakerArrangement) => {
+        Ok(EffectOpCode::SetSpeakerArrangement) => {
             // SAFETY: VST2 ABI: the host passes pointers to arrangements sized for their
             // channel counts, or null.
             let arrangements = unsafe {
@@ -445,7 +447,7 @@ fn dispatch_inner(
         }
         // `value` and `ptr` are the addresses of the host's two `VstSpeakerArrangement*`
         // slots, which the plugin points at arrangements it keeps.
-        Ok(OpCode::GetSpeakerArrangement) => {
+        Ok(EffectOpCode::GetSpeakerArrangement) => {
             let Some((input, output)) = get_plugin().speaker_arrangement() else {
                 return 0;
             };
@@ -461,16 +463,16 @@ fn dispatch_inner(
             }
             return 1;
         }
-        Ok(OpCode::StartProcess) => get_plugin().start_process(),
-        Ok(OpCode::StopProcess) => get_plugin().stop_process(),
+        Ok(EffectOpCode::StartProcess) => get_plugin().start_process(),
+        Ok(EffectOpCode::StopProcess) => get_plugin().stop_process(),
         // `value` is the width: 0 = 32-bit, anything else = 64-bit.
-        Ok(OpCode::SetPrecision) => get_plugin().set_precision(value != 0),
+        Ok(EffectOpCode::SetPrecision) => get_plugin().set_precision(value != 0),
 
-        Ok(OpCode::GetNumMidiInputs) => {
+        Ok(EffectOpCode::GetNumMidiInputs) => {
             // SAFETY: as for `params` above: `user` is the live `PluginCache`.
             return unsafe { (*effect).get_info() }.midi_inputs as isize;
         }
-        Ok(OpCode::GetNumMidiOutputs) => {
+        Ok(EffectOpCode::GetNumMidiOutputs) => {
             // SAFETY: as for `params` above: `user` is the live `PluginCache`.
             return unsafe { (*effect).get_info() }.midi_outputs as isize;
         }

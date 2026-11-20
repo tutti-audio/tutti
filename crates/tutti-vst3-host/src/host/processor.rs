@@ -374,17 +374,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             declared,
             ..
         } = self;
-        drain.drain(|id, value| {
-            if ParamWriteError::check_sorted(id, declared).is_err() {
-                *edits_dropped += 1;
-            } else if let Some(slot) = pending.iter_mut().find(|(waiting, _)| *waiting == id) {
-                slot.1 = value;
-            } else if pending.len() < declared.len() {
-                pending.push((id, value));
-            } else {
-                *edits_dropped += 1;
-            }
-        });
+        drain.drain(|id, value| stage_write(pending, edits_dropped, declared, id, value));
     }
 
     /// Runs one realtime processing block.
@@ -633,6 +623,79 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         });
         result
             .map(|()| true)
+            .map_err(|error| ProcessFailed { error })
+    }
+
+    /// Delivers `changes` between blocks, the Controller's writes first. While
+    /// the plugin is processing, with a `process` call that carries no audio
+    /// (`numSamples = 0`, the SDK's way to flush parameters): the render thread
+    /// that calls it renders no block meanwhile. Before it processes (no block
+    /// yet, or after a stop) the SDK has no flush to offer, since `process`
+    /// follows `setProcessing(true)` and this does not toggle it: the writes are
+    /// staged for the next block's input changes.
+    ///
+    /// # Errors
+    ///
+    /// [`ProcessFailed`] when the plugin refuses the call, or a list a plugin
+    /// thread holds cannot be filled (nothing was delivered).
+    pub fn flush_changes(
+        &mut self,
+        changes: &ParameterChanges,
+    ) -> std::result::Result<(), ProcessFailed> {
+        use tutti_vst3_ffi::Vst3Error;
+        self.drain_slots();
+        if !self.processing {
+            // The SDK has the host call `setProcessing(true)` before `process`,
+            // and a flush must not toggle it: the writes wait in `pending` and
+            // the next block's input changes carry them at offset 0, after what
+            // the Controller queued.
+            let Self {
+                pending,
+                edits_dropped,
+                declared,
+                ..
+            } = self;
+            for queue in &changes.queues {
+                if let Some(point) = queue.points.last() {
+                    stage_write(
+                        pending,
+                        edits_dropped,
+                        declared,
+                        queue.param_id,
+                        point.value,
+                    );
+                }
+            }
+            return Ok(());
+        }
+        let Some(mut staging) = self.audio.input.param_changes.try_begin() else {
+            return Err(ProcessFailed {
+                error: Vst3Error::NotInitialized,
+            });
+        };
+        let declared = &self.declared;
+        let staged = staging
+            .refill_where(changes, |id| {
+                ParamWriteError::check_sorted(id, declared).is_ok()
+            })
+            .is_ok()
+            && self
+                .pending
+                .iter()
+                .all(|&(id, value)| staging.prepend(id, value).is_ok());
+        drop(staging);
+        if !staged || self.audio.output.param_changes.try_begin().is_none() {
+            return Err(ProcessFailed {
+                error: Vst3Error::NotInitialized,
+            });
+        }
+        self.pending.clear();
+        self.audio_side
+            .flush(FlushIo {
+                mode: self.audio.config.block_mode,
+                input_params: &self.audio.input.param_changes,
+                output_params: &self.audio.output.param_changes,
+            })
             .map_err(|error| ProcessFailed { error })
     }
 
@@ -926,6 +989,15 @@ impl Processor for ProcessorAny {
         }
     }
 
+    /// `process` with no audio ([`Vst3Processor::flush_changes`]).
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+        match self {
+            Self::F32(p) => p.flush_changes(changes),
+            Self::F64(p) => p.flush_changes(changes),
+        }
+        .map_err(|_| PluginError::Block("the plugin refused a parameter flush"))
+    }
+
     /// `setProcessing(false)`, started again by the next block: what the SDK
     /// offers for a reset (`ivstaudioprocessor.h`: it "could be used to reset
     /// some buffers (like Delay line or Reverb)"), with the SysEx reassembly
@@ -997,6 +1069,28 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     }
 }
 
+/// Stages a write for the next block's input changes: the latest to each
+/// parameter wins, and one to a parameter the plugin did not declare (or past the
+/// room) is counted dropped. Allocation-free: `pending` is reserved for every
+/// declared parameter.
+fn stage_write(
+    pending: &mut Vec<(ParamId, Normalized)>,
+    dropped: &mut u64,
+    declared: &[(ParamId, ParamAccess)],
+    id: ParamId,
+    value: Normalized,
+) {
+    if ParamWriteError::check_sorted(id, declared).is_err() {
+        *dropped += 1;
+    } else if let Some(slot) = pending.iter_mut().find(|(waiting, _)| *waiting == id) {
+        slot.1 = value;
+    } else if pending.len() < declared.len() {
+        pending.push((id, value));
+    } else {
+        *dropped += 1;
+    }
+}
+
 /// Copies one block's emitted events out of the host's pooled buffers into the
 /// caller's reusable [`ProcessOutput`](tutti_plugin_types::ProcessOutput).
 ///
@@ -1019,7 +1113,7 @@ fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_type
 }
 
 // A Processor moves by value through activation (`Staged`, `Lifecycle`, the
-// server's `Served`), and every debug frame on that path holds a copy. Its
+// server's `Server`), and every debug frame on that path holds a copy. Its
 // large buffers are boxed, so it stays small; a new inline array that tips
 // this bound fails the build.
 const _: () = assert!(size_of::<ProcessorAny>() <= 4096);

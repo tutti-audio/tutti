@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, ThreadId};
 
 use tutti_plugin_types::MainWork;
-use tutti_session::{Declared, DetachedSession, Life, Load, PoolEntry, RetryError, Session, Task};
+use tutti_session::{Declared, DetachedSession, Life, Load, PoolEntry, RetryError, Session};
 use tutti_units::SampleRate;
 
 /// What the worker hands the main stage: it says where it is dropped.
@@ -59,10 +59,9 @@ fn session_with_output() -> (
     Arc<Mutex<Option<ThreadId>>>,
     Arc<AtomicBool>,
 ) {
-    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
-    let spawned = Arc::clone(&held);
+    let executor = tutti_platform::Executor::polled();
     let mut session = Session::builder()
-        .spawn_with(move |job| spawned.lock().unwrap().push(job))
+        .executor(executor.clone())
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
     let dropped_on = Arc::default();
@@ -76,9 +75,7 @@ fn session_with_output() -> (
             },
         ))
         .expect("this is the main thread");
-    for job in held.lock().unwrap().drain(..) {
-        job.run();
-    }
+    executor.poll(usize::MAX);
     (session, dropped_on, dropped)
 }
 
@@ -142,27 +139,21 @@ impl PoolEntry for Dual {
     }
 }
 
-fn held_session() -> (DetachedSession, Arc<Mutex<Vec<Task>>>) {
-    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
-    let spawned = Arc::clone(&held);
+fn held_session() -> (DetachedSession, tutti_platform::Executor) {
+    let executor = tutti_platform::Executor::polled();
     let session = Session::builder()
-        .spawn_with(move |job| spawned.lock().unwrap().push(job))
+        .executor(executor.clone())
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
-    (session, held)
+    (session, executor)
 }
 
-fn run_held(held: &Arc<Mutex<Vec<Task>>>) -> usize {
-    let jobs: Vec<Task> = held.lock().unwrap().drain(..).collect();
-    let count = jobs.len();
-    for job in jobs {
-        job.run();
-    }
-    count
+fn run_held(executor: &tutti_platform::Executor) -> usize {
+    executor.poll(usize::MAX)
 }
 
 fn retry_of_a_main_stage_load_is_refused_off_the_main_thread_until_an_update_ran_on_it() {
-    let (mut session, held) = held_session();
+    let (mut session, executor) = held_session();
     let fail = Arc::new(AtomicBool::new(true));
     let entry = |fail: &Arc<AtomicBool>| {
         Declared::new(
@@ -174,7 +165,7 @@ fn retry_of_a_main_stage_load_is_refused_off_the_main_thread_until_an_update_ran
         )
     };
     session.pool(entry(&fail)).expect("on the main thread");
-    run_held(&held);
+    run_held(&executor);
     // The failure lands in an update that is not on the main thread.
     let mut session = thread::spawn(move || {
         let _ = session.update();
@@ -188,7 +179,7 @@ fn retry_of_a_main_stage_load_is_refused_off_the_main_thread_until_an_update_ran
 }
 
 fn a_key_whose_load_needs_no_main_thread_does_not_join_a_flight_that_does_off_the_main_thread() {
-    let (mut session, held) = held_session();
+    let (mut session, executor) = held_session();
     let fail = Arc::new(AtomicBool::new(false));
     let served = move |name, main| {
         Declared::shared(
@@ -200,7 +191,7 @@ fn a_key_whose_load_needs_no_main_thread_does_not_join_a_flight_that_does_off_th
         )
     };
     session.pool(served("a", true)).expect("on the main thread");
-    assert_eq!(held.lock().unwrap().len(), 1);
+    assert_eq!(run_held(&executor), 1, "a's load started");
     // On another thread, a is declared again in its served form and b joins in
     // that form: a's flight waits for a main thread this call has not got.
     let again = served.clone();
@@ -212,12 +203,12 @@ fn a_key_whose_load_needs_no_main_thread_does_not_join_a_flight_that_does_off_th
     })
     .join()
     .unwrap();
-    assert_eq!(held.lock().unwrap().len(), 2, "b started its own load");
+    assert_eq!(run_held(&executor), 1, "b started its own load");
     // On the main thread b joins a's flight instead.
     session
         .pool((served("a", false), served("b", false), served("c", false)))
         .unwrap();
-    assert_eq!(held.lock().unwrap().len(), 2, "c joined a flight");
+    assert_eq!(run_held(&executor), 0, "c joined a flight");
 }
 
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["pool_main";

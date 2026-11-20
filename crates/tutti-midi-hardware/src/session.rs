@@ -52,10 +52,10 @@ use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
-use tutti_midi_ci::ProductInstanceId;
 use tutti_midi_ci::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::{InputInlets, InputWriters};
+use tutti_ump::ProductInstanceId;
 use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
@@ -87,7 +87,7 @@ pub struct MidiSession {
     /// The devices present, and the backend that opens them.
     devices: Devices,
     /// What the session was opened with.
-    options: MidiHardwareOptions,
+    config: MidiHardwareConfig,
     /// Who the session presents itself as on every input with an output; `None`
     /// presents nothing ([`present`](MidiSession::present)).
     presented: Option<Presented>,
@@ -122,13 +122,13 @@ pub struct Presented {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
-pub struct MidiHardwareOptions {
+pub struct MidiHardwareConfig {
     /// Where the event times of the input ports come from.
     pub input_timing: InputTiming,
 }
 
-impl MidiHardwareOptions {
-    /// The options of a session opened with none: inputs timed by arrival.
+impl MidiHardwareConfig {
+    /// The config of a session opened with none: inputs timed by arrival.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -136,7 +136,7 @@ impl MidiHardwareOptions {
         }
     }
 
-    /// These options with the event times of the input ports from `timing`:
+    /// This config with the event times of the input ports from `timing`:
     /// [`Arrival`](InputTiming::Arrival), the OS's arrival stamp (the default), or
     /// [`JitterReduction`](InputTiming::JitterReduction), the JR Timestamps of a
     /// device that agrees to send them.
@@ -285,13 +285,13 @@ impl MidiSession {
     /// by `inlets` (the session builds and owns the [`HardwareMidiInputs`] over
     /// them: [`ports`](Self::ports)).
     ///
-    /// `options` are what the session runs with ([`MidiHardwareOptions`]).
+    /// `config` is what the session runs with ([`MidiHardwareConfig`]).
     ///
     /// # Errors
     ///
     /// As [`Devices::open`].
-    pub fn open(inlets: Arc<InputInlets>, options: MidiHardwareOptions) -> Result<Self> {
-        Self::open_over(backend::active(), inlets, options)
+    pub fn open(inlets: Arc<InputInlets>, config: MidiHardwareConfig) -> Result<Self> {
+        Self::open_over(backend::active(), inlets, config)
     }
 
     /// A session over a supplied backend.
@@ -307,13 +307,13 @@ impl MidiSession {
     pub fn open_over(
         backend: Box<dyn MidiEndpoints>,
         inlets: Arc<InputInlets>,
-        options: MidiHardwareOptions,
+        config: MidiHardwareConfig,
     ) -> Result<Self> {
         Ok(Self {
             inputs: HashMap::new(),
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
             devices: Devices::open_over(backend)?,
-            options,
+            config,
             presented: None,
             generated_instance: None,
             properties: ResourceStore::default(),
@@ -372,7 +372,7 @@ impl MidiSession {
     /// leaves the input connected and the device as the OS describes it.
     ///
     /// The source of the input's event times is the session's
-    /// [`MidiHardwareOptions::input_timing`]:
+    /// [`MidiHardwareConfig::input_timing`]:
     /// [`InputTiming::JitterReduction`] asks the device for JR Timestamps and
     /// places its events by them once it agrees, while [`InputTiming::Arrival`]
     /// is the OS's arrival stamp. An input already open is kept as it is.
@@ -407,7 +407,7 @@ impl MidiSession {
         writers: InputWriters,
     ) -> Result<Connected> {
         let (writers, ci_refused) = writers.split();
-        let timing = self.options.input_timing;
+        let timing = self.config.input_timing;
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
         if self
@@ -706,8 +706,8 @@ impl MidiSession {
 
     /// What the session was opened with.
     #[must_use]
-    pub fn options(&self) -> MidiHardwareOptions {
-        self.options
+    pub fn config(&self) -> MidiHardwareConfig {
+        self.config
     }
 
     /// The MIDI-CI peers found on the open input `id`, by Group then MUID:

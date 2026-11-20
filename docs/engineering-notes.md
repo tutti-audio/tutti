@@ -27,7 +27,7 @@ So `--no-default-features` does **not** test this — it drops the codec and mid
 features instead. Name the feature:
 
 ```bash
-cargo check -p tutti-transport -p tutti-metering -p tutti-engine
+cargo check -p tutti-transport -p tutti-engine
 ```
 
 ## The import-path gate
@@ -109,7 +109,6 @@ crates/             everything shipped, directory name = package name
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
                     #   executor. Design doc 013.
   tutti-transport   # Transport: tempo, loop, motion state machine, timed commands
-  tutti-metering    # LoadMeter (level meters are plan ops in tutti-graph)
   tutti-engine      # Engine: the per-block graph render over a transport
   tutti-cpal        # Device layer: CPAL stream, RT callback, driver lifecycle
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
@@ -458,8 +457,8 @@ param takes nothing. `P` is a packed `UnitAddr` (index in the high byte, the
 plain `{ UnitParam::X as u16 }` and a node with several names the others with
 `{ UnitAddr::new(UnitParam::X, i).to_u16() }` (doc 013, "Param addresses").
 `AudioNode`, the component wrapping a `NodeKey`, is `bevy-tutti`'s; the engine
-and `tutti-session` key a node by `NodeKey`, and `tutti-transport`,
-`tutti-metering` and `tutti-engine` have no `bevy` feature.
+and `tutti-session` key a node by `NodeKey`, and `tutti-transport` and
+`tutti-engine` have no `bevy` feature.
 
 The session runs a frame as the phases of `tutti_session::PHASES`, and
 `bevy-tutti` schedules each in a `SessionPhaseSystems(Phase)` set chained
@@ -582,6 +581,19 @@ knowing because the same shapes recur:
   *between* syscalls, so a budget of any size was unenforceable. The fix is
   `PeekNamedPipe`: ask how many bytes are buffered, and only read when the
   answer is "some". See `tutti-plugin-ipc`'s `transport::control`.
+- **The audio slab is anonymous on unix, and its descriptor is its own message.**
+  The plugin process loads untrusted code, so a slab it could open by name, or
+  `ftruncate` once opened, would fault the host's audio thread (SIGBUS on the next
+  read of an unbacked page). On Linux the slab is a `memfd` sealed against shrinking,
+  growing and sealing; the server refuses a descriptor that is not one, or not the
+  layout's exact length. On macOS it is a POSIX shared memory object unlinked as soon
+  as it is sized; nothing seals it there, so the protection is that XNU refuses a
+  second `ftruncate` once the object is allocated, which
+  `a_second_ftruncate_is_refused_to_every_holder` pins. The descriptor follows the `SetupSharedMemory` frame as one byte
+  carrying it (as ancillary data), read by the exact read that follows the frame: a plain
+  `read` across a message with descriptors drops them, so a buffered reader that reads
+  ahead would have to `recvmsg` everywhere. Windows keeps a named, delete-on-close
+  file whose name travels in the frame.
 - **`set_nonblocking` is not the way out, and was tried.** It took Windows from
   37 failures to 47. `PIPE_NOWAIT` makes `ReadFile` report *success with zero
   bytes*, which this transport reads as EOF, so a quiet peer was reported as a
@@ -783,7 +795,7 @@ that user can do, including `ptrace` the host or write its memory (a probe did,
 with `ptrace_scope` 0). Anything that needs a boundary needs a sandbox, which is
 a separate, opt-in piece.
 
-- **Linux host:** `BridgeConfig::protect_host_memory` clears the host's dumpable
+- **Linux host:** `IpcConfig::protect_host_memory` clears the host's dumpable
   flag (PR_SET_DUMPABLE 0) before its first server is spawned, which closes
   that. It is opt-in because the flag also stops the host dumping core and a
   same-user debugger or crash handler attaching to it; those are the app's to
@@ -818,10 +830,10 @@ mode is one. The server's `LoadPlugin` activated at once and the state came
 after `PluginLoaded`, so such a plugin kept the default: every first load with
 a state, a crash-recovery reload, and a graph fork (four runs in six came up in
 the default mode). The state is now staged before the load
-(`HostMessage::StageStateChunk`), the loader restores it between opening the
+(`ControlRequest::StageStateChunk`), the loader restores it between opening the
 plugin and activating it, and the `PluginLoaded` reply (buses, latency) is the
 state's; a plugin that refuses the state loads at its defaults and the reply
-says so. The load declares the state it restores (`LoadPlugin { state: Some(StagedState { len }) }`) and the server refuses one that does not match what it holds; a stage is discarded by any other request. The server says `RestoringState` just before the restore, and from then the host waits a flat 60 s (a restore is one opaque call with nothing in it to measure progress by) and blames a failure on the state (`BridgeError::StateRestore`, which the session answers by withholding the snapshot); a failure before it, in the library or its init, is a load failure and blames nothing. `PluginClient::new_with_state`, `Plugin::open_with_state` and
+says so. The load declares the state it restores (`LoadPlugin { state: Some(StagedState { len }) }`) and the server refuses one that does not match what it holds; a stage is discarded by any other request. The server says `Working::Restoring` just before the restore, and from then the host waits a flat 60 s (a restore is one opaque call with nothing in it to measure progress by) and blames a failure on the state (`IpcError::StateRestore`, which the session answers by withholding the snapshot); a failure before it, in the library or its init, is a load failure and blames nothing. `PluginClient::new_with_state`, `Plugin::open_with_state` and
 `PluginLoad::run` carry it; the in-process VST2 fork restores the program and
 the state before it activates. The AU change mirrors the others and is not
 built here (macOS only).

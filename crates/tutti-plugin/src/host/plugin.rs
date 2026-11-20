@@ -17,7 +17,7 @@ use tutti_plugin_host::{
     AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, PluginHandle,
 };
 use tutti_plugin_ipc::AudioConfig;
-use tutti_plugin_types::BridgeResult;
+use tutti_plugin_types::IpcResult;
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor, PluginRole};
 use tutti_units::SampleRate;
@@ -30,7 +30,7 @@ use tutti_units::SampleRate;
 ///
 /// Every arm is boxed. An enum is as large as its largest variant, and these
 /// differ by ~9 KiB (a served client is ~15 KiB, an in-process one ~6 KiB), so
-/// an unboxed enum would make every `Plugin` (and every `BridgeResult`
+/// an unboxed enum would make every `Plugin` (and every `IpcResult`
 /// carrying one) pay the larger figure.
 enum Placed {
     Served(Box<PluginClient>),
@@ -67,7 +67,7 @@ enum Placed {
 /// if plugin.takes_midi() {
 ///     // wire a MIDI source to the node's event input
 /// }
-/// # Ok::<(), tutti_plugin_types::BridgeError>(())
+/// # Ok::<(), tutti_plugin_types::IpcError>(())
 /// ```
 pub struct Plugin {
     placed: Placed,
@@ -126,25 +126,25 @@ impl Plugin {
     ///
     /// # Errors
     ///
-    /// Returns [`BridgeError::Blacklisted`](tutti_plugin_types::BridgeError::Blacklisted)
+    /// Returns [`IpcError::Blacklisted`](tutti_plugin_types::IpcError::Blacklisted)
     /// for a blacklisted plugin,
-    /// [`BridgeError::ServerNotFound`](tutti_plugin_types::BridgeError::ServerNotFound)
+    /// [`IpcError::ServerNotFound`](tutti_plugin_types::IpcError::ServerNotFound)
     /// when the `plugin-server` binary cannot be located,
-    /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed)
-    /// when the plugin does not load, [`BridgeError::NotOutOfProcess`] for a
+    /// [`IpcError::LoadFailed`](tutti_plugin_types::IpcError::LoadFailed)
+    /// when the plugin does not load, [`IpcError::NotOutOfProcess`] for a
     /// VST2 plugin whose load asks for [`Hosting::OutOfProcess`],
-    /// [`BridgeError::NotInProcess`] for a format this build has no in-process
+    /// [`IpcError::NotInProcess`] for a format this build has no in-process
     /// host for, and a connection, protocol or timeout variant when the
     /// subprocess cannot be reached.
     ///
-    /// [`BridgeError::NotOutOfProcess`]: tutti_plugin_types::BridgeError::NotOutOfProcess
-    /// [`BridgeError::NotInProcess`]: tutti_plugin_types::BridgeError::NotInProcess
+    /// [`IpcError::NotOutOfProcess`]: tutti_plugin_types::IpcError::NotOutOfProcess
+    /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
     pub fn open(
         main: Option<MainThreadMarker>,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
-    ) -> BridgeResult<Self> {
+    ) -> IpcResult<Self> {
         Self::open_with(main, work, &AudioConfig::default(), plugin, sample_rate)
     }
 
@@ -161,7 +161,7 @@ impl Plugin {
         audio: &AudioConfig,
         plugin: &Loadable,
         sample_rate: SampleRate,
-    ) -> BridgeResult<Self> {
+    ) -> IpcResult<Self> {
         Self::open_with_state(main, work, audio, plugin, sample_rate, None)
             .map(|(plugin, _)| plugin)
     }
@@ -183,7 +183,7 @@ impl Plugin {
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
+    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)> {
         if placement(plugin)? == Hosting::InProcess {
             // A served load asks the blacklist in `PluginClient::open`; a
             // session load has asked it once already, before it defers.
@@ -191,7 +191,7 @@ impl Plugin {
             // An in-process plugin loads in this process, on the main thread:
             // the caller says it is there by passing the token.
             let Some(main) = main else {
-                return Err(tutti_plugin_types::BridgeError::LoadFailed {
+                return Err(tutti_plugin_types::IpcError::LoadFailed {
                     path: Some(plugin.plugin().path().to_path_buf()),
                     stage: tutti_plugin_types::LoadStage::Opening,
                     reason: "a plugin hosted in the host process loads on the main thread \
@@ -228,7 +228,7 @@ impl Plugin {
         format: PluginFormat,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
+    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)> {
         match format {
             #[cfg(feature = "vst2")]
             PluginFormat::Vst2 => Self::load_in_process::<tutti_vst2_host::Vst2Loaded>(
@@ -264,7 +264,7 @@ impl Plugin {
             ),
             // `Loadable::placement` refused every format with no host built in; this
             // arm is the same refusal, for a caller that skipped it.
-            _ => Err(tutti_plugin_types::BridgeError::NotInProcess {
+            _ => Err(tutti_plugin_types::IpcError::NotInProcess {
                 path: plugin.path().to_path_buf(),
                 format: "plugin",
             }),
@@ -285,7 +285,7 @@ impl Plugin {
         plugin: &PluginRef,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)>
+    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)>
     where
         L: tutti_plugin_types::InProcess + 'static,
         L::Processor: 'static,

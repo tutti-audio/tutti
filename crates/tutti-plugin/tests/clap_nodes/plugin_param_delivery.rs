@@ -169,7 +169,9 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
         },
         || read(&handle, p) == Some(0.25),
     ));
-    handle.send_parameter(extra(p), tutti_units::Normalized::of(0.75));
+    handle
+        .send_parameter(extra(p), tutti_units::Normalized::of(0.75))
+        .expect("a declared parameter");
     // The edit is queued to the plugin's Processor and reaches the plugin at
     // the head of its next block, so blocks run until it has.
     assert!(
@@ -273,10 +275,13 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     );
 
     // The edit, behind the node's back.
-    probe.handle.send_parameter(
-        GAIN,
-        tutti_units::Normalized::clamped(f64::from(gain_at(-15.0))),
-    );
+    probe
+        .handle
+        .send_parameter(
+            GAIN,
+            tutti_units::Normalized::clamped(f64::from(gain_at(-15.0))),
+        )
+        .expect("a declared parameter");
     assert!(
         until(
             SETTLE,

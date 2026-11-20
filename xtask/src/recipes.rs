@@ -286,6 +286,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a quantity has one width and data is generic over the graph's float: a crossing is a named place, bar the rows of xtask/width-baseline.txt",
     ),
     (
+        "check-threads",
+        "",
+        "background work is a future on tutti_platform::Executor: a thread start outside tutti-platform is a row of xtask/threads-baseline.txt or one of the gate's two real-time sites",
+    ),
+    (
         "check-session-api",
         "",
         "tutti-session's public API has no `run` or `*_blocking`, and only the rows of xtask/session-api-allow.txt hold a MainThreadMarker",
@@ -376,7 +381,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-wasm",
         "",
-        "clippy for wasm32-unknown-unknown: tutti-platform and tutti, lib only",
+        "clippy for wasm32-unknown-unknown: tutti-platform, tutti-rt and tutti, lib only; then tutti with the web features",
     ),
     (
         "check-no-std",
@@ -711,6 +716,7 @@ impl Planner<'_> {
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-units-bare" => self.out.push(Step::Gate(Gate::UnitsBare)),
             "check-width" => self.out.push(Step::Gate(Gate::Width)),
+            "check-threads" => self.out.push(Step::Gate(Gate::Threads)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -768,7 +774,8 @@ impl Planner<'_> {
                 r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"#,
             ]),
             "check-wasm" => self.lines(&[
-                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings",
+                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
+                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-aiff,export,record,midi -- -D warnings",
             ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
@@ -848,6 +855,7 @@ impl Planner<'_> {
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
                     "check-session-api", "check-values", "check-units-bare", "check-width",
+                    "check-threads",
                 ] {
                     self.dep(d)?;
                 }
@@ -924,7 +932,6 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-midi-protocol", &["serde"]),
     ("tutti-curve", &[]),
     ("tutti-buffers", &["serde"]),
-    ("tutti-metering", &[]),
     ("tutti-tempo", &["serde"]),
     ("tutti-voicing", &[]),
 ];
@@ -968,6 +975,7 @@ const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test job_gate_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test parker_loom"#,
+    r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test bells_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test level_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_flags_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test dirty_set_loom"#,

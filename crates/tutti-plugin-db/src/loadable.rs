@@ -12,7 +12,7 @@
 //! the blacklist.
 
 use crate::catalog::{BlacklistView, Catalog};
-use tutti_plugin_types::{BridgeResult, PluginFormat, PluginRef, UnknownExtension};
+use tutti_plugin_types::{IpcResult, PluginFormat, PluginRef, UnknownExtension};
 
 /// Where a plugin runs: in the host's own process or in a `plugin-server`
 /// process. A choice made per load ([`Loadable::hosting`]); everything a
@@ -32,12 +32,12 @@ pub enum Hosting {
     /// In the host's process: no isolation, no IPC copy, and the editor is the
     /// audio instance. The load needs the main thread
     /// ([`MainThreadMarker`](tutti_plugin_types::MainThreadMarker)). Refused with
-    /// [`BridgeError::NotInProcess`](tutti_plugin_types::BridgeError::NotInProcess)
+    /// [`IpcError::NotInProcess`](tutti_plugin_types::IpcError::NotInProcess)
     /// when this build has no host for the format (its `tutti-plugin` feature
     /// is off).
     InProcess,
     /// In a `plugin-server` process, with its editor here. Refused with
-    /// [`BridgeError::NotOutOfProcess`](tutti_plugin_types::BridgeError::NotOutOfProcess)
+    /// [`IpcError::NotOutOfProcess`](tutti_plugin_types::IpcError::NotOutOfProcess)
     /// for VST2, which cannot be served.
     OutOfProcess,
 }
@@ -54,7 +54,7 @@ pub enum Hosting {
 /// `Loadable`**: `tutti_plugin`'s `Plugin::open`, `PluginClient`'s
 /// open and a session's crash reload ask it. Two reloads of a plugin that was
 /// already admitted do not: the relaunch of a served plugin for a fork
-/// (`IpcOrigin::reopen`) and the in-process editor instance of a served plugin
+/// (`LaunchSpec::reopen`) and the in-process editor instance of a served plugin
 /// load the same file again from the origin the first load recorded, without
 /// the view.
 #[derive(Debug, Clone)]
@@ -140,9 +140,9 @@ impl Loadable {
     ///
     /// # Errors
     ///
-    /// [`BridgeError::Blacklisted`](tutti_plugin_types::BridgeError::Blacklisted) with the recorded reason when the plugin's
+    /// [`IpcError::Blacklisted`](tutti_plugin_types::IpcError::Blacklisted) with the recorded reason when the plugin's
     /// file is blacklisted and unchanged.
-    pub fn check(&self) -> BridgeResult<()> {
+    pub fn check(&self) -> IpcResult<()> {
         self.blacklist.check(&self.plugin)
     }
 }

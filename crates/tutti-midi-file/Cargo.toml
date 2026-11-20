@@ -14,13 +14,13 @@ categories = ["multimedia::audio", "parser-implementations"]
 workspace = true
 
 [dependencies]
-tempfile = "3.27"
 thiserror = { workspace = true, features = ["std"] }
 
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
@@ -28,6 +28,7 @@ winnow = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
+tempfile = "3.27"
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [package.metadata.docs.rs]

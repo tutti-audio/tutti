@@ -1,12 +1,5 @@
 #![doc = include_str!("../README.md")]
-// Forked from vst-rs 0.3.0. This is *owned* code, not a read-only vendor drop:
-// the fork already diverges deliberately (host-side audioMaster callbacks, plus
-// the host-safety fixes documented in `host.rs`), so its lints are chased like
-// any other crate here.
-//
-// The remaining allows are narrow and each has a reason:
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
-#![allow(missing_docs)]
 // Elided-lifetime style across a 2021-edition port of a 2018-edition crate.
 #![allow(mismatched_lifetime_syntaxes)]
 
@@ -20,28 +13,25 @@
 //! races are avoided.
 //!
 //! # Plugins
-//! The plugin-authoring half (`plugin_main!`, the `AEffect` builder and the
-//! plugin-side dispatcher) lives in the test-only `tutti-vst2-author`; this crate
-//! holds the ABI types both sides share, and the `Plugin` and `PluginParameters` traits
-//! the authoring side implements (nothing here implements them any more: a loaded plugin
-//! is a `PluginInstance`, the main-thread handle, and a `RenderHandle`, the audio one).
+//! The plugin-authoring half (the `Plugin` and `PluginParameters` traits, `HostCallback`,
+//! `plugin_main!` and the plugin-side dispatcher) lives in the test-only
+//! `tutti-vst2-author`; this crate holds the ABI types both sides share. A loaded plugin
+//! is a `PluginInstance`, the main-thread handle, and a `RenderHandle`, the audio one.
 //!
 //! # Hosts
 //!
 //! ## `Host` Trait
-//! All hosts must implement the [`Host` trait](host/trait.Host.html). To load a VST plugin, you
+//! All hosts must implement the [`Host` trait](Host). To load a VST plugin, you
 //! need to wrap your host in an `Arc<T>` wrapper. Along with the
 //! plugin path, this can be passed to the [`PluginLoader::load`] method to create a plugin loader
 //! which can spawn plugin instances.
 //!
 //! ## Example Host
 //! ```no_run
-//! extern crate tutti_vst2_ffi as vst;
-//!
 //! use std::sync::Arc;
 //! use std::path::Path;
 //!
-//! use tutti_vst2_ffi::host::{Host, PluginLoader};
+//! use tutti_vst2_ffi::{Host, PluginLoader};
 //!
 //! struct SampleHost;
 //!
@@ -72,33 +62,47 @@
 //!
 //! ```
 //!
-//! [`PluginLoader::load`]: host/struct.PluginLoader.html#method.load
+//! [`PluginLoader::load`]: PluginLoader::load
 //!
 
-extern crate libc;
-extern crate libloading;
-extern crate num_traits;
-#[macro_use]
-extern crate tracing;
-#[macro_use]
-extern crate bitflags;
-
-#[macro_use]
 mod primitive_enum;
 
-pub mod api;
-pub mod buffer;
-pub mod channels;
-pub mod editor;
-pub mod event;
-pub mod host;
-pub mod interfaces;
-pub mod midi;
-pub mod plugin;
-pub mod scratch;
-pub mod speaker;
+mod api;
+mod buffer;
+mod editor;
+mod host;
+mod interfaces;
+mod midi;
+mod plugin;
+mod scratch;
+mod speaker;
 
+pub use api::consts::{
+    MAX_CATEGORY_LABEL, MAX_EFFECT_NAME_LEN, MAX_LABEL, MAX_PARAM_STR_LEN, MAX_PRESET_NAME_LEN,
+    MAX_PRODUCT_STR_LEN, MAX_SHORT_LABEL, MAX_VENDOR_STR_LEN, VST_MAGIC,
+};
+pub use api::{
+    AEffect, AutomationState, ChannelFlags, ChannelProperties, DispatcherProc, Event, EventType,
+    Events, GetChunkError, GetParameterProc, HostCallbackProc, MidiEvent, MidiEventFlags,
+    MidiKeyName, MidiProgramCategory, MidiProgramFlags, MidiProgramName, ModifierKey,
+    ParameterFlags, ParameterProperties, PluginEvent, PluginEvents, PluginFlags, PluginMain,
+    ProcessLevel, ProcessProc, ProcessProcF64, SetParameterProc, SmpteFrameRate,
+    SpeakerArrangementType, Supported, SysExEvent, SysExMessage, TimeInfo, TimeInfoFlags,
+};
+pub use buffer::{
+    AudioBuffer, AudioBufferIterator, InputIterator, Inputs, OutputIterator, Outputs,
+};
+pub use editor::{Key, KeyCode, Rect};
+pub use host::{
+    AudioMasterOpCode, Host, MidiChannelCounts, PluginInstance, PluginLoadError, PluginLoader,
+    RenderHandle, ShellPlugin,
+};
+pub use interfaces::{copy_string, read_string};
+pub use midi::{MidiIo, MidiSendBuffer, from_midi, to_midi};
+pub use plugin::{CanDo, Category, EffectOpCode, Info};
 pub use primitive_enum::UnknownPrimitive;
+pub use scratch::RenderScratch;
+pub use speaker::{ArrangementRead, MAX_ARRANGEMENT_CHANNELS, Speaker, SpeakerArrangement};
 
 // Test-only global allocator for the RT-safety test of the render refusal; it aborts on
 // any allocation inside an `assert_no_alloc` scope.
@@ -115,7 +119,7 @@ mod primitive_enum_tests {
     #[test]
     fn a_value_no_variant_has_is_refused_with_that_value() {
         assert_eq!(
-            crate::plugin::OpCode::try_from(i32::MAX).err(),
+            crate::plugin::EffectOpCode::try_from(i32::MAX).err(),
             Some(UnknownPrimitive(i64::from(i32::MAX)))
         );
         assert_eq!(

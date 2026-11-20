@@ -10,7 +10,7 @@ use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorPresence, EditorWindow, Features, Layout, LoadedPlugin, OwnBypass, ParamAccess,
+    EditorPresence, EditorWindow, Features, Layout, Loaded, LoadedPlugin, OwnBypass, ParamAccess,
     ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
     PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId, ProcessWake,
     RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId, TrackInfo,
@@ -84,6 +84,7 @@ pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> Plugin
         },
         editor,
         measured: None,
+        widths: None,
     }
 }
 
@@ -101,7 +102,10 @@ impl ClapLoaded {
     /// it has an editor measured from the plugin itself.
     pub(crate) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
         let bits = editor_bits(self.has_editor(main), self.has_floating_editor(main));
-        descriptor_of(&self.info, EditorPresence::measured(bits.has_editor))
+        PluginDescriptor {
+            widths: Some(Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::measured(bits.has_editor))
+        }
     }
 
     /// The descriptor with the editor measured, asking the plugin the first time.
@@ -183,6 +187,10 @@ impl ClapLoaded {
         // preset-discovery extension, which is factory-level and unbound here,
         // so only the load half is answered.
         features.set(Features::PRESET_LOAD, self.supports_preset_load());
+        features.set(
+            Features::AUTOMATION_STATE,
+            self.plugin.supports_param_indication(),
+        );
         // The format the plugin runs at: 64-bit only while activated as such.
         features.set(Features::F64_AUDIO, self.audio.f64_active);
         features.set(
@@ -314,14 +322,22 @@ impl Control for ClapLoaded {
 
     /// `param-indication.set_automation` for every automatable parameter: the
     /// mode is the plugin's whole, and CLAP names automation per parameter.
-    /// A plugin without `clap.param-indication` is not told.
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
+    /// A plugin without `clap.param-indication` is not told (`false`), and
+    /// neither is one with no automatable parameter: `true` is that at least one
+    /// parameter was told.
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
+        if !self.plugin.supports_param_indication() {
+            return false;
+        }
         let state = ParamAutomationState::from(mode);
+        let mut told = false;
         for info in self.parameter_list(main) {
             if info.flag(ParamFlags::AUTOMATABLE) == Some(true) {
                 self.set_param_automation(main, info.id().get(), state, None);
+                told = true;
             }
         }
+        told
     }
 
     /// What the plugin's `track-info.get` answers from now on; the plugin is

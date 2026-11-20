@@ -66,6 +66,8 @@ struct Core
 	std::atomic<double> rate {0};
 	std::array<std::atomic<uint32_t>, 16> blocks {};
 	std::atomic<uint32_t> blocksN {0};
+	// What the host told the plugin of its automation state (core.rs, "State"): how many times, and the last raw value.
+	std::atomic<uint32_t> automationN {0}, automationLast {0};
 	struct Log { std::atomic<uint64_t> head {0}, id {0}; std::atomic<double> value {0}; };
 	std::array<Log, 32> log;
 	std::atomic<uint32_t> logN {0};
@@ -241,6 +243,7 @@ struct Core
 			put<uint32_t> (b, uint32_t (h >> 32)); put<uint32_t> (b, uint32_t (h)); put<uint32_t> (b, told[k].flags);
 			put<uint32_t> (b, 0); put<double> (b, told[k].tempo); put<double> (b, told[k].beat);
 		}
+		put<uint32_t> (b, automationN); put<uint32_t> (b, automationLast);
 		return b;
 	}
 	bool load (const uint8_t* p, size_t n)

@@ -1,5 +1,5 @@
 use super::*;
-use tutti_midi_ci::BlockName;
+use tutti_ump::BlockName;
 use tutti_ump::{OsFunctionBlock, UiHint, read_function_block, read_protocol};
 
 fn info(id: u8) -> FunctionBlockInfo {

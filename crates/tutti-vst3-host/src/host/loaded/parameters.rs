@@ -312,6 +312,11 @@ impl Vst3Loaded {
             .xml_representation(main, vendor, name, version, host)
     }
 
+    /// Whether the plugin's controller implements `IAutomationState`.
+    pub(crate) fn has_automation_state(&self, main: MainThreadMarker) -> bool {
+        self.plugin.has_automation_state(main)
+    }
+
     /// Tells the plugin the host's current automation read/write mode via
     /// `IAutomationState`.
     ///
@@ -485,6 +490,8 @@ pub(super) fn build_param_info(
         .with_unit(info.units_string())
         .with_range(range)
         .with_steps(steps)
+        // No plain map: the plugin's controller owns it
+        // (`normalizedParamToPlain`, whatever its shape).
         .with_flags(KNOWN, reported)
         .with_group(group)
         .with_measures(measures)

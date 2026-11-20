@@ -141,6 +141,9 @@ pub(super) struct Fork<L: InProcess, F: Float> {
     /// The live node's parameter delivery: what it has delivered, read when
     /// it forks, before its state.
     delivery: Arc<DeliveryCounters>,
+    /// The host's parameter writes no block has taken: applied before the state
+    /// is read, so the fork starts from them.
+    edits: Option<super::host_edits::EditPost>,
     /// The width the live node renders at, which the second instance is
     /// loaded for.
     width: PhantomData<fn() -> F>,
@@ -164,6 +167,7 @@ where
             features: client.features,
             transport: client.transport.clone(),
             delivery: client.params.counters(),
+            edits: client.edits.as_ref().map(super::host_edits::EditPort::post),
             width: PhantomData,
         })
     }
@@ -185,6 +189,9 @@ where
             let control = instance
                 .control()
                 .ok_or(PluginForkError::SaveState(StateError::PluginCrashed))?;
+            if let Some(edits) = &self.edits {
+                edits.flush(main, control);
+            }
             // A plugin with no presets has none to carry (and would refuse
             // the current one's id).
             let preset = if self.features.contains(Features::PRESET_LOAD) {

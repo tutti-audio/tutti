@@ -20,7 +20,6 @@ getrandom = { workspace = true }
 mdns-sd = { workspace = true }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
-tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", default-features = false }
 # `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 

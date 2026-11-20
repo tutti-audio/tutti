@@ -1,9 +1,18 @@
-# tutti
+<div align="center">
+
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tutti-banner-dark.svg">
+    <img alt="tutti" src="assets/brand/tutti-banner-light.svg" width="640">
+  </picture>
+</h1>
 
 A type-driven, real-time audio engine for building DAWs in Rust.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/tutti-audio/tutti/ci.yml?branch=main&style=flat&label=CI)](https://github.com/tutti-audio/tutti/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20or%20Apache--2.0-blue?style=flat)](#license)
+
+</div>
 
 Audio software has always felt a little chaotic to us: formats with their own
 rules, specs with their own corners, vendor quirks no document mentions, and

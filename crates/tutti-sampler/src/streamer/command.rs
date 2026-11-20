@@ -1,14 +1,14 @@
 //! Streamer thread command enum and the stream's identity.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
+use tutti_platform::Asset;
 
 use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
 
+use super::oneshot::Sender;
 use super::open::Opened;
 use crate::OpenError;
 
@@ -41,11 +41,11 @@ impl<F: RingFloat> std::fmt::Debug for Decoded<F> {
 /// Command sent to the Streamer thread.
 #[derive(Debug)]
 pub(crate) enum StreamerCommand<F: RingFloat> {
-    /// Open `file_path` as stream `id`, its window starting at frame `start`,
+    /// Open `asset` as stream `id`, its window starting at frame `start`,
     /// and answer on `reply`.
     Open {
         id: StreamId,
-        file_path: PathBuf,
+        asset: Asset,
         start: u64,
         /// The voice's width, or the file's own when `None`.
         width: Option<ChannelLayout>,

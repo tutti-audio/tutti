@@ -10,18 +10,19 @@ use tutti_dsp::{
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterNode, CompressorControls,
-    CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, DynamicEqConfig,
-    DynamicEqNode, FdnNode, FreeverbNode, GateControls, GateNode, LadderFilterNode,
-    LimiterControls, LimiterNode, MaxDelay, ModDelayNode, MultibandCompressorNode, PeakDetection,
-    PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
-    SvfFilterNode, TremoloConfig, TremoloNode,
+    Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode,
+    CompressorConfig, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayNode,
+    DistortionNode, DynamicEqConfig, DynamicEqNode, FdnNode, FreeverbNode, GateConfig,
+    GateControls, GateNode, LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode,
+    MaxDelay, ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+    PeakDetection, PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
+    RingModNode, SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    EnvelopeFilterConfig, EnvelopeFilterNode, TiltFilterConfig, TiltFilterNode,
-    TransientShaperConfig, TransientShaperNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TiltFilterConfig,
+    TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
@@ -97,7 +98,9 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "compressor",
-            Box::new(CompressorNode::<f32>::mono(CompressorControls::DEFAULT)),
+            Box::new(CompressorNode::<f32>::from(
+                CompressorConfig::new(BusTopology::MONO).controls(CompressorControls::DEFAULT),
+            )),
         ),
         (
             // A hold of 91 frames captures the poisoned frame (273 is 3 x 91) and holds it
@@ -164,23 +167,36 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             )),
         ),
         (
-            "gate",
-            Box::new(GateNode::<f32>::mono(GateControls::DEFAULT)),
-        ),
-        (
-            "limiter",
-            Box::new(LimiterNode::<f32>::mono(LimiterControls::DEFAULT)),
-        ),
-        (
-            "true-peak limiter",
+            "leveller",
             Box::new(
-                LimiterNode::<f32>::mono(LimiterControls::DEFAULT)
-                    .detection(PeakDetection::TruePeak),
+                LevellerNode::<f32>::try_from(LevellerConfig::new(BusTopology::STEREO)).unwrap(),
             ),
         ),
         (
+            "gate",
+            Box::new(GateNode::<f32>::from(
+                GateConfig::new(BusTopology::MONO).controls(GateControls::DEFAULT),
+            )),
+        ),
+        (
+            "limiter",
+            Box::new(LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::MONO).controls(LimiterControls::DEFAULT),
+            )),
+        ),
+        (
+            "true-peak limiter",
+            Box::new(LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::MONO)
+                    .detection(PeakDetection::TruePeak)
+                    .controls(LimiterControls::DEFAULT),
+            )),
+        ),
+        (
             "brickwall",
-            Box::new(BrickwallLimiterNode::<f32>::new(Db::new(-1.0))),
+            Box::new(BrickwallLimiterNode::<f32>::from(
+                BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(-1.0)),
+            )),
         ),
         (
             "chorus",
@@ -231,7 +247,9 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "multiband",
-            Box::new(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 3).unwrap()),
+            Box::new(MultibandCompressorNode::<f32>::from(
+                MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(3)),
+            )),
         ),
     ]
 }
@@ -308,14 +326,15 @@ mod logged {
     //! per reset, at the earliest non-finite frame, naming its channel (the lowest on a tie).
 
     use super::{BLOCK, POISONED, SR};
-    use tutti_buffers::{ChannelLayout, MaxBlock};
+    use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InPort, IntoNode, Io, LogFilter, Node, NodeKey, OutPort,
         Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Source, Status,
         TransportPosition, Unforkable,
     };
     use tutti_nodes::{
-        CompressorControls, CompressorNode, DcBlockerConfig, DcBlockerNode, MultibandCompressorNode,
+        CompressorConfig, CompressorControls, CompressorNode, DcBlockerConfig, DcBlockerNode,
+        MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
     };
     use tutti_units::{Frame, Samples, Tail};
 
@@ -425,13 +444,18 @@ mod logged {
     #[test]
     fn a_finite_input_logs_nothing() {
         assert!(records(dc_blocker(), 0.0, None, 8).is_empty());
-        let compressor = CompressorNode::<f32>::stereo(CompressorControls::DEFAULT);
+        let compressor = CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::STEREO).controls(CompressorControls::DEFAULT),
+        );
         assert!(records(compressor, 0.0, None, 8).is_empty());
     }
 
     #[test]
     fn the_multiband_compressor_logs_its_reset_once() {
-        let node = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 3).unwrap();
+        let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::STEREO,
+            MultibandBands::of(3),
+        ));
         let records = records(node, f32::NAN, Some(1), 8);
         assert_one_warning(&records, 1, POISONED * BLOCK as u64 + AT as u64);
     }

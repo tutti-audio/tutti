@@ -28,7 +28,7 @@
 //! - `plain_node`: an `impl Node for X` or `impl Node<f32> for X` with no `F`, an f32-only
 //!   node (event-only nodes included);
 //! - `fn_twin`: a `pub fn` named `*_f32` or `*_f64`;
-//! - `f32_cell`: a tuple struct whose only field is an `f32` (a unit), or an `AtomicF32`
+//! - `f32_cell`: a tuple struct whose only field is an `f32` (a unit), or an atomic `f32`
 //!   (a param cell);
 //! - `bare_f32`: a `pub` item (`fn`, `type`, a `pub` field of a `pub` struct, a variant of
 //!   a `pub` enum, a method of a `pub` trait) whose signature or field type names `f32`,
@@ -461,7 +461,7 @@ fn fn_twins(code: &str) -> Vec<usize> {
     out
 }
 
-/// The offsets of an `f32` unit or cell: `struct X(f32)`, `AtomicF32`.
+/// The offsets of an `f32` unit or cell: `struct X(f32)`, an atomic `f32`.
 fn f32_cells(code: &str) -> Vec<usize> {
     let mut out = Vec::new();
     let mut from = 0;

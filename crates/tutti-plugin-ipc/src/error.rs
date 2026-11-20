@@ -1,11 +1,11 @@
 //! The error types of the process edge.
 //!
-//! [`BridgeError`] (in `tutti-plugin-types`) is the host-side error most calls
+//! [`IpcError`] (in `tutti-plugin-types`) is the host-side error most calls
 //! return. [`PluginRenderFault`] describes how a forked plugin instance
 //! failed while rendering.
 
 use thiserror::Error;
-use tutti_plugin_types::{BridgeError, PluginFailure};
+use tutti_plugin_types::{IpcError, PluginFailure};
 use tutti_units::SampleRate;
 
 /// How a forked plugin instance failed while rendering.
@@ -33,7 +33,7 @@ pub enum PluginRenderFault {
         reason: String,
     },
     /// The fork's server did not publish a block within the budget
-    /// (`BridgeConfig::timeout_ms`). The fork stopped waiting: every later
+    /// (`IpcConfig::timeout_ms`). The fork stopped waiting: every later
     /// block is silence, at once.
     #[error(
         "the forked instance did not answer a block within {budget:?}; \
@@ -62,18 +62,15 @@ pub enum PluginRenderFault {
 }
 
 /// Builds an `UnexpectedMessage` error by Debug-formatting the received
-/// `BridgeMessage`.
-pub(crate) fn unexpected_message(
-    expected: &'static str,
-    got: &crate::BridgeMessage,
-) -> BridgeError {
-    BridgeError::UnexpectedMessage {
+/// message.
+pub(crate) fn unexpected_message(expected: &'static str, got: &impl std::fmt::Debug) -> IpcError {
+    IpcError::UnexpectedMessage {
         expected,
         got: format!("{got:?}").into(),
     }
 }
 
-/// A postcard failure as the [`BridgeError`] it is on the wire.
-pub(crate) fn codec(e: postcard::Error) -> BridgeError {
-    BridgeError::Serialization(e)
+/// A postcard failure as the [`IpcError`] it is on the wire.
+pub(crate) fn codec(e: postcard::Error) -> IpcError {
+    IpcError::Serialization(e)
 }

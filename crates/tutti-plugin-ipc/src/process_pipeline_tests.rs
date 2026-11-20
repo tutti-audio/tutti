@@ -24,7 +24,7 @@
 //! load-bearing rather than decorative.
 
 use crate::Batcher;
-use crate::BridgeThread;
+use crate::IpcThread;
 use crate::PluginBridge;
 use tutti_fixtures::machine_lock;
 
@@ -33,8 +33,10 @@ use tutti_fixtures::machine_lock;
 const BATCH_SIZE: usize = 64;
 use crate::BlockPayload;
 use crate::unique_socket_path;
-use crate::{AudioSlab, Chunks, FATES, RING_SLOTS, Replies, SlabWriter};
-use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION, SlabLayout};
+use crate::{
+    AudioReply, AudioRequest, ControlFrame, Framed, PROTOCOL_VERSION, Request, SlabLayout,
+};
+use crate::{AudioSlab, BATCH_OUTCOMES, Chunks, RING_SLOTS, Replies, SlabHandle, SlabWriter};
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
@@ -50,8 +52,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
@@ -143,7 +145,7 @@ fn drive(
 
 /// `None` on a clean EOF — the host side closing the socket at teardown is
 /// normal shutdown, not a failure, so it must not panic the server thread.
-fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> Option<HostMessage> {
+fn recv_host_msg<T: Framed>(stream: &interprocess::local_socket::Stream) -> Option<T> {
     use std::io::Read;
     let mut stream = stream;
     let mut len_buf = [0u8; 4];
@@ -163,22 +165,22 @@ fn accept_control(listener: &interprocess::local_socket::Listener) {
     let control = listener.accept().unwrap();
     send_bridge_msg(
         &control,
-        &BridgeMessage::Ready {
+        &ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
         },
     );
-    std::thread::spawn(move || while recv_host_msg(&control).is_some() {});
+    std::thread::spawn(move || while recv_host_msg::<Request>(&control).is_some() {});
 }
 
-fn send_bridge_msg(stream: &interprocess::local_socket::Stream, msg: &BridgeMessage) {
+fn send_bridge_msg<T: Framed>(stream: &interprocess::local_socket::Stream, msg: &T) {
     try_send_bridge_msg(stream, msg).unwrap();
 }
 
 /// [`send_bridge_msg`] that reports a closed peer instead of panicking, for a
 /// reply the test no longer waits for.
-fn try_send_bridge_msg(
+fn try_send_bridge_msg<T: Framed>(
     stream: &interprocess::local_socket::Stream,
-    msg: &BridgeMessage,
+    msg: &T,
 ) -> std::io::Result<()> {
     let mut stream = stream;
     crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
@@ -201,7 +203,7 @@ fn stereo_layout() -> SlabLayout {
 /// node's batcher owns in production (`SlabWriter`: one per direction).
 type Rig = (
     Arc<PluginBridge>,
-    BridgeThread,
+    IpcThread,
     std::thread::JoinHandle<()>,
     SlabWriter,
     Replies,
@@ -274,11 +276,10 @@ fn bridge_with_server_mode(
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let out_channels: usize = layout.outputs.iter().map(|l| l.count() as usize).sum();
-    let shm_name = tutti_fixtures::unique_name("test_process-sync");
-    let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
+    let (host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
     // The server side maps the SAME backing file as a view, mirroring the real
     // subprocess: audio travels in shared memory, not over the socket.
-    let mut server_slab = AudioSlab::open(shm_name, layout).unwrap();
+    let mut server_slab = AudioSlab::open(&handle, layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
@@ -297,7 +298,7 @@ fn bridge_with_server_mode(
     let server_stream = listener.accept().unwrap();
     send_bridge_msg(
         &server_stream,
-        &BridgeMessage::Ready {
+        &AudioReply::Ready {
             protocol_version: PROTOCOL_VERSION,
         },
     );
@@ -318,14 +319,14 @@ fn bridge_with_server_mode(
             let mut scratch = vec![0.0f32; BATCH_SIZE];
             loop {
                 let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    recv_host_msg(&server_stream)
+                    recv_host_msg::<AudioRequest>(&server_stream)
                 })) {
                     Ok(Some(msg)) => msg,
                     // Clean EOF or a panicking read: the host is gone, stop.
                     Ok(None) | Err(_) => break,
                 };
                 let reply = match msg {
-                    HostMessage::ProcessAudio(data) => {
+                    AudioRequest::ProcessAudio(data) => {
                         hold_for_permit(&stall);
                         if let Some(gate) = gate.as_ref().filter(|_| data.seq == 1) {
                             let _ = gate.got.send(());
@@ -357,7 +358,7 @@ fn bridge_with_server_mode(
                             // the bridge's progress are told.
                             published.notify();
                         }
-                        BridgeMessage::AudioProcessed {
+                        AudioReply::AudioProcessed {
                             latency_us: 0,
                             seq,
                             midi_out: Default::default(),
@@ -717,7 +718,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
     /// Shares a ring slot with seq 1 — the block the host collects second.
     const DECOY_SEQ: u64 = 1 + RING_SLOTS as u64;
 
-    let (bridge, mut bridge_thread, slab, replies) = bridge_with_no_server();
+    let (bridge, mut bridge_thread, slab, handle, replies) = bridge_with_no_server();
     let host_slab = Arc::clone(slab.slab());
     let mut batcher = Batcher::new(
         CHANNELS,
@@ -739,7 +740,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
 
     // The decoy is what a server would have published: written through the
     // server's end of the slab, the output writer `open` hands back.
-    let mut server = AudioSlab::open(host_slab.name(), host_slab.layout()).unwrap();
+    let mut server = AudioSlab::open(&handle, host_slab.layout()).unwrap();
     for ch in 0..CHANNELS {
         server.write(DECOY_SEQ, ch, &[DECOY; BATCH_SIZE]).unwrap();
     }
@@ -808,13 +809,18 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
 ///
 /// Returned deliberately without a server thread — the point is a bridge that
 /// never publishes to the slab.
-fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter, Replies) {
+fn bridge_with_no_server() -> (
+    Arc<PluginBridge>,
+    IpcThread,
+    SlabWriter,
+    SlabHandle,
+    Replies,
+) {
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
 
     let layout = stereo_layout();
-    let shm_name = tutti_fixtures::unique_name("test_no-server");
-    let host_slab = AudioSlab::create(shm_name, layout).unwrap();
+    let (host_slab, handle) = AudioSlab::create(layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path,
@@ -830,7 +836,7 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter, Repl
     )
     .unwrap();
 
-    (bridge, bridge_thread, host_slab, replies)
+    (bridge, bridge_thread, host_slab, handle, replies)
 }
 
 /// Drive `blocks` blocks through `batcher`, asserting nothing but that it runs.
@@ -1118,7 +1124,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     // Block 4 sees chunk 2 in the ring; chunk 1's fate is not read yet.
     block();
     wait_for(&bridge, "chunk 1's fate", || {
-        bridge.audio().chunk_fate(1) == Some(crate::Fate::Refused)
+        bridge.audio().batch_outcome(1) == Some(crate::BatchOutcome::Refused)
     });
     // Chunk 4 is answered before block 5, so block 5's collect finds it and
     // neither of its two looks can count it late.
@@ -1162,7 +1168,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
     let mut output = Planar::new();
     let mut midi_out = MidiEventVec::new();
 
-    for sent in 1..=2 * FATES as u64 {
+    for sent in 1..=2 * BATCH_OUTCOMES as u64 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
         wait_for(&bridge, "the bridge to deal with the chunk", || {
             bridge.audio().block_counts().abandoned + bridge.audio().skipped_cell().get() >= sent
@@ -1182,7 +1188,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
 /// path into `silence_block`.
 #[test]
 fn silence_on_a_missing_reply_does_not_allocate() {
-    let (bridge, mut bridge_thread, slab, replies) = bridge_with_no_server();
+    let (bridge, mut bridge_thread, slab, _handle, replies) = bridge_with_no_server();
     let mut batcher = Batcher::new(
         CHANNELS,
         CHANNELS,
@@ -1240,7 +1246,7 @@ fn silence_on_a_missing_reply_does_not_allocate() {
 /// the claim in the name, and it is the claim being checked.
 #[test]
 fn silence_on_a_crashed_bridge_does_not_allocate() {
-    let (bridge, mut bridge_thread, slab, replies) = bridge_with_no_server();
+    let (bridge, mut bridge_thread, slab, _handle, replies) = bridge_with_no_server();
     let mut batcher = Batcher::new(
         CHANNELS,
         CHANNELS,
@@ -1300,7 +1306,7 @@ fn silence_on_a_crashed_bridge_does_not_allocate() {
 /// a plugin that misses one deadline is slow, not dead, and the slab's sequence
 /// check already turns a missing reply into silence for that block alone.
 ///
-/// But the timeout surfaces as `BridgeError::Timeout` out of `recv_reply`, and
+/// But the timeout surfaces as `IpcError::Timeout` out of `recv_reply`, and
 /// `handle` returns it through `?` into `pump`, which treats *every* `handle`
 /// error as connection-level: it calls `crash()`, latches the cause, drains the
 /// queue with errors and **returns**, ending the thread. From then on
@@ -1388,7 +1394,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
 /// the server is mid-`process` and will write that frame onto the stream when it
 /// finishes. Leave it there and the next command's `recv_reply` consumes the
 /// abandoned block's answer, and every later block is paired with its
-/// predecessor's — permanently one behind. `Owed::settle` drains it instead.
+/// predecessor's — permanently one behind. `AudioState::hear` forwards it instead.
 ///
 /// # Why this asserts on MIDI rather than on audio
 ///
@@ -1475,7 +1481,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     assert!(
         counts.late >= 1,
         "the drain collected no owed reply although {} blocks were abandoned. \
-         `Owed::take` never ran or never collected anything, and the abandoned \
+         `AudioState::hear` never ran or never collected anything, and the abandoned \
          frame is still queued — which the stamps below cannot reliably detect.",
         counts.abandoned
     );
@@ -1548,9 +1554,8 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     let layout = stereo_layout();
-    let shm_name = tutti_fixtures::unique_name("test_stamped");
-    let host_slab = AudioSlab::create(shm_name.clone(), layout.clone()).unwrap();
-    let mut server_slab = AudioSlab::open(shm_name, layout).unwrap();
+    let (host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
+    let mut server_slab = AudioSlab::open(&handle, layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
@@ -1569,7 +1574,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     let server_stream = listener.accept().unwrap();
     send_bridge_msg(
         &server_stream,
-        &BridgeMessage::Ready {
+        &AudioReply::Ready {
             protocol_version: PROTOCOL_VERSION,
         },
     );
@@ -1591,13 +1596,13 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
             let mut stalled_once = false;
             loop {
                 let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    recv_host_msg(&server_stream)
+                    recv_host_msg::<AudioRequest>(&server_stream)
                 })) {
                     Ok(Some(msg)) => msg,
                     Ok(None) | Err(_) => break,
                 };
                 let reply = match msg {
-                    HostMessage::ProcessAudio(data) => {
+                    AudioRequest::ProcessAudio(data) => {
                         if !(first_only && stalled_once) {
                             stalled_once = true;
                             hold_for_permit(&stall);
@@ -1625,7 +1630,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
                         }]
                         .into_iter()
                         .collect();
-                        BridgeMessage::AudioProcessed {
+                        AudioReply::AudioProcessed {
                             latency_us: 0,
                             seq,
                             midi_out,
@@ -1818,8 +1823,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
     let _lock = machine_lock();
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
-    let slab =
-        AudioSlab::create(tutti_fixtures::unique_name("test_refused"), stereo_layout()).unwrap();
+    let (slab, _handle) = AudioSlab::create(stereo_layout()).unwrap();
     let (bridge, _thread, replies) = PluginBridge::new(
         path,
         tutti_plugin_types::PluginRef::file("test.vst3"),
@@ -1980,19 +1984,19 @@ fn two_stale_blocks(
         released.recv().unwrap();
         send_bridge_msg(
             &server_stream,
-            &BridgeMessage::Ready {
+            &AudioReply::Ready {
                 protocol_version: PROTOCOL_VERSION,
             },
         );
         accept_control(&control_listener);
-        while let Some(msg) = recv_host_msg(&server_stream) {
-            if let HostMessage::ProcessAudio(data) = msg {
+        while let Some(msg) = recv_host_msg::<AudioRequest>(&server_stream) {
+            if let AudioRequest::ProcessAudio(data) = msg {
                 let midi: Vec<tutti_plugin_types::WireMidi> = data.midi_events.to_vec();
                 let _ = got_tx.send((data.seq, midi));
                 // The test asserts on `got`, which is sent above: once it has
                 // block 4 it drops the bridge, so the last reply may find the
                 // peer closed. That ends the server, as a closed read does.
-                let reply = BridgeMessage::AudioProcessed {
+                let reply = AudioReply::AudioProcessed {
                     latency_us: 0,
                     seq: data.seq,
                     midi_out: Default::default(),

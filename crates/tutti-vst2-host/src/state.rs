@@ -30,7 +30,6 @@ use tutti_plugin_types::{MainThreadMarker, StateFrame};
 use tutti_units::Normalized;
 
 use crate::error::{Result, Vst2Error};
-use crate::host::host_write;
 use crate::loaded::Vst2Loaded;
 
 /// State format tags:
@@ -195,7 +194,7 @@ impl Vst2Loaded {
         // anything there. Unclamped, `-1` sign-extends to `usize::MAX` and the
         // `* 4` overflows — profile-dependent, so debug panics on multiply
         // overflow while release wraps to a small capacity and carries on.
-        let param_count = info.parameters.max(0);
+        let param_count = self.instance.read_num_params().max(0);
         let mut state = Vec::with_capacity(4 + 4 + 4 + (param_count as usize) * 4);
         state.extend_from_slice(&STATE_HEADER_PARAMS);
         state.extend_from_slice(&program.to_le_bytes());
@@ -242,7 +241,7 @@ impl Vst2Loaded {
             // `AEffect`. Unclamped, a plugin declaring `-1` makes this
             // comparison `0 > -1` and rejects the empty snapshot
             // `read_state` just wrote for that same plugin.
-            let actual_count = self.instance.get_info().parameters.max(0);
+            let actual_count = self.instance.read_num_params().max(0);
             if *count > actual_count {
                 return Err(Vst2Error::TooManyParameters {
                     saved: *count,
@@ -272,12 +271,15 @@ impl Vst2Loaded {
                 // none, and a JUCE plugin answers 0 after loading), so there is no refusal
                 // to read: the call returning is all that is known.
                 self.instance.load_preset_data(main, payload);
+                // The chunk is the plugin's to apply: no value it holds is a host write.
+                self.host.clear_written();
                 Ok(())
             }
             StateHeader::Params { count, values, .. } => (0..count).try_for_each(|index| {
-                if host_write(|| {
-                    self.instance
-                        .set_parameter(index, saved_value(values, index))
+                // A saved word widens exactly, so its narrowing is the word itself.
+                let saved = Normalized::clamped(f64::from(saved_value(values, index)));
+                if self.host.write(index, saved, |word| {
+                    self.instance.set_parameter(index, word)
                 }) {
                     Ok(())
                 } else {

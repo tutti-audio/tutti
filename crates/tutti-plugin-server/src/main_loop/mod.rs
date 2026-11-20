@@ -38,12 +38,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
+use tutti_plugin_ipc::{ControlFrame, Request};
 use tutti_plugin_ipc_ffi::Ready;
-use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, StateError, Wakeups};
+use tutti_plugin_types::{IpcError, IpcResult, MainThreadMarker, StateError, Wakeups};
 
 use crate::render::RenderThread;
 use crate::session::{Reaction, Session};
-use crate::transport::Transport;
+use crate::transport::{ControlTransport, Incoming};
 
 /// How often the idle tick runs while nothing else wakes the loop: about 30 Hz,
 /// the rate a plugin's editor idle is conventionally driven at.
@@ -93,7 +94,7 @@ impl Ticker {
 #[cfg_attr(not(unix), path = "windows.rs")]
 mod sys;
 
-pub(crate) use sys::{Bell, Listener, Native, Stream, wait_readable};
+pub(crate) use sys::{Bell, Listener, Native, Stream, connection, wait_readable};
 
 impl Native {
     /// Waits until `transport` has a frame to read (`Ok(true)`), the `bell`
@@ -109,12 +110,12 @@ impl Native {
     /// The wait fails.
     pub(crate) fn wait(
         &mut self,
-        transport: &mut dyn Transport,
+        transport: &mut ControlTransport,
         timeout: Duration,
         wakeups: &Wakeups,
         bell: &Bell,
         ready: &mut Vec<Ready>,
-    ) -> BridgeResult<bool> {
+    ) -> IpcResult<bool> {
         ready.clear();
         match transport.stream() {
             Some(stream) => self.wait_on(stream, wakeups, timeout, bell, ready),
@@ -134,10 +135,10 @@ impl Native {
 /// `session` fails in a way it cannot answer as a reply.
 pub(crate) fn serve(
     session: &mut Session,
-    transport: &mut dyn Transport,
+    transport: &mut ControlTransport,
     main: MainThreadMarker,
     render: &RenderThread,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     serve_every(
         session,
         transport,
@@ -155,10 +156,10 @@ pub(crate) fn serve(
 /// # Errors
 ///
 /// [`StateError::PluginCrashed`], when the plugin is lost.
-fn ensure_not_lost(session: &Session) -> BridgeResult<()> {
+fn ensure_not_lost(session: &Session) -> IpcResult<()> {
     if session.plugin_lost() {
         tracing::error!("plugin-server: the plugin is lost; the server exits");
-        return Err(BridgeError::State(StateError::PluginCrashed));
+        return Err(IpcError::State(StateError::PluginCrashed));
     }
     Ok(())
 }
@@ -166,15 +167,15 @@ fn ensure_not_lost(session: &Session) -> BridgeResult<()> {
 /// Whether a connection's end is the peer leaving: a clean end of stream, or
 /// the socket reset or broken under it. Every other error is the peer
 /// breaking the protocol.
-fn host_left(error: &BridgeError) -> bool {
+fn host_left(error: &IpcError) -> bool {
     use std::io::ErrorKind::{BrokenPipe, ConnectionAborted, ConnectionReset, UnexpectedEof};
     /// Windows' `ERROR_PIPE_NOT_CONNECTED`, a named pipe read after the peer
     /// closed: std maps it to no kind (`ERROR_BROKEN_PIPE`, 109, is
     /// `BrokenPipe`), and no unix errno is 233.
     const PIPE_NOT_CONNECTED: i32 = 233;
     match error {
-        BridgeError::ProcessCrashed => true,
-        BridgeError::Io(e) => {
+        IpcError::ProcessCrashed => true,
+        IpcError::Io(e) => {
             matches!(
                 e.kind(),
                 UnexpectedEof | BrokenPipe | ConnectionReset | ConnectionAborted
@@ -187,12 +188,12 @@ fn host_left(error: &BridgeError) -> bool {
 /// [`serve`] with a tick every `period`.
 pub(crate) fn serve_every(
     session: &mut Session,
-    transport: &mut dyn Transport,
+    transport: &mut ControlTransport,
     backend: &mut Native,
     main: MainThreadMarker,
     render: &RenderThread,
     period: Duration,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     let bell = session.ties().bell.clone();
     let host_gone = session.ties().host_gone.clone();
     let mut ticker = Ticker::new(Instant::now(), period);
@@ -211,13 +212,13 @@ pub(crate) fn serve_every(
             && !host_left(error)
         {
             tracing::error!("plugin-server: the audio connection failed: {error}; ending");
-            return Err(BridgeError::AudioConnection {
+            return Err(IpcError::AudioConnection {
                 cause: Arc::clone(error),
             });
         }
         if ticker.take_due(Instant::now()) {
             for event in session.tick(main) {
-                transport.send(&event)?;
+                transport.send(&event.into())?;
             }
         }
         // A tick that lost the plugin ends the server before it waits.
@@ -241,31 +242,34 @@ pub(crate) fn serve_every(
         // say) and rang the bell: what it raised leaves now, not on the tick.
         if bell.rung() {
             for event in session.drain_async_events(main) {
-                transport.send(&event)?;
+                transport.send(&event.into())?;
             }
         }
         let now = Instant::now();
         if !ready.is_empty() || wakeups.is_due(now) {
             for event in session.wake(main, &ready, now) {
-                transport.send(&event)?;
+                transport.send(&event.into())?;
             }
         }
         if !readable {
             continue;
         }
-        let msg = transport.recv()?;
-        match session.handle(main, msg)? {
+        let (id, reaction) = match transport.recv()? {
+            Incoming::Request(Request { id, body }) => (id, session.handle(main, body)?),
+            Incoming::SetupSlab { id, layout, slab } => (id, session.setup_slab(&slab, layout)),
+        };
+        match reaction {
             Reaction::Shutdown => return Ok(()),
-            Reaction::Reply(m) => transport.send(&m)?,
-            Reaction::ReplyMany(ms) => {
-                for m in &ms {
-                    transport.send(m)?;
+            Reaction::Reply(reply) => transport.send(&ControlFrame::Reply { id, reply })?,
+            Reaction::ReplyMany(replies) => {
+                for reply in replies {
+                    transport.send(&ControlFrame::Reply { id, reply })?;
                 }
             }
             Reaction::None => {}
         }
         for event in session.drain_async_events(main) {
-            transport.send(&event)?;
+            transport.send(&event.into())?;
         }
     }
 }
@@ -282,7 +286,7 @@ mod tests {
     #[test]
     fn only_the_peer_leaving_is_host_left() {
         use std::io::{Error, ErrorKind};
-        let io = |e: Error| BridgeError::Io(e);
+        let io = |e: Error| IpcError::Io(e);
         for kind in [
             ErrorKind::UnexpectedEof,
             ErrorKind::BrokenPipe,
@@ -291,7 +295,7 @@ mod tests {
         ] {
             assert!(host_left(&io(Error::from(kind))), "{kind:?}");
         }
-        assert!(host_left(&BridgeError::ProcessCrashed));
+        assert!(host_left(&IpcError::ProcessCrashed));
         assert!(host_left(&io(Error::from_raw_os_error(233))));
         for kind in [
             ErrorKind::InvalidData,
@@ -300,11 +304,11 @@ mod tests {
         ] {
             assert!(!host_left(&io(Error::from(kind))), "{kind:?}");
         }
-        assert!(!host_left(&BridgeError::ProtocolMismatch {
+        assert!(!host_left(&IpcError::ProtocolMismatch {
             expected: 1,
             got: 2
         }));
-        assert!(!host_left(&BridgeError::ProtocolError("junk")));
+        assert!(!host_left(&IpcError::ProtocolError("junk")));
     }
 
     const PERIOD: Duration = Duration::from_millis(33);

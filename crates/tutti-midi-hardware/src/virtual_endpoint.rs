@@ -23,9 +23,9 @@
 use std::sync::Mutex;
 use tutti_rt::LockExt;
 
-use tutti_midi_ci::EndpointName;
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
+use tutti_ump::EndpointName;
 use tutti_ump::{Message, Ump};
 
 use crate::InputProducerHandle;
@@ -49,7 +49,8 @@ pub enum VirtualProtocol {
 #[must_use = "a spec does nothing until an endpoint is opened from it"]
 pub struct VirtualSpec {
     name: EndpointName,
-    protocol: VirtualProtocol,
+    /// The protocol asked for; the backends read it.
+    pub(crate) protocol: VirtualProtocol,
     blocks: Vec<FunctionBlock>,
 }
 
@@ -65,7 +66,7 @@ impl VirtualSpec {
 
     /// The endpoint carrying `protocol`. Where the platform has no such
     /// protocol the endpoint reports the one it got.
-    pub fn with_protocol(mut self, protocol: VirtualProtocol) -> Self {
+    pub fn protocol(mut self, protocol: VirtualProtocol) -> Self {
         self.protocol = protocol;
         self
     }
@@ -81,12 +82,6 @@ impl VirtualSpec {
     #[must_use]
     pub fn name(&self) -> &EndpointName {
         &self.name
-    }
-
-    /// The protocol asked for.
-    #[must_use]
-    pub fn protocol(&self) -> VirtualProtocol {
-        self.protocol
     }
 
     /// The Function Blocks declared, in the order they were added.

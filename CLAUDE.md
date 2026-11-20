@@ -188,7 +188,9 @@ touched.
   value) or `Counter<U>` (a cumulative count that saturates); a count with many writers is
   a `Tally<U>`. A count of lost events is a `Counter<Losses>` (`tutti_graph::Losses`).
 - A refusable push returns `tutti_rt::PushError { Full, Disconnected }`.
-- A wake-up is `tutti_rt::parker()`: any number of `Unparker`s unpark one `Parker`.
+- A thread's wake-up is `tutti_rt::parker()`: any number of `Unparker`s unpark one
+  `Parker`. A future's wake-up is a `tutti_rt::Bell` from the session's `Bells`: the audio
+  thread rings it, and the future awaits its `Listener::rung()`.
 - A value the audio thread must never drop holds a `tutti_rt::ControlDrop`.
 - A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`; a thread is started with
   `tutti_platform::spawn_named`.
@@ -198,6 +200,8 @@ touched.
 - A value the audio thread reads whole is a `tutti_rt::AtomicCell<T>` over an `AtomicWord`
   (`atomic_word!`); a node declares it in `declare_params!`'s `settings` block.
 - An id type is written with `tutti_rt::id!` and minted from a `tutti_rt::Mint`.
+- A parameter's id is a `tutti_units::ParamId`; a channel's index is a
+  `tutti_buffers::ChannelIndex`; a meter's attack and release are a `tutti_units::Ballistics`.
 - Time and layout have one type each: `tutti_music::LoopRange` for a loop,
   `TimeSignature` and `MeterMap` for meter, `tutti_tempo::TempoMap` for tempo,
   `tutti_buffers::{ChannelLayout, ChannelTopology, BusTopology}` for channels, and
@@ -258,7 +262,7 @@ touched.
 - A main-thread entry takes a `tutti_plugin_types::MainThreadMarker`; holding one is the proof.
 - A format host is a `Loaded` typestate whose `activate` splits a plugin into a realtime
   `Processor` and a main-thread `Controller`.
-- The plugin-server is one `Served<F: OutOfProcess>`; VST2 is not served.
+- The plugin-server is one `Server<F: OutOfProcess>`; VST2 is not served.
 - `tutti_plugin_types::bundle` is the only code that knows a bundle's layout. Build a VST3
   UID with `inline_uid`.
 - **The plugin contract** (`testing/tutti-plugin-contract`) runs the same cases against
@@ -312,7 +316,7 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 3. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
    `tutti-midi-ci`, `tutti-curve`
 4. `tutti-rt`, `tutti-midi-device`
-5. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
+5. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`
 6. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
 7. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,

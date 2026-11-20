@@ -80,6 +80,13 @@ pub enum Call {
     EditorIdle,
     /// `EditorWindow::set_editor_scale`, with the factor's bits.
     SetEditorScale(u64),
+    /// `Control::inform_controller`: the plugin's edit controller was told of a
+    /// host write.
+    InformController(ParamId, Normalized),
+    /// A parameter value a block's context carried: the last point of a queue.
+    BlockParam(ParamId, Normalized),
+    /// `Processor::flush_parameters`, with this many parameters' changes.
+    FlushParameters(usize),
 }
 
 const SCOPES: [RescanScope; 4] = [
@@ -118,6 +125,9 @@ impl Call {
             Self::CloseEditor => [20, 0, 0],
             Self::EditorIdle => [21, 0, 0],
             Self::SetEditorScale(bits) => [22, bits, 0],
+            Self::InformController(id, value) => [23, u64::from(id.get()), value.get().to_bits()],
+            Self::BlockParam(id, value) => [24, u64::from(id.get()), value.get().to_bits()],
+            Self::FlushParameters(count) => [25, count as u64, 0],
         }
     }
 
@@ -153,6 +163,15 @@ impl Call {
             20 => Self::CloseEditor,
             21 => Self::EditorIdle,
             22 => Self::SetEditorScale(a),
+            24 => Self::BlockParam(
+                ParamId::new(a as u32),
+                Normalized::clamped(f64::from_bits(b)),
+            ),
+            25 => Self::FlushParameters(a as usize),
+            23 => Self::InformController(
+                ParamId::new(a as u32),
+                Normalized::clamped(f64::from_bits(b)),
+            ),
             _ => return None,
         })
     }
@@ -225,6 +244,7 @@ struct Shared {
     panic_in_deactivate: AtomicBool,
     panic_in_rebuild: AtomicBool,
     panic_in_latency: AtomicBool,
+    process_fails: AtomicBool,
     latency: AtomicUsize,
     tail: AtomicUsize,
     outputs: AtomicU32,
@@ -321,6 +341,7 @@ impl FakePlugin {
             panic_in_deactivate: AtomicBool::new(false),
             panic_in_rebuild: AtomicBool::new(false),
             panic_in_latency: AtomicBool::new(false),
+            process_fails: AtomicBool::new(false),
             latency: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
             outputs: AtomicU32::new(2),
@@ -401,6 +422,12 @@ impl FakePlugin {
     /// Makes `rebuild` panic.
     pub fn panic_in_rebuild(&self, panic: bool) {
         self.0.panic_in_rebuild.store(panic, Ordering::Relaxed);
+    }
+
+    /// Makes every block fail (`Processor::process` returns an error) while
+    /// set: the block's parameter changes are then not delivered.
+    pub fn fail_blocks(&self, fail: bool) {
+        self.0.process_fails.store(fail, Ordering::Relaxed);
     }
 
     /// Makes `Controller::latency` panic.
@@ -624,6 +651,15 @@ macro_rules! fake_control {
                 plain: f64,
             ) -> Option<Normalized> {
                 Normalized::new(plain)
+            }
+
+            fn inform_controller(
+                &mut self,
+                _main: MainThreadMarker,
+                id: ParamId,
+                value: Normalized,
+            ) {
+                self.shared.log.push(Call::InformController(id, value));
             }
 
             /// Follows the write policy: only a parameter the fake declares
@@ -956,6 +992,16 @@ impl Processor for FakeProcessor {
         .fetch_add(1, Ordering::Relaxed);
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
+        if self.shared.process_fails.load(Ordering::Relaxed) {
+            return Err(PluginError::Block("the fake fails its blocks"));
+        }
+        if let Some(changes) = io.ctx.param_changes {
+            for queue in &changes.queues {
+                if let Some(point) = queue.points.last() {
+                    log.push(Call::BlockParam(queue.param_id, point.value));
+                }
+            }
+        }
         let ring = self.shared.ring.load(Ordering::Relaxed);
         let frames = io.buffer.frames().get();
         io.buffer.output().silence();
@@ -992,6 +1038,14 @@ impl Processor for FakeProcessor {
             );
         }
         log.push(Call::Process(frames));
+        Ok(())
+    }
+
+    fn flush_parameters(&mut self, changes: &crate::ParameterChanges) -> PluginResult<()> {
+        let log = &self.shared.log;
+        self.drain
+            .drain(|id, value| log.push(Call::Edit(id, value)));
+        log.push(Call::FlushParameters(changes.queues.len()));
         Ok(())
     }
 

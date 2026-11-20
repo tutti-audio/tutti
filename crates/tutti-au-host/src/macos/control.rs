@@ -15,12 +15,12 @@ use dpi::{LogicalSize, Size};
 use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
-    AuComponentType, AutomationMode, BypassWrite, ContentScale, Control, EditorCapabilities,
-    EditorError, EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker,
-    OwnBypass, ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamWriteError,
-    ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId,
-    PluginResult, PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport, Request,
-    RescanScope, StateUse, WindowHandle, Wraps, taken,
+    AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
+    EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker, OwnBypass,
+    ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
+    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginResult,
+    PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse,
+    WindowHandle, Wraps, taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -35,7 +35,7 @@ use crate::handle::AuHandle;
 use crate::instance::AuLoaded;
 use crate::marks::Marks;
 use crate::parameters;
-use crate::ranges::RangeTable;
+use crate::ranges::{ParamBounds, RangeTable};
 use crate::types::AudioComponentDescription;
 
 /// The wire's mirror of the AU host's component type.
@@ -82,6 +82,7 @@ pub(crate) fn describe(handle: &AuHandle) -> PluginDescriptor {
         },
         editor: EditorPresence::measured(AuEditor::has_editor(handle.unit())),
         measured: None,
+        widths: Some(super::lifecycle::WIDTHS),
     }
 }
 
@@ -217,7 +218,7 @@ impl AuLoaded {
     /// `value` in the declared plain units; `None` for a parameter off the
     /// table, which has no range to denormalize against.
     fn denormalize(&self, id: ParamId, value: Normalized) -> Option<f32> {
-        Some(self.ranges.bounds(id.get())?.plain(value) as f32)
+        Some(self.ranges.bounds(id.get())?.word(value))
     }
 
     /// Reads the declared ranges again, after the unit said its parameter list
@@ -245,13 +246,22 @@ impl AuLoaded {
     fn drain_edits(&self, out: &mut Vec<ParamEdit>) {
         let mut queued = Vec::new();
         self.edits.drain(&mut queued);
-        out.extend(queued.into_iter().map(|edit| match edit {
-            Edit::Begin(id) => ParamEdit::Begin(ParamId::new(id)),
-            Edit::End(id) => ParamEdit::End(ParamId::new(id)),
-            Edit::Change(id, plain) => {
-                ParamEdit::change(ParamId::new(id), self.normalize(id, plain))
-            }
+        out.extend(queued.into_iter().filter_map(|edit| match edit {
+            Edit::Begin(id) => Some(ParamEdit::Begin(ParamId::new(id))),
+            Edit::End(id) => Some(ParamEdit::End(ParamId::new(id))),
+            // The unit repeating the narrowing of a host write is not an edit.
+            Edit::Change(id, plain) if self.ranges.absorbs_report(id, plain) => None,
+            Edit::Change(id, plain) => Some(ParamEdit::change(
+                ParamId::new(id),
+                self.normalize(id, plain),
+            )),
         }));
+    }
+
+    /// Forgets every written position: the unit set its own state (a preset, a
+    /// document, a reset), so no value it reports is a host write repeated.
+    pub(crate) fn clear_written(&self) {
+        self.ranges.marks().clear_written();
     }
 
     /// The marks the render sets bits in: the current table's, and every
@@ -359,6 +369,7 @@ impl Control for AuLoaded {
                         default: p.range.default as f64,
                     })
                     .with_steps(steps)
+                    .with_plain_map(ParamBounds::of(p.range.min, p.range.max).plain_map())
                     .with_flags(ParamFlags::READ_ONLY, flags)
                     .with_group(group)
                     // The unit code is a closed enumeration, so it types the
@@ -425,7 +436,12 @@ impl Control for AuLoaded {
         self.parameter_writable(main, id)?;
         // Declared, so the table has its range.
         if let Some(plain) = self.denormalize(id, value) {
-            let _ = parameters::set(self.unit(), id.get(), plain);
+            // Recorded once the unit took the write: a refused one repeats nothing.
+            if parameters::set(self.unit(), id.get(), plain).is_ok()
+                && let Some(slot) = self.ranges.slot(id.get())
+            {
+                self.ranges.marks().record(slot, value);
+            }
         }
         Ok(())
     }
@@ -507,10 +523,6 @@ impl Control for AuLoaded {
     /// there is no honest value to fabricate.
     fn current_preset(&mut self, _main: MainThreadMarker) -> Option<PresetId> {
         self.current_preset_figure()
-    }
-
-    fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) {
-        let _ = mode;
     }
 
     fn rescan_parameters(&mut self, _main: MainThreadMarker, scope: RescanScope) {

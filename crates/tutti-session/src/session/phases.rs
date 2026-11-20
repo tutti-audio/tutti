@@ -19,8 +19,9 @@ use crate::{AppKey, Clock, Committed, Session, SessionEvent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Phase {
-    /// What the session's jobs sent lands first (`SessionBuilder::spawn_with`:
-    /// each message, then each end, in arrival order). Then the pool's
+    /// The bells tick and the session's executor polls what was woken
+    /// (`SessionBuilder::executor`), then what the jobs sent lands (each message,
+    /// then each end, in arrival order). Then the pool's
     /// landings are reported ([`SessionEvent::Pool`], in the order the app's
     /// set names the entries), then its releases (by key), then crossfades
     /// that waited out a re-prepare are retried, what bounces
@@ -34,7 +35,7 @@ pub enum Phase {
     /// key, silent, and a host-inserted plugin's is removed
     /// (`PluginChange::Died`), a moved latency handed to the graph
     /// (`PluginChange::LatencyChanged`), a due snapshot, a parameter
-    /// read and a reload submitted to the session's spawner (their results land in
+    /// read and a reload submitted to the session's executor (their results land in
     /// the next `Phase::Collect`).
     Plugins,
     /// The plugins' render mode (features `plugin` and `export`): Offline
@@ -194,7 +195,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     pub fn run_phase(&mut self, phase: Phase, cx: PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
         match phase {
             Phase::Collect => {
-                // First, so what a job landed is in the graph this update commits.
+                // The bells wake what the audio thread rang for, and the polled
+                // executor runs what was woken, so what those futures sent lands now.
+                self.sampler.wake();
+                self.jobs.poll();
+                // First of the landings, so what a job landed is in the graph this
+                // update commits.
                 self.land_jobs(out);
                 // What those landings and the holds' ends changed, and the pool's
                 // stages on this thread.

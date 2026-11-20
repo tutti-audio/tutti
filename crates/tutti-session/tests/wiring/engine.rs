@@ -14,7 +14,7 @@ use tutti_graph::ForkByClone;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Op;
-use tutti_graph::TapAlign;
+use tutti_graph::{TapAlign, TapOptions};
 use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
@@ -279,22 +279,23 @@ fn a_voice_plays_in_time_at_every_device_block_size() {
     }
 }
 
-/// An offline session's [`Session::render`] feeds its load meter, one block
-/// per call; a detached session has no engine and no meter.
+/// An offline session's [`Session::render`] feeds its load and block counts,
+/// one block per call; a detached session has no engine and no readings.
 #[test]
-fn an_offline_render_feeds_the_load_meter() {
-    let mut s = offline();
+fn an_offline_render_feeds_the_load_and_the_block_counts() {
+    let s = offline();
     let mut block = vec![0.0f32; 128 * 2];
     for _ in 0..4 {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     }
-    let r = s.load_meter_mut().expect("an offline engine").take();
-    assert_eq!(r.blocks, 4);
-    assert!(r.mean > 0.0, "a render takes some time");
+    assert_eq!(s.blocks().expect("an offline engine").get().blocks, 4);
+    let mean = s.load().expect("an offline engine").get().get();
+    assert!(mean > 0.0, "a render takes some time");
     let detached = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
-    assert!(detached.load_meter().is_none());
+    assert!(detached.load().is_none());
+    assert!(detached.blocks().is_none());
 }
 
 /// A session's master meter is an op in its plan, declared and on from the
@@ -355,7 +356,10 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     assert_eq!(
         s.graph()
             .taps()
-            .open(&[OutPort::new(a, 1)], TapAlign::Raw, Samples::new(64))
+            .open(
+                &[OutPort::new(a, 1)],
+                TapOptions::new(Samples::new(64)).align(TapAlign::Raw)
+            )
             .err(),
         Some(MissingSource::Port {
             node: a.erase(),

@@ -26,10 +26,10 @@ use tutti_plugin_contract::{
     state_with_rings, vst3_cpp_module, vst3_module,
 };
 use tutti_plugin_db::PluginDb;
-use tutti_plugin_ipc::{BridgeConfig as IpcConfig, Ipc, Launched};
+use tutti_plugin_ipc::{Ipc, IpcConfig, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Editor, InProcess, LatencyVerdict, LoadStage, MainThreadMarker,
-    MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash, TailVerdict,
+    Editor, InProcess, IpcError, IpcResult, LatencyVerdict, LoadStage, MainThreadMarker, MaxBlock,
+    Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash, TailVerdict,
 };
 use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};
 use tutti_vst2_author::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME};
@@ -130,6 +130,11 @@ fn assert_named(d: &PluginDescriptor, format: &str, name: &str) {
 fn clap_is_probed_through_the_binary() {
     let d = probe(&clap_path()).expect("probes");
     assert_shared_plugin(&d, "clap");
+    assert_eq!(
+        d.widths,
+        Some(spec::WIDTHS),
+        "the audio ports' 64-bit flags"
+    );
     let db = probe_db(&clap_path()).expect("probes");
     let id = db.plugins().next().and_then(|p| p.id.cloned());
     assert_eq!(id, Some(PluginId::Clap("tutti.shared-test-plugin".into())));
@@ -149,6 +154,7 @@ fn vst2_is_probed_through_the_binary() {
     let dir = tempfile::tempdir().unwrap();
     let d = probe(&vst2_named(&dir, "shared.vst", library())).expect("probes");
     assert_shared_plugin(&d, "vst2");
+    assert_eq!(d.widths, Some(spec::WIDTHS), "effFlagsCanDoubleReplacing");
 }
 
 /// **A VST3 factory is every audio class it lists**, one entry per class id, in the
@@ -182,6 +188,30 @@ fn vst3_is_probed_through_the_binary() {
     assert_eq!(ids.len(), 3, "one id per class: {found:?}");
 }
 
+/// A VST3 plugin's widths are its `canProcessSampleSize(kSample64)` answer; a
+/// class that refuses `initialize` never answers, so its widths are unread
+/// (`None`), never 32-bit only.
+///
+/// It is also the pin for "a failed widths load never costs the listing": the
+/// refusing class is still listed, and the file's other classes keep theirs. A
+/// crash, as against a refusal, is pinned by the host-side
+/// `a_listing_written_before_the_probe_died_is_the_result` and by review.
+#[test]
+fn vst3_widths_are_the_sample_size_answer_and_unread_when_the_class_will_not_load() {
+    let db = probe_db(&bundle_of(&vst3_module())).expect("probes");
+    let widths: Vec<_> = db.plugins().map(|p| p.descriptor.widths).collect();
+    assert_eq!(widths.len(), 3, "the refusing class is still listed");
+    assert_eq!(widths[0], Some(spec::WIDTHS));
+    assert_eq!(widths[1], None, "initialize refused: nothing to ask");
+    assert_eq!(widths[2], Some(spec::WIDTHS), "a later class keeps its own");
+}
+
+#[test]
+fn vst3_cpp_widths_are_the_sample_size_answer() {
+    let d = probe(&bundle_of(&vst3_cpp_module())).expect("probes");
+    assert_eq!(d.widths, Some(spec::WIDTHS));
+}
+
 #[test]
 fn vst3_cpp_is_probed_through_the_binary() {
     let d = probe(&bundle_of(&vst3_cpp_module())).expect("probes");
@@ -194,8 +224,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> BridgeResult<Box<dyn Editor>> {
-    Err(BridgeError::LoadFailed {
+) -> IpcResult<Box<dyn Editor>> {
+    Err(IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "these tests load no editor".into(),

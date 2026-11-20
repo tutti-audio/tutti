@@ -7,7 +7,7 @@
 //! backend or the host latches; why a *replacement* failed is the session's
 //! own `RecoveryFailure`. It is `Clone` (a latch is read many times and an
 //! event outlives the call that raised it), so an error that is not `Clone`
-//! (`BridgeError` holds an `io::Error`) is held in an `Arc` and reached as
+//! (`IpcError` holds an `io::Error`) is held in an `Arc` and reached as
 //! [`source`](std::error::Error::source).
 
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::{BridgeError, PluginError};
+use crate::{IpcError, PluginError};
 
 /// Why a hosted plugin is dead.
 ///
@@ -34,17 +34,17 @@ pub enum PluginFailure {
     /// socket: the plugin never ran.
     Connect {
         /// What the connect returned.
-        source: Arc<BridgeError>,
+        source: Arc<IpcError>,
     },
     /// The server's handshake on the realtime socket failed: it sent no
     /// `Ready`, sent something else first, or spoke another protocol version
-    /// ([`BridgeError::ProtocolMismatch`]).
+    /// ([`IpcError::ProtocolMismatch`]).
     Handshake {
         /// What the handshake read.
-        source: Arc<BridgeError>,
+        source: Arc<IpcError>,
     },
     /// The control stream closed mid-session: the server is gone
-    /// ([`BridgeError::ProcessCrashed`]).
+    /// ([`IpcError::ProcessCrashed`]).
     StreamClosed,
     /// An offline render found the server process had exited, with the status
     /// the OS reported.
@@ -53,27 +53,27 @@ pub enum PluginFailure {
         status: std::process::ExitStatus,
     },
     /// The server did not answer within an operation's deadline
-    /// ([`BridgeError::Timeout`]).
+    /// ([`IpcError::Timeout`]).
     TimedOut {
         /// The timeout.
-        source: Arc<BridgeError>,
+        source: Arc<IpcError>,
     },
-    /// An I/O operation on the control stream failed ([`BridgeError::Io`]).
+    /// An I/O operation on the control stream failed ([`IpcError::Io`]).
     Io {
         /// The I/O error.
-        source: Arc<BridgeError>,
+        source: Arc<IpcError>,
     },
     /// The server broke the protocol: a message the host was not waiting for,
     /// or one that would not frame, encode or decode
-    /// ([`BridgeError::UnexpectedMessage`], `ProtocolError`, `Serialization`, `FrameTooLarge`).
+    /// ([`IpcError::UnexpectedMessage`], `ProtocolError`, `Serialization`, `FrameTooLarge`).
     Protocol {
         /// The violation.
-        source: Arc<BridgeError>,
+        source: Arc<IpcError>,
     },
     /// Any other error that ended a call on the control stream.
     Bridge {
         /// The error.
-        source: Arc<BridgeError>,
+        source: Arc<IpcError>,
     },
     /// The host ended the plugin's server.
     Terminated {
@@ -117,7 +117,7 @@ impl std::fmt::Display for PluginFailure {
 }
 
 /// The error behind a failure is its [`source`](std::error::Error::source):
-/// the [`BridgeError`] itself (not the `Arc` that shares it), so a caller
+/// the [`IpcError`] itself (not the `Arc` that shares it), so a caller
 /// downcasts to the type it knows.
 impl std::error::Error for PluginFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -139,24 +139,24 @@ impl std::error::Error for PluginFailure {
 
 impl PluginFailure {
     /// The failure a call on the control stream ended with, from the error it
-    /// returned: the one place a stream's [`BridgeError`] becomes a cause.
+    /// returned: the one place a stream's [`IpcError`] becomes a cause.
     #[must_use]
-    pub fn from_stream(error: BridgeError) -> Self {
+    pub fn from_stream(error: IpcError) -> Self {
         match error {
-            BridgeError::ProcessCrashed => Self::StreamClosed,
-            BridgeError::Timeout { .. } => Self::TimedOut {
+            IpcError::ProcessCrashed => Self::StreamClosed,
+            IpcError::Timeout { .. } => Self::TimedOut {
                 source: Arc::new(error),
             },
-            BridgeError::Io(_) => Self::Io {
+            IpcError::Io(_) => Self::Io {
                 source: Arc::new(error),
             },
-            BridgeError::UnexpectedMessage { .. }
-            | BridgeError::ProtocolError(_)
-            | BridgeError::AudioConnection { .. }
-            | BridgeError::FrameTooLarge(_)
-            | BridgeError::TrailingBytes { .. }
-            | BridgeError::StaleServer { .. }
-            | BridgeError::Serialization(_) => Self::Protocol {
+            IpcError::UnexpectedMessage { .. }
+            | IpcError::ProtocolError(_)
+            | IpcError::AudioConnection { .. }
+            | IpcError::FrameTooLarge(_)
+            | IpcError::TrailingBytes { .. }
+            | IpcError::StaleServer { .. }
+            | IpcError::Serialization(_) => Self::Protocol {
                 source: Arc::new(error),
             },
             other => Self::Bridge {
@@ -188,30 +188,30 @@ mod tests {
 
     /// A stream error keeps its kind and its error as `source`: the wire's
     /// `ProcessCrashed` is a closed stream, an I/O error is `Io` with the
-    /// `BridgeError` behind it, and a timeout is `TimedOut`.
+    /// `IpcError` behind it, and a timeout is `TimedOut`.
     #[test]
     fn a_stream_error_keeps_its_kind_and_its_source() {
         assert!(matches!(
-            PluginFailure::from_stream(BridgeError::ProcessCrashed),
+            PluginFailure::from_stream(IpcError::ProcessCrashed),
             PluginFailure::StreamClosed
         ));
-        let io = PluginFailure::from_stream(BridgeError::Io(std::io::Error::other("boom")));
+        let io = PluginFailure::from_stream(IpcError::Io(std::io::Error::other("boom")));
         assert!(matches!(io, PluginFailure::Io { .. }));
         let source = io.source().expect("an I/O failure has a source");
         assert!(matches!(
-            source.downcast_ref::<BridgeError>(),
-            Some(BridgeError::Io(e)) if e.to_string() == "boom"
+            source.downcast_ref::<IpcError>(),
+            Some(IpcError::Io(e)) if e.to_string() == "boom"
         ));
-        let late = PluginFailure::from_stream(BridgeError::Timeout {
+        let late = PluginFailure::from_stream(IpcError::Timeout {
             operation: "x",
             after: std::time::Duration::from_millis(5),
             partial: false,
         });
         assert!(matches!(late, PluginFailure::TimedOut { .. }));
-        let proto = PluginFailure::from_stream(BridgeError::ProtocolError("bad"));
+        let proto = PluginFailure::from_stream(IpcError::ProtocolError("bad"));
         assert!(matches!(proto, PluginFailure::Protocol { .. }));
         assert!(matches!(
-            PluginFailure::from_stream(BridgeError::ServerNotFound),
+            PluginFailure::from_stream(IpcError::ServerNotFound),
             PluginFailure::Bridge { .. }
         ));
     }

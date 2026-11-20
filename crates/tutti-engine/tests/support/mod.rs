@@ -23,7 +23,7 @@ use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_units::{Beat, Bpm, Hz, SampleRate, Tail};
 
 /// A map of steps: each `(beat, bpm)` holds until the next. A tempo change
-/// is a point at a beat, never a command at a frame (doc 020).
+/// is a point at a beat, never a command at a frame.
 pub fn step_map(points: &[(f64, f64)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {

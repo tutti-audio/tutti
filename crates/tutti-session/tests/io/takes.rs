@@ -80,6 +80,10 @@ struct Rig {
 }
 
 fn rig(config: InputConfig, lead: Samples) -> Rig {
+    rig_on(config, lead, tutti_platform::Executor::default())
+}
+
+fn rig_on(config: InputConfig, lead: Samples, executor: tutti_platform::Executor) -> Rig {
     let capture = Arc::new(Mutex::new(Capture {
         writer: None,
         lead,
@@ -92,6 +96,7 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
         tutti_buffers::SampleFormat::F32,
     );
     let live = Session::builder()
+        .executor(executor)
         .input_opener(Opener(Arc::clone(&capture)))
         .device(Default::default())
         .build_device_on(spec, driver)
@@ -150,6 +155,21 @@ impl Rig {
             self.step(BLOCK);
             std::thread::sleep(Duration::from_micros(200));
         }
+    }
+
+    /// Steps blocks until `done` holds of the events so far, for at most a count of
+    /// blocks that only guards a hang: the pump's task is woken by the bells' tick
+    /// thread, which no count of updates orders against. The pump runs inside the
+    /// updates, on this thread.
+    fn steps_until(&mut self, done: impl Fn(&[SessionEvent]) -> bool) {
+        for _ in 0..1_000_000 {
+            if done(&self.events) {
+                return;
+            }
+            self.step(BLOCK);
+            std::thread::yield_now();
+        }
+        panic!("never happened: {:?}", self.events);
     }
 
     fn takes(&self) -> Vec<&TakeEvent> {
@@ -389,8 +409,8 @@ fn started_then_finished_once() {
     drop(take);
 }
 
-/// An open-ended take is finished by its handle: it stops at once, returns
-/// what it holds, and the update still reports its end once.
+/// An open-ended take is finished by its handle: it stops at once and
+/// returns without waiting, and an update reports its end with what the take holds.
 #[test]
 fn an_open_ended_take_is_finished_by_its_handle() {
     let dir = tempfile::tempdir().unwrap();
@@ -420,11 +440,12 @@ fn an_open_ended_take_is_finished_by_its_handle() {
     let first = rolling.placement().first_frame();
     // `Started` lands once the pump has written the take's first frame.
     rig.run_until(started);
-    let done = rolling.finish().expect("closed cleanly");
+    rolling.finish();
+    // The end lands in an update, with what the take holds.
+    rig.run_until(finished);
+    let done = recorded(&rig.events);
     assert_eq!(done.placement().first_frame(), first);
     assert!(done.frames().get() > 0);
-    // The update still reports the end, once.
-    rig.run_until(finished);
     assert!(
         rig.takes()
             .iter()
@@ -514,7 +535,16 @@ fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
     let TakeEvent::Failed { error, .. } = takes.last().unwrap() else {
         panic!("not Failed: {takes:?}");
     };
-    assert!(matches!(error, TakeError::Sink(_)), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            TakeError::Sink {
+                unfinished: None,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
     // `TakeError` is `Clone`, so the sink's error is shared behind an `Arc`,
     // whose `Error` impl hides the concrete type from a downcast.
     assert_eq!(
@@ -653,4 +683,238 @@ fn a_take_makes_a_clip_only_from_a_file() {
         from_sink.err()
     );
     drop((to_file, to_sink));
+}
+
+/// **A take on a polled session records and finishes, and the file holds the frames
+/// the input played.** The pump runs inside `update`, woken by the tap's bell: the
+/// ramp the test pushed (frame `i` is `[i, -i]`) comes back frame for frame from the
+/// first frame the take kept.
+#[test]
+fn a_take_on_a_polled_session_records_and_its_file_holds_the_frames_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut rig = rig_on(
+        InputConfig::default(),
+        Samples::new(0),
+        tutti_platform::Executor::polled(),
+    );
+    rig.step(256);
+    let path = wav(&dir, "polled.wav");
+    let take = rig
+        .session
+        .record(&rig.input, Punch::now(), TakeTarget::wav(path.clone()))
+        .expect("armed");
+    rig.steps_until(started);
+    for _ in 0..16 {
+        rig.step(BLOCK);
+    }
+    take.finish();
+    rig.steps_until(finished);
+    let done = recorded(&rig.events);
+    let first = done.placement().first_frame().get();
+    let frames = read(&path);
+    assert_eq!(frames.len(), done.frames().get());
+    // A stop ends the pump at its next wake, so how much of the tail it drained first
+    // depends on when the tick thread woke it: the frames it kept are what is pinned.
+    assert!(!frames.is_empty(), "the take kept no frame");
+    for (k, frame) in frames.iter().enumerate() {
+        let want = (first as usize + k) as f32;
+        assert_eq!(*frame, [want, -want], "file frame {k}");
+    }
+}
+
+/// **`finish` returns without waiting, and the completion lands in a later update.**
+/// On a polled session the pump closes the sink only inside an `update`'s poll, so a
+/// `finish` that joined would never return; it returns at once, nothing has landed, and
+/// the updates that follow report the end once.
+#[test]
+fn finish_returns_at_once_and_the_completion_lands_in_the_updates_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut rig = rig_on(
+        InputConfig::default(),
+        Samples::new(0),
+        tutti_platform::Executor::polled(),
+    );
+    rig.step(256);
+    let take = rig
+        .session
+        .record(
+            &rig.input,
+            Punch::now(),
+            TakeTarget::wav(wav(&dir, "f.wav")),
+        )
+        .expect("armed");
+    rig.steps_until(started);
+    let before = rig.takes().len();
+    take.finish();
+    assert_eq!(
+        rig.takes().len(),
+        before,
+        "finish landed nothing: it only stops the pump"
+    );
+    rig.steps_until(finished);
+    for _ in 0..8 {
+        rig.step(BLOCK);
+    }
+    let ends = rig
+        .takes()
+        .iter()
+        .filter(|e| matches!(e, TakeEvent::Finished { .. } | TakeEvent::Failed { .. }))
+        .count();
+    assert_eq!(ends, 1, "the end is reported once: {:?}", rig.takes());
+}
+
+/// **A take that has nothing to record never stalls `update` on a polled session.** Its
+/// punch-in is far ahead, so the pump has no frame to keep: it awaits its bell instead
+/// of waiting on the tap. A hundred updates return with it armed, and stopping it before
+/// its punch-in lands as a failure within the updates that follow.
+#[test]
+fn an_idle_take_on_a_polled_session_never_stalls_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut rig = rig_on(
+        InputConfig::default(),
+        Samples::new(0),
+        tutti_platform::Executor::polled(),
+    );
+    rig.step(256);
+    let take = rig
+        .session
+        .record(
+            &rig.input,
+            Punch::at(At::Frame(Frame::new(1 << 30))),
+            TakeTarget::wav(wav(&dir, "idle.wav")),
+        )
+        .expect("armed");
+    for _ in 0..100 {
+        rig.step(BLOCK);
+    }
+    assert!(rig.takes().is_empty(), "nothing was punched in");
+    take.finish();
+    rig.steps_until(finished);
+    assert!(
+        matches!(
+            rig.takes().as_slice(),
+            [TakeEvent::Failed {
+                error: TakeError::NeverStarted,
+                ..
+            }]
+        ),
+        "{:?}",
+        rig.takes()
+    );
+}
+
+/// **Dropping a session ends a take's pump, which commits the take.** The pump awaits its
+/// tap's bell; the graph's drop drops the tap's writer, which rings that bell, and the
+/// session's bells deliver the ring before they go. The executor's next poll runs the
+/// woken pump, which reads the writer gone and closes its sink: the take's file lands at
+/// its path, holding the ramp's frames. Until then the path does not exist.
+#[test]
+fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "dropped.wav");
+    let executor = tutti_platform::Executor::polled();
+    let mut rig = rig_on(InputConfig::default(), Samples::new(0), executor.clone());
+    rig.step(256);
+    let take = rig
+        .session
+        .record(&rig.input, Punch::now(), TakeTarget::wav(path.clone()))
+        .expect("armed");
+    rig.steps_until(started);
+    for _ in 0..16 {
+        rig.step(BLOCK);
+    }
+    assert!(!path.exists(), "the file is committed when the pump ends");
+
+    drop(rig);
+    executor.poll(usize::MAX);
+
+    let frames = read(&path);
+    assert!(!frames.is_empty(), "the committed file holds the take");
+    let first = frames[0][0];
+    for (k, frame) in frames.iter().enumerate() {
+        let want = first + k as f32;
+        assert_eq!(*frame, [want, -want], "frame {k}");
+    }
+    drop(take);
+}
+
+/// Runs a polled take of the ramp into `target` to its end and returns the
+/// session's events.
+fn record_polled(target: TakeTarget) -> Vec<SessionEvent> {
+    let mut rig = rig_on(
+        InputConfig::default(),
+        Samples::new(0),
+        tutti_platform::Executor::polled(),
+    );
+    rig.step(256);
+    let take = rig
+        .session
+        .record(&rig.input, Punch::now(), target)
+        .expect("armed");
+    rig.steps_until(started);
+    for _ in 0..16 {
+        rig.step(BLOCK);
+    }
+    take.finish();
+    rig.steps_until(finished);
+    rig.events
+}
+
+/// The names in `dir`, sorted.
+fn names(dir: &tempfile::TempDir) -> Vec<std::ffi::OsString> {
+    let mut names: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    names.sort();
+    names
+}
+
+/// **A take with `create_new` onto an existing file ends `Failed` with an
+/// `AlreadyExists` commit, the path keeps its old bytes, and the file kept
+/// beside it holds the take's frames.** The ramp the test pushed is frame `i`
+/// is `[i, -i]`, so the kept file's frames count up by one from its first.
+#[test]
+fn a_create_new_take_onto_an_existing_file_keeps_the_take_and_leaves_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "taken.wav");
+    std::fs::write(&path, b"old bytes").unwrap();
+    let events = record_polled(TakeTarget::wav(path.clone()).create_new());
+    let [SessionEvent::Take(TakeEvent::Failed { error, .. })] = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::Take(_)))
+        .skip(1)
+        .collect::<Vec<_>>()
+        .as_slice()
+    else {
+        panic!("not a lone Failed after Started: {events:?}");
+    };
+    let TakeError::Commit(commit) = error else {
+        panic!("not a commit failure: {error:?}");
+    };
+    assert_eq!(commit.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read(&path).unwrap(), b"old bytes");
+    let kept = commit.kept();
+    assert_eq!(kept.parent(), path.parent(), "kept beside the path");
+    let frames = read(kept);
+    assert!(!frames.is_empty(), "the kept file holds no frame");
+    let first = frames[0][0];
+    for (k, frame) in frames.iter().enumerate() {
+        let want = first + k as f32;
+        assert_eq!(*frame, [want, -want], "kept frame {k}");
+    }
+    assert_eq!(names(&dir).len(), 2, "the path and the kept file only");
+}
+
+/// **A take without `create_new` replaces what is at its path and leaves no
+/// temporary file beside it.**
+#[test]
+fn a_take_replaces_an_existing_file_and_leaves_nothing_beside_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "taken.wav");
+    std::fs::write(&path, b"old bytes").unwrap();
+    let events = record_polled(TakeTarget::wav(path.clone()));
+    let done = recorded(&events);
+    assert_eq!(read(&path).len(), done.frames().get());
+    assert_eq!(names(&dir), [std::ffi::OsString::from("taken.wav")]);
 }

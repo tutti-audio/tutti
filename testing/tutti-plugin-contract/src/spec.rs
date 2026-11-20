@@ -4,7 +4,8 @@
 //! plugin's own copy is the spec in `tutti-shared-plugin`'s `core` module.
 
 use tutti_plugin_types::{
-    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, ParamSteps, Samples,
+    AutomationMode, Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, ParamSteps,
+    Samples, Widths,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::Normalized;
@@ -219,6 +220,12 @@ impl Mode {
 /// The plugin's one bus a side: a stereo main, in every format.
 pub const MAIN_BUS: ChannelLayout = ChannelLayout::STEREO;
 
+/// The audio widths the plugin processes in CLAP, VST3 and VST2: 32-bit and
+/// 64-bit (an AUv2 unit renders 32-bit only). CLAP's ports declare 64-bit
+/// support, VST3 answers `canProcessSampleSize` for `kSample64`, VST2 sets
+/// `effFlagsCanDoubleReplacing`.
+pub const WIDTHS: Widths = Widths::BOTH;
+
 /// The Delay mode's latency.
 pub const LATENCY: Samples = Samples::new(137);
 /// The tail, in every mode.
@@ -319,6 +326,27 @@ const AUX_EDITED: [Edit; 3] = [
     Edit::End(Param::Aux),
 ];
 
+const AUTOMATION_CLAP: [(AutomationMode, u32); 4] = [
+    (AutomationMode::Off, 0),
+    (AutomationMode::Reading, 2),
+    (AutomationMode::Writing, 3),
+    (AutomationMode::ReadWriting, 3),
+];
+
+const AUTOMATION_VST2: [(AutomationMode, u32); 4] = [
+    (AutomationMode::Off, 1),
+    (AutomationMode::Reading, 2),
+    (AutomationMode::Writing, 3),
+    (AutomationMode::ReadWriting, 4),
+];
+
+const AUTOMATION_VST3: [(AutomationMode, u32); 4] = [
+    (AutomationMode::Off, 0),
+    (AutomationMode::Reading, 1),
+    (AutomationMode::Writing, 2),
+    (AutomationMode::ReadWriting, 3),
+];
+
 /// What a format's control surface answers for the shared plugin, the same in
 /// a loaded plugin and an active one. One row per format ([`Surface`]).
 #[derive(Clone, Copy, Debug)]
@@ -351,6 +379,13 @@ pub struct Surface {
     /// edits in a block's output and so not from a state load alone, and for
     /// AU.
     pub edits: &'static [Edit],
+    /// The raw automation state the host's mode reaches the plugin as, in the
+    /// format's own number, for each mode: VST3's `IAutomationState` bitmask
+    /// (read 1, write 2), CLAP's `param-indication` states (playing 2, recording
+    /// 3: writing, alone or with reading, is recording), VST2's
+    /// `audioMasterGetAutomationState` answers (off 1, read 2, write 3, read and
+    /// write 4). Empty where the format has no such call: AU, not applicable by its spec.
+    pub automation: &'static [(tutti_plugin_types::AutomationMode, u32)],
     /// What the format's conversion answers for [`Param::Tone`].
     pub tone: Tone,
     /// Whether the shell reads the state's tail byte (fourth byte of the mode
@@ -396,6 +431,25 @@ pub struct Surface {
     pub reports_automatable: bool,
     /// How the format names the presets it lists ([`PROGRAMS`]).
     pub preset_ids: PresetIds,
+    /// The plain map the format declares for `level`, `aux`, `tone` and `meter`.
+    pub plain_map: MapKind,
+    /// The plain map the format declares for `mode`, the five-position selector.
+    pub mode_plain_map: MapKind,
+}
+
+/// Which plain map a format declares for a parameter
+/// (`ParameterInfo::plain_map`): CLAP and AU speak plain values with no
+/// normalized one, so the host's line over the declared range, stepped on its
+/// integer for CLAP's stepped `mode`; VST3 and a VST2 with no integer range
+/// leave the map to the plugin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapKind {
+    /// The line between the declared ends.
+    Linear,
+    /// The line, each value on its integer.
+    Stepped,
+    /// The plugin's own map.
+    PluginDefined,
 }
 
 /// The role every VST3 plugin of ours declares, by parameter (function names
@@ -419,6 +473,7 @@ const fn assignment(channel: Option<MidiChannel>) -> MidiAssignment {
 /// CLAP: no editor in the plugin, no `clap.render` (so no render mode), a
 /// callback request.
 pub const CLAP: Surface = Surface {
+    automation: &AUTOMATION_CLAP,
     selects_editor: false,
     has_editor: false,
     render_mode: tutti_plugin_types::RenderModeSupport::Unsupported,
@@ -438,10 +493,13 @@ pub const CLAP: Surface = Surface {
     reports_access: true,
     reports_automatable: true,
     preset_ids: PresetIds::Numbered,
+    plain_map: MapKind::Linear,
+    mode_plain_map: MapKind::Stepped,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.
 pub const VST2: Surface = Surface {
+    automation: &AUTOMATION_VST2,
     selects_editor: false,
     has_editor: false,
     render_mode: tutti_plugin_types::RenderModeSupport::Live,
@@ -461,11 +519,14 @@ pub const VST2: Surface = Surface {
     reports_access: false,
     reports_automatable: false,
     preset_ids: PresetIds::Numbered,
+    plain_map: MapKind::PluginDefined,
+    mode_plain_map: MapKind::PluginDefined,
 };
 
 /// VST3 from the Rust plugin: an editor once selected, the mode read at activation, an edit of `aux` to 0.75 on each state
 /// load.
 pub const VST3: Surface = Surface {
+    automation: &AUTOMATION_VST3,
     selects_editor: true,
     has_editor: true,
     render_mode: tutti_plugin_types::RenderModeSupport::OnActivation,
@@ -485,11 +546,14 @@ pub const VST3: Surface = Surface {
     reports_access: true,
     reports_automatable: true,
     preset_ids: PresetIds::Programs,
+    plain_map: MapKind::PluginDefined,
+    mode_plain_map: MapKind::PluginDefined,
 };
 
 /// VST3 from the C++ plugin: no editor, an edit of `aux` to 0.75 on each state
 /// load.
 pub const VST3_CPP: Surface = Surface {
+    automation: &AUTOMATION_VST3,
     selects_editor: false,
     has_editor: false,
     render_mode: tutti_plugin_types::RenderModeSupport::OnActivation,
@@ -509,6 +573,8 @@ pub const VST3_CPP: Surface = Surface {
     reports_access: true,
     reports_automatable: true,
     preset_ids: PresetIds::Programs,
+    plain_map: MapKind::PluginDefined,
+    mode_plain_map: MapKind::PluginDefined,
 };
 
 /// AU, from the shared plugin's Audio Unit shell: no editor (the shell offers no
@@ -517,6 +583,7 @@ pub const VST3_CPP: Surface = Surface {
 /// byte read, and the host's own linear map over the declared range for `tone`
 /// (an AU has no normalized value). The infinite marker is `+inf` seconds.
 pub const AU: Surface = Surface {
+    automation: &[],
     selects_editor: false,
     has_editor: false,
     render_mode: tutti_plugin_types::RenderModeSupport::OnActivation,
@@ -536,4 +603,6 @@ pub const AU: Surface = Surface {
     reports_access: true,
     reports_automatable: false,
     preset_ids: PresetIds::Numbered,
+    plain_map: MapKind::Linear,
+    mode_plain_map: MapKind::Linear,
 };

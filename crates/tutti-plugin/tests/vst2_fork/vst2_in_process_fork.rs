@@ -246,7 +246,9 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
         .find(|id| *id == PresetId::Number(1))
         .expect("the probe declares two programs");
     assert_eq!(handle.load_preset(main_thread(), &program_1), Ok(()));
-    handle.send_parameter(ParamId::new(0), Normalized::of(0.75));
+    handle
+        .send_parameter(ParamId::new(0), Normalized::of(0.75))
+        .expect("a declared parameter");
 
     let fork = client
         .fork_instance(main_thread(), ForkMode::Live)
@@ -262,7 +264,9 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
     let mut renderer = Renderer::new(editor, exec);
     assert_renders(&renderer.render(BLOCK * 2), 10_750.0, "the fork");
 
-    handle.send_parameter(ParamId::new(0), Normalized::of(0.25));
+    handle
+        .send_parameter(ParamId::new(0), Normalized::of(0.25))
+        .expect("a declared parameter");
     assert_eq!(
         handle.parameter_value(ParamId::new(0)),
         Some(Normalized::of(0.25)),

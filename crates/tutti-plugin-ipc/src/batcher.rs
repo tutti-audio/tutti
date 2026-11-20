@@ -69,7 +69,9 @@
 //! never narrowed, and a 64-bit block through a 32-bit wire is narrowed once.
 
 use crate::OfflineWait;
-use crate::{AudioBridge, AudioSlab, FATES, Fate, HarmonyInputs, Replies, SlabWriter};
+use crate::{
+    AudioBridge, AudioSlab, BATCH_OUTCOMES, BatchOutcome, HarmonyInputs, Replies, SlabWriter,
+};
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -382,8 +384,8 @@ pub(crate) struct Batcher {
     counters: Arc<ChunkCounters>,
     /// Chunks collected unanswered, and not yet seen answered
     /// ([`Self::watch_late`]); `0` for an empty entry (sequences start at 1).
-    /// At most `FATES` matter: the bridge remembers no more.
-    unanswered: [u64; FATES],
+    /// At most `BATCH_OUTCOMES` matter: the bridge remembers no more.
+    unanswered: [u64; BATCH_OUTCOMES],
 }
 
 impl std::fmt::Debug for Batcher {
@@ -424,7 +426,7 @@ impl Batcher {
             reply: MidiEventVec::new(),
             said: BlockStatus::Continue,
             counters: Arc::default(),
-            unanswered: [0; FATES],
+            unanswered: [0; BATCH_OUTCOMES],
         }
     }
 
@@ -592,7 +594,7 @@ impl Batcher {
     /// audio from arriving.
     pub fn reset(&mut self) {
         self.expect_seq = None;
-        self.unanswered = [0; FATES];
+        self.unanswered = [0; BATCH_OUTCOMES];
         self.counters.in_flight.store(0, Ordering::Release);
         self.pos = 0;
         self.reply.clear();
@@ -683,7 +685,11 @@ impl Batcher {
             .unanswered
             .iter()
             .position(|&s| s == 0)
-            .unwrap_or_else(|| (0..FATES).min_by_key(|&i| self.unanswered[i]).unwrap_or(0));
+            .unwrap_or_else(|| {
+                (0..BATCH_OUTCOMES)
+                    .min_by_key(|&i| self.unanswered[i])
+                    .unwrap_or(0)
+            });
         if self.unanswered[at] != 0 {
             self.counters.unanswered.fetch_add(1, Ordering::Relaxed);
         }
@@ -693,7 +699,7 @@ impl Batcher {
     /// Resolves the chunks collected unanswered whose fate is known: published
     /// ([`ChunkCounters::late`]), refused ([`ChunkCounters::refused`]) or
     /// skipped (counted by the bridge). A chunk whose fate the bridge never
-    /// learned within the last [`FATES`] chunks is
+    /// learned within the last [`BATCH_OUTCOMES`] chunks is
     /// [`unanswered`](ChunkCounters::unanswered). Relaxed adds and loads of
     /// the slab's sequence words and the bridge's fate words: RT-safe.
     fn watch_late(&mut self, bridge: &AudioBridge) {
@@ -706,17 +712,17 @@ impl Batcher {
                 *seq = 0;
                 continue;
             }
-            match bridge.chunk_fate(*seq) {
-                Some(Fate::Published) => {
+            match bridge.batch_outcome(*seq) {
+                Some(BatchOutcome::Published) => {
                     self.counters.late.fetch_add(1, Ordering::Relaxed);
                     *seq = 0;
                 }
-                Some(Fate::Refused) => {
+                Some(BatchOutcome::Refused) => {
                     self.counters.refused.fetch_add(1, Ordering::Relaxed);
                     *seq = 0;
                 }
-                Some(Fate::Skipped) => *seq = 0,
-                None if *seq + (FATES as u64) / 2 < self.next_seq => {
+                Some(BatchOutcome::Skipped) => *seq = 0,
+                None if *seq + (BATCH_OUTCOMES as u64) / 2 < self.next_seq => {
                     self.counters.unanswered.fetch_add(1, Ordering::Relaxed);
                     *seq = 0;
                 }
@@ -824,31 +830,28 @@ impl Batcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AudioSlab;
     use crate::client::audio::response_ring;
+    use crate::{AudioSlab, SlabHandle};
     use tutti_plugin_types::MAX_CHUNK;
 
     /// A real slab's input writer, `samples` frames per channel, stereo both
     /// ways: these tests stage nothing, but a batcher cannot exist without the
     /// writer its chunks go through.
     fn slab(samples: usize) -> SlabWriter {
-        slab_of(samples, FloatWidth::F32)
+        slab_of(samples, FloatWidth::F32).0
     }
 
-    /// [`slab`] with the wire's format `format`.
-    fn slab_of(samples: usize, format: FloatWidth) -> SlabWriter {
-        let name = tutti_fixtures::unique_name("batcher");
+    /// [`slab`] with the wire's format `format`, and the handle a server opens
+    /// it with.
+    fn slab_of(samples: usize, format: FloatWidth) -> (SlabWriter, SlabHandle) {
         let stereo = tutti_plugin_types::ChannelLayout::STEREO;
-        AudioSlab::create(
-            name,
-            crate::SlabLayout {
-                samples_per_channel: samples,
-                format,
-                slots: crate::RING_SLOTS as u32,
-                inputs: vec![stereo],
-                outputs: vec![stereo],
-            },
-        )
+        AudioSlab::create(crate::SlabLayout {
+            samples_per_channel: samples,
+            format,
+            slots: crate::RING_SLOTS as u32,
+            inputs: vec![stereo],
+            outputs: vec![stereo],
+        })
         .unwrap()
     }
 
@@ -866,8 +869,8 @@ mod tests {
     /// writes.
     #[test]
     fn the_output_is_read_from_the_slab_given_and_a_missing_channel_is_silence() {
-        let writer = slab(MAX_CHUNK);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F32);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         server.write(1, 0, &[0.5f32; 8]).unwrap();
         server.publish(1);
         let mut rows = Rows::<f32>::new(0, 3, MAX_CHUNK);
@@ -885,8 +888,8 @@ mod tests {
     /// the slab lacks, and the others still play.**
     #[test]
     fn a_channel_the_slab_lacks_is_counted_as_missed() {
-        let writer = slab(MAX_CHUNK);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F32);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         for ch in 0..2 {
             server.write(1, ch, &[0.25f32; 8]).unwrap();
         }
@@ -925,8 +928,8 @@ mod tests {
     #[test]
     fn a_64_bit_block_through_a_64_bit_wire_is_bit_exact() {
         assert_ne!(FINE as f32 as f64, FINE, "the value must not fit in f32");
-        let mut writer = slab_of(MAX_CHUNK, FloatWidth::F64);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (mut writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F64);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         let mut rows = Rows::<f64>::new(2, 2, MAX_CHUNK);
 
         let src = [FINE; 8];
@@ -959,8 +962,8 @@ mod tests {
     #[test]
     fn a_64_bit_block_through_a_32_bit_wire_is_narrowed_by_the_sample_rule() {
         use tutti_buffers::Sample;
-        let mut writer = slab(MAX_CHUNK);
-        let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
+        let (mut writer, handle) = slab_of(MAX_CHUNK, FloatWidth::F32);
+        let mut server = AudioSlab::open(&handle, writer.layout()).unwrap();
         let mut rows = Rows::<f32>::new(1, 1, MAX_CHUNK);
 
         let src = [FINE, -FINE, 0.1, 0.3];
@@ -1015,15 +1018,15 @@ mod tests {
             response_ring().1,
         )
         .with_counters(Arc::clone(&counters));
-        for seq in 1..=FATES as u64 {
+        for seq in 1..=BATCH_OUTCOMES as u64 {
             b.remember_unanswered(seq);
         }
         assert_eq!(counters.unanswered(), 0, "the list was not full yet");
-        b.remember_unanswered(FATES as u64 + 1);
+        b.remember_unanswered(BATCH_OUTCOMES as u64 + 1);
         assert_eq!(counters.unanswered(), 1, "chunk 1, the oldest, is replaced");
         assert!(!b.unanswered.contains(&1));
         b.reset();
-        assert_eq!(b.unanswered, [0; FATES]);
+        assert_eq!(b.unanswered, [0; BATCH_OUTCOMES]);
     }
 
     /// `reset` (a seek) drops the in-flight chunk but must NOT rewind the

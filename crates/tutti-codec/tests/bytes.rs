@@ -17,6 +17,8 @@
 use std::io::Cursor;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
+#[cfg(all(feature = "encode-flac", feature = "encode-wav"))]
+use tutti_codec::FileEncoder;
 use tutti_codec::{Encoder, Format, Spec};
 use tutti_units::SampleRate;
 
@@ -309,7 +311,7 @@ fn decoded(format: Format, channels: u16, frames: usize) -> Vec<Vec<f32>> {
     let samples = input(usize::from(channels), frames);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("written");
-    let mut encoder = Encoder::create_file(&spec, &path).unwrap();
+    let mut encoder = FileEncoder::create(&spec, &path).unwrap();
     encoder
         .write(Interleaved::new(&samples, layout).unwrap())
         .unwrap();

@@ -17,6 +17,7 @@ use tutti_ump::U7;
 ///     mtc: true,
 ///     mmc: Some(Recipient::AllCall),
 ///     flex: false,
+///     metronome: false,
 ///     rate: MtcRate::Fps30,
 /// };
 /// assert_ne!(messages, SyncMessages::OFF);
@@ -38,6 +39,17 @@ pub struct SyncMessages {
     /// without the Beat Clock. The meter is the node's
     /// ([`SyncOut::meter`](crate::SyncOut::meter)).
     pub flex: bool,
+    /// The Flex Data metronome: a Set Metronome (§7.5.5) on every bar boundary
+    /// where the meter in force differs from the one last stated. It states the
+    /// meter's click, one on each beat with the bar's first beat accented, and
+    /// is sent whatever the click node's state: on, off or in another mode.
+    /// It is stated again on a start, and after a locate at the next bar
+    /// boundary where the meter differs from the last one stated. A meter with
+    /// no Set Metronome form (a 64th-note beat) sends none, and the receiver
+    /// keeps the click it was last told. Sent with or without
+    /// [`flex`](Self::flex), on the same Group. The meter is the node's
+    /// ([`SyncOut::meter`](crate::SyncOut::meter)).
+    pub metronome: bool,
     /// The SMPTE frame rate every time code is stated at: the quarter-frames,
     /// the Full Messages and an MMC Locate, so they cannot disagree.
     pub rate: MtcRate,
@@ -50,13 +62,20 @@ impl SyncMessages {
         mtc: false,
         mmc: None,
         flex: false,
+        metronome: false,
         rate: MtcRate::Fps25,
     };
+
+    /// Whether the Flex lane (tempo, meter, metronome) has anything on.
+    pub(crate) const fn any_flex(self) -> bool {
+        self.flex || self.metronome
+    }
 
     const CLOCK: u64 = 1;
     const MTC: u64 = 1 << 1;
     const MMC: u64 = 1 << 2;
     const FLEX: u64 = 1 << 3;
+    const METRONOME: u64 = 1 << 4;
     const RATE_SHIFT: u32 = 8;
     const DEVICE_SHIFT: u32 = 16;
 }
@@ -67,9 +86,9 @@ impl Default for SyncMessages {
     }
 }
 
-/// The word: bit 0 the Beat Clock, bit 1 MTC, bit 2 MMC present, bit 3 Flex Data, bits 8 to 15
-/// the rate's two-bit code ([`MtcRate::code`]), bits 16 to 22 the MMC
-/// recipient's device byte (`0x7F` the all-call; zero while MMC is absent).
+/// The word: bit 0 the Beat Clock, bit 1 MTC, bit 2 MMC present, bit 3 Flex
+/// Data, bit 4 the Flex metronome, bits 8 to 15 the rate's
+/// two-bit code ([`MtcRate::code`]), bits 16 to 22 the MMC recipient's device byte (`0x7F` the all-call; zero while MMC is absent).
 ///
 /// Decoding is total: every word reads as some value, the rate from the low
 /// two bits of its byte ([`MtcRate::masked`]) and the device from the low seven
@@ -87,6 +106,9 @@ impl AtomicWord for SyncMessages {
         if self.flex {
             word |= Self::FLEX;
         }
+        if self.metronome {
+            word |= Self::METRONOME;
+        }
         if let Some(to) = self.mmc {
             word |= Self::MMC | u64::from(to.device_byte()) << Self::DEVICE_SHIFT;
         }
@@ -100,6 +122,7 @@ impl AtomicWord for SyncMessages {
             mmc: (word & Self::MMC != 0)
                 .then(|| Recipient::of_byte(U7::masked((word >> Self::DEVICE_SHIFT) as u8))),
             flex: word & Self::FLEX != 0,
+            metronome: word & Self::METRONOME != 0,
             rate: MtcRate::masked((word >> Self::RATE_SHIFT) as u8),
         })
     }

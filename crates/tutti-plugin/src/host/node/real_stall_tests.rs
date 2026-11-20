@@ -43,7 +43,7 @@ use tutti_units::{SampleRate, Samples};
 
 use crate::PluginClient;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_ipc::BridgeConfig;
+use tutti_plugin_ipc::IpcConfig;
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -121,9 +121,7 @@ fn load_probe(env: &mut ScopedEnv, render_mode: u32) -> (PluginClient, PluginHan
         release_path().to_string_lossy().into_owned(),
     );
     let client = PluginClient::new(
-        BridgeConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         &tutti_fixtures::detached_work(),
         &crate::catalog::Loadable::uncatalogued(crate::catalog::PluginRef::file(
             tutti_fixtures::clap_probe(),

@@ -49,6 +49,7 @@
 
 extern crate alloc;
 
+mod beats;
 mod builder;
 mod error;
 mod grid;
@@ -58,7 +59,7 @@ mod segment;
 mod view;
 
 pub use builder::TempoMapBuilder;
-pub use error::TempoError;
+pub use error::{FromBeatsError, TempoError};
 pub use grid::{Cell, CellGrid, CellGridError};
 pub use map::TempoMap;
 pub use point::{TempoPoint, Transition};

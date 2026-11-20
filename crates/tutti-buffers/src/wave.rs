@@ -174,6 +174,39 @@ impl<S: Sample> Wave<S> {
         wave
     }
 
+    /// Returns a wave of `f` applied to every sample, with the same rate, topology
+    /// and length.
+    ///
+    /// The way to change a wave's storage format with the caller's own rule;
+    /// narrowing a float wave is `wave.map(|x| x as f32)`, and widening is
+    /// `Wave::<f64>::from(&wave)`.
+    ///
+    /// ```
+    /// use tutti_buffers::{Interleaved, Wave, ChannelLayout};
+    /// use tutti_units::SampleRate;
+    ///
+    /// let wide = Wave::from_interleaved(
+    ///     SampleRate::SR_48K,
+    ///     Interleaved::new(&[0.5f64, -0.25], ChannelLayout::MONO)?,
+    /// );
+    /// let narrow = wide.map(|x| x as f32);
+    /// assert_eq!(narrow.channel(0).samples(), &[0.5f32, -0.25]);
+    /// # Ok::<(), tutti_buffers::BufferError>(())
+    /// ```
+    pub fn map<T: Sample>(&self, mut f: impl FnMut(S) -> T) -> Wave<T> {
+        Wave {
+            vec: self
+                .vec
+                .iter()
+                .map(|channel| channel.iter().map(|&x| f(x)).collect())
+                .collect(),
+            sample_rate: self.sample_rate,
+            len: self.len,
+            topology: self.topology.clone(),
+            placement: self.placement,
+        }
+    }
+
     /// Returns which speaker each channel feeds.
     ///
     /// A decoded file states its own; a wave built from a count carries the
@@ -335,6 +368,15 @@ impl<S: Sample> Wave<S> {
     #[inline]
     pub fn duration(&self) -> Seconds {
         Seconds::new(self.len.get() as f64 / self.sample_rate.get())
+    }
+}
+
+/// Widening is exact: every sample is the `f32` as an `f64`, with the same
+/// rate, topology and length. There is no `From` that narrows; that is
+/// [`Wave::map`] with the caller's cast.
+impl From<&Wave<f32>> for Wave<f64> {
+    fn from(wave: &Wave<f32>) -> Self {
+        wave.map(f64::from)
     }
 }
 

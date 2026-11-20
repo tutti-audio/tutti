@@ -4,7 +4,7 @@
 //! knows which. CLAP, VST3 and AU keep an editor-only second instance in the
 //! host, which the host's [`EditorLoader`] loads on the first open
 //! (`InProcessEditor`); a bridge made with no loader opens the editor on the
-//! served instance in the server (`ServedEditor`). Every editor call is one
+//! served instance in the server (`ServerEditor`). Every editor call is one
 //! `match` on the site.
 
 use super::audio::AudioBridge;
@@ -35,7 +35,7 @@ pub struct EditorSite {
 #[derive(Debug)]
 enum Site {
     InProcess(Box<InProcessEditor>),
-    Served(Box<ServedEditor>),
+    Server(Box<ServerEditor>),
 }
 
 /// The editor-only instance in this process: loaded with the [`EditorLoader`]
@@ -62,7 +62,7 @@ pub(crate) struct InProcessEditor {
 }
 
 /// The editor in the server: every window call is a message to it.
-pub(crate) struct ServedEditor {
+pub(crate) struct ServerEditor {
     audio: AudioBridge,
     remote: Mutex<IpcEditor>,
 }
@@ -75,9 +75,9 @@ impl std::fmt::Debug for InProcessEditor {
     }
 }
 
-impl std::fmt::Debug for ServedEditor {
+impl std::fmt::Debug for ServerEditor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServedEditor").finish_non_exhaustive()
+        f.debug_struct("ServerEditor").finish_non_exhaustive()
     }
 }
 
@@ -100,7 +100,7 @@ impl EditorSite {
                 baseline: Mutex::new(None),
                 mirror: GuiMirror::new(),
             })),
-            None => Site::Served(Box::new(ServedEditor {
+            None => Site::Server(Box::new(ServerEditor {
                 audio: audio.clone(),
                 remote: Mutex::new(IpcEditor::new(audio.clone())),
             })),
@@ -124,7 +124,7 @@ impl EditorSite {
     ) -> std::result::Result<Size, EditorError> {
         match &self.site {
             Site::InProcess(site) => site.open_editor(main, parent, scale),
-            Site::Served(site) => site.open_editor(main, parent, scale),
+            Site::Server(site) => site.open_editor(main, parent, scale),
         }
     }
 
@@ -143,7 +143,7 @@ impl EditorSite {
     ) -> std::result::Result<(), EditorError> {
         match &self.site {
             Site::InProcess(site) => site.open_floating_editor(main),
-            Site::Served(site) => site.open_floating_editor(main),
+            Site::Server(site) => site.open_floating_editor(main),
         }
     }
 
@@ -152,7 +152,7 @@ impl EditorSite {
     pub fn close_editor(&self, main: MainThreadMarker) -> bool {
         match &self.site {
             Site::InProcess(site) => site.close_editor(main),
-            Site::Served(site) => site.close_editor(main),
+            Site::Server(site) => site.close_editor(main),
         }
     }
 
@@ -183,7 +183,7 @@ impl EditorSite {
     pub fn editor_idle(&self, main: MainThreadMarker) {
         match &self.site {
             Site::InProcess(site) => site.editor_idle(main),
-            Site::Served(site) => site.editor_idle(main),
+            Site::Server(site) => site.editor_idle(main),
         }
     }
 
@@ -191,7 +191,7 @@ impl EditorSite {
     pub fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
         match &self.site {
             Site::InProcess(site) => site.editor_capabilities(main),
-            Site::Served(site) => site.editor_capabilities(main),
+            Site::Server(site) => site.editor_capabilities(main),
         }
     }
 
@@ -207,7 +207,7 @@ impl EditorSite {
     ) -> std::result::Result<Size, EditorError> {
         match &self.site {
             Site::InProcess(site) => site.set_editor_size(main, requested),
-            Site::Served(site) => site.set_editor_size(main, requested),
+            Site::Server(site) => site.set_editor_size(main, requested),
         }
     }
 
@@ -224,7 +224,7 @@ impl EditorSite {
     ) -> std::result::Result<(), EditorError> {
         match &self.site {
             Site::InProcess(site) => site.set_editor_scale(main, scale),
-            Site::Served(site) => site.set_editor_scale(main, scale),
+            Site::Server(site) => site.set_editor_scale(main, scale),
         }
     }
 
@@ -232,7 +232,7 @@ impl EditorSite {
     pub fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
         match &self.site {
             Site::InProcess(site) => site.poll_editor_resize_request(main),
-            Site::Served(site) => site.poll_editor_resize_request(main),
+            Site::Server(site) => site.poll_editor_resize_request(main),
         }
     }
 
@@ -242,7 +242,7 @@ impl EditorSite {
     pub fn mirror_refused_cell(&self) -> Option<Tally<u64>> {
         match &self.site {
             Site::InProcess(site) => Some(site.mirror.refused.clone()),
-            Site::Served(_) => None,
+            Site::Server(_) => None,
         }
     }
 
@@ -303,7 +303,7 @@ impl Drop for EditorSite {
     }
 }
 
-impl ServedEditor {
+impl ServerEditor {
     /// Runs a call of the editor in the server, its refusal as the
     /// [`EditorError`] the bridge's editor calls answer with.
     fn call<T>(
@@ -490,7 +490,9 @@ impl InProcessEditor {
     fn forward_edits(&self, edits: Vec<ParamEdit>) {
         for edit in edits {
             if let ParamEdit::Change { id, value, .. } = edit {
-                self.audio.set_parameter_rt(id, value);
+                // An id the editor reports is the plugin's own; the table
+                // follows its list, so the write has a slot.
+                let _ = self.audio.write_parameter(id, value);
             }
             self.audio.report_edit(edit);
         }
@@ -717,7 +719,7 @@ fn mode_of_code(code: u8) -> Option<AutomationMode> {
 /// The cosmetic mirror of the realtime setters onto the in-process editor.
 ///
 /// The in-process editor is a second instance of the plugin whose parameter and
-/// automation calls are main-thread calls, and `set_parameter_rt` and
+/// automation calls are main-thread calls, and `set_parameter_value` and
 /// `set_automation_state_rt` run wherever the node's controls are written. So
 /// they queue here (never blocking, never allocating) and the main-thread
 /// [`editor_idle`](EditorSite::editor_idle) applies what was queued.

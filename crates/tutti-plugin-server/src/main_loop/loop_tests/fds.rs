@@ -20,7 +20,7 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
     probe.thread_reset();
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_FD);
-    let (mut fixture, _slab) = session("fds");
+    let (mut fixture, _slab) = session();
     let host = fixture.host();
 
     // A real socket pair: the loop polls the socket's descriptor together with
@@ -29,8 +29,16 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
     let mut transport = SocketTransport::new(Stream::from(OwnedFd::from(server_end)));
 
     let driver = std::thread::spawn(move || {
-        write_frame(&mut host_end, &load_message()).expect("sends the load");
-        let _loaded: BridgeMessage = read_frame(&mut host_end).expect("the load is answered");
+        write_frame(
+            &mut host_end,
+            &tutti_plugin_ipc::Request {
+                id: tutti_plugin_ipc::ReqId::new(1),
+                body: load_message(),
+            },
+        )
+        .expect("sends the load");
+        let _loaded: tutti_plugin_ipc::ControlFrame =
+            read_frame(&mut host_end).expect("the load is answered");
         assert!(
             host.block(1, 64, Duration::from_secs(5)).is_some(),
             "the render thread answers the block"
@@ -49,7 +57,14 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
                 crate::test_utils::clap_probe_thread_capture().fd_fires >= fire
             });
         }
-        write_frame(&mut host_end, &HostMessage::Shutdown).expect("asks it to stop");
+        write_frame(
+            &mut host_end,
+            &tutti_plugin_ipc::Request {
+                id: tutti_plugin_ipc::ReqId::new(2),
+                body: ControlRequest::Shutdown,
+            },
+        )
+        .expect("asks it to stop");
     });
 
     let main = main_thread();

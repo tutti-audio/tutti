@@ -8,13 +8,15 @@
 
 use tutti_graph::{
     CloseError, EventCapacity, EventTapId, EventTapReader, EventTapSource, MeterId, MeterReader,
-    MeterSpec, MissingSource, NodeKey, TapAlign, TapId, TapReader,
+    MeterSpec, MissingSource, NodeKey, TapAlign, TapId, TapOptions, TapReader,
 };
 use tutti_units::Samples;
 
 use tutti_buffers::Float;
 
 use super::Graph;
+#[cfg(feature = "analyze")]
+use crate::{Analyzer, AnalyzerError, AudioContext, AudioInput};
 use crate::{EventTapPort, OutPort};
 
 /// What a reader of the root is named by: the id of the tap or of the meter.
@@ -84,8 +86,10 @@ impl<F: Float> Taps<'_, F> {
     /// compiled by the next commit and fed by every block that renders after
     /// it (a device, [`Session::render`](crate::Session::render) and
     /// `Session::render_frame` alike).
-    /// `capacity` is each lane's ring in frames; what the reader does not
-    /// drain in time is counted ([`TapReader::take_lost`]).
+    /// `options` give each lane's ring capacity in frames (what the reader does
+    /// not drain in time is counted, [`TapReader::take_lost`]), the alignment and
+    /// an optional bell the tap rings after each block it writes and when it ends,
+    /// so a reader that awaits its frames wakes on the audio thread's ring.
     ///
     /// [`TapAlign::ToOutput`] delays each lane by the compensation an output
     /// of the same source gets, so it lines up with what the outputs carry;
@@ -129,14 +133,49 @@ impl<F: Float> Taps<'_, F> {
     pub fn open(
         &mut self,
         sources: &[OutPort],
-        align: TapAlign,
-        capacity: Samples,
+        options: TapOptions,
     ) -> Result<TapReader<F>, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;
         let id = TapId::mint(&self.graph.ids);
-        let reader = self.graph.editor.open_tap(id, sources, align, capacity)?;
+        let reader = self.graph.editor.open_tap(id, sources, options)?;
         self.graph.edited = true;
         Ok(reader)
+    }
+
+    /// Opens a tap on `sources` ([`open`](Self::open)) and an [`Analyzer`] over
+    /// it: the meter `analysis` builds, bound to the graph's rate and the tap's
+    /// width, fed what the tap holds each time the app drains it
+    /// ([`Analyzer::try_iter`]). The analysis is bound the way
+    /// [`Session::analyze`](crate::Session::analyze) binds it to a wave
+    /// ([`AudioContext`], [`AudioInput`]).
+    ///
+    /// `options` are the tap's: its capacity, its alignment and a bell it rings
+    /// after each block it writes, which an app that awaits frames passes and
+    /// awaits ([`Bell`](tutti_rt::Bell)). A rate change after the open is not
+    /// followed.
+    ///
+    /// # Errors
+    ///
+    /// [`AnalyzerError::Measure`] when the analysis cannot be bound to the
+    /// graph's rate and the tap's width, [`AnalyzerError::Bind`] when the
+    /// tap's width has no view of the kind the meter takes, and
+    /// [`AnalyzerError::MissingSource`] for a source that is not in the graph
+    /// now. Nothing is opened on an error.
+    #[cfg(feature = "analyze")]
+    pub fn analyzer<A>(
+        &mut self,
+        sources: &[OutPort],
+        analysis: A,
+        options: TapOptions,
+    ) -> Result<Analyzer<A, F>, AnalyzerError>
+    where
+        A: tutti_measure::Measure<F>,
+        A::Context: AudioContext,
+        for<'a> <A::Meter as tutti_measure::Meter>::Input<'a>: AudioInput<'a, F>,
+    {
+        let rate = self.graph.editor.prepare().sample_rate();
+        let width = u16::try_from(sources.len()).unwrap_or(u16::MAX);
+        Analyzer::open(rate, width, &analysis, || self.open(sources, options))
     }
 
     /// A tap on the graph's global outputs, aligned: lane `c` is output
@@ -212,7 +251,7 @@ impl<F: Float> Taps<'_, F> {
     /// it; a copy of events, the event sibling of [`open`](Self::open).
     ///
     /// `capacity` is a count of events ([`EventCapacity`], as for
-    /// `Midi::record`). A non-note-off is refused once that
+    /// `Midi::tap`). A non-note-off is refused once that
     /// many are held, a note-off is kept up to
     /// [`note_off_room`](tutti_graph::note_off_room) of it, and each refusal is
     /// counted ([`EventTapReader::take_lost`]). `align` is as for a plan tap:

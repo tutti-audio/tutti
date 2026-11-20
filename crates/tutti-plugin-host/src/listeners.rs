@@ -1,6 +1,6 @@
 //! Main-thread listeners for plugin-originated events.
 //!
-//! The bridge thread pushes `BridgeEvent`s into these through
+//! The bridge thread pushes `IpcEvent`s into these through
 //! `PluginClient`'s installed listener; `PluginHandle` users register
 //! callbacks through [`PluginHandle::subscribe`](crate::PluginHandle::subscribe).
 //!

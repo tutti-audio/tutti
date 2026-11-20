@@ -2,7 +2,7 @@ use super::*;
 use crate::served::format::clap::{THREAD_POOL, flush_out_of_band, pool_participants};
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
-use tutti_plugin_ipc::BridgeMessage;
+use tutti_plugin_ipc::News;
 use tutti_plugin_types::Control;
 
 use std::path::Path;
@@ -20,7 +20,7 @@ use tutti_plugin_types::ChannelLayout;
 use tutti_plugin_types::{EditorPresence, Features, PluginTail, RenderModeSupport, Request};
 use tutti_ump::U7;
 
-type ClapInstance = Served<HostLoaded>;
+type ClapInstance = Server<HostLoaded>;
 
 /// What a pass told the host that is not the layout, as these tests read it.
 #[derive(Debug, Default, PartialEq)]
@@ -34,7 +34,7 @@ struct ClapChanges {
 /// The test-side views of the instance: the plugin whichever half holds it,
 /// and the pass and its results kept apart so a test can read them one at a
 /// time.
-impl Served<HostLoaded> {
+impl Server<HostLoaded> {
     pub(crate) fn clap_loaded(&self) -> &HostLoaded {
         match &self.lifecycle {
             Lifecycle::Loaded(plugin) | Lifecycle::Refused { plugin, .. } => plugin,
@@ -78,26 +78,26 @@ impl Served<HostLoaded> {
     fn take_io_changed(&mut self) -> bool {
         let before = self.events.len();
         self.events
-            .retain(|e| !matches!(e, BridgeMessage::PluginIoChanged { .. }));
+            .retain(|e| !matches!(e, News::PluginIoChanged { .. }));
         self.events.len() != before
     }
 
     fn take_changes(&mut self) -> ClapChanges {
         let mut changes = ClapChanges::default();
         self.events.retain(|event| match event {
-            BridgeMessage::LatencyChanged { samples } => {
+            News::LatencyChanged { samples } => {
                 changes.latency = Some(*samples);
                 false
             }
-            BridgeMessage::TailChanged { tail } => {
+            News::TailChanged { tail } => {
                 changes.tail = Some(*tail);
                 false
             }
-            BridgeMessage::PluginParamValuesChanged => {
+            News::PluginParamValuesChanged => {
                 changes.param_values = true;
                 false
             }
-            BridgeMessage::PluginParamTitlesChanged => {
+            News::PluginParamTitlesChanged => {
                 changes.param_titles = true;
                 false
             }
@@ -295,7 +295,7 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
     let announced: Vec<_> = told
         .iter()
         .filter_map(|e| match e {
-            BridgeMessage::PluginIoChanged { layout } => Some(layout.clone()),
+            News::PluginIoChanged { layout } => Some(layout.clone()),
             _ => None,
         })
         .collect();
@@ -313,7 +313,7 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
         !plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
+            .any(|e| matches!(e, News::PluginIoChanged { .. })),
         "once"
     );
 }
@@ -488,7 +488,7 @@ fn a_served_ports_rescan_is_polled_as_io_changed() {
         plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. }))
+            .any(|e| matches!(e, News::PluginIoChanged { .. }))
     };
     assert!(io_changed(&mut plugin), "the host is told");
     assert_eq!(plugin.loaded().total_inputs(), 3);
@@ -515,7 +515,7 @@ fn the_buses_are_announced_when_they_change_and_not_otherwise() {
             .poll(main_thread())
             .into_iter()
             .filter_map(|e| match e {
-                BridgeMessage::PluginIoChanged { layout } => Some(layout),
+                News::PluginIoChanged { layout } => Some(layout),
                 _ => None,
             })
             .collect();
@@ -547,10 +547,7 @@ fn the_buses_are_announced_when_they_change_and_not_otherwise() {
     // What the host is sent when the plugin is lost, or a refusal leaves it
     // silent, with the buses unchanged: the report, with no layout.
     assert!(
-        matches!(
-            plugin.io_changed(),
-            BridgeMessage::PluginIoChanged { layout: None }
-        ),
+        matches!(plugin.io_changed(), News::PluginIoChanged { layout: None }),
         "the buses the host was told are not sent again"
     );
     let other = rescan(&mut plugin, TwoMono);
@@ -1401,6 +1398,8 @@ fn test_reference_set_parameter_flush() {
 
     let param_id = params[0].id();
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::of(0.5))
         .expect("a declared, writable parameter");
 }
@@ -1592,6 +1591,8 @@ fn test_clap_param_write_is_settled_for_a_state_save() {
     let new_value = if original < 0.5 { 0.75 } else { 0.25 };
 
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
     assert_eq!(
@@ -1732,6 +1733,8 @@ fn test_clap_param_set_reaches_the_next_block() {
     // Set to a different value
     let new_value = if original < 0.5 { 0.75 } else { 0.25 };
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
     // The bridge also applies the write now (see `set_parameter`), and the
@@ -1804,6 +1807,8 @@ fn test_clap_state_save_load_roundtrip() {
     // Change parameter
     let new_value = if original_value < 0.5 { 0.75 } else { 0.25 };
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
 
@@ -2067,6 +2072,8 @@ fn test_reference_state_save_load() {
     let original_value = instance.normalized(main_thread(), param_id);
     let new_value = if original_value < 0.5 { 0.75 } else { 0.25 };
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
 
@@ -2466,7 +2473,7 @@ fn a_tail_change_without_the_extension_is_an_unknown_tail() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            BridgeMessage::TailChanged {
+            News::TailChanged {
                 tail: PluginTail::Unknown
             }
         )),
@@ -2511,15 +2518,13 @@ fn a_clap_tail_change_reaches_the_event_list() {
 
     let events = plugin.poll(main_thread());
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, BridgeMessage::TailChanged { .. })),
+        events.iter().any(|e| matches!(e, News::TailChanged { .. })),
         "the tail notification was polled and dropped; got {events:?}"
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::LatencyChanged { .. })),
+            .any(|e| matches!(e, News::LatencyChanged { .. })),
         "the latency notification went missing; got {events:?}"
     );
 
@@ -2566,7 +2571,7 @@ fn a_transport_request_is_sent_to_the_host_in_the_order_made() {
         .events
         .iter()
         .filter_map(|e| match e {
-            BridgeMessage::TransportRequested { request } => Some(*request),
+            News::TransportRequested { request } => Some(*request),
             _ => None,
         })
         .collect();
@@ -2594,7 +2599,7 @@ fn the_track_the_host_sends_reaches_the_served_plugin() {
     let probe = crate::test_utils::clap();
     probe.hostext_reset();
 
-    ServedPlugin::set_track_info(
+    ServerPlugin::set_track_info(
         &mut instance,
         main_thread(),
         &TrackInfo {

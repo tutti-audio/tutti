@@ -6,10 +6,10 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit, ParamMapping,
-    ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginResult,
-    PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples, StateUse,
-    Vst3SubCategories, WindowHandle, bypass_parameter,
+    KeyUse, Loaded, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit,
+    ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
+    StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -61,6 +61,7 @@ pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> Plugin
         },
         editor,
         measured: None,
+        widths: None,
     }
 }
 
@@ -89,7 +90,10 @@ impl Vst3Loaded {
     /// The descriptor for this plugin as loaded: its factory info, with whether
     /// it has an editor measured from the plugin itself.
     pub(super) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
-        descriptor_of(&self.info, EditorPresence::measured(self.has_editor(main)))
+        PluginDescriptor {
+            widths: Some(Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::measured(self.has_editor(main)))
+        }
     }
 
     /// The capabilities this plugin has, as the shared vocabulary names them.
@@ -122,6 +126,7 @@ impl Vst3Loaded {
         let has_programs = !self.program_lists(main).is_empty();
         features.set(Features::PRESET_LIST, has_programs);
         features.set(Features::PRESET_LOAD, has_programs);
+        features.set(Features::AUTOMATION_STATE, self.has_automation_state(main));
         // `processMode` is a field of every plugin's `ProcessSetup`.
         features.insert(Features::RENDER_MODE);
         features
@@ -242,9 +247,16 @@ impl Vst3Loaded {
 }
 
 impl Control for Vst3Loaded {
+    /// The controller alone is what a loaded plugin has: a write is the inform.
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        let _ = Control::set_parameter(self, main, id, value);
+    }
+
     fn info(&self) -> &PluginDescriptor {
-        self.descriptor
-            .get_or_init(|| descriptor_of(&self.info, EditorPresence::Unknown))
+        self.descriptor.get_or_init(|| PluginDescriptor {
+            widths: Some(Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::Unknown)
+        })
     }
 
     /// The wiring read from the plugin now. Latency is read only while the
@@ -471,11 +483,11 @@ impl Control for Vst3Loaded {
         })
     }
 
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
         // Encoded onto the `IAutomationState` bitmask here, at the VST3 edge,
-        // by the crate's own SDK-backed conversion; a no-op if the plugin does
+        // by the crate's own SDK-backed conversion; `false` if the plugin does
         // not implement the interface.
-        self.apply_automation_state(main, mode);
+        self.apply_automation_state(main, mode)
     }
 
     /// Nothing is cached: parameters are read live from the controller.

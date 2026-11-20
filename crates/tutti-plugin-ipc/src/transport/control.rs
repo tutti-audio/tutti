@@ -2,24 +2,24 @@
 //! local socket (Unix domain socket on Unix, named pipe on Windows).
 //!
 //! Wire: `[u32 big-endian length][postcard payload]` both directions, with the body capped at
-//! [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) — the length arrives from the peer, so it
+//! the message type's own cap ([`Framed::CAP`]) — the length arrives from the peer, so it
 //! is checked before it is believed, in both `send` and `recv`. EOF at either end surfaces as
-//! [`BridgeError::ProcessCrashed`], and so does a length prefix over the cap: a peer that cannot
+//! [`IpcError::ProcessCrashed`], and so does a length prefix over the cap: a peer that cannot
 //! frame has desynchronised the stream, and there is no resynchronisation point to recover to.
 //!
 //! **Two independent bounds, because they answer different questions.**
-//! [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) bounds how *much* a peer can make the host
+//! the cap bounds how *much* a peer can make the host
 //! allocate; the deadline in [`read_exact_by`] bounds how *long* a peer can make it wait. A size
 //! cap alone does not bound time — an under-cap frame delivered one byte per receive timeout is
 //! still unbounded, because `SO_RCVTIMEO` restarts on every syscall while `read_exact` loops. Both
 //! are needed and neither subsumes the other.
 
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
-use crate::{BridgeMessage, HostMessage};
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use crate::{ControlRequest, Framed, ReqId, Request, SlabHandle, SlabLayout};
+use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
-pub use super::sys::{ControlBell, ControlWait, Watch, control_bell, socket_name};
+pub use super::sys::{ControlUnparker, ControlWait, Watch, control_unparker, socket_name};
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use std::io::Read;
@@ -46,7 +46,7 @@ pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// # Errors
 ///
 /// The socket name is invalid or nothing is listening on it.
-pub fn connect(socket: &Path) -> BridgeResult<ControlStream> {
+pub fn connect(socket: &Path) -> IpcResult<ControlStream> {
     connect_within(socket, SEND_TIMEOUT)
 }
 
@@ -57,7 +57,7 @@ pub fn connect(socket: &Path) -> BridgeResult<ControlStream> {
 /// pipe, as it does for reads, and there a hung server's writes end when the
 /// server is ended (the session's hang verdict kills it, closing the pipe).
 /// Arming is therefore best-effort and its failure is not an error.
-pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> BridgeResult<ControlStream> {
+pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> IpcResult<ControlStream> {
     let name = socket_name(socket)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     let stream = Stream::connect(name)?;
@@ -72,22 +72,54 @@ pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> BridgeRes
 /// A frame the peer must reject (over the cap, or not encodable) is refused
 /// with nothing written, so the stream stays synchronised: a send the host
 /// itself declines is not a crash. A write the peer does not take within the
-/// send deadline is [`BridgeError::Timeout`] with `partial` set: some of the
+/// send deadline is [`IpcError::Timeout`] with `partial` set: some of the
 /// frame may be on the wire, and the connection cannot go on.
-pub fn send(stream: &mut ControlStream, msg: &HostMessage) -> BridgeResult<()> {
+pub fn send<T: Framed>(stream: &mut ControlStream, msg: &T) -> IpcResult<()> {
     write_frame(stream, msg).map_err(|e| match e {
-        BridgeError::Io(io)
-            if io.kind() == std::io::ErrorKind::TimedOut
-                || io.kind() == std::io::ErrorKind::WouldBlock =>
-        {
-            BridgeError::Timeout {
-                operation: "send",
-                after: SEND_TIMEOUT,
-                partial: true,
-            }
-        }
+        IpcError::Io(io) => send_failed(io),
         other => other,
     })
+}
+
+/// A write error as the error of a send: a timeout is [`IpcError::Timeout`] with
+/// `partial` set, and anything else the OS's.
+fn send_failed(io: std::io::Error) -> IpcError {
+    if io.kind() == std::io::ErrorKind::TimedOut || io.kind() == std::io::ErrorKind::WouldBlock {
+        IpcError::Timeout {
+            operation: "send",
+            after: SEND_TIMEOUT,
+            partial: true,
+        }
+    } else {
+        IpcError::Io(io)
+    }
+}
+
+/// Writes the request that points the server at `slab`, and then the slab.
+///
+/// The frame carries the layout and what of the slab a frame can carry
+/// ([`SlabHandle::wire`]); the slab follows it as its own message, which the
+/// server's transport reads right after the frame. This is the only way a
+/// `SetupSharedMemory` is written, so the frame never goes without its slab.
+///
+/// # Errors
+///
+/// As [`send`], and a failure to send the slab itself, which like any failure
+/// after the frame's first byte leaves the stream mid-message: the connection
+/// cannot go on.
+pub fn send_setup(
+    stream: &mut ControlStream,
+    id: ReqId,
+    layout: SlabLayout,
+    slab: &SlabHandle,
+) -> IpcResult<()> {
+    let body = ControlRequest::SetupSharedMemory {
+        slab: slab.wire(),
+        layout,
+    };
+    send(stream, &Request { id, body })?;
+    slab.send(super::sys::connection(stream))
+        .map_err(send_failed)
 }
 
 /// How long the unbounded [`recv`] entry may wait for a whole frame.
@@ -151,7 +183,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Measured on a `UnixStream` pair: a 300 ms receive timeout survived 2.3 s of
 /// one-byte-per-200 ms dribble, and the ceiling scales with the frame size, so
 /// a legitimate under-cap frame is as exploitable as an over-cap one. That is
-/// why [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) does not close this on its own.
+/// why the frame cap does not close this on its own.
 ///
 /// The deadline is **total**, not per-syscall, and progress does not extend it.
 /// That is the whole point: a peer controls the pacing but not the wall clock.
@@ -306,12 +338,12 @@ impl PartialFrame {
 /// expires part-way through leaves the progress recorded and the next call picks
 /// it up exactly where this one stopped. On success `partial` is cleared and the
 /// stream is back on a frame boundary.
-fn recv_by(
+fn recv_by<T: Framed>(
     stream: &mut ControlStream,
     deadline: Instant,
     partial: &mut PartialFrame,
     wakeup: &Wakeup,
-) -> BridgeResult<BridgeMessage> {
+) -> IpcResult<T> {
     if !partial.have_len {
         let mut prefix = partial.prefix;
         let r = read_exact_by(
@@ -333,9 +365,9 @@ fn recv_by(
         // talking to, and the stream is desynchronised. `pump` turns it into
         // `crash()`. A send the host itself declines is **not** a crash; see
         // [`send`].
-        let len = decode_prefix(partial.prefix).map_err(|e| {
+        let len = decode_prefix(partial.prefix, T::CAP).map_err(|e| {
             tracing::warn!("plugin server sent a {e}; treating it as a crash");
-            BridgeError::ProcessCrashed
+            IpcError::ProcessCrashed
         })?;
         // The buffer is the connection's: its capacity is kept between frames
         // (and trimmed after a large one, `clear`), so a block's reply reads
@@ -373,7 +405,7 @@ fn recv_by(
 /// Still deadline-bounded, by [`HANDSHAKE_TIMEOUT`]: "no timeout" on a socket
 /// means a peer that never speaks parks this thread forever, and the handshake
 /// runs before any crash reporting exists to notice.
-pub fn recv(stream: &mut ControlStream) -> BridgeResult<BridgeMessage> {
+pub fn recv<T: Framed>(stream: &mut ControlStream) -> IpcResult<T> {
     let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
     // The handshake has no resume path — a failure here ends the connection —
     // so the cursor is local and dropped with the frame it describes.
@@ -395,7 +427,7 @@ pub fn recv(stream: &mut ControlStream) -> BridgeResult<BridgeMessage> {
 /// to survive a timeout and keep the connection must use [`recv_resumable`]
 /// instead; this one is for the paths where a timeout is already fatal
 /// (handshake, probe, launch).
-pub fn recv_within(stream: &mut ControlStream, timeout: Duration) -> BridgeResult<BridgeMessage> {
+pub fn recv_within<T: Framed>(stream: &mut ControlStream, timeout: Duration) -> IpcResult<T> {
     let mut partial = PartialFrame::default();
     recv_resumable(stream, timeout, &mut partial)
 }
@@ -410,21 +442,21 @@ pub fn recv_within(stream: &mut ControlStream, timeout: Duration) -> BridgeResul
 ///
 /// Check [`PartialFrame::in_progress`] on a timeout to tell "nothing arrived, the
 /// stream is on a boundary" from "a frame is half-read and must be finished".
-pub fn recv_resumable(
+pub fn recv_resumable<T: Framed>(
     stream: &mut ControlStream,
     timeout: Duration,
     partial: &mut PartialFrame,
-) -> BridgeResult<BridgeMessage> {
+) -> IpcResult<T> {
     let deadline = Instant::now() + timeout;
     with_poll_timeout(stream, timeout, |s, wakeup| {
         recv_by(s, deadline, partial, wakeup)
     })
     .map_err(|e| match e {
-        BridgeError::Io(io)
+        IpcError::Io(io)
             if io.kind() == std::io::ErrorKind::TimedOut
                 || io.kind() == std::io::ErrorKind::WouldBlock =>
         {
-            BridgeError::Timeout {
+            IpcError::Timeout {
                 operation: "recv",
                 after: timeout,
                 partial: partial.in_progress(),
@@ -479,8 +511,8 @@ pub fn recv_resumable(
 fn with_poll_timeout<T>(
     stream: &mut ControlStream,
     budget: Duration,
-    f: impl FnOnce(&mut ControlStream, &Wakeup) -> BridgeResult<T>,
-) -> BridgeResult<T> {
+    f: impl FnOnce(&mut ControlStream, &Wakeup) -> IpcResult<T>,
+) -> IpcResult<T> {
     let poll = budget.min(POLL_INTERVAL).max(Duration::from_millis(1));
     let wakeup = Wakeup::arm(stream, poll);
     let result = f(stream, &wakeup);
@@ -497,9 +529,9 @@ fn annotate(e: std::io::Error, stage: &str) -> std::io::Error {
     std::io::Error::new(e.kind(), format!("reading the {stage}: {e}"))
 }
 
-fn crashed_on_eof(e: std::io::Error) -> BridgeError {
+fn crashed_on_eof(e: std::io::Error) -> IpcError {
     if e.kind() == std::io::ErrorKind::UnexpectedEof {
-        BridgeError::ProcessCrashed
+        IpcError::ProcessCrashed
     } else {
         e.into()
     }
@@ -508,6 +540,7 @@ fn crashed_on_eof(e: std::io::Error) -> BridgeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AudioReply, AudioRequest, ControlFrame, News};
     use interprocess::local_socket::ListenerOptions;
 
     /// A connected pair of local sockets, plus the path so it can be cleaned up.
@@ -554,6 +587,42 @@ mod tests {
         }
     }
 
+    /// **A setup is a frame and then its slab, and the slab opens the creator's
+    /// memory.** The server's end reads the `SetupSharedMemory` frame, takes the
+    /// slab right after it, and maps what the host wrote into.
+    #[test]
+    fn a_setup_is_a_frame_then_the_slab_it_announced() {
+        use crate::protocol::frame::read_frame;
+        use crate::{AudioSlab, RING_SLOTS, SlabLayout};
+        let layout = SlabLayout {
+            samples_per_channel: 8,
+            format: tutti_buffers::FloatWidth::F32,
+            slots: RING_SLOTS as u32,
+            inputs: vec![tutti_plugin_types::ChannelLayout::MONO],
+            outputs: vec![tutti_plugin_types::ChannelLayout::MONO],
+        };
+        let (mut host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
+        host_slab.write(1, 0, &[0.25f32; 8]).unwrap();
+        host_slab.publish(1);
+
+        let mut p = pair();
+        let mut server = p.take_peer();
+        send_setup(&mut p.host, ReqId::new(7), layout.clone(), &handle).unwrap();
+
+        let Request { id, body } = read_frame(&mut server).unwrap();
+        assert_eq!(id, ReqId::new(7));
+        let ControlRequest::SetupSharedMemory { slab, layout: got } = body else {
+            panic!("the frame is not a setup");
+        };
+        assert_eq!(got, layout);
+        let received = SlabHandle::receive(super::super::sys::connection(&server), slab).unwrap();
+        let opened = AudioSlab::open(&received, layout).unwrap();
+        let mut back = [0.0f32; 8];
+        assert!(opened.has_input(1), "the host's published block is visible");
+        opened.read_input_into(1, 0, &mut back).unwrap();
+        assert_eq!(back, [0.25f32; 8]);
+    }
+
     /// **A block's round trip allocates nothing once the buffers are warm**: the host sends
     /// `ProcessAudio`, the server end reads it and answers `AudioProcessed`, and the host reads the
     /// answer, over a real socket pair, inside `assert_no_alloc`. A block with no parameter changes
@@ -566,12 +635,12 @@ mod tests {
         let mut p = pair();
         let mut server = p.take_peer();
         let mut partial = PartialFrame::default();
-        let block = HostMessage::ProcessAudio(ProcessAudioData {
+        let block = AudioRequest::ProcessAudio(ProcessAudioData {
             seq: 1,
             num_samples: 64,
             ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
         });
-        let reply = BridgeMessage::AudioProcessed {
+        let reply = AudioReply::AudioProcessed {
             latency_us: 0,
             seq: 1,
             midi_out: Default::default(),
@@ -580,18 +649,19 @@ mod tests {
         };
         let mut round = || {
             send(&mut p.host, &block).expect("send");
-            let got: HostMessage = read_frame(&mut server).expect("server read");
-            assert!(matches!(got, HostMessage::ProcessAudio(ref d) if d.seq == 1));
+            let got: AudioRequest = read_frame(&mut server).expect("server read");
+            assert!(matches!(got, AudioRequest::ProcessAudio(ref d) if d.seq == 1));
             write_frame(&mut server, &reply).expect("server write");
-            let back = recv_resumable(&mut p.host, Duration::from_secs(5), &mut partial)
-                .expect("host read");
-            assert!(matches!(back, BridgeMessage::AudioProcessed { seq: 1, .. }));
+            let back =
+                recv_resumable::<AudioReply>(&mut p.host, Duration::from_secs(5), &mut partial)
+                    .expect("host read");
+            assert!(matches!(back, AudioReply::AudioProcessed { seq: 1, .. }));
         };
         round(); // warms this thread's buffers and the cursor's
         assert_no_alloc::assert_no_alloc(&mut round);
     }
 
-    /// Send one framed `BridgeMessage`, holding the body back between the
+    /// Send one framed `ControlFrame`, holding the body back between the
     /// length prefix and the body so a reader's deadline lands in the middle of
     /// the frame: `prefix_sent` is signalled once the prefix is on the wire, and
     /// the body goes out when `release_body` fires.
@@ -601,7 +671,7 @@ mod tests {
     /// runs the two threads.
     fn send_split(
         peer: &ControlStream,
-        msg: &BridgeMessage,
+        msg: &ControlFrame,
         prefix_sent: &std::sync::mpsc::Sender<()>,
         release_body: &std::sync::mpsc::Receiver<()>,
     ) {
@@ -618,10 +688,10 @@ mod tests {
         peer.flush().unwrap();
     }
 
-    fn latency_msg(samples: i64) -> BridgeMessage {
-        BridgeMessage::LatencyChanged {
+    fn latency_msg(samples: i64) -> ControlFrame {
+        ControlFrame::News(News::LatencyChanged {
             samples: tutti_plugin_types::Samples::new(samples as usize),
-        }
+        })
     }
 
     /// **A timeout part-way through a frame is resumed, not restarted.**
@@ -661,9 +731,10 @@ mod tests {
         prefix_on_wire
             .recv_timeout(Duration::from_secs(60))
             .expect("the writer sent the prefix");
-        let err = recv_resumable(host, Duration::from_millis(20), &mut partial).unwrap_err();
+        let err = recv_resumable::<ControlFrame>(host, Duration::from_millis(20), &mut partial)
+            .unwrap_err();
         match err {
-            BridgeError::Timeout { partial: p, .. } => assert!(
+            IpcError::Timeout { partial: p, .. } => assert!(
                 p,
                 "the prefix was consumed, so the stream is mid-frame and the \
                  timeout must say so — a caller told otherwise would restart \
@@ -679,7 +750,7 @@ mod tests {
 
         // Second attempt with the SAME cursor: continues from the body.
         release_body.send(()).expect("the writer waits");
-        let got = recv_resumable(host, Duration::from_secs(5), &mut partial)
+        let got = recv_resumable::<ControlFrame>(host, Duration::from_secs(5), &mut partial)
             .expect("the resumed read must deliver the frame the peer sent");
         assert_eq!(
             format!("{got:?}"),
@@ -725,13 +796,15 @@ mod tests {
         prefix_on_wire
             .recv_timeout(Duration::from_secs(60))
             .expect("the writer sent the prefix");
-        let _ = recv_resumable(host, Duration::from_millis(20), &mut partial).unwrap_err();
+        let _ = recv_resumable::<ControlFrame>(host, Duration::from_millis(20), &mut partial)
+            .unwrap_err();
         release_body.send(()).expect("the writer waits");
 
-        let got_first = recv_resumable(host, Duration::from_secs(5), &mut partial).unwrap();
+        let got_first =
+            recv_resumable::<ControlFrame>(host, Duration::from_secs(5), &mut partial).unwrap();
         assert_eq!(format!("{got_first:?}"), format!("{first:?}"));
 
-        let got_second = recv_resumable(host, Duration::from_secs(5), &mut partial)
+        let got_second = recv_resumable::<ControlFrame>(host, Duration::from_secs(5), &mut partial)
             .expect("the frame after a resumed one must parse");
         assert_eq!(
             format!("{got_second:?}"),
@@ -754,9 +827,9 @@ mod tests {
     fn a_timeout_with_nothing_read_reports_a_framed_stream() {
         let mut p = pair();
         // The peer sends nothing at all.
-        let err = recv_within(&mut p.host, Duration::from_millis(20)).unwrap_err();
+        let err = recv_within::<ControlFrame>(&mut p.host, Duration::from_millis(20)).unwrap_err();
         match err {
-            BridgeError::Timeout { partial, .. } => assert!(
+            IpcError::Timeout { partial, .. } => assert!(
                 !partial,
                 "no byte was ever sent, so the stream is still on a frame \
                  boundary — reporting `partial` here would make every idle \
@@ -786,9 +859,9 @@ mod tests {
             peer.write_all(&[0u8; 8]).unwrap();
             peer.flush().unwrap();
         }
-        let err = recv_within(&mut p.host, Duration::from_millis(50)).unwrap_err();
+        let err = recv_within::<ControlFrame>(&mut p.host, Duration::from_millis(50)).unwrap_err();
         match err {
-            BridgeError::Timeout { partial, .. } => assert!(
+            IpcError::Timeout { partial, .. } => assert!(
                 partial,
                 "the prefix and 8 body bytes were consumed, so the stream is \
                  mid-frame. Reporting it as clean would let a caller resume and \
@@ -802,6 +875,7 @@ mod tests {
     #[cfg(unix)]
     mod unix_send_bound {
         use super::super::*;
+        use crate::ControlRequest;
         use interprocess::local_socket::ListenerOptions;
 
         /// **A send to a peer that reads nothing gives up at the send deadline**, as a `partial`
@@ -822,10 +896,14 @@ mod tests {
             let _writer = std::thread::spawn(move || {
                 let mut host =
                     connect_within(&connect_path, Duration::from_millis(200)).expect("connect");
-                let chunk = HostMessage::LoadStateChunk {
-                    seq: 0,
-                    last: None,
-                    bytes: vec![0u8; 1 << 20],
+                let chunk = crate::Request {
+                    id: crate::ReqId::new(1),
+                    body: ControlRequest::LoadStateChunk {
+                        seq: 0,
+                        total: 1 << 20,
+                        last: None,
+                        bytes: vec![0u8; 1 << 20],
+                    },
                 };
                 // Far more than any socket buffer holds: the peer reads nothing.
                 let result = (0..256).try_for_each(|_| send(&mut host, &chunk));
@@ -838,7 +916,7 @@ mod tests {
                 .expect("the send never gave up on a peer that reads nothing");
             let _ = std::fs::remove_file(&path);
             assert!(
-                matches!(result, Err(BridgeError::Timeout { partial: true, .. })),
+                matches!(result, Err(IpcError::Timeout { partial: true, .. })),
                 "{result:?}"
             );
         }

@@ -1,10 +1,10 @@
-//! `Served<AuLoaded>` against the units macOS ships. macOS only.
+//! `Server<AuLoaded>` against the units macOS ships. macOS only.
 
 use super::*;
 use tutti_au_host::AuLoaded;
 use tutti_buffers::{FloatWidth, InputOutput};
 
-impl Served<AuLoaded> {
+impl Server<AuLoaded> {
     /// `load_first` for the plugin `plugin` names, in
     /// 32-bit.
     fn load_with(
@@ -29,16 +29,16 @@ impl Served<AuLoaded> {
     }
 }
 use tutti_fixtures::main_thread;
-use tutti_plugin_ipc::BridgeMessage;
+use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
     Control, Event, Hand, HostOp, Lifecycle, MaxBlock, ProcessContext, ProcessOutput, Request,
     RescanScope, SampleRate, Samples,
 };
 
-type AuInstance = Served<AuLoaded>;
+type AuInstance = Server<AuLoaded>;
 
 /// The test-side views of the instance.
-impl Served<AuLoaded> {
+impl Server<AuLoaded> {
     /// The unit, whichever half holds it.
     fn loaded_ref(&self) -> Option<&AuLoaded> {
         match &self.lifecycle {
@@ -143,19 +143,17 @@ fn an_au_property_change_reaches_the_event_list() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::LatencyChanged { .. })),
+            .any(|e| matches!(e, News::LatencyChanged { .. })),
         "the latency change was polled and dropped; got {events:?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, BridgeMessage::TailChanged { .. })),
+        events.iter().any(|e| matches!(e, News::TailChanged { .. })),
         "the tail change went missing; got {events:?}"
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginParamTitlesChanged)),
+            .any(|e| matches!(e, News::PluginParamTitlesChanged)),
         "a parameter-list change must ask the client to re-pull the list; \
          got {events:?}"
     );
@@ -199,14 +197,14 @@ fn an_au_latency_poll_refreshes_the_cached_wiring() {
     let reported_latency = events
         .iter()
         .find_map(|e| match e {
-            BridgeMessage::LatencyChanged { samples } => Some(*samples),
+            News::LatencyChanged { samples } => Some(*samples),
             _ => None,
         })
         .expect("a raised latency request must produce a re-read");
     let reported_tail = events
         .iter()
         .find_map(|e| match e {
-            BridgeMessage::TailChanged { tail } => Some(*tail),
+            News::TailChanged { tail } => Some(*tail),
             _ => None,
         })
         .expect("a raised tail request must produce a re-read");
@@ -299,7 +297,7 @@ fn test_au_parameter_list_via_trait() {
     let params = au.parameters(main_thread());
     assert!(
         !params.is_empty(),
-        "AUDelay should have parameters through `ServedPlugin`"
+        "AUDelay should have parameters through `ServerPlugin`"
     );
 }
 
@@ -512,7 +510,9 @@ fn direct_parameter_path_is_normalized_end_to_end() {
     let (min, max) = cutoff.bounds().expect("a plain range");
     let addr = cutoff.id();
 
-    au.set_parameter(main, addr, Normalized::of(1.0))
+    au.control_mut()
+        .expect("a live plugin")
+        .set_parameter(main, addr, Normalized::of(1.0))
         .expect("a declared, writable parameter");
     let plain = tutti_au_host::parameters::get(au.loaded_ref().unwrap().unit(), addr.get())
         .expect("cutoff is readable");
@@ -528,7 +528,9 @@ fn direct_parameter_path_is_normalized_end_to_end() {
     );
     assert!((au.normalized(main, addr) - 1.0).abs() < 1e-3);
 
-    au.set_parameter(main, addr, Normalized::of(0.0))
+    au.control_mut()
+        .expect("a live plugin")
+        .set_parameter(main, addr, Normalized::of(0.0))
         .expect("a declared, writable parameter");
     assert!((au.normalized(main, addr)).abs() < 1e-3);
 }
@@ -640,7 +642,9 @@ fn au_parameter_text_denormalizes_and_reports_absence_honestly() {
     let (min, max) = target.bounds().expect("AU declares a plain range");
 
     // The write path lands full scale on `max`, not on the raw `1.0`.
-    au.set_parameter(main, target.id(), Normalized::of(1.0))
+    au.control_mut()
+        .expect("a live plugin")
+        .set_parameter(main, target.id(), Normalized::of(1.0))
         .expect("a declared, writable parameter");
     let after = tutti_au_host::parameters::get(au.loaded_ref().unwrap().unit(), target.id().get())
         .expect("param is readable");

@@ -725,9 +725,7 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
 /// clones share a cell with it (`Shared`), which its fork source severs, and
 /// a [`ParamNode`] whose fork is taken from its [`ParamSet`].
 ///
-/// Changed in doc 014 §12.6: a live-only write to the level's cell (a
-/// modulation driver's) is gone with the authored copy (§10); a fork reads
-/// the cells, and the test now moves the live level after the fork.
+/// A fork reads the cells, and the test moves the live level after the fork.
 #[test]
 fn the_live_graph_is_unaffected_while_a_fork_renders() {
     fn build() -> (Editor, tutti_graph::Executor, ParamSet) {

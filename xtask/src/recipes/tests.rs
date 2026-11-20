@@ -85,6 +85,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         ("check-test-time", "gate check-test-time"),
         ("check-units-bare", "gate check-units-bare"),
         ("check-width", "gate check-width"),
+        ("check-threads", "gate check-threads"),
         ("check-guards", "gate check-guards"),
         ("check-hosting", "gate check-hosting"),
         ("check-session", "gate check-session"),
@@ -117,6 +118,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         "gate check-test-time",
         "gate check-units-bare",
         "gate check-width",
+        "gate check-threads",
         "gate check-guards",
         "gate check-hosting",
         "gate check-session",
@@ -219,13 +221,15 @@ fn loom_recipes_carry_their_environment() {
     );
 }
 
-/// The web build check is the command CI's clippy job runs.
+/// The web build check is the commands CI's clippy job runs: the platform, rt
+/// and umbrella crates, then the umbrella with every feature the web path uses.
 #[test]
-fn check_wasm_lints_the_platform_crate_and_the_umbrella_for_the_web() {
+fn check_wasm_lints_the_platform_crate_the_rt_crate_and_the_umbrella_with_the_web_features() {
     assert_eq!(
         dry("check-wasm", &[]),
         [
-            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings"
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-aiff,export,record,midi -- -D warnings",
         ]
     );
 }
@@ -444,7 +448,6 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
             "cargo build --locked -p tutti-curve --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-buffers --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-buffers --no-default-features --target aarch64-unknown-none --features serde",
-            "cargo build --locked -p tutti-metering --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-tempo --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-tempo --no-default-features --target aarch64-unknown-none --features serde",
             "cargo build --locked -p tutti-voicing --no-default-features --target aarch64-unknown-none",

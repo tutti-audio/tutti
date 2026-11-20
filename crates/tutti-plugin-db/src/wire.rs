@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::path::{Path, PathBuf};
 
 /// The version of the record layout [`PluginDb`] serializes and deserializes.
-pub const DB_VERSION: u64 = 6;
+pub const DB_VERSION: u64 = 7;
 
 /// Why a record is not a database this version can read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -218,7 +218,7 @@ mod tests {
     use tutti_plugin_types::{
         Described, LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginClass,
         PluginDescriptor, PluginFormat, PluginId, ProbeConfig, StateHash, TailVerdict, Uid,
-        Verdict,
+        Verdict, Widths,
     };
     use tutti_units::{Db, SampleRate, Samples};
 
@@ -381,6 +381,41 @@ mod tests {
         let back: PluginDb = postcard::from_bytes(&bytes).unwrap();
 
         assert_eq!(back, db);
+    }
+
+    /// **A plugin's widths survive both formats, each of the three answers**:
+    /// 64-bit offered, 32-bit only, and unread.
+    #[test]
+    fn a_plugins_widths_round_trip_through_json_and_postcard() {
+        let mut db = PluginDb::new();
+        for (name, widths) in [
+            ("both", Some(Widths::BOTH)),
+            ("narrow", Some(Widths::F32)),
+            ("unread", None),
+        ] {
+            let mut row = row(name);
+            let FileState::Probed { plugins, .. } = &mut row.state else {
+                unreachable!("a probed row");
+            };
+            plugins[0].descriptor.widths = widths;
+            db.apply(RowChange::put(format!("/plugins/{name}.vst3"), row));
+        }
+        let widths_of = |db: &PluginDb, name: &str| {
+            db.plugins()
+                .find(|p| p.descriptor.name == name)
+                .unwrap_or_else(|| panic!("{name} is in the database"))
+                .descriptor
+                .widths
+        };
+
+        let json = from_json(&to_json(&db)).unwrap();
+        let postcard: PluginDb = postcard::from_bytes(&postcard::to_stdvec(&db).unwrap()).unwrap();
+
+        for back in [&json, &postcard] {
+            assert_eq!(widths_of(back, "both"), Some(Widths::BOTH));
+            assert_eq!(widths_of(back, "narrow"), Some(Widths::F32));
+            assert_eq!(widths_of(back, "unread"), None);
+        }
     }
 
     /// A serialized database declares the version it deserializes.

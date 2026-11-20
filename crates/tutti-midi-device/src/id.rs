@@ -3,7 +3,7 @@
 
 use core::fmt;
 
-use tutti_midi_ci::ProductInstanceId;
+use tutti_ump::ProductInstanceId;
 
 /// The OS's handle to one endpoint, opaque and backend-owned.
 ///

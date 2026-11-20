@@ -44,15 +44,15 @@ use tutti_platform::Instant;
 use tutti_platform::{StopToken, ThreadHandle};
 use tutti_rt::LockExt;
 
-use std::borrow::Cow;
 use tutti_buffers::Float;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
+use tutti_plugin_ipc::{AudioReply, AudioRequest, SlabLayout, SlabWriter};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
-    BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginIo, PluginResult,
+    BlockStatus, Features, IpcError, IpcResult, MidiEventVec, PluginIo, PluginResult,
     ProcessOutput, Processor,
 };
+use tutti_plugin_types::{EditWriter, ParameterChanges};
 use tutti_rt::{
     Overflow, PushError, Returned, RingReader, RingWriter, Rt, Tally, TallyWriter, ring, tally,
 };
@@ -63,7 +63,7 @@ use crate::audio_pipeline::{
 use crate::main_loop::Bell;
 use crate::served::Render;
 use crate::ties::{Notify, Patience, Ties, ties};
-use crate::transport::Transport;
+use crate::transport::AudioTransport;
 
 /// How many commands may be queued to the render thread. A load is a handful;
 /// the queue is sized so the handshake, which runs before the thread does,
@@ -127,6 +127,10 @@ pub(crate) trait RenderEnd: Render + Send {
     /// Whether the Processor is here: a block rendered now reaches the plugin
     /// (and drains the writes queued to it).
     fn has_processor(&mut self) -> bool;
+    /// Delivers parameter changes between blocks by the format's own route
+    /// ([`Processor::flush_parameters`]); a plugin whose Processor is not here
+    /// has nothing to deliver them to.
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()>;
 }
 
 /// [`RenderEnd`] over the format's Processor, in a handoff.
@@ -189,6 +193,13 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
     fn has_processor(&mut self) -> bool {
         self.rt.held().is_some()
     }
+
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+        match self.rt.held() {
+            Some(processor) => processor.flush_parameters(changes),
+            None => Ok(()),
+        }
+    }
 }
 
 /// What the main thread asks of the render thread. Every value a command
@@ -211,6 +222,10 @@ pub(crate) enum ToRender {
     /// The plugin's parameter output, held in fixed storage: a queue per
     /// parameter, each of room for a block's points.
     Output(Box<ProcessOutput>),
+    /// The writer of the slots the render thread leaves each block's parameter
+    /// values in, for the main thread to tell the plugin's edit controller of
+    /// ([`Session::tick`](crate::session::Session::tick)).
+    Informs(EditWriter),
     /// New figures for the blocks that follow.
     Config(RenderConfig),
     /// The plugin's end: its Processor arrives in it.
@@ -242,6 +257,9 @@ pub(crate) enum Back {
     /// The parameter output a new one replaced.
     #[expect(dead_code, reason = "handed back only to be dropped")]
     Output(Box<ProcessOutput>),
+    /// The writer of the slots a new one replaced.
+    #[expect(dead_code, reason = "handed back only to be dropped")]
+    Informs(EditWriter),
     /// Why the plugin failed a block, for the main thread to log.
     Failure(BlockFault),
     /// A block that reached the plugin after the [`ToRender::Barrier`] of this
@@ -295,6 +313,17 @@ struct LossWriters {
     back_refused: TallyWriter<u64>,
 }
 
+/// Why the render thread did not take a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RenderStalled {
+    /// The render thread has ended.
+    #[error("the render thread is gone")]
+    Gone,
+    /// The render thread took no command within the patience: it has stopped.
+    #[error("the render thread takes no commands")]
+    Full,
+}
+
 /// The main thread's end of the render thread's queues.
 pub(crate) struct RenderLink {
     ties: Ties,
@@ -313,9 +342,19 @@ pub(crate) struct RenderLink {
     /// The number of the last barrier sent, and of the last one acknowledged.
     barrier_sent: u64,
     barrier_acked: u64,
+    /// Counts the loads: what the render thread left for the edit controller
+    /// before one is stale ([`Informs`]). One writer, the main thread.
+    informs_loads: TallyWriter<u64>,
 }
 
 impl RenderLink {
+    /// A state or preset load is about to replace the values the blocks so far
+    /// left for the edit controller: they are voided, wherever the render thread
+    /// is in writing them.
+    pub(crate) fn void_informs(&self) {
+        self.informs_loads.add(1);
+    }
+
     /// What wakes the render thread and what it wakes.
     pub(crate) fn ties(&self) -> &Ties {
         &self.ties
@@ -323,17 +362,23 @@ impl RenderLink {
 
     /// Attaches `slab`: the render thread takes it with scratch sized to its
     /// layout, in the format blocks are rendered in.
-    pub(crate) fn attach_slab(&mut self, slab: SlabWriter) {
+    ///
+    /// # Errors
+    ///
+    /// The render thread did not take it: the slab is dropped, and the host is
+    /// told its setup failed.
+    pub(crate) fn attach_slab(&mut self, slab: SlabWriter) -> Result<(), RenderStalled> {
         let layout = slab.layout_ref().clone();
         let scratch = Box::new(AudioScratch::for_layout(self.format, &layout));
+        self.send(ToRender::Slab { slab, scratch })?;
         self.slab_layout = Some(layout);
-        self.send(ToRender::Slab { slab, scratch });
+        Ok(())
     }
 
     /// Detaches the slab (an unload).
     pub(crate) fn detach_slab(&mut self) {
         self.slab_layout = None;
-        self.send(ToRender::DropSlab);
+        self.tell(ToRender::DropSlab);
     }
 
     /// Renders in `format` from the next block on: scratch of the slab's shape
@@ -345,7 +390,7 @@ impl RenderLink {
         self.format = format;
         if let Some(layout) = &self.slab_layout {
             let scratch = Box::new(AudioScratch::for_layout(format, layout));
-            self.send(ToRender::Scratch(scratch));
+            self.tell(ToRender::Scratch(scratch));
         }
     }
 
@@ -355,7 +400,7 @@ impl RenderLink {
         self.params = (queues, points);
         let mut output = ProcessOutput::default();
         output.reserve_params(queues, points);
-        self.send(ToRender::Output(Box::new(output)));
+        self.tell(ToRender::Output(Box::new(output)));
     }
 
     /// Re-reserves the plugin's parameter output for `queues` parameters, at
@@ -413,10 +458,14 @@ impl RenderLink {
     }
 
     /// Queues `command` and wakes the render thread, waiting for it to make
-    /// room if the queue is full. A command the render thread does not take
-    /// within [`SEND_PATIENCE`] is dropped and logged: the render thread has
-    /// stopped.
-    pub(crate) fn send(&mut self, command: ToRender) {
+    /// room if the queue is full.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderStalled::Gone`] if the render thread has ended, and
+    /// [`RenderStalled::Full`] if it took no command within [`SEND_PATIENCE`];
+    /// the command is dropped either way.
+    pub(crate) fn send(&mut self, command: ToRender) -> Result<(), RenderStalled> {
         self.reap();
         let mut command = command;
         let patience = Patience::new(Instant::now(), SEND_PATIENCE);
@@ -425,23 +474,27 @@ impl RenderLink {
             match self.to.push(command) {
                 Ok(()) => {
                     self.ties.wake.ring();
-                    return;
+                    return Ok(());
                 }
                 Err(Returned {
                     error: PushError::Disconnected,
                     ..
-                }) => {
-                    tracing::error!("plugin-server: the render thread is gone");
-                    return;
-                }
+                }) => return Err(RenderStalled::Gone),
                 Err(Returned { value, .. }) => command = value,
             }
             if patience.left(Instant::now()).is_none() {
-                tracing::error!("plugin-server: the render thread takes no commands");
-                return;
+                return Err(RenderStalled::Full);
             }
             // Room is made when the render thread takes a command.
             self.ties.settle.wait_past(seen, patience);
+        }
+    }
+
+    /// [`send`](Self::send) for a command nothing answers for: a refusal is
+    /// logged, and the host learns of it from the commands that are answered.
+    pub(crate) fn tell(&mut self, command: ToRender) {
+        if let Err(e) = self.send(command) {
+            tracing::error!("plugin-server: {e}");
         }
     }
 
@@ -473,7 +526,7 @@ impl RenderLink {
     pub(crate) fn barrier(&mut self) -> u64 {
         self.barrier_sent += 1;
         let id = self.barrier_sent;
-        self.send(ToRender::Barrier(id));
+        self.tell(ToRender::Barrier(id));
         id
     }
 
@@ -497,6 +550,58 @@ impl RenderLink {
     }
 }
 
+/// Where the render thread leaves each block's last value of each parameter,
+/// for the main thread to tell the plugin's edit controller of.
+///
+/// A state or preset load makes what the slots hold stale. The main thread
+/// counts its loads (a [`Tally`]); the render thread reads the count when a
+/// block begins and, after writing the block's values, ends the epoch if the
+/// count moved meanwhile. A block that began before a load and writes after it
+/// voids its own values; a block that began after it sees the new count at its
+/// start and keeps them, however long the render thread idled before it.
+/// Wait-free.
+pub(crate) struct Informs {
+    writer: Option<EditWriter>,
+    loads: Tally<u64>,
+}
+
+impl Informs {
+    fn new(loads: Tally<u64>) -> Self {
+        Self {
+            writer: None,
+            loads,
+        }
+    }
+
+    /// Installs the writer of the slots, returning the one it replaces for the
+    /// main thread to free.
+    fn install(&mut self, writer: EditWriter) -> Option<EditWriter> {
+        self.writer.replace(writer)
+    }
+
+    /// The loads so far, read as a block begins.
+    pub(crate) fn begin(&self) -> u64 {
+        self.loads.get()
+    }
+
+    /// Leaves each parameter's last value of `changes`, then ends the epoch if
+    /// a load came since `began` ([`begin`](Self::begin)).
+    pub(crate) fn note(&mut self, changes: &ParameterChanges, began: u64) {
+        let Some(writer) = self.writer.as_mut() else {
+            return;
+        };
+        for queue in &changes.queues {
+            if let Some(point) = queue.points.last() {
+                // A parameter the plugin did not list has no slot.
+                let _ = writer.write(queue.param_id, point.value);
+            }
+        }
+        if self.loads.get() != began {
+            writer.reset();
+        }
+    }
+}
+
 /// The render thread's state: what a block is rendered with.
 pub(crate) struct RenderSide {
     commands: RingReader<ToRender>,
@@ -507,6 +612,9 @@ pub(crate) struct RenderSide {
     seat: Option<Box<dyn RenderEnd>>,
     /// The barrier the next block that reaches the plugin acknowledges.
     barrier: Option<u64>,
+    /// Where each block leaves the last value it carried for each parameter,
+    /// for the edit controller.
+    informs: Informs,
     /// What ends the thread's wait: rung by the main thread.
     wake: Bell,
     /// How the thread tells the main thread it has made progress.
@@ -537,6 +645,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
         back_refused: back_refused.writer(),
     };
     let pipeline = AudioPipeline::new(failed_blocks.writer());
+    let loads = tally();
     Ok((
         RenderLink {
             ties,
@@ -554,6 +663,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
             params: (0, 0),
             barrier_sent: 0,
             barrier_acked: 0,
+            informs_loads: loads.writer(),
         },
         RenderSide {
             commands,
@@ -563,6 +673,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
             config,
             seat: None,
             barrier: None,
+            informs: Informs::new(loads),
             wake: render_ties.wake,
             notify: render_ties.notify,
             losses: writers,
@@ -599,6 +710,11 @@ impl RenderSide {
                 ToRender::Output(output) => {
                     let old = self.pipeline.install_output(output);
                     self.give_back(Back::Output(old));
+                }
+                ToRender::Informs(writer) => {
+                    if let Some(old) = self.informs.install(writer) {
+                        self.give_back(Back::Informs(old));
+                    }
                 }
                 ToRender::Config(config) => {
                     self.config = config;
@@ -655,8 +771,8 @@ impl RenderSide {
     /// # Errors
     ///
     /// The transport fails (the host went away, or sent a frame that does not
-    /// decode), or the host sent a message that is not the audio connection's.
-    pub(crate) fn step(&mut self, io: Option<&mut Box<dyn Transport>>) -> BridgeResult<()> {
+    /// decode).
+    pub(crate) fn step(&mut self, io: Option<&mut Box<AudioTransport>>) -> IpcResult<()> {
         self.drain();
         self.poll_seat();
         let Some(io) = io else {
@@ -679,24 +795,41 @@ impl RenderSide {
         Ok(())
     }
 
-    /// Serves one message of the audio connection: `ProcessAudio` (answered)
-    /// and `Reset` (not).
+    /// Serves one message of the audio connection: `ProcessAudio` and
+    /// `ApplyParameters` (answered) and `Reset` (not).
     ///
     /// # Errors
     ///
-    /// The message is not one the audio connection carries: a peer that
-    /// confuses its two connections.
-    pub(crate) fn handle(&mut self, msg: HostMessage) -> BridgeResult<Option<BridgeMessage>> {
+    /// A block's reply cannot be built.
+    pub(crate) fn handle(&mut self, msg: AudioRequest) -> IpcResult<Option<AudioReply>> {
         match msg {
-            HostMessage::ProcessAudio(data) => {
+            AudioRequest::ProcessAudio(data) => {
+                let began = self.informs.begin();
                 let midi = &data.midi_events;
-                self.handle_process(AudioBlock {
+                let reply = self.handle_process(AudioBlock {
                     seq: data.seq,
                     num_samples: data.num_samples,
                     midi,
                     extras: ProcessExtras::of(&data),
-                })
-                .map(Some)
+                })?;
+                // The edit controller is told of what the Processor was, each
+                // parameter's last value of the block, whoever wrote it: the
+                // host's write rode this block as a change on its first frame.
+                self.informs.note(&data.param_changes, began);
+                Ok(Some(reply))
+            }
+            // The host's writes no block has carried, in order with the blocks
+            // on this connection: the plugin has them, through the format's own
+            // route for parameters outside a block, before the answer.
+            AudioRequest::ApplyParameters { id, param_changes } => {
+                let began = self.informs.begin();
+                if let Some(seat) = self.seat.as_mut()
+                    && seat.flush_parameters(&param_changes).is_err()
+                {
+                    self.failures += 1;
+                }
+                self.informs.note(&param_changes, began);
+                Ok(Some(AudioReply::ParametersApplied { id }))
             }
             // The plugin forgets its signal history,
             // in order with the blocks on this connection, so a reset is never
@@ -706,19 +839,12 @@ impl RenderSide {
             // sequence, so a pre-seek block published late is structurally
             // unmatchable), and anything done to it here would be a second
             // mechanism that could disagree with the first.
-            HostMessage::Reset => {
+            AudioRequest::Reset => {
                 if let Some(seat) = self.seat.as_mut() {
                     seat.reset();
                 }
                 Ok(None)
             }
-            // The control connection's messages: a peer that confuses its two
-            // connections. Named, not formatted: the render thread builds no
-            // text.
-            _ => Err(BridgeError::UnexpectedMessage {
-                expected: "a message the audio connection carries",
-                got: Cow::Borrowed("a control connection message"),
-            }),
         }
     }
 
@@ -754,11 +880,11 @@ impl RenderSide {
         fits
     }
 
-    fn handle_process(&mut self, block: AudioBlock<'_>) -> BridgeResult<BridgeMessage> {
+    fn handle_process(&mut self, block: AudioBlock<'_>) -> IpcResult<AudioReply> {
         // Read before `block` is moved into the pipeline: every reply below
         // echoes it.
         let seq = block.seq;
-        let silent = || BridgeMessage::AudioProcessed {
+        let silent = || AudioReply::AudioProcessed {
             latency_us: 0,
             seq,
             midi_out: MidiEventVec::new(),
@@ -831,7 +957,7 @@ impl RenderSide {
                 losses.back_refused.add(1);
             }
         }
-        Ok(BridgeMessage::AudioProcessed {
+        Ok(AudioReply::AudioProcessed {
             latency_us: output.latency_us,
             seq,
             // An allocation-free copy of the inline list, which stays in the
@@ -883,7 +1009,7 @@ pub(crate) struct RenderThread {
     wake: Bell,
     /// Why the audio connection ended, if it did: the thread then only trades
     /// the Processor, until it is stopped.
-    ended: Arc<OnceLock<Arc<BridgeError>>>,
+    ended: Arc<OnceLock<Arc<IpcError>>>,
 }
 
 impl RenderThread {
@@ -899,7 +1025,7 @@ impl RenderThread {
     /// for whoever still has a Processor to bring home through it.
     pub(crate) fn spawn(
         side: RenderSide,
-        audio: Option<Box<dyn Transport>>,
+        audio: Option<Box<AudioTransport>>,
     ) -> Result<Self, Box<SpawnFailed>> {
         let ended = Arc::new(OnceLock::new());
         let wake = side.wake.clone();
@@ -932,7 +1058,7 @@ impl RenderThread {
     }
 
     /// Why the audio connection ended, once it has.
-    pub(crate) fn ended(&self) -> Option<&Arc<BridgeError>> {
+    pub(crate) fn ended(&self) -> Option<&Arc<IpcError>> {
         self.ended.get()
     }
 
@@ -971,12 +1097,12 @@ pub(crate) enum NotHome {
 /// Records, as the end of the audio connection, a thread that unwinds: the main
 /// loop reads that and ends the session, which a panic that only reached the
 /// join would leave running.
-struct EndedByPanic<'a>(&'a OnceLock<Arc<BridgeError>>);
+struct EndedByPanic<'a>(&'a OnceLock<Arc<IpcError>>);
 
 impl Drop for EndedByPanic<'_> {
     fn drop(&mut self) {
         if std::thread::panicking() {
-            let _ = self.0.set(Arc::new(BridgeError::Other(
+            let _ = self.0.set(Arc::new(IpcError::Other(
                 "the render thread panicked".into(),
             )));
         }
@@ -999,9 +1125,9 @@ impl Drop for RenderThread {
 /// trading the Processor until `stop`.
 fn run(
     mut side: RenderSide,
-    mut audio: Option<Box<dyn Transport>>,
+    mut audio: Option<Box<AudioTransport>>,
     stop: &StopToken,
-    ended: &OnceLock<Arc<BridgeError>>,
+    ended: &OnceLock<Arc<IpcError>>,
 ) -> RenderSide {
     while !stop.is_stopped() {
         if let Err(error) = side.step(audio.as_mut()) {
@@ -1017,7 +1143,65 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::AUDIO_REPLY_BYTES;
+
+    /// What the render thread left for the edit controller: the slots' reader,
+    /// the writer in an [`Informs`], and the main thread's count of loads.
+    fn informs() -> (Informs, tutti_plugin_types::EditReader, TallyWriter<u64>) {
+        let loads = tally();
+        let writer_end = loads.writer();
+        let mut informs = Informs::new(loads);
+        let (writer, reader) = tutti_plugin_types::edit_slots([tutti_units::ParamId::new(1)]);
+        assert!(informs.install(writer).is_none());
+        (informs, reader, writer_end)
+    }
+
+    fn changes_of(value: f64) -> ParameterChanges {
+        let mut changes = ParameterChanges::reserved(1, 1);
+        assert!(changes.add_change(tutti_units::ParamId::new(1), 0, value));
+        changes
+    }
+
+    fn told(reader: &mut tutti_plugin_types::EditReader) -> Vec<f64> {
+        let mut out = Vec::new();
+        reader.drain(|_, value| out.push(value.get()));
+        out
+    }
+
+    /// **A block's last value of a parameter is left for the edit controller**,
+    /// the newest of several blocks.
+    #[test]
+    fn a_blocks_last_value_is_left_for_the_edit_controller() {
+        let (mut informs, mut reader, _) = informs();
+        let began = informs.begin();
+        informs.note(&changes_of(0.25), began);
+        informs.note(&changes_of(0.5), began);
+        assert_eq!(told(&mut reader), [0.5]);
+    }
+
+    /// **A load voids the values a block that began before it writes after
+    /// it**: the block reads the count, the load comes, the block writes, and
+    /// its values do not reach the controller.
+    #[test]
+    fn a_block_that_began_before_a_load_is_voided() {
+        let (mut informs, mut reader, loads) = informs();
+        let began = informs.begin();
+        loads.add(1);
+        informs.note(&changes_of(0.25), began);
+        assert!(told(&mut reader).is_empty(), "the stale block's value");
+    }
+
+    /// **A write after a load, on a render thread that idled between them,
+    /// reaches the controller**: the first block after the load reads the new
+    /// count when it begins, and keeps its values.
+    #[test]
+    fn the_first_write_after_a_load_on_an_idle_render_thread_is_told() {
+        let (mut informs, mut reader, loads) = informs();
+        loads.add(1);
+        let began = informs.begin();
+        informs.note(&changes_of(0.75), began);
+        assert_eq!(told(&mut reader), [0.75]);
+    }
+    use crate::transport::{AUDIO_REPLY_BYTES, Transport};
     use std::io::Write as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tutti_plugin_ipc::{AudioSlab, FrameBuf, ProcessAudioData, SlabLayout, write_frame};
@@ -1029,16 +1213,15 @@ mod tests {
 
     /// A slab of `samples` frames, stereo each way, and the host's end that
     /// keeps its memory alive.
-    fn slab(name: &str, samples: usize) -> (impl Sized, SlabWriter) {
+    fn slab(samples: usize) -> (impl Sized, SlabWriter) {
         let layout = SlabLayout::new(
             samples,
             FloatWidth::F32,
             vec![ChannelLayout::STEREO],
             vec![ChannelLayout::STEREO],
         );
-        let name = format!("tutti_render_{name}_{}", std::process::id());
-        let host = AudioSlab::create(name.clone(), layout.clone()).expect("slab");
-        (host, AudioSlab::open(name, layout).expect("slab"))
+        let (host, handle) = AudioSlab::create(layout.clone()).expect("slab");
+        (host, AudioSlab::open(&handle, layout).expect("slab"))
     }
 
     /// **A drain never allocates or frees**, whatever it applies: a second slab
@@ -1048,13 +1231,13 @@ mod tests {
     #[test]
     fn a_drain_that_replaces_the_slab_refits_the_params_and_changes_format_never_allocates() {
         let (mut link, mut side) = link().expect("bells");
-        let (_first_host, first) = slab("drain_first", 256);
-        link.attach_slab(first);
+        let (_first_host, first) = slab(256);
+        link.attach_slab(first).unwrap();
         link.reserve_params(4, 64);
         side.drain();
 
-        let (_second_host, second) = slab("drain_second", 4096);
-        link.attach_slab(second);
+        let (_second_host, second) = slab(4096);
+        link.attach_slab(second).unwrap();
         link.fit_params(300);
         link.set_format(FloatWidth::F64);
         assert_no_alloc::assert_no_alloc(|| side.drain());
@@ -1068,18 +1251,20 @@ mod tests {
     /// A host connection that says a frame has begun and then does what `recv`
     /// is told to: a peer whose frame never completes, or a transport that
     /// breaks.
-    struct Begun<F: FnMut() -> BridgeResult<HostMessage> + Send>(F);
+    struct Begun<F: FnMut() -> IpcResult<AudioRequest> + Send>(F);
 
-    impl<F: FnMut() -> BridgeResult<HostMessage> + Send> Transport for Begun<F> {
-        fn recv(&mut self) -> BridgeResult<HostMessage> {
+    impl<F: FnMut() -> IpcResult<AudioRequest> + Send> Transport<AudioRequest, AudioReply>
+        for Begun<F>
+    {
+        fn recv(&mut self) -> IpcResult<AudioRequest> {
             (self.0)()
         }
 
-        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> IpcResult<bool> {
             Ok(true)
         }
 
-        fn send(&mut self, _: &BridgeMessage) -> BridgeResult<()> {
+        fn send(&mut self, _: &AudioReply) -> IpcResult<()> {
             Ok(())
         }
     }
@@ -1096,7 +1281,7 @@ mod tests {
         let stalled = Begun(move || {
             let _ = inside.send(());
             let _ = released.recv();
-            Err(BridgeError::ProcessCrashed)
+            Err(IpcError::ProcessCrashed)
         });
         let thread = RenderThread::spawn(side, Some(Box::new(stalled))).expect("the thread");
 
@@ -1153,10 +1338,10 @@ mod tests {
                 .expect("the audio transport");
             let thread = RenderThread::spawn(side, Some(Box::new(audio))).expect("the thread");
 
-            let (_slab_host, slab) = slab("wake", 256);
+            let (_slab_host, slab) = slab(256);
             let settle = link.ties().settle.clone();
             let seen = settle.seen();
-            link.attach_slab(slab);
+            link.attach_slab(slab).unwrap();
             settle.wait_past(
                 seen,
                 Patience::new(Instant::now(), Duration::from_secs(600)),
@@ -1278,6 +1463,9 @@ mod tests {
         fn has_processor(&mut self) -> bool {
             true
         }
+        fn flush_parameters(&mut self, _: &ParameterChanges) -> PluginResult<()> {
+            Ok(())
+        }
     }
 
     /// The MIDI events a flooding plugin emits in a block: past the cap.
@@ -1286,23 +1474,24 @@ mod tests {
 
     /// A render side with a stereo slab and `plugin` seated, and the host's
     /// end of the slab.
-    fn seated(name: &str, plugin: Faulty) -> (RenderLink, RenderSide, impl Sized) {
+    fn seated(plugin: Faulty) -> (RenderLink, RenderSide, impl Sized) {
         let (mut link, mut side) = link().expect("bells");
-        let (host, writer) = slab(name, FRAMES);
-        link.attach_slab(writer);
+        let (host, writer) = slab(FRAMES);
+        link.attach_slab(writer).unwrap();
         link.send(ToRender::Config(RenderConfig {
             max_block: FRAMES,
             inputs: 2,
             outputs: 2,
             ..RenderConfig::new()
-        }));
-        link.send(ToRender::Seat(Box::new(plugin)));
+        }))
+        .unwrap();
+        link.send(ToRender::Seat(Box::new(plugin))).unwrap();
         side.drain();
         (link, side, host)
     }
 
-    fn block(seq: u64) -> HostMessage {
-        HostMessage::ProcessAudio(ProcessAudioData {
+    fn block(seq: u64) -> AudioRequest {
+        AudioRequest::ProcessAudio(ProcessAudioData {
             seq,
             num_samples: FRAMES,
             ..ProcessAudioData::empty(SampleRate::SR_48K)
@@ -1339,7 +1528,7 @@ mod tests {
             );
         };
         tracing::subscriber::with_default(CountEvents(Arc::clone(&events)), || {
-            let (mut link, mut side, _host) = seated("quiet", Faulty::new(Mode::Fail));
+            let (mut link, mut side, _host) = seated(Faulty::new(Mode::Fail));
             let mut filled = 0;
             on_render_thread(&mut || filled = fill_back_queue(&mut side, &link));
             // A plugin that fails: each failure's cause would go home, and
@@ -1351,7 +1540,7 @@ mod tests {
             }
             // Past the activated length: refused.
             on_render_thread(&mut || {
-                side.handle(HostMessage::ProcessAudio(ProcessAudioData {
+                side.handle(AudioRequest::ProcessAudio(ProcessAudioData {
                     seq: 6,
                     num_samples: FRAMES + 1,
                     ..ProcessAudioData::empty(SampleRate::SR_48K)
@@ -1370,7 +1559,7 @@ mod tests {
                 let reply = side.handle(block(7)).expect("answered").expect("a reply");
                 assert!(matches!(
                     reply,
-                    BridgeMessage::AudioProcessed { ref midi_out, .. } if midi_out.len() == MIDI_STACK_CAPACITY
+                    AudioReply::AudioProcessed { ref midi_out, .. } if midi_out.len() == MIDI_STACK_CAPACITY
                 ));
             });
             // A rate the plugin refused.
@@ -1432,7 +1621,7 @@ mod tests {
         let errors = (0..BLOCKS)
             .map(|i| PluginError::Other(format!("the plugin failed block {i}")))
             .collect();
-        let (link, mut side, _host) = seated("owned_errors", Faulty::new(Mode::Owned(errors)));
+        let (link, mut side, _host) = seated(Faulty::new(Mode::Owned(errors)));
         let filled = fill_back_queue(&mut side, &link);
         assert_no_alloc::assert_no_alloc(|| {
             for seq in 1..=BLOCKS as u64 {
@@ -1451,7 +1640,7 @@ mod tests {
     /// a plugin failing every block is not a flood of hand-backs.
     #[test]
     fn a_failed_blocks_cause_goes_home_on_a_doubling_schedule() {
-        let (mut link, mut side, _host) = seated("failing_causes", Faulty::new(Mode::Fail));
+        let (mut link, mut side, _host) = seated(Faulty::new(Mode::Fail));
         // The seat and slab hand-backs of the setup are home already.
         while link.back.pop().is_some() {}
         for seq in 1..=9 {
@@ -1474,7 +1663,7 @@ mod tests {
     fn the_final_counts_are_reported_when_they_differ_from_the_last_report() {
         let events = Arc::new(AtomicUsize::new(0));
         tracing::subscriber::with_default(CountEvents(Arc::clone(&events)), || {
-            let (mut link, mut side, _host) = seated("final", Faulty::new(Mode::Fail));
+            let (mut link, mut side, _host) = seated(Faulty::new(Mode::Fail));
             for seq in 1..=2 {
                 side.handle(block(seq)).expect("answered");
             }
@@ -1547,16 +1736,16 @@ mod tests {
         replies: usize,
     }
 
-    impl Transport for Replay {
-        fn recv(&mut self) -> BridgeResult<HostMessage> {
+    impl Transport<AudioRequest, AudioReply> for Replay {
+        fn recv(&mut self) -> IpcResult<AudioRequest> {
             self.frames.read(&mut self.request.as_slice())
         }
 
-        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> IpcResult<bool> {
             Ok(true)
         }
 
-        fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
+        fn send(&mut self, msg: &AudioReply) -> IpcResult<()> {
             let mut sink: &mut [u8] = &mut self.sink;
             self.frames.write(&mut sink, msg)?;
             sink.flush()?;
@@ -1574,7 +1763,7 @@ mod tests {
     /// a decode of points still allocates (see `PointBuf`'s `Deserialize`).
     #[test]
     fn a_step_with_extras_reads_decodes_renders_and_answers_without_allocating() {
-        let (mut link, mut side, _host) = seated("step_alloc", Faulty::new(Mode::Alternate));
+        let (mut link, mut side, _host) = seated(Faulty::new(Mode::Alternate));
         let mut block = ProcessAudioData {
             seq: 1,
             num_samples: FRAMES,
@@ -1597,8 +1786,8 @@ mod tests {
             value: 3,
         });
         let mut request = Vec::new();
-        write_frame(&mut request, &HostMessage::ProcessAudio(block)).unwrap();
-        let mut io: Box<dyn Transport> = Box::new(Replay {
+        write_frame(&mut request, &AudioRequest::ProcessAudio(block)).unwrap();
+        let mut io: Box<AudioTransport> = Box::new(Replay {
             frames: FrameBuf::new(request.len(), AUDIO_REPLY_BYTES),
             request,
             sink: vec![0; AUDIO_REPLY_BYTES + 4].into_boxed_slice(),

@@ -79,7 +79,7 @@ fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     s.graph().connect(latent, tutti_session::Root).unwrap();
     let mut take = s
         .midi()
-        .record(target, EventCapacity::of(64))
+        .tap(target, EventCapacity::of(64))
         .expect("the tap takes MIDI");
     let mut live = s.midi().input(target).expect("the take left the keys");
     let _ = s.update();
@@ -115,7 +115,7 @@ fn a_take_of_an_instrument_records_what_its_handle_plays() {
         .handle;
     let mut take = s
         .midi()
-        .record(synth.node(), EventCapacity::of(64))
+        .tap(synth.node(), EventCapacity::of(64))
         .expect("an instrument takes MIDI");
     let _ = s.update();
     let (c, k) = (MidiChannel::of(2), NoteNumber::of(60));
@@ -213,7 +213,7 @@ fn recording_a_target_with_no_event_input_is_refused() {
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     assert!(matches!(
-        s.midi().record(dc, EventCapacity::of(8)),
+        s.midi().tap(dc, EventCapacity::of(8)),
         Err(MidiError::NoEventInput(n)) if n == dc.erase()
     ));
 }
@@ -419,17 +419,17 @@ fn a_route_rule_keyed_by_the_apps_id_round_trips_and_refuses_a_bad_channel() {
 #[cfg(feature = "midi-hardware")]
 mod hardware {
     use super::*;
-    use tutti_midi_ci::ProductInstanceId;
     use tutti_midi_device::{EndpointId, Identity, PortDirection};
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
     use tutti_session::{
         LoadError, MidiPortError, Peer, PoolState, PortCause, Presence, midi_input, midi_output,
     };
+    use tutti_ump::ProductInstanceId;
 
     fn session() -> (Session, FakeCounters) {
         let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
         let s = Session::builder()
-            .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+            .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
             .sample_rate(SampleRate::SR_48K)
             .build()
             .expect("builds");

@@ -20,13 +20,15 @@
 //! **Every format reports**: each plugin's own edits reach
 //! the parameter callback as [`ParamEdit`](tutti_plugin_types::ParamEdit)s, in
 //! process through `Control::take_reported_edits` and through the plugin-server
-//! as `BridgeMessage::ParameterChanged`.
+//! as `News::ParameterChanged`.
 //!
 //! **An echo is not an edit.** A plugin that reports the value a host just
-//! set (from inside `setParameter`) would make that value an edit. The VST2
-//! host drops a report made inside its own `setParameter` call
-//! (`tutti-vst2-host`'s `host_write`), so none reaches here; a format that
-//! reports values in future needs the same filter.
+//! set (from inside `setParameter`) would make that value an edit. A format
+//! whose parameter word is `f32` (VST2, AU) drops a report equal to the `f32`
+//! narrowing of the `f64` the host last wrote
+//! ([`WrittenValues`](tutti_plugin_types::WrittenValues)), so none reaches here
+//! and the `f64` the host set stays the value read; a format that reports
+//! values in future needs the same filter.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -354,7 +356,13 @@ mod tests {
                 .1
                 .map(|v| Normalized::clamped(f64::from(v)))
         }
-        fn set_parameter_value(&self, _id: ParamId, _value: Normalized) {}
+        fn set_parameter_value(
+            &self,
+            _id: ParamId,
+            _value: Normalized,
+        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+            Ok(())
+        }
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
             None
         }

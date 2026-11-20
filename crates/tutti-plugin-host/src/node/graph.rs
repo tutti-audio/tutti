@@ -35,7 +35,9 @@ use tutti_graph::{
 };
 use tutti_units::{Latency, Samples, Tail};
 
-use super::client::{InProcessClient, Inputs, PluginNode, Rendered, render_with};
+use super::client::{
+    InProcessClient, Inputs, PluginNode, Rendered, render_with, take_edits, void_stale_edits,
+};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
@@ -218,6 +220,12 @@ where
                     this.intake.new_chunk();
                     this.segments.begin(chunk);
                 }
+                // The host's writes since the last piece, on this piece's
+                // first frame; a node with no Processor leaves them in their
+                // slots.
+                if processor.is_some() {
+                    take_edits(this.edits.as_ref(), &mut this.params, phase);
+                }
                 this.midi.clear();
                 this.chords.changes.clear();
                 this.scales.changes.clear();
@@ -310,6 +318,8 @@ where
                     .take(n_out)
                     .map(|out| &mut out[at..at + n])
                     .collect();
+                // A load since a write was drained voids it before the chunk goes.
+                void_stale_edits(this.edits.as_ref(), &mut this.params);
                 let rendered = render_with(
                     processor.as_deref_mut(),
                     this.params.losses(),
@@ -418,6 +428,9 @@ where
         this.chords.changes.clear();
         this.scales.changes.clear();
         this.params.begin();
+        if processor.is_some() {
+            take_edits(this.edits.as_ref(), &mut this.params, 0);
+        }
         let midi = &mut this.midi;
         let intake = &mut this.intake;
         let (chords, scales) = (&mut this.chords, &mut this.scales);
@@ -470,6 +483,8 @@ where
                 .take(n_out)
                 .map(|out| &mut out[..size])
                 .collect();
+            // A load since a write was drained or owed voids it before the block goes.
+            void_stale_edits(this.edits.as_ref(), &mut this.params);
             let rendered = render_with(
                 processor,
                 this.params.losses(),
@@ -726,7 +741,7 @@ mod owed_tests {
         main: MainThreadMarker,
         path: &std::path::Path,
         rate: SampleRate,
-    ) -> tutti_plugin_types::BridgeResult<(InProcessClient<Vst2Loaded>, PluginHandle)> {
+    ) -> tutti_plugin_types::IpcResult<(InProcessClient<Vst2Loaded>, PluginHandle)> {
         crate::load_client::<Vst2Loaded, f32>(
             main,
             &tutti_fixtures::pumped_work(),

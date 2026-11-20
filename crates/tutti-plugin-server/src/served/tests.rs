@@ -1,4 +1,4 @@
-//! `Served<L>` against each format's reference plugin.
+//! `Server<L>` against each format's reference plugin.
 
 use super::*;
 use std::path::Path;
@@ -12,7 +12,7 @@ mod clap;
 #[cfg(feature = "vst3")]
 mod vst3;
 
-impl<L: ServerSide> Served<L> {
+impl<L: ServerSide> Server<L> {
     /// The plugin a file's first, at `rate`, for blocks of up to `block`, with no
     /// state to restore: the shortest load a test needs.
     fn load_first(
@@ -41,7 +41,7 @@ impl<L: ServerSide> Served<L> {
 /// A plugin loaded on a [`Hand::local`] renders in place: the Processor is
 /// this value's, as a test that calls the plugin needs it (production renders
 /// through [`crate::render::End`], which holds the Processor on its thread).
-impl<L: ServerSide> Render for Served<L> {
+impl<L: ServerSide> Render for Server<L> {
     fn features(&self) -> Features {
         self.wiring.features
     }
@@ -55,7 +55,7 @@ impl<L: ServerSide> Render for Served<L> {
     }
 }
 
-impl<L: ServerSide> Served<L> {
+impl<L: ServerSide> Server<L> {
     /// One block at either width, in place: silence when the plugin is not
     /// running.
     fn render_here<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
@@ -69,7 +69,7 @@ impl<L: ServerSide> Served<L> {
     }
 }
 
-impl<L: ServerSide> Served<L> {
+impl<L: ServerSide> Server<L> {
     /// A parameter's value, which the plugin must have.
     fn normalized(&self, main: MainThreadMarker, id: ParamId) -> f64 {
         self.parameter(main, id)
@@ -81,8 +81,8 @@ impl<L: ServerSide> Served<L> {
 use tutti_fixtures::main_thread;
 
 /// Loads `path` through the table as `format`, with everything else defaulted.
-fn load_any(path: &Path, format: PluginFormat) -> PluginResult<AnyServed> {
-    AnyServed::load(
+fn load_any(path: &Path, format: PluginFormat) -> PluginResult<AnyServer> {
+    AnyServer::load(
         main_thread(),
         &tutti_fixtures::detached_work(),
         &PluginRef::file(path),
@@ -97,7 +97,7 @@ fn load_any(path: &Path, format: PluginFormat) -> PluginResult<AnyServed> {
     .map(|(plugin, _, _)| plugin)
 }
 
-fn assert_refused(result: PluginResult<AnyServed>, at: LoadStage, reason: &str) {
+fn assert_refused(result: PluginResult<AnyServer>, at: LoadStage, reason: &str) {
     match result {
         Err(PluginError::Load { stage, reason: r }) => {
             assert_eq!(stage, at, "{r}");
@@ -149,12 +149,12 @@ fn a_load_opens_the_file_as_the_format_it_names() {
         "the premise: the library does not carry the format's extension"
     );
     let plugin = load_any(path, PluginFormat::Clap).expect("a CLAP plugin under another name");
-    assert!(matches!(plugin, AnyServed::Clap(_)));
+    assert!(matches!(plugin, AnyServer::Clap(_)));
 }
 
 /// A plugin reads as lost once a call into it panicked, and not before: what
 /// the server loop ends on.
-fn assert_poison_reads_as_lost(mut plugin: AnyServed) {
+fn assert_poison_reads_as_lost(mut plugin: AnyServer) {
     assert!(!plugin.plugin().is_lost());
     plugin.poison();
     assert!(plugin.plugin().is_lost());

@@ -52,10 +52,10 @@ fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
 /// environment.
 fn detached() -> DetachedSession {
     set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-    // Jobs run inline, in the phase that submits them, and land in the next
-    // update's `Collect`.
+    // The executor is polled: a job runs in the `Collect` that polls it, and lands
+    // there.
     Session::builder()
-        .spawn_with(|job| job.run())
+        .executor(tutti_platform::Executor::polled())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds")
@@ -79,8 +79,8 @@ fn add_probe_keyed(s: &mut DetachedSession) -> (u64, tutti_session::Key<tutti_se
 }
 
 /// A virtual clock for the session's phases, and the plugin changes they
-/// reported: a parameter read or a reload is a job on the session's (inline)
-/// spawner, landed in the next frame's collect.
+/// reported: a parameter read or a reload is a job on the session's polled
+/// executor, run and landed in the next frame's collect.
 struct Drive {
     now: Instant,
     told: Vec<&'static str>,
@@ -287,7 +287,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     );
 
     let incoming = PluginClient::new(
-        tutti_plugin::BridgeConfig::at(
+        tutti_plugin::IpcConfig::at(
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),

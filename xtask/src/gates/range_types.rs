@@ -136,6 +136,11 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: a test-local codec fixture, never read from a document",
     ),
     (
+        "crates/tutti-plugin-types/src/widths.rs",
+        "Widths",
+        "permanent: one flag, and both of its values are a width set",
+    ),
+    (
         "crates/tutti-plugin-types/src/format.rs",
         "Uid",
         "permanent: a class id is any sixteen bytes; it has no range, the gate flags only the private field under the derive",
@@ -144,6 +149,11 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "crates/tutti-plugin-types/src/format.rs",
         "FourCc",
         "permanent: the registry accepts any u32 as a component code (`AuComponentType::Unknown` keeps one raw), so no value is invalid and a printable-ASCII check would refuse real components",
+    ),
+    (
+        "crates/tutti-plugin-ipc/src/protocol/envelope.rs",
+        "ReqId",
+        "permanent: a request number is any u64; the host numbers its requests and no value is invalid",
     ),
     (
         "crates/tutti-plugin-types/src/parameters.rs",

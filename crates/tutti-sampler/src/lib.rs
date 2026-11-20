@@ -107,7 +107,7 @@
 //!   app turns on there. With none on, `probe` and `SampleFacts` are absent: no
 //!   header can be read.
 //! - `testing`: `DiskStreamer::manual` and `step`, which run the
-//!   streamer's cycle by hand instead of on its thread, and the `testing` module (a
+//!   streamer's cycle by hand instead of as a future on an executor, and the `testing` module (a
 //!   mock transport and block driver). For tests; a host has no use for it.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -118,7 +118,7 @@
 //!   [`MemorySourceConfig`], [`Loop`] and [`VoiceWindow`].
 //! - [`DiskVoice`]: disk-streamed playback, built from the [`StreamReader`] a
 //!   [`DiskStreamer::open`] answers with.
-//! - [`DiskStreamer`]: owns the streamer thread; a stream it opens is a
+//! - [`DiskStreamer`]: owns the streamer future; a stream it opens is a
 //!   [`Stream`] (the control side: steer it, drop it to end it) and a
 //!   [`StreamReader`] (the voice's).
 //! - [`Voice`], [`VoiceSource`], [`Playback`]: a voice of either tier and its
@@ -216,7 +216,7 @@ pub use voice::{
     VoiceNode, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
     voice_width,
 };
-// The async disk-streaming engine (streamer thread + the `DiskStreamer` handle).
+// The async disk-streaming engine (streamer future + the `DiskStreamer` handle).
 pub(crate) mod streamer;
 
 pub use streamer::{

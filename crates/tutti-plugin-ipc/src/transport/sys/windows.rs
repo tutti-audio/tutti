@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_plugin_ipc_ffi::Connection;
 
 /// Converts a host-chosen socket path into the local-socket name for this
 /// platform.
@@ -117,22 +118,22 @@ impl Watch {
     }
 }
 
-/// The ringing side of a control thread's wait ([`control_bell`]): a flag the
+/// The unparking side of a control thread's wait ([`control_unparker`]): a flag the
 /// wait looks at between its looks at the pipe. Any thread rings it, the audio
 /// thread included: one store.
 #[derive(Clone)]
-pub struct ControlBell {
+pub struct ControlUnparker {
     rung: Arc<AtomicBool>,
 }
 
-impl ControlBell {
+impl ControlUnparker {
     /// Ends the control thread's wait now, or its next one.
-    pub fn ring(&self) {
+    pub fn unpark(&self) {
         self.rung.store(true, Ordering::Release);
     }
 }
 
-/// The waiting side of a control thread's wait ([`control_bell`]): a named pipe
+/// The waiting side of a control thread's wait ([`control_unparker`]): a named pipe
 /// has no `poll`, so it asks the pipe and the flag in turn and naps between
 /// asks ([`back_off`]).
 pub struct ControlWait {
@@ -153,10 +154,10 @@ pub struct Woken {
 /// # Errors
 ///
 /// Never on this platform.
-pub fn control_bell() -> std::io::Result<(ControlBell, ControlWait)> {
+pub fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
     let rung = Arc::new(AtomicBool::new(false));
     Ok((
-        ControlBell {
+        ControlUnparker {
             rung: Arc::clone(&rung),
         },
         ControlWait { rung },
@@ -240,4 +241,9 @@ impl Wakeup {
 
     /// Nothing to put back: peeking leaves no state on the handle.
     pub(super) fn disarm(self, _: &mut ControlStream) {}
+}
+
+/// What a slab is sent over on `stream`: nothing, as its name is in the frame.
+pub(crate) fn connection(_: &ControlStream) -> Connection<'_> {
+    Connection::detached()
 }

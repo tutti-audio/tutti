@@ -10,9 +10,9 @@
 //!
 //! A mapping exists only together with its one [`MappingWriter`] (not `Clone`,
 //! `write` takes `&mut self`), so within this process every store into the data
-//! region is ordered by the borrow checker. That, and the file being made here
-//! (exclusively, at 0600 on unix and in the temp directory's ACL on Windows) and
-//! never resized, is what lets every call in this module be safe.
+//! region is ordered by the borrow checker. That, and the memory being made here
+//! and never resized (sealed against it on Linux, a file in the temp directory's
+//! ACL on Windows), is what lets every call in this module be safe.
 //!
 //! What makes `&SharedMapping` shareable between threads is the data region's
 //! discipline, since `header` hands out `&SlabHeader` (all atomics) and `read`
@@ -36,11 +36,23 @@
 //! or racing peer yields wrong audio, which the recheck then discards, never an
 //! invalid value on this side.
 //!
-//! The backing file's platform is one module, chosen once above: where it lives,
-//! how it is opened, and what keeps it from outliving its last mapping.
+//! A slab is made with [`MappingWriter::create`], which returns the
+//! [`SlabHandle`] the peer opens it with; no caller names, spells or builds
+//! one. On unix the handle is a descriptor, sent over the control socket
+//! ([`SlabHandle::send`], [`SlabHandle::receive`]) beside the frame that carries
+//! its [`SlabWire`]; the memory has no name anywhere. On Windows the wire form is
+//! the name of a temp file.
+//!
+//! The backing's platform is one module, chosen once below: what the memory is,
+//! how it travels, and what keeps it from outliving its last mapping.
 
-#[cfg(unix)]
-#[path = "mapping/unix.rs"]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+compile_error!("the audio slab is supported on Linux, macOS and Windows only");
+#[cfg(target_os = "linux")]
+#[path = "mapping/linux.rs"]
+mod platform;
+#[cfg(target_os = "macos")]
+#[path = "mapping/macos.rs"]
 mod platform;
 #[cfg(windows)]
 #[path = "mapping/windows.rs"]
@@ -48,7 +60,8 @@ mod platform;
 
 use crate::SlabError;
 use crate::header::{SLAB_HEADER_BYTES, SlabHeader};
-use memmap2::MmapRaw;
+use memmap2::{MmapOptions, MmapRaw};
+pub use platform::{Connection, SlabWire};
 use std::fs::File;
 use std::sync::Arc;
 
@@ -80,61 +93,97 @@ pub struct MappingWriter {
     mapping: Arc<SharedMapping>,
 }
 
-/// Whether [`platform::open_file`] creates the backing file or opens the peer's.
-enum Open {
-    Create,
-    Existing,
-}
+/// What a peer needs to open a slab made by [`MappingWriter::create`]: handed
+/// out by `create`, sent to the peer ([`send`](Self::send), with its
+/// [`wire`](Self::wire) in the frame) and taken by [`MappingWriter::open`].
+///
+/// Opaque: its contents are private to this module, so nothing outside can
+/// read or construct one. On unix it is the memory's descriptor, which only a
+/// received one or a made one can be; it does not serialize, so it cannot be
+/// written into a frame in place of a send.
+#[derive(Debug)]
+pub struct SlabHandle(platform::Slab);
 
-impl MappingWriter {
-    /// Creates the slab named `name`, `size` bytes long, maps it and stamps its
-    /// header, before any peer can know the name.
-    ///
-    /// The file is created exclusively, at 0600 on unix (the temp directory's
-    /// ACL on Windows): a name that already exists (a symlink included) is an
-    /// error, never a file to truncate, since another process could hold that
-    /// file mapped, or have planted it. The file ends
-    /// with the creator's mapping: on unix the creator's drop unlinks it, and on
-    /// Windows it is opened delete-on-close and the creator keeps that handle,
-    /// so it is deleted when the last handle and view of it close.
+impl SlabHandle {
+    /// What goes in the frame that announces this slab.
+    #[must_use]
+    pub fn wire(&self) -> SlabWire {
+        platform::wire(&self.0)
+    }
+
+    /// Sends the slab to the peer over `conn`, immediately after the frame
+    /// that carries its [`wire`](Self::wire) has been written.
     ///
     /// # Errors
     ///
-    /// [`SlabError::File`] if the file exists or cannot be created, sized or
+    /// The OS error of the send, a send timeout included: the connection is
+    /// then mid-message and cannot go on.
+    pub fn send(&self, conn: Connection<'_>) -> std::io::Result<()> {
+        platform::send(conn, &self.0)
+    }
+
+    /// Takes the slab the frame carrying `wire` announced, over `conn`, right
+    /// after that frame was read.
+    ///
+    /// # Errors
+    ///
+    /// [`SlabError::NoDescriptor`], [`SlabError::ExtraDescriptors`] or
+    /// [`SlabError::Transfer`] if what arrived is not exactly one descriptor.
+    pub fn receive(conn: Connection<'_>, wire: SlabWire) -> Result<Self, SlabError> {
+        platform::receive(conn, wire).map(Self)
+    }
+}
+
+impl MappingWriter {
+    /// Creates a slab `size` bytes long, maps it and stamps its header, before
+    /// any peer holds its [`SlabHandle`], which is returned beside the writer.
+    ///
+    /// On Linux the memory is a sealed `memfd`: it has no name and neither end
+    /// can shrink or grow it. On macOS it is a POSIX shared memory object,
+    /// unlinked as soon as it is sized, and sealed by nothing. On Windows it is
+    /// a file in the temp directory, created exclusively and opened
+    /// delete-on-close; the creator keeps that handle, so it is deleted when
+    /// the last handle and view of it close.
+    ///
+    /// # Errors
+    ///
+    /// [`SlabError::Name`] if the random source fails, and
+    /// [`SlabError::File`] if the memory cannot be created, sized, sealed or
     /// mapped.
     ///
     /// # Panics
     ///
     /// If `size` is smaller than [`SLAB_HEADER_BYTES`]: the caller sizes the
     /// slab from a layout that always includes the header.
-    pub fn create(name: &str, size: usize) -> Result<Self, SlabError> {
-        let (file, backing) = platform::open_file(name, size, Open::Create)?;
-        let writer = Self::map(file, backing)?;
-        // Stamp before anyone can open it: the peer is told the slab's name only
+    pub fn create(size: usize) -> Result<(Self, SlabHandle), SlabError> {
+        let (file, backing, slab) = platform::create(size)?;
+        let writer = Self::map(file, backing, size)?;
+        // Stamp before anyone can open it: the peer gets the handle only
         // after this returns, and `initialize` releases the magic last so an
         // opener that sees the magic sees a fully written header.
         writer.mapping.header().initialize();
-        Ok(writer)
+        Ok((writer, SlabHandle(slab)))
     }
 
-    /// Opens the peer's slab named `name`, checking that it is at least `size`
-    /// bytes and a tutti slab of this build's header.
-    ///
-    /// On unix a symlink at the name is refused (`O_NOFOLLOW`).
+    /// Opens the peer's slab that `handle` is, checking that it is exactly
+    /// `size` bytes (at least, on macOS and Windows), sealed against resizing
+    /// where the platform has seals, and a tutti slab of this build's header.
     ///
     /// # Errors
     ///
-    /// [`SlabError::File`] if it cannot be opened or mapped,
-    /// [`SlabError::Short`] if it is shorter than `size`, and
-    /// [`SlabError::BadMagic`], [`SlabError::BadVersion`] or
+    /// [`SlabError::File`] if it cannot be mapped, [`SlabError::NotSealed`] if
+    /// the memory is not a memfd sealed as `create` seals it (Linux),
+    /// [`SlabError::Short`] or [`SlabError::Long`] if its length is not
+    /// `size`, and [`SlabError::BadMagic`], [`SlabError::BadVersion`] or
     /// [`SlabError::BadSlots`] if it is not a tutti slab of this header version
     /// and ring depth.
     ///
     /// # Panics
     ///
     /// As for [`create`](Self::create).
-    pub fn open(name: &str, size: usize) -> Result<Self, SlabError> {
-        let (file, backing) = platform::open_file(name, size, Open::Existing)?;
+    pub fn open(handle: &SlabHandle, size: usize) -> Result<Self, SlabError> {
+        let (file, backing) = platform::open(&handle.0)?;
+        platform::verify(&file, size)?;
         let actual = file
             .metadata()
             .map_err(|source| SlabError::File {
@@ -150,19 +199,25 @@ impl MappingWriter {
                 expected: size,
             });
         }
-        let writer = Self::map(file, backing)?;
+        let writer = Self::map(file, backing, size)?;
         writer.mapping.header().validate()?;
         Ok(writer)
     }
 
-    fn map(file: File, backing: platform::Backing) -> Result<Self, SlabError> {
-        // `open_file` is the only code that makes or opens a slab file: it
-        // creates one exclusively and sizes it before this map, and opens the
-        // peer's without `truncate` and never sizes it. A process with write
-        // access to the file could still shrink it; that is a fault of a
-        // trusted peer, as is scribbling on it (the module's argument).
-        let map =
-            MmapRaw::map_raw(&file).map_err(|source| SlabError::File { op: "map", source })?;
+    fn map(file: File, backing: platform::Backing, size: usize) -> Result<Self, SlabError> {
+        // The memory is sized once, in `create`, before any peer holds it. On
+        // Linux a received descriptor is checked sealed against shrinking
+        // before it is mapped (`verify`), so no process can fault this mapping
+        // by truncating the memory. Where the platform has no seals, shrinking
+        // is a fault of the peer holding the descriptor, as is scribbling on it
+        // (the module's argument).
+        // Exactly the layout's `size`, not the object's length: where the platform
+        // rounds an object up (macOS, to a page) the mapping still ends where the
+        // layout does.
+        let map = MmapOptions::new()
+            .len(size)
+            .map_raw(&file)
+            .map_err(|source| SlabError::File { op: "map", source })?;
         Ok(Self {
             mapping: Arc::new(SharedMapping::new(map, backing)),
         })
@@ -282,11 +337,6 @@ impl SharedMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::header::SLAB_MAGIC;
-
-    fn name(tag: &str) -> String {
-        format!("ffi_{tag}_{}", std::process::id())
-    }
 
     /// The mapping's copies refuse the header's bytes: the header is only ever
     /// stored through its atomics, while `header()` hands out a shared
@@ -294,122 +344,37 @@ mod tests {
     #[test]
     #[should_panic(expected = "outside the data region")]
     fn a_copy_into_the_header_panics() {
-        let n = name("hdr");
-        let mut w = MappingWriter::create(&n, SLAB_HEADER_BYTES + 64).unwrap();
+        let (mut w, _handle) = MappingWriter::create(SLAB_HEADER_BYTES + 64).unwrap();
         w.write(0, &[0u8; 8]);
     }
 
-    /// The magic is the first thing in the mapping: the opening side keys on it
-    /// before trusting a single byte, so `repr(C)` and its field order are
-    /// load-bearing. Read from the file, not through the header type.
-    #[test]
-    fn the_magic_sits_at_offset_zero() {
-        let n = name("magic");
-        let _w = MappingWriter::create(&n, SLAB_HEADER_BYTES + 64).unwrap();
-        let bytes = std::fs::read(platform::path(&n)).unwrap();
-        assert_eq!(
-            u64::from_le_bytes(bytes[..8].try_into().unwrap()),
-            SLAB_MAGIC
-        );
-    }
-
-    /// An opener reads back what the creator wrote, and refuses a file shorter
+    /// An opener reads back what the creator wrote, and refuses a slab shorter
     /// than the size it asked for.
     #[test]
-    fn open_sees_the_creators_bytes_and_refuses_a_short_file() {
-        let n = name("open");
+    fn open_sees_the_creators_bytes_and_refuses_a_short_slab() {
         let size = SLAB_HEADER_BYTES + 16;
-        let mut w = MappingWriter::create(&n, size).unwrap();
+        let (mut w, handle) = MappingWriter::create(size).unwrap();
         w.write(SLAB_HEADER_BYTES, &[7u8; 16]);
-        let peer = MappingWriter::open(&n, size).unwrap();
+        let peer = MappingWriter::open(&handle, size).unwrap();
         let mut back = [0u8; 16];
         peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
         assert_eq!(back, [7u8; 16]);
-        let err = MappingWriter::open(&n, size + 1).expect_err("a short slab");
+        // More than the slab holds by far: past a page the platform may round it up to.
+        let err = MappingWriter::open(&handle, size + (1 << 20)).expect_err("a short slab");
         assert!(matches!(err, SlabError::Short { .. }), "got {err}");
     }
 
-    /// A symlink planted at the name is refused by both ends: `create` does
-    /// not follow it into the file it names, and `open` (`O_NOFOLLOW`) does not
-    /// map whatever it points at.
-    #[cfg(unix)]
+    /// Two slabs made by one process are two memories: a created slab never
+    /// meets another's bytes.
     #[test]
-    fn a_symlink_at_the_name_is_refused() {
-        let size = SLAB_HEADER_BYTES + 64;
-        let real = name("real");
-        let _owner = MappingWriter::create(&real, size).unwrap();
-        let link = name("link");
-        std::os::unix::fs::symlink(platform::path(&real), platform::path(&link)).unwrap();
-        let opened = MappingWriter::open(&link, size);
-        let created = MappingWriter::create(&link, size);
-        let _ = std::fs::remove_file(platform::path(&link));
-        assert!(opened.is_err(), "open followed a link");
-        assert!(created.is_err(), "create followed a link");
-    }
-
-    /// Opening a file that is not a slab must fail on the magic, not produce a
-    /// mapping full of someone else's bytes read as audio.
-    #[test]
-    fn opening_a_foreign_file_is_refused() {
-        let size = SLAB_HEADER_BYTES + 64;
-        let n = name("foreign");
-        std::fs::write(platform::path(&n), vec![0xABu8; size]).unwrap();
-        let err = MappingWriter::open(&n, size).expect_err("a foreign file must not open");
-        std::fs::remove_file(platform::path(&n)).unwrap();
-        assert!(
-            matches!(err, SlabError::BadMagic { found, expected: SLAB_MAGIC } if found == 0xABAB_ABAB_ABAB_ABAB),
-            "expected a magic failure, got: {err}"
-        );
-    }
-
-    /// No openable slab outlives the last of its mappings: after the owner and
-    /// its peer drop, the name opens no more (unlinked on unix, deleted or
-    /// delete-pending on Windows). CI runs this on unix only.
-    #[test]
-    fn nothing_outlives_the_last_mapping() {
-        let size = SLAB_HEADER_BYTES + 64;
-        let n = name("gone");
-        let owner = MappingWriter::create(&n, size).unwrap();
-        let peer = MappingWriter::open(&n, size).unwrap();
-        drop(owner);
-        drop(peer);
-        assert!(
-            MappingWriter::open(&n, size).is_err(),
-            "the slab opens after its mappings are gone"
-        );
-    }
-
-    /// The owner dropping first leaves the peer's mapping working, and the
-    /// peer's drop is what ends the slab. CI runs this on unix only.
-    #[test]
-    fn the_peer_outlives_the_owner_and_ends_the_slab() {
+    fn two_creates_make_two_slabs() {
         let size = SLAB_HEADER_BYTES + 16;
-        let n = name("peer_last");
-        let owner = MappingWriter::create(&n, size).unwrap();
-        let mut peer = MappingWriter::open(&n, size).unwrap();
-        drop(owner);
-        peer.write(SLAB_HEADER_BYTES, &[9u8; 16]);
+        let (mut a, _ha) = MappingWriter::create(size).unwrap();
+        let (_b, hb) = MappingWriter::create(size).unwrap();
+        a.write(SLAB_HEADER_BYTES, &[1u8; 16]);
+        let peer = MappingWriter::open(&hb, size).unwrap();
         let mut back = [0u8; 16];
         peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
-        assert_eq!(back, [9u8; 16]);
-        drop(peer);
-        assert!(
-            MappingWriter::open(&n, size).is_err(),
-            "the slab opens after its mappings are gone"
-        );
-    }
-
-    /// A creation that fails after the file exists leaves no file: a slab
-    /// shorter than its header trips the mapping's assertion, and no file is
-    /// left once the panic has unwound.
-    #[test]
-    fn a_failed_create_leaves_no_file() {
-        let n = name("failed");
-        let made = std::panic::catch_unwind(|| MappingWriter::create(&n, 1));
-        assert!(made.is_err(), "a slab shorter than its header was made");
-        assert!(
-            !platform::path(&n).exists(),
-            "the failed create left its file"
-        );
+        assert_eq!(back, [0u8; 16], "the second slab holds the first's bytes");
     }
 }

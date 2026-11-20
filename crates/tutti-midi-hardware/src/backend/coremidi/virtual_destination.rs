@@ -9,10 +9,7 @@
 //!
 //! [`UmpVirtualDestination`] hands every received UMP message to a callback.
 //! The endpoint and its receive block are `tutti-coremidi-ffi`'s
-//! (`UmpDestination`): the safe `coremidi` wrapper's
-//! `virtual_destination_with_protocol` reads the null reference constant
-//! CoreMIDI passes a virtual destination as a reference, and so aborts on the
-//! first packet. This module names the endpoint and puts its errors in this
+//! (`UmpDestination`); this module names the endpoint and puts its errors in this
 //! crate's.
 //!
 //! CoreMIDI delivers a packet as a *packed word stream*: several concatenated
@@ -81,7 +78,7 @@ impl UmpVirtualDestination {
         }
         Self::stamped(
             spec.name().as_str(),
-            spec.protocol(),
+            spec.protocol,
             move |event, arrived| {
                 // A full inlet counts the drop itself; a log line would run on
                 // CoreMIDI's thread.
@@ -115,13 +112,14 @@ impl UmpVirtualDestination {
         F: FnMut(Ump, tutti_platform::Instant) + Send + 'static,
     {
         // The device watch's client starts before this endpoint's (`hub_first`).
-        super::hub_first();
-        let destination = UmpDestination::new(name, protocol_of(protocol), move |time, event| {
-            on_event(
-                event,
-                super::host_time::Pairing::now().instant_of_stamp(time),
-            );
-        })?;
+        let client = super::hub_first()?;
+        let destination =
+            UmpDestination::new(client, name, protocol_of(protocol), move |time, event| {
+                on_event(
+                    event,
+                    super::host_time::Pairing::now().instant_of_stamp(time),
+                );
+            })?;
 
         debug!(name, ?protocol, "Created virtual MIDI destination");
         Ok(Self {

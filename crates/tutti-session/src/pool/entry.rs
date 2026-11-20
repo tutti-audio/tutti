@@ -3,12 +3,11 @@
 use std::any::{Any, TypeId};
 use std::fmt;
 use std::marker::PhantomData;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tutti_buffers::Float;
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Asset, MainThreadMarker};
 
 use crate::pool::open::OpenCx;
 use crate::{PeerError, Presence, WorkerError};
@@ -51,14 +50,14 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// The job that loads the entry, described and not started.
     fn load(&self) -> Load<Self::Loaded, S>;
 
-    /// The file the load reads, for a kind whose value comes from one.
+    /// The asset the load reads, for a kind whose value comes from one.
     ///
-    /// The worker that runs the load takes the file's stamp (its length and
-    /// modification time) before the load reads it, and
+    /// The worker that runs the load takes the asset's [`Identity`](tutti_platform::Identity) (a file's
+    /// path and stamp) before the load reads it, and
     /// [`Session::refresh_pool`](crate::Session::refresh_pool) compares it
-    /// with the file's now and loads the entry again when they differ. The
-    /// pool's diff never reads the file. The default is a kind with no file.
-    fn file(&self) -> Option<&Path> {
+    /// with the asset's now and loads the entry again when they differ. An
+    /// asset of bytes never differs. The default is a kind with no asset.
+    fn asset(&self) -> Option<Asset> {
         None
     }
 
@@ -110,7 +109,7 @@ pub enum Retention<T> {
 /// [`LoadError`], and the thread each runs on.
 ///
 /// - [`on_worker`](Self::on_worker): one stage on a thread of the session's
-///   spawner, which finishes the load there.
+///   executor, which finishes the load there.
 /// - [`on_worker_then_main`](Self::on_worker_then_main): a worker stage whose
 ///   output goes by value to a stage on the main thread, which finishes it.
 /// - [`on_session`](Self::on_session): one stage on the session's own thread,
@@ -245,7 +244,7 @@ impl Staged {
 
 impl<T: Send + 'static, S: Float> Load<T, S> {
     /// A load that finishes in one stage: `work`, on a thread of the session's
-    /// spawner.
+    /// executor.
     pub fn on_worker(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
         Self {
             step: Step::Worker(Box::new(move || {
@@ -256,7 +255,7 @@ impl<T: Send + 'static, S: Float> Load<T, S> {
     }
 
     /// A load of a worker stage and then a main-thread stage: `work` runs on a
-    /// thread of the session's spawner, and its output `W` goes by value to
+    /// thread of the session's executor, and its output `W` goes by value to
     /// `main`, which runs on the main thread in an
     /// [`update`](crate::Session::update) on it and makes the loaded value.
     ///
@@ -400,11 +399,12 @@ pub enum LoadError {
     #[cfg(all(feature = "sampler", codec))]
     #[error(transparent)]
     Probe(Arc<tutti_sampler::ProbeError>),
-    /// A file declared streamed cannot be streamed by this build: its container
-    /// reports no length, its decoder cannot seek, or no codec covers it.
+    /// An asset declared streamed cannot be streamed by this build: its
+    /// container reports no length, its decoder cannot seek, or no codec covers
+    /// it. Carries the asset's [`name`](Asset::name).
     #[cfg(feature = "sampler")]
-    #[error("{} cannot be streamed", .0.display())]
-    NotStreamable(std::path::PathBuf),
+    #[error("{0} cannot be streamed")]
+    NotStreamable(String),
     /// A SoundFont could not be opened.
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
@@ -416,7 +416,7 @@ pub enum LoadError {
     /// A plugin did not open.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
-    Plugin(Arc<tutti_plugin_types::BridgeError>),
+    Plugin(Arc<tutti_plugin_types::IpcError>),
     /// The plugin's id names no plugin of the catalog, or several.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
@@ -435,7 +435,7 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error("the node could not swap to the landed plugin: {0}")]
     PluginSwap(Arc<crate::CrossfadeRefused>),
-    /// The load's job did not finish: it panicked, or the spawner dropped it.
+    /// The load's job did not finish: it panicked, or the executor dropped it.
     #[error(transparent)]
     Job(#[from] WorkerError),
 }
@@ -473,8 +473,8 @@ pub(crate) struct Item<K, S: Float> {
     pub(crate) reload: Reload<S>,
     pub(crate) lost: fn(&Value) -> bool,
     pub(crate) retain: fn(Value) -> Option<Value>,
-    /// The file the load reads, as the entry declared it.
-    pub(crate) file: Option<PathBuf>,
+    /// The asset the load reads, as the entry declared it.
+    pub(crate) asset: Option<Asset>,
     pub(crate) share: Option<Cloner>,
 }
 
@@ -666,7 +666,7 @@ impl<K, S: Float> Item<K, S> {
             load: entry.load().erase(),
             lost: lost::<E, S>,
             retain: retain::<E, S>,
-            file: entry.file().map(Path::to_path_buf),
+            asset: entry.asset(),
             share,
             reload: Box::new(move || entry.load().erase()),
         }

@@ -1,5 +1,7 @@
 //! Structures and types for interfacing with the VST 2.4 API.
 
+use crate::primitive_enum::primitive_enum;
+use bitflags::bitflags;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
 use std::ptr::NonNull;
@@ -17,21 +19,31 @@ pub enum GetChunkError {
     /// no buffer to copy however much it claims to have written.
     #[error("plugin reported {0} bytes of chunk data but left the pointer null")]
     NullBuffer(isize),
+    /// The plugin reported more chunk data than a saved state may hold
+    /// ([`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES)), which no plugin
+    /// writes: the length is not believed, and nothing is read.
+    #[error("plugin reported {0} bytes of chunk data, past the most a state may hold")]
+    TooLarge(isize),
 }
 
 use self::consts::*;
 /// Constant values
-#[allow(missing_docs)] // For obvious constants
-pub mod consts {
-
+pub(crate) mod consts {
+    /// `kVstMaxProgNameLen`: the room for a preset name, with its NUL.
     pub const MAX_PRESET_NAME_LEN: usize = 24;
+    /// The room for a parameter's name, label or display text, with its NUL: wider than the
+    /// SDK's `kVstMaxParamStrLen` (8), which plugins routinely exceed.
     pub const MAX_PARAM_STR_LEN: usize = 32;
+    /// `kVstMaxLabelLen`: the room for a label, with its NUL.
     pub const MAX_LABEL: usize = 64;
+    /// `kVstMaxShortLabelLen`: the room for a short label, with its NUL.
     pub const MAX_SHORT_LABEL: usize = 8;
     /// `kVstMaxCategLabelLen` (`aeffectx.h`): the width of
     /// `VstParameterProperties::categoryLabel`.
     pub const MAX_CATEGORY_LABEL: usize = 24;
+    /// `kVstMaxProductStrLen`: the room for a product string, with its NUL.
     pub const MAX_PRODUCT_STR_LEN: usize = 64;
+    /// `kVstMaxVendorStrLen`: the room for a vendor string, with its NUL.
     pub const MAX_VENDOR_STR_LEN: usize = 64;
 
     /// Buffer handed to `effGetEffectName` (45).
@@ -54,7 +66,7 @@ pub mod consts {
 /// undefined behaviour (it agrees with the C one only by coincidence on x86-64).
 ///
 /// ```compile_fail
-/// # use tutti_vst2_ffi::api::{AEffect, HostCallbackProc, PluginMain};
+/// # use tutti_vst2_ffi::{AEffect, HostCallbackProc, PluginMain};
 /// fn rust_abi_main(_: HostCallbackProc) -> *mut AEffect {
 ///     std::ptr::null_mut()
 /// }
@@ -157,7 +169,7 @@ pub struct AEffect {
     /// Bitmask made of values from `api::PluginFlags`.
     ///
     /// ```no_run
-    /// use tutti_vst2_ffi::api::PluginFlags;
+    /// use tutti_vst2_ffi::PluginFlags;
     /// let flags = PluginFlags::CAN_REPLACING | PluginFlags::CAN_DOUBLE_REPLACING;
     /// // ...
     /// ```
@@ -483,16 +495,19 @@ impl SpeakerArrangementType {
 }
 
 /// Used to specify whether functionality is supported.
-#[allow(missing_docs)]
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum Supported {
+    /// `1`: supported.
     Yes,
+    /// `0`: the plugin or host does not know.
     Maybe,
+    /// `-1`: not supported.
     No,
+    /// Any other answer, verbatim.
     Custom(isize),
 }
 
-impl Supported {
+impl From<isize> for Supported {
     /// Interpret an `effCanDo` return value.
     ///
     /// Total by construction. The VST2.4 SDK only *documents* `1` (yes), `0`
@@ -504,7 +519,7 @@ impl Supported {
     /// case) rather than discarded: a host must not panic on a value a plugin
     /// is free to invent, and folding an unknown answer into `Yes` would
     /// misclassify the plugin.
-    pub fn from(val: isize) -> Supported {
+    fn from(val: isize) -> Supported {
         use self::Supported::*;
 
         match val {
@@ -595,19 +610,19 @@ pub struct Events {
 /// Safe code cannot construct a view, nor read a list through the raw struct:
 ///
 /// ```compile_fail,E0624
-/// # use tutti_vst2_ffi::api::{Events, PluginEvents};
+/// # use tutti_vst2_ffi::{Events, PluginEvents};
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
 /// let _ = unsafe { PluginEvents::new(std::ptr::NonNull::from(&raw)) };
 /// ```
 ///
 /// ```compile_fail,E0451
-/// # use tutti_vst2_ffi::api::{Events, PluginEvents};
+/// # use tutti_vst2_ffi::{Events, PluginEvents};
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
 /// let _ = PluginEvents { events: std::ptr::NonNull::from(&raw), list: std::marker::PhantomData };
 /// ```
 ///
 /// ```compile_fail,E0599
-/// # use tutti_vst2_ffi::api::Events;
+/// # use tutti_vst2_ffi::Events;
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
 /// let _ = raw.plugin_events();
 /// ```
@@ -636,12 +651,12 @@ pub enum PluginEvent<'a> {
 /// pointer):
 ///
 /// ```compile_fail,E0451
-/// # use tutti_vst2_ffi::api::SysExMessage;
+/// # use tutti_vst2_ffi::SysExMessage;
 /// let _ = SysExMessage { delta_frames: 0, payload: &[] };
 /// ```
 ///
 /// ```compile_fail,E0599
-/// # use tutti_vst2_ffi::api::SysExEvent;
+/// # use tutti_vst2_ffi::SysExEvent;
 /// fn go(e: &SysExEvent) { let _ = e.payload(); }
 /// ```
 #[derive(Debug)]
@@ -765,72 +780,6 @@ impl<'a> PluginEvents<'a> {
     }
 }
 
-impl Events {
-    #[inline]
-    pub(crate) fn events_raw(&self) -> &[*const Event] {
-        use std::slice;
-        // A negative count is no events.
-        let len = usize::try_from(self.num_events).unwrap_or(0);
-        // SAFETY: VST2 ABI: `events` is a variable-length array and the host allocates
-        // `num_events` contiguous pointers from `events[0]`; `*mut Event` and
-        // `*const Event` share a layout. The count is the sender's word and is not
-        // otherwise checked (the allocation behind a `&Events` cannot be measured).
-        unsafe { slice::from_raw_parts(&self.events[0] as *const *mut _ as *const *const _, len) }
-    }
-
-    #[inline]
-    pub(crate) fn events_raw_mut(&mut self) -> &mut [*const SysExEvent] {
-        use std::slice;
-        // SAFETY: as in `events_raw`: the allocation holds `num_events` contiguous
-        // pointers from `events[0]` (`SendEventBuffer` allocates exactly this), and
-        // `&mut self` gives exclusive access. A negative count is no events.
-        unsafe {
-            slice::from_raw_parts_mut(
-                &mut self.events[0] as *mut *mut _ as *mut *const _,
-                usize::try_from(self.num_events).unwrap_or(0),
-            )
-        }
-    }
-
-    /// Use this in your impl of process_events() to process the incoming midi events.
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use tutti_vst2_ffi::plugin::{Info, Plugin, HostCallback};
-    /// # use tutti_vst2_ffi::buffer::{AudioBuffer, SendEventBuffer};
-    /// # use tutti_vst2_ffi::host::Host;
-    /// # use tutti_vst2_ffi::api;
-    /// # use tutti_vst2_ffi::event::{Event, MidiEvent};
-    /// # struct ExamplePlugin { host: HostCallback, send_buf: SendEventBuffer }
-    /// # impl Plugin for ExamplePlugin {
-    /// #     fn new(host: HostCallback) -> Self { Self { host, send_buf: Default::default() } }
-    /// #
-    /// #     fn get_info(&self) -> Info { Default::default() }
-    /// #
-    /// fn process_events(&mut self, events: &api::Events) {
-    ///     for e in events.events() {
-    ///         match e {
-    ///             Event::Midi(MidiEvent { data, .. }) => {
-    ///                 // ...
-    ///             }
-    ///             _ => ()
-    ///         }
-    ///     }
-    /// }
-    /// # }
-    /// ```
-    #[inline]
-    #[allow(clippy::needless_lifetimes)]
-    pub fn events<'a>(&'a self) -> impl Iterator<Item = crate::event::Event<'a>> {
-        self.events_raw()
-            .iter()
-            .filter(|ptr| !ptr.is_null())
-            // SAFETY: VST2 ABI: each non-null entry of the host's event array points at a
-            // valid event of the type its `event_type` names.
-            .map(|ptr| unsafe { crate::event::Event::from_raw_event(*ptr) })
-    }
-}
-
 /// The type of event that has occurred. See `api::Event.event_type`.
 #[repr(i32)]
 #[derive(Copy, Clone, Debug)]
@@ -861,7 +810,7 @@ pub enum EventType {
 /// via `mem::transmute()` while leveraging pointers, e.g.
 ///
 /// ```
-/// # use tutti_vst2_ffi::api::{Event, EventType, MidiEvent, SysExEvent};
+/// # use tutti_vst2_ffi::{Event, EventType, MidiEvent, SysExEvent};
 /// # let mut event: *mut Event = &mut unsafe { std::mem::zeroed() };
 /// // let event: *const Event = ...;
 /// let midi_event: &MidiEvent = unsafe { std::mem::transmute(event) };
@@ -874,7 +823,7 @@ pub struct Event {
     /// # Example
     ///
     /// ```
-    /// # use tutti_vst2_ffi::api::{Event, EventType, MidiEvent, SysExEvent};
+    /// # use tutti_vst2_ffi::{Event, EventType, MidiEvent, SysExEvent};
     /// #
     /// # // Valid for test
     /// # let mut event: *mut Event = &mut unsafe { std::mem::zeroed() };
@@ -1235,112 +1184,17 @@ bitflags! {
 
 #[cfg(test)]
 mod tests {
-    use super::super::event;
     use super::*;
     use std::mem;
-
-    // This container is used because we have to store somewhere the events
-    // that are pointed to by raw pointers in the events object. We heap allocate
-    // the event so the pointer in events stays consistent when the container is moved.
-    pub struct EventContainer {
-        stored_event: Box<Event>,
-        pub events: Events,
-    }
-
-    // A convenience method which creates an api::Events object representing a midi event.
-    // This represents code that might be found in a VST host using this API.
-    fn encode_midi_message_as_events(message: [u8; 3]) -> EventContainer {
-        let midi_event: MidiEvent = MidiEvent {
-            event_type: EventType::Midi,
-            byte_size: mem::size_of::<MidiEvent>() as i32,
-            delta_frames: 0,
-            flags: 0,
-            note_length: 0,
-            note_offset: 0,
-            midi_data: [message[0], message[1], message[2]],
-            _midi_reserved: 0,
-            detune: 0,
-            note_off_velocity: 0,
-            _reserved1: 0,
-            _reserved2: 0,
-        };
-        // SAFETY: `MidiEvent` and `Event` are both 32-byte `#[repr(C)]` structs (sizes
-        // are checked by `transmute`) with the same leading fields, and any bit pattern
-        // of `MidiEvent`'s integer fields is valid for `Event`'s byte array.
-        let mut event: Event = unsafe { std::mem::transmute(midi_event) };
-        event.event_type = EventType::Midi;
-
-        let events = Events {
-            num_events: 1,
-            _reserved: 0,
-            events: [&mut event, &mut event], // Second one is a dummy
-        };
-        let mut ec = EventContainer {
-            stored_event: Box::new(event),
-            events,
-        };
-        ec.events.events[0] = &mut *(ec.stored_event); // Overwrite ptrs, since we moved the event into ec
-        ec
-    }
-
-    #[test]
-    fn encode_and_decode_gives_back_original_message() {
-        let message: [u8; 3] = [35, 16, 22];
-        let encoded = encode_midi_message_as_events(message);
-        assert_eq!(encoded.events.num_events, 1);
-        assert_eq!(encoded.events.events.len(), 2);
-        let e_vec: Vec<event::Event> = encoded.events.events().collect();
-        assert_eq!(e_vec.len(), 1);
-
-        match e_vec[0] {
-            event::Event::Midi(event::MidiEvent { data, .. }) => {
-                assert_eq!(data, message);
-            }
-            _ => {
-                panic!("Not a midi event!");
-            }
-        };
-    }
-
-    // We check here that calling events() on an api::Events object
-    // does not mutate the underlying events.
-    #[test]
-    fn message_survives_calling_events() {
-        let message: [u8; 3] = [35, 16, 22];
-        let encoded = encode_midi_message_as_events(message);
-
-        for e in encoded.events.events() {
-            match e {
-                event::Event::Midi(event::MidiEvent { data, .. }) => {
-                    assert_eq!(data, message);
-                }
-                _ => {
-                    panic!("Not a midi event!");
-                }
-            }
-        }
-
-        for e in encoded.events.events() {
-            match e {
-                event::Event::Midi(event::MidiEvent { data, .. }) => {
-                    assert_eq!(data, message);
-                }
-                _ => {
-                    panic!("Not a midi event!"); // FAILS here!
-                }
-            }
-        }
-    }
 
     /// Pin the wire size of every struct the *plugin* fills in for us.
     ///
     /// These are host-allocated buffers a plugin writes through a raw pointer,
     /// so the size and field order are the contract. The numbers are the
     /// header's: `sizeof`/`offsetof` of the `aeffectx.h` structs compiled by a C
-    /// compiler, never the Rust structs measuring themselves (that is how
-    /// `categoryLabel` sat at 8 bytes instead of `kVstMaxCategLabelLen` = 24,
-    /// and a plugin wrote 16 bytes past the host's buffer). A field inserted,
-    /// widened or reordered changes one of them
+    /// compiler, never the Rust structs measuring themselves (a `categoryLabel` of 8
+    /// bytes instead of `kVstMaxCategLabelLen` = 24 has a plugin write 16 bytes past the
+    /// host's buffer). A field inserted, widened or reordered changes one of them
     /// and the plugin then writes past, or into the middle of, what we read.
     /// Nothing else in the process can detect that: the dispatch still returns
     /// 1 and the garbage looks like data.
@@ -1423,30 +1277,5 @@ mod tests {
         assert_eq!(ParameterFlags::SUPPORTS_DISPLAY_CATEGORY.bits(), 1 << 5);
         assert_eq!(ParameterFlags::CAN_RAMP.bits(), 1 << 6);
         assert_eq!(MidiProgramFlags::IS_OMNI.bits(), 1);
-    }
-
-    /// A negative event count is no events, not `usize::MAX` of them.
-    #[test]
-    fn a_negative_event_count_is_empty() {
-        let events = Events {
-            num_events: -3,
-            _reserved: 0,
-            events: [std::ptr::null_mut(); 2],
-        };
-        assert_eq!(events.events().count(), 0);
-        let mut events = events;
-        events.num_events = i32::MIN;
-        assert_eq!(events.events().count(), 0);
-    }
-
-    /// A null entry in the event array is skipped, not read.
-    #[test]
-    fn a_null_event_entry_is_skipped() {
-        let events = Events {
-            num_events: 2,
-            _reserved: 0,
-            events: [std::ptr::null_mut(); 2],
-        };
-        assert_eq!(events.events().count(), 0);
     }
 }

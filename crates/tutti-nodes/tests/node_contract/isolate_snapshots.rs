@@ -18,17 +18,19 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
-    AutoPanConfig, AutoPanNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
-    CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
-    DynamicEqConfig, DynamicEqNode, EqBandNode, GateControls, GateNode, InterpolationMode,
-    KeySource, LadderFilterNode, LadderType, LfoNode, LfoShape, LimiterControls, LimiterNode,
-    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind,
-    Stages, SvfControls, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode,
+    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayControls, DelayLayout,
+    DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandNode, GateConfig,
+    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, LfoNode,
+    LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls,
+    PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType,
+    TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    EnvelopeFilterConfig, EnvelopeFilterNode, TransientShaperConfig, TransientShaperNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TransientShaperConfig,
+    TransientShaperNode,
 };
 use tutti_nodes::{
     PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
@@ -42,18 +44,18 @@ use tutti_units::{
 #[test]
 fn compressor() {
     IsolateRow::new("CompressorNode (stereo)", || {
-        CompressorNode::<f32>::new(
-            BusTopology::STEREO,
-            KeySource::Sidechain,
-            CompressorControls {
-                threshold: Db::new(-20.0),
-                knee: Db::new(3.0),
-                ratio: CompressionRatio::new(4.0),
-                attack: Seconds::new(0.005),
-                release: Seconds::new(0.05),
-                makeup: Db::new(2.0),
-                ..CompressorControls::DEFAULT
-            },
+        CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(CompressorControls {
+                    threshold: Db::new(-20.0),
+                    knee: Db::new(3.0),
+                    ratio: CompressionRatio::new(4.0),
+                    attack: Seconds::new(0.005),
+                    release: Seconds::new(0.05),
+                    makeup: Db::new(2.0),
+                    ..CompressorControls::DEFAULT
+                }),
         )
     })
     .control("threshold", |c| {
@@ -80,17 +82,17 @@ fn compressor() {
 #[test]
 fn gate() {
     IsolateRow::new("GateNode (stereo)", || {
-        GateNode::<f32>::new(
-            BusTopology::STEREO,
-            KeySource::Sidechain,
-            GateControls {
-                threshold: Db::new(-15.0),
-                attack: Seconds::new(0.001),
-                hold: Seconds::new(0.005),
-                release: Seconds::new(0.02),
-                range: Db::new(-40.0),
-                ..GateControls::DEFAULT
-            },
+        GateNode::<f32>::from(
+            GateConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(GateControls {
+                    threshold: Db::new(-15.0),
+                    attack: Seconds::new(0.001),
+                    hold: Seconds::new(0.005),
+                    release: Seconds::new(0.02),
+                    range: Db::new(-40.0),
+                    ..GateControls::DEFAULT
+                }),
         )
     })
     .control("threshold", |g| {
@@ -114,11 +116,13 @@ fn gate() {
 #[test]
 fn limiter() {
     IsolateRow::new("LimiterNode (stereo)", || {
-        LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db::new(-6.0),
-            ceiling: Db::new(-3.0),
-            ..LimiterControls::DEFAULT
-        })
+        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterControls {
+                threshold: Db::new(-6.0),
+                ceiling: Db::new(-3.0),
+                ..LimiterControls::DEFAULT
+            },
+        ))
     })
     .control("threshold", |l| {
         assert!(l.param_set().set(UnitParam::Threshold, -12.0));
@@ -135,7 +139,10 @@ fn limiter() {
 #[test]
 fn brickwall_limiter() {
     IsolateRow::new("BrickwallLimiterNode (stereo)", || {
-        BrickwallLimiterNode::<f32>::new(Db::new(-3.0))
+        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+            BusTopology::STEREO,
+            Db::new(-3.0),
+        ))
     })
     .control("ceiling", |l| {
         assert!(l.param_set().set(UnitParam::Ceiling, -9.0));
@@ -334,6 +341,62 @@ fn transient_shaper() {
     .check();
 }
 
+/// A leveller at `target` with a 40 dB cut and a 9 dB boost, 50 ms times and no gate. The window
+/// reads from its first 100 ms hop, so each row renders long enough for the gain to move.
+fn leveller_at(target: f64) -> LevellerNode<f32> {
+    LevellerNode::<f32>::try_from(
+        LevellerConfig::new(BusTopology::STEREO)
+            .target(Db::new(target))
+            .max_boost(Db::new(9.0))
+            .max_cut(Db::new(40.0))
+            .gate(Db::new(-100.0))
+            .attack(Seconds::new(0.05))
+            .release(Seconds::new(0.05)),
+    )
+    .unwrap()
+}
+
+/// The stimulus is loud, so a target of -20 LUFS cuts: the target, the cut and both times show.
+#[test]
+fn leveller_cutting() {
+    IsolateRow::new("LevellerNode<f32> (stereo, cutting)", || leveller_at(-20.0))
+        .frames(65_536)
+        .control("target", |d| {
+            assert!(
+                d.param_set()
+                    .set(UnitAddr::new(UnitParam::Threshold, 0), -30.0)
+            )
+        })
+        .control("max cut", |d| {
+            assert!(d.param_set().set(UnitAddr::new(UnitParam::Range, 1), 3.0))
+        })
+        .control("attack", |d| {
+            assert!(d.param_set().set(UnitParam::Attack, 0.01))
+        })
+        .control("release", |d| {
+            assert!(d.param_set().set(UnitParam::Release, 0.01))
+        })
+        .check();
+}
+
+/// A target of 0 LUFS is above the stimulus, so the gain rises: the boost and the gate show
+/// (a gate at 0 LUFS holds the gain).
+#[test]
+fn leveller_boosting() {
+    IsolateRow::new("LevellerNode<f32> (stereo, boosting)", || leveller_at(0.0))
+        .frames(65_536)
+        .control("max boost", |d| {
+            assert!(d.param_set().set(UnitAddr::new(UnitParam::Range, 0), 3.0))
+        })
+        .control("gate", |d| {
+            assert!(
+                d.param_set()
+                    .set(UnitAddr::new(UnitParam::Threshold, 1), 0.0)
+            )
+        })
+        .check();
+}
+
 #[test]
 fn auto_pan() {
     IsolateRow::new("AutoPanNode", || {
@@ -493,6 +556,27 @@ fn bus_strip() {
             assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
         })
         .check();
+}
+#[test]
+fn fir_convolver() {
+    use tutti_dsp::{LinearPhaseDesign, Tilt};
+    use tutti_nodes::FirConvolverConfig;
+    use tutti_units::{Db, Hz, SampleRate};
+
+    let tilt = Tilt::new(Db::new(6.0))
+        .design(Hz::new(2_000.0), SampleRate::SR_48K)
+        .unwrap();
+    let fir = LinearPhaseDesign::new(Hz::new(200.0))
+        .design(SampleRate::SR_48K, &[tilt])
+        .unwrap();
+    IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
+        FirConvolverConfig::new(tutti_buffers::ChannelLayout::MONO, &fir)
+            .block_size(Samples::new(64))
+            .build::<f32>()
+            .unwrap()
+    })
+    .control("gain", |c| c.set_gain(Amplitude::new(0.3)))
+    .check();
 }
 #[test]
 fn convolver() {

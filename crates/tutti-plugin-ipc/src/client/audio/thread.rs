@@ -13,40 +13,41 @@
 use super::ListenerSlot;
 #[cfg(test)]
 use super::channels::response_ring;
-use super::channels::{Channels, ResponseWriter, Stamped, Waits};
+use super::channels::{Channels, ResponseWriter, Sequenced, Waits};
 use super::dispatch::{
-    Lane, Owed, apply_setting, handle_audio, handle_control, handle_setting, read_news,
+    AudioState, ControlState, Lane, apply_setting, handle_audio, handle_control, handle_setting,
+    read_news, tell,
 };
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioCommand, AudioResponse, BridgeEvent, ControlCommand, Unsolicited};
+use super::messages::{AudioCommand, AudioResponse, ControlCommand, IpcEvent, Unsolicited};
 use super::payload_pool::PayloadPool;
-use crate::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
+use crate::{AudioReply, ControlFrame, ControlRequest};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::ThreadHandle;
-use tutti_plugin_types::{BridgeError, PluginFailure};
+use tutti_plugin_types::{IpcError, IpcResult, PluginFailure};
 use tutti_rt::Parker;
 
 /// The bridge's audio lane thread of an `AudioBridge`, which owns the control
 /// lane's: it speaks to the server for the queues. Dropping it shuts both down
 /// and joins them.
-pub struct BridgeThread {
+pub struct IpcThread {
     channels: Channels,
     lifecycle: Lifecycle,
     handle: Option<ThreadHandle<()>>,
 }
 
-impl std::fmt::Debug for BridgeThread {
+impl std::fmt::Debug for IpcThread {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BridgeThread")
+        f.debug_struct("IpcThread")
             .field("running", &self.handle.is_some())
             .finish_non_exhaustive()
     }
 }
 
-impl BridgeThread {
+impl IpcThread {
     pub(super) fn spawn(
         channels: Channels,
         responses: ResponseWriter,
@@ -107,7 +108,7 @@ impl BridgeThread {
     }
 }
 
-impl Drop for BridgeThread {
+impl Drop for IpcThread {
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -134,7 +135,7 @@ fn run_thread(
     } = waits;
     // The response ring's writer is this thread's alone: it lives in the audio
     // lane's state.
-    let mut owed = Owed::audio(lifecycle.timeouts().drain, responses);
+    let mut state = AudioState::new(lifecycle.timeouts().drain, responses);
     // A bridge that never connects is as dead as one whose socket drops later,
     // and the audio thread tells them apart only through `is_crashed`. Every
     // exit below must mark the crash: returning silently would leave the flag
@@ -146,7 +147,7 @@ fn run_thread(
         Err(failure) => {
             crash(&lifecycle, &listener, failure);
             // A block queued before the crash was marked is never sent.
-            drain_with_errors(&channels, &mut owed);
+            drain_with_errors(&channels, &mut state);
             drop_controls(&channels);
             return;
         }
@@ -156,7 +157,7 @@ fn run_thread(
             (channels.clone(), lifecycle.clone(), Arc::clone(&listener));
         let lane = Lane {
             stream: control,
-            owed: Owed::control(lifecycle.timeouts().drain),
+            state: ControlState::new(lifecycle.timeouts().drain),
         };
         tutti_platform::spawn_named("plugin-control", None, move |_| {
             control_loop(&channels, &control_wait, &lifecycle, &listener, lane);
@@ -169,10 +170,10 @@ fn run_thread(
                 &lifecycle,
                 &listener,
                 PluginFailure::Connect {
-                    source: Arc::new(BridgeError::Io(e)),
+                    source: Arc::new(IpcError::Io(e)),
                 },
             );
-            drain_with_errors(&channels, &mut owed);
+            drain_with_errors(&channels, &mut state);
             drop_controls(&channels);
             return;
         }
@@ -185,7 +186,7 @@ fn run_thread(
         &listener,
         Lane {
             stream: audio,
-            owed,
+            state,
         },
     );
     // The control lane's thread ends on the same condition, rung awake by
@@ -204,14 +205,22 @@ fn run_thread(
 /// a skew becomes a mis-parse instead of an error.
 fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), PluginFailure> {
     let connect = || {
-        let mut stream = ipc::connect(socket_path).map_err(|e| PluginFailure::Connect {
+        let stream = ipc::connect(socket_path).map_err(|e| PluginFailure::Connect {
             source: Arc::new(e),
         })?;
-        expect_ready(&mut stream)?;
         Ok(stream)
     };
-    let audio = connect()?;
-    Ok((audio, connect()?))
+    let mut audio = connect()?;
+    expect_ready(ipc::recv::<AudioReply>(&mut audio).map(|r| match r {
+        AudioReply::Ready { protocol_version } => Ok(protocol_version),
+        other => Err(format!("{other:?}")),
+    }))?;
+    let mut control = connect()?;
+    expect_ready(ipc::recv::<ControlFrame>(&mut control).map(|f| match f {
+        ControlFrame::Ready { protocol_version } => Ok(protocol_version),
+        other => Err(format!("{other:?}")),
+    }))?;
+    Ok((audio, control))
 }
 
 /// The audio lane's loop: park until a block-lane command is
@@ -226,9 +235,8 @@ fn audio_loop(
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
-    mut lane: Lane,
+    mut lane: Lane<AudioState>,
 ) {
-    let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
     let mut failed = false;
     while live(lifecycle) {
         // Read before the pop: a block pushed after this read is not counted,
@@ -260,13 +268,12 @@ fn audio_loop(
                 apply_setting(channels, lifecycle, setting);
             }
         }
-        let result = handle_audio(cmd, &mut lane, channels, payloads, &mut inbox, lifecycle);
-        drain_unsolicited(&mut inbox, channels, listener);
+        let result = handle_audio(cmd, &mut lane, channels, payloads, lifecycle);
         channels.turn_done();
 
         if let Err(e) = result {
             // The error is classified here, at the only place it exists.
-            // `BridgeError` is not `Clone`, and the crash notification outlives
+            // `IpcError` is not `Clone`, and the crash notification outlives
             // this frame, so the failure holds it behind an `Arc`.
             crash(lifecycle, listener, PluginFailure::from_stream(e));
             failed = true;
@@ -278,9 +285,9 @@ fn audio_loop(
         // and queued block, not just one. `None` matches whichever request the
         // audio thread is waiting on. The control lane saw the end when it was
         // not this lane that did: it rang this thread, and this thread answers.
-        lane.owed
+        lane.state
             .respond(channels, AudioResponse::Error { seq: None });
-        drain_with_errors(channels, &mut lane.owed);
+        drain_with_errors(channels, &mut lane.state);
     }
     notify_external_crash(lifecycle, listener);
 }
@@ -301,7 +308,7 @@ fn control_loop(
     wait: &ControlWait,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
-    mut lane: Lane,
+    mut lane: Lane<ControlState>,
 ) {
     // Unsolicited events read while a request waited for its reply. One
     // buffer for the connection, handed to the listener after each turn.
@@ -312,7 +319,7 @@ fn control_loop(
     }
     // The control command taken off its queue and not yet sent, with the end of
     // its wait for the blocks before it.
-    let mut held: Option<(Stamped<ControlCommand>, tutti_platform::Instant)> = None;
+    let mut held: Option<(Sequenced<ControlCommand>, tutti_platform::Instant)> = None;
     while live(lifecycle) {
         if held.is_none() {
             held = channels.pop_control().map(|cmd| {
@@ -324,7 +331,7 @@ fn control_loop(
         let result = if let Some((setting, applied)) = channels.take_setting() {
             // A command's turn reads the news that comes during it too.
             channels.set_news();
-            handle_setting(setting, applied, &mut lane, channels, &mut inbox, lifecycle)
+            handle_setting(setting, applied, &mut lane, &mut inbox, lifecycle)
         } else if let Some((stamped, deadline)) =
             held.take_if(|(c, _)| channels.handled() >= c.after)
         {
@@ -333,7 +340,7 @@ fn control_loop(
             // block it follows.
             let _ = deadline;
             channels.set_news();
-            handle_control(stamped.cmd, &mut lane, channels, &mut inbox, lifecycle)
+            handle_control(stamped.cmd, &mut lane, &mut inbox, lifecycle)
         } else if let Some((stamped, deadline)) = &held {
             // Not yet: wait for the audio lane (or a setting it is holding the
             // block for, the end of the bridge, the command's own bound). A
@@ -359,11 +366,11 @@ fn control_loop(
             match wait.wait(&lane.stream, None) {
                 Ok(woken) if woken.stream => {
                     channels.set_news();
-                    read_news(&mut lane, channels, &mut inbox)
+                    read_news(&mut lane, &mut inbox)
                 }
                 // A ring: look at the queue and the stop condition again.
                 Ok(_) => continue,
-                Err(e) => Err(BridgeError::Io(e)),
+                Err(e) => Err(IpcError::Io(e)),
             }
         };
         drain_unsolicited(&mut inbox, channels, listener);
@@ -388,9 +395,9 @@ fn control_loop(
 /// itself, and the host's wait for the process's end (the guard's) is the
 /// grace. Best effort: a server that cannot be written to is gone or hung, and
 /// the guard kills it at the end of the grace.
-fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane) {
+fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane<ControlState>) {
     if !lifecycle.is_running() && lifecycle.crash_cause().is_none() {
-        let _ = ipc::send(&mut lane.stream, &HostMessage::Shutdown);
+        let _ = tell(&mut lane.stream, &mut lane.state, ControlRequest::Shutdown);
     }
 }
 
@@ -399,29 +406,21 @@ fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane) {
 /// The reason is spelled out per case rather than as one string: a version skew
 /// and a peer that never said `Ready` are different problems for whoever reads
 /// the message, and the first is actionable.
-fn expect_ready(stream: &mut ControlStream) -> Result<(), PluginFailure> {
-    match ipc::recv(stream) {
-        Ok(crate::BridgeMessage::Ready { protocol_version })
-            if crate::protocol::check_protocol_version(protocol_version).is_ok() =>
-        {
-            Ok(())
-        }
-        other => {
-            let source = match other {
-                Ok(crate::BridgeMessage::Ready { protocol_version }) => {
-                    BridgeError::ProtocolMismatch {
-                        expected: crate::PROTOCOL_VERSION,
-                        got: protocol_version,
-                    }
-                }
-                Ok(got) => crate::error::unexpected_message("Ready", &got),
-                Err(e) => e,
-            };
-            Err(PluginFailure::Handshake {
-                source: Arc::new(source),
-            })
-        }
-    }
+fn expect_ready(read: IpcResult<Result<u32, String>>) -> Result<(), PluginFailure> {
+    let source = match read {
+        Ok(Ok(version)) => match crate::protocol::check_protocol_version(version) {
+            Ok(()) => return Ok(()),
+            Err(skew) => skew,
+        },
+        Ok(Err(got)) => IpcError::UnexpectedMessage {
+            expected: "Ready",
+            got: got.into(),
+        },
+        Err(e) => e,
+    };
+    Err(PluginFailure::Handshake {
+        source: Arc::new(source),
+    })
 }
 
 /// Declare the bridge dead: latch the cause, then tell whoever is listening.
@@ -463,7 +462,7 @@ fn notify_crash(lifecycle: &Lifecycle, listener: &ListenerSlot, cause: PluginFai
     }
     let cb = listener.lock().clone();
     if let Some(f) = cb.as_ref() {
-        f(BridgeEvent::Crashed { cause });
+        f(IpcEvent::Crashed { cause });
     }
 }
 
@@ -489,19 +488,19 @@ fn drain_unsolicited(inbox: &mut Unsolicited, channels: &Channels, listener: &Li
 /// Answer every queued block-lane command with an error. A queued chunk is
 /// never sent, so its MIDI is counted dropped; nothing can splice past it, as
 /// the server is gone.
-fn drain_with_errors(channels: &Channels, owed: &mut Owed) {
+fn drain_with_errors(channels: &Channels, state: &mut AudioState) {
     while let Some(cmd) = channels.pop_block() {
         if let AudioCommand::Process(payload) = &cmd {
             channels.note_dropped_midi(payload.midi_events.len() as u64);
         }
-        owed.respond(channels, AudioResponse::Error { seq: None });
+        state.respond(channels, AudioResponse::Error { seq: None });
     }
 }
 
 /// Drop every queued control-lane command: a request's caller, holding the
 /// other end of its reply, is told at once that none is coming.
 fn drop_controls(channels: &Channels) {
-    while let Some(Stamped { cmd, .. }) = channels.pop_control() {
+    while let Some(Sequenced { cmd, .. }) = channels.pop_control() {
         drop(cmd);
     }
 }
@@ -526,7 +525,7 @@ mod tests {
         let channels = Channels::new(SampleRate::SR_48K, Arc::default())
             .expect("the channels")
             .0;
-        let mut owed = Owed::audio(
+        let mut state = AudioState::new(
             tutti_plugin_types::Timeouts::default().drain,
             response_ring().0,
         );
@@ -540,7 +539,7 @@ mod tests {
             }
             assert!(channels.push_block(AudioCommand::Process(payload)));
         }
-        drain_with_errors(&channels, &mut owed);
+        drain_with_errors(&channels, &mut state);
         assert!(channels.pop_block().is_none());
         assert_eq!(channels.dropped_midi_cell().get(), 5);
     }
@@ -621,7 +620,7 @@ mod tests {
         );
         assert_eq!(
             heard.last().map(String::as_str),
-            Some(format!("{:?}", BridgeEvent::Resync(ResyncKind::ParamValues)).as_str())
+            Some(format!("{:?}", IpcEvent::Resync(ResyncKind::ParamValues)).as_str())
         );
     }
 }

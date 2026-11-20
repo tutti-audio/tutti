@@ -10,6 +10,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tutti_plugin_ipc_ffi::Connection;
 
 /// Converts a host-chosen socket path into the local-socket name for this
 /// platform.
@@ -26,6 +27,12 @@ use std::time::Duration;
 // there.
 pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
     socket.to_owned().to_fs_name::<GenericFilePath>()
+}
+
+/// What a slab is sent over on `stream`: the socket's descriptor.
+pub(crate) fn connection(stream: &ControlStream) -> Connection<'_> {
+    let Stream::UdSocket(socket) = stream;
+    socket.as_fd()
 }
 
 /// The longest socket path every Unix takes: `sun_path` is 104 bytes on macOS
@@ -84,27 +91,27 @@ impl Watch {
     }
 }
 
-/// The ringing side of a control thread's wait ([`control_bell`]): wakes the
+/// The unparking side of a control thread's wait ([`control_unparker`]): wakes the
 /// wait from any thread, the audio thread included.
 ///
 /// A non-blocking socket pair whose read end the wait polls beside the control
-/// stream; a ring writes one byte, so the wait ends at once. It takes no lock and
+/// stream; an unpark writes one byte, so the wait ends at once. It takes no lock and
 /// allocates nothing.
 #[derive(Clone)]
-pub struct ControlBell {
+pub struct ControlUnparker {
     tx: Arc<UnixStream>,
 }
 
-impl ControlBell {
+impl ControlUnparker {
     /// Ends the control thread's wait now, or its next one.
-    pub fn ring(&self) {
+    pub fn unpark(&self) {
         // A full socket already holds a byte the thread has not read: its wait
         // ends either way.
         let _ = (&*self.tx).write(&[1]);
     }
 }
 
-/// The waiting side of a control thread's wait ([`control_bell`]).
+/// The waiting side of a control thread's wait ([`control_unparker`]).
 pub struct ControlWait {
     rx: UnixStream,
 }
@@ -123,11 +130,11 @@ pub struct Woken {
 /// # Errors
 ///
 /// The OS refused the socket pair.
-pub fn control_bell() -> std::io::Result<(ControlBell, ControlWait)> {
+pub fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
     let (tx, rx) = UnixStream::pair()?;
     tx.set_nonblocking(true)?;
     rx.set_nonblocking(true)?;
-    Ok((ControlBell { tx: Arc::new(tx) }, ControlWait { rx }))
+    Ok((ControlUnparker { tx: Arc::new(tx) }, ControlWait { rx }))
 }
 
 impl ControlWait {
@@ -228,11 +235,11 @@ mod tests {
             .expect("listen");
         let host = crate::transport::control::connect(&path).expect("connect");
         let mut peer = listener.accept().expect("accept");
-        let (bell, wait) = control_bell().expect("a bell");
+        let (bell, wait) = control_unparker().expect("a bell");
         let now = Some(Duration::ZERO);
 
         assert_eq!(wait.wait(&host, now).expect("wait"), Woken::default());
-        bell.ring();
+        bell.unpark();
         let rung = Woken {
             stream: false,
             rung: true,
@@ -274,10 +281,7 @@ mod tests {
         let base = tempfile::tempdir().expect("a temporary directory");
         let deep = base.path().join("d".repeat(SOCKET_PATH_MAX));
         std::fs::create_dir_all(&deep).expect("the deep directory");
-        let name = format!(
-            "{}.sock",
-            crate::config::unique_name("tutti-bridge").expect("a random source")
-        );
+        let name = format!("{}.sock", tutti_fixtures::unique_name("tutti-bridge"));
 
         let path = socket_path_in(&deep, &name);
         assert!(!path.starts_with(&deep), "{path:?}");

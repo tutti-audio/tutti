@@ -15,11 +15,11 @@ use super::instance::Instance;
 use super::width_error::WidthError;
 use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
-use tutti_plugin_types::{BridgeError, BridgeResult, StateError};
 use tutti_plugin_types::{
     Features, InProcess, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginRef,
     PluginTooWide, Prepare,
 };
+use tutti_plugin_types::{IpcError, IpcResult, StateError};
 use tutti_units::ParamId;
 
 /// The maximum block size the plugin is told (`Prepare::max_block`). A graph
@@ -38,7 +38,7 @@ const MAX_BLOCK_SIZE: usize = 4096;
 pub enum LoadClientError<L: Loaded + 'static> {
     /// The plugin did not load.
     #[error(transparent)]
-    Failed(#[from] BridgeError),
+    Failed(#[from] IpcError),
     /// The plugin does not process the width asked for. It is loaded and
     /// activated at 32-bit: [`WidthError::into_inner`] returns it, with its
     /// handle, to host in a 32-bit graph (boxed, to keep the error small).
@@ -56,14 +56,14 @@ impl<L: Loaded + 'static> std::fmt::Debug for LoadClientError<L> {
 }
 
 impl<L: Loaded + 'static> LoadClientError<L> {
-    /// The failure as a [`BridgeError`] for the plugin at `path`, for a host of one width, where a
+    /// The failure as a [`IpcError`] for the plugin at `path`, for a host of one width, where a
     /// width refusal cannot come: the load's own failure, or the refusal as a
     /// failed activation that drops the plugin.
     #[must_use]
-    pub fn into_bridge(self, path: &Path) -> BridgeError {
+    pub fn into_bridge(self, path: &Path) -> IpcError {
         match self {
             Self::Failed(e) => e,
-            Self::Width(e) => BridgeError::LoadFailed {
+            Self::Width(e) => IpcError::LoadFailed {
                 path: Some(path.to_path_buf()),
                 stage: LoadStage::Activation,
                 reason: e.to_string(),
@@ -147,7 +147,7 @@ where
         F::WIDTH,
         restore,
     )
-    .map_err(|(stage, reason)| BridgeError::LoadFailed {
+    .map_err(|(stage, reason)| IpcError::LoadFailed {
         path: Some(path.to_path_buf()),
         stage,
         reason,
@@ -179,13 +179,13 @@ fn assemble<L, F>(
     rt: tutti_rt::Rt<L::Processor>,
     origin: Option<Reload>,
     sample_rate: tutti_units::SampleRate,
-) -> BridgeResult<(InProcessClient<L, F>, PluginHandle)>
+) -> IpcResult<(InProcessClient<L, F>, PluginHandle)>
 where
     L: InProcess + 'static,
     L::Processor: 'static,
     F: Float,
 {
-    let failed = |(stage, reason)| BridgeError::LoadFailed {
+    let failed = |(stage, reason)| IpcError::LoadFailed {
         path: Some(path.to_path_buf()),
         stage,
         reason,
@@ -194,6 +194,7 @@ where
         mut client,
         inner,
         pending_sample_rate,
+        post,
         descriptor,
         loaded,
     } = wire(main, inner, rt, origin, sample_rate, 0).map_err(failed)?;
@@ -212,6 +213,7 @@ where
         inner: Arc::clone(&inner),
         param_sink: param_sink.clone(),
         pending_sample_rate: Arc::clone(&pending_sample_rate),
+        edits: post,
         reporting,
         lost,
         format: descriptor.class.format_name(),
@@ -236,6 +238,8 @@ struct Wired<L: Loaded, F: Float> {
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
     pending_sample_rate: Arc<PendingSampleRate>,
+    /// Where the backend posts the host's parameter writes the client drains.
+    post: super::host_edits::EditPost,
     descriptor: PluginDescriptor,
     /// The wiring as the plugin reports it, with the presets it can list.
     loaded: LoadedPlugin,
@@ -296,7 +300,8 @@ where
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
     let ids: Vec<ParamId> = parameters.iter().map(|p| p.id()).collect();
-    let client = InProcessClient::new(
+    let (post, port) = super::host_edits::host_edits(ids.iter().copied());
+    let mut client = InProcessClient::new(
         Arc::clone(&inner),
         rt,
         descriptor.clone(),
@@ -312,9 +317,11 @@ where
         None,
         None,
     );
+    client.edits = Some(port);
     Ok(Wired {
         client,
         inner,
+        post,
         pending_sample_rate,
         descriptor,
         loaded,

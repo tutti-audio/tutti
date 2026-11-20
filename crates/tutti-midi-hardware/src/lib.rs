@@ -55,8 +55,9 @@
 //!   told by the exit announcement. On ALSA the name is the identity, so a renamed
 //!   device is `Removed` and then `Added` under the new name, which closes a port
 //!   held on it; `Changed` is for backends whose identity survives a rename.
-//! - **macOS:** one process-wide CoreMIDI client runs its run loop on one thread
-//!   for setup notifications, and each [`Devices`] registers with it. A
+//! - **macOS:** `tutti-coremidi-ffi`'s `SharedClient` runs its run loop on one thread
+//!   for setup notifications (the ports still use a second client, until they
+//!   move to that crate), and each [`Devices`] registers with it. A
 //!   [`DeviceId`](tutti_midi_device::DeviceId) is the endpoint's `MIDIUniqueID`. Untested by the author.
 //! - If the watch ends on its own, [`DeviceEvents::recv_timeout`] says why, once the events the watch reported are taken, and the list
 //!   stays as it was.
@@ -100,7 +101,7 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use tutti_midi_runtime::InputInlets;
-//! use tutti_midi_hardware::{MidiHardwareOptions, MidiSession};
+//! use tutti_midi_hardware::{MidiHardwareConfig, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -108,7 +109,7 @@
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
-//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareOptions::new())?;
+//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareConfig::new())?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -183,7 +184,7 @@
 //!
 //! ## Features
 //!
-//! - `serde`: `Serialize` and `Deserialize` for [`MidiHardwareOptions`] and
+//! - `serde`: `Serialize` and `Deserialize` for [`MidiHardwareConfig`] and
 //!   [`InputTiming`], so an app stores the options it opens with. Off by default.
 //! - `testing`: exports `test_support::FakeBackend`, a device list with no OS
 //!   behind it, for [`MidiSession::open_over`] in headless tests; its `plug` and
@@ -233,10 +234,14 @@ mod devices;
 mod endpoints;
 mod error;
 mod fault;
-// Only a native backend's callback runs through it; the stub has none.
+// Only the ALSA and Windows Multimedia callbacks run through it: the stub has none,
+// and CoreMIDI's port catches a panic in its own.
 #[cfg_attr(
-    midi_backend = "none",
-    allow(dead_code, reason = "only a native backend has a driver callback")
+    any(midi_backend = "none", midi_backend = "coremidi"),
+    allow(
+        dead_code,
+        reason = "only the ALSA and Windows Multimedia backends use it"
+    )
 )]
 mod guard;
 mod peer;
@@ -284,7 +289,7 @@ pub use profiles::{
     ProfilesChange, Switcher, WholeSwitcher,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
-pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};
+pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
 

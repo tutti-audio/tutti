@@ -269,7 +269,7 @@ impl ClapProcessor {
     /// follows it, with the flag, since one that records automation must not
     /// (events.h: "should not be recorded"; the example is a value moved by a
     /// MIDI CC that is itself recorded). Nothing here allocates.
-    fn report_edits(&mut self) {
+    pub(super) fn report_edits(&mut self) {
         let table = self.ranges.lend();
         for event in self.scratch.output_events.events() {
             let Some(heard) = event.heard(&table.ranges) else {
@@ -367,13 +367,25 @@ impl Processor for ClapProcessor {
         ClapProcessor::stop(self);
     }
 
+    /// `params.flush` ([`ClapProcessor::flush_parameters`]).
+    fn flush_parameters(
+        &mut self,
+        changes: &tutti_plugin_types::ParameterChanges,
+    ) -> PluginResult<()> {
+        if ClapProcessor::flush_parameters(self, changes) {
+            Ok(())
+        } else {
+            Err(PluginError::Block("the plugin has no params.flush to call"))
+        }
+    }
+
     fn reset(&mut self) {
         ClapProcessor::reset(self);
     }
 }
 
 // A Processor moves by value through activation (`Lifecycle`, the server's
-// `Served`), and every debug frame on that path holds a copy. Its scratch is
+// `Server`), and every debug frame on that path holds a copy. Its scratch is
 // boxed, so it stays small; a new inline array that tips this bound fails the
 // build.
 const _: () = assert!(size_of::<ClapProcessor>() <= 4096);

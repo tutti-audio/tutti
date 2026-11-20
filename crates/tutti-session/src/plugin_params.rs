@@ -1,16 +1,16 @@
 //! A hosted plugin's parameters as views:
-//! [`Params`], [`Param`], [`TypedParam`] and [`ParamGesture`].
+//! [`PluginParams`], [`Param`] and [`ParamGesture`].
 //!
 //! Every one of them borrows the session through [`Plugin`](crate::Plugin), so
-//! none can outlive what it names. The descriptors a [`Params`] shows are the
+//! none can outlive what it names. The descriptors a [`PluginParams`] shows are the
 //! session's own, read at load and read again when the plugin announces a
 //! session's own, read at load and read again when the plugin announces a
 //! rescan ([`PluginChange::ParamsRescanned`](crate::PluginChange::ParamsRescanned),
 //! [`ParamTitlesChanged`](crate::PluginChange::ParamTitlesChanged)); the read
-//! is a job on the session's spawner and lands in [`Session::update`](crate::Session::update), which
+//! is a job on the session's executor and lands in [`Session::update`](crate::Session::update), which
 //! takes `&mut Session`. So **a handle cannot be stale**: holding one across
 //! an update is a borrow error, and what a host keeps across updates is the
-//! `ParamId`, resolved again with [`Params::get`] (which refuses an id the
+//! `ParamId`, resolved again with [`PluginParams::get`] (which refuses an id the
 //! plugin stopped declaring). No generation counter is checked, because there
 //! is no state to check it against.
 //!
@@ -46,7 +46,7 @@
 //! its handle's token-free calls (a parameter set goes to the plugin's edit ring
 //! from any thread), so the views belong on the read-only `Plugin<'_>`, which
 //! `Session::plugin_view` lends. A call that asks the plugin something
-//! (`text`, `set_text`, `plain`, `set_plain`) may be a round trip to the
+//! (`text`, `plain`) may be a round trip to the
 //! plugin, and for an in-process plugin an answer from its main thread, so a
 //! host does not make one per frame per parameter.
 //!
@@ -66,17 +66,16 @@
 //! plugin to the host, VST2 has none, AU's are notifications to listeners), so a
 //! plugin hears only the values.
 
-use std::marker::PhantomData;
-
 use tutti_graph::NodeKey;
 
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
-use tutti_plugin_types::{ParamEdit, ParamUnit, ParameterInfo, PlainUnit};
+use tutti_plugin_types::{ParamEdit, ParameterInfo, UnknownParam};
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use crate::plugin::{Gate, HostedPlugin, Signals, queue};
+use crate::{PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError};
 
 /// The lane knobs of a plugin's driven parameters: where a set of one goes,
 /// whether the host made it or the plugin reported it. The modulation apply
@@ -123,79 +122,14 @@ impl Driven {
     }
 }
 
-/// Why a call on a plugin's parameters did not do what it was asked.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[non_exhaustive]
-pub enum PluginParamError {
-    /// The plugin's parameters have not been read yet (the read at load was
-    /// not answered and its job has not landed). The session submits the
-    /// read again in `Phase::Plugins` and lands it in a later update; the
-    /// next [`Params::get`] after it landed answers.
-    #[error("the plugin's parameters have not been read yet")]
-    NotRead,
-    /// The plugin declares no parameter with this id.
-    #[error("the plugin declares no parameter {0}")]
-    Unknown(ParamId),
-    /// The parameter is declared read-only.
-    #[error("parameter {0} is read-only")]
-    ReadOnly(ParamId),
-    /// The parameter declares no unit tutti types
-    /// ([`ParameterInfo::measures`] is `None`), so a typed read cannot be made.
-    #[error("parameter {0} declares no unit")]
-    NoUnit(ParamId),
-    /// The parameter's declared unit is not one the asked type reads.
-    #[error("parameter {id} measures {declared:?}, which {wanted} does not read")]
-    UnitMismatch {
-        /// The parameter.
-        id: ParamId,
-        /// The unit it declares.
-        declared: ParamUnit,
-        /// The type asked for.
-        wanted: &'static str,
-    },
-    /// The parameter's declared range holds values the asked type cannot
-    /// (a bipolar percentage as a `Mix`), so its getter would not be total.
-    #[error("the range parameter {id} declares in {declared:?} holds values {wanted} cannot")]
-    RangeUnfit {
-        /// The parameter.
-        id: ParamId,
-        /// The unit it declares.
-        declared: ParamUnit,
-        /// The type asked for.
-        wanted: &'static str,
-    },
-    /// The plugin a [`ParamGesture`] began on is gone (removed, replaced by a
-    /// crossfade or a reload) or stopped declaring the parameter (a rescan).
-    #[error("the plugin of the gesture on parameter {0} is gone")]
-    Gone(ParamId),
-    /// The value is finite and lies outside the range the parameter declares.
-    #[error("the value lies outside the range parameter {0} declares")]
-    OutOfRange(ParamId),
-    /// The value is NaN or infinite.
-    #[error("the value for parameter {0} is not finite")]
-    NotFinite(ParamId),
-    /// The format has no plain value for the parameter (VST2 without an integer
-    /// range, a plugin that no longer answers).
-    #[error("the format has no plain value for parameter {0}")]
-    NoPlainValue(ParamId),
-    /// The plugin could not read a value from the text.
-    #[error("the plugin could not read a value of parameter {id} from {text:?}")]
-    UnreadableText {
-        /// The parameter.
-        id: ParamId,
-        /// The text it was handed.
-        text: String,
-    },
-}
-
 /// A hosted plugin's parameters, lent by [`Plugin::params`](crate::Plugin::params).
 #[derive(Debug, Clone, Copy)]
-pub struct Params<'a> {
+pub struct PluginParams<'a> {
     node: NodeKey,
     hosted: &'a HostedPlugin,
 }
 
-impl<'a> Params<'a> {
+impl<'a> PluginParams<'a> {
     pub(crate) fn new(node: NodeKey, hosted: &'a HostedPlugin) -> Self {
         Self { node, hosted }
     }
@@ -203,7 +137,7 @@ impl<'a> Params<'a> {
     /// Whether the plugin's parameters have been read. A plugin loaded through
     /// the session is read at load; one the host inserted itself
     /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)) is read by a job
-    /// on the session's spawner, landed in [`Session::update`](crate::Session::update).
+    /// on the session's executor, landed in [`Session::update`](crate::Session::update).
     #[must_use]
     pub fn is_ready(&self) -> bool {
         self.hosted.mirror.is_ready()
@@ -228,69 +162,24 @@ impl<'a> Params<'a> {
     }
 
     /// Resolves parameter `id` once. The [`Param`] reads its value from the
-    /// session's mirror and writes through the plugin's handle.
+    /// session's mirror.
     ///
     /// # Errors
     ///
-    /// [`PluginParamError::NotRead`] before the parameters are read;
-    /// [`PluginParamError::Unknown`] for an id the plugin does not declare.
-    pub fn get(&self, id: ParamId) -> Result<Param<'a>, PluginParamError> {
+    /// [`PluginParamRefusal::NotRead`] before the parameters are read;
+    /// [`PluginParamRefusal::UnknownParam`] for an id the plugin does not declare.
+    pub fn get(&self, id: ParamId) -> Result<Param<'a>, PluginParamRefusal> {
         if !self.is_ready() {
-            return Err(PluginParamError::NotRead);
+            return Err(PluginParamRefusal::NotRead);
         }
         let position = self
             .hosted
             .mirror
             .position(id)
-            .ok_or(PluginParamError::Unknown(id))?;
+            .ok_or(PluginParamRefusal::UnknownParam(id))?;
         Ok(Param {
             params: *self,
             position,
-        })
-    }
-
-    /// Resolves parameter `id` as a tutti unit `U`: its declared
-    /// [`ParamUnit`] is checked against `U` once, here, and
-    /// [`TypedParam::get`] and [`TypedParam::set`] then go through the format's
-    /// own value map, in `U`.
-    ///
-    /// # Errors
-    ///
-    /// As [`get`](Self::get), and [`PluginParamError::NoUnit`] for a parameter
-    /// with no declared unit, [`PluginParamError::UnitMismatch`] for a unit `U`
-    /// does not read (`typed::<Db>` on a parameter in hertz) and
-    /// [`PluginParamError::RangeUnfit`] for a declared range `U` cannot hold
-    /// all of.
-    pub fn typed<U: PlainUnit>(&self, id: ParamId) -> Result<TypedParam<'a, U>, PluginParamError> {
-        let param = self.get(id)?;
-        let info = param.info();
-        let wanted = std::any::type_name::<U>();
-        let declared = info.measures().ok_or(PluginParamError::NoUnit(id))?;
-        if !U::reads(declared) {
-            return Err(PluginParamError::UnitMismatch {
-                id,
-                declared,
-                wanted,
-            });
-        }
-        // A unit is only declared over a plain range (`ParamUnit::fits`).
-        let (min, max) = info.bounds().ok_or(PluginParamError::NoUnit(id))?;
-        let unfit = PluginParamError::RangeUnfit {
-            id,
-            declared,
-            wanted,
-        };
-        // Every type here is an interval: if both ends read, so does
-        // everything between them.
-        for end in [min, max] {
-            U::from_plain(declared, end).ok_or(unfit.clone())?;
-        }
-        Ok(TypedParam {
-            param,
-            unit: declared,
-            min,
-            max,
-            unit_type: PhantomData,
         })
     }
 
@@ -301,14 +190,14 @@ impl<'a> Params<'a> {
     }
 }
 
-/// One parameter of a hosted plugin, resolved by [`Params::get`].
+/// One parameter of a hosted plugin, resolved by [`PluginParams::get`].
 ///
 /// `Copy`, and good for as long as the borrow of the session it came from: see
 /// the module docs for why that is as long as the parameter list can stay
 /// as it is.
 #[derive(Debug, Clone, Copy)]
 pub struct Param<'a> {
-    params: Params<'a>,
+    params: PluginParams<'a>,
     /// Where the parameter is in the mirror's list: valid while the read that
     /// made it is the mirror's, which the borrow guarantees.
     position: usize,
@@ -348,32 +237,37 @@ impl<'a> Param<'a> {
         crate::Key::<crate::AnyPlugin>::new(self.params.node).param(self.id())
     }
 
+    /// The target of this parameter in the tutti unit `U`: what `session.set`
+    /// writes in `U`, through the parameter's declared map and unit.
+    ///
+    /// The declaration is checked here, and read again at every write, so a
+    /// rescan that removes the unit or the map refuses later writes with the
+    /// same [`UnitError`] (as [`SetRefusal::Plugin`](crate::SetRefusal::Plugin)).
+    ///
+    /// # Errors
+    ///
+    /// [`UnitError::NoUnit`] for a parameter with no declared unit or no map the
+    /// host computes (every VST3 parameter, a VST2 parameter without an integer
+    /// range), [`UnitError::UnitMismatch`] for a unit `U` does not read
+    /// (`Db` on a parameter in hertz) and [`UnitError::RangeUnfit`] for a
+    /// declared range `U` cannot hold all of.
+    pub fn try_unit<U: PluginUnit>(&self) -> Result<PluginParamTarget<U>, UnitError> {
+        PluginParamTarget::declared(self.params.node, self.info())
+    }
+
     /// The write policy every format answers
     /// ([`ParamWriteError`](tutti_plugin_types::ParamWriteError)), on what the
     /// mirror holds of this parameter's declaration.
-    fn writable(&self) -> Result<(), PluginParamError> {
+    fn writable(&self) -> Result<(), PluginParamRefusal> {
         use tutti_plugin_types::{ParamAccess, ParamWriteError};
         // The mirror holds a declaration, so the policy can only refuse as
         // read-only; any other refusal is reported as an unknown parameter.
         ParamWriteError::check(self.id(), Some(ParamAccess::of(self.info()))).map_err(|refused| {
             match refused {
-                ParamWriteError::ReadOnly(id) => PluginParamError::ReadOnly(id),
-                other => PluginParamError::Unknown(other.id()),
+                ParamWriteError::ReadOnly(id) => PluginParamRefusal::ReadOnly(id),
+                other => PluginParamRefusal::UnknownParam(other.id()),
             }
         })
-    }
-
-    /// Sends `value` to the plugin and reads it back at once.
-    ///
-    /// A parameter a modulation lane drives takes the value as the lane's knob
-    /// and sends the plugin nothing: the lane sends the plugin the knob plus
-    /// its routes.
-    fn send(&self, value: Normalized) {
-        let hosted = self.params.hosted;
-        if !hosted.driven.write(self.id(), value) {
-            hosted.handle.send_parameter(self.id(), value);
-        }
-        hosted.mirror.report(self.id(), value);
     }
 
     /// The plugin's own text for the value now ("-6.0 dB"); `None` when the
@@ -386,60 +280,17 @@ impl<'a> Param<'a> {
             .parameter_text(self.id(), self.normalized())
     }
 
-    /// Sets the parameter from text the plugin reads ("-6 dB"), and returns
-    /// the value it took.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginParamError::ReadOnly`], and [`PluginParamError::UnreadableText`]
-    /// when the plugin cannot read a value from `text`.
-    pub fn set_text(&self, text: &str) -> Result<Normalized, PluginParamError> {
-        self.writable()?;
-        let value = self
-            .params
-            .hosted
-            .handle
-            .parameter_value_from_text(self.id(), text)
-            .ok_or_else(|| PluginParamError::UnreadableText {
-                id: self.id(),
-                text: text.to_owned(),
-            })?;
-        self.send(value);
-        Ok(value)
-    }
-
     /// The value now in the plugin's own units, through the format's own map;
     /// `None` where the format has none.
     ///
     /// A bare `f64`, on purpose: a plugin's plain value has no tutti unit unless
-    /// the plugin declares one, and [`Params::typed`] is the typed door for that.
+    /// the plugin declares one, and [`Param::try_unit`] is the typed door for that.
     #[must_use]
     pub fn plain(&self) -> Option<f64> {
         self.params
             .hosted
             .handle
             .parameter_plain(self.id(), self.normalized())
-    }
-
-    /// Sets the parameter to `plain` in the plugin's own units (a bare `f64` for
-    /// the reason [`plain`](Self::plain) gives), through the
-    /// format's own map, and returns the position it took. A value past an end
-    /// of the range takes that end (the map's law).
-    ///
-    /// # Errors
-    ///
-    /// [`PluginParamError::ReadOnly`], and [`PluginParamError::NoPlainValue`]
-    /// where the format has no plain value for the parameter.
-    pub fn set_plain(&self, plain: f64) -> Result<Normalized, PluginParamError> {
-        self.writable()?;
-        let value = self
-            .params
-            .hosted
-            .handle
-            .parameter_normalized(self.id(), plain)
-            .ok_or(PluginParamError::NoPlainValue(self.id()))?;
-        self.send(value);
-        Ok(value)
     }
 
     /// Takes hold of the parameter: the session reports the host's gesture
@@ -451,9 +302,9 @@ impl<'a> Param<'a> {
     ///
     /// # Errors
     ///
-    /// [`PluginParamError::ReadOnly`]: a gesture on a parameter that cannot be
+    /// [`PluginParamRefusal::ReadOnly`]: a gesture on a parameter that cannot be
     /// set is refused before it begins, so the guard's `set` cannot fail.
-    pub fn edit(&self) -> Result<ParamGesture, PluginParamError> {
+    pub fn edit(&self) -> Result<ParamGesture, PluginParamRefusal> {
         self.writable()?;
         let hosted = self.params.hosted;
         hosted.hear(ParamEdit::Begin(self.id()));
@@ -479,7 +330,7 @@ impl<'a> Param<'a> {
 /// error. What stands in for the borrow is a shared gate the session ends when
 /// the plugin is removed, replaced (a crossfade, a reload) or stops declaring the
 /// parameter (a rescan landed): [`set`](Self::set) then refuses with
-/// [`PluginParamError::Gone`] and nothing is sent, and the drop sends nothing.
+/// [`PluginParamRefusal::UnknownParam`] and nothing is sent, and the drop sends nothing.
 /// The notices go through the plugin's own queue, so the begin, the changes and
 /// the end are reported in the order they were made, with the plugin's.
 ///
@@ -516,14 +367,17 @@ impl ParamGesture {
     ///
     /// # Errors
     ///
-    /// [`PluginParamError::Gone`] once the plugin was removed or replaced, or no
-    /// longer declares the parameter.
-    pub fn set(&self, value: Normalized) -> Result<(), PluginParamError> {
+    /// [`PluginParamRefusal::UnknownParam`] once the plugin was removed or replaced, or no
+    /// longer declares the parameter, including when the write finds it
+    /// undeclared.
+    pub fn set(&self, value: Normalized) -> Result<(), PluginParamRefusal> {
         if !self.gate.holds(self.id) {
-            return Err(PluginParamError::Gone(self.id));
+            return Err(PluginParamRefusal::UnknownParam(self.id));
         }
         if !self.driven.write(self.id, value) {
-            self.handle.send_parameter(self.id, value);
+            self.handle
+                .send_parameter(self.id, value)
+                .map_err(|UnknownParam(id)| PluginParamRefusal::UnknownParam(id))?;
         }
         self.reporter.report(self.id, value);
         queue(
@@ -539,63 +393,6 @@ impl Drop for ParamGesture {
         if self.gate.holds(self.id) {
             queue(&self.notices, PluginSignal::Param(ParamEdit::End(self.id)));
         }
-    }
-}
-
-/// One parameter of a hosted plugin in a tutti unit `U`: made by
-/// [`Params::typed`], which checked the parameter's declared unit once.
-#[derive(Debug, Clone, Copy)]
-pub struct TypedParam<'a, U> {
-    param: Param<'a>,
-    unit: ParamUnit,
-    min: f64,
-    max: f64,
-    unit_type: PhantomData<U>,
-}
-
-impl<'a, U: PlainUnit> TypedParam<'a, U> {
-    /// The untyped parameter, for its value in the plugin's own terms, its text
-    /// and its gesture.
-    #[must_use]
-    pub fn param(&self) -> Param<'a> {
-        self.param
-    }
-
-    /// The value now, in `U`: the mirror's position through the format's own
-    /// map.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginParamError::NoPlainValue`] when the plugin does not answer the
-    /// map (the format has none, or the plugin stopped answering).
-    pub fn get(&self) -> Result<U, PluginParamError> {
-        let id = self.param.id();
-        self.param
-            .plain()
-            .map(|plain| plain.clamp(self.min, self.max))
-            .and_then(|plain| U::from_plain(self.unit, plain))
-            .ok_or(PluginParamError::NoPlainValue(id))
-    }
-
-    /// Sets the parameter to `value`, through the declared range and the
-    /// format's own map.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginParamError::NotFinite`] for a NaN or an infinity,
-    /// [`PluginParamError::OutOfRange`] for a value outside the declared range,
-    /// [`ReadOnly`](PluginParamError::ReadOnly), and
-    /// [`NoPlainValue`](PluginParamError::NoPlainValue) where the format has no
-    /// plain value.
-    pub fn set(&self, value: U) -> Result<(), PluginParamError> {
-        let plain = value.to_plain(self.unit);
-        if !plain.is_finite() {
-            return Err(PluginParamError::NotFinite(self.param.id()));
-        }
-        if !(self.min..=self.max).contains(&plain) {
-            return Err(PluginParamError::OutOfRange(self.param.id()));
-        }
-        self.param.set_plain(plain).map(drop)
     }
 }
 

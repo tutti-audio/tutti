@@ -18,9 +18,10 @@ use tutti_buffers::FloatWidth;
 use tutti_clap_test_plugin::{ClapSwitch, Site};
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::{
-    AudioSlab, BridgeMessage, HostMessage, ProcessAudioData, read_frame, write_frame,
+    AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest,
+    ProcessAudioData, ReqId, Request, read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale};
+use tutti_plugin_types::{ContentScale, IpcError, IpcResult};
 
 use super::{Native, Stream, serve_every};
 
@@ -30,12 +31,12 @@ mod x11;
 use crate::main_loop::Bell;
 use crate::render::{RenderSide, RenderThread};
 use crate::session::Session;
-use crate::transport::{SocketTransport, Transport};
+use crate::transport::{Alone, Incoming, SocketTransport, Transport};
 
 /// One thing the scripted host does.
 #[allow(clippy::large_enum_variant)] // a test script, built once
 enum Step {
-    Send(HostMessage),
+    Send(ControlRequest),
     /// Does something (on the loop's thread, when the script reaches it).
     Call(Box<dyn FnOnce() + Send>),
     /// Says nothing until the condition holds over what the host has heard so
@@ -47,13 +48,13 @@ enum Step {
 
 /// A condition the script's silence ends on, run on the loop's thread.
 struct Until {
-    holds: Box<dyn FnMut(&[BridgeMessage]) -> bool + Send>,
+    holds: Box<dyn FnMut(&[ControlFrame]) -> bool + Send>,
     /// When the wait gives up: [`HANG_GUARD`] after the first wait on it.
     give_up_at: Option<Instant>,
 }
 
 impl Until {
-    fn step(holds: impl FnMut(&[BridgeMessage]) -> bool + Send + 'static) -> Step {
+    fn step(holds: impl FnMut(&[ControlFrame]) -> bool + Send + 'static) -> Step {
         Step::Until(Self {
             holds: Box::new(holds),
             give_up_at: None,
@@ -68,7 +69,9 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 /// A host that follows a script and records what it is sent.
 struct Script {
     steps: VecDeque<Step>,
-    heard: Vec<BridgeMessage>,
+    /// How many requests the script has sent: the id of the last.
+    sent: u64,
+    heard: Vec<ControlFrame>,
     /// How many times the loop has gone to wait, shared with whoever watches it.
     waits: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Run each time the loop goes to wait, on its thread, before `waits` counts it.
@@ -81,6 +84,7 @@ impl Script {
     fn new(steps: impl IntoIterator<Item = Step>) -> Self {
         Self {
             steps: steps.into_iter().collect(),
+            sent: 0,
             heard: Vec::new(),
             waits: std::sync::Arc::default(),
             on_wait: None,
@@ -89,8 +93,8 @@ impl Script {
     }
 }
 
-impl Transport for Script {
-    fn wait_readable(&mut self, timeout: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+impl Transport<Incoming, ControlFrame> for Script {
+    fn wait_readable(&mut self, timeout: Option<Duration>, _: &Bell) -> IpcResult<bool> {
         let timeout = timeout.expect("the loop waits for a bounded time");
         if let Some(on_wait) = self.on_wait.as_mut() {
             on_wait();
@@ -99,18 +103,18 @@ impl Transport for Script {
         self.wait_inner(timeout)
     }
 
-    fn recv(&mut self) -> BridgeResult<HostMessage> {
+    fn recv(&mut self) -> IpcResult<Incoming> {
         self.recv_inner()
     }
 
-    fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
+    fn send(&mut self, msg: &ControlFrame) -> IpcResult<()> {
         self.heard.push(msg.clone());
         Ok(())
     }
 }
 
 impl Script {
-    fn wait_inner(&mut self, _timeout: Duration) -> BridgeResult<bool> {
+    fn wait_inner(&mut self, _timeout: Duration) -> IpcResult<bool> {
         match self.steps.front() {
             Some(Step::Call(_)) => {
                 let Some(Step::Call(call)) = self.steps.pop_front() else {
@@ -152,11 +156,17 @@ impl Script {
         }
     }
 
-    fn recv_inner(&mut self) -> BridgeResult<HostMessage> {
+    fn recv_inner(&mut self) -> IpcResult<Incoming> {
         self.message_due_by = None;
         match self.steps.pop_front() {
-            Some(Step::Send(message)) => Ok(message),
-            _ => Err(BridgeError::Io(std::io::Error::new(
+            Some(Step::Send(body)) => {
+                self.sent += 1;
+                Ok(Incoming::Request(Request {
+                    id: ReqId::new(self.sent),
+                    body,
+                }))
+            }
+            _ => Err(IpcError::Io(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "the script is over",
             ))),
@@ -173,10 +183,10 @@ struct HostEnd {
 impl HostEnd {
     /// Sends block `seq` of `frames` and waits up to `within` for its answer:
     /// `None` when none came.
-    fn block(&self, seq: u64, frames: usize, within: Duration) -> Option<BridgeMessage> {
+    fn block(&self, seq: u64, frames: usize, within: Duration) -> Option<AudioReply> {
         write_frame(
             &mut &self.stream,
-            &HostMessage::ProcessAudio(ProcessAudioData {
+            &AudioRequest::ProcessAudio(ProcessAudioData {
                 seq,
                 num_samples: frames,
                 ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
@@ -192,7 +202,7 @@ impl HostEnd {
 struct Fixture {
     session: Session,
     side: Option<RenderSide>,
-    audio: Option<SocketTransport>,
+    audio: Option<SocketTransport<AudioRequest, AudioReply, Alone>>,
     host: Option<HostEnd>,
 }
 
@@ -205,21 +215,20 @@ impl Fixture {
 
 const TICK: Duration = Duration::from_millis(10);
 
-fn load_message() -> HostMessage {
-    HostMessage::LoadPlugin {
+fn load_message() -> ControlRequest {
+    ControlRequest::LoadPlugin {
         path: std::path::PathBuf::from(crate::test_utils::clap_probe_path()),
         format: tutti_plugin_types::PluginFormat::Clap,
         plugin: None,
         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         block_size: 512,
         preferred_format: FloatWidth::F32,
-        shm_name: String::new(),
         state: None,
     }
 }
 
 /// A session with a slab, as the handshake leaves it.
-fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
+fn session() -> (Fixture, tutti_plugin_ipc::SlabWriter) {
     let (mut session, side) = Session::new().expect("bells");
     let layout = tutti_plugin_ipc::SlabLayout {
         samples_per_channel: 512,
@@ -228,11 +237,11 @@ fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
         inputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
         outputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
     };
-    let shm = format!("tutti_evloop_{name}_{}", std::process::id());
-    let creator = AudioSlab::create(shm.clone(), layout.clone()).expect("slab");
+    let (creator, handle) = AudioSlab::create(layout.clone()).expect("slab");
     session
         .render
-        .attach_slab(AudioSlab::open(shm, layout).expect("slab"));
+        .attach_slab(AudioSlab::open(&handle, layout).expect("slab"))
+        .expect("the render thread takes the slab");
     let (host_end, server_end) = UnixStream::pair().expect("socket pair");
     (
         Fixture {
@@ -274,7 +283,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
     drop(render);
     // A script that ends ends in `recv`'s refusal; any other end is a failure.
     assert!(
-        matches!(result, Err(BridgeError::Io(ref e)) if e.to_string() == "the script is over")
+        matches!(result, Err(IpcError::Io(ref e)) if e.to_string() == "the script is over")
             || result.is_ok(),
         "{result:?}"
     );
@@ -296,7 +305,7 @@ fn a_quiet_host_does_not_stop_the_plugins_timers() {
     probe.thread_reset();
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
-    let (mut session, _slab) = session("timers");
+    let (mut session, _slab) = session();
     let host = session.host();
     let mut script = Script::new([
         Step::Send(load_message()),
@@ -336,7 +345,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
     let _period = timer_period(50);
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
-    let (mut session, _slab) = session("period");
+    let (mut session, _slab) = session();
     let host = session.host();
     let mut script = Script::new([
         Step::Send(load_message()),
@@ -345,7 +354,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
         })),
         // A message is served as it comes, and with it the callback the block
         // asked for, which registers the timer.
-        Step::Send(HostMessage::GetParameterList),
+        Step::Send(ControlRequest::GetParameterList),
         Until::step(move |_| probe_visits(probe) >= 3),
     ]);
 
@@ -364,7 +373,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
 #[test]
 fn a_message_after_silence_is_answered() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let (mut session, _slab) = session("answers");
+    let (mut session, _slab) = session();
     let waits = std::sync::Arc::<std::sync::atomic::AtomicU64>::default();
     let mut script = Script::new([
         Step::Send(load_message()),
@@ -373,7 +382,7 @@ fn a_message_after_silence_is_answered() {
             let waits = waits.clone();
             move |_| waits.load(std::sync::atomic::Ordering::SeqCst) >= 3
         }),
-        Step::Send(HostMessage::GetParameterList),
+        Step::Send(ControlRequest::GetParameterList),
     ]);
     script.waits = waits;
 
@@ -382,7 +391,10 @@ fn a_message_after_silence_is_answered() {
     assert!(
         matches!(
             script.heard.last(),
-            Some(BridgeMessage::ParameterList { parameters }) if !parameters.is_empty()
+            Some(ControlFrame::Reply {
+                reply: ControlReply::ParameterList { parameters },
+                ..
+            }) if !parameters.is_empty()
         ),
         "{:?}",
         script.heard
@@ -397,11 +409,11 @@ fn a_message_after_silence_is_answered() {
 #[test]
 fn a_lost_plugin_ends_the_server_abnormally() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let (mut fixture, _slab) = session("lost");
+    let (mut fixture, _slab) = session();
     let main = main_thread();
     assert!(matches!(
         fixture.session.handle(main, load_message()).expect("load"),
-        crate::session::Reaction::Reply(BridgeMessage::PluginLoaded { .. })
+        crate::session::Reaction::Reply(ControlReply::PluginLoaded { .. })
     ));
     fixture.session.lose_plugin();
     let render = RenderThread::spawn(
@@ -423,7 +435,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
     assert!(
         matches!(
             result,
-            Err(BridgeError::State(
+            Err(IpcError::State(
                 tutti_plugin_types::StateError::PluginCrashed
             ))
         ),
@@ -437,7 +449,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
 #[test]
 fn an_undecodable_audio_frame_ends_the_session() {
     use std::io::Write as _;
-    let (mut fixture, _slab) = session("garbage");
+    let (mut fixture, _slab) = session();
     let host = fixture.host();
     let main = main_thread();
     let render = RenderThread::spawn(
@@ -471,8 +483,8 @@ fn an_undecodable_audio_frame_ends_the_session() {
     assert!(
         matches!(
             result,
-            Err(BridgeError::AudioConnection { ref cause })
-                if matches!(**cause, BridgeError::Serialization(_))
+            Err(IpcError::AudioConnection { ref cause })
+                if matches!(**cause, IpcError::Serialization(_))
         ),
         "{result:?}"
     );
@@ -482,16 +494,16 @@ fn an_undecodable_audio_frame_ends_the_session() {
 /// host blocks on the open and the resize.
 #[test]
 fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
-    let (mut session, _slab) = session("none");
+    let (mut session, _slab) = session();
     let mut script = Script::new([
-        Step::Send(HostMessage::OpenEditor {
+        Step::Send(ControlRequest::OpenEditor {
             parent: None,
             scale: ContentScale::IDENTITY,
         }),
-        Step::Send(HostMessage::SetEditorSize {
+        Step::Send(ControlRequest::SetEditorSize {
             size: dpi::PhysicalSize::new(10, 10).into(),
         }),
-        Step::Send(HostMessage::CloseEditor),
+        Step::Send(ControlRequest::CloseEditor),
     ]);
 
     run(&mut session, &mut script);
@@ -500,8 +512,8 @@ fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
         matches!(
             script.heard.as_slice(),
             [
-                BridgeMessage::EditorOpened { result: Err(open) },
-                BridgeMessage::EditorSized { result: Err(size) },
+                ControlFrame::Reply { reply: ControlReply::EditorOpened { result: Err(open) }, .. },
+                ControlFrame::Reply { reply: ControlReply::EditorSized { result: Err(size) }, .. },
             ] if open.contains("no plugin") && size.contains("not open")
         ),
         "{:?}",
@@ -537,7 +549,7 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
     let _paint = slow_paint(PAINT_MS);
-    let (mut session, _slab) = session("paint");
+    let (mut session, _slab) = session();
     let host = session.host();
     // The wait count each block was sent and answered within, when it was both.
     let within: Arc<Mutex<Vec<u64>>> = Arc::default();

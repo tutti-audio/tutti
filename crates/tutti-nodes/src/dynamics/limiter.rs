@@ -21,10 +21,9 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// A [`KernelNode`] over [`LimiterKernel`], the delay and the gain being [`LimiterBank`]'s;
 /// this file holds the cells and how the graph reaches them.
 ///
-/// - [`mono`](Self::mono) and [`stereo`](Self::stereo): one and two channels, at the
-///   default lookahead of 5 ms ([`Lookahead::DEFAULT`]).
-/// - [`new`](Self::new): any width up to one bus (16 channels), on a checked
-///   [`BusTopology`], at a lookahead of your own.
+/// Made from a [`LimiterConfig`] (`LimiterNode::from`): any width up to one bus (16
+/// channels), on a checked [`BusTopology`], at the lookahead it names (default 5 ms,
+/// [`Lookahead::DEFAULT`]).
 ///
 /// A limiter is a compressor at an effectively infinite ratio: nothing is allowed past
 /// the ceiling: the output is bounded by it (the curve's roundings can put a sample a few
@@ -78,28 +77,47 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// detector.
 pub type LimiterNode<F> = KernelNode<LimiterKernel<F>>;
 
-impl<F: Float> LimiterNode<F> {
-    /// A limiter on the bus `input`, as wide as it, delaying by `lookahead` (at least one
-    /// frame) and running at `controls`.
-    ///
-    /// **The lookahead is the node's latency**: the audio is delayed by the window so the
-    /// gain decision can run ahead of it. Longer catches peaks more transparently and
-    /// delays more; [`Lookahead::DEFAULT`], 5 ms, is a typical compromise.
-    /// It is fixed here, because it sizes the delay: the frame count is derived from these
-    /// seconds at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it, and
-    /// again at every other rate.
+/// What a [`LimiterNode`] is made from: its bus, the lookahead, how it reads a peak and the
+/// controls it starts at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LimiterConfig {
+    input: BusTopology,
+    lookahead: Lookahead,
+    detection: PeakDetection,
+    controls: LimiterControls,
+}
+
+impl LimiterConfig {
+    /// A limiter on the bus `input`, as wide as it, at [`Lookahead::DEFAULT`] (5 ms), reading
+    /// each sample's peak ([`PeakDetection::Sample`]) and at [`LimiterControls::DEFAULT`].
     ///
     /// The gain is linked: the peak is the loudest channel of the frame, and every channel
     /// is scaled by the one gain, so a loud peak in one ducks them all together and the
-    /// image does not shift. `new(BusTopology::STEREO, ..)` is [`stereo`](Self::stereo); an
-    /// `n`-channel one on the engine's order for that width is
-    /// `new(BusTopology::assumed(n)?, ..)`, which refuses a width past one bus.
+    /// image does not shift. An `n`-channel limiter on the engine's order for that width is
+    /// `new(BusTopology::assumed(n)?)`, which refuses a width past one bus.
     #[must_use]
-    pub fn new(input: BusTopology, lookahead: Lookahead, controls: LimiterControls) -> Self {
-        Self::with_kernel(LimiterKernel::new(input, lookahead), LimiterSet, controls)
+    pub fn new(input: BusTopology) -> Self {
+        Self {
+            input,
+            lookahead: Lookahead::DEFAULT,
+            detection: PeakDetection::Sample,
+            controls: LimiterControls::DEFAULT,
+        }
     }
 
-    /// This limiter reading its peak by `detection` ([`PeakDetection::Sample`] until set).
+    /// The audio is delayed by `lookahead` (at least one frame) so the gain decision can run
+    /// ahead of it.
+    ///
+    /// **The lookahead is the node's latency.** Longer catches peaks more transparently and
+    /// delays more; [`Lookahead::DEFAULT`], 5 ms, is a typical compromise. It is fixed here,
+    /// because it sizes the delay: the frame count is derived from these seconds at the rate
+    /// [`Node::prepare`](tutti_graph::Node::prepare) hands it, and again at every other rate.
+    #[must_use]
+    pub fn lookahead(self, lookahead: Lookahead) -> Self {
+        Self { lookahead, ..self }
+    }
+
+    /// How the limiter reads its peak.
     ///
     /// [`TruePeak`](PeakDetection::TruePeak) limits the signal between the samples too, to
     /// within [`LimiterBank::TRUE_PEAK_MARGIN`] (0.56 dB) of the ceiling for content in the
@@ -111,19 +129,21 @@ impl<F: Float> LimiterNode<F> {
     /// prepare.
     #[must_use]
     pub fn detection(self, detection: PeakDetection) -> Self {
-        self.map_kernel(|k| k.detection = detection)
+        Self { detection, ..self }
     }
 
-    /// A mono limiter at the default lookahead: 1 input, 1 output.
+    /// The values the node's cells start at, as [`LimiterControls`] says.
     #[must_use]
-    pub fn mono(controls: LimiterControls) -> Self {
-        Self::new(BusTopology::MONO, Lookahead::DEFAULT, controls)
+    pub fn controls(self, controls: LimiterControls) -> Self {
+        Self { controls, ..self }
     }
+}
 
-    /// A stereo limiter at the default lookahead: 2 inputs, 2 outputs, linked.
-    #[must_use]
-    pub fn stereo(controls: LimiterControls) -> Self {
-        Self::new(BusTopology::STEREO, Lookahead::DEFAULT, controls)
+impl<F: Float> From<LimiterConfig> for LimiterNode<F> {
+    fn from(config: LimiterConfig) -> Self {
+        let mut kernel = LimiterKernel::new(config.input, config.lookahead);
+        kernel.detection = config.detection;
+        Self::with_kernel(kernel, LimiterSet, config.controls)
     }
 }
 
@@ -266,20 +286,24 @@ mod tests {
     /// The usual mastering limiter at the default lookahead, as the node's own tests make
     /// it: stereo, at `threshold` and `ceiling`, with the default release.
     fn limiter(threshold: Db, ceiling: Db) -> LimiterNode<f32> {
-        LimiterNode::<f32>::stereo(LimiterControls {
-            threshold,
-            ceiling,
-            ..LimiterControls::DEFAULT
-        })
+        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterControls {
+                threshold,
+                ceiling,
+                ..LimiterControls::DEFAULT
+            },
+        ))
     }
 
     /// `limiter` with a release of `release` seconds.
     fn limiter_releasing(threshold: Db, ceiling: Db, release: f64) -> LimiterNode<f32> {
-        LimiterNode::<f32>::stereo(LimiterControls {
-            threshold,
-            ceiling,
-            release: Seconds::new(release),
-        })
+        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterControls {
+                threshold,
+                ceiling,
+                release: Seconds::new(release),
+            },
+        ))
     }
 
     /// The level of an `f32` sample, in dB.
@@ -294,41 +318,54 @@ mod tests {
         assert_param_fork(limiter(Db::new(-6.0), Db::new(-0.3)));
     }
 
-    /// Each constructor's ports: `mono` is one channel in and out, `stereo` two, and
-    /// `new` any width on its bus, with no key bus (a limiter limits what it delays).
+    /// A config's ports: the bus's width in and out, at any width, with no key bus (a limiter limits what it delays).
     #[test]
-    fn each_constructor_declares_its_ports() {
+    fn a_config_declares_its_ports() {
         let c = LimiterControls::DEFAULT;
         let ports = |n: LimiterNode<f32>| {
             let shape = n.shape();
             (shape.audio_in().count(), shape.audio_out().count())
         };
-        assert_eq!(ports(LimiterNode::<f32>::mono(c)), (1, 1));
-        assert_eq!(ports(LimiterNode::<f32>::stereo(c)), (2, 2));
+        assert_eq!(
+            ports(LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::MONO).controls(c)
+            )),
+            (1, 1)
+        );
+        assert_eq!(
+            ports(LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::STEREO).controls(c)
+            )),
+            (2, 2)
+        );
         let wide =
             BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus");
         assert_eq!(
-            ports(LimiterNode::<f32>::new(
-                wide,
-                Lookahead::of(Seconds::new(0.002)),
-                c
+            ports(LimiterNode::<f32>::from(
+                LimiterConfig::new(wide)
+                    .lookahead(Lookahead::of(Seconds::new(0.002)))
+                    .controls(c)
             )),
             (6, 6)
         );
     }
 
-    /// The controls given to a constructor are the cells' values: the shape declares the
+    /// The controls given to a config are the cells' values: the shape declares the
     /// ports in the set's order (threshold, ceiling, release), no tail, the latency of the
-    /// lookahead the constructor was given, and a base for each that is the control's.
+    /// lookahead the config was given, and a base for each that is the control's.
     #[test]
-    fn the_constructor_controls_are_the_cells_and_the_lookahead_is_the_latency() {
+    fn the_config_controls_are_the_cells_and_the_lookahead_is_the_latency() {
         let c = LimiterControls {
             threshold: Db::new(-9.0),
             ceiling: Db::new(-2.0),
             release: Seconds::new(0.25),
         };
         let lim = prepared_at(
-            LimiterNode::<f32>::new(BusTopology::STEREO, Lookahead::of(Seconds::new(0.002)), c),
+            LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::STEREO)
+                    .lookahead(Lookahead::of(Seconds::new(0.002)))
+                    .controls(c),
+            ),
             RATE_44K,
         );
         let shape = lim.shape();
@@ -342,8 +379,11 @@ mod tests {
         assert_eq!(lim.param_base(0), Some(-9.0), "the threshold's base");
         assert_eq!(lim.param_base(1), Some(-2.0), "the ceiling's base");
         assert_eq!(lim.param_base(2), Some(0.25), "the release's base");
-        // A shorthand's lookahead is the default's: 5 ms is 220.5 frames, rounded up.
-        let mono = prepared_at(LimiterNode::<f32>::mono(c), RATE_44K);
+        // A config's lookahead is the default's unless it names one: 5 ms is 220.5 frames, rounded up.
+        let mono = prepared_at(
+            LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::MONO).controls(c)),
+            RATE_44K,
+        );
         assert_eq!(mono.shape().latency, Latency::new(Samples::new(221)));
     }
 
@@ -354,10 +394,10 @@ mod tests {
     fn lookahead_frames_are_the_ceil_of_the_exact_product() {
         let device = SampleRate::SR_48K;
         let lim = prepared_at(
-            LimiterNode::<f32>::new(
-                BusTopology::STEREO,
-                Lookahead::of(Seconds::new(0.1)),
-                LimiterControls::DEFAULT,
+            LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::STEREO)
+                    .lookahead(Lookahead::of(Seconds::new(0.1)))
+                    .controls(LimiterControls::DEFAULT),
             ),
             device,
         );
@@ -546,7 +586,7 @@ mod tests {
         let wide =
             BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus");
         let mut lim = prepared_at(
-            LimiterNode::<f32>::new(wide, Lookahead::DEFAULT, LimiterControls::DEFAULT),
+            LimiterNode::<f32>::from(LimiterConfig::new(wide).controls(LimiterControls::DEFAULT)),
             RATE_44K,
         );
         let mut out = [0.0f32; 6];
@@ -814,7 +854,15 @@ mod tests {
             .collect();
         let peak = |detection| {
             let mut lim = prepared_at(
-                limiter_releasing(ceiling, ceiling, 0.1).detection(detection),
+                LimiterNode::<f32>::from(
+                    LimiterConfig::new(BusTopology::STEREO)
+                        .detection(detection)
+                        .controls(LimiterControls {
+                            threshold: ceiling,
+                            ceiling,
+                            release: Seconds::new(0.1),
+                        }),
+                ),
                 RATE_44K,
             );
             assert_eq!(lim.shape().latency, Latency::new(Samples::new(221)));
@@ -843,12 +891,21 @@ mod tests {
         let c = LimiterControls::DEFAULT;
         let short = Lookahead::of(Seconds::new(0.0002));
         let sample = prepared_at(
-            LimiterNode::<f32>::new(BusTopology::MONO, short, c),
+            LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::MONO)
+                    .lookahead(short)
+                    .controls(c),
+            ),
             SampleRate::SR_48K,
         );
         assert_eq!(sample.shape().latency, Latency::new(Samples::new(10)));
         let tp = prepared_at(
-            LimiterNode::<f32>::new(BusTopology::MONO, short, c).detection(PeakDetection::TruePeak),
+            LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::MONO)
+                    .lookahead(short)
+                    .detection(PeakDetection::TruePeak)
+                    .controls(c),
+            ),
             SampleRate::SR_48K,
         );
         let frames = tp.shape().latency.samples().get();

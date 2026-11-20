@@ -3,8 +3,8 @@
 //!
 //! - [`AudioConfig`] (in [`audio`]) — **how a loaded plugin runs**: sample
 //!   format, block size, IPC timeout. Read per load.
-//! - [`BridgeConfig`] (in [`bridge`]) — the **low-level, per-subprocess**
-//!   transport tuning: socket path, shared-memory prefix, buffer size,
+//! - [`IpcConfig`] (in [`bridge`]) — the **low-level, per-subprocess**
+//!   transport tuning: socket path, buffer size,
 //!   timeout, sample format. One drives a single plugin-server connection;
 //!   `AudioConfig::to_bridge_config` derives it.
 //!
@@ -14,5 +14,4 @@ pub mod audio;
 pub mod bridge;
 
 pub use audio::AudioConfig;
-pub(crate) use bridge::unique_name;
-pub use bridge::{BridgeConfig, RandomSourceError, unique_socket_path};
+pub use bridge::{IpcConfig, RandomSourceError, unique_socket_path};

@@ -19,12 +19,20 @@ memmap2 = "0.9"
 # The header's per-architecture cache-line padding.
 crossbeam-utils = "0.8"
 thiserror = "2"
+# The slab's wire form crosses the control wire; the slab's fresh name.
+serde = { version = "1", features = ["derive"] }
+getrandom = { workspace = true }
 # `spawn_named`: the host-watch thread; `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [target.'cfg(unix)'.dependencies]
-# `poll`, `kill(pid, 0)` and `O_NOFOLLOW`, without a hand-written call.
-rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs"] }
+# `poll`, `kill(pid, 0)`, the slab's memfd and seals, and the descriptor's
+# `sendmsg`/`recvmsg`, without a hand-written call.
+rustix = { version = "1", default-features = false, features = ["std", "event", "process", "fs", "net"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The slab's POSIX shared memory object.
+rustix = { version = "1", default-features = false, features = ["shm"] }
 
 [target.'cfg(windows)'.dependencies]
 # The process table walk and liveness probe, the named-pipe peek, and the

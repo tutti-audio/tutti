@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use tutti_au_ffi::{ParamEvent, RenderNotification, RenderPhase, RenderUnit, ScheduleAddress};
-use tutti_plugin_types::{ParamMapping, ParameterQueue};
+use tutti_plugin_types::ParameterQueue;
 use tutti_rt::AudioThreadCell;
 
 use crate::ranges::ParamBounds;
@@ -79,7 +79,7 @@ impl Stage {
         }
         let points = &queue.points[..];
         let offset = |i: usize| points[i].sample_offset.max(0);
-        let plain = |i: usize| bounds.plain(points[i].value) as f32;
+        let plain = |i: usize| bounds.word(points[i].value);
         for i in 0..points.len() {
             let next = i + 1;
             if next < points.len() && offset(next) > offset(i) {

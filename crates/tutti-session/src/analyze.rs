@@ -7,21 +7,30 @@
 //! takes ([`AudioInput`]). A file is decoded one chunk at a time and never
 //! held whole; a wave in memory is cut into the same chunks, so the two tiers
 //! land the same output.
+//!
+//! The same binding serves a live [`Analyzer`]: a tap opened by
+//! [`Taps::analyzer`](crate::Taps::analyzer), which binds the meter to the
+//! graph's rate and the tap's width and shows it what the tap holds each time
+//! the app drains it.
 
 mod feed;
+mod live;
 #[cfg(test)]
 mod tests;
 
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, Meter};
+#[cfg(codec)]
+use tutti_platform::Asset;
 use tutti_units::{SampleRate, Samples};
 
-pub use feed::{AudioContext, AudioInput};
+pub use feed::{AudioContext, AudioInput, BindError};
 use feed::{Bind, Chunk, View};
+pub use live::{Analyzer, AnalyzerError};
 
 use crate::job::{Cancel, sealed};
 use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
@@ -30,20 +39,20 @@ use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
 const CHUNK_FRAMES: Samples = Samples::new(16_384);
 
 /// The audio an analysis reads, in the sample format `S` the measure asks for:
-/// a wave in memory or a file on disk.
+/// a wave in memory or an [`Asset`] to decode.
 ///
 /// Converts from what the session already holds: an [`Arc<Wave<S>>`](Wave) or
-/// a [`Wave<S>`]; with a decoder, a path; and with a decoder and feature
-/// `sampler`, a pooled `AudioEntry`. A path, and a streamed entry, are decoded
+/// a [`Wave<S>`]; with a decoder, an [`Asset`] or a path; and with a decoder and
+/// feature `sampler`, a pooled `AudioEntry`. An asset, and a streamed entry, are decoded
 /// chunk by chunk on the job's worker into `S`.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Audio<S: Float = f32> {
     /// A wave in memory, read in its own format.
     Wave(Arc<Wave<S>>),
-    /// A file, decoded on the worker as the analysis folds it.
+    /// A file or bytes, decoded on the worker as the analysis folds it.
     #[cfg(codec)]
-    File(std::path::PathBuf),
+    File(Asset),
 }
 
 impl<S: Float> From<Wave<S>> for Audio<S> {
@@ -59,16 +68,23 @@ impl<S: Float> From<Arc<Wave<S>>> for Audio<S> {
 }
 
 #[cfg(codec)]
+impl<S: Float> From<Asset> for Audio<S> {
+    fn from(asset: Asset) -> Self {
+        Self::File(asset)
+    }
+}
+
+#[cfg(codec)]
 impl<S: Float> From<std::path::PathBuf> for Audio<S> {
     fn from(path: std::path::PathBuf) -> Self {
-        Self::File(path)
+        Asset::from(path).into()
     }
 }
 
 #[cfg(codec)]
 impl<S: Float> From<&std::path::Path> for Audio<S> {
     fn from(path: &std::path::Path) -> Self {
-        Self::File(path.to_path_buf())
+        Asset::from(path).into()
     }
 }
 
@@ -77,7 +93,7 @@ impl<S: Float> From<crate::AudioEntry<S>> for Audio<S> {
     fn from(entry: crate::AudioEntry<S>) -> Self {
         match entry {
             crate::AudioEntry::Resident(wave) => Self::Wave(wave),
-            crate::AudioEntry::Streamed(info) => Self::File(info.path().to_path_buf()),
+            crate::AudioEntry::Streamed(info) => Self::File(info.asset().clone()),
         }
     }
 }
@@ -95,20 +111,9 @@ pub enum AnalyzeError {
     #[cfg(codec)]
     #[error("the audio file could not be decoded: {0}")]
     Decode(#[from] tutti_codec::DecodeError),
-    /// The analysis reads two channels and the audio is of another width.
-    #[error("the analysis reads {needs:?} audio, and the audio is {found:?}")]
-    Width {
-        /// The width the analysis reads.
-        needs: ChannelLayout,
-        /// The audio's width.
-        found: ChannelLayout,
-    },
-    /// The audio's channels cannot be folded to one for a mono analysis.
-    #[error("the audio's channels cannot be folded to mono: {0}")]
-    Fold(#[from] tutti_buffers::FoldError),
-    /// A chunk was not a whole number of frames of the audio's width.
-    #[error("a chunk of the audio is malformed: {0}")]
-    Buffer(#[from] tutti_buffers::BufferError),
+    /// The audio's channels cannot be shown to the meter in the view it takes.
+    #[error(transparent)]
+    Bind(#[from] BindError),
     /// The worker did not finish.
     #[error(transparent)]
     Worker(#[from] WorkerError),
@@ -158,10 +163,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// The job fails with [`AnalyzeError::Measure`] when the meter refuses the
     /// audio or a chunk, `AnalyzeError::Decode` when a file cannot be
-    /// decoded, [`AnalyzeError::Width`] when a stereo analysis is given audio
-    /// of another width, [`AnalyzeError::Fold`] when a mono analysis has no
-    /// fold from the audio's topology, [`AnalyzeError::Buffer`] when a chunk
-    /// is not a valid view, and [`AnalyzeError::Worker`] or
+    /// decoded, [`AnalyzeError::Bind`] when the audio cannot be shown to the meter
+    /// (a stereo analysis of audio of another width, a mono analysis with no
+    /// fold from the audio's topology, a chunk that is not a valid view), and [`AnalyzeError::Worker`] or
     /// [`AnalyzeError::Wait`] when the job's worker fails or is dropped.
     pub fn analyze<S, A>(&mut self, audio: impl Into<Audio<S>>, analysis: A) -> Job<Analyze<A, S>>
     where
@@ -202,7 +206,9 @@ impl<'w, S: Float> Reader<'w, S> {
                 at: Samples::ZERO,
             },
             #[cfg(codec)]
-            Audio::File(path) => Self::File(Box::new(tutti_codec::FileIn::<S>::open(path)?)),
+            Audio::File(asset) => {
+                Self::File(Box::new(tutti_codec::FileIn::<S>::open(asset.clone())?))
+            }
         })
     }
 

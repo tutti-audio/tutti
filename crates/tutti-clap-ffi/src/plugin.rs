@@ -441,6 +441,12 @@ impl Plugin {
         !self.core.exts.preset_load.is_null()
     }
 
+    /// Whether the plugin implements `clap.param-indication`.
+    #[must_use]
+    pub fn supports_param_indication(&self) -> bool {
+        !self.core.exts.param_indication.is_null()
+    }
+
     /// Whether the plugin implements `clap.render`.
     #[must_use]
     pub fn supports_render(&self) -> bool {
@@ -1508,5 +1514,46 @@ mod extension_query_tests {
 
         assert!(exts.surround.is_null(), "surround");
         assert!(exts.preset_load.is_null(), "preset_load");
+    }
+}
+
+impl crate::AudioSide {
+    /// `params.flush`: delivers parameter events to an active plugin outside a
+    /// block. An `[audio-thread]` entry, so it takes the audio claim and never
+    /// runs beside `process`; the spec allows it whether or not the plugin is
+    /// processing. `false` when the plugin has no such entry, the claim is held
+    /// by a control thread, or the instance is retired.
+    pub fn params_flush(
+        &mut self,
+        input: &dyn crate::EventSource,
+        output: &mut dyn crate::EventSink,
+    ) -> bool {
+        let Some(_claim) = self.core().roles.try_claim() else {
+            return false;
+        };
+        if self.is_retired() {
+            return false;
+        }
+        let params = self.core().exts.params;
+        let flush = if params.is_null() {
+            None
+        } else {
+            // SAFETY: a vtable the plugin returned from `get_extension`, valid
+            // until the instance is destroyed, which the audio claim held here
+            // and the retired check made after it keep from happening during
+            // the call.
+            unsafe { (*params).flush }
+        };
+        let Some(flush) = flush else {
+            return false;
+        };
+        crate::events::with_input(input, |inp| {
+            crate::events::with_output(output, |out| {
+                // SAFETY: the plugin's own `flush` with the instance, and lists
+                // valid for this call, under the audio claim this thread holds.
+                unsafe { flush(self.core().raw(), inp, out) };
+            });
+        });
+        true
     }
 }

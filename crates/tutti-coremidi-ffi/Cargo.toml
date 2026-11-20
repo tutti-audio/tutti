@@ -21,14 +21,27 @@ block2 = { workspace = true }
 core-foundation = { workspace = true }
 mach2 = { workspace = true }
 objc2 = { workspace = true }
-objc2-foundation = { workspace = true }
-objc2-core-midi = { workspace = true }
+objc2-foundation = { workspace = true, features = ["NSError"] }
+objc2-core-midi = { workspace = true, features = ["block2", "MIDIUMPMutableEndpoint", "MIDIUMPMutableFunctionBlock"] }
 # `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
+# The OS-free checks derive their errors on every target the tests run on.
+[dev-dependencies]
+thiserror = { workspace = true, features = ["std"] }
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-foundation = { workspace = true, features = ["NSDictionary"] }
-objc2-core-midi = { workspace = true, features = ["block2", "MIDIUMPMutableEndpoint", "MIDIUMPMutableFunctionBlock"] }
+
+# `UmpEndpoint` is a main-thread object: this target owns `main()`, which is the
+# process's main thread under cargo (the default harness runs each test on a worker
+# thread). `tutti_fixtures::main_thread_cases` answers nextest's command line.
+[[test]]
+name = "ump_endpoint"
+path = "tests/ump_endpoint/main.rs"
+harness = false
 
 [package.metadata.docs.rs]
 targets = ["aarch64-apple-darwin"]

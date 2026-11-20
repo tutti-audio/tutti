@@ -33,7 +33,7 @@ use crate::output::{AudioEngine, Opened};
 /// See the [crate-level example](crate) for building one.
 pub struct TuttiDriver<F: Float = f32> {
     host: StreamHost<F>,
-    target: Option<(DeviceHost, DeviceSelector)>,
+    target: Option<(DeviceHost, crate::OutputConfig)>,
     opened: Opened,
 }
 
@@ -133,7 +133,7 @@ where
     ) -> core::result::Result<(), E> {
         self.host.stop();
         if let Some((_, current)) = &mut self.target {
-            *current = device.into();
+            current.select(device.into());
         }
         let mut opened = None;
         self.host
@@ -195,7 +195,7 @@ where
         spec: OutputSpec,
         driver: D,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
-        target: Option<(DeviceHost, DeviceSelector)>,
+        target: Option<(DeviceHost, crate::OutputConfig)>,
         opened: Opened,
     ) -> core::result::Result<Self, (StreamHost<F>, E)>
     where
@@ -266,7 +266,7 @@ where
     /// Selects a device for the next [`restart`](Self::restart).
     pub fn select_device(&mut self, sel: DeviceSelector) -> &mut Self {
         if let Some((_, current)) = &mut self.target {
-            *current = sel;
+            current.select(sel);
         }
         self
     }

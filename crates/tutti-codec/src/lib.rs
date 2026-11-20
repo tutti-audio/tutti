@@ -14,22 +14,25 @@
 //!   which is also the width) and the rate. `Spec::of_width` takes a width and
 //!   states the engine's order for it.
 //! - `Encoder` is `create(spec, sink)`, a fallible `write(block)` and `finish()`.
-//!   `Encoder::create_file` writes beside the path and moves the file into place
-//!   on `finish`; dropping the encoder first removes it, and so does `finish` after a
-//!   failed `write`.
+//!   `FileEncoder::create` writes beside the path and moves the file into place
+//!   on `finish` (which returns `()`: the file is synced and closed first, so
+//!   nothing holds it open); dropping the encoder first removes it, and so does
+//!   `finish` after a failed `write`.
 //! - `FileOut` is the file sink, `FileIn`'s mirror: a `Sink` over an
 //!   `Encoder`, created from a `Spec` and a path, for any `Format` the build can
 //!   write. It keeps whole frames only, keeps the first write error (later
 //!   writes are skipped and return `SinkFailed`) and `finalize` returns that
 //!   error, else the result of `finish`. It writes in place rather than staged,
-//!   because a recording cut short is worth keeping.
-//! - `write_wave(&wave, path, format)` saves a `Wave` at its own rate and topology.
+//!   because a recording cut short is worth keeping. `FileEncoder::create`
+//!   takes a path or a `tutti_platform::Staged`, for a caller that chooses `create_new`.
+//! - `write_wave(&wave, dest, format)` saves a `Wave` at its own rate and topology, to
+//!   a path (staged: replacing what is there, or refusing it under
+//!   `Destination::create_new`) or into a borrowed writer.
 //! - Decoding is plain functions and types of our own, no trait: `read_wave`
-//!   decodes a file into a `Wave` (a resident, planar sample buffer),
+//!   decodes a path or bytes (any `impl Into<tutti_platform::Asset>`) into a `Wave` (a resident, planar sample buffer),
 //!   `Wave::topology` and `FileIn::topology` say which speaker each channel feeds,
 //!   `read_wave_metadata` reads a header (and the sample format the file holds
-//!   its samples in), `read_wave_bytes` decodes a file held in memory, and
-//!   `FileIn` streams a file as a `Source` with a sample-accurate `seek`. Both
+//!   its samples in), and `FileIn` streams a file as a `Source` with a sample-accurate `seek`. Both
 //!   are generic over the sample format `S` they hand back: the file's own
 //!   (`WaveMetadata::format`) is exact, so an app matches on it once at open. A failure is a `DecodeError`. `symphonia` does the
 //!   work behind them, in `src/decode/` alone, and none of its types is in a
@@ -71,7 +74,6 @@ mod flac;
 mod format;
 mod pcm;
 mod spec;
-mod staged;
 #[cfg(test)]
 mod test_sink;
 #[cfg(feature = "encode-vorbis")]
@@ -87,12 +89,10 @@ mod writer;
 #[cfg(feature = "encode-aiff")]
 pub use aiff::AiffWriter;
 #[cfg(decode)]
-pub use decode::{
-    FileIn, WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_from,
-};
+pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
-pub use encoder::{Encoder, Finalized};
+pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile, Kept, Unfinished};
 pub use error::{Codec, Error, Result, SpecError};
 pub use file_out::FileOut;
 #[cfg(feature = "encode-flac")]
@@ -105,5 +105,5 @@ pub use vorbis::VorbisWriter;
 #[cfg(feature = "encode-wav")]
 pub use wav::WavWriter;
 #[cfg(encode)]
-pub use wave_write::{write_wave, write_wave_to};
+pub use wave_write::write_wave;
 pub use writer::FormatWriter;

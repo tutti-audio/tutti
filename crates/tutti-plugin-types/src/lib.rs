@@ -239,6 +239,7 @@ mod version;
 mod wakeups;
 mod widths;
 mod wire_error;
+mod written_values;
 
 // Test-only global allocator for the no-alloc gates: panics on any heap
 // allocation inside `assert_no_alloc::assert_no_alloc(..)` scopes.
@@ -265,7 +266,7 @@ pub use tutti_units::{BarNumber, Seconds};
 pub use any_thread::{AnyThread, Health};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
-pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};
+pub use bridge_error::{IpcError, IpcResult, PluginForkError};
 pub use c_string::{
     c_str_prefix, read_c_chars, read_c_str, read_utf16_str, write_c_chars, write_c_str,
     write_utf16_str, write_utf16_units,
@@ -274,7 +275,7 @@ pub use channels::{ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, sanitize, si
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, Described, EditorPresence, PluginClass, PluginDescriptor};
 pub use driver::{Hand, Lifecycle, Seat, Successor};
-pub use edit_slots::{EditReader, EditWriter, UnknownParam, edit_slots};
+pub use edit_slots::{EditReader, EditWriter, UnknownParam, edit_slots, epoch_before};
 pub use editor::{
     AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorUnit, InvalidContentScale,
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,
@@ -329,7 +330,7 @@ pub use midi::{
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};
 pub use tutti_graph::BusRole;
-// In the public `BridgeError::Slab`, so a host matches it without depending on ipc-ffi.
+// In the public `IpcError::Slab`, so a host matches it without depending on ipc-ffi.
 pub use tutti_plugin_ipc_ffi::SlabError;
 pub use wakeups::Wakeups;
 pub use wire_error::{FrameTooLarge, ResultError, SlabAccessError, SlabLayoutError};
@@ -344,7 +345,7 @@ pub use note_expression::{
 };
 pub use note_id::{note_id_to_channel_note, plugin_note_id};
 pub use param_edit::ParamEdit;
-pub use param_mapping::{LinearRange, ParamMapping};
+pub use param_mapping::{LinearRange, ParamMapping, PlainMap};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
     ParamAccess, ParamFlags, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
@@ -365,5 +366,6 @@ pub use transport::{
     TransportFlags, TransportInfo, TransportPosition,
 };
 pub use widths::Widths;
+pub use written_values::WrittenValues;
 // The session's render mode, which a plugin's `Prepare` carries and `Control::set_render_mode` takes.
 pub use tutti_graph::RenderMode;

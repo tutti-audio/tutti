@@ -71,7 +71,7 @@ impl PePeer {
             GroupSpan::new(1).unwrap(),
         )
         .midi_ci(2, 0)
-        .name(tutti_midi_ci::BlockName::new("Main").unwrap())
+        .name(tutti_ump::BlockName::new("Main").unwrap())
         .build()
         .unwrap();
         let muid = tutti_midi_ci::Muid::of(0x0012_3457);

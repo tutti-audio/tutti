@@ -107,7 +107,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
 
     let outgoing_pid = s.plugin_view(node).expect("hosted").handle().server_pid();
     let incoming = PluginClient::new(
-        tutti_plugin::BridgeConfig::at(
+        tutti_plugin::IpcConfig::at(
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
@@ -151,7 +151,9 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         let _ = s.update();
     }
     let handle = s.plugin_view(node).expect("hosted").handle().clone();
-    handle.send_parameter(BYPASS, Normalized::of(1.0));
+    handle
+        .send_parameter(BYPASS, Normalized::of(1.0))
+        .expect("a declared parameter");
     assert!(
         until_told(&mut s, node, 1.0),
         "the plugin's own bypass went on"

@@ -12,8 +12,8 @@ use tutti_plugin_types::{
     Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
     LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor, PluginError,
     PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
-    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, WindowHandle,
-    bypass_value,
+    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, UnknownParam,
+    WindowHandle, bypass_value,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
@@ -39,38 +39,44 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameter(id)
             }
 
-            /// Fire-and-forget, and the realtime path: the write is sent as it is.
-            /// It reads no cache, takes no lock and holds no `Arc`, so the audio
-            /// thread never waits or frees here; the server's own
-            /// `Control::set_parameter` refuses a write the plugin does not
-            /// declare or declares read-only, and writes nothing. The client-side
-            /// check, which names the error, is [`Control::set_parameter`].
+            /// Stored in the parameter's slot and sent with the next block as a
+            /// change on its first frame ([`AudioBridge::write_parameter`]), so
+            /// it is never refused for a full queue, and the latest write to a
+            /// parameter wins. The server's own `Control::set_parameter` policy
+            /// refuses a write to a read-only parameter, and writes nothing. The
+            /// client-side check, which names the error, is
+            /// [`Control::set_parameter`].
+            ///
+            /// A control-side call: it takes a lock, and is not for the audio
+            /// thread.
             ///
             /// Stays `Normalized` to the wire, which carries its `f64`.
             /// The server's decode refuses a value outside 0..=1 (NaN
             /// included): the wire is a foreign boundary and the peer is
             /// another process.
-            fn set_parameter_value(&self, id: ParamId, value: Normalized) {
-                // A full command queue refuses the write, counted
-                // (`PluginControls::refused_commands`).
-                let _ = self.link.bridge.set_parameter_rt(id, value);
+            ///
+            /// [`AudioBridge::write_parameter`]: crate::AudioBridge
+            fn set_parameter_value(
+                &self,
+                id: ParamId,
+                value: Normalized,
+            ) -> Result<(), UnknownParam> {
+                self.link.bridge.set_parameter_value(id, value)
             }
 
-            /// A parameter bypass is a parameter write, [`Lost`](BypassWrite::Lost)
-            /// when the command queue refuses it or the link is gone, so the
-            /// session writes it again. A property bypass is not claimed by a
-            /// served plugin.
+            /// A parameter bypass is a parameter write: [`Lost`](BypassWrite::Lost)
+            /// when the link is gone, so the session writes it again,
+            /// [`Refused`](BypassWrite::Refused) for a parameter the plugin does
+            /// not declare. A property bypass is not claimed by a served plugin.
             fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
                 match site {
+                    OwnBypass::Parameter(_) if self.link.bridge.audio().is_crashed() => {
+                        BypassWrite::Lost
+                    }
                     OwnBypass::Parameter(id) => {
-                        if self
-                            .link
-                            .bridge
-                            .set_parameter_rt(id, bypass_value(bypassed))
-                        {
-                            BypassWrite::Sent
-                        } else {
-                            BypassWrite::Lost
+                        match self.set_parameter_value(id, bypass_value(bypassed)) {
+                            Ok(()) => BypassWrite::Sent,
+                            Err(UnknownParam(_)) => BypassWrite::Refused,
                         }
                     }
                     OwnBypass::Property => BypassWrite::Lost,
@@ -214,8 +220,8 @@ macro_rules! served_control {
                 // parameters kept on the client; the write itself is
                 // fire-and-forget across the wire.
                 self.parameter_writable(main, id)?;
-                AnyThread::set_parameter_value(self, id, value);
-                Ok(())
+                AnyThread::set_parameter_value(self, id, value)
+                    .map_err(|UnknownParam(id)| tutti_plugin_types::ParamWriteError::Undeclared(id))
             }
 
             /// From the declared parameters the client keeps, not a round trip
@@ -303,10 +309,13 @@ macro_rules! served_control {
                 self.link.bridge.audio().current_preset()
             }
 
-            /// Advisory only: the outcome `AnyThread::set_automation_mode`
-            /// reports has no `Control` form.
-            fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) {
-                let _ = AnyThread::set_automation_mode(self, mode);
+            /// Whether `AnyThread::set_automation_mode` delivered the mode.
+            fn set_automation_state(
+                &mut self,
+                _main: MainThreadMarker,
+                mode: AutomationMode,
+            ) -> bool {
+                AnyThread::set_automation_mode(self, mode).is_ok()
             }
 
             /// What the plugin re-reported since the last call (a latency or

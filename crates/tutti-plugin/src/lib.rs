@@ -76,7 +76,7 @@
 //! shell over each served format's `Loaded`, CLAP, VST3 and AU; VST2 is not served,
 //! its editor and audio instance being one object, so it runs in the host's
 //! process and a VST2 path refuses out-of-process hosting with
-//! [`BridgeError::NotOutOfProcess`](tutti_plugin_types::BridgeError::NotOutOfProcess)).
+//! [`IpcError::NotOutOfProcess`](tutti_plugin_types::IpcError::NotOutOfProcess)).
 //! The host talks to it over two channels:
 //!
 //! - **Control** (Unix socket / named pipe) — editor open/close, parameter reads,
@@ -128,8 +128,8 @@
 //!   observations spanning 50 ms, and
 //!   [`needs_notify`](tutti_plugin_host::needs_notify)) are
 //!   `tutti-plugin-host`'s.
-//! - [`BridgeConfig`] — low-level bridge tuning (buffer size, timeouts).
-//! - [`BridgeError`](tutti_plugin_types::BridgeError) — the error most calls return.
+//! - [`IpcConfig`] — low-level bridge tuning (buffer size, timeouts).
+//! - [`IpcError`](tutti_plugin_types::IpcError) — the error most calls return.
 //!
 //! ## Features
 //!
@@ -203,10 +203,14 @@
 //! | `SEQUENCER_CONTEXT` | Best-effort | ◐ | ✕ | ✕ | ✕ |
 //! | `PRESET_LIST` | Reaction | ◐ | ○ | ◐ | ◐ |
 //! | `PRESET_LOAD` | Reaction | ◐ | ◐ | ◐ | ◐ |
+//! | `AUTOMATION_STATE` | Reaction | ◐ | ◐ | ✕ | ● |
 //! | `RENDER_MODE` | Reaction | ● | ◐ | ◐ | ● |
 //! | `EDITOR_FLOATING` | Negotiated | ✕ | ◐ | ✕ | ✕ |
 //!
-//! Notes: the AU loader reports `MIDI_IN`, `EDITOR`, `TRANSPORT`, `RENDER_MODE`
+//! Notes: `AUTOMATION_STATE` is probed where the plugin may lack the channel (VST3
+//! `IAutomationState`, CLAP `param-indication`); the AU specification has no
+//! host-to-plugin automation state, and VST2's is the host's answer to
+//! `audioMasterGetAutomationState`. The AU loader reports `MIDI_IN`, `EDITOR`, `TRANSPORT`, `RENDER_MODE`
 //! and the two preset bits; its f64 path is unimplemented (`○`), not spec-impossible,
 //! and it never reports `MIDI_OUT`. AU's `TRANSPORT` is `◐` because it reports whether the unit
 //! accepted `kAudioUnitProperty_HostCallbacks`; the loader feeds it every block. AU's `MIDI_IN` is `◐` off the component type (`aumu` /
@@ -366,7 +370,7 @@ pub use error::{
 mod format;
 mod host;
 
-pub use tutti_plugin_ipc::{BridgeConfig, unique_socket_path};
+pub use tutti_plugin_ipc::{IpcConfig, unique_socket_path};
 
 // The main-thread token the editor, state and polling entries take; a host
 // makes it once, on its UI thread, with `MainThreadMarker::new`. `MainWork` is the
@@ -444,7 +448,7 @@ pub mod catalog {
     };
     pub use tutti_plugin_host::Commit;
     pub use tutti_plugin_ipc::AudioConfig;
-    pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef, PluginRole};
+    pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef, PluginRole, Widths};
 }
 
 // The graph node of a served plugin and its two states. The control handle,

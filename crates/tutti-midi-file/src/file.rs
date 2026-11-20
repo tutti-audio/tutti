@@ -16,12 +16,13 @@
 //! loaded for playback. A file allocates and never reaches the audio thread.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::io::{ErrorKind, Write as _};
 use std::sync::Arc;
 
 use tutti_midi_ci::ProfileOnRequest;
 use tutti_midi_protocol::{MtcRate, channel_voice, flex_tempo};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
+use tutti_platform::{Asset, Destination};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, ManufacturerId, Message, MidiChannel,
@@ -32,7 +33,6 @@ use tutti_units::{Beat, Bpm, Seconds};
 
 use crate::MidiFileKind;
 use crate::smf::{SmfDivision, SmfTicksPerFrame};
-use crate::write::{Existing, WriteOptions};
 use crate::{OutOfOrder, ReadError, Refusal, TrackPart, TracksError, WriteError, clip_file, smf};
 
 mod meta_kind;
@@ -1147,8 +1147,8 @@ impl Track {
     /// The track's events as the packets a clip plays, at their beats for a
     /// file of division `ticks_per_quarter`, in the track's order. The rule is
     /// [`MetricalView::timeline`]'s.
-    pub fn timeline(&self, ticks_per_quarter: TicksPerQuarterNote) -> Timeline {
-        Timeline::of(
+    pub fn timeline(&self, ticks_per_quarter: TicksPerQuarterNote) -> SmfTimeline {
+        SmfTimeline::of(
             self.events
                 .iter()
                 .map(|(tick, event)| (tick.beats(ticks_per_quarter), event)),
@@ -1356,7 +1356,9 @@ impl Container {
 ///     .note(Tick(0), Tick(480), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
 /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
 ///
-/// let again = MidiFile::from_bytes(&file.to_bytes())?;
+/// let mut bytes = Vec::new();
+/// file.write(&mut bytes)?;
+/// let again = MidiFile::read(bytes)?;
 /// assert_eq!(again, file);
 /// let metrical = again.timebase().metrical().unwrap();
 /// assert_eq!(metrical.seconds_at(Tick(480)), Seconds::new(0.5));
@@ -1458,7 +1460,7 @@ impl MidiFile {
     /// messages do not make a [`TempoMap`].
     ///
     /// Only this constructor holds a clip to M2-104 section 7.5.2: a file read
-    /// with [`from_bytes`](Self::from_bytes) keeps the Flex Data messages as
+    /// with [`read`](Self::read) keeps the Flex Data messages as
     /// its sender interleaved them. The rule is checked on the header and on
     /// the events each by itself, so a message that starts in the header and
     /// ends in the events is reported open. Its exemption for JR Clock
@@ -1559,11 +1561,22 @@ impl MidiFile {
         })
     }
 
-    /// Decodes a complete MIDI file from its bytes, detecting the container
-    /// from its magic: `MThd` for an SMF, `SMF2CLIP` for a Clip File.
+    /// Reads and decodes a complete MIDI file from `src` (any `impl Into<Asset>`:
+    /// a path, bytes or an app's own source), detecting the container from its
+    /// magic: `MThd` for an SMF, `SMF2CLIP` for a Clip File.
+    ///
+    /// ```
+    /// # use tutti_midi_file::{LeadTrack, Layout, MidiFile, SmfDivision, Track};
+    /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(Track::new())))?;
+    /// let mut bytes = Vec::new();
+    /// file.write(&mut bytes)?;
+    /// assert_eq!(MidiFile::read(bytes)?, file);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     ///
     /// # Errors
     ///
+    /// - [`ReadError::Io`] if the source cannot be opened or read.
     /// - [`ReadError::UnknownFormat`] when the magic matches neither container
     ///   (no decoder ran).
     /// - [`ReadError::Smf`] for a malformed or cut-off SMF, a zero division
@@ -1572,8 +1585,20 @@ impl MidiFile {
     ///   rule it broke and the word it was found at.
     /// - [`ReadError::Tracks`] if the tempo events do not make a
     ///   [`TempoMap`].
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ReadError> {
-        match MidiFileKind::detect(bytes) {
+    pub fn read(src: impl Into<Asset>) -> Result<Self, ReadError> {
+        use std::io::Read;
+
+        let mut bytes = Vec::new();
+        src.into()
+            .open()
+            .and_then(|mut reader| reader.read_to_end(&mut bytes))
+            .map_err(ReadError::Io)?;
+        Self::decode(&bytes)
+    }
+
+    /// Decodes `bytes`, detecting the container from its magic.
+    fn decode(bytes: &[u8]) -> Result<Self, ReadError> {
+        match MidiFileKind::of_header(bytes) {
             Some(MidiFileKind::StandardMidiFile) => {
                 let parts = smf::read(bytes)?;
                 let mut file = Self::build(
@@ -1621,25 +1646,10 @@ impl MidiFile {
         }
     }
 
-    /// Reads and decodes the MIDI file at `path`. See [`from_bytes`](Self::from_bytes).
-    ///
-    /// # Errors
-    ///
-    /// [`ReadError::Io`] if the file cannot be read; otherwise as
-    /// [`from_bytes`](Self::from_bytes).
-    pub fn read(path: impl AsRef<Path>) -> Result<Self, ReadError> {
-        Self::from_bytes(&std::fs::read(path.as_ref()).map_err(ReadError::Io)?)
-    }
-
     /// The file as bytes, in its own container: every event written back at
-    /// its tick. Running status and the spelling of a Delta Clockstamp may
-    /// differ from the file it was read from; a read of the result is equal to
-    /// this file.
-    ///
-    /// The constructors have checked everything the writer needs, so this
-    /// cannot fail.
-    #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    /// its tick. The constructors have checked everything the writer needs, so
+    /// this cannot fail.
+    pub(crate) fn encode(&self) -> Vec<u8> {
         match self.container {
             Container::Smf(format, division) => smf::write(
                 format,
@@ -1660,42 +1670,60 @@ impl MidiFile {
         }
     }
 
-    /// Writes [`to_bytes`](Self::to_bytes) to `path`, refusing anything
-    /// already there. Use [`write_options`](Self::write_options) to replace one.
+    /// Writes the file to `dst` (any `impl Into<Destination>`: a path, or a
+    /// `&mut` [`Write`](std::io::Write) such as a `Vec<u8>`), in its own
+    /// container: every event written back at its tick. Running status and the
+    /// spelling of a Delta Clockstamp may differ from the file it was read
+    /// from; a read of the result is equal to this file.
     ///
-    /// The bytes are staged in a temporary file beside `path` and renamed into
-    /// place, so a crash leaves no partial file under `path`.
+    /// A path is written through [`Staged`](tutti_platform::Staged): the bytes go to a temporary file
+    /// beside the path and are put in place when whole, so a crash leaves no
+    /// partial file under it and what was there intact. It replaces a file
+    /// already there, as [`std::fs::write`] does;
+    /// [`Destination::create_new`] refuses it instead, atomically. A writer
+    /// receives the whole file in one `write_all`, and `create_new` does not
+    /// apply to it.
     ///
     /// ```
     /// # use tutti_midi_file::{LeadTrack, Layout, MidiFile, SmfDivision, Track, WriteError};
+    /// # use tutti_platform::Destination;
     /// # let dir = tempfile::tempdir()?;
     /// # let path = dir.path().join("song.mid");
     /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(Track::new())))?;
     /// file.write(&path)?;
-    /// assert!(matches!(file.write(&path), Err(WriteError::Exists { .. })));
-    /// file.write_options().replace().write(&path)?;
+    /// file.write(&path)?; // replaces
+    /// assert!(matches!(
+    ///     file.write(Destination::from(&path).create_new()),
+    ///     Err(WriteError::Exists { .. })
+    /// ));
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// # Errors
     ///
-    /// [`WriteError::Exists`] if something is at `path` (it is untouched, and
-    /// `self` can be written again); [`WriteError::Stage`] or
-    /// [`WriteError::Rename`] if the staging or the rename fails. A filesystem
-    /// without an atomic no-replace rename falls back to a hard link; on one
-    /// with neither the write fails with [`WriteError::Rename`] and never
-    /// overwrites.
-    pub fn write(&self, path: impl AsRef<Path>) -> Result<(), WriteError> {
-        self.write_options().write(path)
-    }
-
-    /// How to write this file to a path: [`replace`](WriteOptions::replace)
-    /// overwrites an existing file, and [`write`](WriteOptions::write) ends
-    /// the call.
-    pub fn write_options(&self) -> WriteOptions<'_> {
-        WriteOptions {
-            file: self,
-            existing: Existing::Refuse,
+    /// [`WriteError::Exists`] if something is at a path and `create_new` was
+    /// called (the target is untouched, the staged file is kept, and `self`
+    /// can be written again); [`WriteError::Stage`] if the temporary cannot be
+    /// created or written; [`WriteError::Commit`] if the sync or the move
+    /// fails (the staged file is kept); for a writer, [`WriteError::Writer`]
+    /// if it fails.
+    pub fn write<'a>(&self, dst: impl Into<Destination<'a>>) -> Result<(), WriteError> {
+        let bytes = self.encode();
+        match dst.into() {
+            Destination::Path(staged) => {
+                let path = staged.target().to_path_buf();
+                let mut file = staged.open().map_err(WriteError::Stage)?;
+                file.write_all(&bytes).map_err(WriteError::Stage)?;
+                file.commit().map_err(|e| {
+                    // Only a refused `create_new` commit is `AlreadyExists`.
+                    if e.kind() == ErrorKind::AlreadyExists {
+                        WriteError::Exists { path, source: e }
+                    } else {
+                        WriteError::Commit(e)
+                    }
+                })
+            }
+            Destination::Writer(writer) => writer.write_all(&bytes).map_err(WriteError::Writer),
         }
     }
 
@@ -2005,7 +2033,7 @@ impl<'a> MetricalView<'a> {
     ///   file's [`tempo_map`](Self::tempo_map), and the rest (text, time and
     ///   key signature, ...) are not on the timeline.
     ///
-    /// What has no packet is in [`Timeline::dropped`] with its
+    /// What has no packet is in [`SmfTimeline::dropped`] with its
     /// [`TimelineDrop`], not lost silently: a bare `F7` escape (the arbitrary
     /// bytes SMF 1.0 section 3.2 allows, which no packet holds), a divided
     /// message left unfinished, one with a byte of 128 or more, and an
@@ -2027,8 +2055,8 @@ impl<'a> MetricalView<'a> {
     /// assert!(clip.dropped.is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn timeline(self) -> Timeline {
-        Timeline::of(self.events())
+    pub fn timeline(self) -> SmfTimeline {
+        SmfTimeline::of(self.events())
     }
 }
 
@@ -2344,7 +2372,7 @@ fn smpte_seconds(fps: MtcRate, ticks_per_frame: SmfTicksPerFrame, tick: Tick) ->
 #[derive(Clone, Debug, PartialEq, Default)]
 #[must_use = "`dropped` lists the events with no packet"]
 #[non_exhaustive]
-pub struct Timeline {
+pub struct SmfTimeline {
     /// The packets at their beats, in order.
     pub packets: Vec<(Beat, Ump)>,
     /// The [`SysEx`](FileEvent::SysEx), [`Escape`](FileEvent::Escape) and
@@ -2354,7 +2382,7 @@ pub struct Timeline {
     pub dropped: Vec<(Beat, FileEvent, TimelineDrop)>,
 }
 
-/// Why an event of [`MetricalView::timeline`] has no packet ([`Timeline::dropped`]).
+/// Why an event of [`MetricalView::timeline`] has no packet ([`SmfTimeline::dropped`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TimelineDrop {
@@ -2376,7 +2404,7 @@ fn ends_in_f7(data: &[u8]) -> bool {
     data.last() == Some(&0xF7)
 }
 
-impl Timeline {
+impl SmfTimeline {
     /// The packets of `events`, by [`MetricalView::timeline`]'s rule.
     fn of<'a>(events: impl Iterator<Item = (Beat, &'a FileEvent)>) -> Self {
         let mut timeline = Self::default();
@@ -2486,15 +2514,6 @@ fn packets(events: &[(Tick, FileEvent)]) -> Vec<(u64, Ump)> {
         .iter()
         .filter_map(|(tick, event)| event.ump().map(|ump| (tick.0, ump)))
         .collect()
-}
-
-impl TryFrom<&[u8]> for MidiFile {
-    type Error = ReadError;
-
-    /// [`MidiFile::from_bytes`].
-    fn try_from(bytes: &[u8]) -> Result<Self, ReadError> {
-        Self::from_bytes(bytes)
-    }
 }
 
 /// Why `container` cannot hold `event`, `None` if it can.

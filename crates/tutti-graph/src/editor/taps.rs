@@ -10,7 +10,7 @@ use crate::Source;
 use crate::event_tap::EventTapReader;
 use crate::meter::MeterReader;
 use crate::spec::{EventIn, EventOut};
-use crate::tap::TapReader;
+use crate::tap::{TapOptions, TapReader};
 use crate::{
     EventCapacity, EventTapId, EventTapSource, EventTapSpec, MeterId, MeterSpec, TapAlign, TapId,
     TapSpec,
@@ -20,9 +20,12 @@ impl<F: Float> Editor<F> {
     /// Declares a tap on `sources` (one lane each, any ports) and returns its
     /// reader. It takes effect at the next [`commit`](Self::commit), which
     /// compiles the tap's ops and hands the executor its producers; until
-    /// then the reader sees nothing. `capacity` is each lane's ring, in
-    /// frames; what the reader does not drain in time is counted
-    /// ([`TapReader::take_lost`]).
+    /// then the reader sees nothing. `options` give each lane's ring capacity,
+    /// in frames (what the reader does not drain in time is counted,
+    /// [`TapReader::take_lost`]), the alignment and a bell: with one, the writer
+    /// rings it after each block it writes, whose end rings it too, and whose
+    /// drop rings it, so a reader awaiting its frames wakes on the audio
+    /// thread's ring and never polls.
     ///
     /// Opening an id again ends the reader it replaces: that reader drains what
     /// its rings hold, then reads `Ended` ([`TapReader::source_gone`]). The new
@@ -50,12 +53,12 @@ impl<F: Float> Editor<F> {
         &mut self,
         id: TapId,
         sources: Vec<Source>,
-        align: TapAlign,
-        capacity: Samples,
+        options: TapOptions,
     ) -> Result<TapReader<F>, MissingSource> {
+        let (capacity, align, bell) = options.into_parts();
         self.check_sources(&sources)?;
         self.end_replaced_tap(id);
-        let (reader, writer) = TapReader::named(id, sources.len(), capacity);
+        let (reader, writer) = TapReader::named(id, sources.len(), capacity, bell);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
@@ -124,7 +127,7 @@ impl<F: Float> Editor<F> {
 
     fn replace_output_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader<F> {
         self.end_replaced_tap(id);
-        let (reader, writer) = TapReader::named(id, width, capacity);
+        let (reader, writer) = TapReader::named(id, width, capacity, None);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
@@ -145,7 +148,7 @@ impl<F: Float> Editor<F> {
     fn end_replaced_tap(&mut self, id: TapId) {
         if let Some(Closed { meta, unsent }) = self.taps.close(id) {
             if unsent {
-                meta.end.raise(());
+                meta.end.raise();
             } else {
                 self.link.end_tap(meta.end);
             }
