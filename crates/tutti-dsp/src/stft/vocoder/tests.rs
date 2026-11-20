@@ -269,6 +269,115 @@ fn a_shift_lands_at_the_input_times_two_to_the_cents_over_1200() {
     }
 }
 
+/// The cubic read's position is the step times the frames read, one product, whatever the
+/// output was split into: a stretched and shifted stream (700 cents, no dyadic ratio) in output
+/// blocks of 64 and of 512 is the same bit for bit, pulled and at a fixed rate.
+#[test]
+fn a_shifted_stream_is_bit_identical_in_any_output_blocks() {
+    let source = [sine::<f32>(440.0, 0.5, 0.0, 20_000)];
+    let pulled = |block| {
+        let mut v = vocoder::<f32>(ChannelLayout::MONO);
+        v.retarget(&controls(1.5, 700.0));
+        drive(&mut v, &source, block, |_, _| {})
+    };
+    let fixed = |block| {
+        let mut v = PhaseVocoder::<f32>::fixed_rate(ChannelLayout::MONO, geometry());
+        v.retarget(&controls(1.0, 700.0));
+        drive_blocks(&mut v, &source, block)
+    };
+    for (name, small, large) in [
+        ("pulled", pulled(64), pulled(512)),
+        ("fixed rate", fixed(64), fixed(512)),
+    ] {
+        let len = small[0].len().min(large[0].len());
+        assert!(len > 10_000, "a long enough stream to compare: {len}");
+        for n in 0..len {
+            assert_eq!(
+                small[0][n].to_bits(),
+                large[0][n].to_bits(),
+                "{name}, frame {n}: {} in 64s, {} in 512s",
+                small[0][n],
+                large[0][n]
+            );
+        }
+    }
+}
+
+/// The source frames consumed per output frame over a long run is `read_rate()`: `1 / stretch`
+/// as clamped, whatever the pitch, the extremes of both included. The frames in flight put a
+/// window and a block between the run's counts and the rate, a small part of the 96 000 frames.
+#[test]
+fn the_read_rate_is_the_consumption_measured_over_a_long_run() {
+    let pairs = [
+        (1.0, 0.0),
+        (1.5, 700.0),
+        (0.8, -300.0),
+        (0.25, -2400.0),
+        (0.25, 2400.0),
+        (4.0, 2400.0),
+        (4.0, -2400.0),
+        (f64::NAN, 100.0),
+    ];
+    for (stretch, cents) in pairs {
+        let mut v = vocoder::<f32>(ChannelLayout::MONO);
+        v.retarget(&controls(stretch, cents));
+        let rate = v.read_rate().get();
+        let expected = 1.0 / StretchFactor::new(stretch).get().clamp(0.25, 4.0);
+        let expected = if stretch.is_nan() { 1.0 } else { expected };
+        assert_eq!(rate, expected, "{stretch}, {cents}");
+        let produced = 96_000;
+        let mut fed = 0;
+        let mut made = 0;
+        while made < produced {
+            let needed = v.input_needed(Samples::new(256)).get();
+            let input = vec![vec![0.1f32; needed]];
+            let mut out = vec![vec![0.0f32; 256]];
+            let counts = v.process(
+                Planes::from_vecs(&input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            );
+            fed += counts.consumed.get();
+            made += counts.produced.get();
+        }
+        let measured = fed as f64 / made as f64;
+        let slack = (WINDOW + 4 * 256) as f64 / made as f64;
+        assert!(
+            (measured - rate).abs() <= slack * rate.max(1.0),
+            "{stretch}, {cents}: consumed {measured} per frame, read_rate {rate}"
+        );
+    }
+}
+
+/// A non-finite input sample does not latch: the output is finite again once the frames that
+/// held it have gone out, with no reset between, whatever the controls.
+///
+/// The sample is input frame 5000 of a stream that starts `latency` frames in; the frames
+/// that hold it end by 5000 + latency + window of the input, and the output is the input
+/// stretched by up to 2, so the output is clear by `2 (5000 + 2 window) + latency`.
+#[test]
+fn a_non_finite_input_sample_does_not_latch() {
+    for (stretch, cents) in [(1.0, 0.0), (1.5, 0.0), (0.8, 300.0), (2.0, -500.0)] {
+        for value in [f32::NAN, f32::INFINITY] {
+            let mut input = sine::<f32>(1000.0, 0.5, 0.0, 40_000);
+            input[5000] = value;
+            let mut v = vocoder::<f32>(ChannelLayout::STEREO);
+            v.retarget(&controls(stretch, cents));
+            let out = drive(&mut v, &[input.clone(), input], 256, |_, _| {});
+            assert!(
+                out[0].iter().any(|x| !x.is_finite()),
+                "{stretch}, {cents}: the sample reaches the output"
+            );
+            let clear = 2 * (5000 + 2 * WINDOW) + v.latency().get();
+            for channel in &out {
+                assert!(
+                    channel[clear..].iter().all(|x| x.is_finite()),
+                    "{stretch}, {cents}, {value}: non-finite output past {clear}"
+                );
+            }
+        }
+    }
+}
+
 /// A sine through a non-integer stretch stays a sine: the power outside the fundamental's lobe,
 /// over the power inside it, is as low as the analyser can resolve. The analyser's own floor
 /// is that of the exact input sine (its Blackman-Harris window's sidelobes, about -87 dB here);
