@@ -33,11 +33,17 @@
 //!   `Option` wrapper counts).
 //! - `config-width`: no receiver, return type `Self` or the owner (no wrapper: an
 //!   `Option` or `Result` return is not rule 2's "returning `Self`", and `ctor-result`
-//!   counts the `Result`), on a
-//!   `*Config` owner, whose first parameter is not a `ChannelLayout` or `BusTopology`
+//!   counts the `Result`), on a *node config*, whose first parameter is not a `ChannelLayout` or `BusTopology`
 //!   (the last path segment of a type, or of an `impl Into<_>` or a `T: Into<_>` bound
 //!   named in the generics or the `where` clause). A function with no parameter has no
-//!   first one.
+//!   first one. A node config is a `*Config` owner that the shipped tree converts into
+//!   a node: an `impl From<Owner..> for X` or `impl TryFrom<Owner..> for X` (generics on
+//!   either side, any path prefix) whose `X`'s last path segment ends in `Node` (a type
+//!   alias such as `pub type CrossoverNode<F> = KernelNode<..>` is named so), or a
+//!   `*Node` owner's no-receiver `pub fn` with a parameter whose type is the owner
+//!   (by value, by reference or behind `impl Into<_>`: a constructor like
+//!   `new(config: XConfig)`). The width is the first choice of a node; an analysis,
+//!   device or transport config is no node config and is not read, whatever its name.
 //! - `ctor-result`: no receiver, a built type wrapped in `Result`, on any owner.
 //! - `range-macro`: a `macro_rules!` outside `tutti-units` and `tutti-rt`'s `id.rs` (the homes of
 //!   `ranged!` and `id!`) whose body holds a
@@ -53,7 +59,9 @@
 //! **Blind spots.** The scan is lexical: it does not see an item a macro writes (the
 //! `with-prefix` of a macro-made method), an owner reached through a type alias, a
 //! re-export, whether a `pub` type is reachable from the crate root, or what a type
-//! is beyond its name's suffix (`node-ctor` and `config-width` read the suffix).
+//! is beyond its name's suffix (`node-ctor` reads the suffix, and `config-width` reads
+//! the suffix of the node a config converts into or is passed to, matched by name
+//! across the tree).
 //!
 //! **Keys.** `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`. No line
 //! numbers; items that share a key and a rule (an `impl Foo<f32>` and an
@@ -150,11 +158,6 @@ const fn ty(
     }
 }
 
-const NOT_A_NODE: &str = "an analysis or transport config: it holds no width to choose";
-const MEASURES: &str = "a measurement config describes the analysis; the audio's width travels \
-    with the view it is applied to (`Mono`, `Interleaved`, `StereoPlanes`), so there is no width to choose";
-const TOPOLOGY: &str = "a loudness config holds the channel topology the weights are read from, \
-    which is the analysis's channel model, not a width choice; the call checks the view's width against it";
 const STEREO_ONLY: &str = "a stereo-only node: mid/side, width and auto-pan are defined on a \
     left and right pair, so the width is not a choice and the config takes none";
 const MONO_ONLY: &str = "a mono-only node: an EQ band is one filter section on one channel, so \
@@ -255,12 +258,6 @@ pub(super) const ALLOW: &[Allow] = &[
         rules: &[Rule::CtorResult],
         reason: "a conversion from a Function Block Info Notification and a name, not a configuration: it refuses what no block can hold, with a named error",
     },
-    ty(
-        "crates/tutti-midi-hardware/",
-        "MidiHardwareConfig",
-        WIDTH,
-        NOT_A_NODE,
-    ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualEndpoint::open",
@@ -543,8 +540,6 @@ pub(super) const ALLOW: &[Allow] = &[
         CTOR,
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
-    ty("crates/tutti-au-host/", "StreamConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-cpal/", "OutputConfig", WIDTH, NOT_A_NODE),
     ty(
         "crates/tutti-nodes/",
         "OscillatorConfig",
@@ -623,57 +618,12 @@ pub(super) const ALLOW: &[Allow] = &[
         WIDTH,
         OVER_A_LAYOUT,
     ),
-    ty("crates/tutti-measure/", "AlignConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "ChordConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "ChromaConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "LoudnessConfig", WIDTH, TOPOLOGY),
-    ty("crates/tutti-measure/", "NoteConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "OnsetConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "PeakConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "SilenceConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "SpectrumConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "StftConfig", WIDTH, MEASURES),
-    ty("crates/tutti-measure/", "TempoConfig", WIDTH, MEASURES),
-    ty(
-        "crates/tutti-measure/",
-        "VectorscopeConfig",
-        WIDTH,
-        MEASURES,
-    ),
-    ty(
-        "crates/tutti-measure/",
-        "WindowedLoudnessConfig",
-        WIDTH,
-        TOPOLOGY,
-    ),
     ty(
         "crates/tutti-dsp/",
         "LimiterBank::detecting",
         CTOR,
         "a true-peak lookahead is valid only together with the rate: the up-sampler's delay is a fixed count of frames, and whether the lookahead in seconds covers it depends on the rate, so no type can hold the validity before the rate is bound at this call",
     ),
-    ty("crates/tutti-measure/", "YinConfig", WIDTH, MEASURES),
-    ty(
-        "crates/tutti-midi-network/",
-        "HostConfig",
-        WIDTH,
-        NOT_A_NODE,
-    ),
-    ty(
-        "crates/tutti-midi-protocol/",
-        "MpeZoneConfig",
-        WIDTH,
-        NOT_A_NODE,
-    ),
-    ty("crates/tutti-plugin-ipc/", "AudioConfig", WIDTH, NOT_A_NODE),
-    ty(
-        "crates/tutti-plugin-db/",
-        "CatalogConfig",
-        WIDTH,
-        NOT_A_NODE,
-    ),
-    ty("crates/tutti-session/", "PoolConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-voicing/", "VoiceConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-graph/", "Direct", SETTER, TEST_SUPPORT),
     ty("crates/tutti-graph/", "Reference", SETTER, TEST_SUPPORT),
     ty("crates/tutti-session/", "AudioSide", SETTER, TEST_SUPPORT),
@@ -1064,7 +1014,67 @@ fn writes_range_type(body: &str) -> bool {
 }
 
 /// The violations of one file's text.
+#[cfg(test)]
 pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
+    let parsed = parse_file(path, src);
+    let nodes = parsed.nodes.clone();
+    parsed.finish(&nodes)
+}
+
+/// One file's reading: its violations, its `config-width` candidates (kept apart until
+/// the tree's node configs are known) and the `*Config` names it converts into a node.
+struct Parsed {
+    sites: BTreeSet<Site>,
+    widths: Vec<Site>,
+    nodes: BTreeSet<String>,
+}
+
+impl Parsed {
+    /// The violations, with a `config-width` candidate kept when its owner is in `nodes`.
+    fn finish(self, nodes: &BTreeSet<String>) -> Vec<Site> {
+        let mut sites = self.sites;
+        sites.extend(self.widths.into_iter().filter(|s| nodes.contains(&s.owner)));
+        sites.into_iter().collect()
+    }
+}
+
+/// The `*Config` an `impl From<Config..> for ..Node..` or `impl TryFrom<Config..> for
+/// ..Node..` header converts into a node, if it is one.
+fn converted_config(header: &str) -> Option<String> {
+    let mut h = header.trim();
+    if h.starts_with('<') {
+        h = h[matching(h, 0, b'<', b'>')? + 1..].trim();
+    }
+    if let Some(w) = find_word_from(h, "where", 0) {
+        h = h[..w].trim();
+    }
+    let f = find_word_from(h, "for", 0)?;
+    let (tr, target) = (h[..f].trim(), h[f + 3..].trim());
+    let lt = tr.find('<')?;
+    if !matches!(bare(&tr[..lt]), "From" | "TryFrom") {
+        return None;
+    }
+    let arg = split_top(tr[lt + 1..].trim_end().strip_suffix('>')?)[0];
+    let config = bare(arg.trim().trim_start_matches('&'));
+    let node = bare(target);
+    (config.ends_with("Config") && config.len() > 6 && node.ends_with("Node") && node.len() > 4)
+        .then(|| config.to_owned())
+}
+
+/// The `*Config` a parameter `pat: ty` takes, directly or behind `impl Into<_>`.
+fn config_param(param: &str) -> Option<String> {
+    let p = squash(strip_attrs(param));
+    let (_, ty) = p.split_once(':')?;
+    let ty = ty.trim().trim_start_matches('&');
+    let ty = ty
+        .strip_prefix("implInto<")
+        .or_else(|| ty.strip_prefix("impl Into<"))
+        .map_or(ty, |t| t.trim_end_matches('>'));
+    let name = bare(ty);
+    (name.ends_with("Config") && name.len() > 6).then(|| name.to_owned())
+}
+
+fn parse_file(path: &str, src: &str) -> Parsed {
     let code = blank(src);
     let tests = test_ranges(&code);
     let in_test = |p: usize| tests.iter().any(|&(a, z)| a <= p && p <= z);
@@ -1080,6 +1090,22 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
     let in_macro_home =
         path.starts_with("crates/tutti-units/") || path == "crates/tutti-rt/src/id.rs";
     let mut sites = BTreeSet::new();
+    let mut widths = Vec::new();
+    let mut nodes = BTreeSet::new();
+    let mut at = 0;
+    while let Some(p) = find_word_from(&code, "impl", at) {
+        at = p + 4;
+        let head = code[..p].trim_end();
+        let head_ok = head.is_empty()
+            || head.ends_with(['}', ';', '{', ']'])
+            || head.ends_with("unsafe")
+            || head.ends_with("default");
+        if !head_ok || in_test(p) {
+            continue;
+        }
+        let end = code[at..].find(['{', ';']).map_or(code.len(), |i| at + i);
+        nodes.extend(converted_config(&code[at..end]));
+    }
     if !in_macro_home {
         for (open, close, name) in &macros {
             if writes_range_type(&code[open + 1..*close]) {
@@ -1182,22 +1208,33 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
                     if owner.ends_with("Node") && owner.len() > 4 {
                         hit(Rule::NodeCtor);
                     }
-                    if wrap == Wrap::Plain
-                        && owner.ends_with("Config")
-                        && owner.len() > 6
-                        && !params.first().is_some_and(|f| is_width(f, &bounds))
-                    {
-                        hit(Rule::ConfigWidth);
-                    }
                     if wrap == Wrap::Result {
                         hit(Rule::CtorResult);
                     }
+                }
+                if owner.ends_with("Node") && owner.len() > 4 {
+                    nodes.extend(params.iter().find_map(|p| config_param(p)));
+                }
+                if ty == Some(Wrap::Plain)
+                    && owner.ends_with("Config")
+                    && owner.len() > 6
+                    && !params.first().is_some_and(|f| is_width(f, &bounds))
+                {
+                    widths.push(Site {
+                        key: key.clone(),
+                        owner: owner.to_owned(),
+                        rule: Rule::ConfigWidth,
+                    });
                 }
             }
         }
         from = close;
     }
-    sites.into_iter().collect()
+    Parsed {
+        sites,
+        widths,
+        nodes,
+    }
 }
 
 fn crate_of(path: &str) -> &str {
@@ -1259,11 +1296,18 @@ fn parse(text: &str) -> Result<BTreeSet<Row>, Vec<String>> {
 fn found(tree: &dyn Tree, allow: &[Allow]) -> (BTreeSet<Row>, BTreeSet<usize>) {
     let mut sites = BTreeSet::new();
     let mut used = BTreeSet::new();
+    let mut parsed = Vec::new();
+    let mut nodes = BTreeSet::new();
     for path in source_files(tree) {
         let Some(src) = tree.read(&path) else {
             continue;
         };
-        for s in scan(&path, &src) {
+        let p = parse_file(&path, &src);
+        nodes.extend(p.nodes.iter().cloned());
+        parsed.push((path, p));
+    }
+    for (path, p) in parsed {
+        for s in p.finish(&nodes) {
             let covered: Vec<usize> = (0..allow.len())
                 .filter(|&i| allowed(&path, &s, &allow[i]))
                 .collect();
@@ -1491,7 +1535,13 @@ mod tests {
                   impl CConfig { pub fn new(l: impl Into<ChannelLayout>) -> Self { todo!() } }\n\
                   impl DConfig { pub fn new<L: Into<BusTopology>>(l: L) -> Self { todo!() } }\n\
                   impl EConfig { pub fn new<L>(l: L) -> Self where L: Into<ChannelLayout> { todo!() } }\n\
-                  impl FConfig { pub fn gain(&self) -> Self { todo!() } }";
+                  impl FConfig { pub fn gain(&self) -> Self { todo!() } }\n\
+                  impl From<AConfig> for ANode { fn from(c: AConfig) -> Self { todo!() } }\n\
+                  impl From<BConfig> for BNode { fn from(c: BConfig) -> Self { todo!() } }\n\
+                  impl From<CConfig> for CNode { fn from(c: CConfig) -> Self { todo!() } }\n\
+                  impl From<DConfig> for DNode { fn from(c: DConfig) -> Self { todo!() } }\n\
+                  impl From<EConfig> for ENode { fn from(c: EConfig) -> Self { todo!() } }\n\
+                  impl From<FConfig> for FNode { fn from(c: FConfig) -> Self { todo!() } }";
         assert!(rules(ok).is_empty());
         for bad in [
             "impl XConfig { pub fn new(rate: u32) -> Self { todo!() } }",
@@ -1499,8 +1549,74 @@ mod tests {
             "impl XConfig { pub fn new(r: u32, l: ChannelLayout) -> Self { todo!() } }",
             "impl XConfig { pub fn new<L: Into<u8>>(l: L) -> Self { todo!() } }",
         ] {
-            assert_eq!(rules(bad), one("new", "config-width"), "{bad}");
+            let node = format!(
+                "{bad}\nimpl From<XConfig> for XNode {{ fn from(c: XConfig) -> Self {{ todo!() }} }}"
+            );
+            assert_eq!(rules(&node), one("new", "config-width"), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_config_that_no_node_is_converted_from_is_not_read_for_a_width() {
+        let bare = "impl XConfig { pub fn new(rate: u32) -> Self { todo!() } }";
+        assert!(rules(bare).is_empty());
+        let other = "impl From<XConfig> for XSettings { fn from(c: XConfig) -> Self { todo!() } }\n\
+                     impl From<YConfig> for XNode { fn from(c: YConfig) -> Self { todo!() } }";
+        assert!(rules(&format!("{bare}\n{other}")).is_empty());
+        let node = "impl From<XConfig> for XNode { fn from(c: XConfig) -> Self { todo!() } }";
+        assert_eq!(
+            rules(&format!("{bare}\n{node}")),
+            one("new", "config-width")
+        );
+    }
+
+    #[test]
+    fn a_node_config_is_a_from_or_try_from_into_a_node_or_an_alias_of_one() {
+        let bare = "impl XConfig { pub fn new(rate: u32) -> Self { todo!() } }\n";
+        for conv in [
+            "impl<F: Float> From<XConfig> for a::XNode<F> { fn from(c: XConfig) -> Self { todo!() } }",
+            "impl<F: Float> TryFrom<b::XConfig<F>> for XNode<F> { type Error = E; fn try_from(c: XConfig) -> Result<Self, E> { todo!() } }",
+            "impl From<XConfig> for XNode { fn from(c: XConfig) -> Self { todo!() } }",
+            "pub type XNode<F> = KernelNode<XKernel<F>>;\n\
+             impl<F> TryFrom<XConfig> for XNode<F> { type Error = E; fn try_from(c: XConfig) -> Result<Self, E> { todo!() } }",
+        ] {
+            assert_eq!(
+                rules(&format!("{bare}{conv}")),
+                one("new", "config-width"),
+                "{conv}"
+            );
+        }
+        let across = Mem::with(&[
+            (LIST, ""),
+            (F, bare),
+            (
+                "crates/a/src/node.rs",
+                "pub type XNode<F> = KernelNode<XKernel<F>>;\n\
+                 impl<F> TryFrom<XConfig> for XNode<F> { type Error = E; fn try_from(c: XConfig) -> Result<Self, E> { todo!() } }",
+            ),
+        ]);
+        let r = check(&across, &[], 0);
+        assert_eq!(
+            r.findings[1],
+            "  a  config-width  crates/a/src/lib.rs::XConfig::new"
+        );
+    }
+
+    #[test]
+    fn a_node_constructor_taking_a_config_makes_it_a_node_config() {
+        let bare = "impl XConfig { pub fn new(rate: u32) -> Self { todo!() } }\n";
+        for ctor in [
+            "impl XNode { pub fn new(config: XConfig) -> Self { todo!() } }",
+            "impl<K> XNode<K> { pub fn new(config: &x::XConfig) -> Self { todo!() } }",
+            "impl XNode { pub fn from_config(rate: u32, config: impl Into<XConfig>) -> Self { todo!() } }",
+        ] {
+            assert_eq!(rules(&format!("{bare}{ctor}")).len(), 2, "{ctor}");
+            assert!(rules(&format!("{bare}{ctor}")).contains(&("new".to_owned(), "config-width")));
+        }
+        let not = "impl XNode { pub fn new(config: YConfig) -> Self { todo!() } }\n\
+                   impl XNode { pub fn tuned(&self, config: XConfig) -> Self { todo!() } }\n\
+                   impl XOther { pub fn new(config: XConfig) -> Self { todo!() } }";
+        assert!(!rules(&format!("{bare}{not}")).contains(&("new".to_owned(), "config-width")));
     }
 
     #[test]
@@ -1609,7 +1725,9 @@ mod tests {
     #[test]
     fn a_config_width_allow_row_covers_its_type_and_not_another_config_of_the_crate() {
         let src = "impl AlignConfig { pub fn new(r: u8) -> Self { todo!() } }\n\
-                   impl OtherConfig { pub fn new(r: u8) -> Self { todo!() } }";
+                   impl OtherConfig { pub fn new(r: u8) -> Self { todo!() } }\n\
+                   impl From<AlignConfig> for AlignNode { fn from(c: AlignConfig) -> Self { todo!() } }\n\
+                   impl From<OtherConfig> for OtherNode { fn from(c: OtherConfig) -> Self { todo!() } }";
         let allow = [ty("crates/a/", "AlignConfig", WIDTH, "r")];
         let r = run("", src, &allow);
         assert!(!r.passed());
