@@ -6,7 +6,7 @@ use tutti_fixtures::unique_name;
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_hardware::{
-    MidiHardwareError, MidiHardwareConfig, MidiSession, VirtualDestination, VirtualSource,
+    MidiHardwareConfig, MidiHardwareError, MidiSession, VirtualDestination, VirtualSource,
     VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
