@@ -16,11 +16,10 @@ use tutti_buffers::{Interleaved, Sample};
 /// closed exactly once, and it closes what was written even after a failed
 /// `write`, handing the sink back. A writer dropped before `finish` leaves the
 /// sink as it is (WAV also back-patches its sizes, best effort, so the take
-/// stays readable) and stops any thread it started before `drop` returns.
+/// stays readable).
 ///
 /// The sink bounds belong to each implementation, not to the trait: a format
-/// that needs more of its sink (Ogg Vorbis encodes on a thread of its own,
-/// which takes the sink with it) asks for more on its own `impl`.
+/// that needs more of its sink asks for more on its own `impl`.
 ///
 /// [`Encoder`](crate::Encoder) is the one type that holds any of them.
 pub trait FormatWriter: Sized {

@@ -1,28 +1,4 @@
 use super::*;
-use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
-
-/// `Quality` keeps the range-checked contract: `new`, `TryFrom`, `of` and
-/// serde agree, and every raw outside `0.0..=1.0`, NaN and infinity included,
-/// is refused.
-#[test]
-fn quality_keeps_the_range_contract() {
-    let c = RangeContract {
-        new: Quality::new,
-        get: Quality::get,
-        of: Some(Quality::of),
-        valid: &[0.0, 0.25, 0.5, 1.0],
-        invalid: &[-0.1, 1.25, f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
-    };
-    check_range_contract(&c);
-    check_range_serde(&c);
-}
-
-#[test]
-fn quality_defaults_to_the_middle() {
-    assert_eq!(Quality::default().get(), 0.5);
-    assert_eq!(Quality::LOWEST.get(), 0.0);
-    assert_eq!(Quality::HIGHEST.get(), 1.0);
-}
 
 /// An extension names its format with the defaults, case and `aif` aside; an
 /// unknown one is named lowercased, and a missing one is `(none)`.
@@ -50,13 +26,6 @@ fn extensions_name_formats_and_refuse_the_rest() {
         Format::Flac {
             depth: IntDepth::Int24,
             level: FlacLevel::Standard
-        }
-    );
-    #[cfg(feature = "encode-vorbis")]
-    assert_eq!(
-        Format::from_extension("ogg").unwrap(),
-        Format::Vorbis {
-            quality: Quality::of(0.5)
         }
     );
 }
@@ -91,13 +60,5 @@ fn the_integer_width_and_the_length_bound_follow_the_format() {
         }
         .int_depth(),
         Some(IntDepth::Int16)
-    );
-    #[cfg(feature = "encode-vorbis")]
-    assert_eq!(
-        Format::Vorbis {
-            quality: Quality::default()
-        }
-        .int_depth(),
-        None
     );
 }

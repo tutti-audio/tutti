@@ -26,7 +26,7 @@ use tutti_midi_runtime::InputInlets;
 use tutti_platform::MainThreadMarker;
 use tutti_ump::{
     Bank, BlockDirection, CCNumber, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel,
-    Protocol, Rpn, U7, UiHint, Ump, Utility, Voice1,
+    ProductInstanceId, Protocol, Rpn, U7, UiHint, Ump, Utility, Voice1,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -211,6 +211,50 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
         assert_eq!(got.info, block().info());
         assert_eq!(got.name.as_deref(), Some("Pads"));
     }
+}
+
+/// The endpoint record another client reads carries the Device Identity
+/// (M2-104 §7.1.3) and the Product Instance Id (§7.1.5) of the spec, field by
+/// field, for a source and a destination alike; an Id of the 42-byte maximum
+/// arrives whole, and an endpoint with no Id has none.
+#[test]
+fn the_published_endpoint_record_carries_the_device_identity_and_instance_id() {
+    let id = ProductInstanceId::new(&"0123456789".repeat(5)[..42]).unwrap();
+    let identified = |tag, instance| {
+        VirtualSpec::new(
+            EndpointName::new(&format!("tutti-virt-{}-{tag}", std::process::id())).unwrap(),
+            device_identity(),
+            instance,
+        )
+    };
+    let source_spec = identified("ident-source", Some(id));
+    let dest_spec = identified("ident-destination", Some(id));
+    let bare_spec = identified("ident-bare", None);
+    let _source =
+        VirtualSource::open(&source_spec, plain_endpoint_main()).expect("a virtual source");
+    let _bare = VirtualSource::open(&bare_spec, plain_endpoint_main()).expect("a virtual source");
+    let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
+    let ports = HardwareMidiInputs::new(inlets);
+    let producer = ports.open_input_port("virtual").0;
+    let _destination = VirtualDestination::open(&dest_spec, producer, plain_endpoint_main())
+        .expect("a destination");
+
+    let (peer, _) = peer(PortCaps::READ);
+    let record = |spec| {
+        find(&peer, spec)
+            .expect("listed")
+            .ump
+            .expect("a UMP Endpoint record")
+    };
+    for spec in [&source_spec, &dest_spec] {
+        let record = record(spec);
+        assert_eq!(record.device, Some(device_identity()));
+        assert_eq!(record.instance, Some(id));
+        assert_eq!(record.instance.map(|id| id.as_str().len()), Some(42));
+    }
+    let bare = record(&bare_spec);
+    assert_eq!(bare.device, Some(device_identity()));
+    assert_eq!(bare.instance, None);
 }
 
 /// An endpoint created as MIDI 1.0 reports MIDI 1.0 and publishes it, and the

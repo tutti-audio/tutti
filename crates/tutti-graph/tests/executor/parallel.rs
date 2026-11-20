@@ -24,7 +24,7 @@ use tutti_graph::{
     ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn, ParamRamp, ParamRange,
     ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
+use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
 use tutti_ump::Ump;
 use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, UnitParam};
 
@@ -170,7 +170,7 @@ fn out(node: u64, port: u16) -> OutPort {
 }
 
 fn from(node: u64, port: u16) -> Edge {
-    Edge::Direct(Source::Node(out(node, port)))
+    Edge::Direct(PortSource::Node(out(node, port)))
 }
 
 fn ev_out(node: u64) -> EventOut {
@@ -264,7 +264,7 @@ fn build(ed: &mut Editor) {
     ed.insert(NodeKey(51), "fbsmooth", Forkable(Kind::Smooth));
     let spec = ed.spec_mut();
     let t = &mut spec.topology;
-    let g = Edge::Direct(Source::Global(0));
+    let g = Edge::Direct(PortSource::Global(0));
     for k in [2, 3, 4, 5, 6, 30, 50] {
         t.edges.insert(at(k, 0), vec![g]);
     }
@@ -286,11 +286,11 @@ fn build(ed: &mut Editor) {
     );
     t.edges.insert(at(51, 0), vec![from(50, 0)]);
     t.set_outputs(vec![
-        Source::Node(out(9, 0)),
-        Source::Node(out(40, 0)),
-        Source::Node(out(41, 1)),
-        Source::Node(out(30, 0)),
-        Source::Node(out(51, 0)),
+        PortSource::Node(out(9, 0)),
+        PortSource::Node(out(40, 0)),
+        PortSource::Node(out(41, 1)),
+        PortSource::Node(out(30, 0)),
+        PortSource::Node(out(51, 0)),
     ]);
     for (to, src) in [
         (consumer_in(0), 20),
@@ -621,11 +621,11 @@ fn a_panic_on_a_worker_reaches_the_caller() {
         ed.spec_mut()
             .topology
             .edges
-            .insert(at(k, 0), vec![Edge::Direct(Source::Global(0))]);
+            .insert(at(k, 0), vec![Edge::Direct(PortSource::Global(0))]);
     }
     ed.spec_mut()
         .topology
-        .set_outputs((1..=6).map(|k| Source::Node(out(k, 0))));
+        .set_outputs((1..=6).map(|k| PortSource::Node(out(k, 0))));
     ed.commit().expect("commits");
     let input = vec![0.5f32; MAX_BLOCK];
     let mut chans = vec![vec![0.0f32; MAX_BLOCK]; 6];
@@ -745,12 +745,13 @@ fn the_executor_waits_by_its_pools_budget() {
         );
     }
     let edges = &mut ed.spec_mut().topology.edges;
-    edges.insert(at(1, 0), vec![Edge::Direct(Source::Global(0))]);
-    edges.insert(at(2, 0), vec![Edge::Direct(Source::Global(0))]);
-    edges.insert(at(3, 0), vec![Edge::Direct(Source::Node(out(1, 0)))]);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![Source::Node(out(2, 0)), Source::Node(out(3, 0))]);
+    edges.insert(at(1, 0), vec![Edge::Direct(PortSource::Global(0))]);
+    edges.insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
+    edges.insert(at(3, 0), vec![Edge::Direct(PortSource::Node(out(1, 0)))]);
+    ed.spec_mut().topology.set_outputs(vec![
+        PortSource::Node(out(2, 0)),
+        PortSource::Node(out(3, 0)),
+    ]);
     ed.commit().expect("commits");
     exec.apply_pending();
     assert!(exec.is_parallel());
@@ -823,7 +824,7 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
                 .topology
                 .edges
                 .insert(at(fx.0, 0), vec![from(src.0, 0)]);
-            outputs.push(Source::Node(out(fx.0, 0)));
+            outputs.push(PortSource::Node(out(fx.0, 0)));
         }
         ed.spec_mut().topology.set_outputs(outputs);
         ed.commit().expect("commits");

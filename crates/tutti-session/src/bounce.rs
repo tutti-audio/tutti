@@ -538,8 +538,8 @@ impl<N, M, F: Float> Bounce<N, M, F> {
         self
     }
 
-    /// What the master file's channels are (the WAV speaker mask, Ogg
-    /// Vorbis's channel order); the engine's order for the width without it.
+    /// What the master file's channels are (the WAV speaker mask); the engine's order for the
+    /// width without it.
     /// The file is as wide as the topology, so it replaces
     /// [`channels`](Self::channels) named before it.
     pub fn file_topology(mut self, topology: ChannelTopology) -> Self {
@@ -607,14 +607,14 @@ impl<N, F: Float> Bounce<N, FileMaster, F> {
 
     /// The dither applied when quantizing to an integer width: triangular
     /// unless this or [`no_dither`](Self::no_dither) says otherwise. A float
-    /// width and Ogg Vorbis ignore it.
+    /// width ignores it.
     pub fn dither(mut self, shape: DitherShape) -> Self {
         self.dither = Some(shape);
         self
     }
 
     /// No dither when quantizing to an integer width: the rounding error is
-    /// left as it falls. A float width and Ogg Vorbis ignore it.
+    /// left as it falls. A float width ignores it.
     pub fn no_dither(mut self) -> Self {
         self.dither = None;
         self
@@ -1653,7 +1653,7 @@ fn open_stem_taps<F: Float>(
                 .ports
                 .iter()
                 .map(|&port| {
-                    tutti_graph::Source::Node(OutPort {
+                    tutti_graph::PortSource::Node(OutPort {
                         node: stem.node,
                         port,
                     })

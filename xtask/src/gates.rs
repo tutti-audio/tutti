@@ -224,7 +224,7 @@ impl Gate {
             Gate::SubmodulePins => {
                 submodule_pins::check(&RealGit(root.to_path_buf()), submodule_pins::PINS)
             }
-            Gate::Layout => layout::check(&tree, &RealCargo(root.to_path_buf())),
+            Gate::Layout => layout::check(&tree),
             Gate::Ffi => ffi::check(&tree),
             Gate::Errors => errors::check(&tree, errors::ALLOW),
             Gate::Guards => guards::check(&tree, guards::MIN_SEEN),
@@ -699,34 +699,6 @@ pub(crate) mod fake {
     impl Cargo for TreeText {
         fn tree(&self, _: &[&str]) -> Result<String, String> {
             Ok(self.0.to_owned())
-        }
-    }
-
-    /// `cargo tree -i ogg_next_sys` for `export` alone and for `export,encode-vorbis`.
-    pub(crate) struct OggCargo {
-        pub(crate) export_reaches: bool,
-        pub(crate) ogg_reaches: bool,
-    }
-
-    impl Cargo for OggCargo {
-        fn tree(&self, args: &[&str]) -> Result<String, String> {
-            let features = args
-                .iter()
-                .position(|a| *a == "--features")
-                .and_then(|i| args.get(i + 1))
-                .copied();
-            let reaches = if features == Some("export") {
-                self.export_reaches
-            } else {
-                self.ogg_reaches
-            };
-            if reaches {
-                Ok("ogg_next_sys v0.1
-"
-                .to_owned())
-            } else {
-                Err("error: package ID specification `ogg_next_sys` did not match".to_owned())
-            }
         }
     }
 

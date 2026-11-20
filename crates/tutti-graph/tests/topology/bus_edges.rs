@@ -19,8 +19,8 @@ use tutti_graph::Node;
 use tutti_graph::{
     Bus, BusError, BusFeed, BusFold, BusRef, BusRole, BusSide, BusSource, Buses, CommitError,
     CompileError, DelayKey, Edge, EdgeGain, EdgeId, Editor, GraphInvalid, GraphSpec, InPort,
-    Lowering, NodeKey, Op, OutPort, Plan, Sink, Source, TransportPosition, Unforkable, ValidGraph,
-    compile,
+    Lowering, NodeKey, Op, OutPort, Plan, PortSink, PortSource, TransportPosition, Unforkable,
+    ValidGraph, compile,
 };
 use tutti_units::{Amplitude, SampleRate, Samples, Tail};
 
@@ -41,16 +41,16 @@ fn at(node: u64, port: u16) -> InPort {
     }
 }
 
-fn out_port(node: u64, port: u16) -> Source {
-    Source::Node(OutPort {
+fn out_port(node: u64, port: u16) -> PortSource {
+    PortSource::Node(OutPort {
         node: key(node),
         port,
     })
 }
 
-fn lane(sink: u64, port: u16, from: Source) -> EdgeId {
+fn lane(sink: u64, port: u16, from: PortSource) -> EdgeId {
     EdgeId {
-        sink: Sink::Port(at(sink, port)),
+        sink: PortSink::Port(at(sink, port)),
         from: Edge::Direct(from),
     }
 }
@@ -142,13 +142,13 @@ impl Rig {
         for c in 0..width as u16 {
             self.spec
                 .topology
-                .connect(at(node, c), Edge::Direct(Source::Global(c)));
+                .connect(at(node, c), Edge::Direct(PortSource::Global(c)));
         }
     }
 
     /// Every output channel of `node`, in order, is a graph output.
     fn output_all(&mut self, node: u64, width: usize) {
-        let sources: Vec<Source> = (0..width as u16).map(|c| out_port(node, c)).collect();
+        let sources: Vec<PortSource> = (0..width as u16).map(|c| out_port(node, c)).collect();
         self.spec.topology.set_outputs(sources);
     }
 
@@ -751,7 +751,7 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
     for c in 0..2u16 {
         ed.spec_mut()
             .topology
-            .connect(at(1, c), Edge::Direct(Source::Global(c)));
+            .connect(at(1, c), Edge::Direct(PortSource::Global(c)));
     }
     ed.spec_mut().topology.set_outputs(vec![out_port(2, 0)]);
     // The author's own lane: the constant into the sink at a weight of 0.25.
@@ -772,7 +772,7 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
     let got = render_block(&mut exec, &inputs, 1);
     let expected: Vec<u32> = (0..BLOCK)
         .map(|i| {
-            // Source order: the source node 1's lanes, then node 3's.
+            // PortSource order: the source node 1's lanes, then node 3's.
             let fold = weighted_fold(&[(0.5, &inputs[0]), (0.5, &inputs[1])], i);
             (fold + 0.25 * 0.5).to_bits()
         })
@@ -871,7 +871,7 @@ fn a_bus_edges_lanes_align_like_any_edges() {
         .connect(at(2, 0), Edge::Direct(out_port(3, 0)));
     rig.output_all(2, 1);
     let got = delays(&rig.plan());
-    let ring = |from: Source| DelayKey::Audio { at: at(2, 0), from };
+    let ring = |from: PortSource| DelayKey::Audio { at: at(2, 0), from };
     let expected = BTreeMap::from([
         (ring(out_port(1, 0)), Samples::new(5)),
         (ring(out_port(1, 1)), Samples::new(5)),
@@ -954,9 +954,9 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
 // The root as a bus sink.
 // ---------------------------------------------------------------------------
 
-fn root_lane(channel: u16, from: Source) -> EdgeId {
+fn root_lane(channel: u16, from: PortSource) -> EdgeId {
     EdgeId {
-        sink: Sink::Output(channel),
+        sink: PortSink::Output(channel),
         from: Edge::Direct(from),
     }
 }
@@ -1104,7 +1104,7 @@ fn a_redeclared_root_that_no_longer_folds_fails_the_commit() {
     for c in 0..2u16 {
         ed.spec_mut()
             .topology
-            .connect(at(1, c), Edge::Direct(Source::Global(c)));
+            .connect(at(1, c), Edge::Direct(PortSource::Global(c)));
     }
     ed.spec_mut().root = Some(smpte(2).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new(); 2];

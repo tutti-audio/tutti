@@ -15,7 +15,7 @@ workspace = true
 # One binary per area under `src/bin/`: each renders its cases to the
 # directory it is given, and the matching `py/verify_<area>.py` judges them.
 [dependencies]
-tutti-codec = { path = "../../crates/tutti-codec", features = ["decode-wav", "encode-wav", "encode-flac", "encode-aiff", "encode-vorbis"] }
+tutti-codec = { path = "../../crates/tutti-codec", features = ["decode-wav", "encode-wav", "encode-flac", "encode-aiff"] }
 tutti-dsp = { path = "../../crates/tutti-dsp" }
 tutti-export = { path = "../../crates/tutti-export" }
 tutti-graph = { path = "../../crates/tutti-graph" }

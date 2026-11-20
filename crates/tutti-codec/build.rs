@@ -11,7 +11,7 @@ fn main() {
             .iter()
             .any(|f| std::env::var_os(format!("CARGO_FEATURE_{f}")).is_some())
     };
-    if any(&["ENCODE_WAV", "ENCODE_AIFF", "ENCODE_FLAC", "ENCODE_VORBIS"]) {
+    if any(&["ENCODE_WAV", "ENCODE_AIFF", "ENCODE_FLAC"]) {
         println!("cargo::rustc-cfg=encode");
     }
     if any(&["DECODE_WAV", "DECODE_FLAC", "DECODE_MP3", "DECODE_OGG"]) {

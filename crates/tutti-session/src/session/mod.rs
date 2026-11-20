@@ -86,6 +86,8 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 #[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
 pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
+    /// Which session this is, so an output cut from another is refused.
+    pub(crate) id: crate::apply::SessionId,
     /// The value lock and the table every node's params are written through,
     /// shared with the graph and the session's [`Values`](crate::Values).
     pub(crate) values: Arc<ValueState<K>>,
@@ -231,6 +233,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         running: N::Running,
     ) -> (Session<K, N>, C::Running) {
         let Session {
+            id,
             values,
             _early_work,
             running: old_running,
@@ -250,6 +253,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         } = self;
         (
             Session {
+                id,
                 values,
                 _early_work,
                 running,

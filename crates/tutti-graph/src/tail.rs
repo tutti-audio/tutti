@@ -186,7 +186,7 @@ impl GraphTail {
     /// tail, not an eight-second one.
     ///
     /// ```
-    /// use tutti_graph::{NodeSpec, OutPort, Source};
+    /// use tutti_graph::{NodeSpec, OutPort, PortSource};
     /// use tutti_units::{SampleRate, Samples, Tail};
     /// use tutti_buffers::ChannelLayout;
     /// use tutti_graph::{graph_tail, NodeKey, Topology};
@@ -198,7 +198,7 @@ impl GraphTail {
     ///     NodeSpec::new("reverb", ChannelLayout::EMPTY, ChannelLayout::MONO)
     ///         .with_tail(Tail::Unbounded),
     /// );
-    /// g.set_outputs([Source::Node(OutPort { node: verb, port: 0 })]);
+    /// g.set_outputs([PortSource::Node(OutPort { node: verb, port: 0 })]);
     ///
     /// let tail = graph_tail(&g, SampleRate::SR_48K);
     /// assert_eq!(tail.samples(), None); // never decays
@@ -394,7 +394,7 @@ mod tests {
     struct Toy {
         /// Per node: its tail, and the source feeding each input port.
         nodes: Vec<(Tail, Vec<Option<usize>>)>,
-        /// Source feeding each output channel.
+        /// PortSource feeding each output channel.
         outputs: Vec<Option<usize>>,
     }
 

@@ -27,7 +27,7 @@ use tutti_graph::{
     Cx, Editor, Env, Executor, Io, Node, Offset, Prepare, Reference, Shape, Status,
     TransportChanges, TransportHistory, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
@@ -96,12 +96,12 @@ fn topology(ed: &mut Editor) {
             node: PROBE,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: LATENT,
             port: 0,
         }))],
     );
-    t.set_outputs((0..3).map(|port| Source::Node(OutPort { node: PROBE, port })));
+    t.set_outputs((0..3).map(|port| PortSource::Node(OutPort { node: PROBE, port })));
 }
 
 fn units(lat: usize) -> BTreeMap<NodeKey, Box<dyn Node>> {
@@ -470,12 +470,12 @@ fn wide(workers: usize) -> (Editor, Executor) {
                 node: probe,
                 port: 0,
             },
-            vec![Edge::Direct(Source::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutPort {
                 node: latent,
                 port: 0,
             }))],
         );
-        outputs.extend((0..3).map(|port| Source::Node(OutPort { node: probe, port })));
+        outputs.extend((0..3).map(|port| PortSource::Node(OutPort { node: probe, port })));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");

@@ -33,7 +33,7 @@ use tutti_graph::{
     ParamKind, ParamRamp, ParamSegment, Prepare, Scheduled, Shape, Status, TransportPosition,
     Unforkable,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
+use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
 use tutti_ump::{CCNumber, Message, MidiChannel, NoteNumber, U7, U14, Ump, Voice1};
 use tutti_units::{At, Beat, Frame, Latency, Samples, Tail};
 
@@ -61,7 +61,7 @@ fn at(node: u64, port: u16) -> InPort {
 }
 
 fn from(node: u64, port: u16) -> Edge {
-    Edge::Direct(Source::Node(OutPort {
+    Edge::Direct(PortSource::Node(OutPort {
         node: NodeKey(node),
         port,
     }))
@@ -162,7 +162,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     );
     let t = &mut spec.topology;
     t.edges
-        .insert(at(5, 0), vec![Edge::Direct(Source::Global(0))]);
+        .insert(at(5, 0), vec![Edge::Direct(PortSource::Global(0))]);
     t.edges.insert(at(6, 0), vec![from(4, 0)]);
     t.edges.insert(at(7, 0), vec![from(5, 0)]);
     t.edges.insert(at(7, 1), vec![from(6, 0)]);
@@ -179,11 +179,11 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     t.edges.insert(at(8, 0), vec![from(7, 0)]);
     t.edges.insert(at(9, 0), vec![from(8, 0)]);
     t.set_outputs(vec![
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(9),
             port: 0,
         }),
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         }),
@@ -316,7 +316,7 @@ fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
     wire(&mut ed, 2);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(4),
             port: 0,
         })]);
@@ -391,15 +391,15 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     );
     let t = &mut ed.spec_mut().topology;
     t.edges
-        .insert(at(1, 0), vec![Edge::Direct(Source::Global(0))]);
+        .insert(at(1, 0), vec![Edge::Direct(PortSource::Global(0))]);
     t.edges
-        .insert(at(1, 1), vec![Edge::Direct(Source::Global(1))]);
+        .insert(at(1, 1), vec![Edge::Direct(PortSource::Global(1))]);
     t.set_outputs(vec![
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         }),
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(3),
             port: 0,
         }),
@@ -518,7 +518,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
         );
     }
     ed.spec_mut().topology.set_outputs((1..=KEYS).map(|k| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(k),
             port: 0,
         })
@@ -903,9 +903,9 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(2, 0), vec![Edge::Direct(Source::Global(0))]);
+            .insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
-        t.set_outputs(vec![Source::Node(OutPort {
+        t.set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -1045,9 +1045,9 @@ fn param_events_are_allocation_free_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(2, 0), vec![Edge::Direct(Source::Global(0))]);
+            .insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
-        t.set_outputs(vec![Source::Node(OutPort {
+        t.set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         })]);
@@ -1130,9 +1130,9 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(2, 0), vec![Edge::Direct(Source::Global(0))]);
+            .insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
-        t.set_outputs(vec![Source::Node(OutPort {
+        t.set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         })]);
@@ -1301,7 +1301,7 @@ fn an_azimuth_param_port_is_allocation_free() {
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -1356,7 +1356,7 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -1418,7 +1418,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -1527,7 +1527,7 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
             .topology
             .edges
             .insert(at(fx.0, 0), vec![from(src.0, 0)]);
-        outputs.push(Source::Node(OutPort { node: fx, port: 0 }));
+        outputs.push(PortSource::Node(OutPort { node: fx, port: 0 }));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
@@ -1611,7 +1611,7 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                     }
                     ed.spec_mut()
                         .topology
-                        .set_outputs(vec![Source::Node(OutPort {
+                        .set_outputs(vec![PortSource::Node(OutPort {
                             node: sink,
                             port: 0,
                         })]);
@@ -1619,7 +1619,7 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                     ed.spec_mut().topology.outputs = vec![
                         (1..=n)
                             .map(|k| {
-                                Source::Node(OutPort {
+                                PortSource::Node(OutPort {
                                     node: NodeKey(k),
                                     port: 0,
                                 })
@@ -1671,7 +1671,7 @@ fn parallel_fan_in_is_allocation_free() {
 /// lane runs the param port's step, with its clamp and its values, per block.
 fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
     use common::Burst;
-    use tutti_graph::{EdgeGain, EdgeId, Sink};
+    use tutti_graph::{EdgeGain, EdgeId, PortSink};
     use tutti_units::Amplitude;
     for n in [64u64, 100] {
         for at_port in [false, true] {
@@ -1698,9 +1698,9 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
             let sink = NodeKey(n + 1);
             let edge_of = |k: u64| EdgeId {
                 sink: if at_port {
-                    Sink::Port(at(sink.0, 0))
+                    PortSink::Port(at(sink.0, 0))
                 } else {
-                    Sink::Output(0)
+                    PortSink::Output(0)
                 },
                 from: from(k, 0),
             };
@@ -1715,7 +1715,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                 }
                 ed.spec_mut()
                     .topology
-                    .set_outputs(vec![Source::Node(OutPort {
+                    .set_outputs(vec![PortSource::Node(OutPort {
                         node: sink,
                         port: 0,
                     })]);
@@ -1723,7 +1723,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                 ed.spec_mut().topology.outputs = vec![
                     (1..=n)
                         .map(|k| {
-                            Source::Node(OutPort {
+                            PortSource::Node(OutPort {
                                 node: NodeKey(k),
                                 port: 0,
                             })
@@ -1929,13 +1929,13 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
         vec![EventEdge::Direct(ev(3, 0))],
     );
     let t = &mut spec.topology;
-    t.connect(at(5, 0), Edge::Direct(Source::Global(0)));
+    t.connect(at(5, 0), Edge::Direct(PortSource::Global(0)));
     t.connect(at(6, 0), from(5, 0));
     t.connect(at(7, 0), from(6, 0));
     t.connect(at(8, 0), from(4, 0));
     t.connect(at(8, 1), from(7, 0));
     t.connect(at(9, 0), from(8, 0));
-    t.set_outputs(vec![Source::Node(OutPort {
+    t.set_outputs(vec![PortSource::Node(OutPort {
         node: NodeKey(9),
         port: 0,
     })]);
@@ -2016,8 +2016,8 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
     );
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(1);
     let t = &mut ed.spec_mut().topology;
-    t.connect(at(1, 0), Edge::Direct(Source::Global(0)));
-    t.set_outputs(vec![Source::Node(OutPort {
+    t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+    t.set_outputs(vec![PortSource::Node(OutPort {
         node: NodeKey(1),
         port: 0,
     })]);
@@ -2208,7 +2208,7 @@ fn parallel_driven_mixes_are_allocation_free() {
 /// the ring (a push of a plain value), then a block rendered after the editor
 /// settled them (outside the gate: settling edits the spec) and recommitted.
 fn fading_edges_are_allocation_free_on(workers: usize) {
-    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, Sink};
+    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, PortSink};
     let (mut ed, mut exec) = Editor::new(prepare(64));
     use_pool(&mut exec, workers);
     for k in 1..=8u64 {
@@ -2222,13 +2222,13 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
         );
     }
     let edge = |k: u64| EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: from(k, 0),
     };
     ed.spec_mut().topology.outputs = vec![
         (1..=8u64)
             .map(|k| {
-                Source::Node(OutPort {
+                PortSource::Node(OutPort {
                     node: NodeKey(k),
                     port: 0,
                 })
@@ -2341,7 +2341,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
         );
     }
     ed.spec_mut().topology.set_outputs((1..=NODES).map(|k| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(k),
             port: 0,
         })
@@ -2403,7 +2403,7 @@ fn parallel_swap_is_allocation_free() {
 /// on every block, across commits (which allocate, outside the gate).
 #[test]
 fn edge_fades_are_allocation_free() {
-    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, Sink};
+    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, PortSink};
     use tutti_units::Amplitude;
     const BLOCK: usize = 64;
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
@@ -2415,14 +2415,14 @@ fn edge_fades_are_allocation_free() {
         ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
     }
     let src = |n: u64| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(n),
             port: 0,
         })
     };
     ed.spec_mut().topology.outputs = vec![vec![src(1), src(2)]];
     let id = |n: u64| EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: Edge::Direct(src(n)),
     };
     ed.spec_mut()
@@ -2472,9 +2472,9 @@ fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
     );
     let t = &mut ed.spec_mut().topology;
     t.edges
-        .insert(at(base, 0), vec![Edge::Direct(Source::Global(0))]);
+        .insert(at(base, 0), vec![Edge::Direct(PortSource::Global(0))]);
     t.edges
-        .insert(at(base + 1, 0), vec![Edge::Direct(Source::Global(0))]);
+        .insert(at(base + 1, 0), vec![Edge::Direct(PortSource::Global(0))]);
     t.edges.insert(at(base + 2, 0), vec![from(base, 0)]);
     t.edges.insert(at(base + 2, 1), vec![from(base + 1, 0)]);
     sum
@@ -2623,8 +2623,8 @@ fn event_pdc(ed: &mut Editor, base: u64) {
 fn applying_a_commit_allocates_nothing_on(workers: usize) {
     use tutti_buffers::MaxBlock;
     use tutti_graph::{
-        EdgeGain, EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, Sink, TapAlign,
-        TapId, TapOptions,
+        EdgeGain, EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, PortSink,
+        TapAlign, TapId, TapOptions,
     };
     use tutti_units::{Amplitude, SampleRate};
 
@@ -2632,7 +2632,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     use_pool(&mut exec, workers);
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     let first = pdc_pair(&mut ed, 1, 40);
-    let out_of = |node: NodeKey| Source::Node(OutPort { node, port: 0 });
+    let out_of = |node: NodeKey| PortSource::Node(OutPort { node, port: 0 });
     ed.spec_mut().topology.set_outputs(vec![out_of(first)]);
     let cap = Samples::new(1 << 16);
     let mut tap = ed
@@ -2772,7 +2772,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(300, 0), vec![Edge::Direct(Source::Global(0))]);
+            .insert(at(300, 0), vec![Edge::Direct(PortSource::Global(0))]);
         t.edges.insert(at(302, 0), vec![from(300, 0)]);
         t.edges.insert(at(302, 1), feedback(128));
         t.edges.insert(at(301, 0), vec![from(302, 0)]);
@@ -2824,7 +2824,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
 
     // Weighted lanes on the output edges, then one a source drives.
     let edge = |node: NodeKey| EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: from(node.0, 0),
     };
     ed.spec_mut()
@@ -3223,7 +3223,7 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(200),
             port: 0,
         })]);
@@ -3264,7 +3264,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
             width: 3,
         })),
     );
-    let port = |p| Source::Node(OutPort { node, port: p });
+    let port = |p| PortSource::Node(OutPort { node, port: p });
     ed.spec_mut()
         .topology
         .set_outputs(vec![port(0), port(1), port(2)]);

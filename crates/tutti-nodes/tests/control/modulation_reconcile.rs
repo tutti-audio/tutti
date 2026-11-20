@@ -20,7 +20,7 @@ use tutti_graph::{
     ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamSegment, Prepare, ScheduleError, Shape,
     Status, TransportChanges, TransportPosition,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_modulation::{
     Adsr, Clock, Declarations, Law, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
     Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
@@ -389,7 +389,7 @@ fn probe_of(ed: &mut Editor, host: &mut Host, id: u64, p: Probe) {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![Source::Node(OutPort {
+        .push(vec![PortSource::Node(OutPort {
             node: key(id),
             port: 0,
         })]);
@@ -901,7 +901,7 @@ fn a_host_key_is_never_taken() {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![Source::Node(OutPort {
+        .push(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -1341,7 +1341,7 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
             node: key(20),
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: key(1),
             port: 0,
         }))],
@@ -1680,7 +1680,7 @@ fn a_feed_moved_after_a_steady_state_is_rewired() {
             node: follower,
             port: 0
         }),
-        Some(&vec![Edge::Direct(Source::Node(OutPort {
+        Some(&vec![Edge::Direct(PortSource::Node(OutPort {
             node: key(11),
             port: 0
         }))])

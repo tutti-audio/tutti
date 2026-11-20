@@ -30,7 +30,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Io, Node, Prepare, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_units::{SampleRate, Samples};
 
 const MAX_BLOCK: usize = 64;
@@ -86,11 +86,11 @@ fn render_probes(workers: usize, entry: Entry) {
                 node: NodeKey(k),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Global(0))],
+            vec![Edge::Direct(PortSource::Global(0))],
         );
     }
     ed.spec_mut().topology.set_outputs((1..=PROBES).map(|k| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(k),
             port: 0,
         })

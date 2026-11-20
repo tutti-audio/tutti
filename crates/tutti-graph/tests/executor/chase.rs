@@ -15,7 +15,7 @@ use tutti_graph::{
     Buses, Chase, Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, Fade,
     FadeLaw, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{NodeKey, OutPort, Source};
+use tutti_graph::{NodeKey, OutPort, PortSource};
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
 use tutti_units::Samples;
 
@@ -154,7 +154,7 @@ fn rig(old: Keeper) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "keeper", Unforkable(old));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -271,7 +271,7 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -313,7 +313,7 @@ fn a_chase_past_its_declared_capacity_is_counted() {
     ed.insert(NodeKey(1), "wide", Unforkable(Wide(5)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -357,7 +357,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
             );
         }
         ed.spec_mut().topology.set_outputs(keys.clone().map(|k| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(k),
                 port: 0,
             })
@@ -487,7 +487,7 @@ fn a_held_chase_counts_what_the_successor_cannot_take() {
     ed.insert(NodeKey(1), "mute", Unforkable(Mute));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
