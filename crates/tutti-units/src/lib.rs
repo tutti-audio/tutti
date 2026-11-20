@@ -78,7 +78,8 @@
 //! Off by default (`default = []`).
 //!
 //! - `serde`: `Serialize`/`Deserialize` on the unit newtypes, `Samples`,
-//!   `Resyncs`, `Frame`, `Latency`, `Tail` and `Text`. Not `UnitParam`.
+//!   `Resyncs`, `Frame`, `Latency`, `Tail` and `Text`. Not `UnitParam`. A float
+//!   unit serializes and deserializes refusing NaN and keeping an infinity.
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]

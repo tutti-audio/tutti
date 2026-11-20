@@ -1,5 +1,5 @@
 //! A `MidiInput` handle reads what its port lost: the events its device's inlet
-//! had no room for, cumulative for the entry and carried across an unplug and a
+//! had no room for, cumulative for the port and carried across an unplug and a
 //! replug on the same cells.
 
 use std::time::Duration;
@@ -10,7 +10,7 @@ use crate::common::blocks;
 use tutti_graph::Losses;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, persistent_endpoint};
-use tutti_session::{Session, midi_input};
+use tutti_session::Session;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::SampleRate;
 
@@ -62,9 +62,8 @@ fn an_inlet_that_overflows_raises_the_ports_lost_count() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    s.pool(midi_input("keys", saved)).expect("declares");
+    let port = s.open_midi_input(saved).expect("opens");
     let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
     assert_eq!(port.losses(), Losses::NONE);
     push(&fake, 3_000);
     assert_eq!(port.losses(), Losses::lost(3_000 - INLET));
@@ -79,9 +78,8 @@ fn the_lost_count_survives_an_unplug_and_keeps_counting_after_the_replug() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    s.pool(midi_input("keys", saved)).expect("declares");
+    let port = s.open_midi_input(saved).expect("opens");
     let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
     push(&fake, 3_000);
     let first = 3_000 - INLET;
     assert_eq!(port.losses().lost, first);
@@ -104,7 +102,11 @@ fn the_lost_count_survives_an_unplug_and_keeps_counting_after_the_replug() {
         2 * first,
         "cumulative across the replug"
     );
-    assert_eq!(s.midi_input(&"keys").unwrap().losses().lost, 2 * first);
+    assert_eq!(
+        port.clone().losses().lost,
+        2 * first,
+        "a clone reads the same cells"
+    );
 }
 
 /// `n` events from the device stamped ten seconds ahead (one reading of the
@@ -130,9 +132,8 @@ fn an_inlet_eviction_raises_the_ports_count_and_carries_across_a_replug() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    s.pool(midi_input("keys", saved)).expect("declares");
+    let port = s.open_midi_input(saved).expect("opens");
     let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
     assert_eq!(port.losses(), Losses::NONE);
     // The engine's clock reads, so an arrival is placed ahead of its block.
     blocks(&s, 2);
@@ -172,9 +173,8 @@ fn an_input_node_mailbox_overflow_counts_as_refused_on_the_port() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    s.pool(midi_input("keys", saved)).expect("declares");
+    let port = s.open_midi_input(saved).expect("opens");
     let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
     blocks(&s, 2);
     push(&fake, 2_000);
     blocks(&s, 2);
@@ -191,9 +191,8 @@ fn a_late_arrival_is_counted_on_the_port_across_a_replug() {
     plug(&fake);
     let _ = s.update();
     let saved = keys(&mut s);
-    s.pool(midi_input("keys", saved)).expect("declares");
+    let port = s.open_midi_input(saved).expect("opens");
     let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
     let late = |fake: &FakeCounters| {
         let ump = Ump::from(Message::midi2(
             MidiChannel::FIRST,

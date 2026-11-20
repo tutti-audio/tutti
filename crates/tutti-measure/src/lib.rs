@@ -25,6 +25,7 @@
 //!   third-octave or log band, with smoothing, peak hold and a rolling
 //!   spectrogram.
 //! - `spectral_features` — centroid, flatness and rolloff of every STFT frame.
+//! - `mfcc` — mel-frequency cepstral coefficients of every STFT frame.
 //! - `strip_silence` — the sample ranges that hold signal, with a minimum silence
 //!   length and padding.
 //! - `vectorscope_points` (`VectorscopeConfig` for blocks) — a stereo pair
@@ -288,6 +289,9 @@
 //!   [`StftMagnitude`], into [`SpectralFeatures`]; the per-spectrum kernels
 //!   are [`tutti_dsp`]'s (`spectral_centroid`, `spectral_flatness`,
 //!   `spectral_rolloff`).
+//! - Cepstrum: [`mfcc`] from an [`MfccConfig`] over every frame of a
+//!   [`StftMagnitude`], into a `frames x coefficients` `Grid`; the per-spectrum
+//!   kernel is [`tutti_dsp`]'s `Mfcc`.
 //! - Strip silence: [`strip_silence`] with a [`SilenceConfig`] into
 //!   [`Region`]s, or incrementally with a [`SilenceMeter`].
 //! - Vectorscope: [`vectorscope_points`] turns a stereo pair into
@@ -333,6 +337,7 @@ pub use analyses::chord::{
 };
 pub use analyses::features::{SpectralFeatures, spectral_features};
 pub use analyses::key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
+pub use analyses::mfcc::{MfccConfig, mfcc};
 pub use analyses::notes::{
     NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
     PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,

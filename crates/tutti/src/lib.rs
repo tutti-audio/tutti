@@ -281,6 +281,7 @@ pub mod nodes {
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
+    pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
@@ -628,9 +629,9 @@ pub mod measure {
     };
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
-        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, CosineWindow,
-        FrameCount, FrameIndex, Grid, HopSize, HopSizeError, StftError, WindowLength,
-        WindowLengthError,
+        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
+        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
+        StftGeometry, WindowLength, WindowLengthError,
     };
 }
 
@@ -734,10 +735,9 @@ pub mod plugin {
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
-/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`midi_sink`, `MidiSink`,
-/// `SinkLoaded`), and under `midi-hardware` a device (`DeviceId`,
-/// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
-/// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`DeviceId`,
+/// `DeviceInfo`), the ports a session opens for them
+/// (`MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The translation layer
 /// (`Midi2Translator`, `Midi1Translator`), the runtime's clock sync and the MIDI-CI codec
@@ -843,13 +843,11 @@ pub mod midi {
     pub use tutti_session::{
         AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
         InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport,
-        MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo, NoCommonTimelineError,
-        NotInstrument, SinkLoaded, SinkOptions, Stamping, TrackError, midi_sink,
+        MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink,
+        Stamping, TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
-    pub use tutti_session::{
-        InputLoaded, MidiInput, MidiInputEntry, MidiOutput, MidiOutputEntry, OutputLoaded,
-    };
+    pub use tutti_session::{MidiInput, MidiOutput, OpenMidiOutput};
 
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;
@@ -864,8 +862,8 @@ pub mod midi {
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
         ChannelProfile, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError,
-        MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer, ReportPeer,
-        RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
+        MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer, RequestReport,
+        SwitchProfile, WholeProfile,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};

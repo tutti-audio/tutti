@@ -793,7 +793,7 @@ impl Planner<'_> {
             ]),
             "check-wasm" => self.lines(&[
                 "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
-                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi -- -D warnings",
+                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi,serde -- -D warnings",
             ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
@@ -956,6 +956,10 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
 
 const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked --workspace --all-features --all-targets -- -D warnings"#,
+    // Each encoder alone: a codec test helper compiles only where a test uses it.
+    r#"cargo clippy --locked -p tutti-codec --no-default-features --features encode-wav --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-codec --no-default-features --features encode-aiff --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-codec --no-default-features --features encode-flac --all-targets -- -D warnings"#,
     // The session's lib alone, where no dev-dependency unifies a codec feature in.
     r#"cargo clippy --locked -p tutti-session --all-features --lib -- -D warnings"#,
     // A subsystem feature alone: its test binaries compile only what it enables.
