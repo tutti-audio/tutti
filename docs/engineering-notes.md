@@ -588,10 +588,9 @@ knowing because the same shapes recur:
   read of an unbacked page). On Linux the slab is a `memfd` sealed against shrinking,
   growing and sealing; the server refuses a descriptor that is not one, or not the
   layout's exact length. On macOS it is a POSIX shared memory object unlinked as soon
-  as it is sized; nothing seals it there, so
-  the protection is that XNU refuses a second `ftruncate` once the object is allocated,
-  which `a_second_ftruncate_is_refused_to_every_holder` pins (macOS CI runs it; it has
-  not run on Linux). The descriptor follows the `SetupSharedMemory` frame as one byte
+  as it is sized; nothing seals it there, so the protection is that XNU refuses a
+  second `ftruncate` once the object is allocated, which
+  `a_second_ftruncate_is_refused_to_every_holder` pins. The descriptor follows the `SetupSharedMemory` frame as one byte
   carrying it (as ancillary data), read by the exact read that follows the frame: a plain
   `read` across a message with descriptors drops them, so a buffered reader that reads
   ahead would have to `recvmsg` everywhere. Windows keeps a named, delete-on-close
