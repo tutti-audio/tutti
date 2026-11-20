@@ -44,7 +44,7 @@ use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::Result;
 use std::sync::Mutex;
-use tutti_alsa_ffi::{Address, Blocking, Client, UmpVersion};
+use tutti_alsa_ffi::{Address, Client, UmpVersion};
 use tutti_midi_device::{EndpointId, OsDevice, PortDirection};
 use tutti_rt::LockExt;
 
@@ -89,7 +89,7 @@ impl AlsaEndpoints {
     fn list(&self, direction: PortDirection) -> Vec<OsEndpoint> {
         let mut held = self.enumerator.lock_recover();
         if held.is_none() {
-            *held = client::open("tutti-enum", Blocking::NonBlock, UmpVersion::Midi2)
+            *held = client::open("tutti-enum", UmpVersion::Midi2)
                 .inspect_err(|e| tracing::debug!("ALSA enumeration: {}", crate::error::chain(e)))
                 .ok();
         }

@@ -480,6 +480,41 @@ fn a_timer_keeps_no_executor_alive() {
 }
 
 #[test]
+fn a_weak_executor_keeps_no_executor_alive_and_upgrades_while_one_lives() {
+    let (executor, threads) = with_threads(1);
+    let weak = executor.downgrade();
+    let marker = Arc::new(());
+    let held = Arc::clone(&marker);
+    let (armed_tx, armed_rx) = mpsc::channel();
+    executor
+        .spawn(async move {
+            let _held = held;
+            armed_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        })
+        .detach();
+    armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    let upgraded = weak.upgrade().expect("a clone lives, so it upgrades");
+    assert_eq!(
+        wait(upgraded.spawn(async { 6 * 7 })),
+        42,
+        "the upgraded clone runs on the same executor's threads"
+    );
+    drop(upgraded);
+    drop(threads);
+    drop(executor);
+    assert_eq!(
+        Arc::strong_count(&marker),
+        1,
+        "the executor shut down although a weak handle is held"
+    );
+    assert!(
+        weak.upgrade().is_none(),
+        "a shut-down executor does not upgrade"
+    );
+}
+
+#[test]
 fn a_timer_sleep_fires_when_due_and_something_drives() {
     let executor = Executor::new();
     let timer = executor.timer();
