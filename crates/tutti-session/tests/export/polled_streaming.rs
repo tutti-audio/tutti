@@ -82,7 +82,7 @@ fn updates_prime_an_open_streams_ring() {
     // A hang guard by deadline: the streamer's thread primes the ring on its own.
     let deadline = Instant::now() + Duration::from_secs(10);
     while stream.status().phase == StreamPhase::Opening && Instant::now() < deadline {
-        std::thread::yield_now();
+        std::thread::park_timeout(Duration::from_millis(1));
     }
     assert_ne!(
         stream.status().phase,
@@ -193,7 +193,7 @@ fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
     // A hang guard by deadline: the streamer's thread is woken by the bell.
     let deadline = Instant::now() + Duration::from_secs(10);
     while std::sync::Arc::strong_count(&bytes) > 1 && Instant::now() < deadline {
-        std::thread::yield_now();
+        std::thread::park_timeout(Duration::from_millis(1));
     }
     assert_eq!(
         std::sync::Arc::strong_count(&bytes),

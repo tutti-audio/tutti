@@ -31,8 +31,8 @@ impl Own {
 pub(super) fn unblock<T: Send + 'static>(
     handle: &Handle,
     f: impl FnOnce() -> T + Send + 'static,
-) -> Task<T> {
-    handle.shared.queue.spawn(async move { f() })
+) -> io::Result<Task<T>> {
+    Ok(handle.shared.queue.spawn(async move { f() }))
 }
 
 /// A dedicated future is a queued one: there is no thread to give it, and no priority.

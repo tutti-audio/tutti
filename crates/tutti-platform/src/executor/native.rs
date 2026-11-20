@@ -81,7 +81,7 @@ impl Own {
 pub(super) fn unblock<T: Send + 'static>(
     handle: &Handle,
     f: impl FnOnce() -> T + Send + 'static,
-) -> Task<T> {
+) -> io::Result<Task<T>> {
     handle.own.blocking.unblock(f)
 }
 

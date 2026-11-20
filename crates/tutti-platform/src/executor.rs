@@ -85,7 +85,9 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// # Panics
 ///
 /// A task that panics is dropped, and a [`Task`] awaited after that panics; the driving
-/// thread carries on.
+/// thread carries on. So does a `Task` awaited after its executor dropped it at shutdown:
+/// a caller that may outlive the executor awaits the task's fallible form from
+/// async-task, which resolves `None` instead.
 ///
 /// ```
 /// use tutti_platform::Executor;
@@ -170,9 +172,16 @@ impl Executor {
     /// [`try_tick`](Self::try_tick), on the caller's thread, for as long as it takes.
     ///
     /// Dropping the task before `f` starts cancels it; one that has started finishes and
-    /// its output is dropped. A pool thread that cannot start leaves `f` unrun, and the
-    /// task then resolves as cancelled.
-    pub fn unblock<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static) -> Task<T> {
+    /// its output is dropped.
+    ///
+    /// # Errors
+    ///
+    /// The OS's refusal to start a pool thread when none is running to take `f`; `f` is
+    /// dropped unrun. With a pool thread running, `f` waits for it instead.
+    pub fn unblock<T: Send + 'static>(
+        &self,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> io::Result<Task<T>> {
         os::unblock(&self.handle, f)
     }
 

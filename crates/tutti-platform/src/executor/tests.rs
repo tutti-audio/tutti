@@ -454,8 +454,11 @@ fn a_sleep_outlives_its_executor_pending() {
 fn unblock_runs_off_the_calling_thread_and_its_output_resolves() {
     let executor = Executor::new();
     let caller = thread::current().id();
-    let (ran_on, name, value) =
-        wait(executor.unblock(move || (thread::current().id(), current_name(), 6 * 7)));
+    let (ran_on, name, value) = wait(
+        executor
+            .unblock(move || (thread::current().id(), current_name(), 6 * 7))
+            .expect("a pool thread"),
+    );
     assert_ne!(ran_on, caller);
     assert!(
         name.as_deref()
@@ -471,7 +474,8 @@ fn unblock_runs_off_the_calling_thread_and_its_output_resolves() {
 fn a_task_awaiting_unblock_finishes_in_the_callers_drive() {
     let executor = Executor::new();
     let exec = executor.clone();
-    let awaiting = executor.spawn(async move { exec.unblock(|| 40 + 2).await });
+    let awaiting =
+        executor.spawn(async move { exec.unblock(|| 40 + 2).expect("a pool thread").await });
     // A caller's drive is a loop; the guard only stops a hang.
     let give_up = Instant::now() + HANG_GUARD;
     while !awaiting.is_finished() {
@@ -487,14 +491,18 @@ fn unblock_runs_many_closures_that_wait_on_each_other() {
     let executor = Executor::new();
     let (a_tx, a_rx) = mpsc::sync_channel::<()>(0);
     let (b_tx, b_rx) = mpsc::sync_channel::<()>(0);
-    let first = executor.unblock(move || {
-        a_tx.send(()).unwrap();
-        b_rx.recv().unwrap();
-    });
-    let second = executor.unblock(move || {
-        a_rx.recv().unwrap();
-        b_tx.send(()).unwrap();
-    });
+    let first = executor
+        .unblock(move || {
+            a_tx.send(()).unwrap();
+            b_rx.recv().unwrap();
+        })
+        .expect("a pool thread");
+    let second = executor
+        .unblock(move || {
+            a_rx.recv().unwrap();
+            b_tx.send(()).unwrap();
+        })
+        .expect("a pool thread");
     wait(first);
     wait(second);
 }
@@ -502,10 +510,12 @@ fn unblock_runs_many_closures_that_wait_on_each_other() {
 #[test]
 fn a_panicking_unblock_closure_leaves_the_pool_running() {
     let executor = Executor::new();
-    let task = executor.unblock(|| -> u8 { panic!("a closure's own panic") });
+    let task = executor
+        .unblock(|| -> u8 { panic!("a closure's own panic") })
+        .expect("a pool thread");
     let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| wait(task)));
     assert!(outcome.is_err(), "awaiting the panicked task panics");
-    assert_eq!(wait(executor.unblock(|| 9)), 9);
+    assert_eq!(wait(executor.unblock(|| 9).expect("a pool thread")), 9);
 }
 
 #[test]

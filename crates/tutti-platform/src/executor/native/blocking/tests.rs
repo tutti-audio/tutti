@@ -30,23 +30,23 @@ fn wait<T>(task: Task<T>) -> T {
 #[test]
 fn an_idle_thread_ends_and_a_later_closure_starts_another() {
     let pool = Blocking::new(Duration::from_millis(1));
-    assert_eq!(wait(pool.unblock(|| 1)), 1);
+    assert_eq!(wait(pool.unblock(|| 1).expect("a pool thread")), 1);
     assert!(
         pool.wait_until_empty(HANG_GUARD),
         "the idle thread never ended"
     );
     assert_eq!(pool.thread_count(), 0);
-    assert_eq!(wait(pool.unblock(|| 2)), 2);
+    assert_eq!(wait(pool.unblock(|| 2).expect("a pool thread")), 2);
 }
 
 #[test]
-fn a_closed_pool_ends_its_idle_threads_and_cancels_new_closures() {
+fn a_closed_pool_ends_its_idle_threads_and_refuses_new_closures() {
     let pool = Blocking::new(Duration::from_secs(3600));
-    assert_eq!(wait(pool.unblock(|| 1)), 1);
+    assert_eq!(wait(pool.unblock(|| 1).expect("a pool thread")), 1);
     assert_eq!(pool.thread_count(), 1, "the thread idles for an hour");
     pool.close();
     assert!(pool.wait_until_empty(HANG_GUARD), "close woke no thread");
-    assert!(pool.unblock(|| 3).is_finished(), "cancelled, not queued");
+    assert!(pool.unblock(|| 3).is_err(), "refused, not queued");
 }
 
 #[test]
@@ -64,6 +64,7 @@ fn closures_past_the_cap_queue_and_all_run() {
                 lock(&release_rx).recv().unwrap();
                 i
             })
+            .expect("a pool thread")
         })
         .collect();
     for _ in 0..MAX_THREADS {

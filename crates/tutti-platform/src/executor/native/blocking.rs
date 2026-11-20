@@ -7,6 +7,7 @@
 //! blocking calls queues instead of starting a thread each.
 
 use std::collections::VecDeque;
+use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -17,6 +18,9 @@ use super::lock;
 use crate::thread::spawn_named;
 
 /// The most threads the pool runs at once; a closure past that waits for a thread to free.
+/// It bounds the blocking calls in flight together (decodes, disk reads, IPC round trips)
+/// far above what a session issues, while a flood still queues instead of starting a
+/// thread per call.
 const MAX_THREADS: usize = 32;
 
 /// How long a thread with nothing to run waits before it ends.
@@ -49,26 +53,33 @@ impl Blocking {
         })
     }
 
-    /// Queues `f` and returns its task.
+    /// Queues `f` and returns its task, or the refusal of the thread it needed.
     pub(super) fn unblock<T: Send + 'static>(
         self: &Arc<Self>,
         f: impl FnOnce() -> T + Send + 'static,
-    ) -> Task<T> {
+    ) -> io::Result<Task<T>> {
         let pool = Arc::clone(self);
+        // A closure's future completes in its one poll, so this scheduler runs only for
+        // the first schedule below, or for a cancel; neither has a caller to tell.
         let (runnable, task) = async_task::spawn(async move { f() }, move |runnable| {
-            pool.schedule(runnable);
+            let _ = pool.schedule(runnable);
         });
-        runnable.schedule();
-        task
+        self.schedule(runnable)?;
+        Ok(task)
     }
 
     /// Queues a runnable, and wakes an idle thread or starts one for it.
-    fn schedule(self: &Arc<Self>, runnable: Runnable) {
+    ///
+    /// # Errors
+    ///
+    /// The pool is closed, or no thread runs and none can start: the runnable, and every
+    /// runnable queued behind it, is dropped unrun.
+    fn schedule(self: &Arc<Self>, runnable: Runnable) -> io::Result<()> {
         let mut state = lock(&self.state);
         if state.closed {
             drop(state);
             drop(runnable);
-            return;
+            return Err(io::Error::other("the executor has shut down"));
         }
         state.queue.push_back(runnable);
         if state.queue.len() <= state.idle {
@@ -82,14 +93,19 @@ impl Blocking {
                 Ok(thread) => thread.detach(),
                 Err(error) => {
                     state.threads -= 1;
+                    if state.threads > 0 {
+                        // A running thread takes the queued closures in turn.
+                        return Ok(());
+                    }
                     // With no thread to run on, the queued closures are cancelled.
-                    let stranded = (state.threads == 0).then(|| std::mem::take(&mut state.queue));
+                    let stranded = std::mem::take(&mut state.queue);
                     drop(state);
-                    tracing::warn!(%error, "the blocking pool could not start a thread");
                     drop(stranded);
+                    return Err(error);
                 }
             }
         }
+        Ok(())
     }
 
     /// A pool thread's body: runs closures until the pool closes or it idles out.
