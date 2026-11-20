@@ -197,6 +197,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             Phase::Collect => {
                 // The bells wake what the audio thread rang for, and the polled
                 // executor runs what was woken, so what those futures sent lands now.
+                self.sampler.wake();
                 self.jobs.poll();
                 // First of the landings, so what a job landed is in the graph this
                 // update commits.

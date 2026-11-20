@@ -16,6 +16,7 @@
 //! loaded for playback. A file allocates and never reaches the audio thread.
 
 use std::collections::HashMap;
+use std::io::{ErrorKind, Write as _};
 use std::sync::Arc;
 
 use tutti_midi_ci::ProfileOnRequest;
@@ -32,7 +33,6 @@ use tutti_units::{Beat, Bpm, Seconds};
 
 use crate::MidiFileKind;
 use crate::smf::{SmfDivision, SmfTicksPerFrame};
-use crate::write::WriteOptions;
 use crate::{OutOfOrder, ReadError, Refusal, TrackPart, TracksError, WriteError, clip_file, smf};
 
 mod meta_kind;
@@ -1676,22 +1676,24 @@ impl MidiFile {
     /// spelling of a Delta Clockstamp may differ from the file it was read
     /// from; a read of the result is equal to this file.
     ///
-    /// A path replaces a file already there, as [`std::fs::write`] does; use
-    /// [`write_options`](Self::write_options) and `create_new` to refuse it
-    /// instead. The bytes are staged in a temporary file beside the path and
-    /// renamed into place, so a crash leaves no partial file under it and what
-    /// was there intact. A writer receives the whole file in one `write_all`,
-    /// and `create_new` does not apply to it.
+    /// A path is written through [`Staged`](tutti_platform::Staged): the bytes go to a temporary file
+    /// beside the path and are put in place when whole, so a crash leaves no
+    /// partial file under it and what was there intact. It replaces a file
+    /// already there, as [`std::fs::write`] does;
+    /// [`Destination::create_new`] refuses it instead, atomically. A writer
+    /// receives the whole file in one `write_all`, and `create_new` does not
+    /// apply to it.
     ///
     /// ```
     /// # use tutti_midi_file::{LeadTrack, Layout, MidiFile, SmfDivision, Track, WriteError};
+    /// # use tutti_platform::Destination;
     /// # let dir = tempfile::tempdir()?;
     /// # let path = dir.path().join("song.mid");
     /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(Track::new())))?;
     /// file.write(&path)?;
     /// file.write(&path)?; // replaces
     /// assert!(matches!(
-    ///     file.write_options().create_new().write(&path),
+    ///     file.write(Destination::from(&path).create_new()),
     ///     Err(WriteError::Exists { .. })
     /// ));
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1700,22 +1702,28 @@ impl MidiFile {
     /// # Errors
     ///
     /// [`WriteError::Exists`] if something is at a path and `create_new` was
-    /// called (it is untouched, and `self` can be written again); [`WriteError::Stage`] or
-    /// [`WriteError::Rename`] if the staging or the rename fails; for a writer,
-    /// [`WriteError::Writer`] if it fails. A filesystem without an atomic
-    /// no-replace rename falls back to a hard link; on one with neither the
-    /// write fails with [`WriteError::Rename`] and never overwrites.
+    /// called (the target is untouched, the staged file is kept, and `self`
+    /// can be written again); [`WriteError::Stage`] if the temporary cannot be
+    /// created or written; [`WriteError::Commit`] if the sync or the move
+    /// fails (the staged file is kept); for a writer, [`WriteError::Writer`]
+    /// if it fails.
     pub fn write<'a>(&self, dst: impl Into<Destination<'a>>) -> Result<(), WriteError> {
-        self.write_options().write(dst)
-    }
-
-    /// How to write this file: [`create_new`](WriteOptions::create_new) refuses
-    /// a file already at a path, and [`write`](WriteOptions::write) ends
-    /// the call.
-    pub fn write_options(&self) -> WriteOptions<'_> {
-        WriteOptions {
-            file: self,
-            create_new: false,
+        let bytes = self.encode();
+        match dst.into() {
+            Destination::Path(staged) => {
+                let path = staged.target().to_path_buf();
+                let mut file = staged.open().map_err(WriteError::Stage)?;
+                file.write_all(&bytes).map_err(WriteError::Stage)?;
+                file.commit().map_err(|e| {
+                    // Only a refused `create_new` commit is `AlreadyExists`.
+                    if e.kind() == ErrorKind::AlreadyExists {
+                        WriteError::Exists { path, source: e }
+                    } else {
+                        WriteError::Commit(e)
+                    }
+                })
+            }
+            Destination::Writer(writer) => writer.write_all(&bytes).map_err(WriteError::Writer),
         }
     }
 

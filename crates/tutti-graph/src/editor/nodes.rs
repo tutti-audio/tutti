@@ -611,7 +611,7 @@ impl<F: Float> Editor<F> {
                     if unsent {
                         // The executor never held its writer: nothing more
                         // will be written.
-                        end.raise(());
+                        end.raise();
                     } else {
                         self.link.end_tap(end);
                     }

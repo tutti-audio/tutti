@@ -139,6 +139,33 @@ impl<F: Float> Taps<'_, F> {
         Ok(reader)
     }
 
+    /// [`open`](Self::open) whose tap rings `bell` after each block it writes and when
+    /// it ends, so a reader that awaits its frames wakes on the audio thread's ring.
+    ///
+    /// # Errors
+    ///
+    /// [`MissingSource`] for the first source that is not in the graph now.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "a take's pump (feature `capture`) is its user")
+    )]
+    pub(crate) fn open_with_bell(
+        &mut self,
+        sources: &[OutPort],
+        align: TapAlign,
+        capacity: Samples,
+        bell: tutti_rt::Bell,
+    ) -> Result<TapReader<F>, MissingSource> {
+        let sources = self.graph.raw_sources(sources)?;
+        let id = TapId::mint(&self.graph.ids);
+        let reader = self
+            .graph
+            .editor
+            .open_tap_with_bell(id, sources, align, capacity, bell)?;
+        self.graph.edited = true;
+        Ok(reader)
+    }
+
     /// A tap on the graph's global outputs, aligned: lane `c` is output
     /// channel `c` as the outputs carry it, **post-sum**: a channel several
     /// sources feed is heard whole, each source delayed to the output time and

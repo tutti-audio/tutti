@@ -8,8 +8,8 @@ use crate::VoiceWindow;
 use crate::testing::loop_frames;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
 
@@ -62,10 +62,19 @@ fn cut_flac(dir: &Path) -> PathBuf {
     path
 }
 
+/// A streamer future with what keeps it going: its bells, whose tick thread wakes the
+/// task, and the executor whose thread runs it (a dropped executor ends the future).
+struct Threaded {
+    streamer: DiskStreamer<Running, f32>,
+    _bells: tutti_rt::Bells,
+    _executor: tutti_platform::Executor,
+}
+
 /// The two drivers, so one case runs on both.
 enum Driver {
     Hand(Box<DiskStreamer<Manual<f32>, f32>>),
-    Threaded(DiskStreamer<Running, f32>),
+    /// Its bells, which wake the future's task, live as long as it does.
+    Threaded(Box<Threaded>),
 }
 
 impl Driver {
@@ -73,7 +82,15 @@ impl Driver {
         let rate = tutti_units::SampleRate::of(rate);
         let config = DiskStreamerConfig::default();
         if threaded {
-            Self::Threaded(DiskStreamer::build(rate, config, seams).expect("the thread starts"))
+            let bells = tutti_rt::Bells::new().expect("a tick thread");
+            let executor = tutti_platform::Executor::threaded();
+            let streamer = DiskStreamer::build(rate, config, seams, &executor, &bells)
+                .expect("the future starts");
+            Self::Threaded(Box::new(Threaded {
+                streamer,
+                _bells: bells,
+                _executor: executor,
+            }))
         } else {
             Self::Hand(Box::new(
                 DiskStreamer::<Manual<f32>, f32>::manual_with(rate, config, seams).expect("builds"),
@@ -88,9 +105,8 @@ impl Driver {
                 let opening = s.open(path, Placement::HEAD);
                 wait_for_open(s.as_mut(), opening).expect("the file opens")
             }
-            Self::Threaded(s) => {
-                wait_for_open_threaded(s.open(path, Placement::HEAD)).expect("the file opens")
-            }
+            Self::Threaded(t) => wait_for_open_threaded(t.streamer.open(path, Placement::HEAD))
+                .expect("the file opens"),
         };
         self.until("the stream to be primed", || {
             opened.0.status().phase != StreamPhase::Opening
@@ -108,45 +124,10 @@ impl Driver {
                 Self::Hand(s) => {
                     let _ = s.step();
                 }
-                Self::Threaded(_) => {}
+                Self::Threaded(..) => {}
             }
             std::thread::sleep(Duration::from_millis(1));
         }
-    }
-}
-
-#[derive(Clone)]
-struct Gate(Arc<(Mutex<bool>, Condvar)>);
-
-impl Gate {
-    fn closed() -> Self {
-        Self(Arc::new((Mutex::new(false), Condvar::new())))
-    }
-
-    /// The hook that waits at the gate.
-    fn hook(&self) -> super::decode::DecodeHook {
-        let gate = Arc::clone(&self.0);
-        Arc::new(move |_path| {
-            let (open, bell) = &*gate;
-            let mut open = open.lock().unwrap();
-            while !*open {
-                open = bell.wait(open).unwrap();
-            }
-        })
-    }
-
-    fn open(&self) {
-        *self.0.0.lock().unwrap() = true;
-        self.0.1.notify_all();
-    }
-}
-
-/// Releases the gate however the test ends, so a failure does not leave a
-/// streamer thread waiting for good. A test holds a clone declared after its
-/// streamer, so the gate opens before the streamer's drop joins its thread.
-impl Drop for Gate {
-    fn drop(&mut self) {
-        self.open();
     }
 }
 
@@ -248,29 +229,91 @@ fn underruns_are_read_from_the_status() {
     assert_eq!(stream.status().underruns, 5, "the total counts on");
 }
 
-/// **A dropped streamer publishes `Faulted(StreamerGone)` to a live stream**,
-/// hand-stepped and threaded.
+/// **A dropped hand-stepped streamer publishes `Faulted(StreamerGone)` to a live
+/// stream** at once: its cycle state drops with it.
 #[test]
 fn a_dropped_streamer_publishes_streamer_gone() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = constant_file(dir.path(), "a.wav", 8_000, 1, 0.25);
-    for threaded in [false, true] {
-        let mut driver = Driver::start(8_000.0, threaded, Seams::default());
-        let (stream, _reader) = driver.open(&path);
-        assert!(
-            matches!(
-                stream.status().phase,
-                StreamPhase::Live | StreamPhase::Ended
-            ),
-            "setup: a served stream (threaded: {threaded})"
-        );
-        drop(driver);
-        assert_eq!(
+    let mut driver = Driver::start(8_000.0, false, Seams::default());
+    let (stream, _reader) = driver.open(&path);
+    assert!(
+        matches!(
             stream.status().phase,
-            StreamPhase::Faulted(StreamFault::StreamerGone),
-            "threaded: {threaded}"
-        );
+            StreamPhase::Live | StreamPhase::Ended
+        ),
+        "setup: a served stream"
+    );
+    drop(driver);
+    assert_eq!(
+        stream.status().phase,
+        StreamPhase::Faulted(StreamFault::StreamerGone)
+    );
+}
+
+/// Polls `executor` until `done`, for at most a count of polls that only guards a
+/// hang: the streamer's task is woken by the bells' tick thread, which no count of
+/// polls orders against.
+fn polled_until(executor: &tutti_platform::Executor, mut done: impl FnMut() -> bool) -> bool {
+    for _ in 0..1_000_000 {
+        if done() {
+            return true;
+        }
+        let _ = executor.poll(8);
+        std::thread::yield_now();
     }
+    done()
+}
+
+/// **A dropped streamer's future ends on its next poll and publishes
+/// `Faulted(StreamerGone)`**: the drop raises the stop flag and rings, never joins, and
+/// the executor's next poll runs the future to its end.
+#[test]
+fn a_dropped_streamer_future_publishes_streamer_gone_on_its_next_poll() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = constant_file(dir.path(), "a.wav", 8_000, 1, 0.25);
+    let bells = tutti_rt::Bells::new().expect("a tick thread");
+    let executor = tutti_platform::Executor::polled();
+    let streamer = DiskStreamer::<Running, f32>::build(
+        tutti_units::SampleRate::SR_8K,
+        DiskStreamerConfig::default(),
+        Seams::default(),
+        &executor,
+        &bells,
+    )
+    .expect("the future spawns");
+    let mut opening = Some(streamer.open(&path, Placement::HEAD));
+    let mut opened = None;
+    assert!(
+        polled_until(&executor, || {
+            match opening.take().map(PendingOpen::poll) {
+                Some(Open::Ready(stream, reader)) => opened = Some((stream, reader)),
+                Some(Open::Pending(again)) => opening = Some(again),
+                Some(Open::Failed(error)) => panic!("{error}"),
+                None => {}
+            }
+            opened.is_some()
+        }),
+        "the polled streamer never answered the open"
+    );
+    let (stream, _reader) = opened.expect("opened");
+    assert_ne!(
+        stream.status().phase,
+        StreamPhase::Faulted(StreamFault::StreamerGone)
+    );
+    drop(streamer);
+    assert!(
+        !matches!(
+            stream.status().phase,
+            StreamPhase::Faulted(StreamFault::StreamerGone)
+        ),
+        "the future only ends when polled"
+    );
+    assert!(
+        polled_until(&executor, || stream.status().phase
+            == StreamPhase::Faulted(StreamFault::StreamerGone)),
+        "the future never ended"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -395,34 +438,6 @@ fn a_panic_while_a_loop_is_captured_faults_that_stream() {
 // Fallible construction.
 // ---------------------------------------------------------------------------
 
-fn refuse(
-    _name: &str,
-    _priority: Option<tutti_platform::PriorityRequest>,
-    _body: Box<dyn FnOnce(&tutti_platform::StopToken) + Send>,
-) -> std::io::Result<tutti_platform::ThreadHandle<()>> {
-    Err(std::io::Error::other("no threads"))
-}
-
-/// **`DiskStreamer::start` returns `Err` when the spawn fails**, where it used
-/// to panic: the streamer's thread is refused through the spawn seam.
-#[test]
-fn a_refused_spawn_is_an_error() {
-    let seams = Seams {
-        spawn: refuse,
-        ..Seams::default()
-    };
-    let built = DiskStreamer::<Running, f32>::build(
-        tutti_units::SampleRate::SR_48K,
-        DiskStreamerConfig::default(),
-        seams,
-    );
-    assert!(
-        matches!(&built, Err(crate::Error::Spawn(e)) if e.to_string() == "no threads"),
-        "{:?}",
-        built.map(|_| ())
-    );
-}
-
 // ---------------------------------------------------------------------------
 // The decode lane.
 // ---------------------------------------------------------------------------
@@ -476,73 +491,55 @@ fn a_file_that_cannot_seek_opens_through_the_decode_lane() {
     }
 }
 
-/// **A non-seekable file opens while another stream keeps refilling**: the
-/// decode is held open at a gate on the decode thread, and a stream on the
-/// shared thread is still refilled meanwhile; the open then completes when the
-/// gate does.
+/// **A non-seekable file opens while another stream keeps refilling**: the decode
+/// reads a chunk per cycle, so a stream on the same streamer is refilled in the
+/// cycles the decode takes, and the open completes when the decode does.
 #[test]
-fn a_decode_held_open_does_not_stop_another_stream() {
+fn a_decode_in_flight_does_not_stop_another_stream() {
     const RATE: u32 = 4_000;
     let dir = tempfile::tempdir().expect("a temp dir");
     let long = constant_file(dir.path(), "long.wav", RATE, 40, 0.25);
     let near_end = u64::from(RATE) * 38;
-    let gate = Gate::closed();
+    // A chunk of 256 frames: the fixture takes many cycles to decode.
     let seams = Seams {
-        decode_hook: Some(gate.hook()),
+        decode_chunk: Some(Samples::new(256)),
         ..Seams::default()
     };
-    let mut driver = Driver::start(f64::from(RATE), true, seams);
-    let _release = gate.clone();
-    let (_busy, mut reader) = driver.open(&long);
+    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual_with(
+        tutti_units::SampleRate::of(f64::from(RATE)),
+        Default::default(),
+        seams,
+    )
+    .expect("builds");
+    let busy = sampler.open(&long, Placement::HEAD);
+    let (_busy, mut reader) = wait_for_open(&mut sampler, busy).expect("opens");
     let before = reader.ring.window().1;
 
-    let Driver::Threaded(streamer) = &driver else {
-        unreachable!()
-    };
-    let mut opening = streamer.open(mp3(dir.path()), Placement::HEAD);
-    // Let the streamer reach the decode, which holds at the gate.
-    std::thread::sleep(Duration::from_millis(50));
+    let mut opening = sampler.open(mp3(dir.path()), Placement::HEAD);
+    // The first cycle starts the decode, which one chunk does not finish.
+    let _ = sampler.step();
     opening = match opening.poll() {
         Open::Pending(again) => again,
-        other => panic!("the decode is held, yet the open answered: {other:?}"),
+        other => panic!("one chunk of the decode answered the open: {other:?}"),
     };
 
     drop(reader.block(
         Samples::new(near_end as usize),
         [span(near_end, near_end + 4), span(0, 0)],
     ));
-    driver.until("the other stream's refill, with the decode held", || {
-        reader.ring.window().1 > before
-    });
+    let _ = sampler.step();
     assert!(
-        matches!(opening.poll(), Open::Pending(_)),
-        "the gate is still closed"
+        reader.ring.window().1 > before,
+        "the other stream was not refilled while the decode ran"
     );
-    gate.open();
-}
-
-/// **A decode thread that cannot start fails the open with `Io`**, where the
-/// open would wait for good: the lane's spawn is refused through the seam
-/// (the streamer's own thread is not started: hand-stepped).
-#[test]
-fn a_refused_decode_thread_fails_the_open() {
-    let seams = Seams {
-        spawn: refuse,
-        ..Seams::default()
+    let opening = match opening.poll() {
+        Open::Pending(again) => again,
+        other => panic!("the decode is still running, yet the open answered: {other:?}"),
     };
-    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual_with(
-        tutti_units::SampleRate::SR_44K1,
-        Default::default(),
-        seams,
-    )
-    .expect("builds");
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let opening = sampler.open(mp3(dir.path()), Placement::HEAD);
-    let answer = wait_for_open(&mut sampler, opening);
+    let _ = sampler.step_until_idle(10_000);
     assert!(
-        matches!(&answer, Err(OpenError::Io(std::io::ErrorKind::Other))),
-        "{:?}",
-        answer.map(|_| ())
+        matches!(opening.poll(), Open::Ready(..)),
+        "the open completes once the decode does"
     );
 }
 

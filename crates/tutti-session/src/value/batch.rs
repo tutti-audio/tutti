@@ -88,6 +88,15 @@ impl<'a> Batch<'a> {
         }
     }
 
+    /// The failure of a target that resolved to no cell: the refusal its
+    /// declaration gives, else that it is not there.
+    fn unresolved<T: Store>(&self, target: T) -> Failure {
+        let kind = target
+            .unresolved(self.params)
+            .map_or(ValueErrorKind::NoSuchTarget, ValueErrorKind::Refused);
+        self.fail(target.id(), kind)
+    }
+
     /// Stages the value `make` builds from the target's value so far in this
     /// batch, or from its base when it has none.
     fn apply<T: Store>(
@@ -99,12 +108,18 @@ impl<'a> Batch<'a> {
         // A target id holds the node type its key names, and one node type
         // declares one unit at an address, so every target of one id has one
         // value type: a key of another node type resolves to no cell and
-        // never reaches a slot. The downcasts cannot fail.
+        // never reaches a slot. The downcasts cannot fail, bar a plugin
+        // parameter named in two units (below).
         const ONE_TYPE: &str = "one target id names one value type";
         match self.slots.iter().position(|s| s.id() == id) {
             Some(at) => {
                 let slot = &mut self.slots[at];
-                let current = slot.value_mut().downcast_ref::<T::Value>().expect(ONE_TYPE);
+                // One plugin parameter has one id in every unit, so a second
+                // target of it may hold another value type than the staged one.
+                let Some(current) = slot.value_mut().downcast_ref::<T::Value>() else {
+                    let refusal = ValueErrorKind::Refused(SetRefusal::MixedValueTypes);
+                    return Err(self.fail(id, refusal));
+                };
                 let next = make(current);
                 let accepted = slot.accepts(&next);
                 if accepted.is_ok() {
@@ -115,7 +130,7 @@ impl<'a> Batch<'a> {
             None => {
                 let (cell, base) = target
                     .resolve(self.params)
-                    .ok_or_else(|| self.fail(id, ValueErrorKind::NoSuchTarget))?;
+                    .ok_or_else(|| self.unresolved(target))?;
                 let next = make(&base);
                 T::check(&cell, &next).map_err(|r| self.fail(id, ValueErrorKind::Refused(r)))?;
                 self.slots.push(Box::new(Slot::<T> {
@@ -133,7 +148,7 @@ impl<'a> Batch<'a> {
     fn read_base<T: Store>(&mut self, target: T) -> Result<T::Value, Failure> {
         let (_, base) = target
             .resolve(self.params)
-            .ok_or_else(|| self.fail(target.id(), ValueErrorKind::NoSuchTarget))?;
+            .ok_or_else(|| self.unresolved(target))?;
         self.index += 1;
         Ok(base)
     }

@@ -183,9 +183,9 @@ pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
-    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginParamError,
-    PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError,
-    RestoreState, SaveState, TypedParam,
+    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginPresets,
+    PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
+    SaveState,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
@@ -227,7 +227,9 @@ pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::{PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget};
+pub use tutti_session::{
+    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
+};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{SamplerEvent, SamplerLoad};
 
@@ -726,7 +728,7 @@ pub mod midi {
         Pattern, Placement, RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame,
         SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange,
         SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
-        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,
+        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, Timeline, TimelineDrop,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
