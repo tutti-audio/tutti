@@ -28,7 +28,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_sampler::{DiskVoice, MemorySource, Placement, StreamPhase, VoiceWindow};
+use tutti_sampler::{DiskVoice, MemorySource, StreamPhase, StreamStart, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, SamplerEvent, Session, SessionEvent};
 use tutti_units::{Beat, Db, SampleRate, Samples};
 
@@ -105,7 +105,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
             // The streamer opens the stream on its own thread, and the open
             // lands in `update()`.
             let id = s
-                .open_stream(&path, Placement::HEAD)
+                .open_stream(&path, StreamStart::HEAD)
                 .expect("an offline session streams");
             let deadline = Instant::now() + Duration::from_secs(10);
             let (stream, reader) = 'opened: loop {

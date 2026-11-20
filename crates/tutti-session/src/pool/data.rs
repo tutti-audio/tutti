@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tutti_platform::Asset;
 
-use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry, Sharing};
+use crate::pool::entry::{Declared, Life, LoadError, PoolEntry, PoolLoad, Sharing};
 
 /// A wave file: [`audio_file`]'s entry, decoded whole (resident) or probed for
 /// a disk stream ([`streamed`](Declared::streamed)).
@@ -153,9 +153,9 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
         (self.asset.clone(), self.tier)
     }
 
-    fn load(&self) -> Load<Self::Loaded, S> {
+    fn load(&self) -> PoolLoad<Self::Loaded, S> {
         let (asset, tier) = (self.asset.clone(), self.tier);
-        Load::on_worker(move || match tier {
+        PoolLoad::on_worker(move || match tier {
             Tier::Resident => resident::<S>(asset),
             Tier::Streamed => {
                 let facts = probe(&asset)?;
@@ -245,9 +245,9 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
         self.asset.clone()
     }
 
-    fn load(&self) -> Load<Self::Loaded, S> {
+    fn load(&self) -> PoolLoad<Self::Loaded, S> {
         let asset = self.asset.clone();
-        Load::on_worker(move || {
+        PoolLoad::on_worker(move || {
             tutti_sf2::SoundFont::open(asset)
                 .map(Arc::new)
                 .map_err(|error| LoadError::SoundFont(Arc::new(error)))

@@ -19,7 +19,7 @@ use tutti_midi_runtime::MidiOut;
 use crate::midi::{
     LossReaders, LossWriters, OutputTiming, Stamping, UmpOut, drain_events, loss_cells,
 };
-use crate::pool::{Declared, HandleError, Life, Load, PoolEntry};
+use crate::pool::{Declared, HandleError, Life, PoolEntry, PoolLoad};
 use crate::{Peer, Presence, Resource, ResourceId, Session};
 
 // --- The entry ---
@@ -104,10 +104,10 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for MidiSinkEntry {
         (Arc::as_ptr(&self.sink).addr(), self.options)
     }
 
-    fn load(&self) -> Load<SinkLoaded, S> {
+    fn load(&self) -> PoolLoad<SinkLoaded, S> {
         let sink = Arc::clone(&self.sink);
         let options = self.options;
-        Load::on_session(move |cx| {
+        PoolLoad::on_session(move |cx| {
             let id = cx.mint_resource_id();
             Ok(cx.midi().open_sink(id, sink, options))
         })

@@ -9,7 +9,7 @@ use tutti_units::SampleRate;
 
 use super::{Spawned, events, state};
 use crate::pool::table::{Hold, HoldKind};
-use crate::{Declared, Life, Load, PoolConfig, PoolEntry, PoolKey, Retention, Session};
+use crate::{Declared, Life, PoolConfig, PoolEntry, PoolKey, PoolLoad, Retention, Session};
 
 /// A kind with something live behind it: it releases when parked, and loads
 /// again when declared after.
@@ -27,9 +27,9 @@ impl PoolEntry for Device {
         self.version
     }
 
-    fn load(&self) -> Load<u32> {
+    fn load(&self) -> PoolLoad<u32> {
         let (version, loads) = (self.version, Arc::clone(&self.loads));
-        Load::on_worker(move || {
+        PoolLoad::on_worker(move || {
             loads.fetch_add(1, Ordering::SeqCst);
             Ok(version)
         })
@@ -58,9 +58,9 @@ impl PoolEntry for Shared {
         0
     }
 
-    fn load(&self) -> Load<u32> {
+    fn load(&self) -> PoolLoad<u32> {
         let loads = Arc::clone(&self.loads);
-        Load::on_worker(move || {
+        PoolLoad::on_worker(move || {
             loads.fetch_add(1, Ordering::SeqCst);
             Ok(0)
         })
@@ -129,7 +129,7 @@ fn held(
 
 #[test]
 fn a_snapshot_hold_past_the_depth_parks_a_kind_that_releases_and_the_newest_stay_live() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(2));
+    let (mut s, spawned) = session(PoolConfig::new().live_holds(2));
     let loads = Arc::new(AtomicUsize::new(0));
     let (lives, _holds) = held(&mut s, &spawned, &loads, &["a", "b", "c"]);
     let _ = events(&mut s);
@@ -165,7 +165,7 @@ fn the_default_depth_is_eight_holds() {
 
 #[test]
 fn recalling_a_parked_entry_loads_it_again_and_a_live_one_adopts_with_no_load() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(1));
+    let (mut s, spawned) = session(PoolConfig::new().live_holds(1));
     let loads = Arc::new(AtomicUsize::new(0));
     let (lives, _holds) = held(&mut s, &spawned, &loads, &["old", "new"]);
     let _ = events(&mut s);
@@ -197,7 +197,7 @@ fn recalling_a_parked_entry_loads_it_again_and_a_live_one_adopts_with_no_load() 
 
 #[test]
 fn a_node_hold_never_parks_however_old() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
+    let (mut s, spawned) = session(PoolConfig::new().live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
     s.pool(device("a", &loads)).unwrap();
     spawned.run_until_stalled();
@@ -215,7 +215,7 @@ fn a_node_hold_never_parks_however_old() {
 
 #[test]
 fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
+    let (mut s, spawned) = session(PoolConfig::new().live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
     s.pool(Declared::new(
         "a",
@@ -248,7 +248,7 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
 
 #[test]
 fn the_last_hold_of_a_parked_entry_releases_it() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
+    let (mut s, spawned) = session(PoolConfig::new().live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
     let (lives, holds) = held(&mut s, &spawned, &loads, &["a"]);
     let _ = events(&mut s);

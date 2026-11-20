@@ -9,7 +9,7 @@ use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_sampler::{OpenError, Placement, StreamPhase};
+use tutti_sampler::{OpenError, StreamPhase, StreamStart};
 use tutti_session::{
     AudioEntry, OutPort, PoolState, Root, SamplerError, SamplerEvent, SamplerLoad, Session,
     SessionEvent, audio_file,
@@ -62,8 +62,8 @@ fn an_open_lands_opened_with_the_calls_id() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    let first = s.open_stream(&path, Placement::HEAD).expect("a streamer");
-    let second = s.open_stream(&path, Placement::HEAD).expect("a streamer");
+    let first = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
+    let second = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
     assert_ne!(first, second);
 
     let mut opened: Vec<SamplerLoad> = landed(&mut s, 2)
@@ -91,7 +91,7 @@ fn a_missing_file_lands_open_failed_with_the_typed_error() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut s = session();
     let id = s
-        .open_stream(dir.path().join("absent.wav"), Placement::HEAD)
+        .open_stream(dir.path().join("absent.wav"), StreamStart::HEAD)
         .expect("a streamer");
     let events = landed(&mut s, 1);
     let [SamplerEvent::OpenFailed { id: failed, error }] = &events[..] else {
@@ -115,7 +115,7 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
         .expect("builds");
     let dir = tempfile::tempdir().expect("a temp dir");
     assert!(matches!(
-        s.open_stream(dir.path().join("a.wav"), Placement::HEAD),
+        s.open_stream(dir.path().join("a.wav"), StreamStart::HEAD),
         Err(SamplerError::NoStreamer)
     ));
 }
@@ -136,7 +136,7 @@ fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
     match s.audio(&"ramp").expect("loaded") {
         AudioEntry::Resident(wave) => tutti_sampler::Clip::new(wave).expect("a placeable wave"),
         AudioEntry::Streamed(info) => {
-            s.open_stream(info.asset().clone(), Placement::HEAD)
+            s.open_stream(info.asset().clone(), StreamStart::HEAD)
                 .expect("a streamer");
             match landed(&mut s, 1).pop() {
                 Some(SamplerEvent::Opened { id }) => {

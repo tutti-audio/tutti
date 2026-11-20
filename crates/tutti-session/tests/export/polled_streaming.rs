@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
 use tutti_platform::{Executor, Instant};
-use tutti_sampler::{Clip, Placement, StreamPhase};
+use tutti_sampler::{Clip, StreamPhase, StreamStart};
 use tutti_session::{
     AudioEntry, Bounce, BounceLatency, BounceTail, PoolState, Range, Root, SamplerEvent,
     SamplerLoad, Session, SessionEvent, audio_file,
@@ -72,7 +72,7 @@ fn updates_prime_an_open_streams_ring() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    let id = s.open_stream(&path, Placement::HEAD).expect("a streamer");
+    let id = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
     let landed = updates_until_sampler(&mut s);
     assert!(
         matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
@@ -100,7 +100,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    let id: SamplerLoad = s.open_stream(&path, Placement::HEAD).expect("a streamer");
+    let id: SamplerLoad = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
     let landed = updates_until_sampler(&mut s);
     assert!(
         matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
@@ -178,7 +178,7 @@ fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
         .build()
         .expect("a session builds on a polled executor");
     let id = s
-        .open_stream(std::sync::Arc::clone(&bytes), Placement::HEAD)
+        .open_stream(std::sync::Arc::clone(&bytes), StreamStart::HEAD)
         .expect("a streamer");
     let landed = updates_until_sampler(&mut s);
     assert!(

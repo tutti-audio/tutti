@@ -10,7 +10,7 @@ use tutti_platform::Asset;
 
 use super::{Spawned, events, session, state};
 use crate::{
-    Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshError, RefreshReport, Sharing,
+    Declared, Life, LoadError, PoolEntry, PoolKey, PoolLoad, RefreshError, RefreshReport, Sharing,
 };
 
 /// A kind that reads a whole file: the loaded value is its bytes.
@@ -28,9 +28,9 @@ impl PoolEntry for Read {
         self.path.clone()
     }
 
-    fn load(&self) -> Load<Arc<Vec<u8>>> {
+    fn load(&self) -> PoolLoad<Arc<Vec<u8>>> {
         let (path, reads) = (self.path.clone(), Arc::clone(&self.reads));
-        Load::on_worker(move || {
+        PoolLoad::on_worker(move || {
             reads.fetch_add(1, Ordering::SeqCst);
             std::fs::read(path)
                 .map(Arc::new)
@@ -101,9 +101,9 @@ impl PoolEntry for Held {
         0
     }
 
-    fn load(&self) -> Load<u8> {
+    fn load(&self) -> PoolLoad<u8> {
         let asset = self.asset.clone();
-        Load::on_worker(move || {
+        PoolLoad::on_worker(move || {
             asset
                 .open()
                 .map(|_| 0)
@@ -301,8 +301,8 @@ impl PoolEntry for Unstamped {
         self.path.clone()
     }
 
-    fn load(&self) -> Load<u8> {
-        Load::ready(0)
+    fn load(&self) -> PoolLoad<u8> {
+        PoolLoad::ready(0)
     }
 
     fn asset(&self) -> Option<Asset> {
