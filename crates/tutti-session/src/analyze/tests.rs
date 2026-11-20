@@ -241,13 +241,12 @@ impl Meter for CountingMeter {
 
 #[test]
 fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
 
-    let held: Arc<Mutex<Vec<crate::Task>>> = Arc::default();
-    let into = Arc::clone(&held);
+    let held = tutti_fixtures::HeldFutures::new();
     let mut s = Session::builder()
-        .spawn_with(move |task| into.lock().unwrap().push(task))
+        .executor(held.executor())
         .build_detached(RATE)
         .unwrap();
     let pushed = Arc::new(AtomicUsize::new(0));
@@ -255,10 +254,7 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
     let wave = Wave::from_mono(RATE, Mono::new(&vec![0.0; 10 * CHUNK_FRAMES]));
     let job = s.analyze(wave, Counting(Arc::clone(&pushed)));
     drop(job);
-    let tasks: Vec<_> = held.lock().unwrap().drain(..).collect();
-    for task in tasks {
-        task.run();
-    }
+    held.run_all();
     assert_eq!(pushed.load(Ordering::SeqCst), 0);
     let landed = s
         .update()

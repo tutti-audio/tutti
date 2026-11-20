@@ -334,6 +334,38 @@ mod tests {
         }
     }
 
+    /// **A listing the probe wrote survives the probe's death after it**: the
+    /// probe writes the listing, then loads each plugin for its widths, and a
+    /// plugin that crashes or hangs there ends the process. The host reads the
+    /// result file whatever the exit, so the plugins still list, with the widths
+    /// that load would have read left unread.
+    #[test]
+    fn a_listing_written_before_the_probe_died_is_the_result() {
+        use tutti_plugin_types::{ProbeOutcome, write_result};
+        let listed = vec![Described::new(
+            PluginId::Clap("a.plugin".into()),
+            tutti_plugin_types::PluginDescriptor::new(
+                "A",
+                tutti_plugin_types::PluginClass::Unknown,
+            ),
+        )];
+        for end in ["kill -SEGV $$", "exec sleep 300"] {
+            let dir = TempDir::new().unwrap();
+            let prepared = dir.path().join("listing");
+            write_result(
+                &prepared,
+                &ProbeOutcome::Described {
+                    plugins: listed.clone(),
+                    unmeasured: Vec::new(),
+                },
+            )
+            .unwrap();
+            let locator = stand_in(&dir, &format!("cp {} \"$2\"\n{end}", prepared.display()));
+            let result = probe(&locator, Duration::from_secs(2));
+            assert_eq!(result, Ok(listed.clone()), "after `{end}`");
+        }
+    }
+
     /// **The host states its pid to the probe**, as it does to a plugin-server, so
     /// the probe watches the host and not whatever its parent is by then.
     #[test]

@@ -193,7 +193,7 @@ pub enum RecoveryFailure {
         /// The graph's refusal.
         source: CrossfadeRefused,
     },
-    /// The reload's job was dropped by the session's spawner before it ran.
+    /// The reload's job was dropped by the session's executor before it ran.
     ReloadDropped,
     /// The reload's job panicked.
     ReloadPanicked {

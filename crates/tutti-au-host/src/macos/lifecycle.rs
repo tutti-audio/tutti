@@ -23,6 +23,10 @@ use crate::error::AuError;
 use crate::instance::AuLoaded;
 use crate::processor::{AuProcessor, MidiOut, ProcessorParts, Rendering, UninitializeOnDrop};
 
+/// An AUv2 unit renders 32-bit audio only: what a loaded unit and its
+/// descriptor both report.
+pub(super) const WIDTHS: Widths = Widths::F32;
+
 impl Loaded for AuLoaded {
     type Processor = AuProcessor;
     type Controller = AuController;
@@ -35,7 +39,7 @@ impl Loaded for AuLoaded {
 
     /// An AUv2 unit renders 32-bit audio only.
     fn widths(&self) -> Widths {
-        Widths::F32
+        WIDTHS
     }
 
     /// Initializes the unit so it can render.

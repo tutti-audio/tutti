@@ -31,14 +31,15 @@
 //! dropping it leaves its entry loaded. [`Session::when_loaded`] runs a
 //! closure once an entry is loaded.
 //!
-//! A file entry takes the file's stamp on the worker that loads it, and
-//! [`Session::refresh_pool`] compares stamps on a worker and loads again the
-//! entries whose file changed; the diff itself never reads metadata.
+//! An entry that reads an asset takes the asset's [`Identity`](tutti_platform::Identity)
+//! on the worker that loads it (a file's is its path and stamp, bytes' is minted
+//! once), and [`Session::refresh_pool`] takes it again on a worker and loads
+//! again the entries whose asset changed; the diff itself never reads metadata.
 //!
 //! # Stages
 //!
 //! A [`Load`] has one to two stages, each on a named thread: a worker of the
-//! session's spawner ([`Load::on_worker`]), a worker and then the main thread
+//! session's executor ([`Load::on_worker`]), a worker and then the main thread
 //! ([`Load::on_worker_then_main`]), the session's own thread
 //! ([`Load::on_session`]), or none ([`Load::ready`]). At most
 //! [`PoolConfig::parallel_loads`] worker stages run at once; the rest wait in
@@ -68,7 +69,6 @@ mod open;
 mod refresh;
 mod report;
 mod run;
-mod stamp;
 mod table;
 
 pub use config::PoolConfig;
@@ -87,7 +87,6 @@ pub use open::OpenCx;
 pub(crate) use refresh::Checked;
 pub use refresh::RefreshReport;
 pub use report::{PoolOutcome, PoolReport};
-pub(crate) use stamp::Stamp;
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
 #[cfg(feature = "plugin")]
@@ -100,7 +99,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
     /// The set is diffed against the one declared before, by key and by
-    /// identity. A new key starts a load on the session's spawner; a key whose
+    /// identity. A new key starts a load on the session's executor; a key whose
     /// identity is unchanged keeps its entry, loaded once; a key whose
     /// identity changed reloads, its old value staying until the new one
     /// lands; a key the set no longer names is held while a node or a snapshot
@@ -213,18 +212,22 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         self.pool.entries.when_loaded(key, Box::new(then))
     }
 
-    /// Checks the files the pool's entries read, on a worker, and loads again
-    /// the entries whose file changed.
+    /// Checks the assets the pool's entries read, on a worker, and loads again
+    /// the entries whose asset changed.
     ///
-    /// Each file entry took the file's stamp (length and modification time)
-    /// when it loaded. The check takes each stamp again and compares: an entry
-    /// whose stamp differs reloads as it does for a changed identity (the old
-    /// value stays until the new one lands, as a [`PoolEvent::Reloaded`]), and
-    /// two keys that share a load reload with one. An entry whose file can no
-    /// longer be read keeps what it has, and is named as unreadable. An entry
-    /// with no stamp (its stat failed when it loaded) loads again once its file
-    /// reads, and that load's worker stage stamps it; a kind whose load has no
-    /// worker stage takes no stamp, so it loads again at every refresh.
+    /// Each entry that reads an asset took the asset's
+    /// [`Identity`](tutti_platform::Identity) when it loaded (a file's is its
+    /// path with its length and modification time). The check takes each
+    /// identity again and compares: an entry whose identity differs reloads as
+    /// it does for a changed identity (the old value stays until the new one
+    /// lands, as a [`PoolEvent::Reloaded`]), and two keys that share a load
+    /// reload with one. An entry whose asset can no longer be opened keeps what
+    /// it has, and is named as unreadable. An entry with no identity (its file
+    /// could not be stamped when it loaded) loads again once its asset has one,
+    /// and that load's worker stage takes it; a kind whose load has no worker
+    /// stage takes none, so it loads again at every refresh. An asset of bytes
+    /// never changes, so it never reloads, and an asset that never has an
+    /// identity is not watched.
     ///
     /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
     /// never does, so a key declared after its file changed shares the loaded
@@ -233,9 +236,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
     /// Dropping the job cancels the reloads the check would start.
     pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {
-        let files = self.pool.entries.stamped_files();
+        let assets = self.pool.entries.stamped_files();
         self.jobs.submit_job(
-            move |_| refresh::check(files),
+            move |_| refresh::check(assets),
             move |session, done, ticket| match done {
                 // A dropped job reloads nothing.
                 Ok(checked) => ticket.complete(|| Ok(session.land_pool_refresh(checked))),

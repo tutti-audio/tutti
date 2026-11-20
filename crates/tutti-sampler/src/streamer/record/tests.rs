@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use tutti_buffers::ChannelLayout;
+use tutti_platform::Asset;
 use tutti_units::SampleRate;
 
 use super::*;
@@ -58,7 +59,7 @@ fn record_with_cells(
 ) {
     let (out, ring, pos) = RegionBuffer::with_capacity(id, path.clone(), capacity, channels);
     let cache = Arc::new(LruCache::<f32>::new(4, 1 << 20));
-    let pin = cache.pin(&path);
+    let pin = cache.pin(Asset::from(path).identity().as_ref());
     let status = Arc::new(StatusCell::new());
     let looping = Publisher::new(None);
     let direction = Publisher::new(Direction::Forward);
@@ -272,7 +273,7 @@ fn a_rate_event_re_derives_each_streams_own_ratio() {
                 Arc::clone(&cells),
                 SampleRate::of(file_rate),
                 Samples::new(1_000),
-                cache.pin(&PathBuf::new()),
+                cache.pin(None),
                 Arc::new(StatusCell::new()),
                 Publisher::new(None).reader(),
                 Publisher::new(Direction::Forward).reader(),

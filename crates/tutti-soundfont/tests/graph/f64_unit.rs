@@ -15,13 +15,12 @@ const BLOCK: usize = 64;
 
 fn font() -> Arc<SoundFont> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
-    let mut file = std::fs::File::open(&path).unwrap_or_else(|e| {
+    Arc::new(SoundFont::open(path.as_path()).unwrap_or_else(|e| {
         panic!(
-            "committed test soundfont missing at {}: {e}",
+            "committed test soundfont at {} does not load: {e}",
             path.display()
         )
-    });
-    Arc::new(SoundFont::from_reader(&mut file).expect("the test soundfont parses"))
+    }))
 }
 
 /// A note held for a second is audible in both channels of the dry pair, every sample finite;

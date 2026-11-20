@@ -20,11 +20,10 @@
 //! races are avoided.
 //!
 //! # Plugins
-//! The plugin-authoring half (`plugin_main!`, the `AEffect` builder and the
-//! plugin-side dispatcher) lives in the test-only `tutti-vst2-author`; this crate
-//! holds the ABI types both sides share, and the `Plugin` and `PluginParameters` traits
-//! the authoring side implements (nothing here implements them any more: a loaded plugin
-//! is a `PluginInstance`, the main-thread handle, and a `RenderHandle`, the audio one).
+//! The plugin-authoring half (the `Plugin` and `PluginParameters` traits, `HostCallback`,
+//! `plugin_main!` and the plugin-side dispatcher) lives in the test-only
+//! `tutti-vst2-author`; this crate holds the ABI types both sides share. A loaded plugin
+//! is a `PluginInstance`, the main-thread handle, and a `RenderHandle`, the audio one.
 //!
 //! # Hosts
 //!
@@ -88,9 +87,7 @@ mod primitive_enum;
 
 pub mod api;
 pub mod buffer;
-pub mod channels;
 pub mod editor;
-pub mod event;
 pub mod host;
 pub mod interfaces;
 pub mod midi;

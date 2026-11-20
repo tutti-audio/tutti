@@ -300,10 +300,7 @@ mod tests {
                 zones: vec![instrument],
             }],
         );
-        std::sync::Arc::new(
-            tutti_sf2::SoundFont::from_reader(&mut std::io::Cursor::new(bytes))
-                .expect("the built SoundFont parses"),
-        )
+        std::sync::Arc::new(tutti_sf2::SoundFont::open(bytes).expect("the built SoundFont parses"))
     }
 
     fn with<R>(font: &tutti_sf2::SoundFont, f: impl FnOnce(&RegionPair<'_>) -> R) -> R {

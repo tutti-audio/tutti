@@ -82,6 +82,7 @@ pub(crate) fn describe(handle: &AuHandle) -> PluginDescriptor {
         },
         editor: EditorPresence::measured(AuEditor::has_editor(handle.unit())),
         measured: None,
+        widths: Some(super::lifecycle::WIDTHS),
     }
 }
 

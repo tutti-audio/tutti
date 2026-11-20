@@ -17,8 +17,7 @@ use tutti_units::SampleRate;
 pub const RATE: SampleRate = SampleRate::SR_44K1;
 
 pub fn timgm6mb() -> Arc<SoundFont> {
-    let mut file = std::fs::File::open(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap();
-    Arc::new(SoundFont::from_reader(&mut file).unwrap())
+    Arc::new(SoundFont::open(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap())
 }
 
 /// A unit over a font, with typed messages.

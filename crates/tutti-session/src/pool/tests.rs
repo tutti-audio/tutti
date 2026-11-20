@@ -1,15 +1,15 @@
 //! The pool's rules: the diff by key and identity, an entry's life, and the
 //! refusals at the call. The jobs run when a test says, on the test's thread.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use tutti_units::SampleRate;
 
 use super::table::HoldKind;
 use super::{Declared, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent, PoolKey, PoolState};
 use crate::peer::sealed;
-use crate::{HandleError, Peer, PeerError, Presence, Resource, ResourceId, Session, Task};
+use crate::{HandleError, Peer, PeerError, Presence, Resource, ResourceId, Session};
 use crate::{Job, JobKind, SessionEvent, WorkerError};
 
 mod holds;
@@ -27,31 +27,14 @@ fn took<J: JobKind>(
     })
 }
 
-/// The loads a session handed its spawner, held until the test runs them.
-#[derive(Clone, Default)]
-struct Spawned(Arc<Mutex<Vec<Task>>>);
-
-impl Spawned {
-    fn take(&self) -> Vec<Task> {
-        std::mem::take(&mut *self.0.lock().unwrap())
-    }
-
-    fn is_empty(&self) -> bool {
-        self.0.lock().unwrap().is_empty()
-    }
-
-    fn run_all(&self) {
-        for job in self.take() {
-            job.run();
-        }
-    }
-}
+/// The loads a session handed its executor, held until the test runs them.
+type Spawned = tutti_fixtures::HeldFutures;
 
 fn session() -> (crate::DetachedSession, Spawned) {
     let spawned = Spawned::default();
     let held = spawned.clone();
     let session = Session::builder()
-        .spawn_with(move |job| held.0.lock().unwrap().push(job))
+        .executor(held.executor())
         .build_detached(SampleRate::SR_48K)
         .unwrap();
     (session, spawned)
@@ -332,7 +315,7 @@ fn a_job_that_did_not_finish_fails_the_entry() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    drop(spawned.take()); // the spawner dropped it unrun
+    drop(spawned.take()); // the executor dropped it unrun
     assert!(matches!(s.pool_state(&"a"), Some(PoolState::Loading)));
     let landed = events(&mut s);
     assert_eq!(landed.len(), 1);
@@ -794,6 +777,33 @@ mod audio {
         assert_eq!(loaded.len().get(), 100, "a reader of the old wave keeps it");
     }
 
+    /// An audio file held only as bytes (the `Vec<u8>` is the asset) loads the
+    /// file's own samples, resident and streamed, and the entry still names it.
+    #[test]
+    fn an_audio_file_declared_from_bytes_loads_the_files_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 100);
+        let bytes = std::fs::read(&path).unwrap();
+        drop(dir);
+        let (mut s, spawned) = session();
+        s.pool((
+            audio_file("whole", bytes.clone()),
+            audio_file("piece", bytes).streamed(),
+        ))
+        .unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        let loaded = wave(&s, "whole");
+        assert_eq!(loaded.len().get(), 100);
+        assert_eq!(loaded.at(1, 50), -0.5, "the file's own samples");
+        let AudioEntry::Streamed(info) = s.audio(&"piece").unwrap() else {
+            panic!("a streamed entry reads as its header");
+        };
+        assert_eq!(info.facts().frames.map(|frames| frames.get()), Some(100));
+        assert!(info.asset().open().is_ok(), "the entry keeps the bytes");
+    }
+
     #[test]
     fn dropping_an_audio_handle_leaves_the_entry_loaded_and_its_wave_shared() {
         let dir = tempfile::tempdir().unwrap();
@@ -825,7 +835,7 @@ mod audio {
         let AudioEntry::Streamed(info) = s.audio(&"long").unwrap() else {
             panic!("a streamed entry reads as its header");
         };
-        assert_eq!(info.path(), path);
+        assert_eq!(info.asset().name(), path.display().to_string());
         assert_eq!(info.facts().frames.map(|frames| frames.get()), Some(480));
         assert_eq!(info.facts().layout.count(), 2);
         assert_eq!(info.facts().sample_rate, tutti_units::SampleRate::SR_48K);
@@ -1010,7 +1020,7 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
 }
 
 /// A clock switch, with loads of the session's own in flight (the pool's loads
-/// run as jobs on the session's spawner).
+/// run as jobs on the session's executor).
 #[cfg(feature = "device")]
 mod clock_switch {
     use tutti_buffers::ChannelLayout;
@@ -1024,7 +1034,7 @@ mod clock_switch {
         let spawned = Spawned::default();
         let held = spawned.clone();
         let session = Session::builder()
-            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .executor(held.executor())
             .system_clock()
             .build()
             .unwrap();
@@ -1095,7 +1105,7 @@ mod clock_switch {
             tutti_buffers::SampleFormat::F32,
         );
         let session = Session::builder()
-            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .executor(held.executor())
             .device(Default::default())
             .build_device_on(spec, driver)
             .unwrap();
@@ -1340,7 +1350,7 @@ mod clock_switch {
         let spawned = Spawned::default();
         let held = spawned.clone();
         let mut s = Session::builder()
-            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .executor(held.executor())
             .outputs(ChannelLayout::from(6u16))
             .system_clock()
             .build()

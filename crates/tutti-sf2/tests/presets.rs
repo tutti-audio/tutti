@@ -1,8 +1,6 @@
 //! A preset's bank and program are typed, and a preset whose values are not
 //! MIDI's is kept but cannot be played (SF2 2.04 section 7.2).
 
-use std::io::Cursor;
-
 use tutti_fixtures::sf2::{Inst, Preset, bytes};
 use tutti_sf2::{Bank, InstrumentGenerator, PresetGenerator, SoundFont};
 use tutti_ump::U7;
@@ -34,7 +32,7 @@ fn a_preset_outside_midis_values_is_kept_and_says_it_cannot_be_played() {
             zones: vec![vec![]],
         }],
     );
-    let font = SoundFont::from_reader(&mut Cursor::new(file)).expect("the font loads");
+    let font = SoundFont::open(file).expect("the font loads");
     let seen: Vec<_> = font
         .presets()
         .iter()
@@ -86,7 +84,7 @@ fn an_unused_or_reserved_generator_number_is_ignored() {
             zones: vec![instrument_zone],
         }],
     );
-    let font = SoundFont::from_reader(&mut Cursor::new(file)).expect("the font loads");
+    let font = SoundFont::open(file).expect("the font loads");
     let region = &font.presets()[0].regions()[0];
     let instrument = &font.instruments()[region.instrument_id()].regions()[0];
     assert_eq!(region.generator(PresetGenerator::Pan), 9);
@@ -126,7 +124,7 @@ fn an_instrument_record_in_an_instrument_zone_is_ignored() {
             zones: vec![vec![(41, 1), (17, 4), (41, 1)]],
         }],
     );
-    let font = SoundFont::from_reader(&mut Cursor::new(file)).expect("the font loads");
+    let font = SoundFont::open(file).expect("the font loads");
     let regions = font.instruments()[0].regions();
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].generator(InstrumentGenerator::Pan), 4);

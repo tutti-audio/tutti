@@ -213,7 +213,7 @@ impl<F: RingFloat> PendingOpen<F> {
     }
 
     /// Blocks until the streamer answers: the open as a job for a thread
-    /// that has nothing else to do (the session's spawner), where
+    /// that has nothing else to do (the session's executor), where
     /// [`poll`](Self::poll) is for one that has. It sleeps on the reply, so
     /// no loop of polls is needed; but a streamer nobody drives (a
     /// `DiskStreamer::manual` no one steps)

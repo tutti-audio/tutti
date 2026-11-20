@@ -47,7 +47,7 @@
 //!
 //! Between the two there are queues and no mutable state. A commit travels
 //! to the audio thread over the editor's queue, retired values travel back
-//! over its return queue, and a job on the session's spawner reports over a
+//! over its return queue, and a job on the session's executor reports over a
 //! channel that [`Phase::Collect`] drains. A call on the [`Graph`] only stages
 //! an edit, in the graph value the control thread holds
 //! ([`Graph::is_edited`] says whether one waits); nothing reaches the audio
@@ -186,7 +186,6 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use job::{Job, JobId, JobKind, JobOutput, JobStatus, WaitError, WorkerError};
-pub use jobs::Task;
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,

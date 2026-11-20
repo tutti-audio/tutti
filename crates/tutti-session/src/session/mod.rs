@@ -124,7 +124,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) inputs: Inputs<C::Float>,
     /// The bounce token and the leftovers' channel.
     pub(crate) bounce: BouncePart,
-    /// The blocking work running on the spawner, landed in `Phase::Collect`.
+    /// The blocking work running on the executor, landed in `Phase::Collect`.
     pub(crate) jobs: Jobs,
     /// Plugin hosting. Last, so it drops after every plugin the session holds:
     /// a close handed over while the session drops is still collected.

@@ -162,7 +162,7 @@ impl<F: RingFloat> Stream<F> {
         }
     }
 
-    /// The file the stream plays: its path and rate, and the wave when the
+    /// The file the stream plays: its asset and rate, and the wave when the
     /// streamer holds it whole. What a fork of the stream's voice reads.
     #[must_use]
     pub fn file(&self) -> &StreamFile<F> {

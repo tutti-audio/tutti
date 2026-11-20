@@ -6,6 +6,7 @@
 //! read back from the code under test.
 
 use crate::common::{self, metrical, sequences};
+use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
@@ -250,7 +251,7 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
     let mut whole = vec![0xF0, 11];
     whole.extend(1..=10u8);
     whole.push(0xF7);
-    let f = MidiFile::from_bytes(&build_smf(
+    let f = read_bytes(build_smf(
         0,
         Division::Metrical(TPQ),
         &[vec![
@@ -372,7 +373,7 @@ fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
     let escape = FileEvent::Escape(vec![0xF3, 0x01].into());
     let first = FileEvent::SysEx(common::start(&[1, 2]));
     let second = FileEvent::Escape(vec![3, 0xF7].into());
-    let f = MidiFile::from_bytes(&build_smf(
+    let f = read_bytes(build_smf(
         1,
         Division::Metrical(TPQ),
         &[
@@ -449,7 +450,7 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
         MidiChannel::FIRST.into(),
         Voice2::ChannelPressure(tutti_ump::ControlValue::MIN),
     );
-    let clip = MidiFile::from_bytes(
+    let clip = read_bytes(encoded(
         &MidiFile::clip(
             DIVISION,
             Track::new()
@@ -458,9 +459,8 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
                 .push(Tick(0), known)
                 .unwrap(),
         )
-        .unwrap()
-        .to_bytes(),
-    )
+        .unwrap(),
+    ))
     .unwrap();
     let timeline = metrical(&clip).timeline();
     assert_eq!(timeline.packets.len(), 1);
@@ -536,7 +536,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
 
 // ---- bytes in and out ------------------------------------------------------
 
-/// A byte slice reads back the file `to_bytes` gives.
+/// A byte slice reads back the file `write` gives.
 #[test]
 fn a_file_round_trips_through_a_slice() {
     let f = file(vec![
@@ -550,11 +550,11 @@ fn a_file_round_trips_through_a_slice() {
                 U7::of(100),
             ),
     ]);
-    let out = f.to_bytes();
-    assert_eq!(MidiFile::try_from(out.as_slice()).unwrap(), f);
-    // Bytes of neither container are refused as the other doors refuse them.
+    let out = encoded(&f);
+    assert_eq!(read_bytes(&out).unwrap(), f);
+    // Bytes of neither container are refused.
     assert!(matches!(
-        MidiFile::try_from(&b"RIFF...."[..]),
+        read_bytes(b"RIFF...."),
         Err(ReadError::UnknownFormat)
     ));
 }

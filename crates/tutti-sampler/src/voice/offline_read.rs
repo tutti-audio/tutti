@@ -4,9 +4,10 @@
 //! into its ring. A fork of one for an export cannot: the ring has one
 //! consumer, the live audio thread, and a seek asked of the streamer moves the
 //! live stream. So a forked voice reads the file itself, through this: the
-//! file the streamer's record names ([`StreamFile`]), re-opened by its path and
-//! decoded a page at a time on the render's own thread as the render reaches
-//! it — or read in place, when the streamer's cache already holds it decoded.
+//! file the streamer's record names ([`StreamFile`]), opened again through its
+//! asset and decoded a page at a time on the render's own thread as the render
+//! reaches it — or read in place, when the streamer's cache already holds it
+//! decoded.
 //!
 //! # Why a synchronous reader, not a second streamer stream
 //!
@@ -25,7 +26,7 @@
 //! point, and the first such failure is latched ([`FirstError`]): the fork
 //! hands the latch to the graph (its `Forked` carries it as the fork's
 //! `ForkHealth`), and the export
-//! fails naming the node and the path rather than writing the silence as a
+//! fails naming the node and the asset rather than writing the silence as a
 //! success.
 //!
 //! # The same read as the memory tier
@@ -37,7 +38,6 @@
 //! exported from disk is therefore the samples the same clip in memory
 //! renders, bit for bit, wherever the two are asked for the same position.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::fault::FirstError;
@@ -45,6 +45,7 @@ use tutti_buffers::ChannelLayout;
 #[cfg(codec)]
 use tutti_buffers::Source;
 use tutti_buffers::{Float, Wave};
+use tutti_platform::Asset;
 use tutti_units::{SamplePosition, Samples};
 
 use super::Loop;
@@ -71,9 +72,10 @@ const PAGE_LEAD: usize = 4;
 /// Why an offline disk voice renders silence where its file should be: the
 /// file, and what went wrong with it.
 #[derive(Debug, thiserror::Error)]
-#[error("cannot read {}: {what}", path.display())]
+#[error("cannot read {name}: {what}")]
 pub(crate) struct OfflineReadError {
-    path: PathBuf,
+    /// The asset's [`name`](Asset::name).
+    name: String,
     #[source]
     what: ReadFault,
 }
@@ -248,7 +250,7 @@ impl<F: Float> OfflineRead<F> {
     }
 
     /// Close the file: drop the decoder and its pages. The next read opens it
-    /// again by its path. A voice closes it once the playhead has left its
+    /// again through its asset. A voice closes it once the playhead has left its
     /// window for good, so a render holding many voices keeps one file open
     /// per voice sounding, not per voice in the graph.
     pub(crate) fn close(&mut self) {
@@ -283,7 +285,7 @@ impl<F: Float> OfflineRead<F> {
                 Err(what) => {
                     self.failed = true;
                     self.fault.latch(OfflineReadError {
-                        path: self.file.path().to_path_buf(),
+                        name: self.file.asset().name(),
                         what,
                     });
                 }
@@ -305,7 +307,7 @@ enum Open<F: Float> {
 
 impl<F: Float> Open<F> {
     /// Open `file`: the streamer's decoded copy when its cache holds one, else
-    /// the file by its path — header only when it can seek, a whole decode
+    /// the asset opened again — header only when it can seek, a whole decode
     /// when it cannot.
     fn from_file(file: &StreamFile<F>, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
         if let Some(wave) = file.resident() {
@@ -316,13 +318,13 @@ impl<F: Float> Open<F> {
 
     #[cfg(codec)]
     fn open_path(file: &StreamFile<F>, fault: Arc<FirstError>) -> Result<Self, ReadFault> {
-        let decoder = tutti_codec::FileIn::<F>::open(file.path())?;
+        let decoder = tutti_codec::FileIn::<F>::open(file.asset().clone())?;
         let decoder_layout = decoder.layout();
         let channels = usize::from(decoder_layout.count());
         match decoder.total_frames().filter(|_| decoder.seekable()) {
             Some(len) => Ok(Self::Paged(Box::new(Pages {
                 decoder,
-                path: file.path().to_path_buf(),
+                asset: file.asset().clone(),
                 fault,
                 channels,
                 layout: decoder_layout,
@@ -335,7 +337,7 @@ impl<F: Float> Open<F> {
             // wave: no second, interleaved copy.
             None => {
                 drop(decoder);
-                tutti_codec::read_wave::<F>(file.path())
+                tutti_codec::read_wave::<F>(file.asset().clone())
                     .map(|wave| Self::Resident(Arc::new(wave)))
                     .map_err(ReadFault::from)
             }
@@ -407,7 +409,7 @@ impl<F: Float> Open<F> {
 struct Pages<F: Float> {
     #[cfg(codec)]
     decoder: tutti_codec::FileIn<F>,
-    path: PathBuf,
+    asset: Asset,
     fault: Arc<FirstError>,
     /// The file's width. Every page is interleaved at it.
     channels: usize,
@@ -519,7 +521,7 @@ impl<F: Float> Pages<F> {
         #[cfg(codec)]
         {
             let fail = |what: ReadFault| OfflineReadError {
-                path: self.path.clone(),
+                name: self.asset.name(),
                 what,
             };
             if self.decoder.cursor() != Samples::new(start)

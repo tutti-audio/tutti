@@ -11,7 +11,6 @@
 //! (a [`DroppedEvent`]) is the landed value's [`report`](LoadedMidi::report),
 //! never a log line.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tutti_buffers::Float;
@@ -19,6 +18,7 @@ use tutti_midi_file::{
     FileEvent, MidiFile, Normalized, ReadError, RefusedTimeSignature, Timebase, TimelineDrop, Track,
 };
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
+use tutti_platform::Asset;
 use tutti_tempo::TempoMap;
 use tutti_transport::ProjectMeter;
 use tutti_ump::TicksPerQuarterNote;
@@ -40,7 +40,7 @@ pub enum LoadMidiError {
     /// The file could not be read.
     #[error("MIDI file: {0}")]
     Read(#[from] ReadError),
-    /// The worker did not finish: its work panicked, or the spawner dropped it.
+    /// The worker did not finish: its work panicked, or the executor dropped it.
     #[error(transparent)]
     Worker(#[from] WorkerError),
     /// The wait could not run ([`Job::wait`](crate::Job::wait)).
@@ -214,7 +214,7 @@ impl LoadedMidi {
 }
 
 impl<F: Float> Midi<'_, F> {
-    /// Reads the MIDI file at `path` on the session's spawner and converts each
+    /// Reads the MIDI file `asset` (a path, or bytes) on the session's executor and converts each
     /// track to a clip value there. Returns at once; the [`LoadedMidi`] lands
     /// in a later [`update`](crate::Session::update) as a
     /// [`SessionEvent::JobDone`](crate::SessionEvent::JobDone), or
@@ -225,10 +225,10 @@ impl<F: Float> Midi<'_, F> {
     /// A file in SMPTE time has seconds and no beats: it lands with its
     /// [`file`](LoadedMidi::file) and report, and [`TrackError::SmpteTiming`]
     /// for every track.
-    pub fn load_midi(&mut self, path: impl Into<PathBuf>) -> crate::Job<LoadMidi> {
-        let path = path.into();
+    pub fn load_midi(&mut self, asset: impl Into<Asset>) -> crate::Job<LoadMidi> {
+        let asset = asset.into();
         self.jobs.submit_job(
-            move |_| load(&path),
+            move |_| load(&asset),
             |_, done, ticket| {
                 ticket.land(match done {
                     Ok(loaded) => loaded,
@@ -239,9 +239,9 @@ impl<F: Float> Midi<'_, F> {
     }
 }
 
-/// Reads `path` and builds its [`LoadedMidi`].
-fn load(path: &PathBuf) -> Result<LoadedMidi, LoadMidiError> {
-    Ok(convert(MidiFile::read(path)?))
+/// Reads `asset` and builds its [`LoadedMidi`].
+fn load(asset: &Asset) -> Result<LoadedMidi, LoadMidiError> {
+    Ok(convert(MidiFile::read(asset.clone())?))
 }
 
 /// The clips, timeline values and report of `file`.

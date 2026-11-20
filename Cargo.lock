@@ -471,18 +471,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "coremidi"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a57ede822fdaf19280cf1320a5a5d3a522c75c910d01750af1e8122b6ad2595b"
-dependencies = [
- "block2",
- "core-foundation",
- "core-foundation-sys",
- "coremidi-sys",
-]
-
-[[package]]
 name = "coremidi-sys"
 version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2908,6 +2896,7 @@ dependencies = [
  "tutti-midi-ci",
  "tutti-midi-protocol",
  "tutti-music",
+ "tutti-platform",
  "tutti-tempo",
  "tutti-ump",
  "tutti-units",
@@ -2920,8 +2909,6 @@ name = "tutti-midi-hardware"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
- "core-foundation",
- "coremidi",
  "getrandom",
  "serde",
  "serde_json",
@@ -3449,6 +3436,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "tutti-fixtures",
+ "tutti-platform",
  "tutti-sf2",
  "tutti-ump",
  "tutti-units",
@@ -3591,6 +3579,7 @@ version = "0.3.0"
 dependencies = [
  "rand",
  "tracing",
+ "tutti-plugin-types",
  "tutti-vst2-ffi",
 ]
 

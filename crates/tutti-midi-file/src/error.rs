@@ -6,15 +6,14 @@ use thiserror::Error;
 
 use crate::{ClipFileError, SmfParseError, TracksError};
 
-/// Why a MIDI file could not be read ([`MidiFile::from_bytes`](crate::MidiFile::from_bytes),
-/// [`MidiFile::read`](crate::MidiFile::read)).
+/// Why a MIDI file could not be read ([`MidiFile::read`](crate::MidiFile::read)).
 ///
 /// A file that is cut off is an error and never a shorter file: what was read
 /// before the end is not returned.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ReadError {
-    /// The file at the path could not be read.
+    /// The source could not be opened or read.
     #[error("could not read the file")]
     Io(#[source] std::io::Error),
 
@@ -57,14 +56,14 @@ pub enum ReadError {
     Tracks(#[from] TracksError),
 }
 
-/// Why a file could not be written to a path ([`MidiFile::write`](crate::MidiFile::write),
+/// Why a file could not be written ([`MidiFile::write`](crate::MidiFile::write),
 /// [`WriteOptions::write`](crate::WriteOptions::write)).
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum WriteError {
     /// Something (a file, a directory or a symlink) is at the path and the
-    /// write was not told to replace it
-    /// ([`WriteOptions::replace`](crate::WriteOptions::replace)); it is
+    /// write was told to create it new
+    /// ([`WriteOptions::create_new`](crate::WriteOptions::create_new)); it is
     /// untouched.
     #[error("{} already exists", path.display())]
     Exists {
@@ -80,4 +79,8 @@ pub enum WriteError {
     /// Renaming the temporary file onto the target failed.
     #[error("could not rename the staged file onto the target")]
     Rename(#[source] std::io::Error),
+
+    /// The writer given to the write failed.
+    #[error("could not write to the writer")]
+    Writer(#[source] std::io::Error),
 }

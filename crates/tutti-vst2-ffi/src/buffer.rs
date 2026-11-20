@@ -5,8 +5,6 @@ use num_traits::Float;
 use std::slice;
 
 /// `AudioBuffer` contains references to the audio buffers for all input and output channels.
-///
-/// To create an `AudioBuffer` in a host, use a [`HostBuffer`](../host/struct.HostBuffer.html).
 #[derive(Debug)]
 pub struct AudioBuffer<'a, T: 'a + Float> {
     inputs: &'a [*const T],
@@ -121,7 +119,7 @@ where
         if self.index < self.audio_buffer.inputs.len()
             && self.index < self.audio_buffer.outputs.len()
         {
-            // SAFETY: `AudioBuffer`'s constructor contract (`from_raw`/`HostBuffer`) says
+            // SAFETY: `AudioBuffer`'s constructor contract (`from_raw`) says
             // each channel pointer addresses at least `samples` live elements; the index
             // is bounds-checked by the `if` above.
             let input = unsafe {
@@ -259,12 +257,15 @@ impl<'a, T> Outputs<'a, T> {
     ///
     /// The slice borrows `self`, so two live slices of one channel cannot exist:
     ///
-    /// ```compile_fail
-    /// # use tutti_vst2_ffi::host::HostBuffer;
-    /// let mut host_buffer: HostBuffer<f32> = HostBuffer::new(0, 1);
-    /// let inputs: Vec<Vec<f32>> = vec![];
-    /// let mut outputs = vec![vec![0.0f32; 4]];
-    /// let mut buffer = host_buffer.bind(&inputs, &mut outputs);
+    /// ```compile_fail,E0499
+    /// # use tutti_vst2_ffi::buffer::AudioBuffer;
+    /// let mut samples = [0.0f32; 4];
+    /// let inputs: [*const f32; 0] = [];
+    /// let mut outputs = [samples.as_mut_ptr()];
+    /// // SAFETY: one output channel of four live samples, no inputs, both tables outliving
+    /// // `buffer`.
+    /// let mut buffer =
+    ///     unsafe { AudioBuffer::from_raw(0, 1, inputs.as_ptr(), outputs.as_mut_ptr(), 4) };
     /// let (_, mut out) = buffer.split();
     /// let a = out.get_mut(0);
     /// let b = out.get_mut(0);
@@ -346,187 +347,6 @@ impl<'a, 'b, T: Sized> IntoIterator for &'b mut Outputs<'a, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         OutputIterator { data: self, i: 0 }
-    }
-}
-
-use crate::event::{Event, MidiEvent, SysExEvent};
-
-/// This is used as a placeholder to pre-allocate space for a fixed number of
-/// midi events in the re-useable `SendEventBuffer`, because `SysExEvent` is
-/// larger than `MidiEvent`, so either one can be stored in a `SysExEvent`.
-pub type PlaceholderEvent = api::SysExEvent;
-
-/// This trait is used by `SendEventBuffer::store_events` to accept iterators over midi events
-pub trait WriteIntoPlaceholder {
-    /// writes an event into the given placeholder memory location
-    fn write_into(&self, out: &mut PlaceholderEvent);
-}
-
-impl<T: WriteIntoPlaceholder> WriteIntoPlaceholder for &T {
-    fn write_into(&self, out: &mut PlaceholderEvent) {
-        (*self).write_into(out);
-    }
-}
-
-impl WriteIntoPlaceholder for MidiEvent {
-    fn write_into(&self, out: &mut PlaceholderEvent) {
-        // SAFETY: `PlaceholderEvent` (`SysExEvent`, 48 bytes, align 8) is larger than
-        // and at least as aligned as `api::MidiEvent` (32 bytes, align 4), so `out` can
-        // be viewed as one; the target type is inferred from the assignment below.
-        let out = unsafe { &mut *(out as *mut _ as *mut _) };
-        *out = api::MidiEvent {
-            event_type: api::EventType::Midi,
-            byte_size: mem::size_of::<api::MidiEvent>() as i32,
-            delta_frames: self.delta_frames,
-            flags: if self.live {
-                api::MidiEventFlags::REALTIME_EVENT.bits()
-            } else {
-                0
-            },
-            note_length: self.note_length.unwrap_or(0),
-            note_offset: self.note_offset.unwrap_or(0),
-            midi_data: self.data,
-            _midi_reserved: 0,
-            detune: self.detune,
-            note_off_velocity: self.note_off_velocity,
-            _reserved1: 0,
-            _reserved2: 0,
-        };
-    }
-}
-
-impl<'a> WriteIntoPlaceholder for SysExEvent<'a> {
-    fn write_into(&self, out: &mut PlaceholderEvent) {
-        *out = PlaceholderEvent {
-            event_type: api::EventType::SysEx,
-            byte_size: mem::size_of::<PlaceholderEvent>() as i32,
-            delta_frames: self.delta_frames,
-            _flags: 0,
-            data_size: self.payload.len() as i32,
-            _reserved1: 0,
-            // `as_ptr()` is already `*const u8`; only the const→mut step is
-            // real. VST 2.4 declares `system_data` mutable although the host
-            // must not write it.
-            system_data: self.payload.as_ptr() as *mut u8,
-            _reserved2: 0,
-        };
-    }
-}
-
-impl<'a> WriteIntoPlaceholder for Event<'a> {
-    fn write_into(&self, out: &mut PlaceholderEvent) {
-        match *self {
-            Event::Midi(ref ev) => {
-                ev.write_into(out);
-            }
-            Event::SysEx(ref ev) => {
-                ev.write_into(out);
-            }
-            Event::Deprecated(e) => {
-                // SAFETY: `PlaceholderEvent` is larger than and at least as aligned as
-                // `api::Event` (32 bytes), the type inferred from the assignment.
-                let out = unsafe { &mut *(out as *mut _ as *mut _) };
-                *out = e;
-            }
-        };
-    }
-}
-
-use crate::api;
-use std::mem;
-
-/// This buffer is used for sending midi events through the VST interface.
-/// The purpose of this is to convert outgoing midi events from `event::Event` to `api::Events`.
-/// It only allocates memory in new() and reuses the memory between calls.
-pub struct SendEventBuffer {
-    /// The `api::Events` header and its pointer array, in `u64` words: the storage is
-    /// aligned for `api::Events` (8) and holds at least `size_of::<api::Events>()`
-    /// bytes whatever the capacity.
-    buf: Vec<u64>,
-    api_events: Vec<PlaceholderEvent>, // using SysExEvent to store both because it's larger than MidiEvent
-}
-
-impl std::fmt::Debug for SendEventBuffer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SendEventBuffer")
-            .field("api_events", &self.api_events)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Default for SendEventBuffer {
-    fn default() -> Self {
-        SendEventBuffer::new(1024)
-    }
-}
-
-impl SendEventBuffer {
-    /// Creates a buffer for sending up to the given number of midi events per frame
-    #[inline(always)]
-    pub fn new(capacity: usize) -> Self {
-        let header_size = mem::size_of::<api::Events>() - (mem::size_of::<*mut api::Event>() * 2);
-        let body_size = mem::size_of::<*mut api::Event>() * capacity;
-        let bytes = (header_size + body_size).max(mem::size_of::<api::Events>());
-        let mut buf = vec![0u64; bytes.div_ceil(mem::size_of::<u64>())];
-        // SAFETY: all-zero is a valid `SysExEvent`: integers, null pointers and
-        // `EventType::_Placeholder` (discriminant 0).
-        let api_events = vec![unsafe { mem::zeroed::<PlaceholderEvent>() }; capacity];
-        {
-            let ptrs = {
-                let e = Self::buf_as_api_events(&mut buf);
-                e.num_events = capacity as i32;
-                e.events_raw_mut()
-            };
-            for (ptr, event) in ptrs.iter_mut().zip(&api_events) {
-                let (ptr, event): (&mut *const PlaceholderEvent, &PlaceholderEvent) = (ptr, event);
-                *ptr = event;
-            }
-        }
-        Self { buf, api_events }
-    }
-
-    /// Stores events in the buffer, replacing the buffer's current content.
-    /// Use this in [`process_events`](crate::plugin::Plugin::process_events) to store received input events, then read them in [`process`](crate::plugin::Plugin::process) using [`events`](SendEventBuffer::events).
-    #[inline(always)]
-    pub fn store_events<T: IntoIterator<Item = U>, U: WriteIntoPlaceholder>(&mut self, events: T) {
-        #[allow(clippy::suspicious_map)]
-        let count = events
-            .into_iter()
-            .zip(self.api_events.iter_mut())
-            .map(|(ev, out)| ev.write_into(out))
-            .count();
-        self.set_num_events(count);
-    }
-
-    /// Returns a reference to the stored events
-    #[inline(always)]
-    pub fn events(&self) -> &api::Events {
-        // SAFETY: `buf` is a `Vec<u64>`, aligned to 8 as `api::Events` is, and `new` sizes
-        // it to at least `size_of::<api::Events>()` bytes (all of them initialised: zeroed
-        // words, then `num_events` and the pointers written through this same type), and
-        // every bit pattern of its integer and pointer fields is valid. The reference
-        // borrows `self`, so the words are not written while it lives.
-        unsafe { &*(self.buf.as_ptr() as *const api::Events) }
-    }
-
-    /// Clears the buffer
-    #[inline(always)]
-    pub fn clear(&mut self) {
-        self.set_num_events(0);
-    }
-
-    #[inline(always)]
-    fn buf_as_api_events(buf: &mut [u64]) -> &mut api::Events {
-        // SAFETY: as for `events`: `buf` is aligned for `api::Events` and `new` sizes it to
-        // at least `size_of::<api::Events>()` bytes; the borrow of `buf` is the reference's.
-        unsafe { &mut *(buf.as_mut_ptr() as *mut api::Events) }
-    }
-
-    #[inline(always)]
-    fn set_num_events(&mut self, events_len: usize) {
-        use std::cmp::min;
-        let e = Self::buf_as_api_events(&mut self.buf);
-        e.num_events = min(self.api_events.len(), events_len) as i32;
     }
 }
 
@@ -670,25 +490,6 @@ mod tests {
                     assert_eq!(*output, 0.0);
                     acc + 1
                 });
-        }
-    }
-
-    /// `SendEventBuffer`'s header storage is aligned for `api::Events` and holds
-    /// the whole struct at every capacity, `0` and `1` included (they formed a
-    /// `&mut Events` over a 16-byte buffer).
-    #[test]
-    fn send_event_buffer_storage_holds_an_events_header_at_any_capacity() {
-        use super::SendEventBuffer;
-        for capacity in 0..4 {
-            let buffer = SendEventBuffer::new(capacity);
-            let events = buffer.events() as *const crate::api::Events;
-            assert!(events.is_aligned(), "capacity {capacity}");
-            assert!(
-                buffer.buf.len() * std::mem::size_of::<u64>()
-                    >= std::mem::size_of::<crate::api::Events>(),
-                "capacity {capacity}"
-            );
-            assert_eq!(buffer.events().num_events, capacity as i32);
         }
     }
 }

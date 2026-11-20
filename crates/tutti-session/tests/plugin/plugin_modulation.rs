@@ -55,7 +55,7 @@ fn detached() -> DetachedSession {
     // Jobs run inline, in the phase that submits them, and land in the next
     // update's `Collect`.
     Session::builder()
-        .spawn_with(|job| job.run())
+        .executor(tutti_fixtures::inline_executor())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds")

@@ -339,6 +339,7 @@ impl Vst2Loaded {
                         },
                         editor: tutti_plugin_types::EditorPresence::Unknown,
                         measured: None,
+                        widths: None,
                     },
                 ),
             })
