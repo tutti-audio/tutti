@@ -71,19 +71,20 @@ fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolE
     }
 }
 
-/// A session whose executor holds the futures it is handed, and the futures.
-fn holding() -> (Session, tutti_fixtures::HeldFutures) {
-    let held = tutti_fixtures::HeldFutures::new();
+/// A session on a polled executor the test shares: the futures it is handed wait
+/// until the test polls the executor, or the session's `update` does.
+fn holding() -> (Session, tutti_platform::Executor) {
+    let executor = tutti_platform::Executor::polled();
     let s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
-        .executor(held.executor())
+        .executor(executor.clone())
         .build()
         .expect("an offline session builds");
-    (s, held)
+    (s, executor)
 }
 
-fn run_held(held: &tutti_fixtures::HeldFutures) {
-    held.run_all();
+fn run_held(executor: &tutti_platform::Executor) {
+    executor.poll(usize::MAX);
 }
 
 /// **The blacklist is asked when the load runs, not when the entry is built**:
@@ -101,11 +102,11 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     let main = tutti_fixtures::main_thread();
 
     // Blacklisted before the load runs, and still: refused.
-    let (mut s, held) = holding();
+    let (mut s, executor) = holding();
     let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
-    run_held(&held);
+    run_held(&executor);
     match outcome(&mut s, main) {
         PoolEvent::Failed(LoadError::Plugin(error)) => match &*error {
             IpcError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
@@ -118,12 +119,12 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     // keeps no descriptors, so its entry is built before the blacklist.
     assert!(catalog.unblacklist(&path));
     probe(&mut catalog, &path);
-    let (mut s, held) = holding();
+    let (mut s, executor) = holding();
     let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
     assert!(catalog.unblacklist(&path));
-    run_held(&held);
+    run_held(&executor);
     assert!(
         matches!(outcome(&mut s, main), PoolEvent::Loaded),
         "an unblacklisted plugin was refused"

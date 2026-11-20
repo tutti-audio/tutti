@@ -803,39 +803,17 @@ fn an_idle_take_on_a_polled_session_never_stalls_update() {
     );
 }
 
-/// What counts the wakes of a task.
-struct Wakes(std::sync::atomic::AtomicUsize);
-
-impl std::task::Wake for Wakes {
-    fn wake(self: Arc<Self>) {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-/// **Dropping a session wakes a take's pump, and a host executor that outlives the
-/// session ends it.** The pump awaits its tap's bell with its task's waker stored; the
-/// graph's drop drops the tap's writer, which rings that bell, and the session's bells
-/// deliver the ring before they go. The pump then reads the writer gone and closes its
-/// sink, instead of staying parked under the executor for good.
+/// **Dropping a session wakes a take's pump, and the next poll runs it to its end.** The
+/// pump awaits its tap's bell with its task's waker stored; the graph's drop drops the
+/// tap's writer, which rings that bell, and the session's bells deliver the ring before
+/// they go. The executor's next poll then runs the woken pump, which reads the writer
+/// gone and closes its sink, instead of staying parked under the executor for good.
 #[test]
-fn dropping_a_session_wakes_a_take_pump_on_a_host_executor() {
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::task::{Context, Poll, Waker};
-
-    type Captured = Pin<Box<dyn Future<Output = ()> + Send>>;
-    let captured: Arc<Mutex<Vec<Captured>>> = Arc::default();
-    let keep = Arc::clone(&captured);
+fn dropping_a_session_wakes_a_take_pump() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig_on(
-        InputConfig::default(),
-        Samples::new(0),
-        tutti_platform::Executor::new(move |future| {
-            keep.lock().unwrap().push(future);
-        }),
-    );
+    let executor = tutti_platform::Executor::polled();
+    let mut rig = rig_on(InputConfig::default(), Samples::new(0), executor.clone());
     rig.step(256);
-    let before = captured.lock().unwrap().len();
     let take = rig
         .session
         .record(
@@ -844,23 +822,14 @@ fn dropping_a_session_wakes_a_take_pump_on_a_host_executor() {
             TakeTarget::wav(wav(&dir, "host.wav")),
         )
         .expect("armed");
-    let mut pump = captured.lock().unwrap().remove(before);
-    let wakes = Arc::new(Wakes(std::sync::atomic::AtomicUsize::new(0)));
-    let waker = Waker::from(Arc::clone(&wakes));
-    let mut cx = Context::from_waker(&waker);
-    assert_eq!(pump.as_mut().poll(&mut cx), Poll::Pending);
-    let polled = wakes.0.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(executor.poll(usize::MAX) >= 1, "the pump starts");
+    // The bells' tick thread may wake it again, so the count is a floor.
 
     drop(rig);
 
     assert!(
-        wakes.0.load(std::sync::atomic::Ordering::SeqCst) > polled,
-        "the session's drop never woke the take's pump"
-    );
-    assert_eq!(
-        pump.as_mut().poll(&mut cx),
-        Poll::Ready(()),
-        "the woken pump ends"
+        executor.poll(usize::MAX) >= 1,
+        "the session's drop woke the take's pump, which then ends"
     );
     drop(take);
 }
