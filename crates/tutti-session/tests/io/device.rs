@@ -7,12 +7,12 @@ use std::time::Duration;
 use tutti_buffers::InterleavedMut;
 use tutti_platform::Instant;
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector, Direction, Snapshot, SnapshotSource};
 use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputSpec};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{LimiterControls, LimiterNode};
+use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{
     Backoff, DeviceEvent, DevicePolicy, DeviceRestart, DeviceWatch, InPort, LiveSession, OutPort,
     Phase, PhaseCx, RestartOutcome, Root, Session, SessionEvent, Workers,
@@ -107,11 +107,13 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
-    let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db::new(0.0),
-        ceiling: Db::new(0.0),
-        ..LimiterControls::DEFAULT
-    }));
+    let (lim, _) = s.graph().add(LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+            threshold: Db::new(0.0),
+            ceiling: Db::new(0.0),
+            ..LimiterControls::DEFAULT
+        }),
+    ));
     s.graph()
         .set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();
