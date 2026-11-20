@@ -160,9 +160,9 @@ fn a_streamed_handle_opens_a_stream() {
     let AudioData::Streamed(info) = audio.data() else {
         panic!("a streamed load decodes nothing");
     };
-    assert_eq!(info.facts().frames.map(|f| f.get()), Some(FRAMES));
+    assert_eq!(info.frames.map(|f| f.get()), Some(FRAMES));
     let opened = s
-        .open_stream(info.asset().clone(), StreamStart::HEAD)
+        .open_stream(audio.asset().clone(), StreamStart::HEAD)
         .expect("a streamer")
         .run()
         .expect("the file reads");

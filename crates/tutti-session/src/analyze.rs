@@ -92,7 +92,7 @@ impl<S: Float> From<crate::LoadedAudio<S>> for Audio<S> {
     fn from(audio: crate::LoadedAudio<S>) -> Self {
         match audio.data() {
             crate::AudioData::Resident(wave) => Self::Wave(Arc::clone(wave)),
-            crate::AudioData::Streamed(info) => Self::File(info.asset().clone()),
+            crate::AudioData::Streamed(_) => Self::File(audio.asset().clone()),
         }
     }
 }

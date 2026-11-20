@@ -13,7 +13,7 @@ use tutti_dsp::{
     Ramp, Steps,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
+use tutti_units::{Cents, Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
 
 #[cfg(doc)]
 use tutti_dsp::{Stagger, Sweep};
@@ -114,6 +114,16 @@ impl ModDelayConfig {
     #[must_use]
     pub fn flanger(input: BusTopology) -> Self {
         Self::new(ModDelayLayout::flanger(input)).controls(ModDelayControls::FLANGER)
+    }
+
+    /// A vibrato on the bus `input`: [`ModDelayLayout::vibrato`] at 5 Hz and a swing of 50 cents
+    /// ([`ModDelayControls::vibrato`]). It has no feedback, so its node declares a finite
+    /// tail, and it is the wet signal alone: the pitch swing is the whole effect, with no
+    /// dry path to blend.
+    #[must_use]
+    pub fn vibrato(input: BusTopology) -> Self {
+        Self::new(ModDelayLayout::vibrato(input))
+            .controls(ModDelayControls::vibrato(Cents::new(50.0), Hz::new(5.0)))
     }
 
     /// The General MIDI chorus on the bus `input`: [`ModDelayLayout::general_midi_chorus`] at
@@ -1097,5 +1107,64 @@ mod tests {
         k.prepare(rate, MaxBlock::of(Samples::new(len)));
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
         assert_close_f64(&y, &want, 2.0f64.powi(-45));
+    }
+
+    // ---- the vibrato preset ------------------------------------------------------------
+
+    /// A vibrato reads its input at the rate `1 - d'(t)` of its delay `d`, so a ramp through it
+    /// comes out with the slope `1 - d'`: the peak rise of the slope is `2 pi r D` over 1, with
+    /// the sweep's amplitude `D = (2^(c / 1200) - 1) / (2 pi r)` the closed form of a depth of
+    /// `c` cents at rate `r`, and the peak fall is the same step below 1. The delay is the
+    /// corners' chords, whose slope is `sin(8 h) / (8 h)` of the sine's at best and loses
+    /// `cos` of the angle between a segment's middle and the peak, at most `8 h` for `h` radians a frame:
+    /// together under `(8 h)^2` of the peak. Measured over whole cycles on an `f64` ramp, which
+    /// the linear read keeps exact.
+    #[test]
+    fn a_vibratos_peak_pitch_swing_is_its_depth_in_cents() {
+        let len = 96_000;
+        for (cents, hz) in [(50.0, 5.0), (100.0, 2.0), (200.0, 8.0)] {
+            let mut k = ModDelayKernel::<f64>::new(ModDelayLayout::vibrato(BusTopology::MONO));
+            k.prepare(RATE, MaxBlock::of(Samples::new(len)));
+            let controls = ModDelayControls::vibrato(Cents::new(cents), Hz::new(hz));
+            assert_eq!(controls.feedback, Feedback::NONE);
+            let x: Vec<f64> = (0..len).map(|n| n as f64).collect();
+            let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
+            let slopes: Vec<f64> = y.windows(2).skip(2_000).map(|w| w[1] - w[0]).collect();
+            let swing = Cents::new(cents).to_pitch_ratio() - 1.0;
+            let h = std::f64::consts::TAU * hz / SR;
+            let rise = slopes.iter().copied().fold(f64::MIN, f64::max) - 1.0;
+            let fall = 1.0 - slopes.iter().copied().fold(f64::MAX, f64::min);
+            for (name, got) in [("rise", rise), ("fall", fall)] {
+                assert!(
+                    got <= swing * (1.0 + 1e-9),
+                    "{cents} cents at {hz} Hz, {name} {got}"
+                );
+                assert!(
+                    got >= swing * (1.0 - (8.0 * h).powi(2)),
+                    "{cents} cents at {hz} Hz, {name} {got} vs {swing}"
+                );
+            }
+        }
+    }
+
+    /// The preset is wet-only with no feedback (so a finite tail of its 25 ms line), no latency,
+    /// every channel's sweep in step, and starts at 5 Hz and 50 cents.
+    #[test]
+    fn the_vibrato_preset_has_no_feedback_and_a_finite_tail() {
+        let node = prepared(
+            ModDelayNode::<f32>::from(ModDelayConfig::vibrato(BusTopology::STEREO)),
+            RATE,
+            64,
+        );
+        assert_eq!(node.shape().tail, Tail::Finite(Samples::new(1_200)));
+        assert_eq!(node.shape().latency, Latency::new(Samples::new(0)));
+        assert_eq!(node.param_base(0), Some(5.0));
+        let depth = (Cents::new(50.0).to_pitch_ratio() - 1.0) / (std::f64::consts::TAU * 5.0);
+        assert!((node.param_base(1).unwrap() - depth).abs() < 1e-15);
+        assert_eq!(node.param_base(2), Some(0.0));
+        assert_eq!(
+            ModDelayLayout::vibrato(BusTopology::STEREO).offsets()[1],
+            PhaseIncrement::new(0.0)
+        );
     }
 }

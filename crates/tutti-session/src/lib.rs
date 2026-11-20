@@ -95,6 +95,8 @@ mod latency;
 mod load_audio;
 #[cfg(feature = "soundfont")]
 mod load_soundfont;
+#[cfg(any(all(feature = "sampler", codec), feature = "soundfont"))]
+mod loaded;
 #[cfg(feature = "midi")]
 mod midi;
 #[cfg(feature = "midi-hardware")]
@@ -207,7 +209,7 @@ pub use key::{
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
 #[cfg(all(feature = "sampler", codec))]
-pub use load_audio::{AudioData, LoadAudio, LoadedAudio, StreamInfo, Tier};
+pub use load_audio::{AudioData, LoadAudio, LoadedAudio, Tier};
 #[cfg(feature = "soundfont")]
 pub use load_soundfont::{LoadSoundFont, LoadedSoundFont};
 #[cfg(feature = "midi")]
