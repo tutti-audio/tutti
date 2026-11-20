@@ -408,11 +408,18 @@ impl<'t> Exchange<'t> {
                     Working::Opening => {
                         self.conv.extend(id, now);
                     }
-                    Working::Restoring => {
+                    // The restore's window and ceiling are set once, as it
+                    // begins; the beat that follows only extends the wait
+                    // within that ceiling, or a restore that never ends would
+                    // be waited for for ever.
+                    Working::Restoring if self.phase == LoadPhase::Opening => {
                         self.phase = LoadPhase::Restoring;
                         self.window = self.timeouts.state_restore;
                         let restore = self.timeouts.state_restore;
                         self.conv.restart(id, now, restore, restore);
+                    }
+                    Working::Restoring => {
+                        self.conv.extend(id, now);
                     }
                 }
                 Ok(Heard::Working)
@@ -1057,6 +1064,28 @@ mod tests {
             BridgeError::StateRestore { cause }
                 if matches!(*cause, BridgeError::Timeout { after, .. } if after == Duration::from_secs(120))
         ));
+    }
+
+    /// **A restore that beats for ever is not waited for for ever**: the server
+    /// says `Restoring` every second of a restore that hangs, and the wait still
+    /// ends at the ceiling set when the restore began, whatever the beat does.
+    #[test]
+    fn a_restoring_beat_does_not_move_the_ceiling() {
+        let t = exchange_timeouts();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
+
+        for second in 3..=400 {
+            exchange
+                .hear(working(id, Working::Restoring), id, at(second))
+                .unwrap();
+        }
+        // The restore began at 3 s with a 120 s ceiling: due at 123 s, however
+        // many beats came after.
+        assert_eq!(exchange.left(id, at(122)), Duration::from_secs(1));
+        assert_eq!(exchange.left(id, at(123)), Duration::ZERO);
     }
 
     /// **The phase never goes back**: a beat's `Opening` that arrives after the
