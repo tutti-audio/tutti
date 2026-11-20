@@ -200,7 +200,7 @@ fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
 /// the caller asked for.
 #[test]
 fn a_tap_source_past_what_a_port_index_holds_is_refused() {
-    use tutti_graph::{MissingSource, TapAlign};
+    use tutti_graph::{MissingSource, TapAlign, TapOptions};
     use tutti_units::Samples;
     let mut s = detached();
     let (a, _) = s.graph().add(ForkByClone(Const::frame(&[0.5])));
@@ -208,7 +208,10 @@ fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     let refused = s
         .graph()
         .taps()
-        .open(&[a.out(0), far], TapAlign::Raw, Samples::new(64))
+        .open(
+            &[a.out(0), far],
+            TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
+        )
         .map(|_| ())
         .unwrap_err();
     assert!(matches!(refused, MissingSource::Port { node, .. } if node == a.erase()));

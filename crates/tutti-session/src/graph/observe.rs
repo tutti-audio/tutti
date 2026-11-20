@@ -8,7 +8,7 @@
 
 use tutti_graph::{
     CloseError, EventCapacity, EventTapId, EventTapReader, EventTapSource, MeterId, MeterReader,
-    MeterSpec, MissingSource, NodeKey, TapAlign, TapId, TapReader,
+    MeterSpec, MissingSource, NodeKey, TapAlign, TapId, TapOptions, TapReader,
 };
 use tutti_units::Samples;
 
@@ -84,8 +84,10 @@ impl<F: Float> Taps<'_, F> {
     /// compiled by the next commit and fed by every block that renders after
     /// it (a device, [`Session::render`](crate::Session::render) and
     /// `Session::render_frame` alike).
-    /// `capacity` is each lane's ring in frames; what the reader does not
-    /// drain in time is counted ([`TapReader::take_lost`]).
+    /// `options` give each lane's ring capacity in frames (what the reader does
+    /// not drain in time is counted, [`TapReader::take_lost`]), the alignment and
+    /// an optional bell the tap rings after each block it writes and when it ends,
+    /// so a reader that awaits its frames wakes on the audio thread's ring.
     ///
     /// [`TapAlign::ToOutput`] delays each lane by the compensation an output
     /// of the same source gets, so it lines up with what the outputs carry;
@@ -129,39 +131,11 @@ impl<F: Float> Taps<'_, F> {
     pub fn open(
         &mut self,
         sources: &[OutPort],
-        align: TapAlign,
-        capacity: Samples,
+        options: TapOptions,
     ) -> Result<TapReader<F>, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;
         let id = TapId::mint(&self.graph.ids);
-        let reader = self.graph.editor.open_tap(id, sources, align, capacity)?;
-        self.graph.edited = true;
-        Ok(reader)
-    }
-
-    /// [`open`](Self::open) whose tap rings `bell` after each block it writes and when
-    /// it ends, so a reader that awaits its frames wakes on the audio thread's ring.
-    ///
-    /// # Errors
-    ///
-    /// [`MissingSource`] for the first source that is not in the graph now.
-    #[cfg_attr(
-        not(feature = "capture"),
-        expect(dead_code, reason = "a take's pump (feature `capture`) is its user")
-    )]
-    pub(crate) fn open_with_bell(
-        &mut self,
-        sources: &[OutPort],
-        align: TapAlign,
-        capacity: Samples,
-        bell: tutti_rt::Bell,
-    ) -> Result<TapReader<F>, MissingSource> {
-        let sources = self.graph.raw_sources(sources)?;
-        let id = TapId::mint(&self.graph.ids);
-        let reader = self
-            .graph
-            .editor
-            .open_tap_with_bell(id, sources, align, capacity, bell)?;
+        let reader = self.graph.editor.open_tap(id, sources, options)?;
         self.graph.edited = true;
         Ok(reader)
     }
