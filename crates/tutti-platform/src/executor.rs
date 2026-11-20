@@ -20,8 +20,8 @@ use crate::priority::PriorityRequest;
 mod timers;
 
 pub use async_task::Task;
-pub use timers::Sleep;
 use timers::Timers;
+pub use timers::{Sleep, Timer};
 
 #[cfg_attr(not(target_arch = "wasm32"), path = "executor/native.rs")]
 #[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
@@ -75,7 +75,11 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// blocking pool's idle threads end, and every task still pending is dropped. A future
 /// that holds an `Executor` clone keeps the executor alive, so that drop never comes:
 /// tutti's own futures never hold a clone, and a spawner passes a future what it needs
-/// instead. A long-lived future ends on its own stop flag before the executor drops.
+/// instead. A long-lived future ends on its own stop flag before the executor drops. A
+/// future that needs deadlines holds a [`Timer`], which keeps nothing alive.
+///
+/// The executor's deadline queue closes with it: every [`Sleep`] pending wakes and resolves,
+/// and one made or polled later resolves at once; nothing fires deadlines after that.
 ///
 /// # Not on the audio thread
 ///
@@ -197,6 +201,9 @@ impl Executor {
     /// # Errors
     ///
     /// The OS's refusal to start the thread (native only). The future is not run.
+    ///
+    /// The OS refusing `priority` is not an error: the thread runs at the priority it has,
+    /// one `tracing::warn!` names the thread and the refusal, and this returns `Ok`.
     pub fn spawn_dedicated<T: Send + 'static>(
         &self,
         name: &str,
@@ -210,7 +217,8 @@ impl Executor {
     /// already past resolves on its first poll.
     ///
     /// A driver fires it, so its resolution is the cadence of whoever drives. Dropping the
-    /// [`Sleep`] before it resolves removes it from the queue.
+    /// [`Sleep`] before it resolves removes it from the queue. It resolves at once once
+    /// this executor has shut down.
     ///
     /// ```
     /// use tutti_platform::{Executor, Instant};
@@ -221,13 +229,23 @@ impl Executor {
     /// assert!(task.is_finished());
     /// ```
     pub fn sleep_until(&self, deadline: Instant) -> Sleep {
-        Sleep::new(&self.handle.shared.timers, deadline)
+        self.timer().sleep_until(deadline)
     }
 
     /// A future that resolves `duration` from now: [`sleep_until`](Self::sleep_until) of
     /// that instant.
     pub fn sleep(&self, duration: Duration) -> Sleep {
-        self.sleep_until(Instant::now() + duration)
+        self.timer().sleep(duration)
+    }
+
+    /// A [`Timer`] on this executor's deadlines, for a future that needs a deadline and
+    /// must not hold the executor.
+    ///
+    /// The timer holds the deadline queue only: it keeps the executor, its threads and its
+    /// queue from nothing, so the executor still shuts down when its last clone drops, and
+    /// a [`Sleep`] it made resolves at once from then on.
+    pub fn timer(&self) -> Timer {
+        Timer::new(&self.handle.shared.timers)
     }
 
     /// Fires the due sleeps, then runs ready tasks on this thread until none is ready, and
