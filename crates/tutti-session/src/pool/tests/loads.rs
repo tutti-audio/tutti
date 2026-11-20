@@ -435,7 +435,7 @@ fn a_ready_load_lands_at_the_declaration_with_the_value_it_was_given() {
 fn one_at_a_time() -> crate::DetachedSession {
     Session::builder()
         .executor(Spawned::new())
-        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
+        .pool_config(PoolConfig::new().parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap()
 }
@@ -487,7 +487,7 @@ fn the_parallel_cap_is_the_builders() {
     let spawned = Spawned::new();
     let mut s = Session::builder()
         .executor(spawned.clone())
-        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(2).unwrap()))
+        .pool_config(PoolConfig::new().parallel_loads(std::num::NonZeroUsize::new(2).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
     s.pool(["a", "b", "c"].map(|name| declare(&stub(name, How::Worker, &log))))
@@ -501,7 +501,7 @@ fn a_queued_load_superseded_before_it_starts_never_runs() {
     let spawned = Spawned::new();
     let mut s = Session::builder()
         .executor(spawned.clone())
-        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
+        .pool_config(PoolConfig::new().parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
     s.pool((
