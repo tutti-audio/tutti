@@ -220,6 +220,7 @@ pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
         .into_iter()
         .next()
         .expect("the destination is listed");
+    eprintln!("connecting {device:?}");
     let mut out = session.connect_output(&device.id).expect("connects");
     let note: Ump = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::of(1), 60, 0x8000);
     let before = source.losses().refused;
@@ -228,8 +229,19 @@ pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
         "macOS {:?}, {before} refused before the notes",
         tutti_fixtures::macos_major()
     );
-    for _ in 0..100 {
-        assert_eq!(out.queue(&[(Offset::ZERO, note)]).packets(), 1);
+    struct Report<'a>(&'a VirtualSource);
+    impl Drop for Report<'_> {
+        fn drop(&mut self) {
+            eprintln!("level at the end: {:?}", self.0.losses());
+        }
+    }
+    let _report = Report(&source);
+    for n in 0..100 {
+        let taken = out.queue(&[(Offset::ZERO, note)]);
+        if n == 0 || taken.packets() != 1 {
+            eprintln!("note {n}: {taken:?}");
+        }
+        assert_eq!(taken.packets(), 1);
     }
     tutti_fixtures::wait_until("the notes are counted as refused", PATIENCE, || {
         source.losses().refused >= before + 100
