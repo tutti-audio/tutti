@@ -181,7 +181,7 @@ pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, St
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::Params as PluginParams;
+pub use tutti_session::PluginParams;
 #[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
