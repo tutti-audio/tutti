@@ -1,7 +1,7 @@
 //! `TempoMap::from_beats` against the tempo each beat interval implies:
 //! 60 * rate / interval BPM, and beat `n` on the `n`-th position.
 
-use tutti_tempo::{FromBeatsError, TempoMap};
+use tutti_tempo::{FromBeatsError, TempoError, TempoMap};
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 fn frames(positions: &[usize]) -> Vec<Samples> {
@@ -71,5 +71,30 @@ fn a_repeated_or_earlier_beat_is_refused_at_its_index() {
     assert_eq!(
         TempoMap::from_beats(&frames(&[5, 5]), SampleRate::SR_48K),
         Err(FromBeatsError::NotIncreasing(1))
+    );
+}
+
+/// 60 * rate overflows an `f64` at a rate of 1e308 Hz, so even a long interval
+/// has no finite tempo: the interval's tempo is refused, not stored as infinity.
+#[test]
+fn a_rate_whose_tempo_overflows_is_refused() {
+    let rate = SampleRate::new(1e308).unwrap();
+    let beats = frames(&[0, 24_000, 48_000]);
+    assert!(matches!(
+        TempoMap::from_beats(&beats, rate),
+        Err(FromBeatsError::Tempo(_))
+    ));
+}
+
+/// At 1e-300 Hz an interval of half the frame range is a tempo of order 1e-300
+/// BPM, whose segment duration overflows an `f64`: the map refuses it, and the
+/// error names the segment.
+#[test]
+fn a_segment_too_long_for_the_map_is_the_maps_error() {
+    let rate = SampleRate::new(1e-300).unwrap();
+    let beats = frames(&[0, usize::MAX / 2, usize::MAX]);
+    assert_eq!(
+        TempoMap::from_beats(&beats, rate),
+        Err(FromBeatsError::Map(TempoError::Unrepresentable(0)))
     );
 }

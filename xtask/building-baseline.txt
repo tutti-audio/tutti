@@ -427,7 +427,6 @@ tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::
 tutti-soundfont  ctor-result  crates/tutti-soundfont/src/lib.rs::SoundFontUnit::new
 
 # tutti-tempo
-tutti-tempo  ctor-result  crates/tutti-tempo/src/beats.rs::TempoMap::from_beats
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::constant
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::new
 
