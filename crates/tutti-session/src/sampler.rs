@@ -19,11 +19,9 @@
 //! [`open_stream`](Session::open_stream) opens.
 
 use tutti_platform::Asset;
-use tutti_sampler::{
-    AdoptError, DiskStreamer, OpenError, Running, Stream, StreamReader, StreamStart,
-};
+use tutti_sampler::{AdoptError, OpenError, Stream, StreamReader, StreamStart};
 
-use crate::apply::{Apply, Cut, Sealed};
+use crate::apply::{Cut, Sealed};
 use crate::{AppKey, Clock, Session, SessionFloat};
 
 /// Why a sampler call did not go through.
@@ -102,6 +100,25 @@ impl<F: SessionFloat> OpenStream<F> {
 /// side, which a `VoiceNode::streaming` or a pool's `add_streaming` takes, so
 /// the voice sounds for as long as the node or the pool slot lives. Dropping
 /// the stream ends it.
+///
+/// A session applies only what was read in its own float; the other is a type
+/// error:
+///
+/// ```compile_fail
+/// # use tutti_session::{OpenedStream, Session};
+/// fn wrong(session: &mut Session, opened: OpenedStream<f64>) {
+///     let _ = session.apply(opened); // `Session` is an `f32` session
+/// }
+/// ```
+///
+/// Its compiling twin applies what its own float read:
+///
+/// ```
+/// # use tutti_session::{OpenedStream, Session};
+/// fn right(session: &mut Session, opened: OpenedStream<f32>) {
+///     let _ = session.apply(opened);
+/// }
+/// ```
 #[derive(Debug)]
 #[must_use = "a read file is a stream only once the session applies it"]
 pub struct OpenedStream<F: SessionFloat> {
@@ -109,44 +126,30 @@ pub struct OpenedStream<F: SessionFloat> {
     opened: tutti_sampler::OpenedStream<F>,
 }
 
-/// `Apply` for the session's two floats, each by name: the trait's `Applied` and
-/// `Error` name the float, which a generic impl would leave unresolved in the
-/// sealed trait's methods.
-macro_rules! apply_opened_stream {
-    ($float:ty) => {
-        impl Apply for OpenedStream<$float> {
-            type Applied = (Stream<$float>, StreamReader<$float>);
-            type Error = OpenStreamError;
-        }
+impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
+    type Applied = (Stream<F>, StreamReader<F>);
+    type Error = OpenStreamError;
 
-        impl Sealed for OpenedStream<$float> {
-            fn cut(&self) -> &Cut {
-                &self.cut
-            }
+    fn cut(&self) -> &Cut {
+        &self.cut
+    }
 
-            fn stale() -> OpenStreamError {
-                OpenStreamError::Stale
-            }
+    fn stale() -> OpenStreamError {
+        OpenStreamError::Stale
+    }
 
-            fn apply_to<K: AppKey, C: Clock>(
-                self,
-                session: &mut Session<K, C>,
-            ) -> Result<(Stream<$float>, StreamReader<$float>), OpenStreamError> {
-                // The cut names this session, so its float is this one; a type that
-                // says otherwise is another session's.
-                let streamer = (&session.sampler.streamer as &dyn std::any::Any)
-                    .downcast_ref::<Option<DiskStreamer<Running, $float>>>()
-                    .ok_or(OpenStreamError::Stale)?
-                    .as_ref()
-                    .ok_or(OpenStreamError::StreamerGone)?;
-                streamer.adopt(self.opened).map_err(adopt_refusal)
-            }
-        }
-    };
+    fn apply_to<K: AppKey, C: Clock<Float = F>>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<(Stream<F>, StreamReader<F>), OpenStreamError> {
+        let streamer = session
+            .sampler
+            .streamer
+            .as_ref()
+            .ok_or(OpenStreamError::StreamerGone)?;
+        streamer.adopt(self.opened).map_err(adopt_refusal)
+    }
 }
-
-apply_opened_stream!(f32);
-apply_opened_stream!(f64);
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Cuts the reading of `asset` as a disk stream, its reader starting at
