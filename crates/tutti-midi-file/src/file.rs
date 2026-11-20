@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tutti_midi_ci::ProfileOnRequest;
 use tutti_midi_protocol::{MtcRate, channel_voice, flex_tempo};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
-use tutti_platform::{Asset, Destination, Staged};
+use tutti_platform::{Asset, Destination};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, ManufacturerId, Message, MidiChannel,
@@ -1676,7 +1676,7 @@ impl MidiFile {
     /// spelling of a Delta Clockstamp may differ from the file it was read
     /// from; a read of the result is equal to this file.
     ///
-    /// A path is written through [`Staged`]: the bytes go to a temporary file
+    /// A path is written through [`Staged`](tutti_platform::Staged): the bytes go to a temporary file
     /// beside the path and are put in place when whole, so a crash leaves no
     /// partial file under it and what was there intact. It replaces a file
     /// already there, as [`std::fs::write`] does;
@@ -1710,21 +1710,14 @@ impl MidiFile {
     pub fn write<'a>(&self, dst: impl Into<Destination<'a>>) -> Result<(), WriteError> {
         let bytes = self.encode();
         match dst.into() {
-            Destination::Path { path, create_new } => {
-                let staged = Staged::new(&path);
-                let staged = if create_new {
-                    staged.create_new()
-                } else {
-                    staged
-                };
+            Destination::Path(staged) => {
+                let path = staged.target().to_path_buf();
                 let mut file = staged.open().map_err(WriteError::Stage)?;
                 file.write_all(&bytes).map_err(WriteError::Stage)?;
                 file.commit().map_err(|e| {
-                    if create_new && e.kind() == ErrorKind::AlreadyExists {
-                        WriteError::Exists {
-                            path: path.into_owned(),
-                            source: e,
-                        }
+                    // Only a refused `create_new` commit is `AlreadyExists`.
+                    if e.kind() == ErrorKind::AlreadyExists {
+                        WriteError::Exists { path, source: e }
                     } else {
                         WriteError::Commit(e)
                     }
