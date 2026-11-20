@@ -29,6 +29,9 @@ pub struct Chunks {
     pub missed: u64,
     /// Of those, answered after the silence was played.
     pub late: u64,
+    /// Of those, answered by the plugin with a refusal: it did not publish the
+    /// chunk's audio, and said so.
+    pub refused: u64,
     /// Chunks the bridge dropped as more than one chunk behind.
     pub skipped: u64,
 }
@@ -39,6 +42,7 @@ impl Chunks {
         Chunks {
             missed: self.missed.saturating_sub(before.missed),
             late: self.late.saturating_sub(before.late),
+            refused: self.refused.saturating_sub(before.refused),
             skipped: self.skipped.saturating_sub(before.skipped),
         }
     }
@@ -145,7 +149,8 @@ fn first_sound_in_window<S: Subject>(rig: &Rig, from: usize, stamp: usize) -> Re
 }
 
 /// What one attempt at a timing case found: its verdict, and the chunks its
-/// subject's pipeline missed, answered late or skipped while the case ran.
+/// subject's pipeline missed, answered late, refused or skipped while the case
+/// ran.
 struct Judged {
     outcome: Result<(), String>,
     chunks: Chunks,
@@ -169,17 +174,17 @@ const JUDGEABLE_RUNS: usize = 3;
 
 /// Runs `attempt` on a fresh rig until one can be judged. A passing attempt is
 /// judged. A failing one is judged too, unless the subject's pipeline missed a
-/// chunk during it that the counters account for as late or skipped: the
-/// silent block a late or skipped answer plays moves a note's first sound by a
+/// chunk during it that the counters account for as late, refused or skipped:
+/// the silent block such an answer plays moves a note's first sound by a
 /// block, or loses it, whatever its stamp. A failure with no such miss fails at
-/// once, as does a miss the counters do not account for. Three unjudgeable
+/// once, as does a miss the counters leave unanswered. Three unjudgeable
 /// attempts fail as too loaded to judge.
 fn judgeable<S: Subject>(what: &str, mut attempt: impl FnMut() -> Judged) {
     let mut seen = Vec::new();
     for n in 1..=JUDGEABLE_RUNS {
         let Judged { outcome, chunks } = attempt();
         let Err(why) = outcome else { return };
-        if chunks.missed == 0 || chunks.late + chunks.skipped < chunks.missed {
+        if chunks.missed == 0 || chunks.late + chunks.refused + chunks.skipped < chunks.missed {
             panic!(
                 "{}: {what}: {why} (chunks over the case: {chunks:?})",
                 S::NAME
