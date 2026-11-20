@@ -301,3 +301,36 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadEntry f
         }
     }
 }
+
+/// A job that lands in updates on the main thread.
+pub trait LandOn<J: tutti_session::JobKind> {
+    /// Updates `s` on the main thread until the job lands, and returns its
+    /// result: a test thread is not the OS's main thread, so
+    /// [`Job::wait`](tutti_session::Job::wait) cannot run a job that waits for
+    /// it. The deadline only guards a hang.
+    fn land_on<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
+        self,
+        s: &mut Session<K, C>,
+    ) -> Result<J::Output, J::Error>;
+}
+
+impl<J: tutti_session::JobKind> LandOn<J> for tutti_session::Job<J> {
+    fn land_on<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
+        self,
+        s: &mut Session<K, C>,
+    ) -> Result<J::Output, J::Error> {
+        let main = tutti_fixtures::main_thread();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            for event in s.update_on(main) {
+                if let SessionEvent::JobDone(mut output) = event
+                    && let Some(result) = output.take(&self)
+                {
+                    return result;
+                }
+            }
+            assert!(Instant::now() < deadline, "the job never landed");
+            std::thread::yield_now();
+        }
+    }
+}

@@ -89,23 +89,6 @@ fn editor_error(error: PluginError) -> EditorError {
     }
 }
 
-/// Which plugin instance a [`PluginHandle`] reaches ([`PluginHandle::instance`]):
-/// one created plugin. A handle and its clones share it; a crash recovery, a
-/// reload or a replace loads the plugin again and gets a handle of a new
-/// instance, so ids from before differ from ids after.
-///
-/// It keeps nothing of the plugin alive, so any thread may hold and drop it.
-#[derive(Clone, Debug)]
-pub struct InstanceId(std::sync::Weak<()>);
-
-impl PartialEq for InstanceId {
-    fn eq(&self, other: &Self) -> bool {
-        std::sync::Weak::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for InstanceId {}
-
 /// Whether a plugin is still answering — [`PluginHandle::status`].
 ///
 /// Two variants because the engine can only speak to what it can *detect*. A
@@ -230,9 +213,6 @@ pub struct PluginHandle {
     /// Whether an editor this handle opened is open: shared by every clone, set
     /// by a successful open and cleared by `close_editor`.
     editor_open: Arc<AtomicBool>,
-    /// The plugin instance this handle reaches: made with the handle, shared by
-    /// every clone.
-    instance: Arc<()>,
 }
 
 impl std::fmt::Debug for PluginHandle {
@@ -279,7 +259,6 @@ impl PluginHandle {
             // No subprocess to name unless `with_server_pid` says so.
             server_pid: None,
             editor_open: Arc::new(AtomicBool::new(false)),
-            instance: Arc::new(()),
         }
     }
 
@@ -711,14 +690,6 @@ impl PluginHandle {
         Self::editor_call(control, |c| c.open_floating_editor(main))?;
         self.editor_open.store(true, Ordering::Relaxed);
         Ok(())
-    }
-
-    /// Which plugin instance this handle reaches ([`InstanceId`]): the same for
-    /// a clone of it, and another for any handle made by loading a plugin
-    /// again.
-    #[must_use]
-    pub fn instance(&self) -> InstanceId {
-        InstanceId(Arc::downgrade(&self.instance))
     }
 
     /// Whether an editor opened through this handle (or a clone of it) is open:

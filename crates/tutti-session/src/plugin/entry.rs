@@ -120,6 +120,8 @@ impl<T: Send + 'static> Drop for Affine<T> {
 /// node takes it out ([`release_handle`](Self::release_handle)), so a handle
 /// to the entry never keeps a server alive past its node.
 struct Standing {
+    /// The loaded plugin instance this standing belongs to.
+    instance: ResourceId,
     handle: Mutex<Option<Affine<PluginHandle>>>,
     /// The session recovers a plugin that dies at its node.
     recovery: bool,
@@ -183,7 +185,30 @@ pub(crate) struct PooledLink {
     standing: Arc<Standing>,
 }
 
+/// A node's hold on one plugin instance, read from another thread: which
+/// instance it is, and whether a node still hosts it.
+#[derive(Clone)]
+pub(crate) struct Hosted(Arc<Standing>);
+
+impl Hosted {
+    /// The plugin instance the node hosts: the one its loads reach.
+    pub(crate) fn instance(&self) -> ResourceId {
+        self.0.instance
+    }
+
+    /// Whether a node still hosts the instance: not once the node is removed,
+    /// or a swap replaced the plugin.
+    pub(crate) fn is_hosted(&self) -> bool {
+        self.0.hosted.load(Ordering::Acquire)
+    }
+}
+
 impl PooledLink {
+    /// The node's hold on its plugin instance.
+    pub(crate) fn hosted(&self) -> Hosted {
+        Hosted(Arc::clone(&self.standing))
+    }
+
     /// Recovery gave up on the plugin.
     pub(crate) fn gave_up(&self, why: GiveUp) {
         *self.standing.gave_up.lock_recover() = Some(why);
@@ -309,7 +334,7 @@ impl LoadedPlugin {
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
         let id = cx.ids.mint();
-        let presets = PluginPresets::new(handle.preset_support(), handle.instance());
+        let presets = PluginPresets::new(handle.preset_support(), id);
         if presets.support().can_list() {
             match main {
                 Some(main) => presets.fill(handle.presets(main)),
@@ -335,6 +360,7 @@ impl LoadedPlugin {
             id,
             info: Arc::new(info),
             standing: Arc::new(Standing {
+                instance: id,
                 handle: Mutex::new(Some(Affine::new(handle, &cx.work, main_only))),
                 recovery: cx.recovery,
                 hosted: AtomicBool::new(false),

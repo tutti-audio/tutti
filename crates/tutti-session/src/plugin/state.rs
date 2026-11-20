@@ -19,10 +19,13 @@ use tutti_graph::NodeKey;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRef, StateError, StateUse};
 
-use super::{AnyPlugin, Gate};
+use super::entry::{Hosted, PoolPluginEntry};
+use super::{AnyPlugin, Gate, Signals};
 use crate::SessionFloat;
 use crate::apply::{Cut, Sealed};
-use crate::{AppKey, Clock, Key, NoSuchNode, OtherPeer, PeerState, SavedPeer, Session};
+use crate::{
+    AppKey, Clock, HandleError, Key, NoSuchNode, OtherPeer, PeerState, PoolKey, SavedPeer, Session,
+};
 
 /// Why [`Session::restore_state`] made no value.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -259,5 +262,51 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
             .plugins
             .get(&node)
             .ok_or_else(|| NoSuchNode::new(node))
+    }
+}
+
+/// Why a key names no plugin node: shared by the plugin jobs that need one.
+#[derive(Clone, Debug, thiserror::Error)]
+pub(super) enum NodeLookup<K: fmt::Debug> {
+    /// The key has no loaded plugin entry.
+    #[error(transparent)]
+    Entry(#[from] HandleError<K>),
+    /// The entry's plugin is in no node.
+    #[error("the plugin of {0:?} has no node")]
+    NoNode(K),
+}
+
+/// `f32` because a plugin format is `f32` at its FFI.
+impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
+    /// The handle, the plugin and the notice queue of the node over `key`.
+    pub(super) fn state_parts<P>(
+        &self,
+        key: &P,
+    ) -> Result<(PluginHandle, PluginRef, Signals, Hosted), NodeLookup<P>>
+    where
+        P: AppKey,
+    {
+        self.pool.entries.loaded::<P, PoolPluginEntry>(key)?;
+        let pool_key = PoolKey::new(key);
+        // At most one node links a key: `add_pooled_plugin` refuses a key a
+        // node already holds (`AddPluginError::Installed`) and a swap keeps
+        // the node it replaces, so the first match is the only one.
+        let (hosted, link) = self
+            .graph
+            .plugins
+            .values()
+            .find_map(|hosted| {
+                let link = hosted.pooled.as_ref().filter(|link| link.key == pool_key)?;
+                Some((hosted, link))
+            })
+            .ok_or_else(|| NodeLookup::NoNode(key.clone()))?;
+        Ok((
+            hosted.handle.clone(),
+            hosted.plugin.clone(),
+            hosted.notices.clone(),
+            // The node's own instance: a reload that landed and is not yet
+            // swapped in is not this one.
+            link.hosted(),
+        ))
     }
 }

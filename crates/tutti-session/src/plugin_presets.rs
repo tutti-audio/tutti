@@ -6,7 +6,7 @@
 //! answers it where the load lands, and a served plugin's list is a round trip,
 //! so it is read by the first [`update`](crate::Session::update) on the main
 //! thread after the load ([`PluginPresets::is_read`]). No host reports a change
-//! of a plugin's list, so nothing refreshes it later. Loading is work the app runs
+//! of a plugin's list, so nothing refreshes it later. Loading is a job
 //! ([`Session::load_preset`](crate::Session::load_preset),
 //! [`Session::load_preset_file`](crate::Session::load_preset_file)).
 
@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use tutti_plugin_types::{Preset, PresetError, PresetId, PresetSupport};
 
-use tutti_plugin_host::InstanceId;
+use crate::ResourceId;
 
 /// What a plugin does with presets and the list it has, in its
 /// [`PluginInfo`](crate::PluginInfo).
@@ -23,7 +23,7 @@ use tutti_plugin_host::InstanceId;
 #[derive(Debug, Clone)]
 pub struct PluginPresets {
     support: PresetSupport,
-    plugin: InstanceId,
+    plugin: ResourceId,
     list: Arc<OnceLock<Vec<Preset>>>,
 }
 
@@ -31,7 +31,7 @@ impl PluginPresets {
     /// The presets of the plugin instance `plugin`, as `support` says. A
     /// plugin that lists none has its (empty) list read at once; any other has
     /// it set once by [`fill`](Self::fill).
-    pub(crate) fn new(support: PresetSupport, plugin: InstanceId) -> Self {
+    pub(crate) fn new(support: PresetSupport, plugin: ResourceId) -> Self {
         let this = Self {
             support,
             plugin,
@@ -91,7 +91,7 @@ impl PluginPresets {
             .into_iter()
             .flatten()
             .map(|preset| ListedPreset {
-                plugin: self.plugin.clone(),
+                plugin: self.plugin,
                 preset: preset.clone(),
             })
     }
@@ -108,7 +108,7 @@ impl PluginPresets {
 /// [`Session::load_preset`](crate::Session::load_preset).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedPreset {
-    pub(crate) plugin: InstanceId,
+    pub(crate) plugin: ResourceId,
     preset: Preset,
 }
 
