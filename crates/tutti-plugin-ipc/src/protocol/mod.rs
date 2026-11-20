@@ -140,50 +140,55 @@ pub(crate) mod wire;
 ///   byte.
 /// - **Version 50** splits the host's and the server's messages by connection
 ///   (`AudioRequest`/`AudioReply` on the audio connection, `ControlRequest`/
-///   `ControlReply`/`News` on the control one), so a message of the other
-///   connection has no variant to be written as.
+///   `ControlReply`/`News` on the control one, each type with its own frame
+///   cap), and every state chunk (`LoadStateChunk`, `StageStateChunk`,
+///   `StateChunk`) carries the `total` of the whole state, so the receiver
+///   sizes its buffer once and refuses a total over the limit before it
+///   allocates.
 pub const PROTOCOL_VERSION: u32 = 50;
 
-/// Largest control-socket frame body either end will allocate for, in bytes.
+/// Largest frame body the control connection carries, either way, in bytes.
 ///
 /// The wire is `[u32 big-endian length][postcard payload]`, so the length is
 /// **attacker-controlled**: a corrupt or hostile peer can advertise `u32::MAX`,
-/// and an unbounded reader would answer with `vec![0u8; len]` — a 4 GiB zeroed
-/// allocation made before a single byte of body had been seen, let alone
-/// validated. Under Linux overcommit that mapping is lazy and effectively free
-/// (measured at 60 ns), which hides the hazard; with `overcommit_memory=2`,
-/// a cgroup limit, or a 32-bit host, the allocator fails and Rust's OOM handler
-/// **aborts the process** — the whole DAW, not the bridge.
+/// and an unbounded reader would answer with `vec![0u8; len]`, a 4 GiB zeroed
+/// allocation made before a single byte of body had been seen. Under Linux
+/// overcommit that mapping is lazy and effectively free, which hides the
+/// hazard; with `overcommit_memory=2`, a cgroup limit, or a 32-bit host, the
+/// allocator fails and Rust's OOM handler **aborts the process**: the whole
+/// DAW, not the bridge.
 ///
 /// **This bounds size, and only size.** It does *not* bound how long a read
-/// takes, and must not be read as closing the dribble hazard: `SO_RCVTIMEO`
-/// restarts on every syscall, so any frame — including a perfectly legitimate
-/// under-cap one — can be paced out indefinitely one byte at a time. The
-/// **total-elapsed deadline** in `transport::control::read_exact_by` is
-/// what answers that, and the two are independent. Removing either re-opens a
-/// hazard the other does not cover.
+/// takes: `SO_RCVTIMEO` restarts on every syscall, so any under-cap frame can
+/// be paced out one byte at a time. The total-elapsed deadline in
+/// `transport::control::read_exact_by` answers that, and the two are
+/// independent.
 ///
-/// 64 MiB is far above any honest *control* frame and far below a denial of
-/// service. Every message except plugin state is bounded by a fixed struct or
-/// by `ParameterList`, and `midi_out` is capped at `MIDI_STACK_CAPACITY`
-/// server-side.
-///
-/// **Plugin state is the exception, and it is not carried in one frame.**
-/// A Kontakt- or Serum-class instrument embedding samples or wavetables
-/// routinely exceeds 64 MiB, and a plugin storing an impulse response or a
-/// recorded buffer trivially does — so capping state at this number would
-/// silently lose a user's preset. State travels chunked instead
-/// (`StateChunk`), bounded on reassembly by [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES). Each wire
-/// frame stays under this cap, so the allocation and deadline guarantees hold
-/// unchanged for state as well. Raising *this* constant to cover the state tail
-/// would re-widen the allocation surface for all traffic and still leave a wall
-/// somewhere; a larger number just moves the cliff.
-pub const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+/// Each lane and direction has its own cap, carried by its message type
+/// ([`Framed`]): the control lane's messages are bounded by a
+/// fixed struct, by `ParameterList` or by a `STATE_CHUNK_BYTES` slice of
+/// plugin state, so this is far above an honest control frame and far below a
+/// denial of service. **Plugin state is not carried in one frame**: it travels
+/// as chunks ([`STATE_CHUNK_BYTES`]), bounded on reassembly by
+/// [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES), each frame under
+/// this cap.
+pub const CONTROL_FRAME_BYTES: usize = 32 * 1024 * 1024;
+
+/// Largest frame body the audio connection takes from the host, in bytes: a
+/// block's request, whose automation is megabytes at a large block, a large
+/// queue count and the host's point budget.
+pub const AUDIO_REQUEST_FRAME_BYTES: usize = 64 * 1024 * 1024;
+
+/// Largest frame body the audio connection takes from the server, in bytes: a
+/// block's reply with its MIDI at the cap, each event at the most its varints
+/// take. The host reads no more than this from the audio connection, so a
+/// server cannot make it allocate for a reply bigger than a block's.
+pub const AUDIO_REPLY_FRAME_BYTES: usize = tutti_plugin_types::MIDI_STACK_CAPACITY * 32 + 256;
 
 /// Payload size of one `StateChunk` on the wire.
 ///
-/// Comfortably under [`MAX_FRAME_BYTES`] so the framed message — chunk bytes
-/// plus the `seq`/`last` header and the codec's own overhead — cannot approach
+/// Comfortably under [`CONTROL_FRAME_BYTES`] so the framed message (chunk bytes
+/// plus the `seq`/`last`/`total` header and the codec's own overhead) cannot approach
 /// the cap however the envelope grows. 4 MiB keeps a 1 GiB state to 256 round
 /// trips, which at local-socket speeds is not the bottleneck; the plugin's own
 /// `get_state`/`set_state` is.

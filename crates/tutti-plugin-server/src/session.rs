@@ -421,20 +421,28 @@ impl Session {
             }
 
             M::SaveState { state_use } => Ok(self.handle_save_state(main, state_use)),
-            M::LoadStateChunk { seq, last, bytes } => {
+            M::LoadStateChunk {
+                seq,
+                total,
+                last,
+                bytes,
+            } => {
                 let ends = last.is_some();
                 if ends {
                     self.forget_informs();
                 }
-                let reply = self.handle_load_state_chunk(main, seq, last, &bytes);
+                let reply = self.handle_load_state_chunk(main, seq, total, last, &bytes);
                 if ends {
                     self.forget_informs();
                 }
                 Ok(reply)
             }
-            M::StageStateChunk { seq, last, bytes } => {
-                Ok(self.handle_stage_state_chunk(seq, last, &bytes))
-            }
+            M::StageStateChunk {
+                seq,
+                total,
+                last,
+                bytes,
+            } => Ok(self.handle_stage_state_chunk(seq, total, last, &bytes)),
 
             M::SetupSharedMemory { shm_name, layout } => {
                 // A slab this side cannot open is the host's to hear of: a reply,
@@ -855,6 +863,7 @@ impl Session {
             state_chunk::split(&data)
                 .map(|(seq, last, bytes)| ControlReply::StateChunk {
                     seq,
+                    total: data.len() as u64,
                     last,
                     bytes: bytes.to_vec(),
                 })
@@ -866,9 +875,15 @@ impl Session {
     ///
     /// Answers, as `LoadStateChunk` does, only on the final chunk or a failure;
     /// `error: None` means staged. Nothing is applied until `LoadPlugin`.
-    fn handle_stage_state_chunk(&mut self, seq: u32, last: bool, bytes: &[u8]) -> Reaction {
+    fn handle_stage_state_chunk(
+        &mut self,
+        seq: u32,
+        total: u64,
+        last: bool,
+        bytes: &[u8],
+    ) -> Reaction {
         let acc = self.stage_in.get_or_insert_with(Reassembler::default);
-        match acc.push(seq, last, bytes) {
+        match acc.push(seq, total, last, bytes) {
             Ok(false) => Reaction::None,
             Ok(true) => {
                 let data = self.stage_in.take().expect("just inserted").into_inner();
@@ -903,6 +918,7 @@ impl Session {
         &mut self,
         main: MainThreadMarker,
         seq: u32,
+        total: u64,
         ending: Option<StateUse>,
         bytes: &[u8],
     ) -> Reaction {
@@ -925,7 +941,7 @@ impl Session {
             return ControlReply::StateLoaded { error }.into();
         }
         let acc = self.state_in.get_or_insert_with(Reassembler::default);
-        let complete = match acc.push(seq, last, bytes) {
+        let complete = match acc.push(seq, total, last, bytes) {
             Ok(done) => done,
             Err(e) => {
                 self.state_in = None;
@@ -1405,6 +1421,7 @@ mod tests {
                 main_thread(),
                 ControlRequest::LoadStateChunk {
                     seq: 0,
+                    total: 3,
                     last: Some(StateUse::Project),
                     bytes: vec![1, 2, 3],
                 },
@@ -1431,6 +1448,7 @@ mod tests {
                 main_thread(),
                 ControlRequest::LoadStateChunk {
                     seq,
+                    total: 3,
                     last: last.then_some(StateUse::Project),
                     bytes: vec![1, 2, 3],
                 },
@@ -2386,10 +2404,15 @@ mod tests {
             .into_replies()
         {
             match m {
-                ControlReply::StateChunk { seq, last, bytes } => {
+                ControlReply::StateChunk {
+                    seq,
+                    total,
+                    last,
+                    bytes,
+                } => {
                     assert!(!done, "chunks continued after `last`");
                     done = acc
-                        .push(seq, last, &bytes)
+                        .push(seq, total, last, &bytes)
                         .expect("well-formed chunk sequence");
                 }
                 other => panic!("expected StateChunk, got {other:?}"),
@@ -2414,6 +2437,7 @@ mod tests {
                     main_thread(),
                     ControlRequest::LoadStateChunk {
                         seq,
+                        total: data.len() as u64,
                         last: last.then_some(StateUse::Project),
                         bytes: bytes.to_vec(),
                     },
@@ -2434,6 +2458,7 @@ mod tests {
                     main_thread(),
                     ControlRequest::StageStateChunk {
                         seq,
+                        total: data.len() as u64,
                         last,
                         bytes: bytes.to_vec(),
                     },
@@ -2505,6 +2530,7 @@ mod tests {
             main_thread(),
             ControlRequest::StageStateChunk {
                 seq,
+                total: bytes.len() as u64,
                 last,
                 bytes: bytes.to_vec(),
             },
@@ -2696,6 +2722,7 @@ mod tests {
                 main_thread(),
                 ControlRequest::StageStateChunk {
                     seq: 5,
+                    total: 1,
                     last: true,
                     bytes: vec![1],
                 },

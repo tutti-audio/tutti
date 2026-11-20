@@ -884,6 +884,7 @@ pub(super) fn handle_control(
                     stream,
                     &ControlRequest::LoadStateChunk {
                         seq,
+                        total: data.len() as u64,
                         last: last.then_some(state_use),
                         bytes: bytes.to_vec(),
                     },
@@ -1261,7 +1262,13 @@ fn recv_state(
             owed.owe(Late::StateRest);
             return Ok(Err(progress.stalled()));
         };
-        let ControlReply::StateChunk { seq, last, bytes } = msg else {
+        let ControlReply::StateChunk {
+            seq,
+            total,
+            last,
+            bytes,
+        } = msg
+        else {
             // A reply of another type is the whole answer (the server's
             // `Error` when the plugin cannot save); the state is not coming.
             return Ok(Err(StateError::Rejected(format!(
@@ -1269,7 +1276,7 @@ fn recv_state(
             ))));
         };
         progress.advance(bytes.len());
-        let refused = match acc.push(seq, last, &bytes) {
+        let refused = match acc.push(seq, total, last, &bytes) {
             Ok(true) => return Ok(Ok(acc.into_inner())),
             Ok(false) => continue,
             Err(ChunkError::TooLarge { bytes, limit }) => StateError::TooLarge { bytes, limit },
@@ -1279,6 +1286,11 @@ fn recv_state(
             Err(ChunkError::Empty { seq }) => StateError::Rejected(format!(
                 "plugin sent an empty state chunk {seq} before the last"
             )),
+            Err(
+                refused @ (ChunkError::NoRoom { .. }
+                | ChunkError::TotalChanged { .. }
+                | ChunkError::NotTotal { .. }),
+            ) => StateError::Rejected(refused.to_string()),
         };
         if !last {
             owed.owe(Late::StateRest);
@@ -1397,6 +1409,7 @@ mod tests {
     fn chunk(seq: u32, last: bool) -> ControlReply {
         ControlReply::StateChunk {
             seq,
+            total: 8,
             last,
             bytes: vec![1; 4],
         }
