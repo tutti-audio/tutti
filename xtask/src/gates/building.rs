@@ -358,18 +358,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "creating a staged file to encode into: the failure is the OS's, not a value's",
     ),
     ty(
-        "crates/tutti-codec/",
-        "FileEncoder::create_staged",
-        CTOR,
-        "creating a staged file to encode into: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-codec/",
-        "FileEncoder::create_planned_staged",
-        CTOR,
-        "creating a staged file to encode into: the failure is the OS's, not a value's",
-    ),
-    ty(
         "crates/tutti-platform/",
         "Stamp::of",
         CTOR,

@@ -70,7 +70,7 @@ pub(crate) fn open_file<F: FftFloat>(
     } else {
         staged
     };
-    let encoder = FileEncoder::create_planned_staged(&spec, staged, planned)?;
+    let encoder = FileEncoder::create_planned(&spec, staged, planned)?;
     Chain::new(target, source_rate, encoder)
 }
 

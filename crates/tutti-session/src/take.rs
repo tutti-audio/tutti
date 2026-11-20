@@ -639,11 +639,24 @@ pub enum TakeError {
     /// untouched; the file is the app's to move or delete.
     #[error(transparent)]
     Commit(#[from] StagedCommitError),
-    /// The sink failed: a write, or closing it (for a WAV, the header is then
-    /// left unpatched and the file unreadable). What was written before the
+    /// The sink failed: a write, or closing it. What was written before the
     /// failure is in the sink.
+    ///
+    /// A take written to a file keeps the file beside its path in `unfinished`
+    /// (a full disk, say) and leaves the path alone: the frames so far are
+    /// there, and the app owns the file, to move or delete. It is unfinished:
+    /// a FLAC or Ogg Vorbis file may end in a cut frame or page, and a WAV's or
+    /// AIFF's header states the whole frames on disk only if
+    /// [`header_patched`](tutti_codec::Unfinished::header_patched) says so.
+    /// `unfinished` is `None` for a sink of the caller's.
     #[error("the take's sink failed")]
-    Sink(#[source] Arc<dyn std::error::Error + Send + Sync>),
+    Sink {
+        /// The sink's own error.
+        #[source]
+        source: Arc<dyn std::error::Error + Send + Sync>,
+        /// The file kept, for a file target.
+        unfinished: Option<tutti_codec::Unfinished>,
+    },
     /// The sink refused a write, yet its `finalize` reported no error: it broke
     /// [`Sink`]'s contract, which has `finalize` report the first failure.
     #[error("the sink refused a write and its finalize reported no error")]
@@ -1003,11 +1016,12 @@ fn open_target<F: Float>(
             } else {
                 staged
             };
-            let encoder = FileEncoder::create_staged(&Spec::of_width(format, layout, rate), staged)
+            let encoder = FileEncoder::create(&Spec::of_width(format, layout, rate), staged)
                 .map_err(|e| TakeError::Open(Arc::new(e)))?;
             let file = StagedSink {
                 encoder,
                 layout,
+                failure: None,
                 sample: PhantomData,
             };
             Ok((Box::new(file), Some(path)))
@@ -1030,32 +1044,79 @@ fn open_target<F: Float>(
 struct StagedSink<F> {
     encoder: FileEncoder,
     layout: ChannelLayout,
+    /// The first write failure, which [`finalize`](Sink::finalize) reports with
+    /// the file it kept.
+    failure: Option<tutti_codec::Error>,
     sample: PhantomData<fn(F)>,
+}
+
+/// How a [`StagedSink`] ended without its file in place.
+#[derive(Debug, Error)]
+enum StagedClosed {
+    /// The finished file could not be put in place; it is kept.
+    #[error(transparent)]
+    Commit(StagedCommitError),
+    /// A write failed; the unfinished file is kept.
+    #[error("{source}")]
+    Write {
+        #[source]
+        source: tutti_codec::Error,
+        unfinished: tutti_codec::Unfinished,
+    },
+    /// Closing the file failed; it is removed.
+    #[error(transparent)]
+    Close(tutti_codec::Error),
 }
 
 impl<F: Float> Sink for StagedSink<F> {
     type Sample = F;
-    type Error = tutti_codec::Error;
+    type Error = StagedClosed;
 
     fn layout(&self) -> ChannelLayout {
         self.layout
     }
 
     fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
-        self.encoder.write(frames).map_err(|_| SinkFailed)
+        if self.failure.is_some() {
+            return Err(SinkFailed);
+        }
+        self.encoder.write(frames).map_err(|error| {
+            self.failure = Some(error);
+            SinkFailed
+        })
     }
 
     fn finalize(self) -> Result<(), Self::Error> {
-        self.encoder.finish()
+        match self.failure {
+            Some(source) => Err(StagedClosed::Write {
+                source,
+                unfinished: self.encoder.keep_unfinished(),
+            }),
+            None => self.encoder.finish().map_err(|error| match error {
+                tutti_codec::Error::Commit(commit) => StagedClosed::Commit(commit),
+                other => StagedClosed::Close(other),
+            }),
+        }
     }
 }
 
 /// A sink's failure to finalize as the take's: a commit's is
 /// [`TakeError::Commit`], which names the file it kept.
 fn closing_failed(error: SinkClosed) -> TakeError {
-    match error.downcast_ref::<tutti_codec::Error>() {
-        Some(tutti_codec::Error::Commit(commit)) => TakeError::Commit(commit.clone()),
-        _ => TakeError::Sink(error),
+    match error.downcast_ref::<StagedClosed>() {
+        Some(StagedClosed::Commit(commit)) => TakeError::Commit(commit.clone()),
+        Some(StagedClosed::Write { source, unfinished }) => TakeError::Sink {
+            source: Arc::new(source.clone()),
+            unfinished: Some(unfinished.clone()),
+        },
+        Some(StagedClosed::Close(source)) => TakeError::Sink {
+            source: Arc::new(source.clone()),
+            unfinished: None,
+        },
+        None => TakeError::Sink {
+            source: error,
+            unfinished: None,
+        },
     }
 }
 

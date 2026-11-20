@@ -72,7 +72,8 @@ mod sleep;
 mod thread;
 
 pub use asset::{
-    Asset, Destination, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile, Stamp,
+    Asset, Destination, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
+    StagedKeep, Stamp,
 };
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;

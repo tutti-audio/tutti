@@ -330,7 +330,7 @@ pub mod types {
     };
     pub use tutti_platform::{
         Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
-        StagedCommitError, StagedFile, Stamp,
+        StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -520,7 +520,7 @@ pub mod codec {
         feature = "encode-vorbis"
     ))]
     pub use tutti_codec::write_wave;
-    pub use tutti_codec::{Codec, Error};
+    pub use tutti_codec::{Codec, Error, Unfinished};
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, Quality, QualityOutOfRange, Spec, SpecError, can_decode,
         decodable_extensions,

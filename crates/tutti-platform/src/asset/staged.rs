@@ -3,7 +3,8 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use thiserror::Error;
 
@@ -98,7 +99,7 @@ impl Staged {
         Ok(StagedFile {
             file: Some(file),
             staged: self,
-            keep: false,
+            keep: Arc::default(),
         })
     }
 }
@@ -119,14 +120,36 @@ pub struct StagedFile {
     /// `None` only inside `commit` and `drop`, once the file is closed.
     file: Option<File>,
     staged: Staged,
-    /// A failed commit's file, which the drop leaves alone.
-    keep: bool,
+    /// Set when the file is to outlive the drop: a failed commit's, or a
+    /// [`keep`](Self::keep).
+    keep: Arc<AtomicBool>,
 }
 
 impl StagedFile {
     /// The temporary's path.
     pub fn temp(&self) -> &Path {
         &self.staged.temp
+    }
+
+    /// Closes the file as it is and leaves it at its temporary path, returned
+    /// here: it is the caller's to move or delete, and nothing removes it. The
+    /// target is untouched.
+    ///
+    /// For a write that failed part way: the bytes written so far are the
+    /// caller's to keep. The file is synced on a best effort, and a failure of
+    /// the sync is not reported.
+    pub fn keep(mut self) -> PathBuf {
+        if let Some(file) = &self.file {
+            let _ = file.sync_all();
+        }
+        self.keep.store(true, Ordering::Release);
+        std::mem::take(&mut self.staged.temp)
+    }
+
+    /// A handle that makes the drop of this file leave it, for a writer that
+    /// owns the file and can lose it to an error ([`StagedKeep::keep`]).
+    pub fn keeper(&self) -> StagedKeep {
+        StagedKeep(Arc::clone(&self.keep))
     }
 
     fn file(&mut self) -> &mut File {
@@ -147,7 +170,7 @@ impl StagedFile {
     /// bytes may be the only copy.
     pub fn commit(mut self) -> Result<(), StagedCommitError> {
         // Kept unless the move succeeds: only an uncommitted drop removes it.
-        self.keep = true;
+        self.keep.store(true, Ordering::Release);
         let kept = |temp: &Path, source| StagedCommitError {
             kept: temp.to_path_buf(),
             source,
@@ -165,13 +188,26 @@ impl StagedFile {
             std::fs::hard_link(temp, target).map_err(|e| kept(temp, e))?;
             // The target is whole and named; only the extra name is left, and
             // the drop removes it (a failure there is logged, not an error).
-            self.keep = false;
+            self.keep.store(false, Ordering::Release);
         } else {
             std::fs::rename(temp, target).map_err(|e| kept(temp, e))?;
             // Renamed away: there is nothing for the drop to remove.
             self.staged.temp = PathBuf::new();
         }
         Ok(())
+    }
+}
+
+/// A handle to a [`StagedFile`] that makes it outlive its drop
+/// ([`StagedFile::keeper`]).
+#[derive(Clone, Debug)]
+pub struct StagedKeep(Arc<AtomicBool>);
+
+impl StagedKeep {
+    /// The file is left at its temporary path when it is dropped, instead of
+    /// removed.
+    pub fn keep(&self) {
+        self.0.store(true, Ordering::Release);
     }
 }
 
@@ -215,6 +251,30 @@ impl Clone for StagedCommitError {
     }
 }
 
+impl From<&Path> for Staged {
+    fn from(target: &Path) -> Self {
+        Self::new(target)
+    }
+}
+
+impl From<PathBuf> for Staged {
+    fn from(target: PathBuf) -> Self {
+        Self::new(&target)
+    }
+}
+
+impl From<&PathBuf> for Staged {
+    fn from(target: &PathBuf) -> Self {
+        Self::new(target)
+    }
+}
+
+impl From<&str> for Staged {
+    fn from(target: &str) -> Self {
+        Self::new(Path::new(target))
+    }
+}
+
 impl Write for StagedFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.file().write(buf)
@@ -235,7 +295,7 @@ impl Drop for StagedFile {
     fn drop(&mut self) {
         // Closed first: an open file cannot be removed on Windows.
         self.file = None;
-        if self.keep || self.staged.temp.as_os_str().is_empty() {
+        if self.keep.load(Ordering::Acquire) || self.staged.temp.as_os_str().is_empty() {
             return;
         }
         match std::fs::remove_file(&self.staged.temp) {

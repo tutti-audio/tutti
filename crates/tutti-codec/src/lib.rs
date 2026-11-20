@@ -23,8 +23,8 @@
 //!   write. It keeps whole frames only, keeps the first write error (later
 //!   writes are skipped and return `SinkFailed`) and `finalize` returns that
 //!   error, else the result of `finish`. It writes in place rather than staged,
-//!   because a recording cut short is worth keeping. `FileEncoder::create_staged`
-//!   takes a `tutti_platform::Staged` for a caller that chooses `create_new`.
+//!   because a recording cut short is worth keeping. `FileEncoder::create`
+//!   takes a path or a `tutti_platform::Staged`, for a caller that chooses `create_new`.
 //! - `write_wave(&wave, dest, format)` saves a `Wave` at its own rate and topology, to
 //!   a path (staged: replacing what is there, or refusing it under
 //!   `Destination::create_new`) or into a borrowed writer.
@@ -92,7 +92,7 @@ pub use aiff::AiffWriter;
 pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
-pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile};
+pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile, Unfinished};
 pub use error::{Codec, Error, Result, SpecError};
 pub use file_out::FileOut;
 #[cfg(feature = "encode-flac")]
