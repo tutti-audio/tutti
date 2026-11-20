@@ -128,3 +128,23 @@ fn the_counts_only_grow_across_reads() {
         }
     );
 }
+
+/// A call's budget is its whole frames over the rate, however many graph
+/// blocks it splits into: 8192 frames in two blocks of 4096 at 48 kHz last
+/// 8192/48000 s, not one block's 4096/48000 s.
+#[test]
+fn the_budget_is_the_whole_calls_frames_over_the_rate() {
+    let mut budget = Budget::new();
+    budget.add(Samples::new(4096), SampleRate::SR_48K);
+    budget.add(Samples::new(4096), SampleRate::SR_48K);
+    assert!((budget.seconds().get() - 8192.0 / 48_000.0).abs() < 1e-12);
+}
+
+/// A call that straddles a rate change is held to each piece's own rate.
+#[test]
+fn a_rate_change_mid_call_budgets_each_piece_at_its_rate() {
+    let mut budget = Budget::new();
+    budget.add(Samples::new(480), SampleRate::SR_48K);
+    budget.add(Samples::new(960), SampleRate::SR_96K);
+    assert!((budget.seconds().get() - (480.0 / 48_000.0 + 960.0 / 96_000.0)).abs() < 1e-12);
+}

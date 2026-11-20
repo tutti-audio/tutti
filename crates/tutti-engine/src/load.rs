@@ -4,7 +4,7 @@
 //! `tutti_rt`'s cells; an app reads them from any thread.
 
 use tutti_rt::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge};
-use tutti_units::Seconds;
+use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The time constant of [`Load`]'s exponential smoothing: a step in the load
 /// is 63% through after this long, whatever the block size.
@@ -98,6 +98,30 @@ impl Count for BlockCounts {
             silenced,
             dropped_events,
         }
+    }
+}
+
+/// The real-time budget of one device call: the sum over its graph blocks of
+/// each block's frames at the rate that block ran at, so the budget is the
+/// whole call's frames and a call that straddles a re-prepare's rate change
+/// is held to the rate in effect for each piece.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Budget(Seconds);
+
+impl Budget {
+    /// The budget of a call that has rendered nothing yet.
+    pub(crate) const fn new() -> Self {
+        Self(Seconds::new(0.0))
+    }
+
+    /// Adds a graph block of `frames` rendered at `rate`.
+    pub(crate) fn add(&mut self, frames: Samples, rate: SampleRate) {
+        self.0 += frames.to_seconds(rate);
+    }
+
+    /// The time the call's frames last.
+    pub(crate) const fn seconds(self) -> Seconds {
+        self.0
     }
 }
 

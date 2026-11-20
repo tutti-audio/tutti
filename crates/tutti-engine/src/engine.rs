@@ -112,7 +112,7 @@ use tutti_graph::{
 };
 
 use crate::block_clock::{BlockClock, BlockClockReader, BlockDates, DateKeeper, Pose};
-use crate::load::{self, BlockCounts, Load, Writers};
+use crate::load::{self, BlockCounts, Budget, Load, Writers};
 use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
 use crate::routing::StageTargets;
 use crate::stage::OutputStage;
@@ -713,7 +713,7 @@ impl<F: Float> Engine<F> {
         let g = &mut *graph;
         let mut done = 0;
         let mut unplaced = false;
-        let mut budget = Seconds::new(0.0);
+        let mut budget = Budget::new();
         while done < frames {
             let (bound, rate) = g.settle();
             let began = (done == 0).then(|| g.dates.date(None));
@@ -729,7 +729,7 @@ impl<F: Float> Engine<F> {
                 .transport
                 .tempo_ahead(len, &t, tutti_graph::MAX_TRANSPORT_CHANGES);
             let len = ahead.limit.unwrap_or(len);
-            budget += Samples::new(len).to_seconds(rate);
+            budget.add(Samples::new(len), rate);
             // Kept current, so a later `process` tells a late beat from one
             // jumped over across this block too.
             g.playhead.observe(&Env {
@@ -760,7 +760,10 @@ impl<F: Float> Engine<F> {
             load.silenced();
         }
         load.dropped_events(g.take_dropped_events());
-        load.record(Seconds::new(start.elapsed().as_secs_f64()), budget);
+        load.record(
+            Seconds::new(start.elapsed().as_secs_f64()),
+            budget.seconds(),
+        );
     }
 
     /// Renders one block into `output`, an interleaved device buffer.
@@ -836,7 +839,7 @@ impl<F: Float> Engine<F> {
         let g = &mut *graph;
         let mut done = 0;
         let mut unplaced = false;
-        let mut budget = Seconds::new(0.0);
+        let mut budget = Budget::new();
         while done < frames {
             let (bound, rate) = g.settle();
             let began = (done == 0).then(|| g.dates.date(stamp));
@@ -864,7 +867,7 @@ impl<F: Float> Engine<F> {
             // The walk cut the block short where a tempo step did not fit
             // its changes; the rest is the next iteration's block.
             let len = walk.frames;
-            budget += Samples::new(len).to_seconds(rate);
+            budget.add(Samples::new(len), rate);
             // Lent after `settle` installed the plan this segment renders
             // (see `process_segment`).
             let (folds, stage) = (reader.lend(), stages.lend());
@@ -885,7 +888,10 @@ impl<F: Float> Engine<F> {
             load.silenced();
         }
         load.dropped_events(g.take_dropped_events());
-        load.record(Seconds::new(start.elapsed().as_secs_f64()), budget);
+        load.record(
+            Seconds::new(start.elapsed().as_secs_f64()),
+            budget.seconds(),
+        );
     }
 
     /// Walks one block's scheduled transport commands in time order, running
