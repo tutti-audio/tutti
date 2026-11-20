@@ -105,7 +105,7 @@ pub struct SlabHandle {
 
 /// A handle as it travels: the name alone, unchecked until it becomes one.
 #[derive(Deserialize)]
-struct WireName(String);
+struct WireName(pub String);
 
 impl TryFrom<WireName> for SlabHandle {
     type Error = String;
