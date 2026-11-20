@@ -9,8 +9,9 @@ use std::collections::{BinaryHeap, HashMap};
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::task::{Context, Poll, Waker};
+use std::thread::{self, ThreadId};
 
 use super::lock;
 use crate::Instant;
@@ -101,6 +102,8 @@ struct State {
 struct Core {
     state: Mutex<State>,
     changed: Condvar,
+    /// The timer thread, once it runs: the one thread the last drop does not join.
+    runner: OnceLock<ThreadId>,
 }
 
 impl Core {
@@ -117,6 +120,7 @@ impl Core {
     /// A timer thread's body: wakes the due sleeps and waits for the next deadline
     /// until the queue closes.
     fn run(&self) {
+        let _ = self.runner.set(thread::current().id());
         let mut state = lock(&self.state);
         loop {
             if state.closed {
@@ -205,7 +209,14 @@ impl Timers {
 impl Drop for Timers {
     fn drop(&mut self) {
         self.core.close();
-        drop(lock(&self.thread).take());
+        let Some(handle) = lock(&self.thread).take() else {
+            return;
+        };
+        // A waker the timer thread wakes or drops can hold the last executor: that
+        // drop runs on the timer thread, which then leaves its loop on `closed`.
+        if self.core.runner.get() == Some(&thread::current().id()) {
+            handle.detach();
+        }
     }
 }
 

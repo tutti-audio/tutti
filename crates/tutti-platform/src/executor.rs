@@ -80,7 +80,8 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// form and a host executor on a native target start a timer thread with the first
 /// sleep; it sleeps to the earliest deadline, wakes the due sleeps, never runs a future,
 /// and is joined when the executor drops. The polled form, and a host executor on the
-/// web (which has no threads), fire nothing between polls: every
+/// web (which has no threads, and whose app calls `poll` on its frame tick), fire
+/// nothing between polls: every
 /// [`poll`](Self::poll) first wakes the sleeps whose deadline has passed, so a sleep's
 /// resolution is the cadence of `poll`.
 ///
@@ -404,6 +405,10 @@ impl Executor {
 
     /// A host's executor: `spawn` receives every future. It owns running each one,
     /// and must tolerate a `poll` that blocks.
+    ///
+    /// On the web its [`sleep_until`](Self::sleep_until)s fire only in
+    /// [`poll`](Self::poll), which the host's runtime does not call: an app calls
+    /// `poll` on its frame tick, or no sleep resolves.
     #[must_use]
     pub fn new(
         spawn: impl Fn(Pin<Box<dyn Future<Output = ()> + Send + 'static>>) + Send + Sync + 'static,

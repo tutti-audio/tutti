@@ -387,3 +387,38 @@ fn dropping_a_threaded_executor_joins_its_timer_thread_and_leaves_sleeps_pending
     drop(executor);
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
 }
+
+/// A waker the timer thread wakes can hold the last clone of the executor; its drop
+/// then runs on the timer thread, which must not join itself.
+#[test]
+fn the_last_executor_dropped_on_the_timer_thread_does_not_join_itself() {
+    use std::task::Wake;
+
+    struct Holder {
+        executor: Mutex<Option<Executor>>,
+        dropped: Mutex<Option<mpsc::Sender<()>>>,
+    }
+    impl Wake for Holder {
+        fn wake(self: Arc<Self>) {
+            drop(self.executor.lock().unwrap().take());
+            if let Some(tx) = self.dropped.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+
+    let executor = Executor::threaded();
+    let mut sleep = executor.sleep(Duration::from_millis(5)).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let holder = Arc::new(Holder {
+        executor: Mutex::new(Some(executor)),
+        dropped: Mutex::new(Some(tx)),
+    });
+    let waker = Waker::from(Arc::clone(&holder));
+    let mut cx = Context::from_waker(&waker);
+    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+    drop(waker);
+    drop(holder);
+    // A hang guard, not a speed bound: a self-join never sends.
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Ok(()));
+}
