@@ -22,7 +22,7 @@ use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, NoWatch, Watch};
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{DestinationBackend, SourceBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
 use tutti_midi_device::EndpointId;
 use tutti_platform::MainThreadMarker;
 
@@ -70,20 +70,12 @@ impl MidiEndpoints for StubEndpoints {
 /// Why no virtual endpoint can be published here.
 const VIRTUAL_REASON: &str = "no virtual MIDI endpoints on this platform (no MIDI backend)";
 
-/// Refuses: there is no virtual source to publish.
-pub(crate) fn open_virtual_source(
-    _spec: &VirtualSpec,
-    _main: MainThreadMarker,
-) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
-    Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
-}
-
-/// Refuses: there is no virtual destination to publish.
-pub(crate) fn open_virtual_destination(
+/// Refuses: there is no virtual endpoint to publish.
+pub(crate) fn open_virtual_endpoint(
     _spec: &VirtualSpec,
     _producer: InputProducerHandle,
     _main: MainThreadMarker,
-) -> Result<(Box<dyn DestinationBackend>, VirtualProtocol)> {
+) -> Result<(Box<dyn EndpointBackend>, VirtualProtocol)> {
     Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
 }
 

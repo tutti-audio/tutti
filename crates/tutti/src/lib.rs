@@ -366,6 +366,7 @@ pub mod types {
     pub use tutti_platform::{
         Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek,
         Shutdown, Sleep, Staged, StagedCommitError, StagedFile, StagedKeep, Stamp, Threads, Timer,
+        WeakExecutor,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
