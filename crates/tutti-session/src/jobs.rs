@@ -39,9 +39,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use tutti_platform::{Executor, Task};
 use tutti_rt::{Bells, LockExt};
@@ -215,15 +214,14 @@ impl Arrivals {
         all
     }
 
-    /// Blocks until something arrives or `slice` passes.
-    fn block(&mut self, slice: Duration) {
+    /// Waits until something arrives, as the platform's wait does.
+    fn block(&mut self) {
         if !self.taken.is_empty() {
             return;
         }
-        match self.rx.recv_timeout(slice) {
-            Ok(arrival) => self.taken.push_back(arrival),
-            // `Jobs` holds a sender: the channel never disconnects while it lives.
-            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {}
+        // `Jobs` holds a sender: the channel never disconnects while it lives.
+        if let Some(arrival) = crate::background::wait(&self.rx) {
+            self.taken.push_back(arrival);
         }
     }
 }
@@ -263,7 +261,7 @@ pub(crate) enum Landing<'a> {
     Reload {
         node: tutti_graph::NodeKey,
         token: &'a Arc<()>,
-        snapshot_age: Option<Duration>,
+        snapshot_age: Option<std::time::Duration>,
         loaded: Box<crate::plugin::PluginLoaded>,
     },
     /// A reload ended without one.
@@ -441,9 +439,9 @@ impl Jobs {
         std::mem::take(&mut self.held)
     }
 
-    /// Blocks until a job sends something, or `slice` passes.
-    pub(crate) fn block(&mut self, slice: Duration) {
-        self.arrivals.block(slice);
+    /// Waits for a job to send something, as the platform's wait does.
+    pub(crate) fn block(&mut self) {
+        self.arrivals.block();
     }
 
     /// Reports what typed jobs landed, in landing order.
@@ -781,27 +779,6 @@ pub(crate) mod tests {
 
     fn session(builder: crate::SessionBuilder) -> (crate::DetachedSession, crate::Background) {
         builder.build_detached(SampleRate::SR_48K).unwrap()
-    }
-
-    /// The jobs submitted and not yet landed: what `jobs`' `Debug` text reports as running.
-    #[cfg_attr(
-        not(feature = "plugin"),
-        expect(
-            dead_code,
-            reason = "the plugin tests (feature `plugin`) are its users"
-        )
-    )]
-    pub(crate) fn running(jobs: &Jobs) -> usize {
-        let text = format!("{jobs:?}");
-        let digits = text
-            .split("running: ")
-            .nth(1)
-            .expect("the jobs report how many run");
-        digits
-            .split(|c: char| !c.is_ascii_digit())
-            .next()
-            .and_then(|n| n.parse().ok())
-            .expect("a count")
     }
 
     #[derive(Debug, PartialEq, Eq, thiserror::Error)]

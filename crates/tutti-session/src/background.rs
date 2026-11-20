@@ -7,7 +7,6 @@
 //! threads) is the one `os` module pair's.
 
 use std::fmt;
-use std::time::Duration;
 
 use tutti_platform::Executor;
 
@@ -17,12 +16,11 @@ use crate::jobs::Jobs;
 #[cfg_attr(target_arch = "wasm32", path = "background/web.rs")]
 mod os;
 
+pub(crate) use os::wait;
+
 /// The most tasks one blocking wait runs between two of its updates: a count, never a
 /// time.
 const TICKS_PER_SLICE: usize = 256;
-
-/// How long a blocking wait sleeps on the arrivals when it has no task to run.
-const WAIT_SLICE: Duration = Duration::from_millis(1);
 
 /// Runs a session's background work: the half of `build`'s result that does the work the
 /// [`Session`](crate::Session) queues.
@@ -124,9 +122,10 @@ impl Background {
         self.executor.try_tick()
     }
 
-    /// One step of a blocking wait: with threads started, blocks until a job sends
-    /// something or a slice passes; without, runs up to [`TICKS_PER_SLICE`] ready tasks,
-    /// and blocks the slice only when there was none to run.
+    /// One step of a blocking wait: with threads started, waits for a job to send
+    /// something or a slice to pass; without, runs up to [`TICKS_PER_SLICE`] ready tasks,
+    /// and waits only when there was none to run. The wait is the platform's
+    /// ([`wait`]): a native target blocks a millisecond, the web never blocks.
     pub(crate) fn step(&mut self, jobs: &mut Jobs) {
         if self.threads.is_empty() {
             let mut ran = false;
@@ -140,6 +139,6 @@ impl Background {
                 return;
             }
         }
-        jobs.block(WAIT_SLICE);
+        jobs.block();
     }
 }

@@ -2567,11 +2567,14 @@ mod tests {
         /// `None`), as an in-process plugin's is when its main thread does
         /// not answer.
         unlisted: Arc<AtomicBool>,
+        /// How many times its list was asked for while unavailable.
+        refused: Arc<AtomicUsize>,
     }
 
     impl tutti_plugin_types::AnyThread for Fake {
         fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
             if self.unlisted.load(Ordering::SeqCst) {
+                self.refused.fetch_add(1, Ordering::SeqCst);
                 return None;
             }
             Some(
@@ -2669,6 +2672,7 @@ mod tests {
                 dead: Arc::clone(&dead),
                 params: Vec::new(),
                 unlisted: Arc::default(),
+                refused: Arc::default(),
             }),
             None,
             Default::default(),
@@ -2714,6 +2718,7 @@ mod tests {
                 dead: Arc::default(),
                 params,
                 unlisted: Arc::default(),
+                refused: Arc::default(),
             }),
             None,
             Default::default(),
@@ -2738,38 +2743,61 @@ mod tests {
             let _ = self.events_at(ms);
         }
 
-        /// The jobs submitted and not yet landed.
-        fn running(&self) -> usize {
-            crate::jobs::tests::running(&self.session.jobs)
-        }
-
-        /// `Phase::Plugins` at `t0 + ms`: how many jobs it submitted.
-        fn plugins_at(&mut self, ms: u64) -> usize {
-            let before = self.running();
-            self.start_at(ms);
-            self.running() - before
-        }
-
-        /// `Phase::Collect` until every submitted job has landed: the events it
-        /// reported. A guard against a job that never ends.
-        fn land(&mut self) -> Vec<SessionEvent> {
+        /// `Phase::Collect` until `done` holds of the rig: the events it reported. The
+        /// effect a landing has is what the test waits for; a guard ends a wait whose
+        /// job never lands.
+        fn land_until(&mut self, what: &str, done: impl Fn(&Rig) -> bool) -> Vec<SessionEvent> {
             let mut out = Vec::new();
             let deadline = Instant::now() + Duration::from_secs(10);
-            loop {
+            while !done(self) {
+                assert!(Instant::now() < deadline, "{what}: never happened");
                 let cx = crate::PhaseCx::at(self.t0);
                 self.session.run_phase(crate::Phase::Collect, cx, &mut out);
-                if self.running() == 0 {
-                    return out;
-                }
-                assert!(Instant::now() < deadline, "a job never ended");
                 std::thread::yield_now();
             }
+            out
         }
 
-        /// Lands the one job that waits.
-        fn run_and_land(&mut self) -> Vec<SessionEvent> {
-            assert_eq!(self.running(), 1, "one job waits");
-            self.land()
+        /// `Phase::Collect` until a landing reports an event: the events so far.
+        fn land_events(&mut self) -> Vec<SessionEvent> {
+            let mut out = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while out.is_empty() {
+                assert!(Instant::now() < deadline, "no landing reported an event");
+                let cx = crate::PhaseCx::at(self.t0);
+                self.session.run_phase(crate::Phase::Collect, cx, &mut out);
+                std::thread::yield_now();
+            }
+            out
+        }
+
+        /// `Phase::Collect` a fixed count of times, for a job whose landing changes and
+        /// reports nothing (a stale or declined one): no event says it ended, so the
+        /// count only gives its end every chance to arrive before the test asserts that
+        /// nothing changed. Count-bound, never time-bound.
+        fn land_quiet(&mut self) -> Vec<SessionEvent> {
+            let mut out = Vec::new();
+            for _ in 0..20_000 {
+                let cx = crate::PhaseCx::at(self.t0);
+                self.session.run_phase(crate::Phase::Collect, cx, &mut out);
+                std::thread::yield_now();
+            }
+            out
+        }
+
+        /// The snapshot the node's record holds.
+        fn snapshot(&self) -> Option<Vec<u8>> {
+            self.session
+                .plugin_view(self.node)
+                .unwrap()
+                .state()
+                .last_good()
+                .map(|state| state.bytes().to_vec())
+        }
+
+        /// The number of saves the fake has been asked for.
+        fn saves(&self) -> usize {
+            self.saves.load(Ordering::SeqCst)
         }
 
         /// The node's record as a plugin being recovered, its reload due now,
@@ -2816,34 +2844,31 @@ mod tests {
     #[test]
     fn snapshots_are_taken_on_the_interval_one_at_a_time() {
         let mut rig = rig(Some(vec![1, 2, 3]));
-        assert_eq!(rig.plugins_at(0), 0, "the first update starts the clock");
-        assert_eq!(rig.plugins_at(500), 0, "inside the interval");
-        assert_eq!(rig.plugins_at(1_000), 1, "one job at the interval");
+        rig.start_at(0);
+        rig.start_at(500);
+        rig.start_at(1_000);
+        rig.start_at(5_000);
+        rig.land_until("the snapshot landing", |rig| rig.snapshot().is_some());
+        assert_eq!(rig.snapshot(), Some(vec![1u8, 2, 3]));
         assert_eq!(
-            rig.plugins_at(5_000),
-            0,
-            "nothing more while the job is in flight"
-        );
-        rig.land();
-        assert_eq!(
-            rig.session
-                .plugin_view(rig.node)
-                .unwrap()
-                .state()
-                .last_good()
-                .map(PeerState::bytes),
-            Some(&[1u8, 2, 3][..])
-        );
-        assert_eq!(rig.saves.load(Ordering::SeqCst), 1, "one job is one save");
-        assert_eq!(
-            rig.plugins_at(5_500),
+            rig.saves(),
             1,
-            "the cadence restarted when the last job was asked for (at 1 s)"
+            "one job at the interval is one save: none at 0, 500 or, while it was in flight, 5 000"
         );
+        // The cadence restarted when the last job was asked for (at 1 s): due.
+        rig.start_at(5_500);
         // Its end lands: the plugin is free again, on the interval.
-        rig.land();
-        assert_eq!(rig.plugins_at(6_000), 0, "inside the interval");
-        assert_eq!(rig.plugins_at(6_500), 1, "a landed job frees it");
+        let _ = rig.land_quiet();
+        // Inside the interval of the second job: nothing asked. Past it, and the
+        // second landed: one more.
+        rig.start_at(6_000);
+        rig.start_at(6_500);
+        let _ = rig.land_quiet();
+        assert_eq!(
+            rig.saves(),
+            3,
+            "the jobs at 1 s, 5.5 s and 6.5 s: none at 6 s, and a landed job frees the plugin"
+        );
     }
 
     /// **A declined save keeps the previous snapshot.** A refusal (the
@@ -2854,17 +2879,14 @@ mod tests {
         let mut rig = rig(None);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.snapshot = Some(PeerState::of_plugin(hosted.plugin.clone(), vec![4, 2]));
-        rig.plugins_at(0);
-        assert_eq!(rig.plugins_at(1_000), 1, "a job at the interval");
-        rig.land();
+        rig.start_at(0);
+        rig.start_at(1_000);
+        // The save is asked for, declined, and its end lands without a snapshot.
+        rig.land_until("the save", |rig| rig.saves() == 1);
+        let _ = rig.land_quiet();
         assert_eq!(
-            rig.session
-                .plugin_view(rig.node)
-                .unwrap()
-                .state()
-                .last_good()
-                .map(PeerState::bytes),
-            Some(&[4u8, 2][..]),
+            rig.snapshot(),
+            Some(vec![4u8, 2]),
             "a declined save must keep the last good snapshot"
         );
     }
@@ -2920,7 +2942,7 @@ mod tests {
             )
             .0,
         );
-        rig.plugins_at(0);
+        rig.start_at(0);
         assert_eq!(
             rig.session.graph_ref().node_latency(rig.node).unwrap(),
             tutti_graph::MAX_NODE_LATENCY.to_samples_ceil(SampleRate::SR_48K)
@@ -2932,13 +2954,15 @@ mod tests {
     #[test]
     fn a_failing_plugin_is_not_snapshotted() {
         let mut rig = rig(Some(vec![1]));
-        rig.plugins_at(0);
+        rig.start_at(0);
         rig.dead.store(true, Ordering::SeqCst);
-        assert_eq!(rig.plugins_at(1_000), 0, "failing: no snapshot");
+        rig.start_at(1_000);
         assert!(matches!(
             rig.session.plugin_view(rig.node).unwrap().health(),
             PluginHealth::Died { .. }
         ));
+        let _ = rig.land_quiet();
+        assert_eq!(rig.saves(), 0, "the failing plugin was not asked for state");
     }
 
     /// **A hosted plugin replaced by a native node is no longer hosted**
@@ -3017,6 +3041,7 @@ mod tests {
                     dead: Arc::default(),
                     params: Vec::new(),
                     unlisted: Arc::default(),
+                    refused: Arc::default(),
                 }),
                 Some(control),
                 Default::default(),
@@ -3073,9 +3098,9 @@ mod tests {
     #[test]
     fn a_crossfade_to_another_plugin_drops_the_old_snapshot() {
         let mut rig = rig(Some(vec![1, 2, 3]));
-        rig.plugins_at(0);
-        assert_eq!(rig.plugins_at(1_000), 1, "a job at the interval");
-        rig.land();
+        rig.start_at(0);
+        rig.start_at(1_000);
+        rig.land_until("the first snapshot", |rig| rig.snapshot().is_some());
         rig.start_at(2_000);
 
         let (incoming, _) = fake_handle(Some(vec![9]), Vec::new());
@@ -3102,30 +3127,21 @@ mod tests {
             None,
             "the outgoing plugin's snapshot is not the incoming one's"
         );
-        rig.run_and_land();
+        // The outgoing plugin's job (its second save) ends and lands nowhere.
+        rig.land_until("the outgoing save", |rig| rig.saves() == 2);
+        let _ = rig.land_quiet();
         assert_eq!(
-            rig.session
-                .plugin_view(rig.node)
-                .unwrap()
-                .state()
-                .last_good()
-                .map(PeerState::bytes),
+            rig.snapshot(),
             None,
             "the outgoing plugin's job must not land on the incoming plugin"
         );
 
-        assert_eq!(rig.plugins_at(2_000), 0, "its clock starts here");
-        assert_eq!(rig.plugins_at(3_000), 1, "its own job");
-        rig.land();
-        assert_eq!(
-            rig.session
-                .plugin_view(rig.node)
-                .unwrap()
-                .state()
-                .last_good()
-                .map(PeerState::bytes),
-            Some(&[9u8][..])
-        );
+        // The incoming plugin's clock starts here: its own job comes on the interval.
+        rig.start_at(2_000);
+        rig.start_at(3_000);
+        rig.land_until("the incoming snapshot", |rig| rig.snapshot().is_some());
+        assert_eq!(rig.snapshot(), Some(vec![9u8]));
+        assert_eq!(rig.saves(), 2, "the incoming plugin's save is its own");
     }
 
     /// **A crossfade to another plugin rebuilds the parameter mirror from
@@ -3163,8 +3179,9 @@ mod tests {
 
         rig.start_at(0);
         rig.start_at(10);
-        assert_eq!(rig.running(), 1, "the read is submitted once, as a job");
-        rig.land();
+        rig.land_until("the incoming plugin's read", |rig| {
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)) == Some(Some(0.75))
+        });
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             Some(Some(0.75)),
@@ -3179,18 +3196,17 @@ mod tests {
         let (third, _) = fake_handle(None, vec![(param, 0.125)]);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.adopt(third, Placement::InProcess);
-        rig.run_and_land();
+        // The read of the second plugin ends and lands nowhere.
+        let _ = rig.land_quiet();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             None,
             "a read of the previous plugin must not land"
         );
-        assert_eq!(rig.plugins_at(30), 1, "its own read");
-        rig.land();
-        assert_eq!(
-            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
-            Some(Some(0.125))
-        );
+        rig.start_at(30);
+        rig.land_until("the third plugin's read", |rig| {
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)) == Some(Some(0.125))
+        });
     }
 
     /// **A read whose parameter list is unavailable does not make the mirror
@@ -3209,6 +3225,7 @@ mod tests {
         hosted.mirror = mirror;
 
         let unlisted = Arc::new(AtomicBool::new(true));
+        let refused = Arc::new(AtomicUsize::new(0));
         let incoming = PluginHandle::from_backend(
             Arc::new(Fake {
                 state: None,
@@ -3216,6 +3233,7 @@ mod tests {
                 dead: Arc::default(),
                 params: vec![(param, 0.75)],
                 unlisted: Arc::clone(&unlisted),
+                refused: Arc::clone(&refused),
             }),
             None,
             Default::default(),
@@ -3224,8 +3242,10 @@ mod tests {
         );
         hosted.adopt(incoming, Placement::InProcess);
 
-        assert_eq!(rig.plugins_at(0), 1, "the read is submitted");
-        rig.land();
+        rig.start_at(0);
+        // The read asks for the list, is told it is unavailable, and lands as not read.
+        rig.land_until("the read", |_| refused.load(Ordering::SeqCst) == 1);
+        let _ = rig.land_quiet();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             None,
@@ -3235,13 +3255,16 @@ mod tests {
         // The list answers before the next phase submits the read again.
         unlisted.store(false, Ordering::SeqCst);
         rig.start_at(10);
-        rig.run_and_land();
+        rig.land_until("the re-run read", |rig| {
+            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)) == Some(Some(0.75))
+        });
+        rig.start_at(20);
+        let _ = rig.land_quiet();
         assert_eq!(
-            rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
-            Some(Some(0.75)),
-            "the re-run read filled the mirror"
+            refused.load(Ordering::SeqCst),
+            1,
+            "the list was asked for unavailable once: it is read, so no read is asked again"
         );
-        assert_eq!(rig.plugins_at(20), 0, "and it is done");
     }
 
     /// **A reload job that ends without a result is a failed attempt, named by
@@ -3324,7 +3347,7 @@ mod tests {
         let mut rig = rig(None);
         rig.recovering_in_process();
         rig.start_at(0);
-        let events = rig.run_and_land();
+        let events = rig.land_events();
         let [
             SessionEvent::Plugin(PluginEvent {
                 change: PluginChange::Reloading { cause, .. },
@@ -3369,7 +3392,7 @@ mod tests {
         // phase submits it.
         catalog.blacklist(&file, "crashed the scanner");
         rig.start_at(0);
-        let events = rig.run_and_land();
+        let events = rig.land_events();
         std::fs::remove_file(&file).ok();
 
         let [
@@ -3403,7 +3426,7 @@ mod tests {
             rig.session.plugin_view(rig.node).is_err(),
             "its record is gone"
         );
-        let events = rig.run_and_land();
+        let events = rig.land_quiet();
         assert!(events.is_empty(), "nothing is reported: {events:?}");
     }
 

@@ -232,6 +232,9 @@ impl<J: JobKind> Job<J> {
     /// bounded by a count, so the wait always has its driver. Pass the `Background`
     /// `build` returned with this session.
     ///
+    /// On the web nothing blocks: every job runs inside the drive, so the wait drives with
+    /// `try_tick`, updates, and loops until the landing arrives.
+    ///
     /// Waiting takes `&self`: an error does not cancel the job. Call it on the
     /// session that made the job.
     ///

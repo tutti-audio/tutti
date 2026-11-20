@@ -2,8 +2,18 @@
 
 use std::io;
 use std::num::NonZeroUsize;
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
 
 use super::Background;
+
+/// How long a wait blocks on the arrivals when it has no task to run.
+const WAIT_SLICE: Duration = Duration::from_millis(1);
+
+/// Blocks until `rx` has something or a millisecond passes.
+pub(crate) fn wait<T>(rx: &Receiver<T>) -> Option<T> {
+    rx.recv_timeout(WAIT_SLICE).ok()
+}
 
 /// The threads a [`Background`] started, each group stopped and joined on drop.
 #[derive(Debug)]
