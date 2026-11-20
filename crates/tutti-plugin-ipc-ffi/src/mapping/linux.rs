@@ -56,6 +56,20 @@ pub(super) fn open(slab: &Slab) -> Result<(File, Backing), SlabError> {
     Ok((duplicate(slab)?, ()))
 }
 
+/// Writes `bytes` at the start of the freshly made `file`.
+pub(super) fn fill(mut file: &File, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    file.write_all(bytes)
+}
+
+/// Appends the first `len` bytes of `file` to `out`, from the start whatever
+/// offset the descriptor was left at.
+pub(super) fn read_front(mut file: &File, len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0))?;
+    file.take(len as u64).read_to_end(out).map(drop)
+}
+
 /// Checks that `file` is a memory file sealed as [`create`] seals it, and
 /// exactly `size` long: a descriptor of any other file could be resized by whoever
 /// holds it, and a larger one is a sender that disagrees about the layout.

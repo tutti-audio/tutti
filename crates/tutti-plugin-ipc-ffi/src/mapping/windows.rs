@@ -153,6 +153,20 @@ fn open_with(opts: &OpenOptions, name: &str) -> Result<(File, Backing), SlabErro
     Ok((file, backing))
 }
 
+/// Writes `bytes` at the start of the freshly made `file`.
+pub(super) fn fill(mut file: &File, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    file.write_all(bytes)
+}
+
+/// Appends the first `len` bytes of `file` to `out`, from the start whatever
+/// offset the descriptor was left at.
+pub(super) fn read_front(mut file: &File, len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0))?;
+    file.take(len as u64).read_to_end(out).map(drop)
+}
+
 /// Nothing to check beyond the length and the header the caller checks.
 pub(super) fn verify(_: &File, _: usize) -> Result<(), SlabError> {
     Ok(())

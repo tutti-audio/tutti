@@ -9,14 +9,12 @@
 //! object) and travels as a descriptor; on Windows it is the named temp file the
 //! slab uses, named in the frame.
 //!
-//! The bytes are read with `read`, not mapped: a read of an object a peer holds
-//! cannot fault if the peer truncates it, which a mapping of an unsealed one
-//! (macOS) could.
+//! How the bytes move in and out of the object is the platform's (`fill`,
+//! `read_front`): reads and writes on a sealed memfd or a file, a mapping on
+//! macOS, whose shared memory objects refuse `read` and `write`.
 
 use super::platform;
 use crate::SlabError;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
 
 /// What a frame carries of a blob: the same form as a slab's.
 pub type BlobWire = super::SlabWire;
@@ -51,8 +49,8 @@ impl Blob {
     /// [`SlabError::Name`] if the random source fails, and [`SlabError::File`]
     /// if the object cannot be created, sized, sealed or written.
     pub fn create(bytes: &[u8]) -> Result<Self, SlabError> {
-        let (mut file, backing, slab) = platform::create(bytes.len())?;
-        file.write_all(bytes).map_err(|source| SlabError::File {
+        let (file, backing, slab) = platform::create(bytes.len())?;
+        platform::fill(&file, bytes).map_err(|source| SlabError::File {
             op: "write",
             source,
         })?;
@@ -115,7 +113,7 @@ impl Received {
         if len > max {
             return Err(too_large());
         }
-        let (mut file, _backing) = platform::open(&self.slab)?;
+        let (file, _backing) = platform::open(&self.slab)?;
         let file_error = |op| move |source| SlabError::File { op, source };
         let actual = file
             .metadata()
@@ -134,7 +132,7 @@ impl Received {
         bytes
             .try_reserve_exact(len)
             .map_err(|_| SlabError::NoRoom { bytes: len })?;
-        read_front(&mut file, len, &mut bytes).map_err(file_error("read"))?;
+        platform::read_front(&file, len, &mut bytes).map_err(file_error("read"))?;
         if bytes.len() != len {
             return Err(SlabError::BlobSize {
                 declared,
@@ -145,17 +143,11 @@ impl Received {
     }
 }
 
-/// Reads the first `len` bytes of `file` into `out`: from the start, whatever
-/// offset the object's descriptor was left at.
-fn read_front(file: &mut File, len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
-    file.seek(SeekFrom::Start(0))?;
-    file.take(len as u64).read_to_end(out).map(drop)
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::SlabWire;
+    use std::io::Write as _;
     use std::os::fd::AsFd;
     use std::os::unix::net::UnixStream;
 

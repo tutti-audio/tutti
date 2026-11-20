@@ -3,7 +3,10 @@
 //!
 //! The object has a name only for the instant between `shm_open` and
 //! `shm_unlink`, so nothing opens it by name and nothing outlives its holders.
-//! It is memory, not a file the kernel writes back. There are no seals on this
+//! It is memory, not a file the kernel writes back. It supports neither `read` nor
+//! `write` (both are `ENXIO`), so a blob is written and read through a mapping,
+//! which is sound because XNU refuses a second `ftruncate` (the tests pin it): no
+//! holder can shrink the object under the mapping. There are no seals on this
 //! platform; the object is sized by one `ftruncate`, and the tests pin that no
 //! later `ftruncate` is accepted.
 //!
@@ -24,6 +27,7 @@
 
 use crate::SlabError;
 use crate::descriptor::{self, duplicate, file_error};
+use memmap2::MmapOptions;
 use rustix::fs::{Mode, ftruncate};
 use rustix::io::{FdFlags, fcntl_setfd};
 use rustix::net::RecvFlags;
@@ -96,6 +100,41 @@ fn create_named(size: usize, name: &str) -> Result<(File, Backing, Slab), SlabEr
 /// The peer's slab as a file to map.
 pub(super) fn open(slab: &Slab) -> Result<(File, Backing), SlabError> {
     Ok((duplicate(slab)?, ()))
+}
+
+/// Writes `bytes` at the start of the freshly made `file`, through a mapping:
+/// a shared memory object refuses `write` here. The mapping is sound because the
+/// object is sized once and XNU refuses a second `ftruncate`, so no holder can
+/// shrink it under the mapping. Nothing is mapped for no bytes (a zero-length
+/// `mmap` is `EINVAL`).
+pub(super) fn fill(file: &File, bytes: &[u8]) -> std::io::Result<()> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    let map = MmapOptions::new().len(bytes.len()).map_raw(file)?;
+    // SAFETY: the mapping is `bytes.len()` long and `map` is the only view this
+    // process holds of it; `bytes` is our own buffer, so the ranges do not
+    // overlap. No peer holds the object yet, and none can shrink it (above).
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), map.as_mut_ptr(), bytes.len()) };
+    Ok(())
+}
+
+/// Appends the first `len` bytes of `file` to `out`, through a read-only mapping
+/// (`read` is refused as `write` is). The caller has checked the object is at
+/// least `len` long, and a holder cannot shrink it (see [`fill`]). The bytes are
+/// copied once with no reference formed over them, as a peer holding the object
+/// may write it.
+pub(super) fn read_front(file: &File, len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
+    if len == 0 {
+        return Ok(());
+    }
+    let map = MmapOptions::new().len(len).map_raw_read_only(file)?;
+    let at = out.len();
+    out.resize(at + len, 0);
+    // SAFETY: the mapping is `len` long and `out` has `len` bytes of its own
+    // from `at`; they are distinct allocations, so the ranges do not overlap.
+    unsafe { std::ptr::copy_nonoverlapping(map.as_ptr(), out.as_mut_ptr().add(at), len) };
+    Ok(())
 }
 
 /// Checks that `file` is a shared memory object (or a regular file), not a pipe,
