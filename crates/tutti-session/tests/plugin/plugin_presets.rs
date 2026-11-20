@@ -13,7 +13,7 @@ mod clap {
     use crate::support::clap_probe;
     use tutti_buffers::MaxBlock;
     use tutti_graph::NodeKey;
-    use tutti_plugin::catalog::PluginRef;
+    use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::{PresetError, PresetSupport};
     use tutti_session::{Peer as _, PresetJobFailed, Session};
     use tutti_units::Samples;
@@ -152,7 +152,7 @@ mod clap {
 #[cfg(feature = "vst3")]
 mod vst3 {
     use tutti_buffers::ChannelLayout;
-    use tutti_plugin::catalog::PluginRef;
+    use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::PresetId;
     use tutti_session::{PHASES, PhaseCx, PoolEvent, SessionEvent};
     use tutti_session::{Peer as _, Session};
@@ -249,7 +249,8 @@ mod vst2 {
     use crate::pooled::{LandOn as _, LoadEntry as _, LoadPlugin, Spec};
     use tutti_buffers::ChannelLayout;
     use tutti_fixtures::ScopedEnv;
-    use tutti_plugin::catalog::{Hosting, PluginRef};
+    use tutti_plugin_db::Hosting;
+    use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::PresetId;
     use tutti_plugin_types::{PresetError, PresetSupport};
     use tutti_session::DetachedSession;
@@ -369,8 +370,8 @@ mod vst2 {
     fn declared() -> (
         DetachedSession,
         tutti_session::Background,
-        tutti_plugin::catalog::Catalog,
-        tutti_plugin::catalog::PluginId,
+        tutti_plugin_db::Catalog,
+        tutti_plugin_types::PluginId,
         u64,
         tutti_graph::NodeKey,
         ScopedEnv,

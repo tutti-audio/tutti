@@ -20,7 +20,8 @@ use support::clap_probe;
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_plugin::PluginClient;
-use tutti_plugin::catalog::{Loadable, PluginRef};
+use tutti_plugin_db::Loadable;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, BufferMaster, Crossfade, ExportClock, OutPort, PHASES,
     Phase, PhaseCx, Range, Root, Session, SessionEvent,
@@ -268,8 +269,8 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     assert_eq!(outgoing, Samples::new(OWN + OFFLINE_EXTRA + BLOCK));
 
     let incoming = PluginClient::new(
-        tutti_plugin::IpcConfig::at(
-            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        tutti_plugin_ipc::IpcConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
@@ -333,8 +334,8 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         .expect("a background thread starts");
 
     let client = PluginClient::new(
-        tutti_plugin::IpcConfig::at(
-            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        tutti_plugin_ipc::IpcConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
@@ -390,8 +391,8 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         .spawn_threads(std::num::NonZeroUsize::MIN)
         .expect("a background thread starts");
     let client = PluginClient::new(
-        tutti_plugin::IpcConfig::at(
-            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        tutti_plugin_ipc::IpcConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),

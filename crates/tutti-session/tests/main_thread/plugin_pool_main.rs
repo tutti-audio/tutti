@@ -14,8 +14,9 @@ use tutti_platform::Instant;
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
 use tutti_buffers::MaxBlock;
-use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, PluginId};
+use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_db::{PluginDb, ScanPoll};
+use tutti_plugin_types::{Locator, PluginId};
 use tutti_session::{
     JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
@@ -993,13 +994,11 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     env.set("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
     let (mut s, _bg) = session();
     let client = tutti_plugin::PluginClient::new(
-        tutti_plugin::IpcConfig::at(
-            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        tutti_plugin_ipc::IpcConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
-            clap_probe(),
-        )),
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(clap_probe())),
         SampleRate::SR_48K,
     )
     .expect("the reference plugin loads");

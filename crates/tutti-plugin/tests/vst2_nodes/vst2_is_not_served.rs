@@ -7,8 +7,8 @@
 
 use std::path::PathBuf;
 
-use tutti_plugin::IpcConfig;
 use tutti_plugin::PluginClient;
+use tutti_plugin_ipc::IpcConfig;
 use tutti_plugin_types::IpcError;
 
 /// **A `.vst`, `.dll` or `.so` path is refused as `NotOutOfProcess`**, whether
@@ -22,9 +22,11 @@ fn a_vst2_path_is_refused_with_a_typed_error_before_a_server_starts() {
     for name in ["Synth.vst", "Legacy.dll", "Old.so"] {
         let path = PathBuf::from(name);
         match PluginClient::new(
-            IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source")),
+            IpcConfig::at(
+                tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+            ),
             &tutti_fixtures::pumped_work(),
-            &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+            &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
                 path.clone(),
             )),
             tutti_units::SampleRate::SR_48K,

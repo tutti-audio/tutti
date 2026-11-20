@@ -284,7 +284,7 @@ pub(crate) enum Landing<'a> {
         node: tutti_graph::NodeKey,
         token: &'a Arc<()>,
         asked: tutti_platform::Instant,
-        state: Result<Vec<u8>, tutti_plugin::error::StateError>,
+        state: Result<Vec<u8>, tutti_plugin_types::StateError>,
     },
 }
 

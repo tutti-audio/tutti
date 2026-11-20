@@ -165,8 +165,8 @@ impl AnyThread for Fake {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
-        Err(tutti_plugin::error::StateError::NoStateRoute)
+    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+        Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: RenderMode) -> bool {
         false
@@ -223,7 +223,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         &mut s,
         node,
         handle,
-        tutti_plugin::catalog::PluginRef::file("fake.clap"),
+        tutti_plugin_types::PluginRef::file("fake.clap"),
     );
     s.commit();
     (s, key, fake, refresh)
@@ -900,7 +900,7 @@ fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin
     );
     let (controls, _) =
         PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
-    let plugin = tutti_plugin::catalog::PluginRef::file(plugin);
+    let plugin = tutti_plugin_types::PluginRef::file(plugin);
     let hosted = s.graph.plugins.get_mut(&node).expect("a hosted plugin");
     let outgoing = hosted.replace_hosted(handle, (*controls).clone(), plugin);
     outgoing.retire().settle(node, &mut s.graph.graveyard);

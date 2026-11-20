@@ -12,7 +12,7 @@ use crate::pooled::{LoadPlugin, Spec};
 use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin_types::PluginRef;
 use tutti_session::Session;
 use tutti_units::Normalized;
 use tutti_units::ParamId;

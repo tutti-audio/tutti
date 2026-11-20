@@ -13,10 +13,11 @@ use tutti_platform::Instant;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef};
-use tutti_plugin::error::StateError;
+use tutti_plugin_db::{Catalog, Hosting};
+use tutti_plugin_types::StateError;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
+use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
     AddPluginError, CrossfadeRefused, DetachedSession, HandleError, JobStatus, LoadError,
     OtherPeer, Peer, PeerState, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,

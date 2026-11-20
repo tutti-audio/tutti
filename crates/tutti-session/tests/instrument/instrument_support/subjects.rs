@@ -96,7 +96,7 @@ impl Plugin {
         pair.1
             .spawn_threads(std::num::NonZeroUsize::MIN)
             .expect("a background thread starts");
-        let plugin = tutti_plugin::catalog::PluginRef::file(path);
+        let plugin = tutti_plugin_types::PluginRef::file(path);
         let request = match state {
             Some(bytes) => Spec::new(plugin.clone())
                 .restoring(tutti_session::PeerState::of_plugin(plugin, bytes)),

@@ -2435,7 +2435,7 @@ mod tests {
     #[cfg(feature = "plugin")]
     #[test]
     fn an_unannounced_finish_leaves_the_mode_to_the_phase() {
-        use tutti_plugin::RenderMode;
+        use tutti_plugin_types::RenderMode;
         let (mut session, _bg) = session();
         let job = session.bounce_start(short()).unwrap();
         assert_eq!(session.render_mode(), RenderMode::Offline);

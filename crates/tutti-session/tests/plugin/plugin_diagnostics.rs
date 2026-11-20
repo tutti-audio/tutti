@@ -10,7 +10,7 @@
 use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{Root, Session};
 use tutti_units::{SampleRate, Samples};
 

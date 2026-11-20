@@ -17,7 +17,8 @@ use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin::PluginClient;
-use tutti_plugin::catalog::{Loadable, PluginRef};
+use tutti_plugin_db::Loadable;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{ModeTarget, NodeMode, Session};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -110,8 +111,8 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
 
     let outgoing_pid = s.plugin_view(node).expect("hosted").handle().server_pid();
     let incoming = PluginClient::new(
-        tutti_plugin::IpcConfig::at(
-            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        tutti_plugin_ipc::IpcConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(plugin_file())),

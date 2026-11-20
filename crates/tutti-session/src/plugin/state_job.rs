@@ -25,8 +25,8 @@
 
 use std::fmt;
 
-use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
+use tutti_plugin_types::StateError;
 use tutti_plugin_types::{PluginRefresh, StateUse};
 
 use super::entry::{Hosted, PluginEntry};

@@ -236,7 +236,7 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     let plugin = tutti_plugin::catalog::Plugin::open(
         Some(main_thread()),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             staged.clone(),
         )),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
@@ -333,7 +333,7 @@ fn the_node_carries_midi_on_its_event_ports() {
         let plugin = tutti_plugin::catalog::Plugin::open(
             Some(main_thread()),
             &tutti_fixtures::pumped_work(),
-            &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+            &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
                 staged.clone(),
             )),
             tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
@@ -344,8 +344,6 @@ fn the_node_carries_midi_on_its_event_ports() {
     };
 
     let takes_only = open("0");
-    assert!(takes_only.takes_midi());
-    assert!(!takes_only.sends_midi());
     let shape = tutti_graph::IntoNode::into_parts(takes_only.bind(
         tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ))
@@ -354,7 +352,6 @@ fn the_node_carries_midi_on_its_event_ports() {
     assert_eq!((shape.event_in, shape.event_out), (1, 0));
 
     let both = open("1");
-    assert!(both.sends_midi());
     let shape = tutti_graph::IntoNode::into_parts(both.bind(
         tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ))

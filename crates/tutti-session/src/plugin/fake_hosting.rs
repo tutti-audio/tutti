@@ -13,7 +13,7 @@ use tutti_units::{SampleRate, Samples};
 
 use crate::plugin::HostedPlugin;
 use crate::{AnyPlugin, Clock, Key, Session};
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin_types::PluginRef;
 
 mod editor;
 mod losses;
@@ -104,8 +104,8 @@ impl tutti_plugin_types::AnyThread for Inert {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
-        Err(tutti_plugin::error::StateError::NoStateRoute)
+    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+        Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
         false

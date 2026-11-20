@@ -62,8 +62,8 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
-        Err(tutti_plugin::error::StateError::NoStateRoute)
+    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+        Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
         false
@@ -114,7 +114,7 @@ fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
         &mut s,
         node,
         handle_with(cause),
-        tutti_plugin::catalog::PluginRef::file("fake.clap"),
+        tutti_plugin_types::PluginRef::file("fake.clap"),
     );
     // The insert is an edit: send it, so the flag starts clear.
     s.commit();
@@ -322,7 +322,7 @@ fn session_reporting() -> (
         &mut s,
         node,
         handle,
-        tutti_plugin::catalog::PluginRef::file("fake.clap"),
+        tutti_plugin_types::PluginRef::file("fake.clap"),
     );
     s.commit();
     (s, node.erase(), params, refresh, invalidate)
