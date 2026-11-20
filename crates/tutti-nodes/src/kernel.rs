@@ -79,17 +79,10 @@ pub trait Kernel: Clone + Send + 'static {
     /// Back to silence. Audio thread: no allocation.
     fn reset(&mut self);
 
-    /// Whether the kernel follows the session's tempo: a kernel that does is told it once a
-    /// block ([`tempo`](Self::tempo)), and one that does not (the default) is never asked the
-    /// transport.
-    fn follows_tempo(&self) -> bool {
-        false
-    }
-
     /// The tempo of the block's first frame, as the transport says it
     /// ([`Cx::transport_at`]): called once at the start of each block, before the block's
-    /// controls are read, on a kernel that [follows the tempo](Self::follows_tempo). A
-    /// stopped transport has its set tempo. Audio thread: no allocation.
+    /// controls are read. A stopped transport has its set tempo. The default ignores it.
+    /// Audio thread: no allocation.
     fn tempo(&mut self, tempo: Bpm) {
         let _ = tempo;
     }
@@ -700,9 +693,7 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
         let (position, rate, applied) = (t.position, t.rate, t.applied);
         t.position += size as u64;
 
-        if self.kernel.follows_tempo() {
-            self.kernel.tempo(cx.transport_at(Offset::ZERO).tempo);
-        }
+        self.kernel.tempo(cx.transport_at(Offset::ZERO).tempo);
 
         self.params.begin(position);
         let target = self.params.read(
@@ -982,10 +973,9 @@ mod tests {
         calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     }
 
-    /// A mono pass-through that asks for the tempo, or does not.
+    /// A mono pass-through that records the tempo it is told.
     #[derive(Clone)]
     struct Tempo {
-        follows: bool,
         heard: Heard,
     }
 
@@ -1017,9 +1007,6 @@ mod tests {
         }
         fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
         fn reset(&mut self) {}
-        fn follows_tempo(&self) -> bool {
-            self.follows
-        }
         fn tempo(&mut self, tempo: Bpm) {
             use std::sync::atomic::Ordering::Relaxed;
             self.heard.last.store(tempo.get().to_bits(), Relaxed);
@@ -1042,10 +1029,9 @@ mod tests {
         }
     }
 
-    fn tempo_node(follows: bool) -> (KernelNode<Tempo>, Heard) {
+    fn tempo_node() -> (KernelNode<Tempo>, Heard) {
         let heard = Heard::default();
         let kernel = Tempo {
-            follows,
             heard: heard.clone(),
         };
         let node = KernelNode::with_kernel(
@@ -1076,14 +1062,14 @@ mod tests {
         );
     }
 
-    /// A kernel that follows the tempo is told, once a block, the tempo of the transport the
+    /// A kernel is told, once a block, the tempo of the transport the
     /// block runs under: 90 bpm playing, and a stopped transport's set 75 bpm (a stopped
     /// transport holds its position and its tempo).
     #[test]
-    fn a_kernel_that_follows_the_tempo_hears_the_transports_once_a_block() {
+    fn a_kernel_hears_the_transports_tempo_once_a_block() {
         use std::sync::atomic::Ordering::Relaxed;
         use tutti_units::Beat;
-        let (mut node, heard) = tempo_node(true);
+        let (mut node, heard) = tempo_node();
         block_under(
             &mut node,
             TransportPosition::new(true, Bpm::of(90.0), Beat::new(8.0), None),
@@ -1096,18 +1082,5 @@ mod tests {
         );
         assert_eq!(f64::from_bits(heard.last.load(Relaxed)), 75.0);
         assert_eq!(heard.calls.load(Relaxed), 2);
-    }
-
-    /// A kernel that does not follow the tempo is never told one.
-    #[test]
-    fn a_kernel_that_does_not_follow_the_tempo_is_never_told_it() {
-        use std::sync::atomic::Ordering::Relaxed;
-        use tutti_units::Beat;
-        let (mut node, heard) = tempo_node(false);
-        block_under(
-            &mut node,
-            TransportPosition::new(true, Bpm::of(90.0), Beat::new(0.0), None),
-        );
-        assert_eq!(heard.calls.load(Relaxed), 0);
     }
 }

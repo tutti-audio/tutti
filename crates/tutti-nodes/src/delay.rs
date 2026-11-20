@@ -214,15 +214,13 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         self.applied = false;
     }
 
-    /// Only a delay timed in notes follows the tempo.
-    fn follows_tempo(&self) -> bool {
-        matches!(self.layout.timing(), DelayTiming::Synced(_))
-    }
-
-    /// Aims the notes' times at `tempo`, when it is not the one they are aimed at: a tempo that
-    /// moves moves the times through their ramp, and the first block's lands at once with the
-    /// first retarget.
+    /// Aims a delay timed in notes at `tempo`, when it is not the one its times are aimed
+    /// at: a tempo that moves moves the times through their ramp, and the first block's lands
+    /// at once with the first retarget. A delay timed in seconds ignores the tempo.
     fn tempo(&mut self, tempo: Bpm) {
+        if !matches!(self.layout.timing(), DelayTiming::Synced(_)) {
+            return;
+        }
         let Some(bank) = &self.bank else { return };
         if self.tempo != Some(tempo) {
             bank.retarget_tempo(&mut self.ramps, tempo);
