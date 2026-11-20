@@ -13,7 +13,7 @@ use tutti_plugin_types::{PluginVersion, TransportInfo, Vst2Category};
 ///
 /// VST2 encodes the tail inversely to every other format, which is why
 /// [`Vst2Loaded::tail`](crate::Vst2Loaded::tail) decodes it here rather than
-/// through [`PluginTail::from_vst3_samples`]: on the wire `0` means "no tail
+/// through [`PluginTail::from_vst3_samples`](tutti_plugin_types::PluginTail::from_vst3_samples): on the wire `0` means "no tail
 /// *information*, host decides" and `1` means "no tail at all".
 /// `from_vst3_samples` maps `0 => None`, so feeding it a VST2 answer reads
 /// "unknown" as "silent" — and a bounce sizing its render from that adds no
