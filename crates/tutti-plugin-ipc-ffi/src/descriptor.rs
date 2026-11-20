@@ -254,7 +254,8 @@ mod tests {
         assert_eq!(open_fds(), before);
     }
 
-    /// The process's open descriptors, from the kernel's list.
+    /// The process's open descriptors, from the kernel's list. The leak tests
+    /// count this process's, so they rely on nextest's one process per test.
     fn open_fds() -> usize {
         std::fs::read_dir("/dev/fd").unwrap().count()
     }
