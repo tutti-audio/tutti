@@ -625,10 +625,6 @@ impl Jobs {
     /// holds, made before that future exists: a take starts its pump first and hands
     /// it this once the file and the tap are open. Dropped unrun, the run lands
     /// [`WorkerError::Dropped`].
-    #[cfg_attr(
-        not(feature = "capture"),
-        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
-    )]
     pub(crate) fn open_stream<M, R, L>(&mut self, mut land: L) -> StreamRun<M, R>
     where
         M: Send + 'static,
@@ -704,15 +700,6 @@ pub(crate) struct StreamRun<M, R> {
 }
 
 impl<M: Send + 'static, R: Send + 'static> StreamRun<M, R> {
-    /// The landings the job sends its messages through.
-    #[cfg_attr(
-        not(feature = "capture"),
-        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
-    )]
-    pub(crate) fn landings(&self) -> &Landings<M> {
-        &self.landings
-    }
-
     /// Runs the job's body, then lands its end exactly once, after every message:
     /// its result, or [`WorkerError::Panicked`] when it panicked. `make` builds the
     /// body from the landings.
@@ -728,10 +715,7 @@ impl<M: Send + 'static, R: Send + 'static> StreamRun<M, R> {
             });
         self.unfinished.done();
         // After every message: they went down the same channel first.
-        let _ = self
-            .landings
-            .tx
-            .send(Arrival::End(self.landings.id, end));
+        let _ = self.landings.tx.send(Arrival::End(self.landings.id, end));
     }
 }
 

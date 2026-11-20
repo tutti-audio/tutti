@@ -158,10 +158,10 @@ impl<F: Float> Taps<'_, F> {
     ) -> Result<TapReader<F>, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;
         let id = TapId::mint(&self.graph.ids);
-        let reader =
-            self.graph
-                .editor
-                .open_tap_waking(id, sources, align, capacity, Some(bell))?;
+        let reader = self
+            .graph
+            .editor
+            .open_tap_waking(id, sources, align, capacity, Some(bell))?;
         self.graph.edited = true;
         Ok(reader)
     }

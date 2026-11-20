@@ -763,10 +763,12 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// graph is given by the input, so it is on the graph's clock whatever the
     /// device does; the module docs say where it is placed.
     ///
-    /// The take's pump holds one future for the whole take, which blocks while it
-    /// runs: the threaded executor gives it a thread of its own. A
-    /// [`polled`](tutti_platform::Executor::polled) or host executor that does not run
-    /// it never starts the take, and [`Take::finish`] blocks until it does.
+    /// The pump is a future that awaits the tap's bell: the audio thread rings it as it
+    /// writes each block, so the pump runs only when there are frames. The threaded
+    /// executor gives it a thread of its own. On a [`polled`](tutti_platform::Executor::polled)
+    /// executor it runs inside [`update`](Self::update)'s poll, which moves what the tap
+    /// holds (at most its ring, a second of frames) into the sink; a host executor that
+    /// does not run it starts nothing.
     ///
     /// The tap compiles in the next [`update`](Self::update). The pump drops
     /// what comes before the punch-in; [`TakeEvent::Started`] lands in the
@@ -779,8 +781,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// session; [`TakeError::Tap`] when it has left the graph;
     /// [`TakeError::TransportStopped`], [`TakeError::Punch`] and
     /// [`TakeError::Past`] for a punch that cannot be resolved;
-    /// [`TakeError::Open`] and [`TakeError::Width`] for the target. Nothing is
-    /// left open on an error.
+    /// [`TakeError::NotStarted`] when the executor refuses the pump, before any file
+    /// or tap exists; [`TakeError::Open`] and [`TakeError::Width`] for the target.
+    /// Nothing is left open on an error.
     pub fn record(
         &mut self,
         input: &Input<C::Float>,
@@ -811,17 +814,38 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         };
         let window = resolve(&punch, &anchor, playhead.playing())?;
 
+        // The pump starts first, before any file or tap exists, so a refused start is
+        // this call's error and leaves nothing open. It waits for its parts, which come
+        // through `parts` once the target and the tap are open; a take that fails
+        // before then stops it, by the stop flag and a ring.
+        let (bell, mut listener) = self.jobs.bells().bell();
+        let stop = Arc::new(AtomicBool::new(false));
+        let parts: Arc<Mutex<Option<Parts<C::Float>>>> = Arc::default();
+        let (waiting, stopping) = (Arc::clone(&parts), Arc::clone(&stop));
+        self.jobs
+            .spawn_long("tutti-take", async move {
+                let Some((pump, run)) = await_parts(&mut listener, &waiting, &stopping).await
+                else {
+                    return;
+                };
+                run.run(move |landings| async move { pump.run(&landings, &mut listener).await })
+                    .await;
+            })
+            .map_err(|error| TakeError::NotStarted(error.kind()))?;
+        let stop = StopOnDrop { stop, bell };
+
         let (sink, path) = open_target(target, layout, rate)?;
 
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
-        // A second of frames: the pump parks `IDLE_PARK` at a time.
+        // A second of frames: the pump moves what the tap holds each time it wakes.
         let capacity = rate.one_second();
-        let reader = self.graph.taps().open(&ports, TapAlign::Raw, capacity)?;
+        let reader =
+            self.graph
+                .taps()
+                .open_waking(&ports, TapAlign::Raw, capacity, stop.bell.clone())?;
 
         let id = TakeId::mint(self.inputs.takes());
         let shared = Arc::new(Shared::default());
-        let stop = Arc::new(AtomicBool::new(false));
-        let (done, result) = channel();
         let pump = Pump {
             reader,
             sink,
@@ -831,17 +855,11 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             probe: self.inputs.latency_probe(),
             anchor,
             shared: Arc::clone(&shared),
-            stop: Arc::clone(&stop),
+            stop: Arc::clone(&stop.stop),
         };
-        self.jobs.submit_dedicated(
-            "tutti-take",
-            move |landings: &Landings<Started>| {
-                let end = pump.run(landings);
-                // `finish` may have gone: then nobody wants the copy.
-                let _ = done.send(end.clone());
-                end
-            },
-            move |_session, landed, events: &mut Vec<SessionEvent>| {
+        let run = self
+            .jobs
+            .open_stream(move |_session, landed, events: &mut Vec<SessionEvent>| {
                 events.push(SessionEvent::Take(match landed {
                     Stream::Message(Started::Placed(placement)) => {
                         TakeEvent::Started { id, placement }
@@ -853,16 +871,36 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
                         error: failed.into(),
                     },
                 }));
-            },
-        );
+            });
+        *parts.lock().unwrap_or_else(PoisonError::into_inner) = Some((pump, run));
+        stop.bell.ring();
         Ok(Take {
             id,
             window,
             shared,
-            stop: StopOnDrop(stop),
-            result,
+            stop,
             state: std::marker::PhantomData,
         })
+    }
+}
+
+/// What the pump future waits for: the pump and the half of its job that reports.
+type Parts<F> = (Pump<F>, StreamRun<Started, Result<Recorded, TakeError>>);
+
+/// Awaits the pump's parts: `None` when the take stopped before they came.
+async fn await_parts<F: Float>(
+    listener: &mut Listener,
+    parts: &Mutex<Option<Parts<F>>>,
+    stop: &AtomicBool,
+) -> Option<Parts<F>> {
+    loop {
+        if let Some(found) = parts.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            return Some(found);
+        }
+        if stop.load(Ordering::Acquire) {
+            return None;
+        }
+        listener.rung().await;
     }
 }
 
@@ -939,7 +977,11 @@ struct Pump<F: Float> {
 }
 
 impl<F: Float> Pump<F> {
-    fn run(mut self, landings: &Landings<Started>) -> Result<Recorded, TakeError> {
+    async fn run(
+        mut self,
+        landings: &Landings<Started>,
+        listener: &mut Listener,
+    ) -> Result<Recorded, TakeError> {
         let layout = self.reader.layout();
         let mut scratch = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
         let silence = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
@@ -967,7 +1009,8 @@ impl<F: Float> Pump<F> {
                     removed = true;
                     break 'pump;
                 }
-                std::thread::sleep(IDLE_PARK);
+                // The tap rings as it writes a block and when it ends.
+                listener.rung().await;
                 continue;
             }
             let first = self.reader.next_frame();
@@ -1108,7 +1151,6 @@ fn write_silence<F: Float>(
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use tutti_platform::Instant;
     use tutti_units::Bpm;
 
     /// A sink that keeps what it is written.
@@ -1188,26 +1230,29 @@ mod tests {
             .unwrap();
         let ended = Arc::new(Mutex::new(None));
         let into = Arc::clone(&ended);
-        session.jobs.submit_dedicated(
-            "test",
-            move |landings: &Landings<Started>| pump.run(landings),
-            move |_, landed, _| {
-                if let Stream::Done(end) = landed {
-                    *into.lock().unwrap() = Some(end);
-                }
-            },
+        let run = session.jobs.open_stream(move |_, landed, _| {
+            if let Stream::Done(end) = landed {
+                *into.lock().unwrap() = Some(end);
+            }
+        });
+        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let (_bell, mut listener) = bells.bell();
+        // Every frame is in the tap and the punch-out is inside them: the pump runs to
+        // its end in one poll, with nothing to await.
+        let mut pumping = Box::pin(
+            run.run(move |landings| async move { pump.run(&landings, &mut listener).await }),
         );
-        let deadline = Instant::now() + std::time::Duration::from_secs(10);
-        while ended.lock().unwrap().is_none() {
-            assert!(Instant::now() < deadline, "the pump never ended");
-            let _ = session.update();
-            std::thread::yield_now();
-        }
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            pumping.as_mut().poll(&mut cx).is_ready(),
+            "the pump awaited a tap that held every frame it needed"
+        );
+        let _ = session.update();
         let recorded = ended
             .lock()
             .unwrap()
             .take()
-            .unwrap()
+            .expect("the end landed in the update")
             .expect("closed cleanly");
         let kept = kept.lock().unwrap();
         assert_eq!(kept.len(), 250);

@@ -594,6 +594,53 @@ mod tests {
     use super::*;
     use crate::arena::Arena;
 
+    /// **A tap rings its bell as it writes a block and when it ends, and not
+    /// otherwise.** A reader that awaits frames is woken by the audio thread's
+    /// ring; a block the rings had no room for wrote nothing and rings nothing.
+    #[test]
+    fn a_tap_rings_its_bell_after_a_block_and_at_its_end() {
+        use std::future::Future;
+        use std::pin::pin;
+        use std::task::{Context, Poll, Waker};
+
+        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let (bell, mut listener) = bells.bell();
+        let (reader, mut writer) =
+            TapReader::<f32>::named(TapId::of(1), 1, Samples::new(4), Some(bell));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Pending,
+            "nothing written"
+        );
+
+        writer.push_interleaved(Interleaved::new(&[1.0, 2.0], writer.layout()).unwrap());
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Ready(()),
+            "a block rings"
+        );
+
+        // The ring holds four frames: a block of eight finds room for none of it once
+        // it is full.
+        writer.push_interleaved(Interleaved::new(&[0.0; 4], writer.layout()).unwrap());
+        assert_eq!(pin!(listener.rung()).poll(&mut cx), Poll::Ready(()));
+        writer.push_interleaved(Interleaved::new(&[0.0; 4], writer.layout()).unwrap());
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Pending,
+            "a block with no room wrote nothing and rings nothing"
+        );
+
+        reader.end_latch().raise();
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Ready(()),
+            "the end rings"
+        );
+        assert!(reader.source_gone());
+    }
+
     /// An `f64` block reaches an `f64` tap sample for sample, with the
     /// digits `f32` cannot hold.
     #[test]
