@@ -30,7 +30,7 @@ use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TapReader, TransportPosition,
     Unforkable,
 };
-use tutti_graph::{NodeKey, TapAlign, TapId};
+use tutti_graph::{NodeKey, TapId, TapOptions};
 use tutti_graph::{OutPort, Source as Origin};
 use tutti_session::{PumpLoop, PumpPass};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -127,8 +127,7 @@ fn graph_tap(capacity: usize) -> (Graph, TapReader) {
         .open_tap(
             TapId::of(1),
             vec![port(0), port(1)],
-            TapAlign::ToOutput,
-            Samples::new(capacity),
+            TapOptions::new(Samples::new(capacity)),
         )
         .expect("the sources exist");
     ed.commit().expect("compiles");

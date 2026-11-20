@@ -14,7 +14,7 @@ use tutti_graph::{
     Editor, Executor, ForkCause, ForkMode, ForkSource, ForkTarget, Forked, IntoNode, MissingSource,
     Node, NodeParts, Op, TapReader, TransportPosition,
 };
-use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapSpec};
+use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapOptions, TapSpec};
 use tutti_units::{Beat, Bpm, Frame, Samples};
 
 /// A `Kind` whose fork is a fresh node of the same kind.
@@ -204,25 +204,23 @@ const BLOCK: usize = 100;
 fn run(r: &mut Rig, blocks: usize) -> Read {
     let cap = Samples::new(1 << 16);
     let mut aligned =
-        r.ed.open_tap(TapId::of(1), r.gains.clone(), TapAlign::ToOutput, cap)
+        r.ed.open_tap(TapId::of(1), r.gains.clone(), TapOptions::new(cap))
             .expect("the sources exist");
     let mut raw =
         r.ed.open_tap(
             TapId::of(2),
             vec![r.gains[0], r.gains[5]],
-            TapAlign::Raw,
-            cap,
+            TapOptions::new(cap).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     let mut single =
-        r.ed.open_tap(TapId::of(3), vec![r.gains[2]], TapAlign::ToOutput, cap)
+        r.ed.open_tap(TapId::of(3), vec![r.gains[2]], TapOptions::new(cap))
             .expect("the sources exist");
     let mut edges =
         r.ed.open_tap(
             TapId::of(4),
             vec![Source::Global(0), Source::Zero],
-            TapAlign::ToOutput,
-            cap,
+            TapOptions::new(cap),
         )
         .expect("the sources exist");
     commit(r);
@@ -334,8 +332,7 @@ fn a_closed_tap_leaves_no_op() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0], r.gains[5]],
-            TapAlign::Raw,
-            Samples::new(64),
+            TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -360,8 +357,7 @@ fn a_closed_tap_leaves_no_op() {
         r.ed.open_tap(
             TapId::of(2),
             vec![r.gains[0]],
-            TapAlign::ToOutput,
-            Samples::new(64),
+            TapOptions::new(Samples::new(64)),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -381,8 +377,7 @@ fn a_full_ring_counts_what_it_lost_and_a_closed_tap_receives_nothing() {
         r.ed.open_tap(
             TapId::of(1),
             r.gains.clone(),
-            TapAlign::Raw,
-            Samples::new(150),
+            TapOptions::new(Samples::new(150)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -415,8 +410,7 @@ fn next_frame_is_the_graph_frame_of_the_next_frame_read() {
         r.ed.open_tap(
             TapId::of(1),
             r.gains[..2].to_vec(),
-            TapAlign::Raw,
-            Samples::new(1 << 12),
+            TapOptions::new(Samples::new(1 << 12)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -458,8 +452,7 @@ fn a_lost_block_advances_next_frame_and_a_contiguous_read_stops_at_it() {
         r.ed.open_tap(
             TapId::of(1),
             r.gains[..2].to_vec(),
-            TapAlign::Raw,
-            Samples::new(150),
+            TapOptions::new(Samples::new(150)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -508,8 +501,7 @@ fn a_read_is_whole_frames() {
         r.ed.open_tap(
             TapId::of(1),
             r.gains[..3].to_vec(),
-            TapAlign::Raw,
-            Samples::new(256),
+            TapOptions::new(Samples::new(256)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -541,8 +533,7 @@ fn a_reader_dropped_first_is_pruned_and_freed_on_the_control_side() {
         r.ed.open_tap(
             TapId::of(1),
             r.gains.clone(),
-            TapAlign::ToOutput,
-            Samples::new(64),
+            TapOptions::new(Samples::new(64)),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -579,8 +570,7 @@ fn a_reader_dropped_on_the_audio_thread_panics() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0]],
-            TapAlign::Raw,
-            Samples::new(8),
+            TapOptions::new(Samples::new(8)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     let _inside = tutti_rt::RtScope::enter();
@@ -601,8 +591,7 @@ fn a_fork_carries_no_tap_and_an_export_reads_its_own_losslessly() {
         r.ed.open_tap(
             TapId::of(1),
             r.gains.clone(),
-            TapAlign::ToOutput,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -618,8 +607,7 @@ fn a_fork_carries_no_tap_and_an_export_reads_its_own_losslessly() {
         .open_tap(
             TapId::of(1),
             r.gains.clone(),
-            TapAlign::ToOutput,
-            Samples::new(MAX_BLOCK),
+            TapOptions::new(Samples::new(MAX_BLOCK)),
         )
         .expect("the sources exist");
     fed.commit().expect("compiles");
@@ -662,8 +650,7 @@ fn removing_a_tapped_node_silences_its_lane() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0], r.gains[1]],
-            TapAlign::Raw,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -706,8 +693,7 @@ fn a_tap_whose_every_source_was_removed_drains_then_ends() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0]],
-            TapAlign::Raw,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -742,8 +728,7 @@ fn a_tap_with_a_source_left_does_not_end() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0], r.gains[1]],
-            TapAlign::Raw,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -764,8 +749,7 @@ fn closing_a_tap_twice_is_refused_by_name() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0]],
-            TapAlign::Raw,
-            Samples::new(8),
+            TapOptions::new(Samples::new(8)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -817,8 +801,12 @@ fn concurrent_drain(workers: usize, width: usize, align: TapAlign) {
         .map(|k| k * 5 / (width as u64 - 1))
         .collect();
     let tap =
-        r.ed.open_tap(TapId::of(1), sources, align, Samples::new(256))
-            .expect("the sources exist");
+        r.ed.open_tap(
+            TapId::of(1),
+            sources,
+            TapOptions::new(Samples::new(256)).align(align),
+        )
+        .expect("the sources exist");
     commit(&mut r);
     let delay = |k: u64| match align {
         TapAlign::Raw => 5 * k,
@@ -915,8 +903,7 @@ fn opening_an_id_again_replaces_the_tap() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0]],
-            TapAlign::Raw,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -925,8 +912,7 @@ fn opening_an_id_again_replaces_the_tap() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[0]],
-            TapAlign::Raw,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -954,8 +940,7 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
         r.ed.open_tap(
             TapId::of(1),
             r.gains[..3].to_vec(),
-            TapAlign::Raw,
-            Samples::new(64),
+            TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -977,8 +962,7 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
         r.ed.open_tap(
             TapId::of(1),
             vec![r.gains[2]],
-            TapAlign::Raw,
-            Samples::new(256),
+            TapOptions::new(Samples::new(256)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -1055,8 +1039,7 @@ fn a_narrowed_node_silences_the_tap_lanes_past_its_width_and_commits() {
             r.ed.open_tap(
                 TapId::of(1),
                 vec![port(1, 0), port(1, 1)],
-                TapAlign::Raw,
-                Samples::new(4096),
+                TapOptions::new(Samples::new(4096)).align(TapAlign::Raw),
             )
             .expect("the sources exist");
         commit(&mut r);
@@ -1088,8 +1071,7 @@ fn a_tap_on_a_global_input_that_goes_missing_reads_silence() {
         r.ed.open_tap(
             TapId::of(1),
             vec![Source::Global(0), Source::Global(1)],
-            TapAlign::Raw,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("both inputs exist when it opens");
     // The graph goes back to one input before anything is committed.
@@ -1114,7 +1096,11 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
     wide(&mut r, 0.5, 2);
     let cap = Samples::new(1024);
     let tap = |r: &mut Rig, sources: Vec<Source>| {
-        r.ed.open_tap(TapId::of(9), sources, TapAlign::Raw, cap)
+        r.ed.open_tap(
+            TapId::of(9),
+            sources,
+            TapOptions::new(cap).align(TapAlign::Raw),
+        )
     };
     assert_eq!(
         tap(&mut r, vec![port(1, 0), port(1, 5)]).err(),
@@ -1186,8 +1172,7 @@ fn a_reused_key_is_not_read_by_the_old_tap() {
         r.ed.open_tap(
             TapId::of(1),
             vec![port(1, 0)],
-            TapAlign::Raw,
-            Samples::new(1024),
+            TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
     commit(&mut r);
@@ -1220,8 +1205,7 @@ fn an_aligned_tap_across_a_narrowing_keeps_the_other_lanes_level() {
         r.ed.open_tap(
             TapId::of(1),
             vec![port(1, 0), port(1, 1), r.gains[3]],
-            TapAlign::ToOutput,
-            Samples::new(4096),
+            TapOptions::new(Samples::new(4096)),
         )
         .expect("the sources exist");
     commit(&mut r);

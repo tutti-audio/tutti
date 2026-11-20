@@ -14,7 +14,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor,
     FeedbackFrom, InPort, Io, Node, NodeKey, OutPort, Prepare, Rewired, Shape, Sink, Source,
-    Status, TapAlign, TapId, TransportPosition, Unforkable, Wired, WiredMask,
+    Status, TapAlign, TapId, TapOptions, TransportPosition, Unforkable, Wired, WiredMask,
 };
 use tutti_units::{Samples, Tail};
 
@@ -175,8 +175,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
         .open_tap(
             TapId::of(1),
             vec![Source::Node(out(PROBE, 1))],
-            TapAlign::Raw,
-            Samples::new(64),
+            TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
@@ -402,8 +401,7 @@ fn a_shape_with_64_ports_reads_bit_63() {
         .open_tap(
             TapId::of(1),
             vec![Source::Node(out(PROBE, 63))],
-            TapAlign::Raw,
-            Samples::new(64),
+            TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     let _ = ed.commit().expect("commits");

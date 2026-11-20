@@ -8,7 +8,7 @@ use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TapReader, TransportPosition,
     Unforkable,
 };
-use tutti_graph::{NodeKey, TapAlign, TapId};
+use tutti_graph::{NodeKey, TapAlign, TapId, TapOptions};
 use tutti_graph::{OutPort, Source as Origin};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -71,8 +71,7 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
         .open_tap(
             TapId::of(1),
             vec![port(0), port(1)],
-            TapAlign::ToOutput,
-            Samples::new(ring),
+            TapOptions::new(Samples::new(ring)),
         )
         .expect("the sources exist");
     ed.commit().expect("compiles");
@@ -180,8 +179,7 @@ fn the_layout_follows_the_taps_width() {
             .open_tap(
                 TapId::of(width as u64),
                 vec![Origin::Zero; width],
-                TapAlign::Raw,
-                Samples::new(8),
+                TapOptions::new(Samples::new(8)).align(TapAlign::Raw),
             )
             .expect("the sources exist");
         assert_eq!(
