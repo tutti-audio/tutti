@@ -85,7 +85,8 @@ pub struct UmpEndpoint {
     /// answers) has none.
     pub device: Option<DeviceIdentity>,
     /// Its Product Instance Id (§7.1.5), when the record holds a valid one. The
-    /// record's field is 128 bytes and the Id at most 42, so every Id fits.
+    /// record's field is 128 bytes and the Id at most 42, so every Id fits. An
+    /// empty field is the record's "no Id", so an empty Id reads back as `None`.
     pub instance: Option<ProductInstanceId>,
     /// Its blocks, by number, as many as the sequencer answered for.
     pub blocks: Vec<UmpBlock>,
@@ -630,10 +631,9 @@ mod tests {
     }
 
     /// The record's numbers are the Device Identity Notification's bytes (M2-104
-    /// §7.1.3): word 1 holds the three
-    /// manufacturer id bytes (`00 21 09` for a 21-bit id), word 2 the family
-    /// then model, each least significant byte first, and word 3 the revision in
-    /// order. Family and model are 16-bit numbers with the second byte high.
+    /// §7.1.3): word 1 holds the three manufacturer id bytes (`00 21 09` for a
+    /// 21-bit id), word 2 the family then model, each least significant byte
+    /// first, and word 3 the revision in order. Family and model are 16-bit numbers with the second byte high.
     #[test]
     fn the_identity_words_are_the_notification_bytes_in_wire_order() {
         let words = IdentityWords::of(&identity());
