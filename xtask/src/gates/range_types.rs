@@ -136,6 +136,11 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: a test-local codec fixture, never read from a document",
     ),
     (
+        "crates/tutti-plugin-types/src/widths.rs",
+        "Widths",
+        "permanent: one flag, and both of its values are a width set",
+    ),
+    (
         "crates/tutti-plugin-types/src/format.rs",
         "Uid",
         "permanent: a class id is any sixteen bytes; it has no range, the gate flags only the private field under the derive",

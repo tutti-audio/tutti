@@ -675,7 +675,7 @@ pub mod plugin {
             CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
         };
         pub use tutti_plugin_types::{
-            Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid,
+            Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid, Widths,
         };
     }
 }

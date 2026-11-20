@@ -2571,7 +2571,13 @@ mod tests {
                 .find(|(a, _)| *a == id)
                 .map(|&(_, v)| Normalized::clamped(f64::from(v)))
         }
-        fn set_parameter_value(&self, _id: ParamId, _value: Normalized) {}
+        fn set_parameter_value(
+            &self,
+            _id: ParamId,
+            _value: Normalized,
+        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+            Ok(())
+        }
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
             None
         }

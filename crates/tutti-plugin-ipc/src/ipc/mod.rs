@@ -376,6 +376,12 @@ impl Link {
         Ok(list)
     }
 
+    /// The declared list if one is kept now, without asking the plugin or
+    /// waiting: `None` before the first fill and after a forgetting.
+    pub(crate) fn declared_if_known(&self) -> Option<Arc<[(ParamId, ParamAccess)]>> {
+        self.events.declared.get().ok()
+    }
+
     pub(crate) fn tail(&self) -> PluginTail {
         *self.events.tail.lock_recover()
     }

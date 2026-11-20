@@ -125,7 +125,8 @@ pub(crate) mod wire;
 /// - **Version 46** replaces `LoadPlugin`'s `load` (a string choice of plugin)
 ///   with `plugin`, an optional `PluginId`, and `PluginLoaded` names the plugin
 ///   it opened (`id`); a descriptor carries no id.
-pub const PROTOCOL_VERSION: u32 = 46;
+/// - **Version 47**: `PluginDescriptor` carries `widths`.
+pub const PROTOCOL_VERSION: u32 = 47;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///

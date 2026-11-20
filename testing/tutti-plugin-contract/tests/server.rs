@@ -277,12 +277,14 @@ fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathB
         a.controller(),
         Param::Meter.id(),
         Normalized::of(spec::WRITE),
-    );
+    )
+    .expect("a declared parameter");
     AnyThread::set_parameter_value(
         a.controller(),
         Param::Level.id(),
         Normalized::of(spec::WRITE),
-    );
+    )
+    .expect("a declared parameter");
     // The writes travel on the control connection and the blocks on the audio
     // one: blocks run until the writable one has landed.
     let guard = HangGuard::new();

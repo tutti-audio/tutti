@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tutti_buffers::LayoutError;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
-use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
+use tutti_plugin_types::{
+    BusChannels, ChannelLayout, EditorPresence, PluginDescriptor, PluginVersion, Widths,
+};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginId, PluginRef};
 
 /// What to load: which library of a bundle and which plugin of the library.
@@ -95,6 +97,10 @@ impl ClapLoaded {
         let (ports, supports_f64) = read_audio_ports(main, &self.plugin)?;
         self.ports = ports;
         self.audio.supports_f64 = supports_f64;
+        // The descriptors state the widths the ports declare now: the measured
+        // one is rebuilt on its next ask.
+        self.unmeasured.widths = Some(Widths::new(supports_f64));
+        self.descriptor.take();
         Ok(())
     }
 
@@ -174,7 +180,10 @@ impl ClapLoaded {
             plugin,
             host_state,
             descriptor: std::cell::OnceCell::new(),
-            unmeasured: descriptor_of(&plugin_info, EditorPresence::Unknown),
+            unmeasured: PluginDescriptor {
+                widths: Some(Widths::new(audio.supports_f64)),
+                ..descriptor_of(&plugin_info, EditorPresence::Unknown)
+            },
             info: plugin_info,
             audio,
             ports,

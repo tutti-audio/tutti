@@ -89,6 +89,9 @@ pub enum Error {
     /// one), and no endpoint is created in it.
     #[error("no endpoint is created in a reserved protocol")]
     ReservedProtocol,
+    /// A message does not fit the event list it is sent in.
+    #[error("the message does not fit the event list")]
+    EventListFull,
     /// The process's client has been started: it has one, and a second is not made.
     #[error("the process's CoreMIDI client is already started")]
     ClientExists,
