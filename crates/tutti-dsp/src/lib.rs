@@ -29,7 +29,8 @@
 //! - **Cascaded sections** (`sos/`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose
 //!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`] and
 //!   [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`] peaking
-//!   equalizer, the [`Tilt`] shelf, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
+//!   equalizer, the [`Tilt`] shelf, the Audio EQ [`Cookbook`] filters, the [`GraphicBands`]
+//!   graphic equalizer design, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
 //!   one as state-variable sections over [`SosCoefficients`].
 //! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
@@ -268,8 +269,9 @@ pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;
 pub use sos::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, KWeighting, LinkwitzRiley,
-    MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank, SosCoefficients, SosError, Tilt,
+    Butterworth, ButterworthOrder, ButterworthOrderError, Cookbook, CutResponse, GraphicBands,
+    KWeighting, LinkwitzRiley, MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank,
+    SosCoefficients, SosError, Tilt,
 };
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,

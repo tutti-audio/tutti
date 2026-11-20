@@ -17,7 +17,9 @@
 //!   coefficient solve shared across the channels), `EqBandNode`, `CutFilterNode`, a
 //!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave,
 //!   `BellFilterNode`, a peaking equalizer matched to the analog bell up to Nyquist, and
-//!   `TiltFilterNode`, a first-order tilt about a pivot, and
+//!   `TiltFilterNode`, a first-order tilt about a pivot,
+//!   `GraphicEqNode`, a bank of cookbook peaking bells at the ISO 266 octave or third-octave
+//!   centers, and
 //!   `EnvelopeFilterNode`, an SVF whose cutoff follows the input's level.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
@@ -206,7 +208,7 @@
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
-//!   [`TiltFilterNode`], [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
+//!   [`TiltFilterNode`], [`GraphicEqNode`] ([`GraphicBands`]), [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
 //!   linear-phase equalizer: a [`tutti_dsp::Fir`] through the convolver); the coefficient solvers
 //!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
 //!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
@@ -325,7 +327,11 @@ pub use filter::{
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
+pub use filter::{
+    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
+};
 pub use tutti_dsp::EnvelopeFilterControls;
+pub use tutti_dsp::GraphicBands;
 pub use tutti_dsp::{ButterworthOrder, CutResponse};
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfDesign`, `LadderDesign`, `CrossoverModel`) are

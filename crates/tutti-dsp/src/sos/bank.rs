@@ -7,8 +7,8 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use super::{Sos, svf_form};
 use crate::{Lerp, Ramp, SimdLanes, SvfCoefficients, svf_step};
 
-/// The most sections a [`SosCoefficients`] holds: order 16 is eight.
-pub const MAX_SECTIONS: usize = 8;
+/// The most sections a [`SosCoefficients`] holds: a 31-band graphic equalizer's.
+pub const MAX_SECTIONS: usize = 32;
 
 /// The coefficients [`SosBank`] reads: one [`SvfCoefficients`] per section of a [`Sos`], in
 /// the arithmetic `F` it runs in. A blend is section by section.

@@ -18,15 +18,15 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_dsp::{GAIN_RAMP, Ramp};
-use tutti_graph::{Io, ParamSetBuilder};
+use tutti_graph::{Io, MAX_PARAM_PORTS, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_SIGNALS;
 use crate::ramp::LastGood;
 
-/// The most controls a kernel has: the compressor's six, the gate's five and the
-/// limiter's three fit with room.
-const MAX_CONTROLS: usize = 16;
+/// The most controls a kernel has: as many as a node has param ports, which the 31-band
+/// graphic equalizer's gains fill but for one.
+const MAX_CONTROLS: usize = MAX_PARAM_PORTS;
 
 /// A kernel's controls as a list of `f64` cells.
 pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
