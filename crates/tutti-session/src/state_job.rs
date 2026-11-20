@@ -23,10 +23,10 @@ job_kind! {
 pub enum StateJobFailed {
     /// The plugin's own refusal: it is gone, busy, refused, has no state route,
     /// or an in-process save the main thread did not run in time
-    /// ([`StateError::Unavailable`](tutti_plugin::error::StateError::Unavailable)).
+    /// ([`StateError::Unavailable`](tutti_plugin_types::StateError::Unavailable)).
     #[cfg(feature = "plugin")]
     #[error(transparent)]
-    Plugin(#[from] tutti_plugin::error::StateError),
+    Plugin(#[from] tutti_plugin_types::StateError),
     /// The device's failure: its Property Exchange call for the State resource
     /// ended without the state, or no call was made.
     #[cfg(feature = "midi-hardware")]
