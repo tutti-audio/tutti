@@ -159,6 +159,35 @@ fn an_output_offset_shifts_the_send_times() {
     assert!((shift - 0.25).abs() < 0.02, "shifted by {shift} s");
 }
 
+/// **A written output latency is the terms' own on a device clock.** A device
+/// session's terms start at the default (no latency, no offset); after a write
+/// of 12 ms and a +3 ms offset and one update, `output_terms` reports exactly
+/// that latency, beside the audio output's.
+#[test]
+fn a_written_output_latency_is_the_terms_own_on_a_device_clock() {
+    let wire = Wire::default();
+    let (mut s, stream) = rig(&wire);
+    let before = s.midi().output_terms().expect("a device session has terms");
+    assert_eq!(before.latency, OutputLatency::default());
+
+    let written = OutputLatency::new(
+        Seconds::new(0.012),
+        OutputOffset::new(Seconds::new(0.003)).unwrap(),
+    )
+    .unwrap();
+    let target = s.midi().output_latency();
+    s.set(target.to(written)).unwrap();
+    let _ = render(&stream, 2, Some(Duration::from_millis(40)));
+    let _ = s.update();
+    let terms = s.midi().output_terms().unwrap();
+    assert_eq!(
+        terms.latency, written,
+        "the write is the terms' own latency"
+    );
+    assert_eq!(terms.audio_output, Some(Seconds::new(0.04)));
+    assert!(terms.is_complete());
+}
+
 /// **While the audio latency is unreported, events are timed with the terms
 /// known, and the terms say so.** Before the stream's first callback and after
 /// one that reports nothing, `output_terms` is incomplete and ticks leave at
