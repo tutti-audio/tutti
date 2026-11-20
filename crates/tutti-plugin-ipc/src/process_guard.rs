@@ -313,13 +313,13 @@ fn pause(slice: Duration) {
 
 /// The exit task's future. `finish` is held by the future from its creation,
 /// so a future dropped before its first poll raises the latch as well.
-fn exit_task(
+async fn exit_task(
     process: Arc<Mutex<Option<Reaped>>>,
     wait: ExitWait,
     watch: Arc<ServerWatch>,
     finish: Finish,
-) -> impl std::future::Future<Output = ()> + Send + 'static {
-    async move { declare_exit(&process, &wait, &watch, finish) }
+) {
+    declare_exit(&process, &wait, &watch, finish);
 }
 
 /// The exit task: declares the process's end to `watch`. It waits on the OS in
