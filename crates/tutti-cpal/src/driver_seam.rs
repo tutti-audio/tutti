@@ -37,7 +37,7 @@ pub const PREFERRED_QUANTUM: MaxBlock = MaxBlock::of(Samples::new(512));
 /// [`Error::InvalidConfig`] for a type the driver does not build. `I8`, `I16`,
 /// `I32`, `F32` and `F64` are themselves; `U8`, `U16` and `U32` are offset
 /// binary and report the signed type of their width.
-fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
+pub(crate) fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
     match format {
         cpal::SampleFormat::I8 | cpal::SampleFormat::U8 => Ok(SampleFormat::I8),
         cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => Ok(SampleFormat::I16),
@@ -48,6 +48,63 @@ fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
             "Unsupported sample format: {other:?}"
         ))),
     }
+}
+
+/// How a device's `offered` format stands to the format `wanted`, best first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Fit {
+    /// The same type: signed or float.
+    Exact,
+    /// The offset-binary type of the same width, opened through the signed
+    /// format with the sign bit flipped.
+    OffsetBinary,
+}
+
+/// Whether a device format `offered` opens as the app's `wanted`, and how.
+/// `None` for a format of another kind or width.
+pub(crate) fn fit(offered: cpal::SampleFormat, wanted: SampleFormat) -> Option<Fit> {
+    if spec_format(offered).ok()? != wanted {
+        return None;
+    }
+    Some(match offered {
+        cpal::SampleFormat::U8 | cpal::SampleFormat::U16 | cpal::SampleFormat::U32 => {
+            Fit::OffsetBinary
+        }
+        _ => Fit::Exact,
+    })
+}
+
+/// The output config to open: the device's `default` when the app chose no
+/// format, else the supported range at the default's rate and width that
+/// opens as `wanted` (a signed type before its offset-binary twin).
+///
+/// Pure, so it is testable with no device.
+///
+/// # Errors
+/// [`Error::OutputFormatUnavailable`] when no range offers `wanted`.
+pub(crate) fn choose_output_config(
+    supported: impl Iterator<Item = cpal::SupportedStreamConfigRange>,
+    default: cpal::SupportedStreamConfig,
+    wanted: Option<SampleFormat>,
+    device_name: &str,
+) -> Result<cpal::SupportedStreamConfig> {
+    let Some(wanted) = wanted else {
+        return Ok(default);
+    };
+    let rate = default.sample_rate();
+    supported
+        .filter(|r| {
+            r.channels() == default.channels()
+                && r.min_sample_rate() <= rate
+                && rate <= r.max_sample_rate()
+        })
+        .filter_map(|r| fit(r.sample_format(), wanted).map(|f| (f, r)))
+        .min_by_key(|(f, _)| *f)
+        .map(|(_, r)| r.with_sample_rate(rate))
+        .ok_or_else(|| Error::OutputFormatUnavailable {
+            device_name: device_name.to_owned(),
+            format: wanted,
+        })
 }
 
 /// A device's default output config, as the spec a stream opens at and the
@@ -241,6 +298,8 @@ impl CpalDriver {
     }
 }
 
+#[cfg(test)]
+mod choice_tests;
 #[cfg(test)]
 mod format_tests;
 #[cfg(test)]

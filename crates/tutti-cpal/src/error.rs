@@ -85,6 +85,34 @@ pub enum Error {
         graph: tutti_units::SampleRate,
     },
 
+    /// A capture device does not offer the sample format the app chose at the
+    /// graph's rate ([`MicConfig::sample_format`](crate::MicConfig)).
+    ///
+    /// Returned by `MicIn::open` (feature `capture`): the format is never
+    /// swapped for another.
+    #[error("input device {device_name:?} does not offer {format:?} samples at {rate} Hz")]
+    InputFormatUnavailable {
+        /// The input device's name, as the OS reports it.
+        device_name: String,
+        /// The format that was asked for.
+        format: tutti_buffers::SampleFormat,
+        /// The graph's rate the device was asked to run at.
+        rate: tutti_units::SampleRate,
+    },
+
+    /// An output device does not offer the sample format the app chose
+    /// ([`OutputConfig::sample_format`](crate::OutputConfig::sample_format)) at
+    /// its default rate and width.
+    ///
+    /// The format is never swapped for another.
+    #[error("output device {device_name:?} does not offer {format:?} samples")]
+    OutputFormatUnavailable {
+        /// The output device's name, as the OS reports it.
+        device_name: String,
+        /// The format that was asked for.
+        format: tutti_buffers::SampleFormat,
+    },
+
     /// The inputs asked of a capture device cannot be selected: none were
     /// named, or one is past the device's last.
     ///

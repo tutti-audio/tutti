@@ -3253,6 +3253,7 @@ dependencies = [
  "interprocess",
  "libc",
  "tempfile",
+ "thiserror 2.0.21",
  "tracing",
  "tracing-subscriber",
  "tutti-au-host",

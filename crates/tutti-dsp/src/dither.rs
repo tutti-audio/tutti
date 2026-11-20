@@ -4,6 +4,7 @@
 //! RNG that continues across blocks. [`DitherNoise`] is that RNG and the two
 //! noise shapes; which signals to dither, and at what depth, is the caller's.
 
+pub(crate) mod shaping;
 pub(crate) mod sink;
 
 use tutti_buffers::{Float, InterleavedMut};

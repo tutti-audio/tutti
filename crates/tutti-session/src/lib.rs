@@ -146,7 +146,9 @@ mod value;
 mod watch;
 
 #[cfg(feature = "analyze")]
-pub use analyze::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
+pub use analyze::{
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+};
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
@@ -293,7 +295,7 @@ pub use transport_handle::TransportHandle;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
-pub use tutti_dsp::DitherSink;
+pub use tutti_dsp::{DitherSink, NoiseShaping};
 pub use tutti_engine::{BlockDates, OutputPlacement, OutputTapOpen, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{

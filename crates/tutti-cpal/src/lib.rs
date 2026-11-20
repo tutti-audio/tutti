@@ -119,6 +119,7 @@ mod output;
 mod owner;
 mod poller;
 mod roster;
+mod supported;
 
 #[cfg(feature = "capture")]
 mod mic;
@@ -128,9 +129,10 @@ pub use driver_seam::{CpalDriver, CpalStream, PREFERRED_QUANTUM};
 pub use error::{Error, Result};
 pub use host::{AudioHost, DeviceHost, DeviceSelector, available_hosts};
 pub use listing::{DeviceListing, Listed};
-pub use output::{AudioEngine, Resolved};
+pub use output::{AudioEngine, OutputConfig, Resolved};
 pub use poller::{DevicePoller, MIN_POLL_INTERVAL};
 pub use roster::{DeviceChange, DeviceId, DeviceRoster, Direction, Snapshot, SnapshotSource};
+pub use supported::SupportedConfig;
 
 // Re-exported because this crate's public surface already names cpal types
 // (cpal errors inside `Error`), so a consumer needs the vocabulary and should

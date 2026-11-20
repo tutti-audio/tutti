@@ -46,7 +46,7 @@ use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology, SampleFormat};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
@@ -54,7 +54,7 @@ use tutti_rt::Drained;
 use tutti_units::Samples;
 use tutti_units::{SampleRate, Seconds};
 
-use crate::driver_seam::device_rate;
+use crate::driver_seam::{Fit, device_rate, fit};
 use crate::edge;
 use crate::error::{Error, Result};
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
@@ -140,10 +140,11 @@ fn default_inputs(width: ChannelLayout) -> [usize; 2] {
     [0, usize::from(width.count() > 1)]
 }
 
-/// What [`MicIn`] opens: the host and device, which inputs, and where the
-/// capture delay is reported. `Default` is the default host's default input
-/// device, its first two inputs, and a delay cell of the mic's own; build one
-/// by struct update.
+/// What [`MicIn`] opens: the host and device, which inputs, the sample format,
+/// and where the capture delay is reported. `Default` is the default host's
+/// default input device, its first two inputs, the device's float format when
+/// it has one, and a delay cell of the mic's own; build one by struct update or
+/// by the chained [`sample_format`](Self::sample_format).
 ///
 /// ```
 /// use tutti_cpal::{AudioHost, DeviceSelector, MicConfig};
@@ -166,6 +167,12 @@ pub struct MicConfig {
     /// the device's input `inputs[i]`. `None`: the first two (a mono device's
     /// one input on both sides).
     pub inputs: Option<Vec<usize>>,
+    /// The sample format to open the device at, at the graph's rate. `None`:
+    /// `F32` when the device offers it, else its first format. A format the
+    /// device does not offer is [`Error::InputFormatUnavailable`], never
+    /// another format. An unsigned device format opens as the signed format of
+    /// its width (a `U16` device offers `I16`).
+    pub sample_format: Option<SampleFormat>,
     /// Where the capture callback reports the delay between a frame's capture
     /// and its callback (`None`: a cell of the mic's own,
     /// [`MicIn::latency`]). A host that reopens its mic hands the same cell to
@@ -183,9 +190,19 @@ impl Default for MicConfig {
             host: AudioHost::default(),
             device: DeviceSelector::default(),
             inputs: None,
+            sample_format: None,
             latency: None,
             monitor_depth: MONITOR_RING,
         }
+    }
+}
+
+impl MicConfig {
+    /// Opens the device at `format` ([`sample_format`](Self::sample_format)).
+    #[must_use]
+    pub fn sample_format(mut self, format: SampleFormat) -> Self {
+        self.sample_format = Some(format);
+        self
     }
 }
 
@@ -196,8 +213,9 @@ impl<F: Float> MicIn<F> {
     /// The rate is a parameter rather than read off the device because nothing
     /// downstream resamples: an inlet renders the mic into the graph
     /// as-is, so the device must run at `graph_rate`. A device whose supported
-    /// range covers `graph_rate` is opened at it (preferring `f32` samples);
-    /// otherwise its default config is used if it already matches.
+    /// range covers `graph_rate` is opened at it, at the format
+    /// [`MicConfig::sample_format`] chose (preferring `f32` samples when none
+    /// is chosen); otherwise its default config is used if it already matches.
     ///
     /// Asking for a rate does not prove a device produces it natively: ALSA
     /// plug devices, for one, advertise wide ranges and resample internally.
@@ -205,7 +223,8 @@ impl<F: Float> MicIn<F> {
     /// # Errors
     /// [`Error::HostUnavailable`] if the host cannot be opened;
     /// [`Error::SampleRateMismatch`] if the device cannot run at
-    /// `graph_rate`; [`Error::InvalidDevice`] if the device does not resolve or
+    /// `graph_rate`; [`Error::InputFormatUnavailable`] if it runs at
+    /// `graph_rate` but not at the chosen format; [`Error::InvalidDevice`] if the device does not resolve or
     /// its configs cannot be queried; [`Error::DeviceNotAvailable`] if it has
     /// no default input config; [`Error::InvalidConfig`] for an unsupported
     /// sample format; [`Error::BuildStream`] / [`Error::PlayStream`] from
@@ -258,6 +277,7 @@ impl<F: Float> MicIn<F> {
                 .default_input_config()
                 .map_err(Error::DeviceNotAvailable)?,
             graph_rate,
+            mic.sample_format,
             &name,
         )?;
         let sample_rate = device_rate(config.sample_rate())?;
@@ -650,46 +670,71 @@ fn build_input<T: cpal::SizedSample + 'static, F: Float>(
 /// device's capabilities directly.
 ///
 /// The rules, in order:
-/// 1. a supported range whose `[min, max]` contains `graph_rate` — preferring
-///    `F32`, the float format, which needs no integer scaling;
-/// 2. otherwise the device's own default, if it happens to match;
-/// 3. otherwise [`Error::SampleRateMismatch`], naming both rates.
+/// 1. a supported range whose `[min, max]` contains `graph_rate` and whose
+///    format opens as `wanted` (a signed type before its offset-binary twin);
+///    with no `wanted`, `F32`, the float format, which needs no integer
+///    scaling, else the first such range;
+/// 2. otherwise the device's own default, if it matches the rate and the
+///    format;
+/// 3. otherwise [`Error::InputFormatUnavailable`] when a range covers the rate
+///    but none offers `wanted`, else [`Error::SampleRateMismatch`], naming
+///    both rates.
 pub(crate) fn choose_input_config(
     supported: impl Iterator<Item = cpal::SupportedStreamConfigRange>,
     fallback: cpal::SupportedStreamConfig,
     graph_rate: SampleRate,
+    wanted: Option<SampleFormat>,
     device_name: &str,
 ) -> Result<cpal::SupportedStreamConfig> {
-    let wanted = graph_rate.get().round() as cpal::SampleRate;
+    let rate = graph_rate.get().round() as cpal::SampleRate;
 
-    let mut best: Option<cpal::SupportedStreamConfig> = None;
+    let mut best: Option<(Fit, cpal::SupportedStreamConfig)> = None;
+    let mut covered = false;
     for range in supported {
-        if range.min_sample_rate() > wanted || range.max_sample_rate() < wanted {
+        if range.min_sample_rate() > rate || range.max_sample_rate() < rate {
             continue;
         }
-        let candidate = range.with_sample_rate(wanted);
-        // Prefer F32: `build_input` scales every integer format per sample,
-        // and this one is already a float.
-        if candidate.sample_format() == cpal::SampleFormat::F32 {
-            return Ok(candidate);
-        }
-        if best.is_none() {
-            best = Some(candidate);
+        covered = true;
+        let candidate = range.with_sample_rate(rate);
+        let Some(by) = (match wanted {
+            Some(format) => fit(candidate.sample_format(), format),
+            // Prefer F32: `build_input` scales every integer format per
+            // sample, and this one is already a float.
+            None if candidate.sample_format() == cpal::SampleFormat::F32 => {
+                return Ok(candidate);
+            }
+            None => Some(Fit::Exact),
+        }) else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(held, _)| by < *held) {
+            best = Some((by, candidate));
         }
     }
-    if let Some(c) = best {
+    if let Some((_, c)) = best {
         return Ok(c);
     }
 
-    if fallback.sample_rate() == wanted {
+    if fallback.sample_rate() == rate
+        && wanted.is_none_or(|w| fit(fallback.sample_format(), w).is_some())
+    {
         return Ok(fallback);
     }
 
-    Err(Error::SampleRateMismatch {
-        device_name: device_name.to_string(),
-        device: device_rate(fallback.sample_rate())?,
-        graph: graph_rate,
-    })
+    match wanted {
+        Some(format) if covered || fallback.sample_rate() == rate => {
+            Err(Error::InputFormatUnavailable {
+                device_name: device_name.to_string(),
+                format,
+                rate: graph_rate,
+            })
+        }
+        _ => Err(Error::SampleRateMismatch {
+            device_name: device_name.to_string(),
+            device: device_rate(fallback.sample_rate())?,
+            graph: graph_rate,
+        }),
+    }
 }
 
 #[cfg(test)]

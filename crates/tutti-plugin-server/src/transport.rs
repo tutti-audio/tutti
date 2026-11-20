@@ -12,7 +12,8 @@ use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
     AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, ControlFrame,
-    FrameBuf, Framed, Request, read_frame, write_frame,
+    ControlRequest, FrameBuf, Framed, ReqId, Request, SlabHandle, SlabLayout, read_frame,
+    write_frame,
 };
 use tutti_plugin_types::{Deadline, IpcResult};
 
@@ -36,7 +37,66 @@ pub(crate) const AUDIO_REPLY_BYTES: usize = AUDIO_REPLY_FRAME_BYTES;
 pub(crate) type AudioTransport = dyn Transport<AudioRequest, AudioReply>;
 
 /// The control connection's transport: requests in, answers and news out.
-pub(crate) type ControlTransport = dyn Transport<Request, ControlFrame>;
+pub(crate) type ControlTransport = dyn Transport<Incoming, ControlFrame>;
+
+/// What the control connection delivers: a request, or a slab setup with the
+/// slab it announced.
+///
+/// A `SetupSharedMemory` frame is not delivered as a [`Request`]: the transport
+/// reads the slab that follows it and delivers both as `SetupSlab`, so a setup
+/// without its slab cannot reach the session.
+#[derive(Debug)]
+pub(crate) enum Incoming {
+    /// Any request but a slab setup.
+    Request(Request),
+    /// The host's `SetupSharedMemory` and the slab that came with it.
+    SetupSlab {
+        /// The request's id, which the answer echoes.
+        id: ReqId,
+        /// The region geometry the host sized the slab for.
+        layout: SlabLayout,
+        /// The slab, as received.
+        slab: SlabHandle,
+    },
+}
+
+/// A message a connection delivers, built from the frame it reads and whatever
+/// follows that frame on the stream.
+pub(crate) trait Inbound: Sized {
+    /// The frame the message is read from.
+    type Frame: Framed;
+
+    /// Completes the message of `frame`, reading from `stream` what follows it.
+    ///
+    /// # Errors
+    ///
+    /// What follows the frame did not arrive as the frame announced.
+    fn complete(frame: Self::Frame, stream: &PlatformStream) -> IpcResult<Self>;
+}
+
+impl Inbound for AudioRequest {
+    type Frame = Self;
+
+    fn complete(frame: Self, _: &PlatformStream) -> IpcResult<Self> {
+        Ok(frame)
+    }
+}
+
+impl Inbound for Incoming {
+    type Frame = Request;
+
+    fn complete(Request { id, body }: Request, stream: &PlatformStream) -> IpcResult<Self> {
+        match body {
+            ControlRequest::SetupSharedMemory { slab, layout } => {
+                // The slab is the next message on the stream: an exact read
+                // right after the frame, so no read ahead can have taken it.
+                let slab = SlabHandle::receive(crate::main_loop::connection(stream), slab)?;
+                Ok(Self::SetupSlab { id, layout, slab })
+            }
+            body => Ok(Self::Request(Request { id, body })),
+        }
+    }
+}
 
 /// Writes a frame to a connection from a thread other than the one serving
 /// it ([`Transport::pulser`]).
@@ -228,7 +288,7 @@ impl SocketTransport<AudioRequest, AudioReply, Alone> {
     }
 }
 
-impl<In: Framed, Out: Framed, W: Writing> Transport<In, Out> for SocketTransport<In, Out, W> {
+impl<In: Inbound, Out: Framed, W: Writing> Transport<In, Out> for SocketTransport<In, Out, W> {
     fn recv(&mut self) -> IpcResult<In> {
         // The frame is bounded before it is allocated (see
         // [`CONTROL_FRAME_BYTES`](tutti_plugin_ipc::CONTROL_FRAME_BYTES)). The server is the more exposed end: it loads
@@ -239,7 +299,7 @@ impl<In: Framed, Out: Framed, W: Writing> Transport<In, Out> for SocketTransport
         // oversize length as `ProcessCrashed`; here the peer is the host,
         // which has not crashed, so the error names the frame and the session
         // ends on it either way.
-        match (self.frames.as_mut(), self.quiet.as_ref()) {
+        let frame = match (self.frames.as_mut(), self.quiet.as_ref()) {
             (Some(frames), Some(quiet)) => {
                 let mut stream: &PlatformStream = &self.stream;
                 let mut reader = FrameReader {
@@ -252,10 +312,11 @@ impl<In: Framed, Out: Framed, W: Writing> Transport<In, Out> for SocketTransport
                     },
                     now: Instant::now,
                 };
-                frames.read(&mut reader)
+                frames.read(&mut reader)?
             }
-            _ => read_frame(&mut &*self.stream),
-        }
+            _ => read_frame(&mut &*self.stream)?,
+        };
+        In::complete(frame, &self.stream)
     }
 
     /// Waits for the host's next frame on the platform's wait
@@ -325,7 +386,7 @@ impl TransportListener {
     /// `accept(2)` returns inherits the listener's flag, and every read on it
     /// then fails with `WouldBlock`). A host that dies while this waits is the
     /// host watch's to end the process ([`crate::server`]).
-    pub(crate) fn accept(&self) -> IpcResult<SocketTransport<Request, ControlFrame>> {
+    pub(crate) fn accept(&self) -> IpcResult<SocketTransport<Incoming, ControlFrame>> {
         Ok(SocketTransport::new(self.accept_stream()?))
     }
 
@@ -362,7 +423,7 @@ mod recv_tests {
         server
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .expect("read timeout");
-        let mut transport: SocketTransport<Request, ControlFrame> =
+        let mut transport: SocketTransport<Incoming, ControlFrame> =
             SocketTransport::new(PlatformStream::from(OwnedFd::from(server)));
         let len = u32::try_from(CONTROL_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
         host.write_all(&len.to_be_bytes()).expect("write prefix");
@@ -381,7 +442,7 @@ mod wait_tests {
     use std::os::unix::net::UnixStream;
     use std::time::Duration;
 
-    fn pair() -> (UnixStream, SocketTransport<Request, ControlFrame>) {
+    fn pair() -> (UnixStream, SocketTransport<Incoming, ControlFrame>) {
         let (host, server) = UnixStream::pair().expect("socket pair");
         (
             host,

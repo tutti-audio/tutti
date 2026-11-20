@@ -9,6 +9,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 
 use crate::error::{Error, Result};
 use crate::roster::{DeviceId, Direction, Snapshot};
+use crate::supported::SupportedConfig;
 
 // JACK is reachable only on Linux and the BSDs with the `jack` feature: one
 // module per case, one chosen.
@@ -162,6 +163,36 @@ impl DeviceHost {
             default_output.as_deref(),
             default_input.as_deref(),
         ))
+    }
+
+    /// What the device `sel` names offers for `direction`: each width, rate
+    /// range and sample format once, as tutti types. An app reads it to choose
+    /// [`MicConfig::sample_format`](crate::MicConfig) or
+    /// [`OutputConfig::sample_format`](crate::OutputConfig::sample_format).
+    /// Blocks as long as the host's query does.
+    ///
+    /// # Errors
+    /// [`Error::InvalidDevice`] when `sel` names no device or the device's
+    /// configs cannot be queried; [`Error::DevicesError`] if the host cannot
+    /// enumerate.
+    pub fn supported_configs(
+        &self,
+        direction: Direction,
+        sel: &DeviceSelector,
+    ) -> Result<Vec<SupportedConfig>> {
+        let device = self.device(direction, sel)?;
+        let name = device_name(&device).unwrap_or_default();
+        let unqueryable = |e: cpal::Error| {
+            Error::InvalidDevice(format!("cannot query {name:?} {direction} configs: {e}"))
+        };
+        Ok(match direction {
+            Direction::Output => {
+                SupportedConfig::list(device.supported_output_configs().map_err(unqueryable)?)
+            }
+            Direction::Input => {
+                SupportedConfig::list(device.supported_input_configs().map_err(unqueryable)?)
+            }
+        })
     }
 
     /// Resolve a selector to a device. **The only place a device is resolved.**
