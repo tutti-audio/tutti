@@ -31,7 +31,8 @@ mod os;
 /// native target. The web has no constructor for it.
 ///
 /// Each fires the due sleeps, runs a ready task, and parks until a task is scheduled or the
-/// next deadline falls due. Dropping the `Threads` stops and joins them; a drop on one of
+/// next deadline falls due. Dropping the `Threads` stops and joins them (within the bound
+/// the executor's shutdown keeps, below); a drop on one of
 /// the threads itself (the last holder of a waker, say) does not join that thread. The
 /// executor it drives stays alive while it does.
 #[must_use = "dropping `Threads` stops and joins its threads"]
@@ -71,7 +72,10 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// # Shutdown
 ///
-/// When the last clone drops, the dedicated threads are told to stop, woken and joined, the
+/// When the last clone drops, the dedicated threads are told to stop, woken and joined
+/// within one second in all; one still running then (a future wedged in an OS call its wake
+/// cannot reach) is detached and named in a `tracing::warn!`, and ends when its future does,
+/// holding only the queue it drives. Then the
 /// blocking pool's idle threads end, and every task still pending is dropped. A future
 /// that holds an `Executor` clone keeps the executor alive, so that drop never comes:
 /// tutti's own futures never hold a clone, and a spawner passes a future what it needs

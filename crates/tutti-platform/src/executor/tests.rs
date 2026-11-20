@@ -716,5 +716,33 @@ fn the_last_drop_stops_and_joins_a_pending_dedicated_thread() {
     assert_eq!(Arc::strong_count(&marker), 1);
 }
 
+/// **The executor's drop returns while a dedicated future is wedged in a call its wake
+/// cannot reach.** The future blocks inside its poll on a channel only the test sends on;
+/// the drop stops the thread, waits out the bound, detaches it and returns. The send then
+/// lets the detached thread end.
+#[test]
+fn a_dedicated_thread_wedged_past_the_bound_is_detached_and_the_drop_returns() {
+    let executor = Executor::new();
+    let (release, wedged) = mpsc::channel::<()>();
+    let (entered, in_poll) = mpsc::channel();
+    let _task = executor
+        .spawn_dedicated("wedged", None, async move {
+            entered.send(()).unwrap();
+            let _ = wedged.recv();
+        })
+        .unwrap();
+    in_poll.recv_timeout(HANG_GUARD).unwrap();
+    let (dropped, returned) = mpsc::channel();
+    thread::spawn(move || {
+        drop(executor);
+        dropped.send(()).unwrap();
+    });
+    assert!(
+        returned.recv_timeout(HANG_GUARD).is_ok(),
+        "the drop returns past a wedged dedicated thread"
+    );
+    release.send(()).unwrap();
+}
+
 #[cfg(target_os = "linux")]
 mod linux;

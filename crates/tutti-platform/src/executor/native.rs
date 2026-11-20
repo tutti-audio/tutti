@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread, ThreadId};
+use std::time::Duration;
 
 use super::{Executor, Handle, Shared, Task, Timers, lock};
 use crate::Instant;
@@ -136,19 +137,33 @@ fn drive(queue: &async_executor::Executor<'static>, timers: &Timers, stopped: &d
     timers.parked.forget(thread.id());
 }
 
-/// Requests every thread's stop, wakes them and joins them, except the calling thread,
-/// which a drop on one of them leaves to end by itself.
+/// How long a stop waits, in all, for the threads it stops to end. A thread still
+/// running then (a future wedged in an OS call its wake cannot reach) is detached.
+pub(super) const STOP_BOUND: Duration = Duration::from_secs(1);
+
+/// Requests every thread's stop, wakes them and joins them within [`STOP_BOUND`] in all,
+/// except the calling thread, which a drop on one of them leaves to end by itself. A
+/// thread still running at the bound is detached, named in a warning: it holds only the
+/// queue and timers it drives, and ends when its future does.
 fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
     for worker in &threads {
         worker.handle.token().stop();
     }
     timers.parked.unpark_all();
     let current = thread::current().id();
+    let deadline = Instant::now() + STOP_BOUND;
     for worker in threads {
         if worker.id.get() == Some(&current) {
             worker.handle.detach();
-        } else {
-            drop(worker.handle);
+            continue;
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if let Err(running) = worker.handle.stop_within(left) {
+            tracing::warn!(
+                thread = running.name(),
+                "a stopped thread still runs past the stop bound; it is detached"
+            );
+            running.detach();
         }
     }
 }
