@@ -43,7 +43,7 @@ enum Placed {
 /// inputs it can accept.
 ///
 /// Created by [`Plugin::open`] or `PluginLoad::run`.
-/// Where a plugin runs is its load's [`Hosting`](tutti_plugin_db::Hosting): by default VST3, CLAP and AU
+/// Where a plugin runs is its load's [`Hosting`]: by default VST3, CLAP and AU
 /// plugins run in a `plugin-server` subprocess and VST2 (with the `vst2`
 /// feature) in the host process; [`Loadable::hosting`] asks for the other
 /// where the format allows it. Which one a plugin landed in does not change
@@ -65,8 +65,8 @@ enum Placed {
 /// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3");
 /// let (_collector, work) = tutti_plugin_types::MainWork::new();
 /// let plugin = Plugin::open(None, &work, &Loadable::uncatalogued(file), SampleRate::SR_48K)?;
-/// println!("{} ({:?})", plugin.descriptor().name, plugin.role());
-/// if plugin.takes_midi() {
+/// println!("{} ({:?})", plugin.descriptor().name, plugin.descriptor().class.role());
+/// if plugin.loaded().features.contains(tutti_plugin_types::Features::MIDI_IN) {
 ///     // wire a MIDI source to the node's event input
 /// }
 /// # Ok::<(), tutti_plugin_types::IpcError>(())
