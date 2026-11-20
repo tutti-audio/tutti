@@ -87,6 +87,7 @@ pub use digest::{Fnv, Noise, noise};
 pub use env::{ScopedEnv, cases};
 #[cfg(feature = "graph")]
 pub use event_rig::{BlockClock, EventRig, Output, Seen, Sink, heard};
+#[cfg(not(loom))]
 pub use executor::executor;
 pub use machine_lock::{MachineLock, machine_lock};
 pub use macos::macos_major;
