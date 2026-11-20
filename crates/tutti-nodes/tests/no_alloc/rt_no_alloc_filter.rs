@@ -5,9 +5,13 @@
 //! ports fed per frame: the paths that design coefficients on the audio thread and cut a
 //! block at grid points and corners.
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::{BlockRig, Direct};
-use tutti_nodes::{EqBandNode, LadderFilterNode, LadderType, SvfFilterNode, SvfType};
+use tutti_nodes::{
+    EqBandConfig, EqBandNode, LadderFilterConfig, LadderFilterNode, LadderType, SvfFilterConfig,
+    SvfFilterNode, SvfType,
+};
 use tutti_units::Db;
 use tutti_units::Hz;
 use tutti_units::Q;
@@ -50,7 +54,11 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 #[test]
 fn ladder_filter_process_is_allocation_free() {
     gate(
-        LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(1_000.0), Resonance::new(0.6)),
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
+                .freq(Hz::new(1_000.0))
+                .res(Resonance::new(0.6)),
+        ),
         |_, _| {},
     );
 }
@@ -58,7 +66,12 @@ fn ladder_filter_process_is_allocation_free() {
 #[test]
 fn eq_band_process_is_allocation_free() {
     gate(
-        EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(6.0)),
+        EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(6.0)),
+        ),
         |_, _| {},
     );
 }
@@ -66,7 +79,11 @@ fn eq_band_process_is_allocation_free() {
 #[test]
 fn svf_filter_mono_process_is_allocation_free() {
     gate(
-        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707)),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(800.0))
+                .q(Q::new(0.707)),
+        ),
         |_, _| {},
     );
 }
@@ -74,11 +91,10 @@ fn svf_filter_mono_process_is_allocation_free() {
 #[test]
 fn svf_filter_stereo_process_is_allocation_free() {
     gate(
-        SvfFilterNode::<f32>::with_channels(
-            tutti_buffers::ChannelLayout::STEREO,
-            SvfType::HighPass,
-            Hz::new(200.0),
-            Q::new(0.707),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(tutti_buffers::ChannelLayout::STEREO, SvfType::HighPass)
+                .freq(Hz::new(200.0))
+                .q(Q::new(0.707)),
         ),
         |_, _| {},
     );
@@ -90,7 +106,11 @@ fn svf_filter_wide_6ch_process_is_allocation_free() {
     // regression that (re)allocated it per buffer, or per-channel scratch in
     // `process`, would trip here.
     gate(
-        SvfFilterNode::<f32>::with_channels(6u16, SvfType::LowPass, Hz::new(800.0), Q::new(0.707)),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(6u16, SvfType::LowPass)
+                .freq(Hz::new(800.0))
+                .q(Q::new(0.707)),
+        ),
         |_, _| {},
     );
 }
@@ -98,11 +118,10 @@ fn svf_filter_wide_6ch_process_is_allocation_free() {
 #[test]
 fn ladder_filter_wide_6ch_process_is_allocation_free() {
     gate(
-        LadderFilterNode::<f32>::with_channels(
-            6u16,
-            LadderType::LP24,
-            Hz::new(1_000.0),
-            Resonance::new(0.6),
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(6u16, LadderType::LP24)
+                .freq(Hz::new(1_000.0))
+                .res(Resonance::new(0.6)),
         ),
         |_, _| {},
     );
@@ -115,7 +134,11 @@ fn svf_filter_with_parameter_changes_is_allocation_free() {
     // coefficient solve ramped across the block.
     let mut hz = 500.0f32;
     gate(
-        SvfFilterNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0)),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Bell)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(1.0)),
+        ),
         move |params, _| {
             hz = if hz > 4_000.0 { 500.0 } else { hz + 1.0 };
             params.set(tutti_units::UnitParam::Cutoff, f64::from(hz));
@@ -131,11 +154,10 @@ fn ladder_with_moving_cutoff_and_drive_is_allocation_free() {
     // host sets them.
     let mut hz = 500.0f32;
     gate(
-        LadderFilterNode::<f32>::with_channels(
-            6u16,
-            LadderType::LP24,
-            Hz::new(1_000.0),
-            Resonance::new(0.6),
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(6u16, LadderType::LP24)
+                .freq(Hz::new(1_000.0))
+                .res(Resonance::new(0.6)),
         ),
         move |params, i| {
             hz = if hz > 4_000.0 { 500.0 } else { hz + 7.0 };
@@ -155,11 +177,10 @@ fn ladder_with_moving_cutoff_and_drive_is_allocation_free() {
 #[test]
 fn an_svf_with_its_ports_fed_is_allocation_free() {
     for width in [1u16, 2, 6, 9, 16] {
-        let node = SvfFilterNode::<f32>::with_channels(
-            width,
-            SvfType::Bell,
-            Hz::new(1_000.0),
-            Q::new(1.0),
+        let node = SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(width, SvfType::Bell)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(1.0)),
         );
         let mut rig = Direct::new(node, SampleRate::SR_48K, 64);
         for c in rig.inputs_mut().iter_mut() {

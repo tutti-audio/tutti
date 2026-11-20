@@ -38,10 +38,10 @@ use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
-    DistortionNode, GateConfig, GateControls, GateNode, InterpolationMode, KeySource,
-    LadderFilterNode, LadderType, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
-    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind, Stages, SvfFilterNode,
-    SvfType,
+    DistortionConfig, DistortionNode, GateConfig, GateControls, GateNode, InterpolationMode,
+    KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind,
+    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -266,19 +266,23 @@ struct Case {
 
 fn cases() -> Vec<Case> {
     fn svf(w: usize) -> SvfFilterNode<f32> {
-        SvfFilterNode::with_channels(
-            ChannelLayout::try_from(w).expect("a test width is small"),
-            SvfType::LowPass,
-            Hz::new(1_000.0),
-            Q::new(0.707),
+        SvfFilterNode::from(
+            SvfFilterConfig::new(
+                ChannelLayout::try_from(w).expect("a test width is small"),
+                SvfType::LowPass,
+            )
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.707)),
         )
     }
     fn ladder(w: usize) -> LadderFilterNode<f32> {
-        LadderFilterNode::with_channels(
-            ChannelLayout::try_from(w).expect("a test width is small"),
-            LadderType::LP24,
-            Hz::new(1_000.0),
-            Resonance::new(0.3),
+        LadderFilterNode::from(
+            LadderFilterConfig::new(
+                ChannelLayout::try_from(w).expect("a test width is small"),
+                LadderType::LP24,
+            )
+            .freq(Hz::new(1_000.0))
+            .res(Resonance::new(0.3)),
         )
     }
     fn delay(w: usize) -> DelayNode<f32> {
@@ -429,10 +433,12 @@ fn cases() -> Vec<Case> {
             name: "distortion drive",
             param: UnitParam::Drive,
             make: |w, v| {
-                let n = DistortionNode::<f32>::with_channels(
-                    ChannelLayout::try_from(w).expect("a test width is small"),
-                    ShapeKind::Tanh,
-                    Drive::new(1.0),
+                let n = DistortionNode::<f32>::from(
+                    DistortionConfig::new(
+                        ChannelLayout::try_from(w).expect("a test width is small"),
+                        ShapeKind::Tanh,
+                    )
+                    .drive(Drive::new(1.0)),
                 );
                 if let Some(v) = v {
                     assert!(n.param_set().set(UnitParam::Drive, f64::from(v)));
@@ -613,11 +619,13 @@ fn block_rate_cases() -> Vec<Case> {
             name: "svf gain",
             param: UnitParam::GainDb,
             make: |w, v| {
-                let n = SvfFilterNode::<f32>::with_channels(
-                    ChannelLayout::try_from(w).expect("a test width is small"),
-                    SvfType::Bell,
-                    Hz::new(1_000.0),
-                    Q::new(0.707),
+                let n = SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(
+                        ChannelLayout::try_from(w).expect("a test width is small"),
+                        SvfType::Bell,
+                    )
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.707)),
                 );
                 if let Some(v) = v {
                     assert!(n.param_set().set(UnitParam::GainDb, f64::from(v)));
@@ -1019,10 +1027,8 @@ fn each_fed_mix_is_the_one_the_graph_blends() {
 /// output of a modulated drive, from the unmodulated node.
 fn plain_distortion(d: f64) -> Vec<f32> {
     render(
-        parts_of(DistortionNode::<f32>::with_channels(
-            1u16,
-            ShapeKind::Tanh,
-            Drive::new(d),
+        parts_of(DistortionNode::<f32>::from(
+            DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(d)),
         )),
         None,
         noise,
@@ -1036,7 +1042,9 @@ fn plain_distortion(d: f64) -> Vec<f32> {
 /// lose.
 #[test]
 fn an_authored_write_moves_the_base_under_modulation() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let cell: Arc<AtomicF64> = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
         .expect("a distortion has a drive")
@@ -1087,7 +1095,9 @@ fn an_authored_write_moves_the_base_under_modulation() {
 /// value past it clamps to the higher bound.
 #[test]
 fn a_crossed_range_is_survivable() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1116,7 +1126,9 @@ fn a_crossed_range_is_survivable() {
 /// stateful node's state would survive), with no step reaching the output.
 #[test]
 fn an_unmodulated_param_adds_nothing_to_the_plan() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1192,7 +1204,9 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
 /// so nothing fades in.
 #[test]
 fn a_fork_modulates_as_the_live_graph_does() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);

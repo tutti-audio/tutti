@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
-use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{
     DeclarationError, ParamRef, RangeTarget, RouteError, RouteSpec, Session, SetRefusal,
     ValueErrorKind,
@@ -15,6 +15,7 @@ use tutti_units::{Depth, Hz, Mix, Q, Samples, UnitParam};
 
 use crate::common::probe::ProbeUnit;
 use crate::mod_lanes::{master, render, rig, settle};
+use tutti_buffers::ChannelLayout;
 
 fn session() -> Session {
     Session::builder()
@@ -30,10 +31,10 @@ fn session() -> Session {
 #[test]
 fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let mut m = s.mods_mut();
     assert_eq!(
@@ -79,10 +80,10 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
 #[test]
 fn a_typed_range_declares_the_target_an_untyped_ref_names() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let mut m = s.mods_mut();
     m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))
@@ -112,10 +113,10 @@ fn a_typed_range_keeps_bounds_f32_cannot_hold() {
     assert_ne!(f64::from(lo as f32), lo, "f32 loses the lower bound");
     assert_ne!(f64::from(hi as f32), hi, "f32 loses the upper bound");
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     s.mods_mut()
         .range(lp.cutoff(), Hz::new(lo)..Hz::new(hi))
@@ -129,10 +130,10 @@ fn a_typed_range_keeps_bounds_f32_cannot_hold() {
 #[test]
 fn a_second_declaration_keeps_the_range_the_target_holds() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     assert_eq!(
         s.mods_mut()
@@ -161,10 +162,10 @@ fn a_second_declaration_keeps_the_range_the_target_holds() {
 #[test]
 fn a_range_write_is_refused_at_the_call() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let undeclared = s
         .set(lp.cutoff().range().to(Hz::new(1.0)..Hz::new(2.0)))
@@ -284,10 +285,10 @@ fn a_range_write_republishes_no_program() {
 #[test]
 fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let mut m = s.mods_mut();
     m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))

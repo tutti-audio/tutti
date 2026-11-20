@@ -31,7 +31,8 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
-    DistortionNode, LimiterConfig, LimiterControls, LimiterNode, ShapeKind, SvfFilterNode, SvfType,
+    DistortionConfig, DistortionNode, LimiterConfig, LimiterControls, LimiterNode, ShapeKind,
+    SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Root, Session};
 use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples, Seconds};
@@ -43,10 +44,16 @@ fn saw() -> ForkByClone<Osc> {
     ForkByClone(Osc::saw(Hz::new(110.0)))
 }
 fn low_pass(cutoff: f64) -> SvfFilterNode<f32> {
-    SvfFilterNode::new(SvfType::LowPass, Hz::new(cutoff), Q::new(0.9))
+    SvfFilterNode::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(cutoff))
+            .q(Q::new(0.9)),
+    )
 }
 fn shaper(drive: f64) -> DistortionNode<f32> {
-    DistortionNode::new(ShapeKind::Tanh, Drive::new(drive))
+    DistortionNode::from(
+        DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(drive)),
+    )
 }
 fn limiter() -> LimiterNode<f32> {
     LimiterNode::from(
