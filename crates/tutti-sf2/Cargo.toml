@@ -22,6 +22,7 @@ serde = ["dep:serde"]
 [dependencies]
 serde = { version = "1", optional = true, features = ["derive"] }
 thiserror = { workspace = true, features = ["std"] }
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 
