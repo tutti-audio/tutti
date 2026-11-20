@@ -25,13 +25,10 @@ fn step(x: f64) -> Stagger {
 fn a_sweep_refuses_what_its_line_cannot_hold() {
     let line = MaxDelay::of(Seconds::new(0.05));
     let ok = |base: f64, lo: f64, hi: f64, fb: f64| {
-        Sweep::new(
-            Seconds::new(base),
-            line,
-            Seconds::new(lo),
-            Seconds::new(hi),
-            Feedback::new(fb),
-        )
+        Sweep::builder(Seconds::new(base), line)
+            .depth(Seconds::new(lo), Seconds::new(hi))
+            .feedback_max(Feedback::new(fb))
+            .build()
     };
     // The edge of each rule is in; the next value out is refused.
     assert!(
@@ -111,7 +108,7 @@ fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(Stagger::step(PhaseIncrement::new(bad)), None, "{bad}");
         assert!(matches!(
-            Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(bad)]),
+            Stagger::try_from(&[PhaseIncrement::new(0.0), PhaseIncrement::new(bad)][..]),
             Err(StaggerError::NotFinite { channel: 1, .. })
         ));
     }
@@ -130,7 +127,8 @@ fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
         PhaseIncrement::new(0.75),
         "behind is wrapped ahead"
     );
-    let each = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(-0.25)]).unwrap();
+    let each =
+        Stagger::try_from(&[PhaseIncrement::new(0.0), PhaseIncrement::new(-0.25)][..]).unwrap();
     assert_eq!(each.offset(ChannelIndex::of(1)), PhaseIncrement::new(0.75));
     assert_eq!(
         each.offset(ChannelIndex::of(7)),
@@ -140,30 +138,46 @@ fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
     assert_eq!((each.channels(), s.channels()), (Some(2), None));
     let too_many = [PhaseIncrement::new(0.0); MAX_CHANNELS + 1];
     assert_eq!(
-        Stagger::each(&too_many),
+        Stagger::try_from(&too_many[..]),
         Err(StaggerError::TooMany {
             count: MAX_CHANNELS + 1,
             max: MAX_CHANNELS
         })
     );
-    assert!(Stagger::each(&too_many[..MAX_CHANNELS]).is_ok());
+    assert!(Stagger::try_from(&too_many[..MAX_CHANNELS]).is_ok());
 }
 
 /// A layout refuses offsets that are not one for each channel of its bus, and takes a step
 /// at any width.
 #[test]
 fn a_layout_refuses_offsets_that_do_not_fit_its_bus() {
-    let two = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
-    assert!(ModDelayLayout::new(BusTopology::STEREO, Sweep::CHORUS, two).is_ok());
+    let two = Stagger::try_from(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)][..]).unwrap();
+    assert!(
+        ModDelayLayout::builder(BusTopology::STEREO, Sweep::CHORUS)
+            .stagger(two)
+            .build()
+            .is_ok()
+    );
     assert_eq!(
-        ModDelayLayout::new(bus(3), Sweep::CHORUS, two).unwrap_err(),
+        ModDelayLayout::builder(bus(3), Sweep::CHORUS)
+            .stagger(two)
+            .build()
+            .unwrap_err(),
         StaggerError::Length { width: 3, got: 2 }
     );
     assert_eq!(
-        ModDelayLayout::new(BusTopology::MONO, Sweep::CHORUS, two).unwrap_err(),
+        ModDelayLayout::builder(BusTopology::MONO, Sweep::CHORUS)
+            .stagger(two)
+            .build()
+            .unwrap_err(),
         StaggerError::Length { width: 1, got: 2 }
     );
     for width in [1, 2, 6, 16] {
-        assert!(ModDelayLayout::new(bus(width), Sweep::CHORUS, step(0.25)).is_ok());
+        assert!(
+            ModDelayLayout::builder(bus(width), Sweep::CHORUS)
+                .stagger(step(0.25))
+                .build()
+                .is_ok()
+        );
     }
 }

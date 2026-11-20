@@ -200,7 +200,7 @@ pub enum Error {
         /// Crashed or timed out.
         kind: tutti_graph::ForkFaultKind,
         /// The unit's own account (for a plugin, a
-        /// `tutti_plugin::PluginRenderFault`).
+        /// `tutti_plugin_ipc::PluginRenderFault`).
         cause: tutti_graph::ForkCause,
     },
 }

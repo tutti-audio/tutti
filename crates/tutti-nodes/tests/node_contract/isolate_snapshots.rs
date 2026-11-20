@@ -19,12 +19,12 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode,
-    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayControls, DelayLayout,
-    DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandNode, GateConfig,
+    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayConfig, DelayControls,
+    DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandNode, GateConfig,
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, LfoNode,
-    LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls,
-    PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType,
-    TremoloConfig, TremoloNode,
+    LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode,
+    PhaserConfig, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages,
+    SvfControls, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -153,21 +153,19 @@ fn brickwall_limiter() {
 #[test]
 fn delay_line() {
     IsolateRow::new("DelayNode (stereo, ping-pong)", || {
-        let layout = DelayLayout::new(
+        let layout = DelayLayout::builder(
             BusTopology::STEREO,
             MaxDelay::of(Seconds::new(1.0)),
             InterpolationMode::Linear,
         )
-        .with_times(ChannelTimes::each(&[Seconds::new(0.07)]).unwrap())
+        .times(ChannelTimes::try_from(&[Seconds::new(0.07)][..]).unwrap())
+        .build()
         .unwrap();
-        DelayNode::<f32>::from_layout(
-            layout,
-            DelayControls {
-                time: Seconds::new(0.05),
-                feedback: Feedback::new(0.5_f64),
-                cross_feedback: Feedback::new(0.3_f64),
-            },
-        )
+        DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+            time: Seconds::new(0.05),
+            feedback: Feedback::new(0.5_f64),
+            cross_feedback: Feedback::new(0.3_f64),
+        }))
     })
     .control("delay time", |d| {
         assert!(d.param_set().set(UnitParam::DelayTime, 0.08));
@@ -441,7 +439,7 @@ fn lfo() {
 #[test]
 fn chorus() {
     IsolateRow::new("ModDelayNode (stereo chorus)", || {
-        ModDelayNode::<f32>::chorus(BusTopology::STEREO)
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO))
     })
     .control("rate", |c| assert!(c.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |c| {
@@ -456,13 +454,13 @@ fn chorus() {
 #[test]
 fn phaser() {
     IsolateRow::new("PhaserNode (stereo, 4 stages)", || {
-        PhaserNode::<f32>::stereo(
-            Stages::of(4),
-            PhaserControls {
+        PhaserNode::<f32>::try_from(
+            PhaserConfig::new(BusTopology::STEREO, Stages::of(4)).controls(PhaserControls {
                 feedback: Feedback::new(0.3_f64),
                 ..PhaserControls::DEFAULT
-            },
+            }),
         )
+        .unwrap()
     })
     .control("rate", |p| assert!(p.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |p| {

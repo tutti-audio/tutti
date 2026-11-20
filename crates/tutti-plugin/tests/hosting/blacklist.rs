@@ -1,12 +1,12 @@
 //! A load asks the blacklist where it opens the plugin, and only a plugin that
 //! came through a catalog is asked.
 
-use tutti_plugin::catalog::{
-    Catalog, CatalogConfig, Loadable, Plugin, PluginDb, PluginId, PluginRef, Resolved,
-};
+use tutti_plugin::catalog::Plugin;
+use tutti_plugin_db::{Catalog, CatalogConfig, Loadable, PluginDb, Resolved};
 use tutti_plugin_db::{FileFacts, FileRow, RowChange, canonical_path};
 use tutti_plugin_types::Described;
 use tutti_plugin_types::{IpcError, PluginClass, PluginDescriptor, PluginFormat, SampleRate};
+use tutti_plugin_types::{PluginId, PluginRef};
 
 /// A catalog whose one file `path` holds the plugin `id` of `format`, or, with no
 /// `id`, is blacklisted for `reason`.

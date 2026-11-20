@@ -90,7 +90,7 @@ impl Plugin {
         // before the first server is spawned, on the test's own thread.
         unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
         let mut session = offline_session();
-        let plugin = tutti_plugin::catalog::PluginRef::file(path);
+        let plugin = tutti_plugin_types::PluginRef::file(path);
         let request = match state {
             Some(bytes) => Spec::new(plugin.clone())
                 .restoring(tutti_session::PeerState::of_plugin(plugin, bytes)),

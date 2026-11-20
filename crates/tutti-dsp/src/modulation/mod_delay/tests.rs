@@ -50,7 +50,7 @@ fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank<f32> {
         Seconds::new(0.01),
         Feedback::MAX_STABLE,
     );
-    let layout = ModDelayLayout::new(bus(1), sweep, Stagger::NONE).unwrap();
+    let layout = ModDelayLayout::builder(bus(1), sweep).build().unwrap();
     ModDelayBank::new(&layout, rate)
 }
 
@@ -111,7 +111,9 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
     assert_eq!(reach(&chorus96, 0.005), (480.0, 1_440.0));
     // A depth past the base: 1 ms base, 10 ms deep: from one frame to 11 ms.
     let flanger = ModDelayBank::new(
-        &ModDelayLayout::new(bus(1), short_base(), Stagger::NONE).unwrap(),
+        &ModDelayLayout::builder(bus(1), short_base())
+            .build()
+            .unwrap(),
         RATE,
     );
     let (lo, hi) = reach(&flanger, 0.01);
@@ -413,7 +415,7 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
         Seconds::new(0.01),
         Feedback::MAX_STABLE,
     );
-    let layout = ModDelayLayout::new(bus(1), sweep, Stagger::NONE).unwrap();
+    let layout = ModDelayLayout::builder(bus(1), sweep).build().unwrap();
     let x = wide_signal(len);
     let run_with = |g: f64| {
         let mut bank = ModDelayBank::<f64>::new(&layout, rate);

@@ -33,7 +33,8 @@ use tutti_units::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Secon
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{
     Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, LineModulation, MAX_DENSE,
-    MAX_LINES, MAX_STAGES, Matrix, Network, NetworkCapacity, OutputMap, Stage, pre_delay_frames,
+    MAX_LINES, MAX_STAGES, Matrix, Network, NetworkCapacity, NetworkOutputMap, Stage,
+    pre_delay_frames,
 };
 use crate::{MIN_DECAY, TAIL_FLOOR, loop_gain};
 
@@ -321,7 +322,7 @@ impl PlateControls {
                 lines,
                 matrix: Matrix::Dense(ring),
                 input,
-                output: OutputMap::default(),
+                output: NetworkOutputMap::default(),
             }))
             .expect("five stages fit MAX_STAGES");
     }

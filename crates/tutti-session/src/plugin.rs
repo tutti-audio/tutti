@@ -131,12 +131,15 @@ use tutti_plugin_types::{MainThreadMarker, StateUse};
 use tutti_rt::LockExt;
 
 use tutti_graph::NodeKey;
-use tutti_plugin::catalog::{AudioConfig, Hosting, Loadable, Plugin as HostPlugin, PluginRef};
-use tutti_plugin::error::StateError;
+use tutti_plugin::catalog::Plugin as HostPlugin;
+use tutti_plugin_db::{Hosting, Loadable};
 use tutti_plugin_host::{Liveness, LivenessVerdict};
 use tutti_plugin_host::{
     NodeControls, PluginControls, PluginHandle, PluginSignal, PluginStatus, Subscription,
 };
+use tutti_plugin_ipc::AudioConfig;
+use tutti_plugin_types::PluginRef;
+use tutti_plugin_types::StateError;
 use tutti_plugin_types::{
     IpcError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail,
 };
@@ -1569,13 +1572,13 @@ pub enum RestoreError {
 /// `Phase::RenderMode`'s record: the mode last announced.
 #[derive(Debug)]
 pub(crate) struct RenderModeState {
-    pub(crate) announced: tutti_plugin::RenderMode,
+    pub(crate) announced: tutti_plugin_types::RenderMode,
 }
 
 impl Default for RenderModeState {
     fn default() -> Self {
         Self {
-            announced: tutti_plugin::RenderMode::Realtime,
+            announced: tutti_plugin_types::RenderMode::Realtime,
         }
     }
 }
@@ -2260,7 +2263,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// The render mode last announced to the hosted plugins.
-    pub fn render_mode(&self) -> tutti_plugin::RenderMode {
+    pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
         self.plugins.render_mode.announced
     }
 
@@ -2512,9 +2515,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         #[cfg(feature = "export")]
         {
             let wanted = if self.bounce.in_flight() {
-                tutti_plugin::RenderMode::Offline
+                tutti_plugin_types::RenderMode::Offline
             } else {
-                tutti_plugin::RenderMode::Realtime
+                tutti_plugin_types::RenderMode::Realtime
             };
             let changed = self.plugins.render_mode.announced != wanted;
             for hosted in self.graph.plugins.values_mut() {
@@ -2608,11 +2611,11 @@ mod tests {
         fn save_state(
             &self,
             _: tutti_plugin_types::StateUse,
-        ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
+        ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
             self.saves.fetch_add(1, Ordering::SeqCst);
             self.state
                 .clone()
-                .ok_or(tutti_plugin::error::StateError::NoStateRoute)
+                .ok_or(tutti_plugin_types::StateError::NoStateRoute)
         }
         fn set_render_mode(&self, _mode: tutti_plugin_types::RenderMode) -> bool {
             false
@@ -3346,7 +3349,7 @@ mod tests {
     /// the blacklist's refusal, and nothing is opened.
     #[test]
     fn a_reload_of_a_plugin_blacklisted_since_its_load_is_refused() {
-        use tutti_plugin::catalog::{Catalog, CatalogConfig, PluginDb};
+        use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb};
         let file =
             std::env::temp_dir().join(format!("tutti-reload-bl-{}.clap", std::process::id()));
         std::fs::write(&file, b"x").unwrap();
