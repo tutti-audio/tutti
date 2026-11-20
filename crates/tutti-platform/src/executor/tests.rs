@@ -716,32 +716,65 @@ fn the_last_drop_stops_and_joins_a_pending_dedicated_thread() {
     assert_eq!(Arc::strong_count(&marker), 1);
 }
 
-/// **The executor's drop returns while a dedicated future is wedged in a call its wake
-/// cannot reach.** The future blocks inside its poll on a channel only the test sends on;
-/// the drop stops the thread, waits out the bound, detaches it and returns. The send then
-/// lets the detached thread end.
+/// **The executor's drop returns while dedicated futures are wedged in a call their wake
+/// cannot reach, and each detached thread ends when its future does.** Three futures block
+/// inside their polls on channels only the test sends on; the drop stops them, waits out
+/// the shared bound, detaches them and returns. Each send then lets its thread finish.
 #[test]
-fn a_dedicated_thread_wedged_past_the_bound_is_detached_and_the_drop_returns() {
+fn dedicated_threads_wedged_past_the_bound_are_detached_and_end_with_their_futures() {
     let executor = Executor::new();
-    let (release, wedged) = mpsc::channel::<()>();
-    let (entered, in_poll) = mpsc::channel();
-    let _task = executor
-        .spawn_dedicated("wedged", None, async move {
-            entered.send(()).unwrap();
-            let _ = wedged.recv();
-        })
-        .unwrap();
-    in_poll.recv_timeout(HANG_GUARD).unwrap();
+    let (finished, ended) = mpsc::channel();
+    let mut releases = Vec::new();
+    for n in 0..3 {
+        let (release, wedged) = mpsc::channel::<()>();
+        let (entered, in_poll) = mpsc::channel();
+        let finished = finished.clone();
+        let _task = executor
+            .spawn_dedicated(&format!("wedged-{n}"), None, async move {
+                entered.send(()).unwrap();
+                let _ = wedged.recv();
+                let _ = finished.send(n);
+            })
+            .unwrap();
+        in_poll.recv_timeout(HANG_GUARD).unwrap();
+        releases.push(release);
+    }
     let (dropped, returned) = mpsc::channel();
-    thread::spawn(move || {
+    let dropper = thread::spawn(move || {
         drop(executor);
-        dropped.send(()).unwrap();
+        let _ = dropped.send(());
     });
     assert!(
         returned.recv_timeout(HANG_GUARD).is_ok(),
-        "the drop returns past a wedged dedicated thread"
+        "the drop returns past wedged dedicated threads"
     );
-    release.send(()).unwrap();
+    dropper.join().unwrap();
+    for release in releases {
+        release.send(()).unwrap();
+    }
+    let mut done: Vec<_> = (0..3)
+        .map(|_| ended.recv_timeout(HANG_GUARD).unwrap())
+        .collect();
+    done.sort_unstable();
+    assert_eq!(
+        done,
+        [0, 1, 2],
+        "every detached thread ends with its future"
+    );
+}
+
+/// **A stop's joins share one deadline.** What is left is the bound minus the time
+/// spent, never the bound again, and zero once it has passed: so `n` joins wait the bound
+/// in all.
+#[test]
+fn a_stop_deadline_is_shared_by_every_join() {
+    let t0 = Instant::now();
+    let deadline = os::StopDeadline::after(t0);
+    assert_eq!(deadline.left(t0), os::STOP_BOUND);
+    let spent = os::STOP_BOUND / 4;
+    assert_eq!(deadline.left(t0 + spent), os::STOP_BOUND - spent);
+    assert_eq!(deadline.left(t0 + os::STOP_BOUND), Duration::ZERO);
+    assert_eq!(deadline.left(t0 + os::STOP_BOUND * 3), Duration::ZERO);
 }
 
 #[cfg(target_os = "linux")]

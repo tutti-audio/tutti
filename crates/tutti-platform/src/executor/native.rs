@@ -141,6 +141,23 @@ fn drive(queue: &async_executor::Executor<'static>, timers: &Timers, stopped: &d
 /// running then (a future wedged in an OS call its wake cannot reach) is detached.
 pub(super) const STOP_BOUND: Duration = Duration::from_secs(1);
 
+/// One deadline for every join of a stop: each join waits only what is left of it, so
+/// stopping `n` threads waits [`STOP_BOUND`] in all, not `n` times it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct StopDeadline(Instant);
+
+impl StopDeadline {
+    /// The deadline [`STOP_BOUND`] after `now`.
+    pub(super) fn after(now: Instant) -> Self {
+        Self(now + STOP_BOUND)
+    }
+
+    /// What is left of the deadline at `now`: zero once it has passed.
+    pub(super) fn left(self, now: Instant) -> Duration {
+        self.0.saturating_duration_since(now)
+    }
+}
+
 /// Requests every thread's stop, wakes them and joins them within [`STOP_BOUND`] in all,
 /// except the calling thread, which a drop on one of them leaves to end by itself. A
 /// thread still running at the bound is detached, named in a warning: it holds only the
@@ -151,14 +168,13 @@ fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
     }
     timers.parked.unpark_all();
     let current = thread::current().id();
-    let deadline = Instant::now() + STOP_BOUND;
+    let deadline = StopDeadline::after(Instant::now());
     for worker in threads {
         if worker.id.get() == Some(&current) {
             worker.handle.detach();
             continue;
         }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if let Err(running) = worker.handle.stop_within(left) {
+        if let Err(running) = worker.handle.stop_within(deadline.left(Instant::now())) {
             tracing::warn!(
                 thread = running.name(),
                 "a stopped thread still runs past the stop bound; it is detached"
