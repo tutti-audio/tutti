@@ -19,8 +19,8 @@ use tutti_au_ffi::{
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    MIDI_STACK_CAPACITY, ParamMapping, ParamWriteError, PlayheadWatch, PluginError, PluginIo,
-    PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
+    MIDI_STACK_CAPACITY, ParamWriteError, PlayheadWatch, PluginError, PluginIo, PluginResult,
+    ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;

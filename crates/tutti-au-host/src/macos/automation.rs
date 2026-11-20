@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use tutti_au_ffi::{ParamEvent, RenderNotification, RenderPhase, RenderUnit, ScheduleAddress};
-use tutti_plugin_types::{ParamMapping, ParameterQueue};
+use tutti_plugin_types::ParameterQueue;
 use tutti_rt::AudioThreadCell;
 
 use crate::ranges::ParamBounds;
