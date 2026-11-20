@@ -168,6 +168,8 @@ jobs:
           node-version: 22
       - uses: taiki-e/install-action@v2
         with:
+          # `cargo xtask test-wasm` refuses a runner that does not match Cargo.lock's wasm-bindgen, so this step
+          # fails by name when the lock moves without this pin.
           tool: wasm-bindgen@0.2.130
       - name: test (wasm32, node)
         run: cargo xtask test-wasm
