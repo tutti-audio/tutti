@@ -177,10 +177,11 @@ pub struct GraphSpec {
     /// [`Editor::commit`](crate::Editor::commit) lowers for you. An empty
     /// `Vec` is the same as an absent key.
     pub bus_edges: BTreeMap<BusRef, Vec<BusFeed>>,
-    /// The declared topology of the root, the graph's outputs, as a bus: what a bus edge into the root folds to. `None` is
-    /// undeclared. Every root the engine renders is at most
-    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) wide, which is a bus's
-    /// width. The session keeps it in step with its root declaration.
+    /// The declared topology of the root, the graph's outputs, as a bus: what a
+    /// bus edge into the root folds to. `None` is undeclared. Every root the
+    /// engine renders is at most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)
+    /// wide, which is a bus's width. The session keeps it in step with its root
+    /// declaration.
     pub root: Option<BusTopology>,
     /// The root's generation: a commit that changes the root's declaration
     /// carries the next one ([`RootId`](crate::RootId)), and the plan it compiles to reports
@@ -459,9 +460,10 @@ impl GraphSpec {
     ///   lane's `LaneControls::resync`).
     /// - **A fresh unit hears nothing held.** A unit placed by a commit (a
     ///   fork's included) starts with no ramp, so a source must send its
-    ///   current value on its first block for the port to read it (a control lane does, having nothing in flight; a hand-wired
-    ///   source answers [`EventKind::Resync`](crate::EventKind::Resync) or
-    ///   drives the knob instead).
+    ///   current value on its first block for the port to read it (a control
+    ///   lane does, having nothing in flight; a hand-wired source answers
+    ///   [`EventKind::Resync`](crate::EventKind::Resync) or drives the knob
+    ///   instead).
     /// - **A crossfade's base.** A [`replace`](crate::Editor::replace) with a
     ///   fade keeps the key's param state, so both units hear one source;
     ///   the base is the incoming unit's control, ramped over one block like

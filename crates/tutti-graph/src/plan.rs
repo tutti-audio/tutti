@@ -436,12 +436,13 @@ pub enum Op {
         /// Audio slot written.
         dst: u32,
     },
-    /// A [`Sum`](Self::Sum) with at least one **weighted lane**: the value is the left fold `((+0.0 + w_0 * a_0) + w_1 *
-    /// a_1) + ..` in `f32`, a multiply and an add per lane, never fused. A
-    /// lane whose weight is exactly `1.0` runs the plain add. Silent addends
-    /// are skipped whatever their weight, and a weight of `0.0` is not
-    /// skipped by value. Unlike `Sum`, one addend is a valid op: a one-edge
-    /// sink with a gain entry runs `+0.0 + w * a`, where a plain one aliases.
+    /// A [`Sum`](Self::Sum) with at least one **weighted lane**: the value is
+    /// the left fold `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in `f32`, a
+    /// multiply and an add per lane, never fused. A lane whose weight is
+    /// exactly `1.0` runs the plain add. Silent addends are skipped whatever
+    /// their weight, and a weight of `0.0` is not skipped by value. Unlike
+    /// `Sum`, one addend is a valid op: a one-edge sink with a gain entry runs
+    /// `+0.0 + w * a`, where a plain one aliases.
     ///
     /// `Sum` is exactly this op with every weight `1.0`; it stays its own
     /// variant so the plain path carries no lane state.

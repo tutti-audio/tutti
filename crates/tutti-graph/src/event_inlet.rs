@@ -629,7 +629,7 @@ mod tests {
 
     use super::*;
 
-    /// `EventCapacity` keeps the range-checked shape of a range-checked type: `new` refuses
+    /// `EventCapacity` has the range-checked shape: `new` refuses
     /// 0 and never clamps, `TryFrom` agrees and carries the refused raw, `of`
     /// panics on it.
     #[test]

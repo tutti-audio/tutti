@@ -32,12 +32,11 @@
 //!   their sources), across recompiles, base moves, latency changes and
 //!   regenerations.
 //!
-//! Audio-rate param sources, several sources summed on one port and their
-//! shaping LUTs are gone: a lane sums and shapes before it
-//! sends, and audio-rate modulation is a node's own audio input. The
-//! sample-accuracy contract row is `tests/executor/contract.rs`'s `param_echo`, and
-//! the allocation gate `tests/rt_no_alloc.rs`'s
-//! `modulated_params_are_allocation_free`.
+//! A param takes no audio-rate source, and one port takes one source: a lane
+//! sums and shapes before it sends, and audio-rate modulation is a node's own
+//! audio input. The sample-accuracy contract row is
+//! `tests/executor/contract.rs`'s `param_echo`, and the allocation gate
+//! `tests/rt_no_alloc.rs`'s `modulated_params_are_allocation_free`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -736,11 +735,11 @@ fn a_fade_keeps_the_params_it_declares() {
     );
 }
 
-/// **A bypassed node's params go on stepping**: a parked node is not called, but its param ports follow the
-/// timeline as a skipped node's do, so a source that spoke while the node was
-/// out is heard when it comes back. The source steps `Cutoff` to 7 at frame
-/// 300, while the probe is parked; un-bypassed at frame 640 it reads 7 once
-/// the fade is over, not its base.
+/// **A bypassed node's params go on stepping**: a parked node is not called,
+/// but its param ports follow the timeline as a skipped node's do, so a source
+/// that spoke while the node was out is heard when it comes back. The source
+/// steps `Cutoff` to 7 at frame 300, while the probe is parked; un-bypassed at
+/// frame 640 it reads 7 once the fade is over, not its base.
 #[test]
 fn a_parked_nodes_params_keep_stepping() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
@@ -938,10 +937,8 @@ fn a_second_event_source_replaces_the_first() {
 /// source's events), and again when the sibling grows to 150 (the delay
 /// retuned longer). The held value is the port's, not the delay line's.
 ///
-/// Ported: the source was an audio step whose delay ring
-/// had to be filled with its last value; there are no audio sources, and
-/// an event delay carries only events, so the property is now that the
-/// port keeps what it holds.
+/// An event delay carries only events, so the property is that the port
+/// keeps what it holds.
 #[test]
 fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));

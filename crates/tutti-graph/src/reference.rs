@@ -3057,12 +3057,12 @@ enum RefWeight<F: Float> {
 }
 
 /// The value a sink holds: none is silence, one plain addend is itself (an
-/// alias, so a `-0.0` stays), anything else is the left fold
-/// `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in `F`, one rounding per add
-/// and per multiply, each lane weighted by
-/// `w[i] = from + (to - from) * ((i + 1) / frames)`. Skips nothing, silent addends and a weight of `1.0` or `0.0`
-/// included: the executor skips the silent ones and takes no multiply at
-/// `1.0`, and must agree.
+/// alias, so a `-0.0` stays), anything else is the left fold `((+0.0 + w_0 *
+/// a_0) + w_1 * a_1) + ..` in `F`, one rounding per add and per multiply, each
+/// lane weighted by `w[i] = from + (to - from) * ((i + 1) / frames)`. Skips
+/// nothing, silent addends and a weight of `1.0` or `0.0` included: the
+/// executor skips the silent ones and takes no multiply at `1.0`, and must
+/// agree.
 fn sum_addends<F: Float>(mut addends: Vec<RefAddend<F>>, frames: usize) -> Vec<F> {
     match addends.len() {
         0 => vec![F::ZERO; frames],

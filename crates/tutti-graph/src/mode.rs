@@ -1,6 +1,6 @@
-//! Bypass, mute and mix as graph state: [`NodeMode`], a node's [`Mix`] (its blend with the aligned input),
-//! the cell they are stored in, and the state the executor keeps to apply
-//! them.
+//! Bypass, mute and mix as graph state: [`NodeMode`], a node's [`Mix`] (its
+//! blend with the aligned input), the cell they are stored in, and the state
+//! the executor keeps to apply them.
 //!
 //! # What a mode is
 //!
@@ -122,8 +122,9 @@ use crate::pass::Pass;
 use crate::spec::EventOut;
 use tutti_buffers::Float;
 
-/// What the graph does with a node: a state the graph holds for any node, a plugin included. See the
-/// module docs of `src/mode.rs` for what each mode makes of the node's outputs.
+/// What the graph does with a node: a state the graph holds for any node, a
+/// plugin included. See the module docs of `src/mode.rs` for what each mode
+/// makes of the node's outputs.
 ///
 /// - **`Active`**: the node runs.
 /// - **`Muted`**: the node keeps running (it consumes its events, keeps its

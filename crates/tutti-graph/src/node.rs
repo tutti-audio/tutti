@@ -189,11 +189,12 @@ pub struct Shape {
     /// until something is connected to it, and the node must then answer
     /// [`Node::param_base`] for it.
     pub params: ParamPorts,
-    /// About how much work the node does per sample and channel: the
-    /// compiler's cost model packs cheap siblings into one task and keeps a
-    /// graph too cheap to spread on one thread. [`Cost::Heavy`] unless set with [`with_cost`](Self::with_cost):
-    /// a node that declares nothing is assumed worth a thread of its own.
-    /// A speed hint only — it never changes a sample.
+    /// About how much work the node does per sample and channel: the compiler's
+    /// cost model packs cheap siblings into one task and keeps a graph too
+    /// cheap to spread on one thread. [`Cost::Heavy`] unless set with
+    /// [`with_cost`](Self::with_cost): a node that declares nothing is assumed
+    /// worth a thread of its own. A speed hint only — it never changes a
+    /// sample.
     pub cost: Cost,
     /// Whether its event outputs may carry notes, hold pedals or a bend. The
     /// executor tracks what such a port holds so that an edge that ends
