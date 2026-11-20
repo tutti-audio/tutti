@@ -2,8 +2,6 @@
 //! (generators 41 and 53) give them as indexes into the instrument and sample
 //! lists, and a list may be longer than 32768.
 
-use std::io::Cursor;
-
 use tutti_fixtures::sf2::{Inst, Preset, bytes_with_samples, generator};
 use tutti_sf2::{Error, SoundFont};
 
@@ -28,8 +26,7 @@ fn a_sample_id_of_32768_or_more_loads_and_reads_back() {
         }],
         BIG,
     );
-    let font =
-        SoundFont::from_reader(&mut Cursor::new(file)).expect("a sample id of 32768 is valid");
+    let font = SoundFont::open(file).expect("a sample id of 32768 is valid");
     assert_eq!(font.sample_headers().len(), BIG);
     assert_eq!(font.instruments()[0].regions()[0].sample_id(), 32_768);
 }
@@ -52,7 +49,7 @@ fn a_sample_id_past_the_list_is_refused_with_its_value() {
         }],
         2,
     );
-    match SoundFont::from_reader(&mut Cursor::new(file)) {
+    match SoundFont::open(file) {
         Err(Error::InvalidSampleId {
             instrument_id: 0,
             sample_id: 3,
@@ -83,7 +80,6 @@ fn an_instrument_id_of_32768_or_more_loads_and_reads_back() {
         &insts,
         1,
     );
-    let font =
-        SoundFont::from_reader(&mut Cursor::new(file)).expect("an instrument id of 32768 is valid");
+    let font = SoundFont::open(file).expect("an instrument id of 32768 is valid");
     assert_eq!(font.presets()[0].regions()[0].instrument_id(), 32_768);
 }

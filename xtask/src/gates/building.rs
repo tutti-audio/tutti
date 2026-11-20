@@ -283,7 +283,7 @@ pub(super) const ALLOW: &[Allow] = &[
         "crates/tutti-sf2/",
         "SoundFont::open",
         CTOR,
-        "opening a SoundFont file: the failure is the file's, not a value's",
+        "opening a SoundFont source: the failure is the source's, not a value's",
     ),
     ty(
         "crates/tutti-rt/src/bells.rs",
