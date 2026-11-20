@@ -1,5 +1,4 @@
-//! [`WorkerPool`]: the threads the parallel graph executor runs a block on
-//! (doc 013 §4 and "The parallel executor").
+//! [`WorkerPool`]: the threads the parallel graph executor runs a block on.
 //!
 //! The graph defines what it needs of a pool (`tutti_graph::Pool`: run one
 //! job on the caller and up to `participants - 1` other threads, return when
@@ -18,7 +17,7 @@
 //! Between jobs a helper **spins** for a short while (a block's job usually
 //! arrives within a device period, and a spinning helper joins it in
 //! nanoseconds), then **yields** its core for a while longer, then **parks**
-//! (crill's progressive backoff, doc 013 §4). A parked helper is woken by
+//! (crill's progressive backoff). A parked helper is woken by
 //! the caller when a job opens — `Thread::unpark`, the one system call the
 //! audio thread makes for the pool — and only as many as the job can keep
 //! busy (`wake`, the plan's widest level): Ardour's bounded wakeups.

@@ -1,12 +1,12 @@
 //! A tempo map with ramps, followed by the live engine and by an offline
-//! render (doc 020, stage 4).
+//! render.
 //!
 //! The oracle is arithmetic written here, apart from the walker and from
 //! `tutti-tempo`'s queries. A ramp linear in time from `r0` to `r1` beats per
 //! second over `D` beats lasts `T = 2 D / (r0 + r1)`, has slope
 //! `a = (r1 - r0) / T` and is at beat `B(s) = r0 s + a s^2 / 2` after `s`
 //! seconds. A cell of 128 frames is a constant tempo whose beats are the chord
-//! of `B` between its ends (doc 020, section 2.2). Where a test asks whether
+//! of `B` between its ends. Where a test asks whether
 //! the playhead is on the curve, the exact time of a beat is the integral
 //! `t(b) = integral of 60 / bpm(b) db`, integrated numerically (Simpson) or in
 //! the closed form of a ramp linear in beats, never read back from
@@ -33,7 +33,7 @@ use tutti_transport::{
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
-/// The cell grid of the engine (doc 020, section 10).
+/// The cell grid of the engine.
 const GRID: u64 = 128;
 /// The largest block the graph takes, so that a device block of 1 024 or more
 /// reaches the graph whole and the 8-change cut is the engine's, not
@@ -134,7 +134,7 @@ fn on_the_cells(frame: u64) -> f64 {
 
 /// Beats the playhead is allowed to be from the curve inside a cell: the
 /// chord of a parabola with second derivative `a` over `h` seconds is
-/// `|a| h^2 / 8` off at its middle, and no more anywhere (doc 020, section 4).
+/// `|a| h^2 / 8` off at its middle, and no more anywhere.
 fn chord_bound() -> f64 {
     A.abs() * (GRID as f64 / SR).powi(2) / 8.0
 }

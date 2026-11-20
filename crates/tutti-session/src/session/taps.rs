@@ -1,8 +1,9 @@
 //! What the session lets the host listen to: the heard tap, the master meter, the load meter,
 //! and (feature `midi`) the engine's MIDI nodes and the `Session::midi` handle.
 
+use tutti_engine::{BlockCounts, Load};
 use tutti_graph::MeterReader;
-use tutti_metering::LoadMeter;
+use tutti_rt::{Counter, Gauge};
 use tutti_units::Samples;
 
 use crate::{AppKey, Clock, OutputTapOpen, Session, SessionOutputTapError};
@@ -104,21 +105,23 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.graph.meters().take_master()
     }
 
-    /// The engine's DSP-load meter: each block's render time against its
-    /// real-time budget, the smoothed mean, the peak since the last
-    /// [`take`](LoadMeter::take) and the blocks over budget.
-    /// Fed by every block the device callback (or, offline,
-    /// [`render`](Self::render)) renders; `None` on a detached session,
-    /// which has no engine.
-    pub fn load_meter(&self) -> Option<&LoadMeter> {
-        self.output.load.as_ref()
+    /// The engine's [`Load`]: each block's render time against its
+    /// real-time budget, smoothed. Fed by every block the device callback (or,
+    /// offline, [`render`](Self::render)) renders; `None` on a detached
+    /// session, which has no engine. Clones read the one cell.
+    pub fn load(&self) -> Option<Gauge<Load>> {
+        self.output.readings.as_ref().map(|(load, _)| load.clone())
     }
 
-    /// The same meter, mutably: [`take`](LoadMeter::take)
-    /// reads the peak since the last take, so it is the one reader's (the
-    /// session holds it; there is no second).
-    pub fn load_meter_mut(&mut self) -> Option<&mut LoadMeter> {
-        self.output.load.as_mut()
+    /// What the engine's blocks amounted to: blocks timed, blocks over
+    /// budget, blocks silenced and events dropped, each cumulative (an app
+    /// diffs two readings). `None` on a detached session, which has no
+    /// engine. Clones read the one cell.
+    pub fn blocks(&self) -> Option<Counter<BlockCounts>> {
+        self.output
+            .readings
+            .as_ref()
+            .map(|(_, blocks)| blocks.clone())
     }
 
     /// The engine's MIDI nodes, when the builder inserted them.

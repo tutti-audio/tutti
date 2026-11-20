@@ -1,6 +1,5 @@
 //! [`Pass`]: which input channel feeds which output channel when a node does
-//! not run (bypass, and the aligned input of a mix; doc 013, "Buses and
-//! coercion between declared layouts", B3).
+//! not run (bypass, and the aligned input of a mix).
 //!
 //! A node declares a `Main` bus on each side. When both say where their
 //! channels sit, the pass is the [`Fold`] between them (a mono centre reaches

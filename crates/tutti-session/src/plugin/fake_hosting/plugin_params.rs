@@ -214,7 +214,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
     )
     .with_refresh_sink(refresh.clone());
     let mut s = Session::builder()
-        .executor(tutti_fixtures::inline_executor())
+        .executor(tutti_platform::Executor::polled())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -240,7 +240,7 @@ fn plugin_events(events: Vec<SessionEvent>) -> Vec<PluginEvent> {
         .collect()
 }
 
-/// An update that submits a parameter read (the executor runs it inline) and
+/// An update that submits a parameter read (the next update polls it) and
 /// one that lands it; the plugin events both reported.
 fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
     let mut reported = plugin_events(s.update());

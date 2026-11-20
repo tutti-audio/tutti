@@ -184,7 +184,7 @@ pub trait LatencyGraph {
     /// Returns what feeds the audio input ports of `node`, tagged by port, in
     /// port order: **one [`PortFeed`] per source**, so a port that sums several
     /// sources yields several pairs with the same port, each source aligned on
-    /// its own (doc 013, "Audio fan-in sums", point 3). A port with no source
+    /// its own. A port with no source
     /// yields one [`PortFeed`] whose feed is `Feed::None`, so the port count is readable from the
     /// view; a feedback addend is `Feed::None` too.
     fn inputs(&self, node: Self::Node) -> impl Iterator<Item = PortFeed<Self::Node>>;

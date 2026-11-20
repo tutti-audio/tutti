@@ -1,4 +1,4 @@
-//! Edge fades (doc 030 section 4): a lane an editor marks `EdgeFade::In` or
+//! Edge fades: a lane an editor marks `EdgeFade::In` or
 //! `Out` moves its weight over `DECLICK` along the smootherstep, at the
 //! position `(j + 1) / (n + 1)` of frame `j` of an `n`-frame fade, counted from
 //! its first block under the fade and across blocks, and the editor learns when

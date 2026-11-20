@@ -20,8 +20,8 @@ use tutti_nodes::{
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    EnvelopeFilterConfig, EnvelopeFilterNode, TiltFilterConfig, TiltFilterNode,
-    TransientShaperConfig, TransientShaperNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TiltFilterConfig,
+    TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
@@ -162,6 +162,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                     .attack(Db::new(12.0))
                     .sustain(Db::new(-6.0)),
             )),
+        ),
+        (
+            "leveller",
+            Box::new(
+                LevellerNode::<f32>::try_from(LevellerConfig::new(BusTopology::STEREO)).unwrap(),
+            ),
         ),
         (
             "gate",

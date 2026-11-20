@@ -1,4 +1,4 @@
-//! The cost model and coarsening (doc 013): a graph
+//! The cost model and coarsening: a graph
 //! too cheap to spread renders serially on a pool, a wide one spreads, and
 //! cheap siblings packed into one task render bit for bit what the serial
 //! walk renders.

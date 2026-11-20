@@ -2015,7 +2015,7 @@ pub fn prepared<N: Node>(mut node: N, rate: SampleRate, max_block: usize) -> N {
 /// Checks a [`ParamNode`]'s fork, the promise [`param_parts`](crate::param_parts)
 /// relies on: a fork of `node` starts from the values last **set** through
 /// its [`ParamSet`](crate::ParamSet) (the cells hold them: a modulation lane
-/// sends to the port and never writes a cell, doc 014 §10), and shares no
+/// sends to the port and never writes a cell), and shares no
 /// cell with the live node in either direction.
 ///
 /// What this catches in a node: a param missing from

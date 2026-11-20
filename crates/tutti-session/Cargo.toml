@@ -32,7 +32,6 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 # The project's tempo map, which a bounce's range and clock are derived from.
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
-tutti-metering = { version = "0.0.1", path = "../tutti-metering" }
 tutti-engine = { version = "0.0.1", path = "../tutti-engine" }
 # `MainThreadMarker`, `monotonic_ns`, `spawn_named`: the session's main-thread proof, system clock and worker threads.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }

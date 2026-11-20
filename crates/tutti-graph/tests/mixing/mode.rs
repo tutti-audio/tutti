@@ -1,5 +1,4 @@
-//! Bypass and mute are graph state (doc 013, "Bypass and mute are graph
-//! state", stage M1): `NodeMode`, set with `Editor::set_mode`, applied by the
+//! Bypass and mute are graph state: `NodeMode`, set with `Editor::set_mode`, applied by the
 //! executor to any node.
 //!
 //! Every figure is analytic: the steady states are the input (delayed by the

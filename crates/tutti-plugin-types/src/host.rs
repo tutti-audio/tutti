@@ -259,9 +259,21 @@ pub trait Control: EditorWindow {
         None
     }
 
-    /// Tells the plugin how the host is automating it.
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
+    /// Tells the plugin how the host is automating it. `true` when the format's
+    /// channel carries the mode (the plugin has it:
+    /// [`Features::AUTOMATION_STATE`](crate::Features)); `false` when it has
+    /// none, and nothing was sent. Per format:
+    ///
+    /// - **VST3:** `IAutomationState::setAutomationState` was called on the
+    ///   controller.
+    /// - **CLAP:** `param-indication.set_automation` was called for at least one
+    ///   automatable parameter.
+    /// - **VST2:** the host answers `audioMasterGetAutomationState` with the mode
+    ///   from now on; the plugin learns it only when it asks.
+    /// - **AU:** never `true`: the format has no such call.
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
         let _ = (main, mode);
+        false
     }
 
     /// Tells the plugin's host what the host says of the track the plugin sits
@@ -828,8 +840,8 @@ impl<W: Wraps> Control for W {
         self.plugin_mut().current_preset(main)
     }
 
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
-        self.plugin_mut().set_automation_state(main, mode);
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
+        self.plugin_mut().set_automation_state(main, mode)
     }
 
     fn rescan_parameters(&mut self, main: MainThreadMarker, scope: RescanScope) {

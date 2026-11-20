@@ -1261,7 +1261,10 @@ fn the_automation_mode_reaches_every_automatable_parameter_as_its_indication() {
     ];
     for (mode, raw) in cases {
         param_reset();
-        Control::set_automation_state(&mut loaded, main_thread(), mode);
+        assert!(
+            Control::set_automation_state(&mut loaded, main_thread(), mode),
+            "the plugin implements param-indication, so it is told"
+        );
         let cap = probe.capture();
         let got: Vec<(u32, u32)> = cap.indications[..cap.indication_calls as usize]
             .iter()
