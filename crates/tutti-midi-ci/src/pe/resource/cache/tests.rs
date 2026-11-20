@@ -604,6 +604,48 @@ fn a_walk_page_overtaken_by_a_set_is_not_cached() {
     assert_eq!(sent_gets(&script) - sent, 1);
 }
 
+// A walk of a custom List Resource, whose data is the JSON as it came: the second
+// walk, from the cache, sends nothing and ends with the pages as the peer sent them.
+/// Spec: m2-103/7.4.3#3
+#[test]
+fn a_walk_of_a_custom_list_from_the_cache_returns_the_pages_as_sent() {
+    let resource = custom("X-ScoreList");
+    let list = PeResourceList::new().with(
+        ResourceEntry::builder(resource.clone())
+            .schema(json(r#"{"title":"Score List","type":"array"}"#))
+            .can_paginate(true)
+            .build()
+            .unwrap(),
+    );
+    let mut script = Script::new(&list);
+    let get = ResourceGet::new(target(resource.clone()));
+    let size = NonZeroU32::new(2).unwrap();
+    let pages = [r#"[{"n":1,"x":[1.5]},"a"]"#, r#"[{"n":2},null]"#];
+    let (call, actions) = script.init.get_list(&get, size, script.now).unwrap();
+    script.take(actions);
+    for body in pages {
+        let id = script.last_get_id();
+        let mut header = PeReply::new(PeStatus::Ok);
+        header.cache_time = Some(PeCacheTime::from_secs(100));
+        header.total_count = Some(4);
+        script.reply_with(
+            id,
+            PeMessageKind::GET_REPLY,
+            header,
+            body.as_bytes().to_vec(),
+        );
+    }
+    assert_eq!(sent_gets(&script), 2);
+    let sent_json = json(r#"[{"n":1,"x":[1.5]},"a",{"n":2},null]"#);
+    let want = PeData::Opaque(PeOpaque::new(resource, sent_json).unwrap());
+    assert_eq!(got(&script, call), want);
+    script.events.clear();
+    let (call, actions) = script.init.get_list(&get, size, script.now).unwrap();
+    script.take(actions);
+    assert_eq!(sent_gets(&script), 2, "the second walk asked for nothing");
+    assert_eq!(got(&script, call), want);
+}
+
 /// The data the call ended with.
 fn got(script: &Script, call: super::super::CallId) -> PeData {
     script
