@@ -13,8 +13,8 @@ pub type Result<T> = std::result::Result<T, Vst2Error>;
 /// Instantiation and Initialization phases.
 pub use tutti_plugin_types::LoadStage;
 use tutti_plugin_types::StateFrameError;
-use vst::api::GetChunkError;
-use vst::host::PluginLoadError;
+use vst::GetChunkError;
+use vst::PluginLoadError;
 
 /// An error reported by the VST2 host.
 #[derive(Debug, Error)]

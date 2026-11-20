@@ -28,7 +28,7 @@ fn session() -> (MidiSession, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let (backend, counters) = FakeBackend::build();
     let inlets = inlets();
     (
-        MidiSession::open_over(backend, inlets, crate::MidiHardwareOptions::new()).unwrap(),
+        MidiSession::open_over(backend, inlets, crate::MidiHardwareConfig::new()).unwrap(),
         counters.sent,
         counters.opens,
     )
@@ -88,7 +88,7 @@ fn by_name_matching_is_case_insensitive_substring() {
 fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
     let (backend, counters) = FakeBackend::build();
     let mut s =
-        MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+        MidiSession::open_over(backend, inlets(), crate::MidiHardwareConfig::new()).unwrap();
     // A name that matches nothing says what it searched, so a typo shows what
     // was there.
     let Err(MidiHardwareError::NoDeviceNamed { name, searched }) = s.connect_input("nonexistent")
@@ -163,7 +163,7 @@ fn a_query_by_id_and_by_name_reach_the_same_device() {
 fn a_dead_inputs_fault_is_read_through_the_session() {
     let (backend, fake) = FakeBackend::build();
     let mut s =
-        MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+        MidiSession::open_over(backend, inlets(), crate::MidiHardwareConfig::new()).unwrap();
     let keystep = input(&s, "Keystep Pro");
     let iac = input(&s, "IAC Bus 1");
     let _ = s.connect_input(&keystep).unwrap();
@@ -216,7 +216,7 @@ fn an_output_reaches_its_device() {
 fn a_send_time_reaches_the_sink_with_its_packet() {
     use tutti_midi_runtime::{Outgoing, SendAt};
     let (backend, counters) = FakeBackend::build_accepting(usize::MAX);
-    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareConfig::new()).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
     let raw = EndpointId::from_raw(10);
     let t = tutti_platform::Instant::now() + std::time::Duration::from_secs(1);
@@ -245,7 +245,7 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
 fn a_refusing_output_reports_zero_accepted() {
     let (backend, counters) = FakeBackend::build_accepting(0);
     let sent = counters.sent;
-    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareConfig::new()).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
 
     assert_eq!(
@@ -264,7 +264,7 @@ fn a_refusing_output_reports_zero_accepted() {
 #[test]
 fn a_partial_accept_reports_what_landed() {
     let (backend, _counters) = FakeBackend::build_accepting(1);
-    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareConfig::new()).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
 
     assert_eq!(output.queue(&[note(), note(), note()]).packets(), 1);
@@ -291,7 +291,7 @@ fn sysex() -> [UmpAt; 3] {
 #[test]
 fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
     let (backend, counters) = FakeBackend::build_accepting(2);
-    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareConfig::new()).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
     let raw = EndpointId::from_raw(10);
     let [start, middle, end] = sysex();
@@ -314,7 +314,7 @@ fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
 #[test]
 fn each_connected_output_is_its_own_value_on_its_own_device() {
     let (backend, counters) = FakeBackend::build_accepting(usize::MAX);
-    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
+    let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareConfig::new()).unwrap();
     let id = |name: &str| s.outputs().into_iter().find(|d| d.name == name).unwrap().id;
     let mut synth = s.connect_output(&id("Synth A")).unwrap();
     let mut iac = s.connect_output(&id("IAC Bus 1")).unwrap();
@@ -417,7 +417,7 @@ fn logging_session(refuse: bool) -> (MidiSession, Arc<Mutex<Vec<&'static str>>>)
     };
     let inlets = inlets();
     (
-        MidiSession::open_over(Box::new(backend), inlets, crate::MidiHardwareOptions::new())
+        MidiSession::open_over(Box::new(backend), inlets, crate::MidiHardwareConfig::new())
             .unwrap(),
         log,
     )
@@ -466,7 +466,7 @@ fn a_session_is_send() {
         std::time::Duration::ZERO,
     );
     let session =
-        MidiSession::open_over(backend, inlets, crate::MidiHardwareOptions::new()).unwrap();
+        MidiSession::open_over(backend, inlets, crate::MidiHardwareConfig::new()).unwrap();
     assert!(is_send(&session));
 }
 
@@ -475,15 +475,15 @@ fn a_session_is_send() {
 #[cfg(feature = "serde")]
 #[test]
 fn the_options_round_trip_through_serde() {
-    let options = MidiHardwareOptions::new().input_timing(InputTiming::JitterReduction);
+    let options = MidiHardwareConfig::new().input_timing(InputTiming::JitterReduction);
     let text = serde_json::to_string(&options).unwrap();
     assert_eq!(
-        serde_json::from_str::<MidiHardwareOptions>(&text).unwrap(),
+        serde_json::from_str::<MidiHardwareConfig>(&text).unwrap(),
         options
     );
-    let none = serde_json::to_string(&MidiHardwareOptions::default()).unwrap();
+    let none = serde_json::to_string(&MidiHardwareConfig::default()).unwrap();
     assert_eq!(
-        serde_json::from_str::<MidiHardwareOptions>(&none).unwrap(),
-        MidiHardwareOptions::new()
+        serde_json::from_str::<MidiHardwareConfig>(&none).unwrap(),
+        MidiHardwareConfig::new()
     );
 }

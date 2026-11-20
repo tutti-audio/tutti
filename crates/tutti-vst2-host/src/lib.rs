@@ -92,7 +92,7 @@
 //! .unwrap();
 //!
 //! let ctx = Vst2ProcessContext::new(tutti_plugin_types::SampleRate::SR_48K);
-//! let _midi_out: &tutti_vst2_host::MidiEventVec =
+//! let _midi_out: &tutti_plugin_types::MidiEventVec =
 //!     processor.process_planes(&mut block, &ctx);
 //!
 //! // Ending it rejoins the halves.
@@ -227,10 +227,8 @@
 // submodules resolves unchanged.
 extern crate tutti_vst2_ffi as vst;
 
-use vst::{midi, scratch};
-
 mod error;
-pub mod types;
+mod types;
 
 mod arrangement;
 mod control;
@@ -260,10 +258,10 @@ pub use param_properties::{
     MidiProgramCategory, NUM_MIDI_CHANNELS, ParameterCategory, ParameterProperties,
     ParameterPropertyFlags,
 };
-pub use types::{
-    ChannelLayout, MidiEventVec, ParameterInfo, PluginInfo, Samples, TimeSignature, TransportInfo,
-    Vst2Category, Vst2ProcessContext, WindowHandle, WireMidi,
+pub use tutti_plugin_types::{
+    ChannelLayout, ParameterInfo, Samples, TimeSignature, TransportInfo, WindowHandle, WireMidi,
 };
+pub use types::{PluginInfo, Vst2ProcessContext};
 
 // Test-only global allocator for RT-safety regression tests. Panics on
 // any heap allocation inside `assert_no_alloc::assert_no_alloc(..)`

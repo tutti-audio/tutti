@@ -20,7 +20,7 @@ use super::listener::Listener;
 use tutti_fixtures::midi::{note_off, note_on};
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::DeviceInfo;
-use tutti_midi_hardware::{MidiHardwareOptions, MidiSession, OpenOutput};
+use tutti_midi_hardware::{MidiHardwareConfig, MidiSession, OpenOutput};
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{MidiChannel, NoteKeyEvent, Ump};
 
@@ -43,7 +43,7 @@ fn open() -> Loopback {
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let mut graph = Listener::over(&inlets);
     let mut io =
-        MidiSession::open(Arc::clone(&inlets), MidiHardwareOptions::new()).expect("open MIDI");
+        MidiSession::open(Arc::clone(&inlets), MidiHardwareConfig::new()).expect("open MIDI");
     let inputs = io.inputs();
     let outputs = io.outputs();
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {

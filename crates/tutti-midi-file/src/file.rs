@@ -1147,8 +1147,8 @@ impl Track {
     /// The track's events as the packets a clip plays, at their beats for a
     /// file of division `ticks_per_quarter`, in the track's order. The rule is
     /// [`MetricalView::timeline`]'s.
-    pub fn timeline(&self, ticks_per_quarter: TicksPerQuarterNote) -> Timeline {
-        Timeline::of(
+    pub fn timeline(&self, ticks_per_quarter: TicksPerQuarterNote) -> SmfTimeline {
+        SmfTimeline::of(
             self.events
                 .iter()
                 .map(|(tick, event)| (tick.beats(ticks_per_quarter), event)),
@@ -2033,7 +2033,7 @@ impl<'a> MetricalView<'a> {
     ///   file's [`tempo_map`](Self::tempo_map), and the rest (text, time and
     ///   key signature, ...) are not on the timeline.
     ///
-    /// What has no packet is in [`Timeline::dropped`] with its
+    /// What has no packet is in [`SmfTimeline::dropped`] with its
     /// [`TimelineDrop`], not lost silently: a bare `F7` escape (the arbitrary
     /// bytes SMF 1.0 section 3.2 allows, which no packet holds), a divided
     /// message left unfinished, one with a byte of 128 or more, and an
@@ -2055,8 +2055,8 @@ impl<'a> MetricalView<'a> {
     /// assert!(clip.dropped.is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn timeline(self) -> Timeline {
-        Timeline::of(self.events())
+    pub fn timeline(self) -> SmfTimeline {
+        SmfTimeline::of(self.events())
     }
 }
 
@@ -2372,7 +2372,7 @@ fn smpte_seconds(fps: MtcRate, ticks_per_frame: SmfTicksPerFrame, tick: Tick) ->
 #[derive(Clone, Debug, PartialEq, Default)]
 #[must_use = "`dropped` lists the events with no packet"]
 #[non_exhaustive]
-pub struct Timeline {
+pub struct SmfTimeline {
     /// The packets at their beats, in order.
     pub packets: Vec<(Beat, Ump)>,
     /// The [`SysEx`](FileEvent::SysEx), [`Escape`](FileEvent::Escape) and
@@ -2382,7 +2382,7 @@ pub struct Timeline {
     pub dropped: Vec<(Beat, FileEvent, TimelineDrop)>,
 }
 
-/// Why an event of [`MetricalView::timeline`] has no packet ([`Timeline::dropped`]).
+/// Why an event of [`MetricalView::timeline`] has no packet ([`SmfTimeline::dropped`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TimelineDrop {
@@ -2404,7 +2404,7 @@ fn ends_in_f7(data: &[u8]) -> bool {
     data.last() == Some(&0xF7)
 }
 
-impl Timeline {
+impl SmfTimeline {
     /// The packets of `events`, by [`MetricalView::timeline`]'s rule.
     fn of<'a>(events: impl Iterator<Item = (Beat, &'a FileEvent)>) -> Self {
         let mut timeline = Self::default();

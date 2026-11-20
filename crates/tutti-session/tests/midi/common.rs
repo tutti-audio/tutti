@@ -106,7 +106,7 @@ pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Session, NodeKey) {
     let (backend, _fake) =
         FakeBackend::build_with(vec![persistent_endpoint(1, "Keys")], vec![], usize::MAX);
     let mut builder = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new());
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new());
     if let Some(last) = groups {
         builder = builder.midi_groups(last);
     }
