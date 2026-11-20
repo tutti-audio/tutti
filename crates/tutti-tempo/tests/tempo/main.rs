@@ -12,6 +12,7 @@ mod common;
 
 mod analytic;
 mod cells;
+mod from_beats;
 mod no_alloc;
 mod range;
 mod stepped;
