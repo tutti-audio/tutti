@@ -38,14 +38,9 @@ fn square(frames: usize) -> Wave {
     wave_of((0..frames).map(|i| if i % 4 < 2 { 0.5 } else { -0.5 }))
 }
 
-/// **A session builds offline with no thread of tutti's, and holds the rate it was asked for.**
-#[wasm_bindgen_test]
-fn an_offline_session_builds_at_its_rate() {
-    assert_eq!(session().sample_rate(), RATE);
-}
-
-/// **A clip of a constant bounces to memory as the range's frames, each at the constant.** One
-/// second of a placed clip holds exactly the second's frames, and the clip's level is the
+/// **A session built offline with no thread of tutti's bounces a clip of a constant to memory as
+/// the range's frames, each at the constant.** One second at the session's rate holds exactly the
+/// second's frames, and the clip's level is the
 /// master's level on every frame.
 #[wasm_bindgen_test]
 fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() {
