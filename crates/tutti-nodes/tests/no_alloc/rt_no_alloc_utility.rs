@@ -5,7 +5,8 @@ use tutti_buffers::{ChannelIndex, ChannelLayout};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
-    MidSideConfig, MidSideNode, PolarityConfig, PolarityNode, StereoWidthConfig, StereoWidthNode,
+    MidSideConfig, MidSideNode, NoiseColour, NoiseConfig, NoiseNode, PolarityConfig, PolarityNode,
+    StereoWidthConfig, StereoWidthNode,
 };
 use tutti_units::{SampleRate, UnitParam};
 
@@ -60,4 +61,19 @@ fn stereo_width_process_is_allocation_free_with_the_width_moving() {
             controls.set(UnitParam::StereoWidth, w);
         },
     );
+}
+
+#[test]
+fn noise_process_is_allocation_free_in_every_colour_with_the_level_moving() {
+    for colour in [NoiseColour::White, NoiseColour::Pink, NoiseColour::Brown] {
+        gate(
+            NoiseNode::<f32>::from(NoiseConfig::new(colour).seed(1)),
+            |controls, i| {
+                controls.set(
+                    UnitParam::Volume,
+                    if i.is_multiple_of(2) { 0.2 } else { 0.9 },
+                );
+            },
+        );
+    }
 }

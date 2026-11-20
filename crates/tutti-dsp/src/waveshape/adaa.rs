@@ -11,7 +11,7 @@
 
 use tutti_buffers::Float;
 
-use super::{Antialiasing, ShapeKind, smooth9};
+use super::{Antialiasing, ShapeKind, fold_phase, smooth9, triangle_fold};
 
 /// How close two inputs are before a quotient whose differences cannot be conditioned is
 /// replaced by its limit, relative to the larger of 1 and the two inputs' magnitudes (in the
@@ -109,6 +109,20 @@ fn softsign_mean_f1<F: Float>(p: F, q: F) -> F {
     }
 }
 
+/// `F1` of the triangle fold's unit curve: the integral of the fold from 0, periodic (the fold
+/// is odd and has a mean of 0 over its period of 4) and even, `a^2 / 2` for `a = |w| <= 1` and
+/// `1 - (2 - a)^2 / 2` from 1 to 2, `w` the argument reduced to `-2..=2`.
+#[inline(always)]
+fn triangle_fold_f1<F: Float>(u: F) -> F {
+    let a = fold_phase(u).abs();
+    if a <= F::ONE {
+        F::lit(0.5) * a * a
+    } else {
+        let r = F::lit(2.0) - a;
+        F::ONE - F::lit(0.5) * r * r
+    }
+}
+
 /// `F1` of `SoftCrush`'s unit curve: the integral of `n + smooth9(u - n)`.
 #[inline(always)]
 fn soft_crush_f1<F: Float>(u: F) -> F {
@@ -159,6 +173,7 @@ impl ShapeKind {
             Self::Atan => u.atan(),
             Self::Softsign => u / (F::ONE + u.abs()),
             Self::HardClip => u.clamp(-F::ONE, F::ONE),
+            Self::TriangleFold => triangle_fold(u),
             Self::Crush => u.round(),
             Self::SoftCrush => {
                 let n = u.floor();
@@ -210,6 +225,27 @@ impl ShapeKind {
                 // `(ca^2 - cb^2) / 2 + ca (a - ca) - cb (b - cb)`.
                 let (ca, cb) = (a.clamp(-one, one), b.clamp(-one, one));
                 (half * (ca - cb) * (ca + cb) + ca * (a - ca) - cb * (b - cb)) / gap
+            }
+            Self::TriangleFold => {
+                // The fold is linear between its kinks, at the odd integers. A segment under
+                // 1 long holds at most one: the mean is the two linear pieces' (the sum of
+                // their end values times their lengths over the segment's, every term of
+                // order 1, so no cancellation grows), or the curve at the midpoint where it
+                // holds none. A longer segment has the antiderivative's difference, over a
+                // gap of at least 1.
+                if gap.abs() < one {
+                    let (lo, hi) = if a > b { (b, a) } else { (a, b) };
+                    let kink = F::lit(2.0) * ((lo + one) * half).floor() + one;
+                    if kink < hi {
+                        let at = self.g(kink);
+                        ((kink - lo) * (self.g(lo) + at) + (hi - kink) * (at + self.g(hi))) * half
+                            / (hi - lo)
+                    } else {
+                        self.g(half * (a + b))
+                    }
+                } else {
+                    (triangle_fold_f1(a) - triangle_fold_f1(b)) / gap
+                }
             }
             Self::Crush => {
                 // `F1(u) = k u - k^2 / 2` with `k = round(u)`: the mean is `ka + (ka - kb)(b -

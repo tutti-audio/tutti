@@ -81,7 +81,7 @@
 //!   [`PlateBank`] (Dattorro's plate), their parameters [`Ramp`]s in [`FreeverbRamps`],
 //!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
 //!   given gain.
-//! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], six memoryless curves, and
+//! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
@@ -105,6 +105,8 @@
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
+//! - **Noise** (`noise.rs`): [`Noise`], a seeded white, pink (Kellet's filter) or brown
+//!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
@@ -167,6 +169,7 @@ mod interp;
 mod level;
 mod loudness;
 mod modulation;
+mod noise;
 mod novelty;
 mod onepole;
 mod oscillator;
@@ -253,6 +256,7 @@ pub use modulation::phaser::{
     SweepRangeError,
 };
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepBuilder, SweepError};
+pub use noise::{Noise, NoiseColour};
 pub use novelty::{
     bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
 };
