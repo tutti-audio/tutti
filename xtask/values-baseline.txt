@@ -18,7 +18,4 @@ setter  crates/tutti-session/src/graph/testing.rs::AudioSide::set_transport  a h
 setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/midi.rs::Midi::set_routes  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/modulation.rs::Mods::set_source  which source a route reads, a declaration: goes at 11e
-setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain  a plugin param's peer path (7a S6)
-setter  crates/tutti-session/src/plugin_params.rs::Param::set_text  a plugin param's peer path (7a S6)
 set  crates/tutti-session/src/plugin_params.rs::ParamGesture::set  a plugin param's gesture, until `Gesture` lands (7d)
-set  crates/tutti-session/src/plugin_params.rs::TypedParam::set  a plugin param's peer path (7a S6)
