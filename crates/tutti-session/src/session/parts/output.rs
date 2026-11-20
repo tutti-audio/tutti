@@ -11,8 +11,9 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_engine::OutputTaps;
+use tutti_engine::{BlockCounts, Load};
 use tutti_graph::RootError;
-use tutti_metering::LoadMeter;
+use tutti_rt::{Counter, Gauge};
 
 use crate::graph::Graph;
 use crate::value::Cell;
@@ -33,10 +34,10 @@ pub(crate) struct OutputPart<F: Float> {
     /// The engine's tap after the fader and the device width it was built
     /// for; `None` detached.
     pub(crate) taps: Option<(OutputTaps<F>, ChannelLayout)>,
-    /// The engine's load meter, offline or on a device; `None` detached.
-    pub(crate) load: Option<LoadMeter>,
-    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced) as
-    /// the last update read it: the next update reports the rise
+    /// The engine's load and block counts, offline or on a device; `None`
+    /// detached.
+    pub(crate) readings: Option<(Gauge<Load>, Counter<BlockCounts>)>,
+    /// [`BlockCounts::silenced`] as the last update read it: the next update reports the rise
     /// ([`SessionEvent::BlocksSilenced`]).
     silenced_seen: u64,
 }
@@ -51,7 +52,7 @@ impl<F: Float> OutputPart<F> {
             root_refusal: None,
             policy,
             taps: None,
-            load: None,
+            readings: None,
             silenced_seen: 0,
         }
     }
@@ -116,12 +117,13 @@ impl<F: Float> OutputPart<F> {
     }
 
     /// The blocks the engine silenced since the last update, as one
-    /// [`SessionEvent::BlocksSilenced`]. The meter's count is cumulative
-    /// (and zeroed by a reset), so the rise is read against the last
-    /// reading; a reset restarts from the new count.
+    /// [`SessionEvent::BlocksSilenced`]. The counter's tally is cumulative,
+    /// so the rise is read against the last reading.
     pub(crate) fn report_silenced(&mut self, out: &mut Vec<SessionEvent>) {
-        let Some(load) = &self.load else { return };
-        let now = load.peek().silenced;
+        let Some((_, blocks)) = &self.readings else {
+            return;
+        };
+        let now = blocks.get().silenced;
         let rise = now.saturating_sub(self.silenced_seen);
         self.silenced_seen = now;
         if rise > 0 {

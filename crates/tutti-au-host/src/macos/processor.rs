@@ -19,8 +19,8 @@ use tutti_au_ffi::{
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    MIDI_STACK_CAPACITY, ParamMapping, ParamWriteError, PlayheadWatch, PluginError, PluginIo,
-    PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
+    MIDI_STACK_CAPACITY, ParamWriteError, PlayheadWatch, PluginError, PluginIo, PluginResult,
+    ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;
@@ -713,7 +713,8 @@ impl AuProcessor {
                 else {
                     continue;
                 };
-                let plain = bounds.plain(last.value) as f32;
+                let plain = bounds.word(last.value);
+                table.marks().record(slot, last.value);
                 if table.is_non_realtime(id) {
                     // The latest value, marked for the tick: a parameter moved
                     // in many blocks is written once, and nothing is dropped.
@@ -829,7 +830,8 @@ impl Processor for AuProcessor {
             else {
                 continue;
             };
-            let plain = bounds.plain(last.value) as f32;
+            let plain = bounds.word(last.value);
+            table.marks().record(slot, last.value);
             if table.is_non_realtime(id) {
                 table.marks().defer(slot, plain);
             } else {
@@ -855,6 +857,8 @@ impl Processor for AuProcessor {
         if let Some(midi_out) = &mut self.rendering.midi_out {
             midi_out.reset();
         }
+        // The unit starts over from its own state: no value it reports is a host write.
+        self.ranges.lend().marks().clear_written();
     }
 }
 

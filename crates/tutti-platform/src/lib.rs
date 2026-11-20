@@ -20,7 +20,8 @@
 //!   joins on drop (or within a bound, `stop_within`) and reports a panic once
 //!   ([`Panicked`]).
 //! - [`Executor`] — where tutti's background futures run: on threads, on a caller's
-//!   `poll`, or on a host's executor.
+//!   `poll`, or on a host's executor. [`Executor::sleep_until`] is a deadline as a
+//!   future ([`Sleep`]), fired by the executor's timer thread or by `poll`.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
@@ -77,7 +78,7 @@ pub use asset::{
 };
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
-pub use executor::Executor;
+pub use executor::{Executor, Sleep};
 pub use main_thread::MainThreadMarker;
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use sleep::sleep_until_ns;

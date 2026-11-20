@@ -242,3 +242,183 @@ fn dropping_a_polled_executor_drops_its_futures() {
     drop(executor);
     assert!(dropped.load(Ordering::SeqCst));
 }
+
+#[test]
+fn a_polled_sleep_with_a_past_deadline_resolves_within_one_poll() {
+    let executor = Executor::polled();
+    let flag = Arc::new(AtomicBool::new(false));
+    let f = Arc::clone(&flag);
+    let sleep = executor.sleep_until(Instant::now()).unwrap();
+    executor
+        .spawn(async move {
+            sleep.await;
+            f.store(true, Ordering::SeqCst);
+        })
+        .unwrap();
+    executor.poll(1);
+    assert!(flag.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_polled_future_awaiting_a_far_deadline_stays_pending_across_polls() {
+    let executor = Executor::polled();
+    let flag = Arc::new(AtomicBool::new(false));
+    let f = Arc::clone(&flag);
+    let sleep = executor.sleep(Duration::from_secs(3600 * 24)).unwrap();
+    executor
+        .spawn(async move {
+            sleep.await;
+            f.store(true, Ordering::SeqCst);
+        })
+        .unwrap();
+    for _ in 0..5 {
+        executor.poll(8);
+    }
+    assert!(!flag.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_polled_poll_wakes_a_sleep_whose_deadline_passed_after_it_pended() {
+    let executor = Executor::polled();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let p = Arc::clone(&polls);
+    let mut sleep = executor
+        .sleep_until(Instant::now() + Duration::from_millis(20))
+        .unwrap();
+    executor
+        .spawn(std::future::poll_fn(move |cx| {
+            p.fetch_add(1, Ordering::SeqCst);
+            Pin::new(&mut sleep).poll(cx)
+        }))
+        .unwrap();
+    assert_eq!(executor.poll(8), 1);
+    // The deadline is real time away: poll until the sleep fires, bounded only
+    // against a hang.
+    let end = Instant::now() + HANG_GUARD;
+    while executor.poll(8) == 0 {
+        assert!(Instant::now() < end, "the sleep never woke");
+        std::thread::yield_now();
+    }
+    assert_eq!(polls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_threaded_sleep_with_a_past_deadline_resolves() {
+    let executor = Executor::threaded();
+    let (tx, rx) = mpsc::channel();
+    let sleep = executor.sleep_until(Instant::now()).unwrap();
+    executor
+        .spawn(async move {
+            sleep.await;
+            tx.send(()).unwrap();
+        })
+        .unwrap();
+    rx.recv_timeout(HANG_GUARD).unwrap();
+}
+
+#[test]
+fn a_threaded_sleep_resolves_at_a_deadline_ahead() {
+    let executor = Executor::threaded();
+    let (tx, rx) = mpsc::channel();
+    let deadline = Instant::now() + Duration::from_millis(10);
+    let sleep = executor.sleep_until(deadline).unwrap();
+    executor
+        .spawn(async move {
+            sleep.await;
+            tx.send(Instant::now()).unwrap();
+        })
+        .unwrap();
+    assert!(rx.recv_timeout(HANG_GUARD).unwrap() >= deadline);
+}
+
+#[test]
+fn an_earlier_deadline_inserted_later_wakes_the_timer_thread_first() {
+    let executor = Executor::threaded();
+    let (tx, rx) = mpsc::channel();
+    for (label, sleep) in [
+        (
+            "far",
+            executor.sleep(Duration::from_secs(3600 * 24)).unwrap(),
+        ),
+        ("near", executor.sleep(Duration::from_millis(10)).unwrap()),
+    ] {
+        let tx = tx.clone();
+        executor
+            .spawn(async move {
+                sleep.await;
+                tx.send(label).unwrap();
+            })
+            .unwrap();
+    }
+    assert_eq!(rx.recv_timeout(HANG_GUARD).unwrap(), "near");
+}
+
+#[test]
+fn a_host_executor_sleep_resolves_on_its_native_timer_thread() {
+    let spawned = Arc::new(Mutex::new(Vec::<BoxFuture>::new()));
+    let s = Arc::clone(&spawned);
+    let executor = Executor::new(move |future| lock(&s).push(future));
+    let flag = Arc::new(AtomicBool::new(false));
+    let f = Arc::clone(&flag);
+    let sleep = executor.sleep_until(Instant::now()).unwrap();
+    executor
+        .spawn(async move {
+            sleep.await;
+            f.store(true, Ordering::SeqCst);
+        })
+        .unwrap();
+    let mut future = lock(&spawned).pop().unwrap();
+    let waker = Waker::noop();
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(waker))
+            .is_ready()
+    );
+    assert!(flag.load(Ordering::SeqCst));
+}
+
+#[test]
+fn dropping_a_threaded_executor_joins_its_timer_thread_and_leaves_sleeps_pending() {
+    let executor = Executor::threaded();
+    let mut sleep = executor.sleep(Duration::from_secs(3600 * 24)).unwrap();
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+    drop(executor);
+    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+}
+
+/// A waker the timer thread wakes can hold the last clone of the executor; its drop
+/// then runs on the timer thread, which must not join itself.
+#[test]
+fn the_last_executor_dropped_on_the_timer_thread_does_not_join_itself() {
+    use std::task::Wake;
+
+    struct Holder {
+        executor: Mutex<Option<Executor>>,
+        dropped: Mutex<Option<mpsc::Sender<()>>>,
+    }
+    impl Wake for Holder {
+        fn wake(self: Arc<Self>) {
+            drop(self.executor.lock().unwrap().take());
+            if let Some(tx) = self.dropped.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+
+    let executor = Executor::threaded();
+    let mut sleep = executor.sleep(Duration::from_millis(5)).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let holder = Arc::new(Holder {
+        executor: Mutex::new(Some(executor)),
+        dropped: Mutex::new(Some(tx)),
+    });
+    let waker = Waker::from(Arc::clone(&holder));
+    let mut cx = Context::from_waker(&waker);
+    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+    drop(waker);
+    drop(holder);
+    // A hang guard, not a speed bound: a self-join never sends.
+    assert_eq!(rx.recv_timeout(Duration::from_secs(30)), Ok(()));
+}

@@ -79,7 +79,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
 #[test]
 fn the_session_reads_the_load_its_callback_measures() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let session = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -88,8 +88,8 @@ fn the_session_reads_the_load_its_callback_measures() {
             .render_block(Samples::new(64))
             .expect("the stream is open");
     }
-    let meter = session.load_meter_mut().expect("a device's engine");
-    assert_eq!(meter.take().blocks, 3);
+    let blocks = session.blocks().expect("a device's engine");
+    assert_eq!(blocks.get().blocks, 3);
 }
 
 /// **A rerate from 48 kHz to 96 kHz keeps the published compensation in

@@ -1,5 +1,4 @@
-//! Wiring bus to bus (doc 013, "Buses and coercion between declared layouts",
-//! B2): a bus edge is a fold between two declared topologies, lowered to
+//! Wiring bus to bus: a bus edge is a fold between two declared topologies, lowered to
 //! weighted lanes, and nothing in the compiler or the executors knows it.
 //!
 //! From the spec: each figure is analytic (the fold's own table, written out
@@ -952,7 +951,7 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
 }
 
 // ---------------------------------------------------------------------------
-// The root as a bus sink (doc 013, "Buses", B4).
+// The root as a bus sink.
 // ---------------------------------------------------------------------------
 
 fn root_lane(channel: u16, from: Source) -> EdgeId {

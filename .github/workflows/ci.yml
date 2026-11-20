@@ -76,7 +76,6 @@ jobs:
       - run: cargo xtask check-paths tutti_dsp allpass buffer control convolver delay dither dynamics error fdn fdn_design fft filter geometry grid interp model network reverb reverb_design swept_delay waveshape window resample
       - run: cargo xtask check-paths tutti_measure align beat chord chroma features key loudness notes onset peaks pitch silence spectrum stereo tempo transform vectorscope xcorr yin
       - run: cargo xtask check-paths tutti_transport beat_walk clock fsm handle loop_region motion offline project_meter settings state timed timeline
-      - run: cargo xtask check-paths tutti_metering load
       - run: cargo xtask check-paths tutti_engine engine error
       - run: cargo xtask check-paths tutti_codec aiff decode encoder error flac format pcm spec staged vorbis wav wave
       - run: cargo xtask check-paths tutti_sf2 bank binary_reader error four_cc generator generator_type instrument instrument_info instrument_region loop_mode preset preset_info preset_region read_counter sample_header soundfont soundfont_info soundfont_parameters soundfont_sampledata soundfont_version zone zone_info
@@ -113,6 +112,7 @@ jobs:
       - run: cargo xtask check-alloc-binaries
       - run: cargo xtask check-buffers
       - run: cargo xtask check-width
+      - run: cargo xtask check-threads
       - run: cargo xtask check-building
       - run: cargo xtask check-values
       - run: cargo xtask check-units-bare

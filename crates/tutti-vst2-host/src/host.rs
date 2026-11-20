@@ -55,25 +55,25 @@ use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use tutti_plugin_types::{
-    AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, sysex_packets,
+    AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, WrittenValues, sysex_packets,
 };
 use tutti_rt::AtomicSampleRate;
 use tutti_rt::{AtomicRequestFlags, Tally, TallyWriter, tally};
 use tutti_ump::MidiGroup;
-use tutti_units::SampleRate;
+use tutti_units::{Normalized, SampleRate};
 use vst::Host;
 use vst::to_midi;
 use vst::{AutomationState, ProcessLevel, Supported};
 
 /// What the plugin reported of a parameter edit: `audioMasterBeginEdit`,
-/// `audioMasterAutomate` (the value, as the `f32` the callback carries) and
+/// `audioMasterAutomate` (the value, widened from the `f32` the callback carries) and
 /// `audioMasterEndEdit`, each with the parameter's index.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ParameterChange {
     /// `audioMasterBeginEdit`: the plugin took hold of the parameter.
     Begin(i32),
     /// `audioMasterAutomate`: the parameter now has this value.
-    Automate(i32, f32),
+    Automate(i32, Normalized),
     /// `audioMasterEndEdit`: the plugin let go of the parameter.
     End(i32),
 }
@@ -160,6 +160,11 @@ pub(crate) struct HostState {
     refused_callbacks: Tally<u64>,
     refused_callbacks_writer: TallyWriter<u64>,
     time_info: TransportReader,
+    /// The value last written to each parameter, sized when the plugin's
+    /// parameter count is known ([`size_written`](Self::size_written)). A report
+    /// equal to the `f32` narrowing of it is the plugin repeating the write, not
+    /// an edit ([`automate`](Host::automate)); any other report clears it.
+    written: std::sync::OnceLock<WrittenValues>,
     /// The maximum block size the plugin was last told (`effSetBlockSize`), in
     /// samples. Served back through `audioMasterGetBlockSize`.
     ///
@@ -222,6 +227,53 @@ impl HostState {
         }
     }
 
+    /// Sizes the record of written values for `count` parameters. Called once,
+    /// when the plugin's parameter count is read; a second call changes nothing.
+    pub(crate) fn size_written(&self, count: usize) {
+        let _ = self.written.set(WrittenValues::new(count));
+    }
+
+    /// The word `setParameter` takes for `value`: VST2 carries a parameter as
+    /// `f32`, so this is the one place a value narrows.
+    pub(crate) fn narrow(value: Normalized) -> f32 {
+        value.get() as f32
+    }
+
+    /// A host write of `value` to parameter `index`: runs `set` (the plugin's
+    /// `setParameter`) with its `f32` narrowing, marked as a host write
+    /// ([`host_write`]), and records the `f64` written when `set` took it.
+    /// Returns what `set` returned.
+    pub(crate) fn write(
+        &self,
+        index: i32,
+        value: Normalized,
+        set: impl FnOnce(f32) -> bool,
+    ) -> bool {
+        let taken = host_write(|| set(Self::narrow(value)));
+        if taken && let (Some(written), Ok(slot)) = (self.written.get(), usize::try_from(index)) {
+            written.record(slot, value);
+        }
+        taken
+    }
+
+    /// Forgets every written value: the plugin set its own state (a chunk, a
+    /// program), so what it reports next is not the host's write repeated.
+    pub(crate) fn clear_written(&self) {
+        if let Some(written) = self.written.get() {
+            written.clear();
+        }
+    }
+
+    /// Whether `report` for parameter `index` is the plugin repeating the
+    /// narrowing of the value the host last wrote there. A report that is not
+    /// clears the record ([`WrittenValues::absorbs`]).
+    fn absorbs_report(&self, index: i32, report: f32) -> bool {
+        let slot = usize::try_from(index).ok();
+        self.written.get().zip(slot).is_some_and(|(written, slot)| {
+            written.absorbs(slot, |value| Self::narrow(value) == report)
+        })
+    }
+
     pub(crate) fn new(
         _main: MainThreadMarker,
         param_tx: Arc<ArrayQueue<ParameterChange>>,
@@ -244,6 +296,7 @@ impl HostState {
             refused_callbacks_writer: refused_callbacks.writer(),
             refused_callbacks,
             time_info,
+            written: std::sync::OnceLock::new(),
             block_size: AtomicU64::new(block_size as u64),
             sample_rate: AtomicSampleRate::new(default_sample_rate),
             offline: std::sync::atomic::AtomicBool::new(false),
@@ -391,7 +444,7 @@ thread_local! {
 /// next write adds the offsets again, ratcheting the base to the clamp.
 /// An edit made on another thread (the editor) while a write runs is still
 /// reported: the mark is this thread's.
-pub(crate) fn host_write<R>(write: impl FnOnce() -> R) -> R {
+fn host_write<R>(write: impl FnOnce() -> R) -> R {
     /// Restores the mark even if `write` unwinds.
     struct Restore(bool);
     impl Drop for Restore {
@@ -414,7 +467,14 @@ impl Host for HostState {
     /// A report made from inside the host's own `setParameter` is an echo of
     /// the host's value and is not queued ([`host_write`]).
     fn automate(&self, index: i32, value: f32) {
-        self.report(ParameterChange::Automate(index, value));
+        if self.absorbs_report(index, value) {
+            return;
+        }
+        // The callback's word is an `f32`; it widens here, once, into a quantity.
+        self.report(ParameterChange::Automate(
+            index,
+            Normalized::clamped(f64::from(value)),
+        ));
     }
 
     /// `audioMasterBeginEdit` (aeffectx.h): the plugin took hold of a

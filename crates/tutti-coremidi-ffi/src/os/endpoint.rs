@@ -8,7 +8,7 @@
 //! the kind asked for and to read that id.
 
 use crate::UniqueId;
-use crate::find::{FindError, Kind, confirm};
+use crate::checks::find::{FindError, Kind, confirm};
 use core_foundation::base::TCFType;
 use core_foundation::string::{CFString, CFStringRef};
 use coremidi_sys::{

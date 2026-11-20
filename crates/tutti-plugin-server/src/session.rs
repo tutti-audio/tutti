@@ -14,7 +14,9 @@ use crate::ties::Ties;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
-use tutti_plugin_ipc::{AudioSlab, ControlReply, ControlRequest, News, StagedState, Working};
+use tutti_plugin_ipc::{
+    AudioSlab, ControlReply, ControlRequest, News, SlabHandle, SlabLayout, StagedState, Working,
+};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
@@ -198,7 +200,7 @@ impl Session {
         };
         if config != self.published {
             self.published = config;
-            self.render.send(ToRender::Config(config));
+            self.render.tell(ToRender::Config(config));
         }
     }
 
@@ -238,6 +240,29 @@ impl Session {
         // runs with it.
         self.publish();
         reaction
+    }
+
+    /// Maps the slab the host sent, and hands it to the render thread.
+    ///
+    /// **Always answered**: a slab this side cannot open, or a render thread that
+    /// does not take it, is the host's to hear of as a reply, not the end of the
+    /// session, and the answer is `SharedMemoryReady` only once the render thread
+    /// holds the slab.
+    pub(crate) fn setup_slab(&mut self, slab: &SlabHandle, layout: SlabLayout) -> Reaction {
+        let reply = match AudioSlab::open(slab, layout) {
+            // The scratch is sized by the attach, to the most a block may carry;
+            // the render thread refuses any block longer.
+            Ok(opened) => match self.render.attach_slab(opened) {
+                Ok(()) => ControlReply::SharedMemoryReady,
+                Err(e) => ControlReply::Error {
+                    message: format!("the render thread did not take the slab: {e}"),
+                },
+            },
+            Err(e) => ControlReply::Error {
+                message: e.to_string(),
+            },
+        };
+        reply.into()
     }
 
     fn dispatch(
@@ -443,22 +468,12 @@ impl Session {
                 bytes,
             } => Ok(self.handle_stage_state_chunk(seq, total, last, &bytes)),
 
-            M::SetupSharedMemory { slab, layout } => {
-                // A slab this side cannot open is the host's to hear of: a reply,
-                // not the end of the session.
-                match AudioSlab::open(&slab, layout) {
-                    Ok(slab) => {
-                        // The scratch is sized here, to the most a block may
-                        // carry; the render thread refuses any block longer.
-                        self.render.attach_slab(slab);
-                        Ok(ControlReply::SharedMemoryReady.into())
-                    }
-                    Err(e) => Ok(ControlReply::Error {
-                        message: e.to_string(),
-                    }
-                    .into()),
-                }
+            // The transport delivers a setup with its slab as `Incoming::SetupSlab`
+            // (`setup_slab`); a frame that reaches here has no slab.
+            M::SetupSharedMemory { .. } => Ok(ControlReply::Error {
+                message: "a slab setup arrived without its slab".into(),
             }
+            .into()),
             M::Shutdown => Ok(Reaction::Shutdown),
         }
     }
@@ -587,7 +602,7 @@ impl Session {
         let (writer, reader) =
             tutti_plugin_types::edit_slots(control.parameters(main).iter().map(|p| p.id()));
         self.informs = Some(reader);
-        self.render.send(ToRender::Informs(writer));
+        self.render.tell(ToRender::Informs(writer));
     }
 
     /// Tells the plugin's edit controller of the values the blocks since the
@@ -703,7 +718,7 @@ impl Session {
             }
             drop(plugin);
             self.work.run(main);
-            self.render.send(ToRender::Unseat);
+            self.render.tell(ToRender::Unseat);
         }
     }
 
@@ -793,7 +808,14 @@ impl Session {
         self.rate_refused = None;
         self.publish();
         self.declare_informs(main);
-        self.render.send(ToRender::Seat(seat));
+        if let Err(e) = self.render.send(ToRender::Seat(seat)) {
+            // The load is not answered as done: the render thread has no
+            // plugin to run, and every block would be refused.
+            return Ok(ControlReply::Error {
+                message: format!("the loaded plugin cannot be seated: {e}"),
+            }
+            .into());
+        }
         Ok(ControlReply::PluginLoaded {
             id,
             descriptor: Box::new(descriptor),
@@ -1057,7 +1079,7 @@ mod tests {
 
         /// Attaches the host's slab, as `SetupSharedMemory` does.
         fn attach(&mut self, slab: tutti_plugin_ipc::SlabWriter) {
-            self.session.render.attach_slab(slab);
+            self.session.render.attach_slab(slab).unwrap();
         }
 
         /// One message of the control connection, on the session.
@@ -1521,15 +1543,15 @@ mod tests {
             vec![tutti_plugin_types::ChannelLayout::STEREO],
             vec![tutti_plugin_types::ChannelLayout::STEREO],
         );
-        // A handle whose slab is gone: made, then every mapping of it dropped.
-        let (owner, gone) = AudioSlab::create(layout.clone()).unwrap();
-        drop(owner);
-        let reply = s
-            .handle(
-                main_thread(),
-                ControlRequest::SetupSharedMemory { slab: gone, layout },
-            )
-            .expect("a refused slab is a reply, not a failure of the session");
+        // A slab made for a longer layout than the one announced with it.
+        let (_owner, shorter) = AudioSlab::create(layout.clone()).unwrap();
+        let longer = SlabLayout::new(
+            512,
+            FloatWidth::F32,
+            vec![tutti_plugin_types::ChannelLayout::STEREO],
+            vec![tutti_plugin_types::ChannelLayout::STEREO],
+        );
+        let reply = s.session.setup_slab(&shorter, longer);
         assert!(
             matches!(reply, Reaction::Reply(ControlReply::Error { .. })),
             "the host hears the refusal"
@@ -1538,6 +1560,35 @@ mod tests {
         assert!(matches!(
             s.handle(main_thread(), ControlRequest::Shutdown).unwrap(),
             Reaction::Shutdown
+        ));
+    }
+
+    /// **A setup is answered ready only once the render thread holds the slab**,
+    /// and a `SetupSharedMemory` frame that reaches the session without its slab
+    /// is refused in a reply.
+    #[test]
+    fn a_setup_is_ready_with_its_slab_and_refused_without() {
+        let mut s = Rig::new();
+        let layout = SlabLayout::new(
+            256,
+            FloatWidth::F32,
+            vec![tutti_plugin_types::ChannelLayout::STEREO],
+            vec![tutti_plugin_types::ChannelLayout::STEREO],
+        );
+        let (_owner, handle) = AudioSlab::create(layout.clone()).unwrap();
+        assert!(matches!(
+            s.session.setup_slab(&handle, layout.clone()),
+            Reaction::Reply(ControlReply::SharedMemoryReady)
+        ));
+        assert!(s.side().has_slab(), "the render thread holds the slab");
+
+        let bare = ControlRequest::SetupSharedMemory {
+            slab: handle.wire(),
+            layout,
+        };
+        assert!(matches!(
+            s.handle(main_thread(), bare).unwrap(),
+            Reaction::Reply(ControlReply::Error { .. })
         ));
     }
 

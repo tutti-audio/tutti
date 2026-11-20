@@ -29,8 +29,7 @@
 //! the host's [`set`](ParamSet::set) is its one writer. A modulation lane
 //! does not write it (it sends `knob + Σ offsets` into the param's event
 //! port instead), so the cell holds what the user set, and a fork of the
-//! node starts from it ([`ParamFork`]) without a second, "authored" copy
-//! (doc 014 §10).
+//! node starts from it ([`ParamFork`]) without a second, "authored" copy.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

@@ -7,16 +7,115 @@
 use cpal::traits::DeviceTrait;
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::Float;
+use tutti_buffers::{Float, SampleFormat};
 use tutti_engine::{
     AudioCallbackState, OutputSpec, OutputStream, StreamDriver, StreamFaults, StreamLatency,
 };
 use tutti_units::SampleRate;
 
-use crate::driver_seam::{CpalDriver, spec_from_supported};
+use crate::driver_seam::{CpalDriver, choose_output_config, spec_from_supported};
 use crate::error::{Error, Result};
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
-use crate::roster::Direction;
+use crate::roster::{DeviceId, Direction};
+
+/// What [`AudioEngine`] opens: the output device and its sample format.
+/// [`new`](Self::new) names the device at its default format; `Default` is the
+/// host's default device; a [`DeviceSelector`], a [`DeviceId`] or an
+/// `Option<DeviceId>` converts to the config that names it. The choice survives
+/// a restart.
+///
+/// ```
+/// use tutti_buffers::SampleFormat;
+/// use tutti_cpal::{DeviceSelector, OutputConfig};
+///
+/// let config = OutputConfig::new(DeviceSelector::named("Interface"))
+///     .sample_format(SampleFormat::I16);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutputConfig {
+    pub(crate) device: DeviceSelector,
+    pub(crate) sample_format: Option<SampleFormat>,
+}
+
+impl OutputConfig {
+    /// The device `device` names, at its default sample format.
+    #[must_use]
+    pub fn new(device: impl Into<DeviceSelector>) -> Self {
+        Self {
+            device: device.into(),
+            sample_format: None,
+        }
+    }
+
+    /// Names `device` instead; the chosen sample format stays, so a restart
+    /// onto another device is asked for the same format.
+    pub(crate) fn select(&mut self, device: DeviceSelector) {
+        self.device = device;
+    }
+
+    /// The device it names.
+    #[must_use]
+    pub fn device(&self) -> &DeviceSelector {
+        &self.device
+    }
+
+    /// Opens the device at `format`, at its default rate and width. An
+    /// unsigned device format opens as the signed format of its width, and a
+    /// format the device does not offer is [`Error::OutputFormatUnavailable`],
+    /// never another format.
+    #[must_use]
+    pub fn sample_format(mut self, format: SampleFormat) -> Self {
+        self.sample_format = Some(format);
+        self
+    }
+}
+
+impl From<DeviceSelector> for OutputConfig {
+    /// The device `device` names, at its default sample format.
+    fn from(device: DeviceSelector) -> Self {
+        Self::new(device)
+    }
+}
+
+impl From<DeviceId> for OutputConfig {
+    fn from(id: DeviceId) -> Self {
+        DeviceSelector::from(id).into()
+    }
+}
+
+impl From<Option<DeviceId>> for OutputConfig {
+    /// `None` is the default device.
+    fn from(id: Option<DeviceId>) -> Self {
+        DeviceSelector::from(id).into()
+    }
+}
+
+/// The config `device` opens at: its default, or the one that offers `wanted`.
+fn output_config(
+    device: &cpal::Device,
+    wanted: Option<SampleFormat>,
+) -> Result<cpal::SupportedStreamConfig> {
+    let name = device_name(device).unwrap_or_default();
+    // The device is asked what it offers only when a format was chosen: a
+    // default open reads one config, as it always has.
+    let supported: Vec<_> = match wanted {
+        Some(_) => device
+            .supported_output_configs()
+            .map_err(|e| {
+                Error::InvalidDevice(format!("cannot query {name:?} output configs: {e}"))
+            })?
+            .collect(),
+        None => Vec::new(),
+    };
+    choose_output_config(
+        supported.into_iter(),
+        device
+            .default_output_config()
+            .map_err(Error::DeviceNotAvailable)?,
+        wanted,
+        &name,
+    )
+}
 
 /// An output device, its stream configuration, and the stream while it runs.
 ///
@@ -32,7 +131,7 @@ pub struct AudioEngine {
     /// `None` for an engine built from a bare spec — no host, no device, so
     /// nothing to re-resolve on start. That is what makes a device-free
     /// lifecycle test possible.
-    pub(crate) target: Option<(DeviceHost, DeviceSelector)>,
+    pub(crate) target: Option<(DeviceHost, OutputConfig)>,
     /// What the stream last started is running on, kept so that naming it
     /// never enumerates the host.
     pub(crate) opened: Opened,
@@ -107,29 +206,31 @@ impl std::fmt::Debug for AudioEngine {
 }
 
 impl AudioEngine {
-    /// Opens a device on the default host and reads its default output config,
+    /// Opens a device on the default host and reads its output config,
     /// without starting a stream.
     ///
     /// # Errors
     /// As [`open`](Self::open).
-    pub fn new(sel: impl Into<DeviceSelector>) -> Result<Self> {
-        Self::open(DeviceHost::open(AudioHost::Default)?, sel.into())
+    pub fn new(config: impl Into<OutputConfig>) -> Result<Self> {
+        Self::open(DeviceHost::open(AudioHost::Default)?, config)
     }
 
-    /// Opens a device on the given host and reads its default output config,
-    /// without starting a stream.
+    /// Opens a device on the given host and reads its output config (the
+    /// device's default, or the one that offers the chosen
+    /// [`sample_format`](OutputConfig::sample_format)), without starting a
+    /// stream.
     ///
     /// # Errors
-    /// As [`new`](Self::new), plus whatever resolving `sel` on `host` reports.
-    pub fn open(host: DeviceHost, sel: DeviceSelector) -> Result<Self> {
-        let device = host.device(Direction::Output, &sel)?;
-        let config = device
-            .default_output_config()
-            .map_err(Error::DeviceNotAvailable)?;
-        let (spec, _) = spec_from_supported(&config)?;
+    /// As [`new`](Self::new), plus whatever resolving the device on `host`
+    /// reports, and [`Error::OutputFormatUnavailable`] for a chosen format the
+    /// device does not offer.
+    pub fn open(host: DeviceHost, config: impl Into<OutputConfig>) -> Result<Self> {
+        let config = config.into();
+        let device = host.device(Direction::Output, &config.device)?;
+        let (spec, _) = spec_from_supported(&output_config(&device, config.sample_format)?)?;
         Ok(Self {
             stream: OutputStream::new(spec),
-            target: Some((host, sel)),
+            target: Some((host, config)),
             opened: Opened::of(&device),
         })
     }
@@ -175,7 +276,7 @@ impl AudioEngine {
     /// Builds a stream on the selected device and starts it. A stream that is
     /// already running is an error: the state handed in is not adopted.
     ///
-    /// Re-reads the device's default config first, so after a
+    /// Re-reads the device's config first (at the chosen format, if any), so after a
     /// [`select_device`](Self::select_device) the [`spec`](Self::spec),
     /// [`sample_rate`](Self::sample_rate) and [`channels`](Self::channels)
     /// describe the device that is actually playing. The stream is opened with
@@ -187,7 +288,9 @@ impl AudioEngine {
     /// [`Error::AlreadyRunning`] if a stream is running (it is left running),
     /// [`Error::InvalidDevice`] for an unresolvable selector,
     /// [`Error::DeviceNotAvailable`] if the config cannot be read,
-    /// [`Error::InvalidConfig`] for a sample format the engine does not build,
+    /// [`Error::OutputFormatUnavailable`] for a chosen format the device does
+    /// not offer, [`Error::InvalidConfig`] for a sample format the engine does
+    /// not build,
     /// or [`Error::BuildStream`] / [`Error::PlayStream`] from CPAL.
     pub fn start<F: Float>(&mut self, state: Arc<AudioCallbackState<F>>) -> Result<()>
     where
@@ -229,20 +332,17 @@ impl AudioEngine {
     /// [`resolve`](Self::resolve) for a bare `target`, which a restart reads
     /// while the stream is borrowed elsewhere.
     pub(crate) fn resolve_target(
-        target: Option<&(DeviceHost, DeviceSelector)>,
+        target: Option<&(DeviceHost, OutputConfig)>,
     ) -> Result<(CpalDriver, OutputSpec, Opened)> {
-        let Some((host, sel)) = target else {
+        let Some((host, config)) = target else {
             return Err(Error::InvalidDevice(
                 "this engine was built from a bare spec and has no device to open; \
                  use `start_with` and supply a driver"
                     .into(),
             ));
         };
-        let device = host.device(Direction::Output, sel)?;
-        let config = device
-            .default_output_config()
-            .map_err(Error::DeviceNotAvailable)?;
-        let (spec, format) = spec_from_supported(&config)?;
+        let device = host.device(Direction::Output, &config.device)?;
+        let (spec, format) = spec_from_supported(&output_config(&device, config.sample_format)?)?;
         // What it is called is recorded by the caller once the stream runs
         // (`opened`): a restart that fails leaves the name of the device the
         // previous stream ran on.
@@ -354,7 +454,7 @@ impl AudioEngine {
     /// built with [`from_spec`](Self::from_spec).
     pub fn select_device(&mut self, sel: DeviceSelector) {
         if let Some((_, current)) = &mut self.target {
-            *current = sel;
+            current.select(sel);
         }
     }
 

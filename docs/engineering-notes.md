@@ -27,7 +27,7 @@ So `--no-default-features` does **not** test this — it drops the codec and mid
 features instead. Name the feature:
 
 ```bash
-cargo check -p tutti-transport -p tutti-metering -p tutti-engine
+cargo check -p tutti-transport -p tutti-engine
 ```
 
 ## The import-path gate
@@ -109,7 +109,6 @@ crates/             everything shipped, directory name = package name
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
                     #   executor. Design doc 013.
   tutti-transport   # Transport: tempo, loop, motion state machine, timed commands
-  tutti-metering    # LoadMeter (level meters are plan ops in tutti-graph)
   tutti-engine      # Engine: the per-block graph render over a transport
   tutti-cpal        # Device layer: CPAL stream, RT callback, driver lifecycle
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
@@ -458,8 +457,8 @@ param takes nothing. `P` is a packed `UnitAddr` (index in the high byte, the
 plain `{ UnitParam::X as u16 }` and a node with several names the others with
 `{ UnitAddr::new(UnitParam::X, i).to_u16() }` (doc 013, "Param addresses").
 `AudioNode`, the component wrapping a `NodeKey`, is `bevy-tutti`'s; the engine
-and `tutti-session` key a node by `NodeKey`, and `tutti-transport`,
-`tutti-metering` and `tutti-engine` have no `bevy` feature.
+and `tutti-session` key a node by `NodeKey`, and `tutti-transport` and
+`tutti-engine` have no `bevy` feature.
 
 The session runs a frame as the phases of `tutti_session::PHASES`, and
 `bevy-tutti` schedules each in a `SessionPhaseSystems(Phase)` set chained
@@ -582,6 +581,19 @@ knowing because the same shapes recur:
   *between* syscalls, so a budget of any size was unenforceable. The fix is
   `PeekNamedPipe`: ask how many bytes are buffered, and only read when the
   answer is "some". See `tutti-plugin-ipc`'s `transport::control`.
+- **The audio slab is anonymous on unix, and its descriptor is its own message.**
+  The plugin process loads untrusted code, so a slab it could open by name, or
+  `ftruncate` once opened, would fault the host's audio thread (SIGBUS on the next
+  read of an unbacked page). On Linux the slab is a `memfd` sealed against shrinking,
+  growing and sealing; the server refuses a descriptor that is not one, or not the
+  layout's exact length. On macOS it is a POSIX shared memory object unlinked as soon
+  as it is sized; nothing seals it there, so the protection is that XNU refuses a
+  second `ftruncate` once the object is allocated, which
+  `a_second_ftruncate_is_refused_to_every_holder` pins. The descriptor follows the `SetupSharedMemory` frame as one byte
+  carrying it (as ancillary data), read by the exact read that follows the frame: a plain
+  `read` across a message with descriptors drops them, so a buffered reader that reads
+  ahead would have to `recvmsg` everywhere. Windows keeps a named, delete-on-close
+  file whose name travels in the frame.
 - **`set_nonblocking` is not the way out, and was tried.** It took Windows from
   37 failures to 47. `PIPE_NOWAIT` makes `ReadFile` report *success with zero
   bytes*, which this transport reads as EOF, so a quiet peer was reported as a

@@ -88,7 +88,7 @@ pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;
 pub use subprocess::{LoadRequest, Restore};
 pub use transport::control::socket_name;
-pub use transport::shm::{AudioSlab, RING_SLOTS, SlabHandle, SlabWriter};
+pub use transport::shm::{AudioSlab, RING_SLOTS, SlabHandle, SlabWire, SlabWriter};
 // Splitting and reassembling plugin state across frames: both ends must chunk
 // identically, so the server uses this one.
 pub use transport::state_chunk;

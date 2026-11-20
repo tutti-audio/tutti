@@ -413,10 +413,13 @@ impl Vst2Processor {
                 refused += 1;
                 continue;
             };
-            // `Normalized` is already on the unit interval, so the cast cannot
+            // `Normalized` is already on the unit interval, so the narrowing cannot
             // hand the plugin a NaN or an out-of-range value.
             let value: Normalized = point.value;
-            if !crate::host::host_write(|| self.render.set_parameter(index, value.get() as f32)) {
+            if !self
+                .host
+                .write(index, value, |word| self.render.set_parameter(index, word))
+            {
                 refused += 1;
             }
         }
@@ -530,5 +533,7 @@ impl Processor for Vst2Processor {
         self.midi.send.reset_midi();
         self.midi.reset_out();
         self.render.stop_process();
+        // The plugin starts over from its own state: no value it reports is a host write.
+        self.host.clear_written();
     }
 }

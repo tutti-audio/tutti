@@ -46,6 +46,7 @@ mod spec_text;
 mod submodule_pins;
 mod test_paths;
 mod test_time;
+mod threads;
 mod toml;
 mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
@@ -172,6 +173,8 @@ pub(crate) enum Gate {
     UnitsBare,
     /// A quantity has one width and data is generic over `F`, bar the rows of the baseline.
     Width,
+    /// Nothing outside `tutti-platform` starts an OS thread, bar the rows of the baseline.
+    Threads,
 }
 
 impl Gate {
@@ -207,6 +210,7 @@ impl Gate {
             Gate::TestTime => "gate check-test-time".to_owned(),
             Gate::UnitsBare => "gate check-units-bare".to_owned(),
             Gate::Width => "gate check-width".to_owned(),
+            Gate::Threads => "gate check-threads".to_owned(),
         }
     }
 
@@ -250,6 +254,7 @@ impl Gate {
             Gate::TestTime => test_time::check(&tree),
             Gate::UnitsBare => units_bare::check(&tree, units_bare::MIN_FILES),
             Gate::Width => width::check(&tree, width::EDGES, width::MIN_FILES),
+            Gate::Threads => threads::check(&tree, threads::REALTIME, threads::MIN_FILES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
             Gate::Platform => platform::check(&tree, platform::MIN_FILES),

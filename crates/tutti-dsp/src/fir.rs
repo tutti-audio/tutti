@@ -14,6 +14,10 @@
 
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
+mod linear_phase;
+
+pub use linear_phase::{LinearPhaseDesign, MAX_GRID};
+
 use crate::stft::window::KaiserWindow;
 
 /// The longest filter [`FirDesign::design`] builds, in taps.
@@ -353,6 +357,40 @@ pub enum FirError {
         transition: Hz,
         /// The widest width the edges allow.
         widest: Hz,
+    },
+    /// A resolution that is not positive and finite.
+    #[error("resolution {0:?} is not positive")]
+    NonPositiveResolution(Hz),
+    /// A resolution at or above the Nyquist frequency, which no length resolves.
+    #[error("resolution {resolution:?} is not below the Nyquist frequency {nyquist:?}")]
+    ResolutionTooWide {
+        /// The resolution asked for.
+        resolution: Hz,
+        /// The Nyquist frequency of the rate.
+        nyquist: Hz,
+    },
+    /// A band that is not one input and at least one output.
+    #[error("a band has one input and an output, not {inputs} in and {outputs} out")]
+    BandShape {
+        /// The band's inputs.
+        inputs: usize,
+        /// The band's outputs.
+        outputs: usize,
+    },
+    /// A target magnitude with a value that is not finite, or a band with no response.
+    #[error("the target magnitude has a value that is not finite")]
+    NonFiniteTarget,
+    /// A band with a pole on or outside the unit circle: its response never decays, so no
+    /// grid samples it without wrapping.
+    #[error("a band has a pole on or outside the unit circle and never decays")]
+    UnstableBand,
+    /// Bands that ring too long to sample on the largest grid.
+    #[error("the bands need a grid of {needed} points; the most is {max}")]
+    GridTooLarge {
+        /// The points needed.
+        needed: usize,
+        /// The most a design takes, [`MAX_GRID`].
+        max: usize,
     },
     /// A filter longer than the supported maximum.
     #[error("a filter of {len} taps exceeds the {max} supported")]

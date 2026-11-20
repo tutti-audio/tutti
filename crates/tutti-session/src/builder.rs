@@ -341,7 +341,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     ) -> SessionBuilder<crate::DeviceClock<F>> {
         SessionBuilder {
             opts: self.opts,
-            config: device,
+            config: tutti_cpal::OutputConfig::from(device),
             dates: (),
         }
     }
@@ -391,11 +391,10 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let taps = engine.output_taps();
-        let mut engine = engine;
-        let load = engine.take_load_meter();
+        let readings = (engine.load(), engine.blocks());
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
-        session.output.load = load;
+        session.output.readings = Some(readings);
         session.transport.handle.set_clock(clock);
         session.output.taps = Some((taps, layout));
         Ok(session)
@@ -479,7 +478,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
-        let mut engine = parts.graph.engine(
+        let engine = parts.graph.engine(
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
@@ -487,7 +486,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let load = engine.take_load_meter();
+        let readings = (engine.load(), engine.blocks());
         let taps = engine.output_taps();
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
@@ -506,7 +505,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             },
             true,
         )?;
-        session.output.load = load;
+        session.output.readings = Some(readings);
         session.output.taps = Some((taps, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
@@ -524,6 +523,23 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
 
 #[cfg(feature = "device")]
 impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
+    /// Opens the output device at `format`, at its default rate and width
+    /// ([`OutputConfig::sample_format`](tutti_cpal::OutputConfig::sample_format)).
+    ///
+    /// The choice holds across every restart ([`Session::restart`](crate::Session),
+    /// the device watch's restarts, and a restart onto any other device). A
+    /// device that lacks the format fails that restart with
+    /// [`tutti_cpal::Error::OutputFormatUnavailable`], through the restart's
+    /// usual failure path, and never opens at another format. The same error
+    /// fails [`build`](Self::build). A switch from the system clock
+    /// ([`Session::into_device`](crate::Session)) takes its own
+    /// [`OutputConfig`](tutti_cpal::OutputConfig).
+    #[must_use]
+    pub fn sample_format(mut self, format: tutti_buffers::SampleFormat) -> Self {
+        self.config = self.config.sample_format(format);
+        self
+    }
+
     /// A session on the selected output device: the device opened first, the
     /// graph built at its rate and callback size, the callback live on
     /// return. The [`LiveSession`](crate::LiveSession) holds the
@@ -536,8 +552,8 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// built over it.
     pub fn build(self) -> Result<crate::LiveSession<&'static str, F>> {
         let host = tutti_cpal::DeviceHost::open(self.opts.host)?;
-        let device = self.config.clone();
-        let engine = tutti_cpal::AudioEngine::open(host, device.clone())?;
+        let engine = tutti_cpal::AudioEngine::open(host, self.config.clone())?;
+        let device = self.config.device().clone();
         self.build_on(engine, device, |engine, state| engine.start(state))
     }
 
@@ -560,7 +576,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         D: tutti_engine::StreamDriver<F>,
         D::Error: Into<tutti_cpal::Error>,
     {
-        let device = self.config.clone();
+        let device = self.config.device().clone();
         self.build_on(
             tutti_cpal::AudioEngine::from_spec(spec),
             device,
@@ -587,7 +603,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
         let mut parts = self.parts(spec.sample_rate, LIVE_MAX_BLOCK, spec.quantum, root)?;
-        let mut engine = parts.graph.engine(
+        let engine = parts.graph.engine(
             &parts.transport,
             spec.channels,
             self.opts.device_topology.clone(),
@@ -600,7 +616,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             crate::device::DeviceHandle::vacant(self.opts.host),
             true,
         )?;
-        session.output.load = engine.take_load_meter();
+        session.output.readings = Some((engine.load(), engine.blocks()));
         session.output.taps = Some((engine.output_taps(), spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the

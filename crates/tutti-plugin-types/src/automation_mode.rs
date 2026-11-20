@@ -41,16 +41,20 @@ pub enum AutomationMode {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum AutomationModeError {
-    /// The plugin's hosting carries no automation-state channel (no in-process
-    /// format does). Permanent: do not retry.
-    #[error("{format} carries no automation-state advisory in this hosting")]
+    /// This plugin carries no automation-state channel (a VST3 controller
+    /// without `IAutomationState`, a CLAP plugin without `param-indication`, an
+    /// Audio Unit, which has none). Permanent: do not retry.
+    #[error("this {format} plugin takes no automation-state advisory")]
     Unsupported {
         /// The plugin's format.
         format: String,
     },
-    /// The push onto the command queue was dropped because the queue is full.
-    /// Transient: the next change lands.
-    #[error("the automation-state push was dropped: the command queue is full")]
+    /// The advisory did not go: the command queue is full, or an in-process
+    /// plugin's main thread did not run the call. Transient: the next change
+    /// lands.
+    #[error(
+        "the automation-state advisory was dropped: the queue is full or the main thread did not run it"
+    )]
     Dropped,
     /// The plugin is gone. Permanent.
     #[error("the plugin is gone")]

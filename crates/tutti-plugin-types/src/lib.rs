@@ -239,6 +239,7 @@ mod version;
 mod wakeups;
 mod widths;
 mod wire_error;
+mod written_values;
 
 // Test-only global allocator for the no-alloc gates: panics on any heap
 // allocation inside `assert_no_alloc::assert_no_alloc(..)` scopes.
@@ -365,5 +366,6 @@ pub use transport::{
     TransportFlags, TransportInfo, TransportPosition,
 };
 pub use widths::Widths;
+pub use written_values::WrittenValues;
 // The session's render mode, which a plugin's `Prepare` carries and `Control::set_render_mode` takes.
 pub use tutti_graph::RenderMode;

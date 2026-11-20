@@ -141,8 +141,10 @@ pub use tutti_graph::{
     InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
     TapOptions, TapReader, TapWriter,
 };
-pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_rt::PushError;
+// The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
+#[cfg(feature = "session")]
+pub use tutti_engine::{BlockCounts, Load};
 pub use tutti_transport::{
     AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
 };
@@ -190,7 +192,9 @@ pub use tutti_session::{
     SaveState,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
-pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
+pub use tutti_session::{
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
@@ -241,13 +245,36 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 /// dynamics, reverbs, modulation effects, mixing, panners, convolution and
 /// automation lanes, each with its config, controls and enums. A node is
 /// inserted with `Session::graph().add(node)`.
+///
+/// A linear-phase equalizer from bands, reachable from here alone:
+///
+/// ```
+/// use tutti::nodes::{ConvolverNode, FirConvolverConfig, LinearPhaseDesign, MatchedBell, Tilt};
+/// use tutti::{ChannelLayout, Db, Hz, Q, SampleRate, Samples};
+///
+/// let rate = SampleRate::SR_48K;
+/// let bands = [
+///     MatchedBell::new(Q::new(1.0), Db::new(6.0)).design(Hz::new(1_000.0), rate).unwrap(),
+///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
+/// ];
+/// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
+/// let node: ConvolverNode<f32> = FirConvolverConfig::new(ChannelLayout::STEREO, &fir)
+///     .block_size(Samples::new(512))
+///     .build()
+///     .unwrap();
+/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// ```
 pub mod nodes {
     pub use tutti_dsp::{
-        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn,
+        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation,
         LookaheadError, Matrix, MatrixConvolverError, MaxDecayError, Network,
         OutputMap as NetworkOutputMap, ResampleError, SimdLanes, SpeakerGeometryError, Stage, Tap,
         Taps, WaveshaperControls,
+    };
+    pub use tutti_dsp::{
+        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, FirError,
+        LinearPhaseDesign, LinkwitzRiley, Lti, MAX_GRID, MatchedBell, Sos, SosError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -267,20 +294,21 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
-        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ButterworthOrder,
-        ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings,
-        ClickState, CompressorControls, CompressorNode, ConvolverError, ConvolverNode,
-        CrossoverControls, CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig,
-        CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls,
-        DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig,
-        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
-        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
-        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode,
-        HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
-        LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
-        MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
-        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
-        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
+        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
+        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings, ClickState,
+        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
+        CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayControls,
+        DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
+        DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FirConvolverConfig,
+        FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode,
+        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
+        LadderType, LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
+        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
+        OversamplingFactor, PhaserControls, PhaserNode, PlateControls, PlateReverbConfig,
+        PlateReverbNode, PortSide, Routing as FeedbackRouting,
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
         SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
         SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
@@ -292,14 +320,15 @@ pub mod nodes {
         ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
-        LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
-        TiltFilterKernel,
+        LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError,
+        SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
-        FreeverbSet, GateSet, HasControl, LadderSet, LimiterSet, ModDelaySet, PhaserSet,
-        PlateKernel, PlateSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
+        FreeverbSet, GateSet, HasControl, LadderSet, LevellerSet, LimiterSet, ModDelaySet,
+        PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet, TransientShaperKernel,
+        TransientShaperSet,
     };
 }
 
@@ -331,8 +360,8 @@ pub mod types {
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
-        StagedCommitError, StagedFile, StagedKeep, Stamp,
+        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Sleep,
+        Staged, StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -400,13 +429,14 @@ pub mod session {
     pub use tutti_cpal::MicConfig;
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
-        DeviceChange, DeviceListing, DeviceRoster, DeviceSelector, Direction as DeviceDirection,
-        Listed, Snapshot, SnapshotSource,
+        DeviceChange, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
+        Direction as DeviceDirection, Listed, OutputConfig, Snapshot, SnapshotSource,
+        SupportedConfig,
     };
     pub use tutti_engine::{
-        BackendErrorKind, GraphEngineError, Lagging, OutputLevelError, OutputLevels, OutputMap,
-        OutputMapError, OutputSpec, OutputStrip, Routing, RoutingError, StartError, StreamFault,
-        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
+        BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
+        OutputLevels, OutputMap, OutputMapError, OutputSpec, OutputStrip, Routing, RoutingError,
+        StartError, StreamFault, StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -421,7 +451,6 @@ pub mod session {
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
         ForkError, InletCounts, Instrument, MeterId, ParamIn, PrerollTable, RootError, RootId,
     };
-    pub use tutti_metering::LoadRecorder;
     pub use tutti_modulation::PeriodPoint;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
@@ -495,8 +524,8 @@ pub mod session {
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{
-        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder,
-        RecorderError,
+        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, NoiseShaping, PumpLoop, PumpPass,
+        Recorder, RecorderError,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
@@ -589,7 +618,8 @@ pub mod measure {
     };
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
-        BinCount, BinIndex, CosineWindow, FrameCount, FrameIndex, Grid, StftError,
+        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, CosineWindow,
+        FrameCount, FrameIndex, Grid, StftError,
     };
 }
 

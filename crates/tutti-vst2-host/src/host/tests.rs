@@ -313,13 +313,124 @@ fn a_full_param_queue_drops_and_counts() {
     assert_eq!(host.dropped_param_changes().get(), 2);
 
     // Draining makes room again — the queue is a queue, not a latch.
-    assert_eq!(host.param_tx.pop(), Some(ParameterChange::Automate(0, 0.5)));
+    assert_eq!(
+        host.param_tx.pop(),
+        Some(ParameterChange::Automate(0, Normalized::of(0.5)))
+    );
     host.automate(7, 0.25);
     assert_eq!(
         host.dropped_param_changes().get(),
         2,
         "a push into freed space must not count as a drop"
     );
+}
+
+/// A plugin that repeats the `f32` narrowing of a written value, from any
+/// thread and after the write returned, is echoing: nothing is queued, and the
+/// `f64` the host wrote is the value held.
+#[test]
+fn automate_of_the_narrowing_of_a_host_write_is_an_echo_every_time() {
+    let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+    host.size_written(2);
+    let written = Normalized::of(0.1 + 1e-12);
+    let mut word = 0.0;
+    assert!(host.write(1, written, |w| {
+        word = w;
+        true
+    }));
+    assert_ne!(f64::from(word), written.get(), "the write must narrow");
+
+    host.automate(1, word);
+    host.automate(1, word);
+
+    assert_eq!(host.param_tx.pop(), None, "an echo is not an edit");
+    let held = host.written.get().and_then(|cells| cells.recorded(1));
+    assert_eq!(held, Some(written), "the cell keeps the f64 written");
+}
+
+/// A report that is not the narrowing of the written value is the plugin's own
+/// change, reported at the width it gave.
+#[test]
+fn automate_off_the_narrowing_of_a_host_write_is_reported() {
+    let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+    host.size_written(1);
+    let written = Normalized::of(0.1 + 1e-12);
+    let mut word = 0.0_f32;
+    host.write(0, written, |w| {
+        word = w;
+        true
+    });
+    let moved = word.next_up();
+
+    host.automate(0, moved);
+
+    assert_eq!(
+        host.param_tx.pop(),
+        Some(ParameterChange::Automate(
+            0,
+            Normalized::clamped(f64::from(moved))
+        ))
+    );
+}
+
+/// Once the plugin reported a value of its own, the narrowing of the old write is
+/// no echo of anything: the report that follows is the plugin's change back to it.
+#[test]
+fn automate_of_the_old_narrowing_after_the_plugins_own_change_is_reported() {
+    let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+    host.size_written(1);
+    let mut word = 0.0_f32;
+    host.write(0, Normalized::of(0.1 + 1e-12), |w| {
+        word = w;
+        true
+    });
+    let own = Normalized::of(0.75);
+
+    host.automate(0, 0.75);
+    host.automate(0, word);
+
+    assert_eq!(host.param_tx.pop(), Some(ParameterChange::Automate(0, own)));
+    assert_eq!(
+        host.param_tx.pop(),
+        Some(ParameterChange::Automate(
+            0,
+            Normalized::clamped(f64::from(word))
+        ))
+    );
+}
+
+/// A state the plugin sets itself forgets the host's writes: its narrowing,
+/// reported after, is the plugin's value.
+#[test]
+fn automate_of_the_narrowing_after_the_written_values_are_cleared_is_reported() {
+    let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+    host.size_written(1);
+    let mut word = 0.0_f32;
+    host.write(0, Normalized::of(0.1 + 1e-12), |w| {
+        word = w;
+        true
+    });
+    host.clear_written();
+
+    host.automate(0, word);
+
+    assert!(host.param_tx.pop().is_some());
+}
+
+/// A write the plugin refused is not recorded, so its narrowing is not an echo.
+#[test]
+fn a_refused_write_records_nothing() {
+    let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+    host.size_written(1);
+    let mut word = 0.0_f32;
+    assert!(!host.write(0, Normalized::of(0.1 + 1e-12), |w| {
+        word = w;
+        false
+    }));
+
+    host.automate(0, word);
+
+    assert!(host.param_tx.pop().is_some());
 }
 
 /// The MIDI-out queue counts its drops separately from the parameter

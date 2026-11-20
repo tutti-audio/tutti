@@ -11,7 +11,6 @@
           - crates/tutti-tempo/**
           - crates/tutti-curve/**
           - crates/tutti-buffers/**
-          - crates/tutti-metering/**
 "area: session":
   - changed-files:
       - any-glob-to-any-file:

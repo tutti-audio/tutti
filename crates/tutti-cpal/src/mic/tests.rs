@@ -26,6 +26,104 @@ fn fallback(rate: u32) -> cpal::SupportedStreamConfig {
     range(rate, rate, cpal::SampleFormat::F32).with_sample_rate(rate)
 }
 
+/// The input pick with `wanted`, at 48 kHz over `ranges`.
+fn choose_wanting(
+    ranges: &[cpal::SupportedStreamConfigRange],
+    wanted: Option<SampleFormat>,
+) -> Result<cpal::SupportedStreamConfig> {
+    choose_input_config(
+        ranges.iter().cloned(),
+        fallback(44_100),
+        SampleRate::SR_48K,
+        wanted,
+        "Format Mic",
+    )
+}
+
+/// **With no format chosen, F32 is taken over an integer format** the device
+/// lists first.
+#[test]
+fn an_unset_input_format_prefers_f32() {
+    let chosen = choose_wanting(
+        &[
+            range(44_100, 48_000, cpal::SampleFormat::I16),
+            range(44_100, 48_000, cpal::SampleFormat::F32),
+        ],
+        None,
+    )
+    .unwrap();
+    assert_eq!(chosen.sample_format(), cpal::SampleFormat::F32);
+}
+
+/// **A chosen I16 is taken over the F32 the default would prefer.**
+#[test]
+fn a_chosen_i16_input_is_taken_over_f32() {
+    let chosen = choose_wanting(
+        &[
+            range(44_100, 48_000, cpal::SampleFormat::F32),
+            range(44_100, 48_000, cpal::SampleFormat::I16),
+        ],
+        Some(SampleFormat::I16),
+    )
+    .unwrap();
+    assert_eq!(chosen.sample_format(), cpal::SampleFormat::I16);
+}
+
+/// **A chosen I16 on a device that offers only U16 opens the U16 type**, which
+/// the callback decodes as I16 with the sign bit flipped; with both offered the
+/// signed one wins.
+#[test]
+fn a_chosen_i16_input_on_a_u16_only_device_opens_u16() {
+    let only = choose_wanting(
+        &[range(44_100, 48_000, cpal::SampleFormat::U16)],
+        Some(SampleFormat::I16),
+    )
+    .unwrap();
+    assert_eq!(only.sample_format(), cpal::SampleFormat::U16);
+    let both = choose_wanting(
+        &[
+            range(44_100, 48_000, cpal::SampleFormat::U16),
+            range(44_100, 48_000, cpal::SampleFormat::I16),
+        ],
+        Some(SampleFormat::I16),
+    )
+    .unwrap();
+    assert_eq!(both.sample_format(), cpal::SampleFormat::I16);
+}
+
+/// **A chosen format the device lacks at the rate is the named error**, with
+/// the device, the format and the rate; it is not another format, and it is not
+/// a rate mismatch (the rate is covered).
+#[test]
+fn a_chosen_input_format_the_device_lacks_is_a_named_error() {
+    let err = choose_wanting(
+        &[range(44_100, 48_000, cpal::SampleFormat::F32)],
+        Some(SampleFormat::I16),
+    )
+    .expect_err("only F32 is offered");
+    assert!(
+        matches!(
+            &err,
+            Error::InputFormatUnavailable { device_name, format: SampleFormat::I16, rate }
+                if device_name == "Format Mic" && *rate == SampleRate::SR_48K
+        ),
+        "{err:?}"
+    );
+}
+
+/// **A format offered only at another rate is the format error's neighbour,
+/// not it**: a device with no range at the graph's rate is a rate mismatch
+/// whatever the format asked.
+#[test]
+fn a_chosen_format_on_a_device_missing_the_rate_is_a_rate_mismatch() {
+    let err = choose_wanting(
+        &[range(44_100, 44_100, cpal::SampleFormat::I16)],
+        Some(SampleFormat::I16),
+    )
+    .expect_err("44.1k cannot serve a 48k graph");
+    assert!(matches!(err, Error::SampleRateMismatch { .. }), "{err:?}");
+}
+
 /// **A device that can run at the graph's rate is opened at it**, not at
 /// whatever its default happens to be.
 ///
@@ -39,6 +137,7 @@ fn a_device_covering_the_graph_rate_is_opened_at_it() {
         [range(8_000, 96_000, cpal::SampleFormat::F32)].into_iter(),
         fallback(44_100),
         SampleRate::SR_48K,
+        None,
         "Wide Range Mic",
     )
     .expect("48k is inside [8k, 96k]");
@@ -59,6 +158,7 @@ fn f32_is_preferred_over_an_integer_format_at_the_same_rate() {
         .into_iter(),
         fallback(44_100),
         SampleRate::SR_48K,
+        None,
         "Dual Format Mic",
     )
     .expect("both ranges cover 48k");
@@ -74,6 +174,7 @@ fn an_integer_only_device_is_accepted_at_the_graph_rate() {
         [range(44_100, 48_000, cpal::SampleFormat::I16)].into_iter(),
         fallback(44_100),
         SampleRate::SR_48K,
+        None,
         "I16 Mic",
     )
     .expect("the range covers 48k");
@@ -91,6 +192,7 @@ fn a_device_that_cannot_reach_the_graph_rate_is_refused() {
         [range(44_100, 44_100, cpal::SampleFormat::F32)].into_iter(),
         fallback(44_100),
         SampleRate::SR_48K,
+        None,
         "Fixed 44k1 Mic",
     )
     .expect_err("44.1k-only cannot serve a 48k graph");
@@ -117,6 +219,7 @@ fn a_default_that_already_matches_is_accepted_with_no_ranges() {
         std::iter::empty(),
         fallback(48_000),
         SampleRate::SR_48K,
+        None,
         "Silent About Its Configs",
     )
     .expect("the default already runs at the graph rate");

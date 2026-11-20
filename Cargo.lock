@@ -2451,7 +2451,6 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-measure",
- "tutti-metering",
  "tutti-midi-ci",
  "tutti-midi-device",
  "tutti-midi-file",
@@ -2653,6 +2652,7 @@ dependencies = [
  "objc2-core-midi",
  "objc2-foundation",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-platform",
  "tutti-ump",
 ]
@@ -2712,7 +2712,6 @@ dependencies = [
  "tutti-buffers",
  "tutti-fixtures",
  "tutti-graph",
- "tutti-metering",
  "tutti-music",
  "tutti-nodes",
  "tutti-platform",
@@ -2839,14 +2838,6 @@ dependencies = [
  "tutti-graph",
  "tutti-music",
  "tutti-rt",
- "tutti-units",
-]
-
-[[package]]
-name = "tutti-metering"
-version = "0.0.1"
-dependencies = [
- "atomic_float",
  "tutti-units",
 ]
 
@@ -3253,6 +3244,7 @@ dependencies = [
  "interprocess",
  "libc",
  "tempfile",
+ "thiserror 2.0.21",
  "tracing",
  "tracing-subscriber",
  "tutti-au-host",
@@ -3400,7 +3392,6 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-measure",
- "tutti-metering",
  "tutti-midi-ci",
  "tutti-midi-device",
  "tutti-midi-file",

@@ -518,7 +518,7 @@
 //! by the source port's `(NodeKey, port)` — a property of the wiring, not of
 //! the order edges were listed in. An audio input port, and a
 //! global output channel, holds a set of sources, which the graph sums
-//! (`Op::Sum`, doc 013 "Audio fan-in sums").
+//! (`Op::Sum`).
 //!
 //! - Each event output port declares how many events it writes per block
 //!   ([`Shape::event_capacity`]), and every buffer downstream is sized from

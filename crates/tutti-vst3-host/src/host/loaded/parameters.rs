@@ -312,6 +312,11 @@ impl Vst3Loaded {
             .xml_representation(main, vendor, name, version, host)
     }
 
+    /// Whether the plugin's controller implements `IAutomationState`.
+    pub(crate) fn has_automation_state(&self, main: MainThreadMarker) -> bool {
+        self.plugin.has_automation_state(main)
+    }
+
     /// Tells the plugin the host's current automation read/write mode via
     /// `IAutomationState`.
     ///

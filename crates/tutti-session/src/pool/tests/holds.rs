@@ -72,11 +72,10 @@ impl PoolEntry for Shared {
 }
 
 fn session(config: PoolConfig) -> (crate::DetachedSession, Spawned) {
-    let spawned = Spawned::default();
-    let held = spawned.clone();
+    let spawned = Spawned::polled();
     let session = Session::builder()
         .pool_config(config)
-        .executor(held.executor())
+        .executor(spawned.clone())
         .build_detached(SampleRate::SR_48K)
         .unwrap();
     (session, spawned)
@@ -111,8 +110,7 @@ fn held(
     )
     .unwrap();
     // The parallel cap starts the rest as running loads land.
-    while !spawned.is_empty() {
-        spawned.run_all();
+    while spawned.poll(usize::MAX) > 0 {
         let _ = events(s);
     }
     let lives = keys.iter().map(|key| life(s, key)).collect();
@@ -182,7 +180,7 @@ fn recalling_a_parked_entry_loads_it_again_and_a_live_one_adopts_with_no_load() 
         Some("loading"),
         "reloading from the park"
     );
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     assert_eq!(events(&mut s), [("old", "loaded".to_owned())]);
     assert_eq!(
         loads.load(Ordering::SeqCst),
@@ -202,7 +200,7 @@ fn a_node_hold_never_parks_however_old() {
     let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
     s.pool(device("a", &loads)).unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     let handle = life(&s, "a");
     let _hold = s
@@ -226,7 +224,7 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
         },
     ))
     .unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     let handle = s.pool.entries.handle::<_, Shared>(&"a").unwrap();
     let _hold = s
@@ -244,7 +242,7 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
         },
     ))
     .unwrap();
-    assert!(spawned.take().is_empty(), "adopted with no load");
+    assert!(spawned.poll(usize::MAX) == 0, "adopted with no load");
     assert_eq!(loads.load(Ordering::SeqCst), 1);
 }
 
