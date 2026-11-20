@@ -34,8 +34,7 @@ const BATCH_SIZE: usize = 64;
 use crate::BlockPayload;
 use crate::unique_socket_path;
 use crate::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, PROTOCOL_VERSION,
-    SlabLayout,
+    AudioReply, AudioRequest, ControlFrame, Framed, PROTOCOL_VERSION, Request, SlabLayout,
 };
 use crate::{AudioSlab, Chunks, FATES, RING_SLOTS, Replies, SlabWriter};
 use std::sync::Arc;
@@ -166,11 +165,11 @@ fn accept_control(listener: &interprocess::local_socket::Listener) {
     let control = listener.accept().unwrap();
     send_bridge_msg(
         &control,
-        &ControlFrame::Reply(ControlReply::Ready {
+        &ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }),
+        },
     );
-    std::thread::spawn(move || while recv_host_msg::<ControlRequest>(&control).is_some() {});
+    std::thread::spawn(move || while recv_host_msg::<Request>(&control).is_some() {});
 }
 
 fn send_bridge_msg<T: Framed>(stream: &interprocess::local_socket::Stream, msg: &T) {
@@ -1391,7 +1390,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
 /// the server is mid-`process` and will write that frame onto the stream when it
 /// finishes. Leave it there and the next command's `recv_reply` consumes the
 /// abandoned block's answer, and every later block is paired with its
-/// predecessor's — permanently one behind. `Owed::settle` drains it instead.
+/// predecessor's — permanently one behind. `AudioState::hear` forwards it instead.
 ///
 /// # Why this asserts on MIDI rather than on audio
 ///
@@ -1478,7 +1477,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     assert!(
         counts.late >= 1,
         "the drain collected no owed reply although {} blocks were abandoned. \
-         `Owed::take` never ran or never collected anything, and the abandoned \
+         `AudioState::hear` never ran or never collected anything, and the abandoned \
          frame is still queued — which the stamps below cannot reliably detect.",
         counts.abandoned
     );

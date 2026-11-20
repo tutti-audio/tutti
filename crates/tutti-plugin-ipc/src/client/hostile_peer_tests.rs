@@ -27,7 +27,7 @@ use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News,
-    PROTOCOL_VERSION, SlabLayout,
+    PROTOCOL_VERSION, ReqId, Request, SlabLayout,
 };
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -126,9 +126,37 @@ fn send_bridge_msg<T: Framed>(stream: &Stream, msg: &T) -> std::io::Result<()> {
     crate::protocol::frame::write_frame(&mut stream, msg).map_err(std::io::Error::other)
 }
 
-/// A control reply as the frame the control connection carries it in.
-fn send_reply(stream: &Stream, msg: &ControlReply) -> std::io::Result<()> {
-    send_bridge_msg(stream, &ControlFrame::Reply(msg.clone()))
+/// A control reply as the frame the control connection carries it in, answering
+/// request `id`.
+fn send_reply(stream: &Stream, id: ReqId, reply: &ControlReply) -> std::io::Result<()> {
+    send_bridge_msg(
+        stream,
+        &ControlFrame::Reply {
+            id,
+            reply: reply.clone(),
+        },
+    )
+}
+
+/// A request of one connection, as the mock's script sees it: the id its
+/// answer echoes, and what is asked.
+trait Wire: Framed {
+    type Body;
+    fn split(self) -> (ReqId, Self::Body);
+}
+
+impl Wire for Request {
+    type Body = ControlRequest;
+    fn split(self) -> (ReqId, ControlRequest) {
+        (self.id, self.body)
+    }
+}
+
+impl Wire for AudioRequest {
+    type Body = AudioRequest;
+    fn split(self) -> (ReqId, AudioRequest) {
+        (ReqId::new(0), self)
+    }
 }
 
 /// Write a raw frame the host must cope with but which no honest server would
@@ -194,39 +222,22 @@ enum Action {
     /// body: a live peer that is part-way through a frame most of the time,
     /// though every frame completes within `split`.
     SplitEvents { split: Duration },
-    /// Send `count` events `gap` apart, answer nothing, then look whether the
-    /// host's next request is already waiting (within 300 ms): `probe` becomes
-    /// [`PROBE_WAITING`] or [`PROBE_NOT_YET`]. The waiting request is handled
-    /// as the next one.
-    EventsThenProbe {
-        count: usize,
-        gap: Duration,
-        probe: Arc<std::sync::atomic::AtomicU8>,
-    },
 }
 
-/// [`Action::EventsThenProbe`] found the host's next request already sent.
-const PROBE_WAITING: u8 = 1;
-/// [`Action::EventsThenProbe`] found nothing sent yet.
-const PROBE_NOT_YET: u8 = 2;
-
 /// One connection of the mock server: answers each request as `respond` says.
-fn serve_lane<Req: Framed>(
+fn serve_lane<Req: Wire>(
     stream: interprocess::local_socket::Stream,
-    respond: &std::sync::Mutex<Box<dyn Fn(Req) -> Action + Send>>,
+    respond: &std::sync::Mutex<Box<dyn Fn(Req::Body) -> Action + Send>>,
 ) {
-    let mut next = None;
     loop {
-        let msg = match next.take() {
-            Some(msg) => msg,
-            None => match recv_host_msg::<Req>(&stream) {
-                Ok(msg) => msg,
-                Err(_) => return, // host hung up
-            },
+        let msg = match recv_host_msg::<Req>(&stream) {
+            Ok(msg) => msg,
+            Err(_) => return, // host hung up
         };
-        match (respond.lock().unwrap())(msg) {
+        let (id, body) = msg.split();
+        match (respond.lock().unwrap())(body) {
             Action::Reply(m) => {
-                if send_reply(&stream, &m).is_err() {
+                if send_reply(&stream, id, &m).is_err() {
                     return;
                 }
             }
@@ -248,14 +259,14 @@ fn serve_lane<Req: Framed>(
                 }
             }
             Action::ReplyMany(ms) => {
-                if ms.iter().any(|m| send_reply(&stream, m).is_err()) {
+                if ms.iter().any(|m| send_reply(&stream, id, m).is_err()) {
                     return;
                 }
             }
             Action::ReplyManySlowly { msgs, gap } => {
                 for m in &msgs {
                     std::thread::sleep(gap);
-                    if send_reply(&stream, m).is_err() {
+                    if send_reply(&stream, id, m).is_err() {
                         return;
                     }
                 }
@@ -280,30 +291,6 @@ fn serve_lane<Req: Framed>(
                         return;
                     }
                 }
-            }
-            Action::EventsThenProbe { count, gap, probe } => {
-                for n in 0..count {
-                    std::thread::sleep(gap);
-                    let event = News::LatencyChanged {
-                        samples: tutti_plugin_types::Samples::new(n),
-                    };
-                    if send_bridge_msg(&stream, &ControlFrame::News(event)).is_err() {
-                        return;
-                    }
-                }
-                use interprocess::local_socket::traits::Stream as _;
-                let _ = stream.set_recv_timeout(Some(Duration::from_millis(300)));
-                let waiting = recv_host_msg::<Req>(&stream).ok();
-                let _ = stream.set_recv_timeout(None);
-                probe.store(
-                    if waiting.is_some() {
-                        PROBE_WAITING
-                    } else {
-                        PROBE_NOT_YET
-                    },
-                    Ordering::SeqCst,
-                );
-                next = waiting;
             }
             Action::SplitEvents { split } => {
                 let mut s = &stream;
@@ -331,7 +318,7 @@ fn serve_lane<Req: Framed>(
 }
 
 /// How a mock lane answers: a script over the messages of its connection.
-type Responder<Req> = Arc<std::sync::Mutex<Box<dyn Fn(Req) -> Action + Send>>>;
+type Responder<Body> = Arc<std::sync::Mutex<Box<dyn Fn(Body) -> Action + Send>>>;
 
 struct MockServer {
     bridge: Arc<PluginBridge>,
@@ -457,12 +444,12 @@ impl MockServer {
         .expect("handshake");
         let server = std::thread::Builder::new()
             .name(format!("mock-hostile-{label}-audio"))
-            .spawn(move || serve_lane(stream, &audio))
+            .spawn(move || serve_lane::<AudioRequest>(stream, &audio))
             .expect("spawn mock");
         let stream = listener.accept().expect("accept");
-        send_reply(
+        send_bridge_msg(
             &stream,
-            &ControlReply::Ready {
+            &ControlFrame::Ready {
                 protocol_version: PROTOCOL_VERSION,
             },
         )
@@ -471,7 +458,7 @@ impl MockServer {
         drop(
             std::thread::Builder::new()
                 .name(format!("mock-hostile-{label}-control"))
-                .spawn(move || serve_lane(stream, &control))
+                .spawn(move || serve_lane::<Request>(stream, &control))
                 .expect("spawn mock"),
         );
 
@@ -1230,7 +1217,11 @@ fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
     let mock = MockServer::start_lanes(
         "wrong-kind-block",
         |msg| match msg {
-            AudioRequest::ProcessAudio(_) => Action::Audio(Box::new(AudioReply::ParametersApplied)),
+            AudioRequest::ProcessAudio(_) => {
+                Action::Audio(Box::new(AudioReply::ParametersApplied {
+                    id: ReqId::new(1),
+                }))
+            }
             _ => Action::Silent,
         },
         |_| Action::Silent,
@@ -1933,103 +1924,6 @@ fn assert_healthy_after_stall(mock: &MockServer, direction: &str) {
     );
 }
 
-/// **A query that times out leaves the bridge healthy, and its late reply is
-/// not the next query's answer**. The first `GetParameter` is
-/// answered after the 5 s budget; the second at once. The bridge owes the
-/// first reply, takes it off the stream when it lands, and gives the second
-/// query its own value.
-#[test]
-fn a_late_query_reply_is_not_the_next_querys_answer() {
-    let asked = Arc::new(AtomicU64::new(0));
-    let mock = MockServer::start("late-query", {
-        let asked = Arc::clone(&asked);
-        move |msg| match msg {
-            ControlRequest::GetParameter { .. } => {
-                let value = |v| ControlReply::ParameterValue {
-                    value: Some(Normalized::of(v)),
-                };
-                if asked.fetch_add(1, Ordering::SeqCst) == 0 {
-                    Action::ReplyManySlowly {
-                        msgs: vec![value(0.25)],
-                        gap: Duration::from_millis(5_300),
-                    }
-                } else {
-                    Action::Reply(Box::new(value(0.75)))
-                }
-            }
-            _ => Action::Silent,
-        }
-    });
-
-    assert_eq!(
-        mock.bridge.audio().parameter(ParamId::new(1)),
-        None,
-        "the first is late"
-    );
-    assert_eq!(
-        mock.bridge.audio().parameter(ParamId::new(1)),
-        Some(Normalized::of(0.75)),
-        "the second query was answered with the first's late reply"
-    );
-    assert!(
-        !mock.bridge.audio().is_crashed(),
-        "a late reply crashed the bridge"
-    );
-}
-
-/// **A plugin that keeps sending events does not extend a request's budget**. The first
-/// `GetParameter` gets 6 s of `LatencyChanged` events at 100 ms and no answer. The bridge gives up
-/// at its 5 s budget and sends the next request, so when the events stop it is already waiting at
-/// the peer; with the budget restarting per event the bridge would still be waiting, until 5 s
-/// after the last event.
-///
-/// The peer looks for the waiting request rather than the test timing the
-/// answer: an oversleeping runner only lengthens the events, which widens the
-/// margin. (A first version required the answer within the second caller's
-/// 5 s wait, which macOS runners' 100 ms sleeps overran.)
-#[test]
-fn a_chatty_plugin_does_not_extend_the_budget() {
-    let asked = Arc::new(AtomicU64::new(0));
-    let probe = Arc::new(std::sync::atomic::AtomicU8::new(0));
-    let mock = MockServer::start("chatty", {
-        let asked = Arc::clone(&asked);
-        let probe = Arc::clone(&probe);
-        move |msg| match msg {
-            ControlRequest::GetParameter { .. } if asked.fetch_add(1, Ordering::SeqCst) == 0 => {
-                Action::EventsThenProbe {
-                    count: 60,
-                    gap: Duration::from_millis(100),
-                    probe: Arc::clone(&probe),
-                }
-            }
-            ControlRequest::GetParameterList => {
-                Action::Reply(Box::new(ControlReply::ParameterList {
-                    parameters: Vec::new(),
-                }))
-            }
-            _ => Action::Silent,
-        }
-    });
-
-    assert_eq!(mock.bridge.audio().parameter(ParamId::new(1)), None);
-    // Sends the next request; its answer waits for the events to stop.
-    let _ = mock.bridge.audio().parameters();
-    tutti_fixtures::wait_until("the peer to finish its events", NOTICE_TIMEOUT, || {
-        probe.load(Ordering::SeqCst) != 0
-    });
-    assert_eq!(
-        probe.load(Ordering::SeqCst),
-        PROBE_WAITING,
-        "when the events stopped the bridge had not sent its next request: it \
-         was still waiting on the chatty one"
-    );
-    assert!(
-        !mock.bridge.audio().is_crashed(),
-        "{:?}",
-        mock.bridge.audio().crash_cause()
-    );
-}
-
 /// **A live peer caught part-way through a frame at the budget is not declared
 /// unable to frame.** The read finishes *that* frame within `Timeouts::drain`
 /// and stops. Extending the whole read by `Timeouts::drain` instead let the next
@@ -2061,51 +1955,6 @@ fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
         "a live peer was declared unable to frame: {:?}",
         mock.bridge.audio().crash_cause()
     );
-}
-
-/// **The rest of a stalled state is taken off the stream, not read as the next
-/// answer**. `SaveState` stalls before its first chunk; the two
-/// chunks land later, ahead of the answer to `GetParameterList`.
-#[test]
-fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
-    let mock = MockServer::start_with_state_progress_timeout(
-        "stalled-rest",
-        STATE_PROGRESS_TIMEOUT,
-        |msg| match msg {
-            ControlRequest::SaveState { .. } => Action::ReplyManySlowly {
-                msgs: (0..2)
-                    .map(|seq| ControlReply::StateChunk {
-                        seq,
-                        total: 64,
-                        last: seq == 1,
-                        bytes: vec![7u8; 32],
-                    })
-                    .collect(),
-                gap: STATE_PROGRESS_TIMEOUT * 3 / 2,
-            },
-            ControlRequest::GetParameterList => {
-                Action::Reply(Box::new(ControlReply::ParameterList {
-                    parameters: Vec::new(),
-                }))
-            }
-            _ => Action::Silent,
-        },
-    );
-
-    let err = mock
-        .bridge
-        .audio()
-        .save_state(tutti_plugin_types::StateUse::Project)
-        .expect_err("the transfer stalls");
-    assert!(
-        matches!(err, StateError::Stalled { bytes: 0, .. }),
-        "{err:?}"
-    );
-    assert!(
-        mock.bridge.audio().parameters().is_some(),
-        "a late state chunk was read as the parameter list's answer"
-    );
-    assert!(!mock.bridge.audio().is_crashed());
 }
 
 /// **A control call made while a control reply is owed waits for it** and is

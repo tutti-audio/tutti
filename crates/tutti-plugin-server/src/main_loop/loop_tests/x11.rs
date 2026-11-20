@@ -67,7 +67,10 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
         .heard
         .iter()
         .find_map(|m| match m {
-            ControlFrame::Reply(ControlReply::EditorOpened { result }) => Some(result.clone()),
+            ControlFrame::Reply {
+                reply: ControlReply::EditorOpened { result },
+                ..
+            } => Some(result.clone()),
             _ => None,
         })
         .expect("the open is answered");
@@ -91,7 +94,10 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
         .heard
         .iter()
         .find_map(|m| match m {
-            ControlFrame::Reply(ControlReply::EditorSized { result }) => Some(result.clone()),
+            ControlFrame::Reply {
+                reply: ControlReply::EditorSized { result },
+                ..
+            } => Some(result.clone()),
             _ => None,
         })
         .expect("the resize is answered");

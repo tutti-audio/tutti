@@ -44,6 +44,7 @@ static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::Al
 mod batcher;
 mod client;
 mod config;
+mod conversation;
 mod error;
 mod ipc;
 mod offline_wait;
@@ -80,7 +81,8 @@ pub use protocol::frame::{FrameBuf, read_frame, write_frame};
 pub use protocol::{
     AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest,
     CONTROL_FRAME_BYTES, ControlFrame, ControlReply, ControlRequest, Framed, News,
-    PROTOCOL_VERSION, ProcessAudioData, STATE_CHUNK_BYTES, SlabLayout, StagedState,
+    PROTOCOL_VERSION, ProcessAudioData, ReqId, Request, STATE_CHUNK_BYTES, SlabLayout, StagedState,
+    Working,
 };
 pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;

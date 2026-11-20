@@ -345,9 +345,6 @@ pub(super) struct Unsolicited {
     latency: Option<Samples>,
     tail: Option<PluginTail>,
     rate: Option<Option<(SampleRate, String)>>,
-    /// Rate changes the bridge stopped waiting for, whose answers have not
-    /// arrived.
-    late_rate_owed: u32,
     /// What a late answer is applied to, when it is read.
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
@@ -372,7 +369,6 @@ impl Unsolicited {
             latency: None,
             tail: None,
             rate: None,
-            late_rate_owed: 0,
             lifecycle: None,
             reloaded: false,
             io: false,
@@ -405,11 +401,6 @@ impl Unsolicited {
         self.tail = Some(tail);
     }
 
-    /// A rate change was given up on; its answer is still to come.
-    pub(super) fn expect_late_rate_reply(&mut self) {
-        self.late_rate_owed = self.late_rate_owed.saturating_add(1);
-    }
-
     /// An inbox whose late rate answers are applied to `lifecycle`.
     pub(super) fn with_lifecycle(lifecycle: super::lifecycle::Lifecycle) -> Self {
         Self {
@@ -418,19 +409,13 @@ impl Unsolicited {
         }
     }
 
-    /// Take `SampleRateSet` as a late answer if one is owed (`true`), applying
-    /// it **now**: it is read in stream order, ahead of whatever is read after
-    /// it, so a later answer (the request being waited on) lands after it and
-    /// wins. `false` when it answers the request being waited on.
-    pub(super) fn late_rate_reply(&mut self, rate: SampleRate, error: Option<String>) -> bool {
-        if self.late_rate_owed == 0 {
-            return false;
-        }
-        self.late_rate_owed -= 1;
+    /// Apply the answer to a rate change the bridge stopped waiting for,
+    /// **now**: it is read in stream order, ahead of whatever is read after it,
+    /// so a later answer (the request being waited on) lands after it and wins.
+    pub(super) fn late_rate_answer(&mut self, rate: SampleRate, error: Option<String>) {
         if let Some(lifecycle) = self.lifecycle.clone() {
             super::dispatch::apply_rate_reply(&lifecycle, self, rate, error);
         }
-        true
     }
 
     /// The server's editor asked its window for `size`.

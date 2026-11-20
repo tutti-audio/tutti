@@ -9,8 +9,12 @@ use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::{ControlTransport, Transport, TransportListener};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tutti_platform::StopToken;
-use tutti_plugin_ipc::{AudioReply, ControlFrame, ControlReply, PROTOCOL_VERSION};
+use tutti_plugin_ipc::{
+    AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
+};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 
@@ -146,7 +150,7 @@ impl PluginServer {
     ///    event loop (`main_loop`), which keeps the plugin's
     ///    `Controller`, its editor and the idle tick.
     ///
-    /// Each phase opens with a [`ControlReply::Ready`] carrying
+    /// Each phase opens with a [`ControlFrame::Ready`] carrying
     /// `PROTOCOL_VERSION`; the host refuses a version it does not know.
     ///
     /// # Errors
@@ -179,9 +183,9 @@ impl PluginServer {
 
         // First connection: handshake.
         let mut handshake = listener.accept()?;
-        handshake.send(&ControlFrame::Reply(ControlReply::Ready {
+        handshake.send(&ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }))?;
+        })?;
         if self.handshake_phase(&mut handshake)? {
             return Ok(());
         }
@@ -193,9 +197,9 @@ impl PluginServer {
             protocol_version: PROTOCOL_VERSION,
         })?;
         let mut control = listener.accept()?;
-        control.send(&ControlFrame::Reply(ControlReply::Ready {
+        control.send(&ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }))?;
+        })?;
         let side = self
             .render
             .take()
@@ -276,29 +280,26 @@ impl PluginServer {
 
     fn handshake_phase(&mut self, transport: &mut ControlTransport) -> BridgeResult<bool> {
         loop {
-            let msg = match transport.recv() {
-                Ok(m) => m,
-                // The host closed the connection, or went away: the phase is over.
+            let Request { id, body } = match transport.recv() {
+                Ok(request) => request,
                 Err(BridgeError::Io(_)) => return Ok(false),
-                // A frame that does not decode (a host of another protocol), or
-                // one past the cap: the cause is the error, not a host that left.
                 Err(e) => return Err(e),
             };
-            // A load says it is restoring a state before it does (the host's wait
-            // changes with it); the transport is the interim sink.
-            let reaction = self.session.handle_with(self.main, msg, &mut |m| {
-                let _ = transport.send(&m.into());
-            })?;
+            let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
+                self.load_working(transport, id, body)?
+            } else {
+                self.session.handle_with(self.main, body, &mut |_| {})?
+            };
             match reaction {
                 Reaction::Shutdown => return Ok(true),
-                Reaction::Reply(m) => {
-                    if transport.send(&m.into()).is_err() {
+                Reaction::Reply(reply) => {
+                    if transport.send(&ControlFrame::Reply { id, reply }).is_err() {
                         return Ok(false);
                     }
                 }
-                Reaction::ReplyMany(ms) => {
-                    for m in ms {
-                        if transport.send(&m.into()).is_err() {
+                Reaction::ReplyMany(replies) => {
+                    for reply in replies {
+                        if transport.send(&ControlFrame::Reply { id, reply }).is_err() {
                             return Ok(false);
                         }
                     }
@@ -308,9 +309,33 @@ impl PluginServer {
         }
     }
 
-    /// The control phase: the main thread's [event loop](crate::main_loop),
-    /// serving the control connection and the editor's idle tick until the
-    /// host leaves.
+    /// A load, with the host told the server is at work on it: once as it
+    /// begins, when it reaches the restore of a staged state, and every
+    /// [`WORKING_PERIOD`] in between by a thread of its own, since the load
+    /// itself is one plugin call that tells nothing. The host's wait for the
+    /// answer restarts on each. The thread has ended before the answer is sent.
+    fn load_working(
+        &mut self,
+        transport: &mut ControlTransport,
+        id: ReqId,
+        body: ControlRequest,
+    ) -> BridgeResult<Reaction> {
+        let restoring = AtomicBool::new(false);
+        let pulse = transport.pulser();
+        let _ = transport.send(&ControlFrame::Working {
+            id,
+            stage: Working::Opening,
+        });
+        beat_while(pulse.as_deref(), WORKING_PERIOD, id, &restoring, || {
+            self.session.handle_with(self.main, body, &mut |stage| {
+                if stage == Working::Restoring {
+                    restoring.store(true, Ordering::Release);
+                }
+                let _ = transport.send(&ControlFrame::Working { id, stage });
+            })
+        })
+    }
+
     fn control_phase(
         &mut self,
         transport: &mut ControlTransport,
@@ -321,6 +346,50 @@ impl PluginServer {
     }
 }
 
+/// Ends a beat when it goes out of scope, however the scope is left.
+struct StopOnDrop<'a>(&'a StopToken);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
+
+/// Runs `work` while a thread of its own sends the host `Working` for request
+/// `id` every `period` (as [`Working::Restoring`] once `restoring` is set),
+/// through `pulse`; without one, `work` runs alone.
+///
+/// The thread has ended when this returns, and it ends on every exit of
+/// `work`, a panic included: the scope waits for it, and a beat that outlived
+/// a failed load would tell the host for ever that it is alive.
+fn beat_while<R>(
+    pulse: Option<&(dyn Fn(&ControlFrame) -> BridgeResult<()> + Send + Sync)>,
+    period: Duration,
+    id: ReqId,
+    restoring: &AtomicBool,
+    work: impl FnOnce() -> R,
+) -> R {
+    let done = StopToken::new();
+    std::thread::scope(|scope| {
+        let _ends = StopOnDrop(&done);
+        if let Some(pulse) = pulse {
+            scope.spawn(|| {
+                while !done.wait(period) {
+                    let stage = if restoring.load(Ordering::Acquire) {
+                        Working::Restoring
+                    } else {
+                        Working::Opening
+                    };
+                    if pulse(&ControlFrame::Working { id, stage }).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        work()
+    })
+}
+
 impl Drop for PluginServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket);
@@ -329,6 +398,9 @@ impl Drop for PluginServer {
 
 /// How long a stopped render thread is given to return: it ends at its next
 /// step, so this is a thread stuck inside the plugin or in a read.
+/// How often the server tells the host it is at work on a load.
+const WORKING_PERIOD: Duration = Duration::from_secs(1);
+
 const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// How long a server is given to shut down after its host ended, before it is
@@ -364,5 +436,133 @@ fn watch_host(
             tracing::warn!("the host's process id is unknown: this server cannot notice its end");
         }
         Err(e) => tracing::warn!("the host watch cannot start: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod beat_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
+
+    const ID: ReqId = ReqId::new(9);
+    /// A pace for the beat in these tests: a count of beats is what they
+    /// wait on, never the time it took.
+    const PACE: Duration = Duration::from_millis(1);
+    /// Far past what a healthy run needs: a hang guard, never a speed bound.
+    const HANG_GUARD: Duration = Duration::from_secs(60);
+
+    fn stage_of(frame: &ControlFrame) -> Working {
+        match frame {
+            ControlFrame::Working { id, stage } => {
+                assert_eq!(*id, ID, "a beat names its request");
+                *stage
+            }
+            other => panic!("a beat sends only `Working`, sent {other:?}"),
+        }
+    }
+
+    /// **The beat repeats while the work runs, as `Opening` until the work says
+    /// it is restoring and as `Restoring` after**: the work waits for three
+    /// beats, flips the stage, and waits for three more, so a beat that sent
+    /// once, or never changed its stage, leaves it waiting.
+    #[test]
+    fn the_beat_repeats_and_follows_the_stage() {
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let pulse = move |frame: &ControlFrame| {
+            let _ = tx.lock().unwrap().send(stage_of(frame));
+            Ok(())
+        };
+        let restoring = AtomicBool::new(false);
+        let seen = beat_while(Some(&pulse), PACE, ID, &restoring, || {
+            let mut seen = Vec::new();
+            for _ in 0..3 {
+                seen.push(rx.recv_timeout(HANG_GUARD).expect("a beat"));
+            }
+            restoring.store(true, Ordering::Release);
+            // Beats already in flight when the stage flipped may still be Opening.
+            while seen.iter().filter(|s| **s == Working::Restoring).count() < 3 {
+                seen.push(rx.recv_timeout(HANG_GUARD).expect("a beat"));
+            }
+            seen
+        });
+        assert_eq!(seen[..3], [Working::Opening; 3]);
+        assert!(seen.iter().filter(|s| **s == Working::Restoring).count() >= 3);
+    }
+
+    /// **The beat has ended when the work's result is returned**: nothing is
+    /// sent after `beat_while` returns, which is what keeps a `Working` from
+    /// following the answer to the load it describes.
+    #[test]
+    fn no_beat_follows_the_return() {
+        let returned = AtomicBool::new(false);
+        let after = AtomicUsize::new(0);
+        let beats = AtomicUsize::new(0);
+        let pulse = |_: &ControlFrame| {
+            if returned.load(Ordering::SeqCst) {
+                after.fetch_add(1, Ordering::SeqCst);
+            }
+            beats.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+        let restoring = AtomicBool::new(false);
+        beat_while(Some(&pulse), PACE, ID, &restoring, || {
+            while beats.load(Ordering::SeqCst) < 3 {
+                std::thread::yield_now();
+            }
+        });
+        returned.store(true, Ordering::SeqCst);
+        // Were the beat still running, it would send within a few paces; a
+        // joined one cannot, whatever the pace.
+        let seen = beats.load(Ordering::SeqCst);
+        for _ in 0..1_000 {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            beats.load(Ordering::SeqCst),
+            seen,
+            "a beat ran after the return"
+        );
+        assert_eq!(after.load(Ordering::SeqCst), 0);
+    }
+
+    /// **A panic in the work ends the beat, and the panic still propagates**: the
+    /// scope waits for the beat thread, so a beat that only the work's own
+    /// ending stopped would keep the host told for ever that the load lives.
+    /// The test completes, within the hang guard, only if the beat was stopped.
+    #[test]
+    fn a_panic_in_the_work_ends_the_beat() {
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let beats = AtomicUsize::new(0);
+            let pulse = |_: &ControlFrame| {
+                beats.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            };
+            let restoring = AtomicBool::new(false);
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                beat_while(Some(&pulse), PACE, ID, &restoring, || {
+                    while beats.load(Ordering::SeqCst) < 2 {
+                        std::thread::yield_now();
+                    }
+                    panic!("the load fails");
+                })
+            }));
+            let _ = done_tx.send(caught.is_err());
+        });
+        assert_eq!(
+            done_rx.recv_timeout(HANG_GUARD),
+            Ok(true),
+            "the scope never ended, or the panic was swallowed"
+        );
+    }
+
+    /// Without a pulse the work runs alone and its result is returned.
+    #[test]
+    fn without_a_pulse_the_work_runs_alone() {
+        let restoring = AtomicBool::new(false);
+        assert_eq!(beat_while(None, PACE, ID, &restoring, || 7), 7);
     }
 }

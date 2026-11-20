@@ -14,7 +14,7 @@ use crate::ties::Ties;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
-use tutti_plugin_ipc::{AudioSlab, ControlReply, ControlRequest, News, StagedState};
+use tutti_plugin_ipc::{AudioSlab, ControlReply, ControlRequest, News, StagedState, Working};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
     BridgeResult, EditorError, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
@@ -223,14 +223,14 @@ impl Session {
 
     /// [`handle`](Self::handle), with `interim` for a message that cannot wait
     /// for the reply: the host is told a load has begun restoring its state
-    /// ([`ControlReply::RestoringState`]) before the restore, so what it waits
+    /// ([`Working::Restoring`]) before the restore, so what it waits
     /// for changes with it. Dispatch stays a function of the request; `interim`
     /// is a sink, not a source.
     pub(crate) fn handle_with(
         &mut self,
         main: MainThreadMarker,
         msg: ControlRequest,
-        interim: &mut dyn FnMut(ControlReply),
+        interim: &mut dyn FnMut(Working),
     ) -> BridgeResult<Reaction> {
         let reaction = self.dispatch(main, msg, interim);
         // What the message changed that a block reads reaches the render thread
@@ -244,7 +244,7 @@ impl Session {
         &mut self,
         main: MainThreadMarker,
         msg: ControlRequest,
-        interim: &mut dyn FnMut(ControlReply),
+        interim: &mut dyn FnMut(Working),
     ) -> BridgeResult<Reaction> {
         use ControlRequest as M;
         match msg {
@@ -725,7 +725,7 @@ impl Session {
         block_size: usize,
         preferred_format: FloatWidth,
         declared: Option<StagedState>,
-        interim: &mut dyn FnMut(ControlReply),
+        interim: &mut dyn FnMut(Working),
     ) -> BridgeResult<Reaction> {
         // What a host staged for this load, restored before the activation: only
         // when the load declares exactly it. Staged here or declared here and not
@@ -754,7 +754,7 @@ impl Session {
                 .into());
             }
         }
-        let mut restoring = || interim(ControlReply::RestoringState);
+        let mut restoring = || interim(Working::Restoring);
         let (plugin, state_error, seat) = match AnyServed::load(
             main,
             &self.work_handle,
@@ -1237,7 +1237,7 @@ mod tests {
                 .handle_audio(apply_parameter(GAIN, 0.25))
                 .unwrap()
                 .expect("answered");
-            assert!(matches!(r, AudioReply::ParametersApplied), "{r:?}");
+            assert!(matches!(r, AudioReply::ParametersApplied { .. }), "{r:?}");
         }
         let after = save_state_bytes(&mut s);
         let saved_at = tutti_platform::Instant::now();
@@ -1314,7 +1314,7 @@ mod tests {
             .handle_audio(apply_parameter(77, 0.25))
             .unwrap()
             .expect("answered");
-        assert!(matches!(r, AudioReply::ParametersApplied), "{r:?}");
+        assert!(matches!(r, AudioReply::ParametersApplied { .. }), "{r:?}");
         assert_ne!(before, save_state_bytes(&mut s));
     }
 
@@ -2352,7 +2352,7 @@ mod tests {
             .handle_audio(apply_parameter(param_id.get(), 0.25))
             .unwrap()
             .expect("answered");
-        assert!(matches!(r, AudioReply::ParametersApplied), "{r:?}");
+        assert!(matches!(r, AudioReply::ParametersApplied { .. }), "{r:?}");
         assert!(
             run_silent_block(&mut s, &mut shm, 1, 64),
             "the block renders"
@@ -2662,7 +2662,7 @@ mod tests {
     }
 
     /// **A stateful load says it is restoring before it does, and a stateless
-    /// one never does**: the interim sink hears `RestoringState` once, ahead of the
+    /// one never does**: the interim sink hears `Working::Restoring` once, ahead of the
     /// reply.
     #[test]
     #[cfg(feature = "clap")]
@@ -2701,7 +2701,7 @@ mod tests {
             }),
         );
         assert!(
-            matches!(heard.as_slice(), [ControlReply::RestoringState]),
+            matches!(heard.as_slice(), [Working::Restoring]),
             "{heard:?}"
         );
         assert!(matches!(reply, ControlReply::PluginLoaded { .. }));
@@ -2874,6 +2874,7 @@ mod tests {
         let mut changes = ParameterChanges::reserved(1, 1);
         assert!(changes.add_change(ParamId::new(id), 0, value));
         AudioRequest::ApplyParameters {
+            id: tutti_plugin_ipc::ReqId::new(1),
             param_changes: changes,
         }
     }

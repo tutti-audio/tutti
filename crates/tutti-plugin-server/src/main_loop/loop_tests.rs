@@ -19,7 +19,7 @@ use tutti_clap_test_plugin::{ClapSwitch, Site};
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest,
-    ProcessAudioData, read_frame, write_frame,
+    ProcessAudioData, ReqId, Request, read_frame, write_frame,
 };
 use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale};
 
@@ -31,7 +31,7 @@ mod x11;
 use crate::main_loop::Bell;
 use crate::render::{RenderSide, RenderThread};
 use crate::session::Session;
-use crate::transport::{SocketTransport, Transport};
+use crate::transport::{Alone, SocketTransport, Transport};
 
 /// One thing the scripted host does.
 #[allow(clippy::large_enum_variant)] // a test script, built once
@@ -69,6 +69,8 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 /// A host that follows a script and records what it is sent.
 struct Script {
     steps: VecDeque<Step>,
+    /// How many requests the script has sent: the id of the last.
+    sent: u64,
     heard: Vec<ControlFrame>,
     /// How many times the loop has gone to wait, shared with whoever watches it.
     waits: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -82,6 +84,7 @@ impl Script {
     fn new(steps: impl IntoIterator<Item = Step>) -> Self {
         Self {
             steps: steps.into_iter().collect(),
+            sent: 0,
             heard: Vec::new(),
             waits: std::sync::Arc::default(),
             on_wait: None,
@@ -90,7 +93,7 @@ impl Script {
     }
 }
 
-impl Transport<ControlRequest, ControlFrame> for Script {
+impl Transport<Request, ControlFrame> for Script {
     fn wait_readable(&mut self, timeout: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
         let timeout = timeout.expect("the loop waits for a bounded time");
         if let Some(on_wait) = self.on_wait.as_mut() {
@@ -100,7 +103,7 @@ impl Transport<ControlRequest, ControlFrame> for Script {
         self.wait_inner(timeout)
     }
 
-    fn recv(&mut self) -> BridgeResult<ControlRequest> {
+    fn recv(&mut self) -> BridgeResult<Request> {
         self.recv_inner()
     }
 
@@ -153,10 +156,16 @@ impl Script {
         }
     }
 
-    fn recv_inner(&mut self) -> BridgeResult<ControlRequest> {
+    fn recv_inner(&mut self) -> BridgeResult<Request> {
         self.message_due_by = None;
         match self.steps.pop_front() {
-            Some(Step::Send(message)) => Ok(message),
+            Some(Step::Send(body)) => {
+                self.sent += 1;
+                Ok(Request {
+                    id: ReqId::new(self.sent),
+                    body,
+                })
+            }
             _ => Err(BridgeError::Io(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "the script is over",
@@ -193,7 +202,7 @@ impl HostEnd {
 struct Fixture {
     session: Session,
     side: Option<RenderSide>,
-    audio: Option<SocketTransport<AudioRequest, AudioReply>>,
+    audio: Option<SocketTransport<AudioRequest, AudioReply, Alone>>,
     host: Option<HostEnd>,
 }
 
@@ -383,7 +392,10 @@ fn a_message_after_silence_is_answered() {
     assert!(
         matches!(
             script.heard.last(),
-            Some(ControlFrame::Reply(ControlReply::ParameterList { parameters })) if !parameters.is_empty()
+            Some(ControlFrame::Reply {
+                reply: ControlReply::ParameterList { parameters },
+                ..
+            }) if !parameters.is_empty()
         ),
         "{:?}",
         script.heard
@@ -501,8 +513,8 @@ fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
         matches!(
             script.heard.as_slice(),
             [
-                ControlFrame::Reply(ControlReply::EditorOpened { result: Err(open) }),
-                ControlFrame::Reply(ControlReply::EditorSized { result: Err(size) }),
+                ControlFrame::Reply { reply: ControlReply::EditorOpened { result: Err(open) }, .. },
+                ControlFrame::Reply { reply: ControlReply::EditorSized { result: Err(size) }, .. },
             ] if open.contains("no plugin") && size.contains("not open")
         ),
         "{:?}",

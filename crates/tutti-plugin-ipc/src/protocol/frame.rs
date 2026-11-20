@@ -29,7 +29,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::{AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, CONTROL_FRAME_BYTES};
-use super::{AudioReply, AudioRequest, ControlFrame, ControlRequest};
+use super::{AudioReply, AudioRequest, ControlFrame, Request};
 
 /// A wire type with the longest frame its lane carries it in.
 ///
@@ -47,7 +47,7 @@ impl Framed for AudioRequest {
 impl Framed for AudioReply {
     const CAP: usize = AUDIO_REPLY_FRAME_BYTES;
 }
-impl Framed for ControlRequest {
+impl Framed for Request {
     const CAP: usize = CONTROL_FRAME_BYTES;
 }
 impl Framed for ControlFrame {
@@ -189,13 +189,13 @@ pub fn read_frame<R: Read, T: Framed>(r: &mut R) -> BridgeResult<T> {
 /// move it there. The wire is the same as [`read_frame`] and [`write_frame`].
 ///
 /// ```
-/// use tutti_plugin_ipc::{AudioReply, FrameBuf};
+/// use tutti_plugin_ipc::{AudioReply, FrameBuf, ReqId};
 ///
 /// let mut buf = FrameBuf::new(16, 16);
 /// let mut wire = Vec::new();
-/// buf.write(&mut wire, &AudioReply::ParametersApplied).unwrap();
+/// buf.write(&mut wire, &AudioReply::ParametersApplied { id: ReqId::new(7) }).unwrap();
 /// let back: AudioReply = buf.read(&mut wire.as_slice()).unwrap();
-/// assert!(matches!(back, AudioReply::ParametersApplied));
+/// assert!(matches!(back, AudioReply::ParametersApplied { id } if id == ReqId::new(7)));
 /// ```
 #[derive(Debug)]
 pub struct FrameBuf {
@@ -369,7 +369,7 @@ mod tests {
         for cap in [
             AudioRequest::CAP,
             AudioReply::CAP,
-            ControlRequest::CAP,
+            Request::CAP,
             ControlFrame::CAP,
         ] {
             let at = u32::try_from(cap).unwrap();

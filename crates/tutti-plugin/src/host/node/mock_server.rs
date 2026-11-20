@@ -12,7 +12,7 @@ use tutti_graph::contract::Direct;
 use tutti_plugin_host::client_over;
 use tutti_plugin_ipc::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, Ipc,
-    IpcParts, PROTOCOL_VERSION, PluginBridge, ProcessAudioData, ProcessGuard, RING_SLOTS,
+    IpcParts, PROTOCOL_VERSION, PluginBridge, ProcessAudioData, ProcessGuard, RING_SLOTS, Request,
     SlabLayout, SlabWriter, unique_socket_path,
 };
 use tutti_plugin_types::{
@@ -143,7 +143,7 @@ fn serve_audio(
                 log.lock().unwrap().push(Said::Audio(AudioRequest::Reset));
                 None
             }
-            AudioRequest::ApplyParameters { .. } => Some(AudioReply::ParametersApplied),
+            AudioRequest::ApplyParameters { id, .. } => Some(AudioReply::ParametersApplied { id }),
         };
         if let Some(reply) = reply
             && !send(stream, &reply)
@@ -155,8 +155,8 @@ fn serve_audio(
 
 /// The control connection: the queries a node makes at load and a rate change.
 fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
-    while let Some(message) = read_frame::<ControlRequest>(stream) {
-        let reply = match message {
+    while let Some(Request { id, body }) = read_frame::<Request>(stream) {
+        let reply = match body {
             ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
                 parameters: PARAMS
                     .iter()
@@ -184,7 +184,7 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
             _ => None,
         };
         if let Some(reply) = reply
-            && !send(stream, &ControlFrame::Reply(reply))
+            && !send(stream, &ControlFrame::Reply { id, reply })
         {
             break;
         }
@@ -240,9 +240,9 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
     let control = listener.accept().unwrap();
     send(
         &control,
-        &ControlFrame::Reply(ControlReply::Ready {
+        &ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }),
+        },
     );
     let record: Record = Arc::default();
     let log = Arc::clone(&record);

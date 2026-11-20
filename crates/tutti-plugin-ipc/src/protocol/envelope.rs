@@ -50,6 +50,48 @@ pub struct StagedState {
     pub state_use: StateUse,
 }
 
+/// The number a request on a connection carries and its answer echoes, which is
+/// how the host knows what a reply answers: a reply is the answer to the request
+/// of its id, whenever it comes and whatever else came before it.
+///
+/// The host numbers the requests of a connection from 1 and never repeats one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ReqId(u64);
+
+impl ReqId {
+    /// The request numbered `raw`.
+    #[must_use]
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    /// The number.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// A request on the control connection, with the id its answer carries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Request {
+    /// What the answer to this request echoes.
+    pub id: ReqId,
+    /// What is asked.
+    pub body: ControlRequest,
+}
+
+/// What the server is doing for a request that has no answer yet: a sign of
+/// life the host waits longer on, and for a load the point it has reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Working {
+    /// Opening the plugin: its library, instance and initialisation.
+    Opening,
+    /// Restoring the staged state into the opened plugin: one opaque plugin
+    /// call, after which a failure is the state's to answer for.
+    Restoring,
+}
+
 /// A request on the audio connection: a block, the parameters outside one, or a reset.
 ///
 /// Variant order is wire-significant; see the module docs.
@@ -70,6 +112,8 @@ pub enum AudioRequest {
     /// VST2 and AU) between blocks, and answers
     /// [`ParametersApplied`](AudioReply::ParametersApplied).
     ApplyParameters {
+        /// What the acknowledgement echoes.
+        id: ReqId,
         /// The changes, each parameter's newest value.
         param_changes: tutti_plugin_types::ParameterChanges,
     },
@@ -119,14 +163,6 @@ pub enum AudioReply {
         #[serde(default)]
         refused: bool,
     },
-    /// The subprocess failed at something it was asked to do.
-    ///
-    /// Fire-and-forget: nothing awaits this, so a request that a caller blocks
-    /// on needs its own reply variant rather than relying on this.
-    Error {
-        /// Human-readable reason, already formatted subprocess-side.
-        message: String,
-    },
     /// Handshake sent once the subprocess is live. Carries the wire
     /// [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION) so a host and subprocess
     /// built from mismatched commits refuse to proceed rather than mis-parsing
@@ -139,7 +175,10 @@ pub enum AudioReply {
     },
     /// The changes of an [`ApplyParameters`](AudioRequest::ApplyParameters) are
     /// in the plugin.
-    ParametersApplied,
+    ParametersApplied {
+        /// The `id` of the request.
+        id: ReqId,
+    },
 }
 
 /// A request on the control connection: everything but a block.
@@ -150,7 +189,7 @@ pub enum ControlRequest {
     /// Instantiate and activate the plugin, ready to process audio. A state
     /// staged before ([`StageStateChunk`](Self::StageStateChunk)) and declared
     /// in `state` is restored between the two; the server says
-    /// [`ControlReply::RestoringState`] just before it starts.
+    /// [`ControlFrame::Working`] (`Restoring`) just before it starts.
     LoadPlugin {
         /// Filesystem path to the plugin bundle or shared library.
         path: PathBuf,
@@ -484,16 +523,6 @@ pub enum ControlReply {
         /// Human-readable reason, already formatted subprocess-side.
         message: String,
     },
-    /// Handshake sent once the subprocess is live. Carries the wire
-    /// [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION) so a host and subprocess
-    /// built from mismatched commits refuse to proceed rather than mis-parsing
-    /// each other's messages (postcard is not self-describing). `#[serde(default)]`
-    /// = 0 for an ancient binary that predates the field → treated as a mismatch.
-    Ready {
-        /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
-        #[serde(default)]
-        protocol_version: u32,
-    },
     /// The subprocess is exiting.
     Shutdown,
     /// The plugin's display string for the value that was asked about. `None`
@@ -538,12 +567,6 @@ pub enum ControlReply {
         /// now runs at `rate`.
         error: Option<String>,
     },
-    /// Sent while a load is in progress, just before the server restores the
-    /// staged state into the plugin it has opened: the point after which a
-    /// failure is the state's to answer for, and the host's wait is for a
-    /// restore (one opaque plugin call that may take as long as the state is
-    /// large) and not for an open.
-    RestoringState,
     /// The plain value the format converted a normalized one to. `None` means
     /// the format has none (a parameter it does not declare, or VST2 without an
     /// integer range).
@@ -651,21 +674,48 @@ pub enum News {
     },
 }
 
-/// One frame the server sends on the control connection: an answer or news.
+/// One frame the server sends on the control connection: an answer, a sign of
+/// life or news.
 ///
 /// Variant order is wire-significant; see the module docs.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ControlFrame {
-    /// The answer to a request.
-    Reply(ControlReply),
+    /// A frame of the answer to request `id`. A state is answered in several,
+    /// the last of which ends the answer ([`ControlReply::ends`]).
+    Reply {
+        /// The `id` of the request.
+        id: ReqId,
+        /// The answer.
+        reply: ControlReply,
+    },
     /// Something the plugin did on its own.
     News(News),
+    /// Request `id` has no answer yet and the server is at work on it: the
+    /// host's wait for it restarts.
+    Working {
+        /// The `id` of the request.
+        id: ReqId,
+        /// What the server is doing.
+        stage: Working,
+    },
+    /// Handshake sent once the subprocess is live: the first frame of the
+    /// connection. Carries the wire [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION)
+    /// so a host and subprocess built from mismatched commits refuse to
+    /// proceed rather than mis-parsing each other's messages (postcard is not
+    /// self-describing).
+    Ready {
+        /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
+        protocol_version: u32,
+    },
 }
 
-impl From<ControlReply> for ControlFrame {
-    fn from(reply: ControlReply) -> Self {
-        Self::Reply(reply)
+impl ControlReply {
+    /// Whether no frame of this answer follows it: a state chunk that is not
+    /// the last has more behind it.
+    #[must_use]
+    pub fn ends(&self) -> bool {
+        !matches!(self, Self::StateChunk { last: false, .. })
     }
 }
 
