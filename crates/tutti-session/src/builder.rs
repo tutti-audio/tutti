@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::NodeKey;
-use tutti_nodes::{ClickNode, ClickSettings};
+use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings};
 use tutti_transport::Transport;
 use tutti_units::SampleRate;
 
@@ -975,7 +975,10 @@ impl<C: Clock> SessionBuilder<C> {
         // block's `Env`, and the count-in flag off the transport (read only).
         // It is not wired to the output: what it feeds is the host's
         // declaration, like every other node's.
-        let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
+        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(
+            &transport,
+            Arc::clone(&click_settings),
+        )));
 
         // The engine's MIDI as graph nodes: the sync node (sends nothing until a
         // host sets its messages). An input port's input node and an output's

@@ -272,8 +272,6 @@ impl From<tutti_dsp::ChannelWeightError> for Error {
 impl From<tutti_dsp::StftError> for Error {
     fn from(error: tutti_dsp::StftError) -> Self {
         match error {
-            tutti_dsp::StftError::ZeroWindow => Self::ZeroWindow,
-            tutti_dsp::StftError::ZeroHop => Self::ZeroHop,
             other => Self::Dsp(other),
         }
     }

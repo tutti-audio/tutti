@@ -4,7 +4,7 @@
 //! `sin` in f64.
 
 use tutti_buffers::{Float, Mono};
-use tutti_dsp::StftGeometry;
+use tutti_dsp::{HopSize, StftGeometry, WindowLength};
 use tutti_measure::{
     ChordConfig, ChordQuality, ChromaConfig, Harmonics, Key, KeyProfile, Mode, PitchClass, Tuning,
     TuningOffset, detect_chords, estimate_key,
@@ -54,7 +54,11 @@ fn chord_tones(out: &mut [f32], at: usize, secs: f64, root: i32, minor: bool, pa
 }
 
 fn geometry(window: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(SampleRate::of(SR), Samples::new(window), Samples::new(hop)).unwrap()
+    StftGeometry::new(
+        SampleRate::of(SR),
+        WindowLength::new(Samples::new(window)).unwrap(),
+        HopSize::new(Samples::new(hop)).unwrap(),
+    )
 }
 
 fn config() -> ChromaConfig {

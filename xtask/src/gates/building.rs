@@ -159,6 +159,10 @@ const STEREO_ONLY: &str = "a stereo-only node: mid/side, width and auto-pan are 
     left and right pair, so the width is not a choice and the config takes none";
 const STEREO_PLATE: &str = "a stereo-only node: the plate's two tank halves feed the left and \
     right ears, so the width is not a choice and the config takes none";
+const FIXED_SOURCE: &str = "a source with no audio input and one fixed output (mono, or the \
+    metronome's stereo pair): the width is not a choice, so the config takes none";
+const NO_AUDIO_PORT: &str = "a node with no audio port: it reads a curve, a program or MIDI and \
+    sends or renders one value, so there is no width to choose";
 const TEST_SUPPORT: &str =
     "test support behind the `testing` or `contract` feature, not an app's type";
 
@@ -533,6 +537,43 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty("crates/tutti-au-host/", "StreamConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-cpal/", "OutputConfig", WIDTH, NOT_A_NODE),
+    ty(
+        "crates/tutti-nodes/",
+        "OscillatorConfig",
+        WIDTH,
+        FIXED_SOURCE,
+    ),
+    ty("crates/tutti-nodes/", "LfoConfig", WIDTH, FIXED_SOURCE),
+    ty(
+        "crates/tutti-nodes/",
+        "ClickNodeConfig",
+        WIDTH,
+        FIXED_SOURCE,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "AutomationLaneConfig",
+        WIDTH,
+        FIXED_SOURCE,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "NoteEnvelopeConfig",
+        WIDTH,
+        NO_AUDIO_PORT,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "UnitLaneConfig",
+        WIDTH,
+        NO_AUDIO_PORT,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "ForeignLaneConfig",
+        WIDTH,
+        NO_AUDIO_PORT,
+    ),
     ty("crates/tutti-nodes/", "MidSideConfig", WIDTH, STEREO_ONLY),
     ty(
         "crates/tutti-nodes/",

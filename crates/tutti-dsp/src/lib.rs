@@ -90,10 +90,11 @@
 //!   the C library's `sin` and `cos`, so not across libms). Values cross as
 //!   [`Complex32`] and [`Complex64`].
 //! - **STFT vocabulary** (`stft/`): [`CosineWindow`] and the [`Window`] trait,
-//!   [`StftGeometry`] (window, hop, shape and rate, validated together), and [`Grid`] with
-//!   its typed indices; [`StftError`] is what they refuse with.
-//! - **Resampling** (`resample/`): [`WindowedSinc`], [`FftResampler`] (failing with a
-//!   [`ResampleError`]) and [`StreamingResampler`], sized by a [`ChunkSize`].
+//!   [`StftGeometry`] (a [`WindowLength`], a [`HopSize`], shape and rate), the
+//!   [`ColaGeometry`] an inverse accepts, and [`Grid`] with its typed indices; [`StftError`] is
+//!   what a [`Grid`] or a [`ColaGeometry`] refuses with.
+//! - **Resampling** (`resample/`): [`WindowedSinc`] and [`StreamingResampler`] (made from a
+//!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]).
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
@@ -244,8 +245,8 @@ pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
-    ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc, needs_resampling,
-    resampled_frames,
+    ChunkSize, ResampleError, StreamingResampler, StreamingResamplerConfig, WindowedSinc,
+    needs_resampling, resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnRamps};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, FreezeMode, MAX_PRE_DELAY, MIN_DECAY};
@@ -274,7 +275,9 @@ pub use spatial::{
 pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
 pub use stereo::{MidSide, WidthBank, WidthControls};
 pub use stft::error::StftError;
-pub use stft::geometry::StftGeometry;
+pub use stft::geometry::{
+    ColaGeometry, HopSize, HopSizeError, StftGeometry, WindowLength, WindowLengthError,
+};
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};

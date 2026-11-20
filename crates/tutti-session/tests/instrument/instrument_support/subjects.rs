@@ -62,7 +62,7 @@ impl Subject for Soundfont {
         let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
         let font =
             std::sync::Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
-        let unit = SoundFontUnit::new(font, settings).expect("builds");
+        let unit = settings.build(font).expect("builds");
         let mut session = offline_session();
         let AddedInstrument { handle, .. } = session
             .add_instrument(unit)

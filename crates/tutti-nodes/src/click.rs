@@ -279,21 +279,40 @@ impl<F: Float> std::fmt::Debug for ClickNode<F> {
     }
 }
 
-impl<F: Float> ClickNode<F> {
-    /// A click node reading the count-in flag and the project meter of
-    /// `transport`, and `settings`. Its click waveforms are rendered when it
-    /// is prepared, at the graph's rate.
-    ///
-    /// `settings` is taken as an `Arc` so a later write to it reaches the
-    /// running node: they are its controls.
-    pub fn new(transport: &Transport, settings: Arc<ClickSettings>) -> Self {
-        Self::over(
-            settings,
-            transport.settings().in_preroll_cell(),
-            transport.settings().project_meter().clone(),
-        )
-    }
+/// What a [`ClickNode`] is made from: the count-in flag and the project meter of a
+/// [`Transport`], and the [`ClickSettings`] its controls are.
+#[derive(Clone, Debug)]
+pub struct ClickNodeConfig {
+    settings: Arc<ClickSettings>,
+    preroll: Arc<AtomicBool>,
+    meter: ProjectMeter,
+}
 
+impl ClickNodeConfig {
+    /// A click node reading the count-in flag and the project meter of `transport`, and
+    /// `settings`.
+    ///
+    /// `settings` is taken as an `Arc` so a later write to it reaches the running node: they
+    /// are its controls.
+    #[must_use]
+    pub fn new(transport: &Transport, settings: Arc<ClickSettings>) -> Self {
+        Self {
+            settings,
+            preroll: transport.settings().in_preroll_cell(),
+            meter: transport.settings().project_meter().clone(),
+        }
+    }
+}
+
+/// The click node of `config`. Its click waveforms are rendered when it is prepared, at the
+/// graph's rate. Control thread: registering the meter reader may allocate.
+impl<F: Float> From<ClickNodeConfig> for ClickNode<F> {
+    fn from(config: ClickNodeConfig) -> Self {
+        Self::over(config.settings, config.preroll, config.meter)
+    }
+}
+
+impl<F: Float> ClickNode<F> {
     /// A node over `settings`, the count-in flag `preroll` and `meter`,
     /// reading the meter cell through a reader it registers there. Control
     /// thread: registering may allocate.
@@ -777,7 +796,7 @@ mod tests {
         let transport = Transport::new(SampleRate::of(SR));
         let settings = Arc::new(ClickSettings::new());
         let node = prepared(
-            ClickNode::new(&transport, Arc::clone(&settings)),
+            ClickNode::from(ClickNodeConfig::new(&transport, Arc::clone(&settings))),
             tutti_units::SampleRate::of(SR),
             64,
         );
@@ -1132,7 +1151,7 @@ mod tests {
             settings.mode().store(MetronomeMode::Always);
             set_volume(&settings, Amplitude::new(1.0));
             let mut node = prepared(
-                ClickNode::new(&transport, settings),
+                ClickNode::from(ClickNodeConfig::new(&transport, settings)),
                 tutti_units::SampleRate::of(RATE),
                 len,
             );
@@ -1304,7 +1323,8 @@ mod tests {
             set_volume(&settings, Amplitude::new(0.5));
             // Recording-only, so the count-in gates it (the render records).
             settings.mode().store(MetronomeMode::RecordingOnly);
-            let node = ClickNode::<f32>::new(&transport, Arc::clone(&settings));
+            let node =
+                ClickNode::<f32>::from(ClickNodeConfig::new(&transport, Arc::clone(&settings)));
             (transport, settings, ClickFork::of(&node))
         };
         // 10 240 frames rolling (and recording) from beat 0 at 20 beats a

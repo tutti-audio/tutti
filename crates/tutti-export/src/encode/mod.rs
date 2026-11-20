@@ -29,7 +29,10 @@ use tutti_buffers::{
     Float, I24, Interleaved, InterleavedMut, Planes, Sample, Sink, SinkFailed, convert,
 };
 use tutti_codec::{FileEncoder, FinalizedFile, IntDepth, Spec};
-use tutti_dsp::{DitherSink, FftFloat, StreamingResampler, needs_resampling, resampled_frames};
+use tutti_dsp::{
+    DitherSink, FftFloat, StreamingResampler, StreamingResamplerConfig, needs_resampling,
+    resampled_frames,
+};
 use tutti_platform::Staged;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
@@ -266,7 +269,7 @@ pub(crate) type Resampler<F> = (StreamingResampler<F>, Vec<Vec<F>>, Vec<Vec<F>>)
 pub(crate) fn resampler_for<F: FftFloat>(
     target: &FileTarget,
     source_rate: SampleRate,
-    ch: usize,
+    layout: ChannelLayout,
 ) -> Result<Option<Resampler<F>>> {
     // Whether to convert at all is the converter's to say
     // (`tutti_dsp::needs_resampling`), not a float comparison here.
@@ -276,11 +279,17 @@ pub(crate) fn resampler_for<F: FftFloat>(
     // rate, which may not be the one a config was rendered at; reading
     // it from a config resamples from a rate the samples were never at.
     Ok(match target.resample {
-        Some(r) if needs_resampling(source_rate, r.target_rate) => Some((
-            StreamingResampler::new(ch, source_rate, r.target_rate, r.chunk)?,
-            vec![Vec::<F>::new(); ch],
-            vec![Vec::<F>::new(); ch],
-        )),
+        Some(r) if needs_resampling(source_rate, r.target_rate) => {
+            let ch = usize::from(layout.count());
+            Some((
+                StreamingResampler::try_from(
+                    StreamingResamplerConfig::new(layout, source_rate, r.target_rate)
+                        .chunk(r.chunk),
+                )?,
+                vec![Vec::<F>::new(); ch],
+                vec![Vec::<F>::new(); ch],
+            ))
+        }
         // A resample to the rate the frames are already at is not a resample.
         _ => None,
     })
@@ -322,7 +331,7 @@ impl<F: FftFloat> Chain<F> {
         if ch == 0 {
             return Err(crate::Error::UnsupportedChannels);
         }
-        let resampler = resampler_for(target, source_rate, ch)?;
+        let resampler = resampler_for(target, source_rate, layout)?;
         Ok(Self {
             layout,
             sink: Quantized::new(encoder, layout, target),

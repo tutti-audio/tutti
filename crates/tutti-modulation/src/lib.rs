@@ -109,9 +109,9 @@ pub use compile::{
 };
 pub use curve::{Curve, CurveSegment};
 pub use program::{
-    Amount, Clock, ControlProgram, Corners, DepthBy, DepthSnapshot, InputLayer, Layer, LayerId,
-    MAX_LANE_DEPTHS, MAX_LANE_INPUTS, MAX_LANE_LAYERS, PeriodPoint, ProgramError, ProgramTime,
-    RateAnchor, SourceId, Waveform,
+    Amount, Clock, ControlProgram, ControlProgramBuilder, Corners, DepthBy, DepthSnapshot,
+    InputLayer, Layer, LayerId, MAX_LANE_DEPTHS, MAX_LANE_INPUTS, MAX_LANE_LAYERS, PeriodPoint,
+    ProgramError, ProgramTime, RateAnchor, SourceId, Waveform,
 };
 pub use shape::{LfoShape, Polarity, shape};
 pub use source::{CONTROL_GRID, ControlSource, Leg, LevelFollower, NoteAdsr, PlayGrid};

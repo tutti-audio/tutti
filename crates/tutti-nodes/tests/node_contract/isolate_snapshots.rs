@@ -21,9 +21,9 @@ use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
     CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
     DynamicEqConfig, DynamicEqNode, EqBandNode, GateControls, GateNode, InterpolationMode,
-    KeySource, LadderFilterNode, LadderType, LfoNode, LfoShape, LimiterControls, LimiterNode,
-    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind,
-    Stages, SvfControls, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    KeySource, LadderFilterNode, LadderType, LfoConfig, LfoNode, LfoShape, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, RingModConfig, RingModNode,
+    ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -419,9 +419,11 @@ fn ring_mod() {
 #[test]
 fn lfo() {
     IsolateRow::new("LfoNode (sine, 3 Hz)", || {
-        LfoNode::new(LfoShape::Sine)
-            .with_rate(Hz::new(3.0))
-            .with_depth(Depth::clamped(0.8))
+        LfoNode::from(
+            LfoConfig::new(LfoShape::Sine)
+                .rate(Hz::new(3.0))
+                .depth(Depth::clamped(0.8)),
+        )
     })
     .control("rate", |l| {
         assert!(ParamNode::<f32>::param_set(l).set(UnitParam::Rate, 5.0))

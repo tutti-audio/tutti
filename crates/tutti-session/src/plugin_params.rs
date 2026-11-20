@@ -97,7 +97,7 @@ impl Driven {
         self.knobs
             .lock_recover()
             .get(&id)
-            .is_some_and(|lane| lane.set_value(value.get()))
+            .is_some_and(|lane| lane.store(value.get()))
     }
 
     /// Replaces the driven parameters with `knobs`; nothing is touched while

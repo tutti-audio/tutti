@@ -19,6 +19,7 @@
 //!   previous program reaches there, so its phase is continuous.
 //! - Refusals are by name ([`CompileError`]).
 
+use crate::ControlProgramBuilder;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -654,7 +655,11 @@ pub fn compile(
         if l.is_empty() && i.is_empty() && decl.automation.is_none() {
             continue;
         }
-        let program = ControlProgram::new(decl.automation.clone(), l, i).map_err(|e| match e {
+        let mut builder = ControlProgramBuilder::new().layers(l).inputs(i);
+        if let Some(automation) = decl.automation.clone() {
+            builder = builder.automation(automation);
+        }
+        let program = builder.build().map_err(|e| match e {
             ProgramError::TooManyLayers { count } | ProgramError::TooManyDepths { count } => {
                 CompileError::TooManyLayers { target, count }
             }

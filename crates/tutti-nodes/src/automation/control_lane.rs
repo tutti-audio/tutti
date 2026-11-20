@@ -192,7 +192,7 @@ impl LaneControls {
     /// Writes the knob the lane reads: a native lane's is its target's own
     /// `Param` cell (so this is a param write), a plugin lane's its own.
     /// `false` for a lane built without one.
-    pub fn set_value(&self, value: f64) -> bool {
+    pub fn store(&self, value: f64) -> bool {
         match &self.0.knob {
             Some(k) => {
                 k.store(value, Ordering::Release);
@@ -379,6 +379,116 @@ fn fresh_seen() -> Seen {
     }
 }
 
+/// What a [`ControlLaneNode`] for a built-in parameter is made from: the parameter, its
+/// program, and the cells of the target it reads.
+///
+/// The lane sends `param` (a [`UnitParam`], which is its index-0 address, a [`UnitAddr`], or a
+/// `ParamKey::addr()`) to its param port, wired with `GraphSpec::connect_param`:
+/// the program's values are the param's raw values ([`ParamSegment::unit`]).
+#[derive(Debug)]
+pub struct UnitLaneConfig {
+    param: UnitAddr,
+    program: ControlProgram,
+    knob: Option<ParamCell>,
+    range: Option<ParamRangeCell>,
+}
+
+impl UnitLaneConfig {
+    /// A lane for `param` running `program`, with no knob and no range.
+    #[must_use]
+    pub fn new(param: impl Into<UnitAddr>, program: ControlProgram) -> Self {
+        Self {
+            param: param.into(),
+            program,
+            knob: None,
+            range: None,
+        }
+    }
+
+    /// The target node's own `Param` cell (`ParamSet::cell`): the base where the program has
+    /// no automation value. Without it the lane sends nothing there.
+    #[must_use]
+    pub fn knob(mut self, knob: ParamCell) -> Self {
+        self.knob = Some(knob);
+        self
+    }
+
+    /// The port's range cell (`Editor::param_range_cell`), read once per block for the span
+    /// the program's offsets scale by. Without it the lane is unranged and sends the base
+    /// alone.
+    #[must_use]
+    pub fn range(mut self, range: ParamRangeCell) -> Self {
+        self.range = Some(range);
+        self
+    }
+}
+
+impl From<UnitLaneConfig> for ControlLaneNode {
+    fn from(config: UnitLaneConfig) -> Self {
+        let param = config.param;
+        Self::build(
+            Arc::new(config.program),
+            config.knob,
+            config.range.map_or(RangeSource::None, RangeSource::Port),
+            Some(param.param),
+            Arc::new(move |from, to, shape| {
+                ParamSegment::unit(param, from, to, Samples::new(0), shape)
+            }),
+            true,
+        )
+    }
+}
+
+/// What a [`ControlLaneNode`] for a foreign unit's parameter (a hosted plugin's) is made
+/// from: its id, its program, and the range the lane clamps to.
+///
+/// The lane speaks the unit's own normalisation, keeps a knob of its own and a range of its
+/// own, and never uses exact mode.
+#[derive(Debug)]
+pub struct ForeignLaneConfig {
+    id: ParamId,
+    program: ControlProgram,
+    range: ParamRange,
+    knob: Option<f64>,
+}
+
+impl ForeignLaneConfig {
+    /// A lane for the foreign parameter `id` running `program`, clamped to `range`, with no
+    /// knob.
+    #[must_use]
+    pub fn new(id: ParamId, program: ControlProgram, range: ParamRange) -> Self {
+        Self {
+            id,
+            program,
+            range,
+            knob: None,
+        }
+    }
+
+    /// A knob of the lane's own, starting at `knob`.
+    #[must_use]
+    pub fn knob(mut self, knob: f64) -> Self {
+        self.knob = Some(knob);
+        self
+    }
+}
+
+impl From<ForeignLaneConfig> for ControlLaneNode {
+    fn from(config: ForeignLaneConfig) -> Self {
+        let id = config.id;
+        Self::build(
+            Arc::new(config.program),
+            config.knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
+            RangeSource::Own(Publisher::new(config.range)),
+            None,
+            Arc::new(move |from, to, shape| {
+                ParamSegment::by_id(id, from, to, Samples::new(0), shape)
+            }),
+            false,
+        )
+    }
+}
+
 impl ControlLaneNode {
     fn build(
         program: Arc<ControlProgram>,
@@ -408,58 +518,6 @@ impl ControlLaneNode {
             seen: fresh_seen(),
             scratch: Vec::with_capacity(SOURCE_EVENT_CAPACITY.get() as usize),
         }
-    }
-
-    /// A lane for built-in parameter `param` (a `UnitParam`, which is its
-    /// index-0 address, a [`UnitAddr`], or a `ParamKey::addr()`), wired to its
-    /// param port with `GraphSpec::connect_param`: `program`'s values are the
-    /// param's raw `f32`s ([`ParamSegment::unit`]).
-    ///
-    /// `knob` is the target node's own `Param` cell (`ParamSet::cell`), the
-    /// base where the program has no automation value; `None` sends nothing
-    /// there. `range` is the port's range cell
-    /// (`Editor::param_range_cell`), read once per block for the span the
-    /// program's offsets scale by; `None` is unranged, which sends the base
-    /// alone.
-    pub fn for_unit(
-        param: impl Into<UnitAddr>,
-        program: ControlProgram,
-        knob: Option<ParamCell>,
-        range: Option<ParamRangeCell>,
-    ) -> Self {
-        let param: UnitAddr = param.into();
-        Self::build(
-            Arc::new(program),
-            knob,
-            range.map_or(RangeSource::None, RangeSource::Port),
-            Some(param.param),
-            Arc::new(move |from, to, shape| {
-                ParamSegment::unit(param, from, to, Samples::new(0), shape)
-            }),
-            true,
-        )
-    }
-
-    /// A lane for a foreign unit's parameter `id` (a hosted plugin's), in
-    /// its own normalisation: a knob of its own starting at `knob` (`None`:
-    /// no knob), and a range of its own, `range` (`(min, max)`), which the
-    /// lane clamps to. Never exact mode.
-    pub fn by_id(
-        id: ParamId,
-        program: ControlProgram,
-        knob: Option<f64>,
-        range: (f64, f64),
-    ) -> Self {
-        Self::build(
-            Arc::new(program),
-            knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
-            RangeSource::Own(Publisher::new(ParamRange::new(range.0, range.1))),
-            None,
-            Arc::new(move |from, to, shape| {
-                ParamSegment::by_id(id, from, to, Samples::new(0), shape)
-            }),
-            false,
-        )
     }
 
     /// The lane's controls (also handed out by an insert).
@@ -1239,8 +1297,11 @@ mod tests {
     /// by the next `reclaim`**, with no further publish.
     #[test]
     fn reclaim_frees_a_program_a_block_held_across_its_replacement() {
-        let mut node =
-            ControlLaneNode::by_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
+        let mut node = ControlLaneNode::from(ForeignLaneConfig::new(
+            ParamId::new(0),
+            ControlProgram::default(),
+            ParamRange::new(0.0, 1.0),
+        ));
         let controls = node.controls();
         let first = program();
         let gone = Arc::downgrade(&first);
@@ -1259,8 +1320,11 @@ mod tests {
     /// by the lane's next `reclaim`**, with no further set.
     #[test]
     fn reclaim_frees_a_range_a_block_held_across_its_replacement() {
-        let mut node =
-            ControlLaneNode::by_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
+        let mut node = ControlLaneNode::from(ForeignLaneConfig::new(
+            ParamId::new(0),
+            ControlProgram::default(),
+            ParamRange::new(0.0, 1.0),
+        ));
         let controls = node.controls();
         let RangeSource::Own(cell) = &controls.0.range else {
             panic!("a plugin lane owns its range cell");
@@ -1282,21 +1346,21 @@ mod tests {
     /// unranged lane (and a native one, whose range is its port's) refuses it.
     #[test]
     fn set_range_is_a_plugin_lanes_own() {
-        let plugin = ControlLaneNode::by_id(
-            ParamId::new(1),
-            ControlProgram::default(),
-            Some(0.25),
-            (0.0, 1.0),
+        let plugin = ControlLaneNode::from(
+            ForeignLaneConfig::new(
+                ParamId::new(1),
+                ControlProgram::default(),
+                ParamRange::new(0.0, 1.0),
+            )
+            .knob(0.25),
         );
         let c = plugin.controls();
         assert!(c.set_range(0.1, 0.9));
         assert_eq!(c.range(), (0.1, 0.9));
-        let unranged = ControlLaneNode::for_unit(
+        let unranged = ControlLaneNode::from(UnitLaneConfig::new(
             tutti_units::UnitAddr::first(tutti_units::UnitParam::Cutoff),
             ControlProgram::default(),
-            None,
-            None,
-        );
+        ));
         assert!(
             !unranged.controls().set_range(0.0, 1.0),
             "no range cell to set"

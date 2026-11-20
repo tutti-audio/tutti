@@ -36,7 +36,7 @@ use super::Curve;
 /// **Audio, not a param source.** It renders the curve as audio, one value
 /// per frame, for anything that reads a signal (a node's audio input, a
 /// meter). A param port is driven by a [`ControlLaneNode`](super::ControlLaneNode) instead
-/// (`ControlLaneNode::for_unit` over
+/// (`UnitLaneConfig` over
 /// [`ControlProgram::from_curve`](tutti_modulation::ControlProgram::from_curve)),
 /// which sends the curve as curve-segment events
 /// ([`ParamSegment`](tutti_graph::ParamSegment)).
@@ -62,14 +62,14 @@ use super::Curve;
 /// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Standalone, TransportPosition};
-/// use tutti_nodes::automation::{Trajectory, AutomationLaneNode, Breakpoint};
+/// use tutti_nodes::automation::{AutomationLaneConfig, AutomationLaneNode, Breakpoint, Trajectory};
 ///
 /// let mut trajectory: Trajectory<Amplitude> = Trajectory::new();
 /// trajectory.add_breakpoint(Breakpoint::new(Beat::new(0.0), Amplitude::new(0.0)));
 /// trajectory.add_breakpoint(Breakpoint::new(Beat::new(4.0), Amplitude::new(1.0)));
 ///
 /// // No inputs, one output (the curve's value).
-/// let lane = AutomationLaneNode::new(trajectory);
+/// let lane = AutomationLaneNode::from(AutomationLaneConfig::new(trajectory));
 /// let mut standalone = Standalone::<_, f32>::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// standalone.renderer_mut()
 ///     .set_transport(TransportPosition::new(false, Bpm::of(120.0), Beat::new(2.0), None));
@@ -93,18 +93,42 @@ impl std::fmt::Debug for AutomationLaneNode {
 /// it this way. The lane is not generic over the trajectory's label.
 pub type LiveAutomationLane = AutomationLaneNode;
 
-impl AutomationLaneNode {
-    /// Builds a lane that evaluates `curve` at the transport beat.
-    ///
-    /// The curve is held behind an `Arc` and read on the audio thread, so it
-    /// must be cheap to evaluate and must not allocate in `value_at`.
+/// What an [`AutomationLaneNode`] is made from: the curve it evaluates at the transport beat.
+///
+/// The curve is held behind an `Arc` and read on the audio thread, so it must be cheap to
+/// evaluate and must not allocate in `value_at`.
+#[derive(Clone)]
+pub struct AutomationLaneConfig {
+    curve: Arc<dyn Curve>,
+}
+
+impl std::fmt::Debug for AutomationLaneConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AutomationLaneConfig")
+            .finish_non_exhaustive()
+    }
+}
+
+impl AutomationLaneConfig {
+    /// A lane that evaluates `curve` at the transport beat.
+    #[must_use]
     pub fn new(curve: impl Curve + 'static) -> Self {
         Self {
             curve: Arc::new(curve),
+        }
+    }
+}
+
+impl From<AutomationLaneConfig> for AutomationLaneNode {
+    fn from(config: AutomationLaneConfig) -> Self {
+        Self {
+            curve: config.curve,
             last_value: 0.0,
         }
     }
+}
 
+impl AutomationLaneNode {
     /// Evaluates the curve at `beat`.
     ///
     /// Returns `0.0` where the curve has no value — before its first point, or
@@ -232,7 +256,9 @@ mod tests {
 
     #[test]
     fn declares_no_inputs_and_one_output() {
-        let shape = Node::<f32>::shape(&AutomationLaneNode::new(ramp_trajectory()));
+        let shape = Node::<f32>::shape(&AutomationLaneNode::from(AutomationLaneConfig::new(
+            ramp_trajectory(),
+        )));
         assert_eq!(shape.audio_in().count(), 0);
         assert_eq!(shape.audio_out().count(), 1);
         assert_eq!(
@@ -244,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_update_tracks_beat_position() {
-        let lane = AutomationLaneNode::new(ramp_trajectory());
+        let lane = AutomationLaneNode::from(AutomationLaneConfig::new(ramp_trajectory()));
 
         assert!((lane.value_at(Beat::new(0.0)) - 0.0).abs() < 0.01);
         assert!((lane.value_at(Beat::new(2.0)) - 0.5).abs() < 0.01);
@@ -256,7 +282,7 @@ mod tests {
     /// behaves identically whether or not a loop produced it.
     #[test]
     fn wrapped_beat_needs_no_loop_handling_in_the_lane() {
-        let lane = AutomationLaneNode::new(ramp_trajectory());
+        let lane = AutomationLaneNode::from(AutomationLaneConfig::new(ramp_trajectory()));
         // A 4..8 loop wraps beat 10 to beat 6 in the transport.
         let wrapped = lane.value_at(Beat::new(6.0));
         assert!(
@@ -270,7 +296,7 @@ mod tests {
     fn a_block_reads_the_curve_at_the_transport_beat() {
         let at = |beat| {
             render(
-                AutomationLaneNode::new(ramp_trajectory()),
+                AutomationLaneNode::from(AutomationLaneConfig::new(ramp_trajectory())),
                 stopped_at(beat),
                 1,
             )[0]
@@ -286,7 +312,7 @@ mod tests {
         flat.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(0.5)));
         flat.add_breakpoint(Breakpoint::new(Beat::new(8.0), Hz::new(0.5)));
         let mut d = tutti_graph::contract::Direct::new(
-            AutomationLaneNode::new(flat),
+            AutomationLaneNode::from(AutomationLaneConfig::new(flat)),
             SampleRate::SR_48K,
             64,
         );
@@ -300,10 +326,14 @@ mod tests {
     #[test]
     fn test_empty_trajectory_returns_zero() {
         let empty: Trajectory<Hz> = Trajectory::new();
-        let lane = AutomationLaneNode::new(empty);
+        let lane = AutomationLaneNode::from(AutomationLaneConfig::new(empty));
         assert_eq!(lane.value_at(Beat::new(5.0)), 0.0);
         let empty: Trajectory<Hz> = Trajectory::new();
-        let out = render(AutomationLaneNode::new(empty), stopped_at(5.0), 1);
+        let out = render(
+            AutomationLaneNode::from(AutomationLaneConfig::new(empty)),
+            stopped_at(5.0),
+            1,
+        );
         assert_eq!(out[0], 0.0);
     }
 
@@ -311,7 +341,7 @@ mod tests {
     #[test]
     fn test_process_fills_block_from_beat_input() {
         let out = render(
-            AutomationLaneNode::new(ramp_trajectory()),
+            AutomationLaneNode::from(AutomationLaneConfig::new(ramp_trajectory())),
             stopped_at(4.0),
             32,
         );
@@ -330,7 +360,7 @@ mod tests {
         flat.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(0.5)));
         flat.add_breakpoint(Breakpoint::new(Beat::new(8.0), Hz::new(0.5)));
         let mut d = tutti_graph::contract::Direct::new(
-            AutomationLaneNode::new(flat),
+            AutomationLaneNode::from(AutomationLaneConfig::new(flat)),
             SampleRate::SR_48K,
             64,
         );
@@ -350,7 +380,11 @@ mod tests {
     fn test_process_per_sample_varies() {
         // 120 BPM at 48 kHz, rolling from beat 0.
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
-        let out = render(AutomationLaneNode::new(ramp_trajectory()), rolling, 32);
+        let out = render(
+            AutomationLaneNode::from(AutomationLaneConfig::new(ramp_trajectory())),
+            rolling,
+            32,
+        );
 
         assert!((out[0] - 0.0).abs() < 0.001);
         let last = out[31];
@@ -391,7 +425,7 @@ mod tests {
     #[test]
     fn a_fork_freezes_a_live_curve() {
         let cell = Arc::new(AtomicF64::new(0.25));
-        let lane = AutomationLaneNode::new(Live(Arc::clone(&cell)));
+        let lane = AutomationLaneNode::from(AutomationLaneConfig::new(Live(Arc::clone(&cell))));
         let fork = lane.fork_fresh();
         cell.store(0.75, Ordering::Release);
         assert_eq!(render(fork, stopped_at(1.0), 1)[0], 0.25);
@@ -403,7 +437,12 @@ mod tests {
     #[test]
     fn the_lane_writes_its_curve_value_at_the_graphs_width() {
         use crate::test_support::{RATE, render_f64};
-        let out = render_f64(AutomationLaneNode::new(Fixed(0.1)), RATE, &[], 32);
+        let out = render_f64(
+            AutomationLaneNode::from(AutomationLaneConfig::new(Fixed(0.1))),
+            RATE,
+            &[],
+            32,
+        );
         assert!(out[0].iter().all(|&v| v == 0.1f64));
         assert_eq!(control_in::<f32>(0.1), 0.1f32);
     }

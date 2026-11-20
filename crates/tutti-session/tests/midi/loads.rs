@@ -333,7 +333,7 @@ mod soundfont {
         .unwrap();
         assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
         let font = s.soundfont(&"gm").unwrap();
-        let unit = SoundFontUnit::<f32>::new(font, Settings::new());
+        let unit = Settings::new().build::<f32>(font);
         assert!(unit.is_ok(), "{:?}", unit.err());
     }
 

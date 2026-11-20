@@ -1,18 +1,24 @@
 use super::*;
 
 fn geo(window: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(SampleRate::SR_44K1, Samples::new(window), Samples::new(hop)).unwrap()
+    StftGeometry::new(
+        SampleRate::SR_44K1,
+        WindowLength::new(Samples::new(window)).unwrap(),
+        HopSize::new(Samples::new(hop)).unwrap(),
+    )
 }
 
 #[test]
-fn rejects_a_zero_window_a_zero_hop_and_a_non_positive_rate() {
+fn a_zero_window_and_a_zero_hop_are_not_values() {
+    assert_eq!(WindowLength::new(Samples::new(0)), None);
+    assert_eq!(HopSize::new(Samples::new(0)), None);
     assert_eq!(
-        StftGeometry::new(SampleRate::SR_44K1, Samples::new(0), Samples::new(512)),
-        Err(StftError::ZeroWindow)
+        WindowLength::try_from(Samples::new(0)),
+        Err(WindowLengthError(Samples::new(0)))
     );
     assert_eq!(
-        StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(0)),
-        Err(StftError::ZeroHop)
+        HopSize::try_from(Samples::new(0)),
+        Err(HopSizeError(Samples::new(0)))
     );
 }
 
@@ -20,12 +26,11 @@ fn rejects_a_zero_window_a_zero_hop_and_a_non_positive_rate() {
 /// reconstruction — decimated display grids sample sparsely on purpose.
 #[test]
 fn a_hop_wider_than_the_window_analyses_but_does_not_invert() {
-    let sparse =
-        StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(8192)).unwrap();
+    let sparse = geo(2048, 8192);
     assert!(!sparse.frames_overlap());
 
     assert_eq!(
-        StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(8192)),
+        ColaGeometry::try_from(sparse),
         Err(StftError::HopExceedsWindow {
             window: Samples::new(2048),
             hop: Samples::new(8192),
@@ -36,14 +41,13 @@ fn a_hop_wider_than_the_window_analyses_but_does_not_invert() {
 /// The bug this split exists to prevent: a decimated hop is accepted for
 /// analysis but refused for anything that has to invert.
 #[test]
-fn cola_refuses_what_new_accepts() {
+fn a_cola_conversion_refuses_what_new_accepts() {
     // 4x overlap: fine for both.
-    assert!(StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(512)).is_ok());
+    assert!(ColaGeometry::try_from(geo(2048, 512)).is_ok());
 
     // 2x overlap: analysable, not invertible.
-    assert!(StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(1024)).is_ok());
     assert_eq!(
-        StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(1024)),
+        ColaGeometry::try_from(geo(2048, 1024)),
         Err(StftError::NotColaCompliant {
             window: Samples::new(2048),
             hop: Samples::new(1024),
@@ -52,63 +56,45 @@ fn cola_refuses_what_new_accepts() {
     );
 
     // Hop does not divide the window: analysable, not invertible.
-    assert!(StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(500)).is_ok());
-    assert!(
-        StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(500)).is_err()
-    );
+    assert!(ColaGeometry::try_from(geo(2048, 500)).is_err());
 }
 
 /// **A grid that is COLA for one window is not automatically COLA for
-/// another**, and this is the case that makes `cola_with` necessary.
+/// another**, and this is the case that makes the conversion check the shape.
 ///
 /// 2048/512 is 4x overlap: exact for Hann, and a 2.1% amplitude ripple for
 /// Blackman, which needs 8x. Nothing about the grid changed — only the
 /// shape laid over it.
 #[test]
 fn a_hann_cola_grid_may_not_be_cola_for_another_window() {
-    let hop = Samples::new(512);
-    assert!(StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), hop).is_ok());
+    assert!(ColaGeometry::try_from(geo(2048, 512)).is_ok());
 
     assert_eq!(
-        StftGeometry::cola_with(
-            SampleRate::SR_44K1,
-            Samples::new(2048),
-            hop,
-            CosineWindow::BLACKMAN
-        ),
+        ColaGeometry::try_from(geo(2048, 512).shape(CosineWindow::BLACKMAN)),
         Err(StftError::NotColaCompliant {
             window: Samples::new(2048),
-            hop,
+            hop: Samples::new(512),
             window_fn: CosineWindow::BLACKMAN,
         }),
         "Blackman needs 8x overlap; 2048/512 is 4x"
     );
 
     // And it is accepted at the overlap it actually asks for.
-    assert!(
-        StftGeometry::cola_with(
-            SampleRate::SR_44K1,
-            Samples::new(2048),
-            Samples::new(256),
-            CosineWindow::BLACKMAN
-        )
-        .is_ok()
-    );
+    assert!(ColaGeometry::try_from(geo(2048, 256).shape(CosineWindow::BLACKMAN)).is_ok());
 }
 
-/// The builder does **not** re-check COLA, and the doc says so — this pins
-/// that, because a silently-invalidated grid is the hazard `cola_with`
-/// exists to give callers a way to avoid.
+/// `shape` does **not** re-check COLA, and the doc says so — this pins
+/// that, because a silently-invalidated grid is the hazard the
+/// `ColaGeometry` conversion exists to give callers a way to avoid.
 #[test]
-fn the_builder_can_produce_a_non_cola_grid() {
-    let hann = StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(512))
-        .expect("hann 4x");
+fn the_shape_option_can_produce_a_non_cola_geo() {
+    let hann = StftGeometry::from(ColaGeometry::try_from(geo(2048, 512)).expect("hann 4x"));
     assert!(hann.is_cola());
 
-    let blackman = hann.with_window_fn(CosineWindow::BLACKMAN);
+    let blackman = hann.shape(CosineWindow::BLACKMAN);
     assert!(
         !blackman.is_cola(),
-        "with_window_fn is infallible and does not re-validate"
+        "shape is infallible and does not re-validate"
     );
 }
 
@@ -133,14 +119,14 @@ fn magnitude_gain_tracks_the_window_shape() {
         "0.5 * 1024"
     );
 
-    let blackman = hann.with_window_fn(CosineWindow::BLACKMAN);
+    let blackman = hann.shape(CosineWindow::BLACKMAN);
     assert!(
         (blackman.magnitude_gain::<f64>() - 430.08).abs() < 1e-9,
         "0.42 * 1024, got {}",
         blackman.magnitude_gain::<f64>()
     );
 
-    let rect = hann.with_window_fn(CosineWindow::RECTANGULAR);
+    let rect = hann.shape(CosineWindow::RECTANGULAR);
     assert!(
         (rect.magnitude_gain::<f64>() - 1024.0).abs() < 1e-9,
         "1.0 * 1024"
@@ -197,11 +183,19 @@ fn latency_is_exact() {
 /// 441 Hz at 44100 Hz on 1000 points is exactly bin 10; the frequency of bin 10.5 is 463.05 Hz.
 #[test]
 fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
-    let g = StftGeometry::new(SampleRate::SR_44K1, Samples::new(1000), Samples::new(250)).unwrap();
+    let g = StftGeometry::new(
+        SampleRate::SR_44K1,
+        WindowLength::of(Samples::new(1000)),
+        HopSize::of(Samples::new(250)),
+    );
     assert_eq!(g.bin_of(Hz::new(441.0)), 10.0);
     assert_eq!(g.bin_of(Hz::new(441.0)).ceil(), 10.0);
     assert_eq!(g.frequency_of(10.5), Hz::new(463.05));
-    let g = StftGeometry::new(SampleRate::SR_48K, Samples::new(1024), Samples::new(256)).unwrap();
+    let g = StftGeometry::new(
+        SampleRate::SR_48K,
+        WindowLength::of(Samples::new(1024)),
+        HopSize::of(Samples::new(256)),
+    );
     assert_eq!(g.bin_of(Hz::new(46.875)), 1.0);
     assert_eq!(g.frequency_of(3.0), Hz::new(140.625));
 }
@@ -210,13 +204,21 @@ fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
 /// 1000 points is bin 10.0000000023, whose ceiling is 11.
 #[test]
 fn an_edge_just_past_a_boundary_keeps_its_side() {
-    let g = StftGeometry::new(SampleRate::SR_44K1, Samples::new(1000), Samples::new(250)).unwrap();
+    let g = StftGeometry::new(
+        SampleRate::SR_44K1,
+        WindowLength::of(Samples::new(1000)),
+        HopSize::of(Samples::new(250)),
+    );
     assert_eq!(g.bin_of(Hz::new(441.000_000_1)).ceil(), 11.0);
 }
 
 /// A frame advances `hop / rate` seconds: 480 / 48000 = 0.01 s.
 #[test]
 fn the_frame_interval_is_the_hop_over_the_rate() {
-    let g = StftGeometry::new(SampleRate::SR_48K, Samples::new(2048), Samples::new(480)).unwrap();
+    let g = StftGeometry::new(
+        SampleRate::SR_48K,
+        WindowLength::of(Samples::new(2048)),
+        HopSize::of(Samples::new(480)),
+    );
     assert!((g.frame_interval().get() - 0.01).abs() < 1e-15);
 }

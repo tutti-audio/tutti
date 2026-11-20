@@ -214,7 +214,11 @@ impl<K: Kernel> KernelNode<K> {
     ///
     /// If the kernel's [`shape`](Kernel::shape) declares no output bus.
     #[must_use]
-    pub fn with_kernel(kernel: K, set: K::Set, controls: <K::Set as ControlSet>::Controls) -> Self {
+    pub(crate) fn with_kernel(
+        kernel: K,
+        set: K::Set,
+        controls: <K::Set as ControlSet>::Controls,
+    ) -> Self {
         const { assert!(K::GRID > 0, "a kernel's grid is at least one frame") };
         let shape = kernel.shape();
         let out = shape.output_bus(0).expect("a kernel has an output");
@@ -709,6 +713,9 @@ impl<K: Kernel> IntoNode<K::Float> for KernelNode<K> {
         tutti_graph::param_parts(self)
     }
 }
+
+#[cfg(test)]
+mod latency_tail;
 
 #[cfg(test)]
 mod tests {

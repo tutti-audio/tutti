@@ -17,8 +17,9 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
 use tutti_nodes::{
-    ChannelTimes, DelayControls, DelayLayout, DelayNode, InterpolationMode, LfoNode, LfoShape,
-    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Routing, Stages, Stagger, SweepRange,
+    ChannelTimes, DelayControls, DelayLayout, DelayNode, InterpolationMode, LfoConfig, LfoNode,
+    LfoShape, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Routing, Stages, Stagger,
+    SweepRange,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
@@ -60,7 +61,7 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl F
 #[test]
 fn lfo_node_process_is_allocation_free() {
     gate(
-        LfoNode::new(LfoShape::Sine).with_rate(Hz::new(2.0_f64)),
+        LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(2.0_f64))),
         0.0,
         5_000,
         |_| {},
@@ -72,7 +73,7 @@ fn lfo_random_shape_process_is_allocation_free() {
     // RandomSmooth hashes its cycle index on its own path. Fast enough
     // to step inside the warm-up, so the node is audible there.
     gate(
-        LfoNode::new(LfoShape::RandomSmooth).with_rate(Hz::new(200.0_f64)),
+        LfoNode::from(LfoConfig::new(LfoShape::RandomSmooth).rate(Hz::new(200.0_f64))),
         0.0,
         5_000,
         |_| {},
@@ -85,9 +86,11 @@ fn lfo_random_shape_process_is_allocation_free() {
 #[test]
 fn beat_synced_lfo_process_is_allocation_free() {
     gate(
-        LfoNode::new(LfoShape::Sine)
-            .with_beat_sync(BeatsPerCycle::of(4.0))
-            .with_phase_offset(PhaseIncrement::new(0.25)),
+        LfoNode::from(
+            LfoConfig::new(LfoShape::Sine)
+                .beat_sync(BeatsPerCycle::of(4.0))
+                .phase_offset(PhaseIncrement::new(0.25)),
+        ),
         0.0,
         5_000,
         |_| {},
@@ -406,7 +409,9 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use tutti_graph::{OutPort, Source};
     use tutti_modulation::ControlProgram;
     use tutti_nodes::automation::Exponent;
-    use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Law, Trajectory};
+    use tutti_nodes::automation::{
+        Breakpoint, ControlLaneNode, Curve, Law, Trajectory, UnitLaneConfig,
+    };
     use tutti_units::{Beat, Hz, ParamKey, Samples, UnitParam};
     let mut shaped = Trajectory::new();
     shaped.add_breakpoint(Breakpoint::with_law(
@@ -434,7 +439,10 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     clamped.add_breakpoint(Breakpoint::new(Beat::new(0.45), Hz::new(1.0)));
     let key = ParamKey::<Hz>::CUTOFF;
     let lane = |curve: Arc<dyn Curve>| {
-        ControlLaneNode::for_unit(key.addr(), ControlProgram::from_curve(curve), None, None)
+        ControlLaneNode::from(UnitLaneConfig::new(
+            key.addr(),
+            ControlProgram::from_curve(curve),
+        ))
     };
     let lanes = [
         lane(Arc::new(shaped.clone())),
@@ -646,7 +654,7 @@ impl tutti_graph::Node for Probe8 {
 fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
     use std::sync::Arc;
     use tutti_modulation::{
-        Amount, Clock, ControlProgram, Law, Layer, LayerId, LfoShape, PeriodPoint, Polarity,
+        Amount, Clock, ControlProgramBuilder, Law, Layer, LayerId, LfoShape, PeriodPoint, Polarity,
         Waveform,
     };
     use tutti_nodes::automation::{Breakpoint, Exponent, Trajectory};
@@ -715,7 +723,11 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
             (Some(curve), vec![layer(seconds, shape(LfoShape::Sawtooth))])
         }
     };
-    ControlProgram::new(automation, layers, vec![]).expect("a valid program")
+    let mut builder = ControlProgramBuilder::new().layers(layers);
+    if let Some(automation) = automation {
+        builder = builder.automation(automation);
+    }
+    builder.build().expect("a valid program")
 }
 
 /// Lane `k` for param `k % 8` of its probe, built against that port's
@@ -727,20 +739,23 @@ fn lane_for(
     use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
+    use tutti_nodes::automation::UnitLaneConfig;
     use tutti_units::{Db, Depth, Feedback, Hz, Mix, ParamKey, Q};
-    let p = lane_program(k, 0);
-    let knob = Some(Arc::new(AtomicF64::new(400.0 + k as f64)).into());
-    let r = Some(range);
-    match k % 8 {
-        0 => L::for_unit(ParamKey::<Hz>::CUTOFF.addr(), p, knob, r),
-        1 => L::for_unit(ParamKey::<Q>::Q.addr(), p, knob, r),
-        2 => L::for_unit(ParamKey::<Db>::GAIN_DB.addr(), p, knob, r),
-        3 => L::for_unit(ParamKey::<Mix>::WET.addr(), p, knob, r),
-        4 => L::for_unit(ParamKey::<Feedback>::FEEDBACK.addr(), p, knob, r),
-        5 => L::for_unit(ParamKey::<Depth>::DEPTH.addr(), p, knob, r),
-        6 => L::for_unit(ParamKey::<Hz>::RATE.addr(), p, knob, r),
-        _ => L::for_unit(ParamKey::<Db>::THRESHOLD.addr(), p, knob, r),
-    }
+    let addr = match k % 8 {
+        0 => ParamKey::<Hz>::CUTOFF.addr(),
+        1 => ParamKey::<Q>::Q.addr(),
+        2 => ParamKey::<Db>::GAIN_DB.addr(),
+        3 => ParamKey::<Mix>::WET.addr(),
+        4 => ParamKey::<Feedback>::FEEDBACK.addr(),
+        5 => ParamKey::<Depth>::DEPTH.addr(),
+        6 => ParamKey::<Hz>::RATE.addr(),
+        _ => ParamKey::<Db>::THRESHOLD.addr(),
+    };
+    L::from(
+        UnitLaneConfig::new(addr, lane_program(k, 0))
+            .knob(Arc::new(AtomicF64::new(400.0 + k as f64)).into())
+            .range(range),
+    )
 }
 
 /// 200 lanes into the params of 25 [`Probe8`]s (one lane per port: a port
@@ -810,7 +825,7 @@ fn lane_moves(
         }
     }
     for (k, c) in controls.iter().enumerate().skip(block % 7).step_by(7) {
-        c.set_value(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
+        c.store(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
     }
     if block % 15 == 14 {
         for k in (block % 9..200).step_by(9) {
@@ -1033,10 +1048,13 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use tutti_graph::{Edge, InPort, OutPort, Source};
     use tutti_graph::{EventEdge, EventIn, EventOut, ForkByClone, ParamIn, ParamRange, Prepare};
     use tutti_modulation::{
-        Adsr, Amount, ControlProgram, InputLayer, Law, LayerId, Polarity, SourceId,
+        Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SourceId,
     };
     use tutti_nodes::automation::ControlLaneNode;
-    use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
+    use tutti_nodes::automation::UnitLaneConfig;
+    use tutti_nodes::{
+        EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+    };
     use tutti_units::{Amplitude, Depth, Hz, ParamKey, Samples, Seconds, UnitParam};
     let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
         SampleRate::SR_48K,
@@ -1072,12 +1090,12 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                     width: 300 + 11 * k as u64,
                 }),
             );
-            let follower = EnvelopeFollowerNode::new(
+            let follower = EnvelopeFollowerNode::from(EnvelopeFollowerConfig::new(
+                ChannelLayout::STEREO,
                 id,
                 Ballistics::new(Seconds::new(0.001 + 0.0005 * k as f64), Seconds::new(0.03))
                     .unwrap(),
-                ChannelLayout::STEREO,
-            );
+            ));
             ed.insert(node, "follower", ForkByClone(follower));
             for port in 0..2 {
                 ed.spec_mut().topology.edges.insert(
@@ -1102,7 +1120,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             ed.insert(
                 node,
                 "envelope",
-                ForkByClone(NoteEnvelopeNode::new(id, adsr)),
+                ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(id, adsr))),
             );
             ed.spec_mut().connect_events(
                 EventIn { node, port: 0 },
@@ -1118,11 +1136,16 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 curve: Law::Linear,
             },
         };
-        let lane = ControlLaneNode::for_unit(
-            ParamKey::<Hz>::CUTOFF.addr(),
-            ControlProgram::new(None, vec![], vec![input]).expect("valid"),
-            Some(Arc::new(AtomicF64::new(0.5)).into()),
-            Some(ed.param_range_cell(cutoff(k)).expect("committed")),
+        let lane = ControlLaneNode::from(
+            UnitLaneConfig::new(
+                ParamKey::<Hz>::CUTOFF.addr(),
+                ControlProgramBuilder::new()
+                    .inputs(vec![input])
+                    .build()
+                    .expect("valid"),
+            )
+            .knob(Arc::new(AtomicF64::new(0.5)).into())
+            .range(ed.param_range_cell(cutoff(k)).expect("committed")),
         );
         let lane_key = NodeKey(6000 + k as u64);
         ed.insert(lane_key, "lane", lane);

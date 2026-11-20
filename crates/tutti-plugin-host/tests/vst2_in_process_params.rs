@@ -28,10 +28,11 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    ForkMode, ForkTarget, GraphBuilder, Offset, ParamEvent, ParamRamp, Prepare, TransportPosition,
+    ForkMode, ForkTarget, GraphBuilder, Offset, ParamEvent, ParamRamp, ParamRange, Prepare,
+    TransportPosition,
 };
 use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_nodes::automation::{ControlLaneNode, ForeignLaneConfig};
 use tutti_plugin_host::PluginHandle;
 #[path = "support/param_reads.rs"]
 mod param_reads;
@@ -224,11 +225,13 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let _env = ProbeEnv::new().params(4).state_dc();
     let (client, handle) = load();
     // A host's knob for VST2 parameter 0, held still.
-    let held = ControlLaneNode::by_id(
-        ParamId::new(0),
-        ControlProgram::default(),
-        Some(0.25),
-        (0.0, 1.0),
+    let held = ControlLaneNode::from(
+        ForeignLaneConfig::new(
+            ParamId::new(0),
+            ControlProgram::default(),
+            ParamRange::new(0.0, 1.0),
+        )
+        .knob(0.25),
     );
 
     let stereo = ChannelLayout::from_count(2);

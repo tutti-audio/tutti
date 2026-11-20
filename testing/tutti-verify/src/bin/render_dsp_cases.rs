@@ -22,8 +22,8 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, LadderBank, LadderBlend,
     LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes, Stages,
-    StreamingResampler, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType,
-    allpass_complement,
+    StreamingResampler, StreamingResamplerConfig, SvfBank, SvfCoefficients, SvfControls, SvfModel,
+    SvfType, allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
 use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate};
@@ -281,11 +281,13 @@ fn resample(dir: &Path, cases: &mut Cases) {
             let secs = 1.0;
             let input = multisine(from, secs, &freqs, 0.5);
             let (mut rs, out) = (
-                StreamingResampler::new(
-                    1,
-                    SampleRate::of(from),
-                    SampleRate::of(to),
-                    ChunkSize::N1024,
+                StreamingResampler::try_from(
+                    StreamingResamplerConfig::new(
+                        ChannelLayout::MONO,
+                        SampleRate::of(from),
+                        SampleRate::of(to),
+                    )
+                    .chunk(ChunkSize::N1024),
                 )
                 .expect("resampler"),
                 &mut vec![Vec::<f32>::new()],

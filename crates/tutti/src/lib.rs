@@ -20,7 +20,7 @@
 //! callback does once per buffer.
 //!
 //! ```rust
-//! use tutti::nodes::{LfoNode, LfoShape};
+//! use tutti::nodes::{LfoConfig, LfoNode, LfoShape};
 //! use tutti::{ChannelLayout, Hz, InterleavedMut, Root, SampleRate, Session};
 //!
 //! let mut session = Session::new(SampleRate::SR_48K).expect("a session builds");
@@ -29,7 +29,7 @@
 //! // with its key; they set its parameters live.
 //! let (tone, _controls) = session
 //!     .graph()
-//!     .add(LfoNode::new(LfoShape::Sine).with_rate(Hz::new(440.0)));
+//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
 //! session.graph().connect(tone, Root).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -280,10 +280,10 @@ pub mod nodes {
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
-    pub use tutti_nodes::automation::Recorder as AutomationRecorder;
     pub use tutti_nodes::automation::{
-        AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls, LiveAutomationLane,
-        RecordMode, RecordingConfig, Trajectory,
+        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, Breakpoint, ControlLaneNode,
+        ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
+        Trajectory, UnitLaneConfig,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
@@ -295,20 +295,21 @@ pub mod nodes {
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
         BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
-        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings, ClickState,
-        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
-        CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayControls,
-        DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
-        DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
-        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FirConvolverConfig,
-        FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode,
-        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
-        LadderType, LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode,
+        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickNodeConfig,
+        ClickSettings, ClickState, CompressorControls, CompressorNode, ConvolverError,
+        ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
+        CutFilterConfig, CutFilterControls, CutFilterNode, DcBlockerConfig, DcBlockerControls,
+        DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig,
+        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
+        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
+        EqBandNode, FdnControls, FdnLayout, FdnNode, FirConvolverConfig, FreeverbControls,
+        FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode,
+        IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType,
+        LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoConfig, LfoNode,
         LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
-        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
-        OversamplingFactor, PhaserControls, PhaserNode, PlateControls, PlateReverbConfig,
-        PlateReverbNode, PortSide, Routing as FeedbackRouting,
+        MultibandCompressorNode, MultibandControls, NoteEnvelopeConfig, NoteEnvelopeNode,
+        OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
         SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
         SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,

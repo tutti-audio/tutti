@@ -17,8 +17,8 @@ use tutti_graph::{
     Env, GraphBuilder, IntoNode, Node, ParamFork, ParamIn, ParamNode, Prepare, Status,
     TransportChanges, TransportPosition,
 };
-use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_modulation::ControlProgramBuilder;
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{FdnNode, FreeverbNode};
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
@@ -504,12 +504,10 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
             node: n,
             param: UnitAddr::first(UnitParam::RoomSize),
         };
-        let program = ControlProgram::new(None, vec![], vec![]).expect("a program");
-        let lane = ControlLaneNode::for_unit(
-            UnitParam::RoomSize,
-            program,
-            Some(Arc::new(AtomicF64::new(room)).into()),
-            None,
+        let program = ControlProgramBuilder::new().build().expect("a program");
+        let lane = ControlLaneNode::from(
+            UnitLaneConfig::new(UnitParam::RoomSize, program)
+                .knob(Arc::new(AtomicF64::new(room)).into()),
         );
         let key = tutti_graph::NodeKey(9_000);
         let editor = r.editor_mut();

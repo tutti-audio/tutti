@@ -271,16 +271,17 @@ pub use tutti_units::{
 
 mod click;
 pub use click::{
-    ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickSettings, ClickState, MetronomeMode,
+    ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickNodeConfig, ClickSettings,
+    ClickState, MetronomeMode,
 };
 
 mod lfo;
 // `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through
 // `lfo`, so `use tutti_nodes::LfoShape` works.
-pub use lfo::{LfoClock, LfoNode, LfoShape, Waveform};
+pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 
 mod oscillator;
-pub use oscillator::OscillatorNode;
+pub use oscillator::{OscillatorConfig, OscillatorNode};
 
 mod delay;
 pub use delay::{DelayKernel, DelayNode, DelaySet};
@@ -413,7 +414,8 @@ pub use tutti_dsp::{
 // (`SignalSource`): nodes that send a raw value into control lanes.
 mod signal;
 pub use signal::{
-    EnvelopeFollowerNode, NoteEnvelopeNode, SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts,
+    EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+    SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts,
 };
 
 // Declarations compiled and applied to an `Editor` as lanes, signal-source
