@@ -1,8 +1,8 @@
 //! The OS MIDI devices through the session's [`Midi`] view (feature
-//! `midi-hardware`): list them. A device is opened by a
-//! `midi_input` or `midi_output` entry of the pool ([`midi_input`](crate::midi_input),
-//! [`midi_output`](crate::midi_output)); what it says of itself is its
-//! handle's [`Peer::info`](crate::Peer::info).
+//! `midi-hardware`): list them. A device is opened by
+//! [`Session::open_midi_input`](crate::Session::open_midi_input) or
+//! [`Session::open_midi_output`](crate::Session::open_midi_output); what it says
+//! of itself is its handle's [`Peer::info`](crate::Peer::info).
 
 use tutti_buffers::Float;
 use tutti_midi_device::DeviceInfo;

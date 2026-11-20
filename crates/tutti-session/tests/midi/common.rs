@@ -97,11 +97,47 @@ pub fn play(s: &Session) {
     s.play().expect("room");
 }
 
-/// A session over a fake OS with one device, `Keys`, declared as the input port
-/// `"input"` and loaded (hearing Groups up to `groups`, the first alone with
-/// `None`): the port's input node, which route rules wire from.
+/// A session and the handle of its one input port, which keeps the port open
+/// for as long as the session is used.
 #[cfg(feature = "midi-hardware")]
-pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Session, NodeKey) {
+pub struct Keyed {
+    session: Session,
+    keys: tutti_session::MidiInput,
+}
+
+#[cfg(feature = "midi-hardware")]
+impl Keyed {
+    /// A session over `session` whose input port is `keys`.
+    pub fn new(session: Session, keys: tutti_session::MidiInput) -> Self {
+        Self { session, keys }
+    }
+
+    /// The port's input node: what a route rule or a follower reads.
+    pub fn input(&self) -> NodeKey {
+        self.keys.node()
+    }
+}
+
+#[cfg(feature = "midi-hardware")]
+impl std::ops::Deref for Keyed {
+    type Target = Session;
+    fn deref(&self) -> &Session {
+        &self.session
+    }
+}
+
+#[cfg(feature = "midi-hardware")]
+impl std::ops::DerefMut for Keyed {
+    fn deref_mut(&mut self) -> &mut Session {
+        &mut self.session
+    }
+}
+
+/// A session over a fake OS with one device, `Keys`, opened as an input port
+/// (hearing Groups up to `groups`, the first alone with `None`): the port's
+/// input node, which route rules wire from.
+#[cfg(feature = "midi-hardware")]
+pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Keyed, NodeKey) {
     use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
     let (backend, _fake) =
         FakeBackend::build_with(vec![persistent_endpoint(1, "Keys")], vec![], usize::MAX);
@@ -113,9 +149,7 @@ pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Session, NodeKey) {
     let mut s = builder.build().expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    s.pool(tutti_session::midi_input("input", keys))
-        .expect("declares");
-    let _ = s.update();
-    let node = s.midi_input(&"input").expect("loaded").node();
-    (s, node)
+    let port = s.open_midi_input(keys).expect("opens");
+    let node = port.node();
+    (Keyed::new(s, port), node)
 }

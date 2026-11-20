@@ -1,5 +1,5 @@
 //! A `MidiInput` handle reads its timing: the latest correction its clock map
-//! made and the count of its re-anchors. The cells belong to the port's entry:
+//! made and the count of its re-anchors. The cells belong to the port:
 //! they are the same across an unplug and a replug, open while a device is
 //! connected and closed while it is away.
 //!
@@ -18,7 +18,7 @@ use tutti_platform::Instant;
 use crate::common::blocks;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, persistent_endpoint};
-use tutti_session::{BlockDates, Session, midi_input};
+use tutti_session::{BlockDates, Session};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Resyncs, SampleRate, Seconds};
 
@@ -93,9 +93,7 @@ fn the_readings_held_from_before_the_first_connect_live_across_a_replug() {
     let saved = keys(&mut s);
     unplug(&fake);
     let _ = s.update();
-    s.pool(midi_input("keys", saved)).expect("declares");
-    let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
+    let port = s.open_midi_input(saved).expect("opens");
     let (timing, resyncs) = (port.timing(), port.resyncs());
     assert!(timing.is_closed() && resyncs.is_closed(), "no device yet");
     assert_eq!(
@@ -127,7 +125,7 @@ fn the_readings_held_from_before_the_first_connect_live_across_a_replug() {
     assert_eq!(resyncs.get(), Resyncs::ZERO, "a connect counts nothing");
     two_readings(&s, &fake);
     assert_eq!(resyncs.get(), Resyncs::ZERO, "still none across the replug");
-    // The handle read again is the same cells.
+    // A clone reads the same cells.
     assert_eq!(port.resyncs().get(), Resyncs::ZERO);
-    assert_eq!(s.midi_input(&"keys").unwrap().timing().get(), timing.get());
+    assert_eq!(port.clone().timing().get(), timing.get());
 }

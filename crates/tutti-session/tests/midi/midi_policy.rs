@@ -19,7 +19,7 @@ use tutti_midi_runtime::MidiClipNode;
 use tutti_session::Peer as _;
 use tutti_session::{
     EventInPort, MidiPolicy, MidiPolicyError, MidiReport, PHASES, PhaseCx, Session, SessionEvent,
-    SetRefusal, ValueErrorKind, midi_input, midi_output,
+    SetRefusal, ValueErrorKind,
 };
 use tutti_ump::EndpointName;
 use tutti_ump::{
@@ -52,12 +52,12 @@ fn policy(model: u8, name: &str) -> MidiPolicy {
 }
 
 /// A session over a fake OS with one duplex UMP device, "Wire", connected.
-fn wired(last_group: u8) -> (Session, FakeCounters) {
+fn wired(last_group: u8) -> (Session, FakeCounters, Ports) {
     wired_with(last_group, MidiHardwareConfig::new())
 }
 
 /// As [`wired`], with the session opened with `config`.
-fn wired_with(last_group: u8, config: MidiHardwareConfig) -> (Session, FakeCounters) {
+fn wired_with(last_group: u8, config: MidiHardwareConfig) -> (Session, FakeCounters, Ports) {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let mut s = Session::builder()
         .midi_hardware_over(backend, config)
@@ -73,13 +73,17 @@ fn wired_with(last_group: u8, config: MidiHardwareConfig) -> (Session, FakeCount
         .into_iter()
         .find(|d| d.name == "Wire")
         .expect("Wire is listed");
-    s.pool((
-        [midi_input("wire", wire.clone())],
-        [midi_output("out", wire)],
-    ))
-    .expect("declares");
-    let _ = s.update();
-    (s, fake)
+    let ports = Ports {
+        input: s.open_midi_input(wire.clone()).expect("opens"),
+        output: s.open_midi_output(wire).run().expect("opens"),
+    };
+    (s, fake, ports)
+}
+
+/// The two ports of the device `Wire`; they stay open while this is held.
+struct Ports {
+    input: tutti_session::MidiInput,
+    output: tutti_session::MidiOutput,
 }
 
 fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
@@ -220,7 +224,7 @@ impl Clock {
 /// hears.
 #[test]
 fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity() {
-    let (mut s, fake) = wired(3);
+    let (mut s, fake, _ports) = wired(3);
     let mut clock = Clock::new();
     clock.run(&mut s, &fake, 5);
     let sent = clock.say(&mut s, &fake, ask_everything());
@@ -275,7 +279,7 @@ fn a_peers_endpoint_discovery_is_answered_only_once_the_policy_names_an_identity
 /// and the session, as a discoverer of the same device, sends no request back.
 #[test]
 fn a_stream_configuration_request_is_granted_within_the_declared_capabilities() {
-    let (mut s, fake) = wired(0);
+    let (mut s, fake, _ports) = wired(0);
     s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
         .unwrap();
     let mut clock = Clock::new();
@@ -315,7 +319,7 @@ fn a_stream_configuration_request_is_granted_within_the_declared_capabilities() 
 /// way and starts nothing.
 #[test]
 fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new() {
-    let (mut s, fake) = wired(0);
+    let (mut s, fake, ports) = wired(0);
     let mut clock = Clock::new();
     s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
         .unwrap();
@@ -325,7 +329,7 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
     };
     let (old, who) = (header.source, data.identity);
     assert_eq!(who, device(2));
-    let port = s.midi_input(&"wire").expect("loaded");
+    let port = &ports.input;
     assert_eq!(port.info().peers().len(), 1, "the peer was found");
     let _ = clock.profile_changes();
 
@@ -382,11 +386,10 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
 /// loss, and the output port, which never carries it, counts nothing.
 #[test]
 fn a_ci_send_the_device_refuses_counts_on_the_input_port() {
-    let (mut s, fake) = wired(0);
+    let (mut s, fake, ports) = wired(0);
     let mut clock = Clock::new();
     let _ = clock.run(&mut s, &fake, 100);
-    let input = s.midi_input(&"wire").expect("loaded");
-    let output = s.midi_output(&"out").expect("loaded");
+    let (input, output) = (&ports.input, &ports.output);
     assert_eq!(input.losses(), Losses::NONE);
     fake.refuse_sends(true);
     s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
@@ -427,12 +430,12 @@ fn an_identity_is_refused_on_a_session_with_no_os_midi_layer() {
 /// grant of MIDI 1.0 is a MIDI 1.0 message.
 #[test]
 fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
-    let (mut s, fake) = wired(0);
+    let (mut s, fake, ports) = wired(0);
     s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
         .unwrap();
     let mut clock = Clock::new();
     clock.run(&mut s, &fake, 50);
-    let out = s.midi_output(&"out").expect("loaded");
+    let out = &ports.output;
     assert_eq!(out.info().config().protocol, Protocol::Midi2);
 
     let ask = Ump::from(Message::Stream(Stream::StreamConfigurationRequest(
@@ -478,7 +481,7 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
 /// session, so the Notification the session sends reports that it receives them.
 #[test]
 fn under_jitter_reduction_the_endpoint_reports_that_it_receives_jr() {
-    let (mut s, fake) = wired_with(
+    let (mut s, fake, _ports) = wired_with(
         0,
         MidiHardwareConfig::new().input_timing(tutti_midi_hardware::InputTiming::JitterReduction),
     );
