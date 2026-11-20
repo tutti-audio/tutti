@@ -26,7 +26,7 @@ use tutti_plugin_types::{
     ChannelLayout, Control, Loaded, MAX_BLOCK_CHANNELS, PluginBus, PluginTooWide, Prepare,
 };
 use tutti_tempo::TempoMap;
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{Bpm, Frame, SampleRate, Samples, Tail};
 

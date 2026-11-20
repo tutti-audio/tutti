@@ -44,7 +44,7 @@ jack = ["cpal/jack"]
 cpal = "0.18"
 thiserror = { workspace = true, features = ["std"] }
 
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 tutti-engine = { version = "0.0.1", path = "../tutti-engine" }
 # `TapReader` and `TapWriter`, the mic's rings.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }

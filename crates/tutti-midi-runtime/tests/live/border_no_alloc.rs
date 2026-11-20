@@ -74,7 +74,7 @@ fn the_border_nodes_process_without_allocating() {
     let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(2), "keys", inlet);
     let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
-    let meter = tutti_transport::ProjectMeter::default();
+    let meter = tutti_timeline::ProjectMeter::default();
     let sync_meter = meter.clone();
     ed.insert(
         NodeKey(3),

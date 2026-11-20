@@ -57,7 +57,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// `*` is every type of the crate.
 const INTERNAL: &[(&str, &str, &str)] = &[
     (
-        "tutti_transport",
+        "tutti_timeline",
         "Transport",
         "the engine's playback transport; an app drives it through `Session`",
     ),
@@ -87,7 +87,7 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "the graph's executor; an app renders through `Session` or `Bounce`",
     ),
     (
-        "tutti_transport",
+        "tutti_timeline",
         "OfflineClock",
         "the export render's clock; `ExportClock` wraps it",
     ),

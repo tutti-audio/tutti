@@ -41,7 +41,7 @@ use tutti_engine::Engine;
 use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::{MotionEvent, Transport};
+use tutti_timeline::{MotionEvent, Transport};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

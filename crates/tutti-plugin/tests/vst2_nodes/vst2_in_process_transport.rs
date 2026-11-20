@@ -30,7 +30,7 @@ use tutti_music::LoopRange;
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_transport::ProjectMeter;
+use tutti_timeline::ProjectMeter;
 use tutti_units::Latency;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_vst2_test_plugin::ProcessCapture;
@@ -135,8 +135,8 @@ fn scene_map(blocks: usize) -> tutti_tempo::TempoMap {
 }
 
 /// A reader of [`scene_map`], for the nodes under test.
-fn scene_tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::fixed(std::sync::Arc::new(scene_map(64)))
+fn scene_tempo() -> tutti_timeline::TempoReader {
+    tutti_timeline::TempoReader::fixed(std::sync::Arc::new(scene_map(64)))
 }
 
 /// The live node fed by a silent source of `arrival` frames' latency on both

@@ -38,7 +38,7 @@ mod param_reads;
 use param_reads::ParamReads as _;
 use tutti_buffers::ChannelLayout;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};

@@ -15,7 +15,7 @@ use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
 use tutti_nodes::{
     ChannelTimes, CrossoverNode, DelayControls, DelayLayout, DelayNode, InterpolationMode,
-    MaxDelay, ModDelayNode, MultibandCompressorNode,
+    MaxDelay, ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::Latency;
 use tutti_units::{Feedback, Hz, Mix, Seconds};
@@ -109,7 +109,10 @@ fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
         assert!(band[0] > 0.0, "band {b} is silent at frame 0");
     }
 
-    let mb = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, 4).unwrap();
+    let mb = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+        BusTopology::MONO,
+        MultibandBands::of(4),
+    ));
     assert_eq!(declared(&mb), Latency::ZERO);
     let out = impulse_response(mb, 64);
     assert_eq!(onsets(&out[0]).first(), Some(&0));
@@ -268,16 +271,18 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     use tutti_buffers::ChannelLayout;
     use tutti_graph::Source;
     use tutti_graph::{GraphBuilder, Prepare};
-    use tutti_nodes::{LimiterControls, LimiterNode};
+    use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
     use tutti_units::Latency;
     use tutti_units::{Db, Samples, Seconds};
 
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-    let (lim, _) = g.add_with_controls(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db::new(-1.0),
-        ceiling: Db::new(-0.3),
-        ..LimiterControls::DEFAULT
-    }));
+    let (lim, _) = g.add_with_controls(LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+            threshold: Db::new(-1.0),
+            ceiling: Db::new(-0.3),
+            ..LimiterControls::DEFAULT
+        }),
+    ));
     g.connect_input(0, lim, 0);
     g.connect_output(lim, 0, 0);
     g.add_output(0, Source::Global(0));

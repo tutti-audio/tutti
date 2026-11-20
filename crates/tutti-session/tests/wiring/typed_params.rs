@@ -9,7 +9,9 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
-use tutti_nodes::{CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType};
+use tutti_nodes::{
+    CompressorConfig, CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType,
+};
 use tutti_rt::Param;
 use tutti_session::{DetachedSession, Session, ValueErrorKind};
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
@@ -58,16 +60,16 @@ fn a_write_reaches_the_cell_the_key_names() {
 
     // A `Seconds` param is an `f64` cell: the write is exact for a value an
     // `f32` holds.
-    let (comp, controls) = s.graph().add(CompressorNode::<f32>::new(
-        BusTopology::MONO,
-        KeySource::Sidechain,
-        CompressorControls {
-            threshold: Db::new(-20.0),
-            ratio: tutti_units::CompressionRatio::new(4.0),
-            attack: Seconds::new(0.01),
-            release: Seconds::new(0.1),
-            ..CompressorControls::DEFAULT
-        },
+    let (comp, controls) = s.graph().add(CompressorNode::<f32>::from(
+        CompressorConfig::new(BusTopology::MONO)
+            .key(KeySource::Sidechain)
+            .controls(CompressorControls {
+                threshold: Db::new(-20.0),
+                ratio: tutti_units::CompressionRatio::new(4.0),
+                attack: Seconds::new(0.01),
+                release: Seconds::new(0.1),
+                ..CompressorControls::DEFAULT
+            }),
     ));
     s.set(comp.attack().to(Seconds::new(0.25))).unwrap();
     assert_eq!(controls.get(UnitParam::Attack), Some(0.25));

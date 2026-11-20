@@ -18,16 +18,17 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode,
-    BrickwallLimiterNode, BusStripConfig, BusStripNode, ButterworthOrder, ChannelTimes,
-    CompressorControls, CompressorNode, ConvolverNode, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, DelayControls, DelayLayout,
-    DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EnvelopeFilterConfig,
-    EnvelopeFilterNode, EqBandNode, GateControls, GateNode, InterpolationMode, KeySource,
-    LadderFilterNode, LadderType, LevellerConfig, LevellerNode, LfoNode, LfoShape, LimiterControls,
-    LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, PlateReverbConfig,
-    PlateReverbNode, RingModConfig, RingModNode, ShapeKind, Stages, StereoWidthConfig,
-    StereoWidthNode, SvfControls, SvfFilterNode, SvfType, TiltFilterConfig, TiltFilterNode,
-    TransientShaperConfig, TransientShaperNode, TremoloConfig, TremoloNode,
+    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, ButterworthOrder,
+    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, ConvolverNode,
+    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, EqBandNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, KeySource, LadderFilterNode, LadderType, LevellerConfig, LevellerNode,
+    LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayNode,
+    PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    ShapeKind, Stages, StereoWidthConfig, StereoWidthNode, SvfControls, SvfFilterNode, SvfType,
+    TiltFilterConfig, TiltFilterNode, TransientShaperConfig, TransientShaperNode, TremoloConfig,
+    TremoloNode,
 };
 use tutti_units::{
     Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
@@ -37,18 +38,18 @@ use tutti_units::{
 #[test]
 fn compressor() {
     IsolateRow::new("CompressorNode (stereo)", || {
-        CompressorNode::<f32>::new(
-            BusTopology::STEREO,
-            KeySource::Sidechain,
-            CompressorControls {
-                threshold: Db::new(-20.0),
-                knee: Db::new(3.0),
-                ratio: CompressionRatio::new(4.0),
-                attack: Seconds::new(0.005),
-                release: Seconds::new(0.05),
-                makeup: Db::new(2.0),
-                ..CompressorControls::DEFAULT
-            },
+        CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(CompressorControls {
+                    threshold: Db::new(-20.0),
+                    knee: Db::new(3.0),
+                    ratio: CompressionRatio::new(4.0),
+                    attack: Seconds::new(0.005),
+                    release: Seconds::new(0.05),
+                    makeup: Db::new(2.0),
+                    ..CompressorControls::DEFAULT
+                }),
         )
     })
     .control("threshold", |c| {
@@ -75,17 +76,17 @@ fn compressor() {
 #[test]
 fn gate() {
     IsolateRow::new("GateNode (stereo)", || {
-        GateNode::<f32>::new(
-            BusTopology::STEREO,
-            KeySource::Sidechain,
-            GateControls {
-                threshold: Db::new(-15.0),
-                attack: Seconds::new(0.001),
-                hold: Seconds::new(0.005),
-                release: Seconds::new(0.02),
-                range: Db::new(-40.0),
-                ..GateControls::DEFAULT
-            },
+        GateNode::<f32>::from(
+            GateConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(GateControls {
+                    threshold: Db::new(-15.0),
+                    attack: Seconds::new(0.001),
+                    hold: Seconds::new(0.005),
+                    release: Seconds::new(0.02),
+                    range: Db::new(-40.0),
+                    ..GateControls::DEFAULT
+                }),
         )
     })
     .control("threshold", |g| {
@@ -109,11 +110,13 @@ fn gate() {
 #[test]
 fn limiter() {
     IsolateRow::new("LimiterNode (stereo)", || {
-        LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db::new(-6.0),
-            ceiling: Db::new(-3.0),
-            ..LimiterControls::DEFAULT
-        })
+        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterControls {
+                threshold: Db::new(-6.0),
+                ceiling: Db::new(-3.0),
+                ..LimiterControls::DEFAULT
+            },
+        ))
     })
     .control("threshold", |l| {
         assert!(l.param_set().set(UnitParam::Threshold, -12.0));
@@ -130,7 +133,10 @@ fn limiter() {
 #[test]
 fn brickwall_limiter() {
     IsolateRow::new("BrickwallLimiterNode (stereo)", || {
-        BrickwallLimiterNode::<f32>::new(Db::new(-3.0))
+        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+            BusTopology::STEREO,
+            Db::new(-3.0),
+        ))
     })
     .control("ceiling", |l| {
         assert!(l.param_set().set(UnitParam::Ceiling, -9.0));

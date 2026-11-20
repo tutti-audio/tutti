@@ -18,7 +18,7 @@ use tutti_session::{
     FollowClock, FollowMachineControl, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
     ValueErrorKind, midi_sink,
 };
-use tutti_transport::FadeOut;
+use tutti_timeline::FadeOut;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, Ump};
 use tutti_units::{Beat, SampleRate};
 

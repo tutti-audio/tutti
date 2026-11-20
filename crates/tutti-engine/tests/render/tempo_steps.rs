@@ -20,7 +20,7 @@ use tutti_graph::{Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, Unfork
 use tutti_graph::{OutPort, Source};
 use tutti_music::{LoopRange, first_frame_at_or_after};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::{
+use tutti_timeline::{
     AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport,
     render_graph,
 };

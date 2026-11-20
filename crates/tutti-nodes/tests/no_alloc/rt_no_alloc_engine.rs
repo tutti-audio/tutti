@@ -23,9 +23,9 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
-    BusStripConfig, BusStripNode, EqBandNode, LimiterControls, LimiterNode, SvfType,
+    BusStripConfig, BusStripNode, EqBandNode, LimiterConfig, LimiterControls, LimiterNode, SvfType,
 };
-use tutti_transport::{MotionEvent, Transport};
+use tutti_timeline::{MotionEvent, Transport};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 /// Build an [`Engine`] whose graph is `sine → bell EQ → strip → limiter`,
@@ -55,11 +55,13 @@ fn build_engine_with_chain() -> Engine {
     ed.insert(
         limiter,
         "limiter",
-        LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db::new(-1.0),
-            ceiling: Db::new(-0.3),
-            ..LimiterControls::DEFAULT
-        }),
+        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterControls {
+                threshold: Db::new(-1.0),
+                ceiling: Db::new(-0.3),
+                ..LimiterControls::DEFAULT
+            },
+        )),
     );
     let topology = &mut ed.spec_mut().topology;
     let mut wire = |node: NodeKey, port: u16, from: NodeKey, out: u16| {

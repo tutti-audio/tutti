@@ -6,13 +6,13 @@
 
 use std::sync::atomic::Ordering;
 use tutti_buffers::{BusTopology, MaxBlock, Planes};
-use tutti_nodes::{
-    BrickwallLimiterNode, BusStripConfig, BusStripNode, DelayControls, DelayNode, EqBandNode,
-    LimiterControls, LimiterNode, MaxDelay, SvfType,
-};
 
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
+use tutti_nodes::{
+    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, DelayControls,
+    DelayNode, EqBandNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, SvfType,
+};
 use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
 
@@ -168,11 +168,13 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         }
     }
     check("limiter", || {
-        let n = LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db::new(-6.0),
-            ceiling: Db::new(-1.0),
-            ..LimiterControls::DEFAULT
-        });
+        let n = LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterControls {
+                threshold: Db::new(-6.0),
+                ceiling: Db::new(-1.0),
+                ..LimiterControls::DEFAULT
+            },
+        ));
         let cell = |kind| n.param_set().cell(kind).unwrap();
         let cells = vec![
             ("threshold", cell(UnitParam::Threshold), -12.0),
@@ -182,7 +184,10 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("brickwall", || {
-        let n = BrickwallLimiterNode::<f32>::new(Db::new(-1.0));
+        let n = BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+            BusTopology::STEREO,
+            Db::new(-1.0),
+        ));
         let cells = vec![(
             "ceiling",
             n.param_set().cell(UnitParam::Ceiling).unwrap(),

@@ -26,7 +26,7 @@ use tutti_graph::{
     Source, Status, TapId, TapOptions, TapReader,
 };
 use tutti_nodes::testing::{Const, Osc};
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -216,7 +216,7 @@ fn two_tones() -> RenderGraph {
 fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass() {
     use std::sync::Arc;
     use tutti_tempo::TempoMap;
-    use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+    use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
     use tutti_units::{Beat, Bpm};
 
     let dir = tempfile::tempdir().unwrap();

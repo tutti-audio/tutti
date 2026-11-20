@@ -32,7 +32,7 @@ use tutti_plugin_types::{
     RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Voice2};
 use tutti_units::Normalized;
 use tutti_units::ParamId;

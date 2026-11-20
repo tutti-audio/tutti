@@ -1,4 +1,4 @@
-# tutti-transport
+# tutti-timeline
 
 Playback control for a music application: a position in musical time, tempo, looping, and play, stop and seek commands that can take effect at an exact frame.
 

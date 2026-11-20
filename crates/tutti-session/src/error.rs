@@ -79,10 +79,10 @@ impl NoSuchNode {
     }
 }
 
-impl<E: Into<tutti_transport::TransportCommand> + std::fmt::Debug>
-    From<tutti_transport::TimedError<E>> for Error
+impl<E: Into<tutti_timeline::TransportCommand> + std::fmt::Debug>
+    From<tutti_timeline::TimedError<E>> for Error
 {
-    fn from(error: tutti_transport::TimedError<E>) -> Self {
+    fn from(error: tutti_timeline::TimedError<E>) -> Self {
         Self::Timed(error.map(Into::into))
     }
 }
@@ -489,7 +489,7 @@ pub enum Error {
     /// the queue was full, or the command cannot fire. The command is handed
     /// back in it.
     #[error(transparent)]
-    Timed(tutti_transport::TimedError<tutti_transport::TransportCommand>),
+    Timed(tutti_timeline::TimedError<tutti_timeline::TransportCommand>),
 
     /// A file could not be decoded (`read_wave`, `FileIn`).
     #[error(transparent)]

@@ -45,6 +45,7 @@
 
 use std::hint::black_box;
 use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
+use tutti_nodes::{BusStripConfig, BusStripNode, EqBandNode, SvfFilterNode, SvfType};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_engine::Engine;
@@ -52,9 +53,8 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{BusStripConfig, BusStripNode, EqBandNode, SvfFilterNode, SvfType};
-use tutti_transport::MotionEvent;
-use tutti_transport::Transport;
+use tutti_timeline::MotionEvent;
+use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 use tutti_units::{Bpm, Samples};
 use tutti_units::{Db, Hz, Q};

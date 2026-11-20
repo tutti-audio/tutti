@@ -14,7 +14,7 @@ use tutti_buffers::BusTopology;
 use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
-use tutti_nodes::{CompressorNode, GateNode, KeySource};
+use tutti_nodes::{CompressorConfig, CompressorNode, GateConfig, GateNode, KeySource};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -108,12 +108,12 @@ fn compressor_controls(cutoff: f64, q: f64) -> CompressorControls {
 }
 
 fn compressor(filter: KeyFilter, cutoff: f64, q: f64) -> CompressorNode<f32> {
-    CompressorNode::<f32>::new(
-        BusTopology::MONO,
-        KeySource::Sidechain,
-        compressor_controls(cutoff, q),
+    CompressorNode::<f32>::from(
+        CompressorConfig::new(BusTopology::MONO)
+            .key(KeySource::Sidechain)
+            .key_filter(filter)
+            .controls(compressor_controls(cutoff, q)),
     )
-    .key_filter(filter)
 }
 
 /// A key through a high-pass is reduced by the static curve at the key's level plus the
@@ -268,8 +268,12 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
         ..compressor_controls(1_000.0, BUTTERWORTH)
     };
     let mut node = prepared(
-        CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Sidechain, controls)
-            .key_filter(KeyFilter::HighPass),
+        CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::MONO)
+                .key(KeySource::Sidechain)
+                .key_filter(KeyFilter::HighPass)
+                .controls(controls),
+        ),
         SR,
         1_024,
     );
@@ -301,12 +305,12 @@ fn gate_controls(threshold: f64, cutoff: f64, q: f64) -> GateControls {
 }
 
 fn gate(filter: KeyFilter, threshold: f64, cutoff: f64, q: f64) -> GateNode<f32> {
-    GateNode::<f32>::new(
-        BusTopology::MONO,
-        KeySource::Sidechain,
-        gate_controls(threshold, cutoff, q),
+    GateNode::<f32>::from(
+        GateConfig::new(BusTopology::MONO)
+            .key(KeySource::Sidechain)
+            .key_filter(filter)
+            .controls(gate_controls(threshold, cutoff, q)),
     )
-    .key_filter(filter)
 }
 
 /// A high-passed gate opens on a key whose filtered peak is over the threshold and stays closed
@@ -321,10 +325,10 @@ fn a_high_passed_gate_decides_on_the_filtered_key() {
         let mut filtered = prepared(gate(KeyFilter::HighPass, threshold, fc, q), SR, 1_024);
         let gain = highest_gain(&run(&mut filtered, &key));
         let mut plain = prepared(
-            GateNode::<f32>::new(
-                BusTopology::MONO,
-                KeySource::Sidechain,
-                gate_controls(threshold, fc, q),
+            GateNode::<f32>::from(
+                GateConfig::new(BusTopology::MONO)
+                    .key(KeySource::Sidechain)
+                    .controls(gate_controls(threshold, fc, q)),
             ),
             SR,
             1_024,
@@ -406,11 +410,14 @@ fn off_declares_no_controls_and_a_filter_declares_two_more() {
         makeup: Db::new(3.0),
         ..compressor_controls(2_000.0, 1.5)
     };
-    let off = CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Sidechain, controls);
+    let config = CompressorConfig::new(BusTopology::MONO)
+        .key(KeySource::Sidechain)
+        .controls(controls);
+    let off = CompressorNode::<f32>::from(config);
     assert_eq!(off.shape().params.len(), 6);
     assert!(!off.param_set().set(UnitParam::Cutoff, 500.0));
     assert!(!off.param_set().set(UnitParam::Q, 2.0));
-    let on = off.key_filter(KeyFilter::BandPass);
+    let on = CompressorNode::<f32>::from(config.key_filter(KeyFilter::BandPass));
     assert_eq!(
         &on.shape().params.as_slice()[6..],
         &[UnitParam::Cutoff, UnitParam::Q][..]
@@ -420,12 +427,10 @@ fn off_declares_no_controls_and_a_filter_declares_two_more() {
         bases,
         [-40.0, 0.0, 4.0, 0.0, 0.0, 3.0, 2_000.0, 1.5].map(Some)
     );
-    let back = on.key_filter(KeyFilter::Off);
-    assert_eq!(back.shape().params.len(), 6);
 
     let gate = gate(KeyFilter::Off, -30.0, 100.0, 1.0);
     assert_eq!(gate.shape().params.len(), 5);
-    let gate = gate.key_filter(KeyFilter::HighPass);
+    let gate = self::gate(KeyFilter::HighPass, -30.0, 100.0, 1.0);
     assert_eq!(
         &gate.shape().params.as_slice()[5..],
         &[UnitParam::Cutoff, UnitParam::Q][..]
