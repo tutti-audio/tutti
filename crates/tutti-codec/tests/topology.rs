@@ -144,3 +144,45 @@ fn the_fixtures_state_their_speakers() {
         assert_eq!(stream.topology(), wave.topology(), "{name}: stream");
     }
 }
+
+/// Ogg Vorbis states its speakers by count and stores its planes in the Vorbis I
+/// order (`FL FC FR RL RR LFE` at six, section 4.3.9); the decoder hands them in
+/// the topology's order, so the plane of each speaker is where the topology says.
+///
+/// `audio/surround_51.ogg` holds one pure tone per speaker: FL 150 Hz, FC 130,
+/// FR 110, BL 90, BR 70, LFE 50, for one second at 44.1 kHz. It was encoded by
+/// libvorbis through ffmpeg from the speakers' WAVE order (`FL FR FC LFE BL BR`),
+/// which the encoder permutes into Vorbis's:
+///
+/// ```text
+/// ffmpeg -f lavfi -i "aevalsrc=0.5*sin(2*PI*150*t)|0.5*sin(2*PI*110*t)|0.5*sin(2*PI*130*t)|0.5*sin(2*PI*50*t)|0.5*sin(2*PI*90*t)|0.5*sin(2*PI*70*t):channel_layout=5.1:sample_rate=44100:duration=1" -c:a libvorbis -q:a 6 surround_51.ogg
+/// ```
+#[cfg(feature = "decode-ogg")]
+#[test]
+fn a_vorbis_six_decodes_in_the_topologys_order() {
+    let hz = |s: tutti_buffers::Speaker| match s {
+        FrontLeft => 150,
+        FrontCenter => 130,
+        FrontRight => 110,
+        BackLeft => 90,
+        BackRight => 70,
+        LowFrequency => 50,
+        other => panic!("{other:?} is not in a 5.1 file"),
+    };
+    let rate = 44_100usize;
+    let wave = read_wave::<f32>(asset("surround_51.ogg")).expect("decodes");
+    assert_eq!(wave.channels(), 6);
+    // Rising zero crossings in the middle half second: `hz / 2` of them.
+    let crossings = |c: usize| {
+        let x = &wave.channel(c).samples()[rate / 4..rate * 3 / 4];
+        x.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count()
+    };
+    for (c, &speaker) in wave.topology().positions().unwrap().iter().enumerate() {
+        let expected = hz(speaker) / 2;
+        assert!(
+            crossings(c).abs_diff(expected) <= 1,
+            "channel {c} ({speaker:?}): {} crossings, want {expected}",
+            crossings(c)
+        );
+    }
+}
