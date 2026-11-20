@@ -53,14 +53,14 @@ fn first_block(reader: StreamReader<f32>) -> Vec<Vec<f32>> {
     play(&mut voice, &clock, SampleRate::of(RATE), 64, 64)
 }
 
-/// `Placement` keeps the range-checked contract: `new`, `TryFrom` and serde
+/// `StreamStart` keeps the range-checked contract: `new`, `TryFrom` and serde
 /// agree (serde as the bare `f64`), and a negative, NaN or infinite position
 /// is refused, never clamped.
 #[test]
 fn placement_keeps_the_range_contract() {
     use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
     let c = RangeContract {
-        new: |raw| Placement::new(SamplePosition::new(raw)),
+        new: |raw| StreamStart::new(SamplePosition::new(raw)),
         get: |placement| placement.get().get(),
         of: None,
         valid: &[0.0, 0.5, 4_000.0, 1e12],
@@ -76,7 +76,7 @@ fn placement_keeps_the_range_contract() {
 fn a_fractional_start_opens_at_its_frame() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
-    let start = Placement::new(SamplePosition::new(4_000.7)).expect("a position");
+    let start = StreamStart::new(SamplePosition::new(4_000.7)).expect("a position");
     assert_eq!(start.frame(), 4_000);
     let opening = streamer.open(&path, start);
     let (_stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
@@ -92,7 +92,7 @@ fn an_open_is_pending_until_the_streamer_answers() {
     let mut streamer = manual();
     let id;
     let opening = {
-        let opening = streamer.open(&path, Placement::HEAD);
+        let opening = streamer.open(&path, StreamStart::HEAD);
         id = opening.id();
         match opening.poll() {
             Open::Pending(again) => again,
@@ -115,7 +115,7 @@ fn an_open_is_pending_until_the_streamer_answers() {
 fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (_stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     assert_eq!(
         reader.ring.registered_readers(),
@@ -139,7 +139,7 @@ fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
 fn a_missing_file_fails_with_io() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut streamer = manual();
-    let opening = streamer.open(dir.path().join("nothing.wav"), Placement::HEAD);
+    let opening = streamer.open(dir.path().join("nothing.wav"), StreamStart::HEAD);
     assert_eq!(
         wait_for_open(&mut streamer, opening).err(),
         Some(OpenError::Io(std::io::ErrorKind::NotFound))
@@ -154,7 +154,7 @@ fn a_file_that_is_not_audio_fails_with_format() {
     let path = dir.path().join("notes.wav");
     std::fs::write(&path, b"this is not a RIFF file, whatever its name says").expect("writes");
     let mut streamer = manual();
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     assert_eq!(
         wait_for_open(&mut streamer, opening).err(),
         Some(OpenError::Format)
@@ -169,7 +169,7 @@ fn an_open_on_a_gone_streamer_fails_with_streamer_gone() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     streamer.driver.gone();
-    let mut opening = streamer.open(&path, Placement::HEAD);
+    let mut opening = streamer.open(&path, StreamStart::HEAD);
     for _ in 0..1_000 {
         match opening.poll() {
             Open::Failed(error) => {
@@ -190,7 +190,7 @@ fn an_open_on_a_gone_streamer_fails_with_streamer_gone() {
 fn an_abandoned_open_is_closed() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
-    drop(streamer.open(&path, Placement::HEAD));
+    drop(streamer.open(&path, StreamStart::HEAD));
     let _ = streamer.step();
     assert!(
         streamer.driver.open_streams() == 0,
@@ -215,8 +215,8 @@ fn two_opens_each_yield_the_reader_of_their_own_stream() {
     write_constant(&path_b, 0.5, 48_000);
 
     let mut streamer = manual();
-    let first = streamer.open(&path_a, Placement::HEAD);
-    let second = streamer.open(&path_b, Placement::HEAD);
+    let first = streamer.open(&path_a, StreamStart::HEAD);
+    let second = streamer.open(&path_b, StreamStart::HEAD);
     let (id_a, id_b) = (first.id(), second.id());
     assert_ne!(id_a, id_b);
     // The streamer has not run: neither is answered.
@@ -275,9 +275,9 @@ fn two_opens_each_yield_the_reader_of_their_own_stream() {
 fn a_loop_set_through_one_stream_leaves_the_other_unchanged() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (a, reader_a) = wait_for_open(&mut streamer, opening).expect("the file opens");
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (b, reader_b) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let loop_of = |reader: &StreamReader<f32>| reader.ring.applied().loop_;
     let looped = |start, end| Some(loop_frames(start, end, 0));
@@ -305,10 +305,10 @@ fn a_loop_set_through_one_stream_leaves_the_other_unchanged() {
 fn a_stopped_streams_handle_commands_nothing() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (stopped, reader_a) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let id_a = stopped.id();
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (_b, reader_b) = wait_for_open(&mut streamer, opening).expect("the file opens");
 
     drop(stopped);
@@ -387,7 +387,7 @@ fn manual_f64() -> DiskStreamer<crate::Manual<f64>, f64> {
 fn an_f64_stream_reads_back_the_files_values_exactly() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (_stream, mut reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
 
     let whole = Samples::new(0)..Samples::new(I32_FRAMES);
@@ -421,7 +421,7 @@ fn an_f64_stream_reads_back_the_files_values_exactly() {
 fn an_f64_stream_writes_a_loop_by_position() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (stream, mut reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     stream
         .looping_cell()

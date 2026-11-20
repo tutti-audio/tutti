@@ -11,6 +11,8 @@ use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use super::Waited;
+
 #[derive(Debug)]
 pub(super) struct Imp {
     /// The queue the exit event arrives on.
@@ -29,6 +31,7 @@ impl Imp {
 
     /// A watch on the process `pid` of any parent. `None` when it has ended
     /// already or the queue was refused.
+    #[cfg(not(loom))]
     pub(super) fn of_pid(pid: u32) -> Option<Self> {
         Self::watching(Pid::from_raw(i32::try_from(pid).ok()?)?)
     }
@@ -59,9 +62,10 @@ impl Imp {
         })
     }
 
-    pub(super) fn wait(&self, timeout: Duration) -> bool {
+    /// Waits up to `timeout` for the process to end.
+    pub(super) fn wait(&self, timeout: Duration) -> Waited {
         if self.seen.load(Ordering::Acquire) {
-            return true;
+            return Waited::Ended;
         }
         let timeout = Timespec {
             tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
@@ -72,36 +76,14 @@ impl Imp {
         // the event list is a live buffer of one slot.
         let ready = unsafe { kevent_timespec(&self.queue, &[], &mut taken[..], Some(&timeout)) };
         match ready {
-            Ok(([], _)) => false,
+            Ok(([], _)) => Waited::Running,
             Ok(_) => {
                 self.seen.store(true, Ordering::Release);
-                true
+                Waited::Ended
             }
-            // A failure to ask (a signal, say) is "may have ended": the owner's
-            // `try_wait` decides, and the next wait asks again.
-            Err(_) => true,
-        }
-    }
-
-    /// Blocks until the process has ended: `true`. `false` when the wait
-    /// itself failed.
-    pub(super) fn wait_ended(&self) -> bool {
-        loop {
-            if self.seen.load(Ordering::Acquire) {
-                return true;
-            }
-            let mut taken = [MaybeUninit::<Event>::uninit(); 1];
-            // SAFETY: as in `wait`: no change is submitted and the event list
-            // is a live buffer of one slot.
-            match unsafe { kevent_timespec(&self.queue, &[], &mut taken[..], None) } {
-                Ok(([], _)) => {}
-                Ok(_) => {
-                    self.seen.store(true, Ordering::Release);
-                    return true;
-                }
-                Err(rustix::io::Errno::INTR) => {}
-                Err(_) => return false,
-            }
+            // A signal ends the wait early: the process still runs.
+            Err(rustix::io::Errno::INTR) => Waited::Running,
+            Err(_) => Waited::Failed,
         }
     }
 }

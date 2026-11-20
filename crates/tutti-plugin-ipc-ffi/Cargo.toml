@@ -22,7 +22,7 @@ thiserror = "2"
 # The slab's wire form crosses the control wire; the slab's fresh name.
 serde = { version = "1", features = ["derive"] }
 getrandom = { workspace = true }
-# `spawn_named`: the host-watch thread; `Instant`, the one clock type.
+# `Executor`: the host-watch task; `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [target.'cfg(unix)'.dependencies]

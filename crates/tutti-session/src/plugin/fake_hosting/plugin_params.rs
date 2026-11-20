@@ -1,5 +1,5 @@
 //! A hosted plugin's parameters through the session's views:
-//! `Plugin::params`, `Param`, `Param::try_unit` and `ParamGesture`, over a fake
+//! `Plugin::params`, `PluginParam`, `PluginParam::try_unit` and `ParamGesture`, over a fake
 //! backend that declares its parameters and records what the host sets (no
 //! `plugin-server`), hosted at a node over `host`.
 
@@ -255,7 +255,7 @@ fn ready() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
     (s, node, fake, refresh)
 }
 
-fn cutoff(s: &DetachedSession, node: NodeKey) -> crate::Param<'_> {
+fn cutoff(s: &DetachedSession, node: NodeKey) -> crate::PluginParam<'_> {
     s.plugin_view(node).unwrap().params().get(CUTOFF).unwrap()
 }
 
@@ -574,7 +574,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
 fn text_and_plain_values_go_through_the_plugin() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
-    fn level(s: &DetachedSession, key: Key<AnyPlugin>) -> crate::Param<'_> {
+    fn level(s: &DetachedSession, key: Key<AnyPlugin>) -> crate::PluginParam<'_> {
         s.plugin_view(key).unwrap().params().get(LEVEL).unwrap()
     }
     assert_eq!(level(&s, key).plain(), Some(-60.0 + 72.0 * 0.25));
@@ -586,7 +586,7 @@ fn text_and_plain_values_go_through_the_plugin() {
 }
 
 /// **A plugin parameter is targeted by the same reference a native one is**
-/// (`modulation`): `Param::target` is the `ParamRef` a route takes.
+/// (`modulation`): `PluginParam::target` is the `ParamRef` a route takes.
 #[test]
 fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
     let (s, node, _, _) = ready();
@@ -598,7 +598,7 @@ fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
 }
 
 /// **A plugin's key names a parameter as a route's target** (`modulation`):
-/// `key.param(id)` is the reference `Param::target` gives, and a route onto it
+/// `key.param(id)` is the reference `PluginParam::target` gives, and a route onto it
 /// is declared and read back through the key, as a native param's is.
 #[test]
 fn a_plugin_key_names_a_parameter_a_route_targets() {

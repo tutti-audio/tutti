@@ -38,7 +38,7 @@ use crate::midi_ci::{
     EndSubscription, GetProperty, ListedPeer, Pending, PortLink, ProfilePeer, Reply, ReportPeer,
     RequestReport, ResourcePeer, SetProperty, Subscribe, SwitchProfile,
 };
-use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
+use crate::pool::{Declared, HandleError, Life, LoadError, PoolEntry, PoolLoad};
 use crate::{
     EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
     ResourceId, Session, SessionEvent,
@@ -478,9 +478,9 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for MidiInputEntry {
         self.saved.clone()
     }
 
-    fn load(&self) -> Load<InputLoaded, S> {
+    fn load(&self) -> PoolLoad<InputLoaded, S> {
         let saved = self.saved.clone();
-        Load::on_session(move |cx| {
+        PoolLoad::on_session(move |cx| {
             let id = cx.mint_resource_id();
             let ids = cx.resource_ids();
             cx.midi()
@@ -535,10 +535,10 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for MidiOutputEntry {
         (self.saved.clone(), self.options.clone())
     }
 
-    fn load(&self) -> Load<OutputLoaded, S> {
+    fn load(&self) -> PoolLoad<OutputLoaded, S> {
         let saved = self.saved.clone();
         let options = self.options.clone();
-        Load::on_session(move |cx| {
+        PoolLoad::on_session(move |cx| {
             let id = cx.mint_resource_id();
             cx.midi()
                 .open_output_port(id, saved, options)

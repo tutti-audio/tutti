@@ -21,7 +21,7 @@ use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, Placement, Playback, SlotId, Stream, VoicePool,
+    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, SlotId, Stream, StreamStart, VoicePool,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
@@ -154,7 +154,7 @@ fn stream() -> (
     write_wav(&path);
     let mut streamer =
         DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     (dir, streamer, stream, reader)
 }
