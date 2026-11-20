@@ -170,7 +170,9 @@ pub(crate) trait EndpointBackend {
 
 /// The platform's send on a [`VirtualEndpoint`], from any thread.
 pub(crate) trait SenderBackend: Send + Sync {
-    /// Publishes one UMP message to the endpoint's subscribers.
+    /// Publishes one UMP message to the endpoint's subscribers. Never called
+    /// from the endpoint's own receive callback: a send holds the endpoint's
+    /// live lock, which its drop waits on.
     fn send(&self, ump: &Ump) -> Result<()>;
 }
 

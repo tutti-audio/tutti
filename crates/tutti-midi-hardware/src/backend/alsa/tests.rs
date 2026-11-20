@@ -21,8 +21,8 @@ use tutti_ump::{
 /// Long enough to be a failure, not a race: the announce arrives at once.
 const PATIENCE: Duration = Duration::from_secs(20);
 
-/// `Devices` with one subscription, and the blocking batch `wait` these tests
-/// are written around.
+/// `Devices` with one subscription, and the batch `wait` these tests are
+/// written around.
 struct Watched {
     devices: Devices,
     events: crate::DeviceEvents,
@@ -956,8 +956,8 @@ fn fill(output: &super::output::AlsaOutput) -> usize {
 
 /// **The output never waits for room.** Events held for a minute fill the
 /// client's own output pool; a batch longer than the pool holds comes back at
-/// once with what it took, short of the batch, where a blocking client would
-/// wait for the pool to drain, which takes the minute.
+/// once with what it took, short of the batch, never waiting for the pool to
+/// drain, which takes the minute.
 #[test]
 fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
     use tutti_midi_runtime::MidiOut;
@@ -968,8 +968,8 @@ fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
     let batch = vec![held; 10_000];
     let started = Instant::now();
     let taken = output.queue_timed(&batch);
-    // A blocking client waits for the pool to drain, which takes the minute the
-    // events are held; returning before half of it is returning without waiting.
+    // Waiting for the pool to drain takes the minute the events are held;
+    // returning before half of it is returning without waiting.
     assert!(
         started.elapsed() < Duration::from_secs(30),
         "waited {:?} for room in the pool",

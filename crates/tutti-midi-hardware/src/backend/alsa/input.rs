@@ -62,8 +62,8 @@ impl Drop for AlsaInput {
         if let Some(thread) = self.thread.take() {
             // Joining matters: the thread holds the `Poller` that owns the
             // `Client`, and letting it outlive this would leave the port
-            // subscribed to a device the caller believes it disconnected. But not for ever: a pump stuck in
-            // alsa-lib is detached, and says so.
+            // subscribed to a device the caller believes it disconnected. But
+            // not for ever: a pump stuck in alsa-lib is detached, and says so.
             match thread.stop_within(JOIN_BOUND) {
                 Ok(Ok(())) => {}
                 // The pump's guard catches its own panics and marks the input
