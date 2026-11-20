@@ -253,6 +253,14 @@ pub struct PoolTooWide {
 /// Both source tiers live here side by side, as the `Memory` / `Disk` arms of
 /// [`VoiceSource`]; the slot's read forks on that enum rather than on a trait,
 /// which is what keeps a per-tier difference visible at the call site.
+///
+/// # Stretched voices
+///
+/// The pool declares no latency. A stretched memory voice reads its source the
+/// vocoder's [`latency`](tutti_dsp::PhaseVocoder::latency) ahead and sounds on
+/// time. A stretched disk voice cannot read before its seat, so it sounds that
+/// latency late and the pool does not compensate it, nor any voice started with
+/// no timeline position to read ahead of.
 pub struct VoicePool<F: SamplerFloat> {
     /// The resident slots, one per voice, summed in order. Reserved to
     /// `MAX_RESIDENT_VOICES` at construction, and the audio-thread

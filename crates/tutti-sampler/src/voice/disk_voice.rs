@@ -201,6 +201,15 @@ pub struct DiskVoiceConfig {
 /// (it reads its render's `Env`), read as the memory tier reads it; see
 /// `offline_read`. That path blocks on file I/O and is never taken live: a
 /// live fork of a disk voice is refused.
+///
+/// # Under a stretch it sounds late
+///
+/// A stretched or transposed disk voice runs a
+/// [`PhaseVocoder`](tutti_dsp::PhaseVocoder), and its ring reads only forward
+/// from where it seats, so it cannot read ahead of its place on the timeline as
+/// a memory voice does. It sounds [`latency`](tutti_dsp::PhaseVocoder::latency)
+/// frames late. A standalone `VoiceNode` declares that latency for delay
+/// compensation; in a [`VoicePool`](crate::VoicePool) it is not compensated.
 pub struct DiskVoice<F: SamplerFloat> {
     inner: DiskSource<F>,
     /// The playback controls: the streamer's cell, shared with `inner`, while
