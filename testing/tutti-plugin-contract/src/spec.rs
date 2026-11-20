@@ -384,7 +384,7 @@ pub struct Surface {
     /// (read 1, write 2), CLAP's `param-indication` states (playing 2, recording
     /// 3: writing, alone or with reading, is recording), VST2's
     /// `audioMasterGetAutomationState` answers (off 1, read 2, write 3, read and
-    /// write 4). Empty where the format has no such call (AU).
+    /// write 4). Empty where the format has no such call: AU, not applicable by its spec.
     pub automation: &'static [(tutti_plugin_types::AutomationMode, u32)],
     /// What the format's conversion answers for [`Param::Tone`].
     pub tone: Tone,

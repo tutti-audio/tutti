@@ -31,6 +31,8 @@ static const FUID kControllerUID (0x54534850, 0x43505002, 0x53484152, 0x45440001
 
 // The host's automation state (core.rs, "State"): the controller is told, and the component, which holds the
 // transcript, reads it when it saves. The two objects of one instance share the image, so this is where they meet.
+// They assume one instance per process: the contract runs each case in a process of its own (nextest isolates
+// every test), and no test hosts two instances of this plugin at once.
 static std::atomic<uint32_t> gAutomationN {0}, gAutomationLast {0};
 
 static std::vector<uint8_t> readAll (IBStream* s)

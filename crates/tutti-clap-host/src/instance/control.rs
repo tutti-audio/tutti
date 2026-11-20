@@ -322,18 +322,22 @@ impl Control for ClapLoaded {
 
     /// `param-indication.set_automation` for every automatable parameter: the
     /// mode is the plugin's whole, and CLAP names automation per parameter.
-    /// A plugin without `clap.param-indication` is not told (`false`).
+    /// A plugin without `clap.param-indication` is not told (`false`), and
+    /// neither is one with no automatable parameter: `true` is that at least one
+    /// parameter was told.
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
         if !self.plugin.supports_param_indication() {
             return false;
         }
         let state = ParamAutomationState::from(mode);
+        let mut told = false;
         for info in self.parameter_list(main) {
             if info.flag(ParamFlags::AUTOMATABLE) == Some(true) {
                 self.set_param_automation(main, info.id().get(), state, None);
+                told = true;
             }
         }
-        true
+        told
     }
 
     /// What the plugin's `track-info.get` answers from now on; the plugin is

@@ -1113,11 +1113,27 @@ pub fn transport_reaches_the_plugin<F: Format>() {
 /// plugin asks once per block), and the plugin's transcript holds the raw state
 /// the spec names for the mode as the last it was told.
 ///
+/// AU is not applicable by its spec: no property or call of `AudioUnitProperties.h`,
+/// `AUComponent.h` or `AUAudioUnit.h` tells a unit the host's automation mode, so
+/// the format has nothing to be told ([`spec::Surface::automation`] is empty) and
+/// the case asks only that the host does not claim to have told it.
+///
 /// # Panics
 ///
 /// Panics when an assertion of the case fails.
+///
+/// Spec: clap.ext.param_indication.set_automation, vst3.IAutomationState.setAutomationState, vst2.audioMaster.GetAutomationState
 pub fn the_automation_mode_reaches_the_plugin<F: Format>() {
     use tutti_plugin_types::AutomationMode;
+    if F::SURFACE.automation.is_empty() {
+        let mut a = active_in::<F>(Mode::Tag);
+        assert!(
+            !a.controller_mut()
+                .set_automation_state(main_thread(), AutomationMode::Writing),
+            "the host claims to have told a format with no automation state"
+        );
+        return;
+    }
     let mut a = active_in::<F>(Mode::Tag);
     let mut told_before = transcript::<F, _>(a.controller_mut()).automation_sent;
     for mode in [
@@ -1129,7 +1145,7 @@ pub fn the_automation_mode_reaches_the_plugin<F: Format>() {
     ] {
         assert!(
             a.controller_mut().set_automation_state(main_thread(), mode),
-            "the plugin takes no automation state: {mode:?} was not told"
+            "the plugin was not told {mode:?}"
         );
         a.silent(BLOCK);
         let t = transcript::<F, _>(a.controller_mut());

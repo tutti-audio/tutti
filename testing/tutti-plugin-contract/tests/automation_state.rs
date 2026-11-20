@@ -38,6 +38,10 @@ where
             "{mode:?} never reached the plugin through the handle"
         );
     }
+    // The plugin is leaked, not dropped: a drop off the main thread posts its close to the
+    // pump's thread, and a VST3 plugin ends on the thread that started it.
+    std::mem::forget(handle);
+    std::mem::forget(_client);
     assert!(
         matches!(surface.automation.first(), Some((AutomationMode::Off, _))),
         "the spec row starts at off"
