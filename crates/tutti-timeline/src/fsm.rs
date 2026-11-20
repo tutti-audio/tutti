@@ -1,10 +1,10 @@
-//! The transport state machine: which motion an event actually produces.
+//! The transport state machine: which motion a command actually produces.
 //!
 //! [`MotionState`] is the published vocabulary; `TransportFsm` is the private
 //! machine that decides transitions, and `TransitionResult` is what it hands
 //! back for the engine's `MotionAudio` to publish.
 
-use super::motion::{AfterLocate, FadeOut, MotionEvent};
+use super::motion::{AfterLocate, FadeOut, MotionCommand};
 use tutti_units::Beat;
 
 /// What the transport is doing.
@@ -156,7 +156,7 @@ impl TransportFsm {
         self.pending
     }
 
-    /// The motion to remember for [`MotionEvent::EndScrub`].
+    /// The motion to remember for [`MotionCommand::EndScrub`].
     ///
     /// A declick state must never be remembered: restoring `DeclickToStop`
     /// with no outcome parked leaves `complete_declick` nothing to settle, so
@@ -236,17 +236,17 @@ impl TransportFsm {
         !matches!(self.motion, MotionState::Stopped)
     }
 
-    /// Applies `event`, returning what changed or `None` if the FSM refused it.
+    /// Applies `command`, returning what changed or `None` if the FSM refused it.
     ///
     /// Every path that returns `Some` assigns `self.motion` first — that is
     /// what keeps the published mirror and the machine from diverging, and it
     /// is why all the arms route through `settle` / `locate_now` /
     /// `start_declick` / `retarget_declick` rather than assigning inline.
-    pub fn transition(&mut self, event: MotionEvent) -> Option<TransitionResult> {
+    pub fn transition(&mut self, command: MotionCommand) -> Option<TransitionResult> {
         use MotionState as S;
 
-        match event {
-            MotionEvent::Play => match self.motion {
+        match command {
+            MotionCommand::Play => match self.motion {
                 // A Play during a fade cancels it, including a pending jump.
                 S::Stopped | S::FastForward | S::Rewind | S::DeclickToStop | S::DeclickToLocate => {
                     self.settle(S::Rolling)
@@ -254,14 +254,14 @@ impl TransportFsm {
                 S::Rolling => None,
             },
 
-            MotionEvent::Stop {
+            MotionCommand::Stop {
                 fade: FadeOut::Immediate,
             } => match self.motion {
                 S::Stopped => None,
                 _ => self.settle(S::Stopped),
             },
 
-            MotionEvent::Stop {
+            MotionCommand::Stop {
                 fade: FadeOut::Declick,
             } => match self.motion {
                 S::Rolling => self.start_declick(S::DeclickToStop, DeclickOutcome::Stop),
@@ -276,7 +276,7 @@ impl TransportFsm {
                 S::Stopped => None,
             },
 
-            MotionEvent::Locate {
+            MotionCommand::Locate {
                 beat: pos,
                 fade,
                 then,
@@ -310,17 +310,17 @@ impl TransportFsm {
                 }
             }
 
-            MotionEvent::FastForward => {
+            MotionCommand::FastForward => {
                 self.prev_motion = self.scrub_anchor();
                 self.settle(S::FastForward)
             }
 
-            MotionEvent::Rewind => {
+            MotionCommand::Rewind => {
                 self.prev_motion = self.scrub_anchor();
                 self.settle(S::Rewind)
             }
 
-            MotionEvent::EndScrub => match self.motion {
+            MotionCommand::EndScrub => match self.motion {
                 S::FastForward | S::Rewind => self.settle(self.prev_motion),
                 // Not scrubbing — nothing to end. Settling on `prev_motion`
                 // here would clobber the motion with a stale anchor and
@@ -346,22 +346,22 @@ mod tests {
         let mut fsm = TransportFsm::new();
 
         // Play from stopped
-        let result = fsm.transition(MotionEvent::Play);
+        let result = fsm.transition(MotionCommand::Play);
         assert!(matches!(
             result,
             Some(TransitionResult::MotionChanged(MotionState::Rolling))
         ));
 
         // Stop while rolling
-        let result = fsm.transition(MotionEvent::stop_unfaded());
+        let result = fsm.transition(MotionCommand::stop_unfaded());
         assert!(matches!(
             result,
             Some(TransitionResult::MotionChanged(MotionState::Stopped))
         ));
 
         // Play again (idempotent)
-        fsm.transition(MotionEvent::Play);
-        let result = fsm.transition(MotionEvent::Play);
+        fsm.transition(MotionCommand::Play);
+        let result = fsm.transition(MotionCommand::Play);
         assert!(result.is_none());
     }
 
@@ -370,7 +370,7 @@ mod tests {
         let mut fsm = TransportFsm::new();
 
         // From a stop there is nothing to fade, so a locate lands immediately.
-        let result = fsm.transition(MotionEvent::locate(Beat::new(8.0)));
+        let result = fsm.transition(MotionCommand::locate(Beat::new(8.0)));
         assert!(matches!(
             result,
             Some(TransitionResult::Located {
@@ -379,7 +379,7 @@ mod tests {
             })
         ));
 
-        let result = fsm.transition(MotionEvent::play_from(Beat::new(4.0)));
+        let result = fsm.transition(MotionCommand::play_from(Beat::new(4.0)));
         assert!(matches!(
             result,
             Some(TransitionResult::Located {
@@ -392,31 +392,31 @@ mod tests {
     #[test]
     fn test_scrub_events() {
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
+        fsm.transition(MotionCommand::Play);
 
         // Fast forward
-        let result = fsm.transition(MotionEvent::FastForward);
+        let result = fsm.transition(MotionCommand::FastForward);
         assert!(matches!(
             result,
             Some(TransitionResult::MotionChanged(MotionState::FastForward))
         ));
 
         // End scrub - should return to rolling
-        let result = fsm.transition(MotionEvent::EndScrub);
+        let result = fsm.transition(MotionCommand::EndScrub);
         assert!(matches!(
             result,
             Some(TransitionResult::MotionChanged(MotionState::Rolling))
         ));
 
         // Rewind
-        let result = fsm.transition(MotionEvent::Rewind);
+        let result = fsm.transition(MotionCommand::Rewind);
         assert!(matches!(
             result,
             Some(TransitionResult::MotionChanged(MotionState::Rewind))
         ));
 
         // End scrub again
-        let result = fsm.transition(MotionEvent::EndScrub);
+        let result = fsm.transition(MotionCommand::EndScrub);
         assert!(matches!(
             result,
             Some(TransitionResult::MotionChanged(MotionState::Rolling))
@@ -426,10 +426,10 @@ mod tests {
     #[test]
     fn test_declick_events() {
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
+        fsm.transition(MotionCommand::Play);
 
         // Stop with declick
-        let result = fsm.transition(MotionEvent::stop());
+        let result = fsm.transition(MotionCommand::stop());
         assert!(matches!(
             result,
             Some(TransitionResult::DeclickStarted {
@@ -440,8 +440,8 @@ mod tests {
 
         // Locate with declick, from rolling
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
-        let result = fsm.transition(MotionEvent::locate(Beat::new(4.0)));
+        fsm.transition(MotionCommand::Play);
+        let result = fsm.transition(MotionCommand::locate(Beat::new(4.0)));
         assert!(matches!(
             result,
             Some(TransitionResult::DeclickStarted {
@@ -463,20 +463,20 @@ mod tests {
     #[test]
     fn every_accepted_transition_settles_the_fsm() {
         let events = [
-            MotionEvent::Play,
-            MotionEvent::stop(),
-            MotionEvent::stop_unfaded(),
-            MotionEvent::locate(Beat::new(16.0)),
-            MotionEvent::play_from(Beat::new(16.0)),
-            MotionEvent::stop_then_locate(Beat::new(0.0)),
-            MotionEvent::Locate {
+            MotionCommand::Play,
+            MotionCommand::stop(),
+            MotionCommand::stop_unfaded(),
+            MotionCommand::locate(Beat::new(16.0)),
+            MotionCommand::play_from(Beat::new(16.0)),
+            MotionCommand::stop_then_locate(Beat::new(0.0)),
+            MotionCommand::Locate {
                 beat: Beat::new(2.0),
                 fade: FadeOut::Immediate,
                 then: AfterLocate::Keep,
             },
-            MotionEvent::FastForward,
-            MotionEvent::Rewind,
-            MotionEvent::EndScrub,
+            MotionCommand::FastForward,
+            MotionCommand::Rewind,
+            MotionCommand::EndScrub,
         ];
         let states = [
             MotionState::Stopped,
@@ -514,11 +514,11 @@ mod tests {
     #[test]
     fn scrub_direction_change_keeps_the_pre_scrub_anchor() {
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
-        fsm.transition(MotionEvent::FastForward);
-        fsm.transition(MotionEvent::Rewind);
+        fsm.transition(MotionCommand::Play);
+        fsm.transition(MotionCommand::FastForward);
+        fsm.transition(MotionCommand::Rewind);
 
-        let result = fsm.transition(MotionEvent::EndScrub);
+        let result = fsm.transition(MotionCommand::EndScrub);
         assert!(
             matches!(
                 result,
@@ -534,12 +534,12 @@ mod tests {
     #[test]
     fn scrubbing_never_resurrects_an_abandoned_fade() {
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
-        fsm.transition(MotionEvent::stop());
+        fsm.transition(MotionCommand::Play);
+        fsm.transition(MotionCommand::stop());
         assert_eq!(fsm.motion, MotionState::DeclickToStop);
 
-        fsm.transition(MotionEvent::FastForward);
-        let result = fsm.transition(MotionEvent::EndScrub);
+        fsm.transition(MotionCommand::FastForward);
+        let result = fsm.transition(MotionCommand::EndScrub);
 
         assert!(
             matches!(
@@ -555,9 +555,9 @@ mod tests {
     #[test]
     fn end_scrub_while_not_scrubbing_is_a_no_op() {
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
+        fsm.transition(MotionCommand::Play);
 
-        assert!(fsm.transition(MotionEvent::EndScrub).is_none());
+        assert!(fsm.transition(MotionCommand::EndScrub).is_none());
         assert_eq!(fsm.motion, MotionState::Rolling, "playback must continue");
     }
 
@@ -567,11 +567,11 @@ mod tests {
     #[test]
     fn stopping_discards_a_pending_locate() {
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
-        fsm.transition(MotionEvent::stop_then_locate(Beat::new(8.0)));
+        fsm.transition(MotionCommand::Play);
+        fsm.transition(MotionCommand::stop_then_locate(Beat::new(8.0)));
         assert!(fsm.pending.is_some(), "the fade armed a pending locate");
 
-        fsm.transition(MotionEvent::stop_unfaded());
+        fsm.transition(MotionCommand::stop_unfaded());
         assert!(
             fsm.take_declick_outcome().is_none(),
             "a discarded locate must not resurface"
@@ -586,11 +586,11 @@ mod tests {
     fn retargeting_a_fade_does_not_restart_the_ramp() {
         // Locate-fade, then asked to stop instead.
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
-        fsm.transition(MotionEvent::stop_then_locate(Beat::new(0.0)));
+        fsm.transition(MotionCommand::Play);
+        fsm.transition(MotionCommand::stop_then_locate(Beat::new(0.0)));
         assert_eq!(fsm.motion, MotionState::DeclickToLocate);
 
-        let result = fsm.transition(MotionEvent::stop());
+        let result = fsm.transition(MotionCommand::stop());
         assert!(
             matches!(
                 result,
@@ -601,11 +601,11 @@ mod tests {
 
         // Stop-fade, then asked to locate instead.
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
-        fsm.transition(MotionEvent::stop());
+        fsm.transition(MotionCommand::Play);
+        fsm.transition(MotionCommand::stop());
         assert_eq!(fsm.motion, MotionState::DeclickToStop);
 
-        let result = fsm.transition(MotionEvent::locate(Beat::new(12.0)));
+        let result = fsm.transition(MotionCommand::locate(Beat::new(12.0)));
         assert!(
             matches!(
                 result,
@@ -622,10 +622,10 @@ mod tests {
     #[test]
     fn stop_during_a_stop_fade_is_a_no_op() {
         let mut fsm = TransportFsm::new();
-        fsm.transition(MotionEvent::Play);
-        fsm.transition(MotionEvent::stop());
+        fsm.transition(MotionCommand::Play);
+        fsm.transition(MotionCommand::stop());
 
-        assert!(fsm.transition(MotionEvent::stop()).is_none());
+        assert!(fsm.transition(MotionCommand::stop()).is_none());
         assert_eq!(fsm.motion, MotionState::DeclickToStop);
     }
 

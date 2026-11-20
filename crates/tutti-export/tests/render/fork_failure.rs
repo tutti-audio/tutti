@@ -17,7 +17,7 @@ use support::{render_file_under, render_normalized_to_file, render_to_buffers, r
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
-    CancelToken, Control, Error, GRAPH_MAX_BLOCK, Normalize, Progress, RenderGraph,
+    CancelToken, Control, GRAPH_MAX_BLOCK, Normalize, Progress, RenderError, RenderGraph,
 };
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -120,10 +120,10 @@ fn config() -> ExportConfig {
     }
 }
 
-fn is_crash(err: &Error) -> bool {
+fn is_crash(err: &RenderError) -> bool {
     matches!(
         err,
-        Error::ForkFailed { key, kind: ForkFaultKind::Crashed, .. } if *key == NodeKey(1)
+        RenderError::ForkFailed { key, kind: ForkFaultKind::Crashed, .. } if *key == NodeKey(1)
     )
 }
 

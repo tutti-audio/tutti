@@ -16,18 +16,17 @@
 //! one gates them *inside the engine*, where the executor drives them through
 //! its own buffers and the transport advances on the same `process` call.
 
-use tutti_buffers::InterleavedMut;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
-    BusStripNode, EqBandConfig, EqBandNode, LimiterConfig, LimiterControls, LimiterNode, SvfType,
+    BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, LimiterConfig, LimiterControls,
+    LimiterNode, SvfType,
 };
-use tutti_timeline::{MotionEvent, Transport};
+use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 /// Build an [`Engine`] whose graph is `sine → bell EQ → strip → limiter`,
@@ -52,7 +51,11 @@ fn build_engine_with_chain() -> Engine {
                 .gain(Db::new(6.0)),
         ),
     );
-    ed.insert(strip, "strip", BusStripNode::stereo());
+    ed.insert(
+        strip,
+        "strip",
+        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)),
+    );
     // The limiter's lookahead ring is sized at the prepared rate, on the
     // control thread, when the commit prepares it: outside the gate.
     ed.insert(
@@ -94,7 +97,7 @@ fn build_engine_with_chain() -> Engine {
         .expect("within the limits");
     // Every commit is sent; the editor only had to outlive the setup.
     drop(ed);
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     engine
 }
 

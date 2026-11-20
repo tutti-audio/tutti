@@ -259,7 +259,7 @@ pub struct Reference<F: Float = f32> {
     next_id: u64,
     cancelled: u64,
     /// What continuous playback has crossed — the reference's own record,
-    /// sharing no code with the executor's `Playhead`.
+    /// sharing no code with the executor's `BeatCrossings`.
     playhead: RefPlayhead,
     /// Between `suspend` and `resume`: the `Prepare` to adopt.
     suspended: Option<Prepare>,
@@ -2711,7 +2711,7 @@ fn walk(t: &TransportPosition, dist: f64) -> Vec<(f64, f64)> {
 
 /// The reference's record of continuous playback: every beat interval
 /// traversed since the last discontinuity, as a list. Deliberately naive and
-/// independent of the executor's `Playhead`, so a shared-decision bug in
+/// independent of the executor's `BeatCrossings`, so a shared-decision bug in
 /// either shows up as a divergence.
 #[derive(Default)]
 struct RefPlayhead {
@@ -2808,7 +2808,7 @@ impl RefPlayhead {
 impl<F: Float> Reference<F> {
     /// Where `cmd` lands this block: `Some(Some(offset))`, `Some(None)` for
     /// late (offset 0), or `None` for not yet. Written out from scratch —
-    /// no `Env::due`, no `Playhead` — so the executor's time logic has an
+    /// no `Env::due`, no `BeatCrossings` — so the executor's time logic has an
     /// independent check.
     fn land(
         &self,

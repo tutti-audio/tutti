@@ -13,11 +13,9 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
-use tutti_buffers::Mono;
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 
 use crate::support::{render_to_buffers, render_to_file};
-use tutti_buffers::ChannelTopology;
-use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
@@ -240,9 +238,7 @@ fn a_convolver_reports_its_ir_ring_out() {
     let ir = vec![0.5f32; 4096];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
     assert_eq!(
@@ -260,12 +256,8 @@ fn cascaded_convolvers_sum_their_tails() {
     let b = vec![0.5f32; 2048];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let first = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&a)))
-        .0;
-    let second = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&b)))
-        .0;
+    let first = g.add_with_controls(convolver(&a)).0;
+    let second = g.add_with_controls(convolver(&b)).0;
     g.connect(src, 0, first, 0)
         .connect(first, 0, second, 0)
         .pipe_output(second);
@@ -306,9 +298,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
     let quiet = g.add(ForkByClone(Unreporting));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, quiet, 0)
         .connect(quiet, 0, conv, 0)
         .pipe_output(conv);
@@ -407,9 +397,7 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
     let ir = vec![0.5f32; 4096];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
     let reported = built(g, RATE).reported_tail();
@@ -840,7 +828,7 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
     assert!(
         matches!(
             err,
-            tutti_export::Error::Unmeasurable {
+            tutti_export::RenderError::Unmeasurable {
                 reason: Unmeasured::BelowGate,
                 output: Some(0),
                 channels,
@@ -1004,7 +992,7 @@ fn normalizing_silence_is_refused() {
         let err = render_normalized_to_file(silence(), &cfg, &FrozenClock, normalize, &path)
             .expect_err("silence has no reading");
         assert!(
-            matches!(&err, tutti_export::Error::Unmeasurable { reason, .. } if *reason == want),
+            matches!(&err, tutti_export::RenderError::Unmeasurable { reason, .. } if *reason == want),
             "{err:?}"
         );
         assert!(!path.exists());
@@ -1123,7 +1111,7 @@ fn an_unmeasurable_rate_fails_rather_than_writing_un_normalized_audio() {
     .expect_err("an unmeasurable rate must not report success");
 
     assert!(
-        matches!(err, tutti_export::Error::Unmeasurable { .. }),
+        matches!(err, tutti_export::RenderError::Unmeasurable { .. }),
         "expected Unmeasurable, got {err:?}"
     );
 }
@@ -1279,7 +1267,7 @@ fn a_zero_width_export_is_rejected_not_a_divide_by_zero() {
     )
     .expect_err("a zero-channel render must not report success");
     assert!(
-        matches!(err, tutti_export::Error::UnsupportedChannels),
+        matches!(err, tutti_export::RenderError::UnsupportedChannels),
         "expected UnsupportedChannels, got {err:?}"
     );
 }
@@ -1290,7 +1278,7 @@ fn a_zero_width_export_is_rejected_not_a_divide_by_zero() {
 /// renders.
 #[test]
 fn a_graph_with_no_place_in_the_file_is_refused() {
-    use tutti_export::{ConfigError, Error};
+    use tutti_export::{ConfigError, RenderError};
     let five = || {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from(5u16));
         let id = g.add(Const::new(0.25, ChannelLayout::from(5u16)));
@@ -1306,7 +1294,7 @@ fn a_graph_with_no_place_in_the_file_is_refused() {
         assert!(
             matches!(
                 err,
-                Err(Error::InvalidConfig(ConfigError::Placement(
+                Err(RenderError::InvalidConfig(ConfigError::Placement(
                     tutti_buffers::FoldError::Unplaced { channel, .. }
                 ))) if channel == usize::from(width)
             ),
@@ -1337,7 +1325,7 @@ fn four_buses(root: Option<ChannelTopology>) -> RenderGraph {
 }
 
 /// The first frame of every plane of a render.
-fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_export::Error> {
+fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_export::RenderError> {
     let cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::from(width));
     let out = render_to_buffers(graph, &cfg, &FrozenClock)?;
     Ok(out.planes().iter().map(|p| p[0]).collect())
@@ -1367,15 +1355,15 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
     // Four buses cannot be placed in a stereo file.
     assert!(matches!(
         first_frame(&mut graph, 2),
-        Err(tutti_export::Error::InvalidConfig(ConfigError::Placement(
-            FoldError::Unplaced { channel: 2, .. }
-        )))
+        Err(tutti_export::RenderError::InvalidConfig(
+            ConfigError::Placement(FoldError::Unplaced { channel: 2, .. })
+        ))
     ));
     // A declaration of another width than the graph is refused.
     let mut graph = four_buses(Some(ChannelTopology::unassigned(ChannelLayout::from(6u16))));
     assert!(matches!(
         first_frame(&mut graph, 6),
-        Err(tutti_export::Error::InvalidConfig(ConfigError::Root(
+        Err(tutti_export::RenderError::InvalidConfig(ConfigError::Root(
             tutti_graph::RootError::Width { .. }
         )))
     ));
@@ -1467,4 +1455,13 @@ fn export_spends_the_ceiling_of_a_node_that_narrows_its_tail() {
     let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
     let duration = 8_820; // 0.2 s at 44.1 kHz
     assert_eq!(out.frames().get(), duration + 4_000);
+}
+
+/// A one-channel convolver over `ir`, with the default head partition.
+fn convolver(ir: &[f32]) -> tutti_nodes::ConvolverNode<f32> {
+    tutti_nodes::ConvolverNode::try_from(tutti_nodes::ConvolverConfig::new(
+        tutti_buffers::BusTopology::MONO,
+        &[Mono::new(ir)],
+    ))
+    .expect("one response on a mono bus")
 }

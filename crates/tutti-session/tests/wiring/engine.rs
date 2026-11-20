@@ -18,7 +18,7 @@ use tutti_graph::{TapAlign, TapOptions};
 use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
-use tutti_timeline::MotionEvent;
+use tutti_timeline::MotionCommand;
 use tutti_units::{Amplitude, Beat, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -49,7 +49,7 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
             transport
                 .schedule(
                     tutti_units::At::NextBlock,
-                    MotionEvent::Locate {
+                    MotionCommand::Locate {
                         beat: tutti_units::Beat::new(0.75),
                         fade: tutti_timeline::FadeOut::Immediate,
                         then: tutti_timeline::AfterLocate::Keep,
@@ -740,10 +740,10 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let motion = s.transport_handle();
     motion.play().expect("room");
     motion
-        .schedule(At::Frame(Frame::new(2_000)), MotionEvent::stop())
+        .schedule(At::Frame(Frame::new(2_000)), MotionCommand::stop())
         .expect("room");
     motion
-        .schedule(At::Frame(Frame::new(4_000)), MotionEvent::Play)
+        .schedule(At::Frame(Frame::new(4_000)), MotionCommand::Play)
         .expect("room");
     let (mut heard, mut tapped) = (Vec::new(), Vec::new());
     let mut block = vec![0.0f32; 64 * 2];
@@ -810,10 +810,10 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     let motion = s.transport_handle();
     motion.play().expect("room");
     motion
-        .schedule(At::Frame(Frame::new(2_000)), MotionEvent::stop())
+        .schedule(At::Frame(Frame::new(2_000)), MotionCommand::stop())
         .expect("room");
     motion
-        .schedule(At::Frame(Frame::new(4_000)), MotionEvent::Play)
+        .schedule(At::Frame(Frame::new(4_000)), MotionCommand::Play)
         .expect("room");
     let mut device = Vec::new();
     let mut block = vec![0.0f32; 64 * 2];

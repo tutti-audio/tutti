@@ -146,7 +146,7 @@ pub use tutti_rt::PushError;
 #[cfg(feature = "session")]
 pub use tutti_engine::{BlockCounts, Load};
 pub use tutti_timeline::{
-    AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
+    AfterLocate, FadeOut, LoopRegion, MotionCommand, MotionState, TransportCommand,
 };
 
 // Units, channels, buffers and the musical meter.
@@ -249,7 +249,8 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 ///
 /// ```
 /// use tutti::nodes::{ConvolverNode, FirConvolverConfig, LinearPhaseDesign, MatchedBell, Tilt};
-/// use tutti::{ChannelLayout, Db, Hz, Q, SampleRate, Samples};
+/// use tutti::types::BusTopology;
+/// use tutti::{Db, Hz, Q, SampleRate};
 ///
 /// let rate = SampleRate::SR_48K;
 /// let bands = [
@@ -257,18 +258,17 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let node: ConvolverNode<f32> = FirConvolverConfig::new(ChannelLayout::STEREO, &fir)
-///     .block_size(Samples::new(512))
-///     .build()
+/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(BusTopology::STEREO, &fir))
 ///     .unwrap();
 /// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
 /// ```
 pub mod nodes {
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
-        FirSummary, Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation,
-        LookaheadError, Matrix, MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap,
-        ResampleError, SimdLanes, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
+        FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
+        Line, LineModulation, LookaheadError, Matrix, MatrixConvolver, MatrixConvolverConfig,
+        MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap, ResampleError, SimdLanes,
+        SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, FirError,
@@ -293,28 +293,29 @@ pub mod nodes {
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
         BitCrusherControls, BitCrusherNode, BrickwallLimiterConfig, BrickwallLimiterNode,
-        BusStripNode, ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError,
-        ClickSettings, ClickState, CompressorConfig, CompressorControls, CompressorNode,
-        ConvolverError, ConvolverNode, CrossoverConfig, CrossoverControls, CrossoverError,
-        CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls, CutFilterNode,
-        DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayConfig, DelayControls, DelayLayout,
-        DelayLayoutBuilder, DelayLayoutError, DelayNode, DistortionConfig, DistortionNode,
-        DynamicEqConfig, DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
-        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandConfig, EqBandNode,
-        FdnConfig, FdnControls, FdnLayout, FdnNode, FeedbackRouting, FeedbackRoutingBuilder,
-        FeedbackRoutingError, FirConvolverConfig, FreeverbConfig, FreeverbControls, FreeverbNode,
-        FreezeMode, GateConfig, GateControls, GateNode, HrtfBinauralNode, InterpolationMode,
-        IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterConfig, LadderFilterNode,
-        LadderType, LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode,
-        LimiterConfig, LimiterControls, LimiterNode, MetronomeMode, ModDelayConfig,
-        ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandBands,
+        BusStripConfig, BusStripNode, ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel,
+        ClickLevelError, ClickSettings, ClickState, CompressorConfig, CompressorControls,
+        CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode, CrossoverConfig,
+        CrossoverControls, CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig,
+        CutFilterControls, CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
+        DelayConfig, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayNode,
+        DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
+        DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
+        EnvelopeFollowerNode, EqBandConfig, EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode,
+        FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
+        FreeverbConfig, FreeverbControls, FreeverbNode, FreezeMode, GateConfig, GateControls,
+        GateNode, HrtfBinauralConfig, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter,
+        KeySource, LadderControls, LadderFilterConfig, LadderFilterNode, LadderType,
+        LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode, LimiterConfig,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayConfig, ModDelayControls,
+        ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandBands,
         MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoteEnvelopeNode,
         OscillatorNode, OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode,
-        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, SOURCE_EVENT_CAPACITY,
-        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
-        SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError,
-        SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode,
-        TransientControls, TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind,
+        SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls,
+        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
+        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
+        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -407,14 +408,13 @@ pub mod graph {
     };
     pub use tutti_graph::{
         BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
-        Edge as GraphEdge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
-        ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
-        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput,
-        ParamKind, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell,
-        ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
-        SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
-        TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
-        TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+        Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild, ForkCause,
+        ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
+        HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
+        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
+        ParamSegment, Pass, PlayClock, RenderMode, Resolution, SilenceMask, Sink, SortedEvents,
+        Source, SubBlocks, TransportChange, TransportChangeRejected, TransportChanges,
+        TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -425,14 +425,13 @@ pub mod graph {
 #[cfg(feature = "session")]
 pub mod session {
     #[cfg(feature = "device")]
-    pub use tutti_cpal::Error as DeviceError;
+    pub use tutti_cpal::DeviceError;
     #[cfg(feature = "capture")]
     pub use tutti_cpal::MicConfig;
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
-        DeviceChange, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
-        Direction as DeviceDirection, Listed, OutputConfig, Snapshot, SnapshotSource,
-        SupportedConfig,
+        DeviceChange, DeviceDirection, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
+        Listed, OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
@@ -441,8 +440,7 @@ pub mod session {
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
-        ConfigError, Error as ExportError, JobError, Rendered, RenderedError, TargetError,
-        Unmeasured,
+        ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
         BusError, BusRef, BusSource, CloseError, CommitError, Inserted, MissingSource, MixError,

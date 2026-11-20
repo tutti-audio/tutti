@@ -38,7 +38,7 @@ use crossbeam_queue::ArrayQueue;
 use tutti_units::At;
 
 use super::loop_region::LoopEdit;
-use super::motion::MotionEvent;
+use super::motion::MotionCommand;
 
 /// Scheduled transport commands that may be in flight at once: sent and not
 /// yet applied or cancelled.
@@ -58,7 +58,7 @@ pub enum TransportCommand {
     /// A motion change (play, stop, seek, scrub): the state machine decides
     /// whether it applies, exactly as for
     /// [`try_send`](super::MotionFsm::try_send).
-    Motion(MotionEvent),
+    Motion(MotionCommand),
     /// Edit the loop region: move its bounds, or arm or disarm it
     /// ([`LoopEdit`]). The engine owns the region, so this is the only way
     /// to change it.
@@ -71,8 +71,8 @@ impl From<LoopEdit> for TransportCommand {
     }
 }
 
-impl From<MotionEvent> for TransportCommand {
-    fn from(event: MotionEvent) -> Self {
+impl From<MotionCommand> for TransportCommand {
+    fn from(event: MotionCommand) -> Self {
         Self::Motion(event)
     }
 }
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn a_full_schedule_refuses_and_hands_the_command_back() {
         let s = CommandQueue::new();
-        let play = TransportCommand::Motion(MotionEvent::Play);
+        let play = TransportCommand::Motion(MotionCommand::Play);
         for i in 0..SCHEDULE_CAPACITY {
             s.send(At::Frame(Frame::new(i as u64)), play).expect("room");
         }
@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn immediate_commands_have_a_reserve_timed_ones_cannot_use() {
         let s = CommandQueue::new();
-        let play = TransportCommand::Motion(MotionEvent::Play);
+        let play = TransportCommand::Motion(MotionCommand::Play);
         for i in 0..SCHEDULE_CAPACITY {
             s.send(At::Beat(tutti_units::Beat::new(1000.0 + i as f64)), play)
                 .expect("room");
@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn cancel_drops_what_was_sent_before_it() {
         let s = CommandQueue::new();
-        let play = TransportCommand::Motion(MotionEvent::Play);
+        let play = TransportCommand::Motion(MotionCommand::Play);
         s.send(At::Frame(Frame::new(10)), play).expect("room");
         s.send(At::Frame(Frame::new(20)), play).expect("room");
         s.cancel_all();

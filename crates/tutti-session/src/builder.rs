@@ -529,7 +529,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// The choice holds across every restart ([`Session::restart`](crate::Session),
     /// the device watch's restarts, and a restart onto any other device). A
     /// device that lacks the format fails that restart with
-    /// [`tutti_cpal::Error::OutputFormatUnavailable`], through the restart's
+    /// [`tutti_cpal::DeviceError::OutputFormatUnavailable`], through the restart's
     /// usual failure path, and never opens at another format. The same error
     /// fails [`build`](Self::build). A switch from the system clock
     /// ([`Session::into_device`](crate::Session)) takes its own
@@ -574,7 +574,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     ) -> Result<crate::LiveSession<&'static str, F>>
     where
         D: tutti_engine::StreamDriver<F>,
-        D::Error: Into<tutti_cpal::Error>,
+        D::Error: Into<tutti_cpal::DeviceError>,
     {
         let device = self.config.device().clone();
         self.build_on(

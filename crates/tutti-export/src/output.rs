@@ -335,7 +335,7 @@ pub enum Feed<F: Float = f32> {
     /// give each lane `2 x max_block` frames of ring, and commit before the
     /// render. A lane count that is not `lanes`' width is
     /// [`TargetError::Lanes`]; frames the ring lost are
-    /// [`Error::TapOverrun`](crate::Error::TapOverrun).
+    /// [`RenderError::TapOverrun`](crate::RenderError::TapOverrun).
     Tap {
         /// The tap's reader: the render is its one consumer.
         reader: TapReader<F>,
@@ -448,7 +448,7 @@ impl<F: Float> Produced<F> {
     }
 }
 
-/// Why an [`Output`] cannot be rendered ([`Error::Target`](crate::Error::Target)).
+/// Why an [`Output`] cannot be rendered ([`RenderError::Target`](crate::RenderError::Target)).
 #[derive(thiserror::Error, Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum TargetError {

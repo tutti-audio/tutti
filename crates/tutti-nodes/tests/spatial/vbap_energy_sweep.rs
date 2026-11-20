@@ -44,7 +44,7 @@ fn tick(node: &mut VbapPannerNode<f32>, input: [f32; 2], out: &mut [f32]) {
 /// light up more speakers than a point source at the same bearing does.
 #[test]
 fn spread_reaches_the_stereo_width_path() {
-    let mut node = VbapPannerNode::<f32>::surround_5_1();
+    let mut node = vbap::<f32>(tutti_buffers::Bed::Surround51);
     node.param_set().set(UnitParam::StereoWidth, 1.0); // the width>0 branch
     aim(&node.param_set(), Azimuth::new(0.0), Elevation::new(0.0));
 
@@ -65,4 +65,10 @@ fn spread_reaches_the_stereo_width_path() {
         "full spread lit {diffuse_lit} speakers and a point source lit \
          {point_lit} — spread is being dropped on the width>0 path"
     );
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
 }

@@ -4,19 +4,17 @@
 
 use tutti_graph::contract::{SAMPLE_RATE, assert_param_fork};
 use tutti_graph::{Node, ParamNode};
-use tutti_nodes::{HrtfBinauralNode, VbapPannerNode};
-use tutti_units::SampleRate;
+use tutti_nodes::HrtfBinauralNode;
 
 fn hrtf() -> HrtfBinauralNode<f32> {
     let rate = SAMPLE_RATE.get() as u32;
     let bytes = synthetic_hrir_sphere(rate, 64);
-    HrtfBinauralNode::<f32>::new(&bytes, SampleRate::from_hz(rate).unwrap())
-        .expect("the sphere parses")
+    hrtf_from::<f32>(&bytes).expect("the sphere parses")
 }
 
 #[test]
 fn vbap_forks_from_its_params() {
-    assert_param_fork(VbapPannerNode::<f32>::atmos_7_1_4());
+    assert_param_fork(vbap::<f32>(tutti_buffers::Bed::Surround714));
 }
 
 #[test]
@@ -28,7 +26,7 @@ fn hrtf_forks_from_its_params() {
 /// so a host reaches the cell a control signal rides on.
 #[test]
 fn a_panner_declares_every_param_it_reads() {
-    let vbap = VbapPannerNode::<f32>::stereo();
+    let vbap = vbap::<f32>(tutti_buffers::Bed::Stereo);
     assert_eq!(vbap.shape().params.as_slice().len(), 4);
     for p in vbap.shape().params.as_slice() {
         assert!(
@@ -87,4 +85,21 @@ fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
         }
     }
     b
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
+}
+
+/// A binaural node over the sphere in `bytes`, prepared at `rate`.
+fn hrtf_from<F: tutti_dsp::FftFloat>(
+    bytes: &[u8],
+) -> Result<tutti_nodes::HrtfBinauralNode<F>, tutti_dsp::HrtfBinauralError> {
+    Ok(tutti_nodes::HrtfBinauralNode::from(
+        tutti_nodes::HrtfBinauralConfig::new(std::sync::Arc::new(
+            tutti_dsp::HrirSphere::from_bytes(bytes)?,
+        )),
+    ))
 }

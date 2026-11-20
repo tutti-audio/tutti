@@ -1,6 +1,5 @@
 use super::*;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::Planes;
+use tutti_buffers::{MaxBlock, Planes};
 use tutti_graph::contract::{drive, prepared};
 use tutti_units::{Gain, UnitParam};
 
@@ -34,7 +33,7 @@ fn tick_at(node: &mut VbapPannerNode<f32>, rate: SampleRate, input: &[f32; 2], o
 
 #[test]
 fn vbap_panner_tick() {
-    let mut panner = prep(VbapPannerNode::<f32>::stereo());
+    let mut panner = prep(vbap::<f32>(tutti_buffers::Bed::Stereo));
     aim(&panner.param_set(), Azimuth::new(0.0), Elevation::new(0.0));
 
     let input = [1.0f32, 1.0f32];
@@ -60,7 +59,7 @@ fn vbap_panner_tick() {
 /// error raised.
 #[test]
 fn reset_keeps_the_authored_placement() {
-    let mut panner = prep(VbapPannerNode::<f32>::surround_5_1());
+    let mut panner = prep(vbap::<f32>(tutti_buffers::Bed::Surround51));
     aim(
         &panner.param_set(),
         Azimuth::new(45.0),
@@ -113,7 +112,7 @@ fn reset_seats_the_ramp_on_the_commanded_position() {
     for (bearing, lead, silent) in [(90.0f64, 0usize, 1usize), (-90.0, 1, 0)] {
         // Where the panner ends up once the 50 ms ramp has run out: a hard
         // pan, so the opposite channel is silent.
-        let mut settled = prep(VbapPannerNode::<f32>::stereo());
+        let mut settled = prep(vbap::<f32>(tutti_buffers::Bed::Stereo));
         aim(
             &settled.param_set(),
             Azimuth::new(bearing),
@@ -130,7 +129,7 @@ fn reset_seats_the_ramp_on_the_commanded_position() {
 
         // The node has rendered at front-centre, then is aimed and reset: the
         // reset drops the ramp that would carry it there.
-        let mut panner = prep(VbapPannerNode::<f32>::stereo());
+        let mut panner = prep(vbap::<f32>(tutti_buffers::Bed::Stereo));
         let mut scratch = [0.0f32; 2];
         for _ in 0..64 {
             tick(&mut panner, &input, &mut scratch);
@@ -156,14 +155,14 @@ fn reset_seats_the_ramp_on_the_commanded_position() {
 fn a_bearing_written_after_the_first_block_ramps() {
     let input = [1.0f32, 1.0f32];
 
-    let mut settled = prep(VbapPannerNode::<f32>::stereo());
+    let mut settled = prep(vbap::<f32>(tutti_buffers::Bed::Stereo));
     aim(&settled.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
     let mut reference = [0.0f32; 2];
     for _ in 0..48_000 {
         tick(&mut settled, &input, &mut reference);
     }
 
-    let mut panner = prep(VbapPannerNode::<f32>::stereo());
+    let mut panner = prep(vbap::<f32>(tutti_buffers::Bed::Stereo));
     let mut scratch = [0.0f32; 2];
     tick(&mut panner, &input, &mut scratch);
     aim(&panner.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
@@ -183,7 +182,7 @@ fn a_bearing_written_after_the_first_block_ramps() {
 /// render was cloned from.
 #[test]
 fn reset_on_a_clone_does_not_move_the_original() {
-    let panner = VbapPannerNode::<f32>::stereo();
+    let panner = vbap::<f32>(tutti_buffers::Bed::Stereo);
     aim(
         &panner.param_set(),
         Azimuth::new(-60.0),
@@ -230,7 +229,7 @@ fn reset_on_a_clone_does_not_move_the_original() {
 /// other.
 #[test]
 fn vbap_clone_shares_atomics() {
-    let panner = VbapPannerNode::<f32>::stereo();
+    let panner = vbap::<f32>(tutti_buffers::Bed::Stereo);
     let cloned = panner.clone();
 
     // -- target: azimuth + elevation, set on the original.
@@ -304,7 +303,7 @@ fn vbap_clone_shares_atomics() {
 #[test]
 fn a_clone_ramps_at_the_originals_sample_rate() {
     let rate = SampleRate::SR_96K;
-    let mut original = prepared(VbapPannerNode::<f32>::stereo(), rate, 64);
+    let mut original = prepared(vbap::<f32>(tutti_buffers::Bed::Stereo), rate, 64);
     let mut clone = original.clone();
     let (mut a, mut b) = ([0.0f32; 2], [0.0f32; 2]);
     tick_at(&mut original, rate, &[1.0, 1.0], &mut a);
@@ -332,7 +331,7 @@ fn a_non_finite_control_reads_as_unchanged() {
     let bad = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
     for value in bad {
         for which in 0..4 {
-            let mut node = prep(VbapPannerNode::<f32>::surround_5_1());
+            let mut node = prep(vbap::<f32>(tutti_buffers::Bed::Surround51));
             aim(&node.param_set(), Azimuth::new(30.0), Elevation::LEVEL);
             let (mut out, input) = ([0.0f32; 6], [0.5f32, -0.25]);
             let mut all_finite = true;
@@ -374,7 +373,7 @@ fn the_inserted_params_move_the_running_node() {
     use tutti_units::Samples;
 
     let mut solo = Standalone::new(
-        VbapPannerNode::<f32>::stereo(),
+        vbap::<f32>(tutti_buffers::Bed::Stereo),
         Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
     );
     aim(solo.controls(), Azimuth::new(90.0), Elevation::LEVEL);
@@ -424,7 +423,7 @@ fn a_channels_speaker_skips_the_lfe() {
 /// its cell as the base the graph's modulation rides on.
 #[test]
 fn the_panner_declares_its_params() {
-    let node = VbapPannerNode::<f32>::stereo();
+    let node = vbap::<f32>(tutti_buffers::Bed::Stereo);
     node.azimuth.store(Azimuth::new(10.0));
     node.elevation.store(Elevation::new(20.0));
     node.spread.store(Spread::new(0.3));
@@ -475,7 +474,7 @@ fn a_signal_drives_each_param_as_its_cell_would() {
         (2, UnitParam::Spread, 0.8),
         (3, UnitParam::StereoWidth, 0.2),
     ] {
-        let fresh = || prep(VbapPannerNode::<f32>::atmos_7_1_4());
+        let fresh = || prep(vbap::<f32>(tutti_buffers::Bed::Surround714));
         let mut default = fresh();
         let at_default = settle(&mut default, None);
 
@@ -514,7 +513,7 @@ fn a_signal_drives_each_param_as_its_cell_would() {
 fn a_signal_driven_bearing_crosses_the_seam_the_short_way() {
     let ones = [1.0f32; 64];
     let at = |bearing: f64| {
-        let mut node = prep(VbapPannerNode::<f32>::quad());
+        let mut node = prep(vbap::<f32>(tutti_buffers::Bed::Quad));
         node.azimuth.store(Azimuth::new(bearing));
         Node::reset(&mut node);
         drive(
@@ -537,7 +536,7 @@ fn a_signal_driven_bearing_crosses_the_seam_the_short_way() {
         "the rear pair carries both ends: {start:?} {end:?}"
     );
 
-    let mut node = prep(VbapPannerNode::<f32>::quad());
+    let mut node = prep(vbap::<f32>(tutti_buffers::Bed::Quad));
     node.azimuth.store(Azimuth::new(170.0));
     Node::reset(&mut node);
     let signal = [190.0f32; 64];
@@ -572,7 +571,7 @@ fn a_signal_driven_bearing_crosses_the_seam_the_short_way() {
 /// The gains of a source at `azimuth` on the horizon: one per placed speaker,
 /// by the layout's own solve.
 fn solve(bed: Bed, azimuth: Azimuth) -> Vec<Gain> {
-    let layout = SpeakerLayout::from_bed(bed).unwrap();
+    let layout = SpeakerLayout::try_from(bed).unwrap();
     let mut gains = vec![Gain::SILENT; speaker_of_channel(bed).iter().flatten().count()];
     layout.gains_into(azimuth, Elevation::LEVEL, Spread::POINT, &mut gains);
     gains
@@ -601,7 +600,7 @@ fn the_cell_ramp_is_fifty_milliseconds_to_a_grid_period_at_every_rate() {
 #[test]
 fn a_bearing_step_across_the_seam_ramps_along_the_short_arc() {
     for rate in [SampleRate::SR_48K, SampleRate::SR_44K1, SampleRate::SR_96K] {
-        let mut node = prepared(VbapPannerNode::<f32>::quad(), rate, GRID);
+        let mut node = prepared(vbap::<f32>(tutti_buffers::Bed::Quad), rate, GRID);
         let params = node.param_set();
         params.set(UnitParam::StereoWidth, 0.0);
         params.set(UnitParam::Azimuth, 170.0);
@@ -645,7 +644,7 @@ fn a_bearing_step_across_the_seam_ramps_along_the_short_arc() {
 #[test]
 fn a_move_between_grid_points_starts_at_the_next_one() {
     let ones = [1.0f32; 24];
-    let mut node = prep(VbapPannerNode::<f32>::surround_5_1());
+    let mut node = prep(vbap::<f32>(tutti_buffers::Bed::Surround51));
     node.param_set().set(UnitParam::StereoWidth, 0.0);
     // Frames 0..8 of the first segment, then the write, then the rest.
     let head = drive(
@@ -691,7 +690,7 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
 /// tens of degrees.
 #[test]
 fn a_signal_driven_bearing_is_followed_to_the_grid_period() {
-    let mut node = prep(VbapPannerNode::<f32>::quad());
+    let mut node = prep(vbap::<f32>(tutti_buffers::Bed::Quad));
     node.param_set().set(UnitParam::StereoWidth, 0.0);
     let ones = [1.0f32; GRID];
     // The control signal is the graph's `f32`: the bearing narrows into it.
@@ -723,5 +722,16 @@ fn a_signal_driven_bearing_is_followed_to_the_grid_period() {
 /// constants of the grid, so the render of a mixture is the mixture of the renders.
 #[test]
 fn in_an_f64_graph_the_panner_is_linear_on_wide_signals() {
-    crate::test_support::assert_linear(VbapPannerNode::<f64>::stereo, SampleRate::SR_48K, 2, 1_024);
+    crate::test_support::assert_linear(
+        || vbap::<f64>(tutti_buffers::Bed::Stereo),
+        SampleRate::SR_48K,
+        2,
+        1_024,
+    );
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> crate::VbapPannerNode<F> {
+    crate::VbapPannerNode::try_from(crate::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
 }

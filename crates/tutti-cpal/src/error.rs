@@ -1,17 +1,16 @@
 //! Errors from the device layer.
 
-use thiserror::Error;
 use tutti_engine::StartError;
 
 /// A failure opening, configuring, or running an audio device.
 ///
 /// Every variant is a device concern; failures from other subsystems (synth,
 /// plugin, export) are the host's to aggregate. Errors reported by a stream
-/// that is already running do not come back as an `Error`: CPAL delivers them
+/// that is already running do not come back as a `DeviceError`: CPAL delivers them
 /// to [`StreamFaults`](tutti_engine::StreamFaults).
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
-pub enum Error {
+pub enum DeviceError {
     /// No default output stream config was available from the host.
     #[error("Audio device not available")]
     DeviceNotAvailable(#[source] cpal::Error),
@@ -139,13 +138,13 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-impl From<std::convert::Infallible> for Error {
+impl From<std::convert::Infallible> for DeviceError {
     fn from(never: std::convert::Infallible) -> Self {
         match never {}
     }
 }
 
-impl<E: std::error::Error + Into<Error> + 'static> From<StartError<E>> for Error {
+impl<E: std::error::Error + Into<DeviceError> + 'static> From<StartError<E>> for DeviceError {
     fn from(err: StartError<E>) -> Self {
         match err {
             StartError::AlreadyRunning => Self::AlreadyRunning,
@@ -156,5 +155,5 @@ impl<E: std::error::Error + Into<Error> + 'static> From<StartError<E>> for Error
     }
 }
 
-/// Convenience alias for `Result<T, `[`enum@Error`]`>`.
-pub type Result<T> = core::result::Result<T, Error>;
+/// Convenience alias for `Result<T, `[`enum@DeviceError`]`>`.
+pub type Result<T> = core::result::Result<T, DeviceError>;

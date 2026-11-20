@@ -8,9 +8,9 @@
 
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
-use crate::error::{Error, Result};
+use crate::error::{DeviceError, Result};
 use crate::host::{AudioHost, DeviceHost};
-use crate::roster::{DeviceId, Direction};
+use crate::roster::{DeviceDirection, DeviceId};
 
 /// What [`DeviceListing::poll`] found.
 #[derive(Debug)]
@@ -20,7 +20,7 @@ pub enum Listed {
     /// The host's output devices.
     Devices(Vec<DeviceId>),
     /// The enumeration failed, or its thread ended without an answer.
-    Failed(Error),
+    Failed(DeviceError),
 }
 
 /// A thread enumerating a host's output devices once.
@@ -39,12 +39,12 @@ impl DeviceListing {
     /// host (no host crosses a thread).
     ///
     /// # Errors
-    /// [`Error::InvalidConfig`] when the thread cannot be spawned.
+    /// [`DeviceError::InvalidConfig`] when the thread cannot be spawned.
     pub fn outputs(host: AudioHost) -> Result<Self> {
         Self::spawn_with(move || {
             Ok(DeviceHost::open(host)?
                 .snapshot()?
-                .devices(Direction::Output)
+                .devices(DeviceDirection::Output)
                 .to_vec())
         })
     }
@@ -52,7 +52,7 @@ impl DeviceListing {
     /// Runs `list` once on a new thread: the seam a test enumerates through.
     ///
     /// # Errors
-    /// [`Error::InvalidConfig`] when the thread cannot be spawned.
+    /// [`DeviceError::InvalidConfig`] when the thread cannot be spawned.
     pub fn spawn_with(
         list: impl FnOnce() -> Result<Vec<DeviceId>> + Send + 'static,
     ) -> Result<Self> {
@@ -62,7 +62,7 @@ impl DeviceListing {
             // The receiver may be gone by now; nobody wants the answer.
             let _ = tx.send(list());
         })
-        .map_err(|e| Error::InvalidConfig(format!("cannot start the device listing: {e}")))?
+        .map_err(|e| DeviceError::InvalidConfig(format!("cannot start the device listing: {e}")))?
         .detach();
         Ok(Self {
             result,
@@ -80,7 +80,7 @@ impl DeviceListing {
             Ok(Ok(devices)) => Listed::Devices(devices),
             Ok(Err(e)) => Listed::Failed(e),
             Err(TryRecvError::Empty) => return Listed::Pending,
-            Err(TryRecvError::Disconnected) => Listed::Failed(Error::ListingEnded),
+            Err(TryRecvError::Disconnected) => Listed::Failed(DeviceError::ListingEnded),
         };
         self.done = true;
         listed
@@ -140,7 +140,7 @@ mod tests {
             }
         };
         assert!(
-            matches!(listed, Listed::Failed(Error::ListingEnded)),
+            matches!(listed, Listed::Failed(DeviceError::ListingEnded)),
             "{listed:?}"
         );
     }

@@ -441,7 +441,7 @@ struct UnopenableCard;
 
 impl tutti_engine::StreamDriver for UnopenableCard {
     type Running = Never;
-    type Error = tutti_cpal::Error;
+    type Error = tutti_cpal::DeviceError;
 
     fn open(
         self,
@@ -449,7 +449,7 @@ impl tutti_engine::StreamDriver for UnopenableCard {
         _: tutti_engine::OutputBlock,
         _: std::sync::Arc<tutti_engine::StreamFaults>,
     ) -> Result<Never, Self::Error> {
-        Err(tutti_cpal::Error::InvalidDevice(
+        Err(tutti_cpal::DeviceError::InvalidDevice(
             "a card that will not open".into(),
         ))
     }
@@ -653,7 +653,7 @@ impl Drop for ThreadedRunning {
 
 impl tutti_engine::StreamDriver for ThreadedCard {
     type Running = ThreadedRunning;
-    type Error = tutti_cpal::Error;
+    type Error = tutti_cpal::DeviceError;
 
     fn open(
         self,

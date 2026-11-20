@@ -47,7 +47,9 @@ fn the_opened_name_tells_a_supplied_driver_from_an_unnamed_device() {
     let mut driver = driver_over(engine);
     let (manual, _stream) = ManualStreamDriver::new();
     driver
-        .switch(manual_spec(), manual, |_, _| Ok::<(), crate::Error>(()))
+        .switch(manual_spec(), manual, |_, _| {
+            Ok::<(), crate::DeviceError>(())
+        })
         .unwrap();
     assert_eq!(driver.opened_name().unwrap(), None);
 }
@@ -63,7 +65,7 @@ fn a_failed_restart_keeps_the_opened_name() {
     let (manual, _stream) = ManualStreamDriver::new();
     driver
         .switch(manual_spec(), manual, |_, _| {
-            Err(crate::Error::InvalidConfig("refused".into()))
+            Err(crate::DeviceError::InvalidConfig("refused".into()))
         })
         .expect_err("the hook refuses");
     assert_eq!(driver.opened_name().unwrap().as_deref(), Some("Card"));
@@ -92,7 +94,7 @@ fn starting_a_running_engine_is_an_error() {
     let err = engine
         .start_with(Arc::clone(&state), second)
         .expect_err("a running engine refuses a second start");
-    assert!(matches!(err, Error::AlreadyRunning), "{err}");
+    assert!(matches!(err, DeviceError::AlreadyRunning), "{err}");
     assert!(first_stream.is_open(), "the running stream is untouched");
     assert!(!second_stream.is_open(), "the refused driver never opened");
 
