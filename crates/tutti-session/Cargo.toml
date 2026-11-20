@@ -58,7 +58,7 @@ tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", optional = true }
 tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features = false, optional = true }
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
-# The font a `soundfont` pool entry opens (`tutti-soundfont` does not re-export it).
+# The font `load_soundfont` parses (`tutti-soundfont` does not re-export it).
 tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2", optional = true }
 tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth", optional = true }
 tutti-export = { version = "0.0.1", path = "../tutti-export", default-features = false, optional = true }

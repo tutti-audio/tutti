@@ -7,7 +7,7 @@ use std::fmt;
 use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
-use tutti_platform::{Asset, Identity, MainThreadMarker};
+use tutti_platform::MainThreadMarker;
 
 use crate::job::Ticket;
 use crate::pool::config::PoolConfig;
@@ -16,7 +16,6 @@ use crate::pool::entry::{
     Staged, Step, Value,
 };
 use crate::pool::key::PoolKey;
-use crate::pool::refresh::{Checked, RefreshError, RefreshReport, Stamped};
 use crate::pool::report::{PoolOutcome, PoolReport};
 use crate::{Clock, PoolLoaded, SessionEvent};
 
@@ -204,11 +203,6 @@ struct Slot<S: Float> {
     parked: bool,
     /// What the kind does with the value when the entry parks.
     retain: fn(Value) -> Option<Value>,
-    /// What the load reads.
-    asset: Option<Asset>,
-    /// The asset's identity as the worker took it before the load that made the
-    /// loaded value read it.
-    loaded_from: Option<Identity>,
     life: Life,
     loaded: Option<Value>,
     state: PoolState,
@@ -294,16 +288,12 @@ struct Flight {
     share: Option<Cloner>,
     /// The load has a stage on the main thread.
     needs_main: bool,
-    /// The identity the worker took of the entries' asset.
-    loaded_from: Option<Identity>,
 }
 
-/// A worker stage the pool let start: its flight, the stage, and the asset whose
-/// identity the worker takes before running it.
+/// A worker stage the pool let start: its flight and the stage.
 pub(crate) struct Worker {
     pub(crate) flight: u64,
     pub(crate) work: Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>,
-    pub(crate) asset: Option<Asset>,
 }
 
 /// A worker stage waiting for a free worker.
@@ -527,7 +517,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             reload,
             lost,
             retain,
-            asset,
             share,
             ..
         } = item;
@@ -547,8 +536,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     pins: Arc::new(()),
                     parked: false,
                     retain,
-                    asset,
-                    loaded_from: None,
                     life: Life::new(),
                     loaded: None,
                     state: PoolState::Loading,
@@ -570,7 +557,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         slot.reload = reload;
         slot.lost = lost;
         slot.retain = retain;
-        slot.asset = asset;
         slot.share = share;
         if slot.parked {
             // Its value was released: the recall loads it again.
@@ -614,10 +600,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             Stage::Loading
         };
         if self.slots[key].share.is_some() {
-            if let Some((copy, loaded_from)) = self.sibling_value(key) {
+            if let Some(copy) = self.sibling_value(key) {
                 let slot = self.slots.get_mut(key).expect("the slot is declared");
                 slot.generation = generation;
-                self.land_slot(key, Ok(copy), loaded_from);
+                self.land_slot(key, Ok(copy));
                 return None;
             }
             if let Some(flight) = self.sibling_flight(key) {
@@ -643,7 +629,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                 stage,
                 share: slot.share,
                 needs_main,
-                loaded_from: None,
             },
         );
         Some(Start {
@@ -653,8 +638,8 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     }
 
     /// A copy of the value another key's entry of `key`'s kind and identity
-    /// has loaded, with the identity it was read under.
-    fn sibling_value(&self, key: &PoolKey) -> Option<(Value, Option<Identity>)> {
+    /// has loaded.
+    fn sibling_value(&self, key: &PoolKey) -> Option<Value> {
         let own = &self.slots[key];
         self.slots.iter().find_map(|(other, slot)| {
             let alike = other != key
@@ -669,7 +654,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     .as_ref()
                     .filter(|value| !(slot.lost)(value))
                     .and_then(|value| own.share?(value))
-                    .map(|copy| (copy, slot.loaded_from.clone()))
             } else {
                 None
             }
@@ -778,28 +762,11 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             let Queued { flight, work } = self.queue.pop_front()?;
             if self.live(flight) {
                 self.running += 1;
-                let asset = self.flights.get(&flight).and_then(|flight_| {
-                    flight_
-                        .targets
-                        .iter()
-                        .find_map(|key| self.slots.get(key)?.asset.clone())
-                });
-                return Some(Worker {
-                    flight,
-                    work,
-                    asset,
-                });
+                return Some(Worker { flight, work });
             }
             self.flights.remove(&flight);
         }
         None
-    }
-
-    /// The identity the worker took of a flight's asset before its load read it.
-    pub(crate) fn stamped(&mut self, flight: u64, loaded_from: Option<Identity>) {
-        if let Some(flight_) = self.flights.get_mut(&flight) {
-            flight_.loaded_from = loaded_from;
-        }
     }
 
     /// A started worker stage ended.
@@ -847,13 +814,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// result nothing waits on (the key was released, or its identity changed
     /// since the load started) is dropped.
     pub(crate) fn land(&mut self, flight: u64, done: Result<Value, LoadError>) {
-        let Some(Flight {
-            targets,
-            share,
-            loaded_from,
-            ..
-        }) = self.flights.remove(&flight)
-        else {
+        let Some(Flight { targets, share, .. }) = self.flights.remove(&flight) else {
             return;
         };
         let waiting: Vec<PoolKey> = targets
@@ -876,17 +837,12 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     .expect("a flight of several entries shares its kind's value")),
                 Err(error) => Err(error.clone()),
             };
-            self.land_slot(key, copy, loaded_from.clone());
+            self.land_slot(key, copy);
         }
-        self.land_slot(last, done, loaded_from);
+        self.land_slot(last, done);
     }
 
-    fn land_slot(
-        &mut self,
-        key: &PoolKey,
-        done: Result<Value, LoadError>,
-        loaded_from: Option<Identity>,
-    ) {
+    fn land_slot(&mut self, key: &PoolKey, done: Result<Value, LoadError>) {
         let Some(slot) = self.slots.get_mut(key) else {
             return;
         };
@@ -898,7 +854,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         let event = match done {
             Ok(value) => {
                 slot.loaded = Some(value);
-                slot.loaded_from = loaded_from;
                 slot.state = PoolState::Loaded;
                 if reloaded {
                     PoolEvent::Reloaded
@@ -907,7 +862,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                 }
             }
             Err(error) => {
-                slot.loaded_from = None;
                 slot.state = PoolState::Failed(error.clone());
                 PoolEvent::Failed(error)
             }
@@ -1145,77 +1099,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         self.last_when
     }
 
-    /// The declared, loaded entries that read an asset, with the asset and the
-    /// identity it was read under, `None` for one whose stat failed at its load
-    /// (the refresh tries again).
-    pub(crate) fn stamped_files(&self) -> Vec<Stamped> {
-        self.slots
-            .iter()
-            .filter(|(_, slot)| slot.declared && matches!(slot.state, PoolState::Loaded))
-            .filter_map(|(key, slot)| {
-                Some(Stamped {
-                    key: key.clone(),
-                    asset: slot.asset.clone()?,
-                    was: slot.loaded_from.clone(),
-                    generation: slot.generation,
-                })
-            })
-            .collect()
-    }
-
-    /// Loads again each entry whose asset's identity moved from the one it was
-    /// read under, and reports what moved and what could not be read.
-    ///
-    /// # Errors
-    ///
-    /// [`RefreshError::Stale`] when an entry checked no longer has the
-    /// generation it was cut at (released, declared again, loaded again);
-    /// nothing is applied then.
-    pub(crate) fn reload_changed(
-        &mut self,
-        checked: Vec<Checked>,
-    ) -> Result<(Vec<Start<C::Float>>, RefreshReport), RefreshError> {
-        if checked.iter().any(|entry| {
-            self.slots.get(&entry.key).map(|slot| slot.generation) != Some(entry.generation)
-        }) {
-            return Err(RefreshError::Stale);
-        }
-        let mut refreshed = RefreshReport::default();
-        for Checked { key, was, now, .. } in checked {
-            let current = self.slots.get(&key).is_some_and(|slot| {
-                slot.declared && matches!(slot.state, PoolState::Loaded) && slot.loaded_from == was
-            });
-            if !current {
-                continue;
-            }
-            match now {
-                Ok(Some(now)) if Some(&now) == was.as_ref() => {}
-                Ok(Some(_)) => refreshed.reloaded.push(key),
-                // No identity to compare: the asset is not watched.
-                Ok(None) => {}
-                Err(kind) => refreshed.unreadable.push((key, kind)),
-            }
-        }
-        // Every entry that reloads is pending before any starts, so two keys
-        // of one file share one load and neither takes the other's old value.
-        for key in &refreshed.reloaded {
-            if let Some(slot) = self.slots.get_mut(key) {
-                slot.state = PoolState::Reloading;
-                slot.at_main = false;
-            }
-        }
-        let starts = refreshed
-            .reloaded
-            .clone()
-            .iter()
-            .filter_map(|key| {
-                let load = (self.slots[key].reload)();
-                self.begin(key, load)
-            })
-            .collect();
-        Ok((starts, refreshed))
-    }
-
     /// How many waits are registered.
     #[cfg(test)]
     pub(crate) fn waiting(&self) -> usize {
@@ -1253,16 +1136,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
 
     /// `E`'s handle for the loaded entry under `key`.
     #[cfg_attr(
-        not(any(
-            test,
-            all(feature = "sampler", codec),
-            feature = "soundfont",
-            feature = "plugin",
-            feature = "midi"
-        )),
+        not(any(test, feature = "plugin", feature = "midi")),
         expect(
             dead_code,
-            reason = "the readers of the kinds (features `sampler` with a decoder, `soundfont`, `plugin`, `midi`) are its callers"
+            reason = "the readers of the kinds (features `plugin`, `midi`) are its callers"
         )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>

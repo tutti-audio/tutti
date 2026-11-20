@@ -1,18 +1,17 @@
 //! A stream the app reads (`open_stream(..).run()`) is applied to the session:
 //! two opens are two streams, a missing file fails its run with the typed error,
-//! another session's read is refused as stale, and a clip over a pool
-//! `audio_file` entry plays the file's own samples from either tier.
+//! another session's read is refused as stale, and a clip over a `load_audio`
+//! handle plays the file's own samples from either tier.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, StreamPhase, StreamStart};
-use tutti_session::{
-    AudioEntry, OpenStreamError, OutPort, PoolState, Root, SamplerError, Session, audio_file,
-};
+use tutti_session::{OpenStreamError, OutPort, Root, SamplerError, Session, Tier};
 use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -103,33 +102,32 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
     ));
 }
 
-/// The clip over the file's `audio_file` entry, declared in `tier`: the wave of
-/// a resident entry, the stream a streamed entry's path opens.
+/// The clip over the file's `load_audio` handle, loaded in the tier `streamed`
+/// names: the wave of a resident load, the stream a streamed load's path opens.
 /// The session is returned with the clip: it owns the streamer that feeds a
 /// streamed clip's ring, which ends with it.
 fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
     let mut s = session();
-    let entry = audio_file("ramp", path);
-    s.pool(if streamed { entry.streamed() } else { entry })
-        .expect("a declaration");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)) {
-        assert!(Instant::now() < deadline, "the entry never loaded");
-        let _ = s.update();
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    let clip = match s.audio(&"ramp").expect("loaded") {
-        AudioEntry::Resident(wave) => tutti_sampler::Clip::new(wave).expect("a placeable wave"),
-        AudioEntry::Streamed(info) => {
-            let opened = s
-                .open_stream(info.asset().clone(), StreamStart::HEAD)
-                .expect("a streamer")
-                .run()
-                .expect("the file reads");
-            let (stream, reader) = s.apply(opened).expect("the session serves it");
-            tutti_sampler::Clip::streaming(reader, stream)
-        }
-        other => panic!("unexpected entry {other:?}"),
+    let audio = s
+        .load_audio(path)
+        .tier(if streamed {
+            Tier::Streamed
+        } else {
+            Tier::Resident
+        })
+        .run()
+        .expect("loads");
+    let clip = if let Some(wave) = audio.wave() {
+        tutti_sampler::Clip::new(Arc::clone(wave)).expect("a placeable wave")
+    } else {
+        let info = audio.stream().expect("a load is resident or streamed");
+        let opened = s
+            .open_stream(info.as_ref(), StreamStart::HEAD)
+            .expect("a streamer")
+            .run()
+            .expect("the file reads");
+        let (stream, reader) = s.apply(opened).expect("the session serves it");
+        tutti_sampler::Clip::streaming(reader, stream)
     };
     (s, clip)
 }
@@ -222,19 +220,9 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
     }
 }
 
-/// Updates until the entry under `key` has landed.
-fn settle(s: &mut Session, key: &'static str) {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while !matches!(s.pool_state(&key), Some(PoolState::Loaded)) {
-        assert!(Instant::now() < deadline, "the entry never loaded");
-        let _ = s.update();
-        std::thread::sleep(Duration::from_millis(1));
-    }
-}
-
 /// **`auto` decides by the file's decoded size.** A short file reads resident,
 /// holding the ramp the test wrote (frame `i` is `value(i)`); one past
-/// `AudioFile::STREAM_ABOVE_BYTES` of decoded audio reads streamed, with the
+/// `Tier::STREAM_ABOVE_BYTES` of decoded audio reads streamed, with the
 /// frame count the test wrote. (The long file is 16-bit mono, whose decoded
 /// `f32` form is twice its size on disk.)
 #[test]
@@ -243,7 +231,7 @@ fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
     let short = dir.path().join("short.wav");
     write_ramp(&short);
     let long = dir.path().join("long.wav");
-    let frames = (tutti_session::AudioFile::STREAM_ABOVE_BYTES / 4) as usize + 1;
+    let frames = (Tier::STREAM_ABOVE_BYTES / 4) as usize + 1;
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: 8_000,
@@ -256,44 +244,28 @@ fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
     }
     w.finalize().expect("finalizes");
 
-    let mut s = session();
-    s.pool((
-        audio_file("short", &short).auto(),
-        audio_file("long", &long).auto(),
-    ))
-    .expect("a declaration");
-    settle(&mut s, "short");
-    settle(&mut s, "long");
-    let AudioEntry::Resident(wave) = s.audio(&"short").expect("loaded") else {
-        panic!("a short file is resident");
-    };
+    let s = session();
+    let short = s.load_audio(&short).run().expect("loads");
+    let long = s.load_audio(&long).run().expect("loads");
+    let wave = short.wave().expect("a short file is resident");
     for i in 0..LEN {
         assert_eq!(wave.at(0, i), value(i), "frame {i}");
     }
-    let AudioEntry::Streamed(info) = s.audio(&"long").expect("loaded") else {
-        panic!("a file past the line streams");
-    };
+    let info = long.stream().expect("a file past the line streams");
     assert_eq!(info.facts().frames.map(|f| f.get()), Some(frames));
 }
 
-/// The threshold is part of the identity: a file under the default line reads
-/// streamed under a lower one, after a reload.
+/// **`Tier::Auto { above }` compares the decoded size with `above`.** A file
+/// under the default line reads streamed under a threshold one byte below its
+/// decoded size, and resident at its decoded size.
 #[test]
-fn the_threshold_is_part_of_the_identity() {
+fn the_threshold_is_the_files_decoded_size() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
-    s.pool(audio_file("a", &path).auto())
-        .expect("a declaration");
-    settle(&mut s, "a");
-    assert!(matches!(s.audio(&"a"), Ok(AudioEntry::Resident(_))));
-    s.pool(audio_file("a", &path).streamed_above((LEN as u64) * 4 - 1))
-        .expect("a declaration");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !matches!(s.audio(&"a"), Ok(AudioEntry::Streamed(_))) {
-        assert!(Instant::now() < deadline, "the entry never reloaded");
-        let _ = s.update();
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    let s = session();
+    let decoded = (LEN as u64) * 4;
+    let load = |above| s.load_audio(&path).tier(Tier::Auto { above }).run();
+    assert!(load(decoded).expect("loads").wave().is_some());
+    assert!(load(decoded - 1).expect("loads").stream().is_some());
 }

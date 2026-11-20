@@ -1,7 +1,8 @@
-//! An `f64` session serves the pool and the spawner: an `audio_file` entry
-//! loads its resident wave in `f64`, and a disk stream opens, lands and its
+//! An `f64` session serves the loads and the spawner: `load_audio`
+//! returns its resident wave in `f64`, and a disk stream opens, lands and its
 //! clip renders into `f64` frames beside a figure `f32` cannot hold.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
@@ -9,7 +10,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
 use tutti_sampler::StreamStart;
-use tutti_session::{AudioEntry, OutPort, PoolState, Root, Session, SessionEvent, audio_file};
+use tutti_session::{OutPort, Root, Session, Tier};
 use tutti_units::{Beat, SampleRate};
 
 #[path = "../support/f64_nodes.rs"]
@@ -39,24 +40,6 @@ fn write_ramp(path: &std::path::Path) {
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(RATE), 1, &samples);
 }
 
-/// Updates `s` until `done` finds what it waits for in what the update landed.
-fn until<T>(
-    s: &mut tutti_session::OfflineSession<&'static str, f64>,
-    what: &str,
-    mut done: impl FnMut(
-        &mut tutti_session::OfflineSession<&'static str, f64>,
-        Vec<SessionEvent>,
-    ) -> Option<T>,
-) -> T {
-    let mut found = None;
-    wait_until(what, Duration::from_secs(20), || {
-        let events = s.update();
-        found = done(s, events);
-        found.is_some()
-    });
-    found.expect("the wait ended on it")
-}
-
 /// Frame `i` of the `f64` ramp file: `FINE` scaled, so no frame is an `f32`.
 fn fine_value(i: usize) -> f64 {
     FINE * (i as f64 + 1.0) * 1e-5
@@ -82,23 +65,21 @@ fn write_f64_ramp(path: &std::path::Path) {
     std::fs::write(path, file).expect("the file writes");
 }
 
-/// **A pool `audio_file` entry of a Float64 file holds its frames as `f64` on
-/// an `f64` session, and a `Clip<f64>` over the pooled wave plays them
-/// exactly.** No frame survives a trip through `f32`.
+/// **A `load_audio` of a Float64 file holds its frames as `f64` on an `f64`
+/// session, and a `Clip<f64>` over the loaded wave plays them exactly.** No frame survives a trip through `f32`.
 #[test]
-fn a_pooled_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
+fn a_loaded_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     assert_ne!(f64::from(fine_value(7) as f32), fine_value(7));
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp64.wav");
     write_f64_ramp(&path);
     let mut s = session();
-    s.pool(audio_file("ramp", &path)).expect("a declaration");
-    until(&mut s, "the entry", |s, _| {
-        matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)).then_some(())
-    });
-    let AudioEntry::Resident(wave) = s.audio(&"ramp").expect("loaded") else {
-        panic!("a resident entry");
-    };
+    let audio = s
+        .load_audio(&path)
+        .tier(Tier::Resident)
+        .run()
+        .expect("loads");
+    let wave = Arc::clone(audio.wave().expect("a resident load"));
     assert_eq!(wave.len().get(), LEN);
     assert_eq!(wave.at(0, 7), fine_value(7));
 
