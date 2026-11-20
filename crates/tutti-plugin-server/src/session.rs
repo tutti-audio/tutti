@@ -1113,6 +1113,7 @@ mod tests {
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
     use tutti_plugin_types::{MidiEventVec, NoteExpressionChanges, ParameterChanges};
+    #[cfg(feature = "clap")]
     use tutti_units::Normalized;
     use tutti_units::ParamId;
 
@@ -2922,6 +2923,7 @@ mod tests {
 
     /// The host's write of `id` to `value`, as the audio lane sends it between
     /// blocks.
+    #[cfg(feature = "clap")]
     fn apply_parameter(id: u32, value: f64) -> HostMessage {
         let mut changes = ParameterChanges::reserved(1, 1);
         assert!(changes.add_change(ParamId::new(id), 0, value));
