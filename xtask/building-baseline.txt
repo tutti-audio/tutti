@@ -308,6 +308,7 @@ tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::Pa
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_group
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_overview
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_map
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_normalized_default
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_range
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_range

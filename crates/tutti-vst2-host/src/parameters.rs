@@ -281,7 +281,7 @@ impl Vst2Loaded {
             .unwrap_or_default();
         // VST2 declares no role: it has no bypass flag on a parameter and no
         // function names.
-        SharedParameterInfo::new(
+        let info = SharedParameterInfo::new(
             ParamId::new(id as u32),
             self.instance.get_parameter_name(id),
         )
@@ -290,7 +290,13 @@ impl Vst2Loaded {
         .with_steps(steps)
         .with_flags(ParamFlags::AUTOMATABLE, flags)
         .with_group(group)
-        .with_measures(measures)
+        .with_measures(measures);
+        // The integer range's own map; a parameter with none leaves the map to
+        // the plugin.
+        match int_range {
+            Some(range) => info.with_plain_map(range.plain_map()),
+            None => info,
+        }
     }
 
     /// Returns the descriptor for one parameter, or `None` if `id` addresses no
