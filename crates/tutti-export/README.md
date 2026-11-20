@@ -2,7 +2,7 @@
 
 Renders an audio graph to a file or to memory, faster or slower than real time.
 
-It can write several outputs from one render, such as a mix and individual tracks, in formats such as WAV, FLAC, AIFF and Ogg Vorbis. Most people will use it through the `tutti` crate.
+It can write several outputs from one render, such as a mix and individual tracks, in formats such as WAV, FLAC and AIFF. Most people will use it through the `tutti` crate.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

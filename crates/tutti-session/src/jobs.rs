@@ -318,9 +318,6 @@ pub(crate) trait JobSession {
         done: Result<crate::pool::Staged, crate::LoadError>,
     );
 
-    /// A pool refresh's check ended: the entries whose file changed reload.
-    fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshReport;
-
     /// What a hosted plugin's job ended with.
     #[cfg(feature = "plugin")]
     fn land_plugin(&mut self, landing: Landing<'_>, out: &mut Vec<SessionEvent>);
@@ -341,12 +338,6 @@ impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
             Err(error) => self.pool.entries.land(flight, Err(error)),
         }
         self.pool_pump();
-    }
-
-    fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshReport {
-        let (starts, refreshed) = self.pool.entries.reload_changed(checked);
-        self.pool_start(starts);
-        refreshed
     }
 
     #[cfg(feature = "plugin")]
@@ -397,6 +388,13 @@ impl Jobs {
 
     /// Runs `work` on the executor as a typed job. `land` runs in a later
     /// [`Session::update`] with the worker's end and the job's ticket.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the job table's tests submit on the pool; no session call does"
+        )
+    )]
     pub(crate) fn submit_job<J, R, W, L>(&mut self, work: W, land: L) -> Job<J>
     where
         J: JobKind,

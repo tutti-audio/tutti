@@ -9,9 +9,9 @@
 //!
 //! # Why a second opinion, when `tests/` already round-trips
 //!
-//! The Rust tests read files back with `hound`, which only speaks WAV — so FLAC,
-//! AIFF and Ogg are checked by frame count and header, never by content. Python's
-//! `soundfile` decodes all four uniformly, which is the only practical way to ask
+//! The Rust tests read files back with `hound`, which only speaks WAV — so FLAC
+//! and AIFF are checked by frame count and header, never by content. Python's
+//! `soundfile` decodes all three uniformly, which is the only practical way to ask
 //! "does the FLAC hold the same samples as the WAV". And the resampler's actual
 //! quality — passband flatness, aliasing rejection — needs a spectral analysis
 //! that a hand-rolled DFT in a test would be reimplementing badly.
@@ -19,7 +19,7 @@
 //! Run: `cargo run --release -p tutti-verify --bin render_export_cases -- <outdir>`
 
 use tutti_buffers::ChannelLayout;
-use tutti_codec::{FlacLevel, Format, Pcm, Quality};
+use tutti_codec::{FlacLevel, Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{
     Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph, Resample, Setup,
@@ -224,19 +224,6 @@ fn main() -> tutti_export::Result<()> {
             )?;
         }
     }
-
-    // Ogg is lossy, so it gets one case and is judged spectrally, never
-    // sample-wise. It ignores bit depth entirely.
-    write(
-        "fmt_ogg.ogg".into(),
-        tone_graph(),
-        &base(
-            Format::Vorbis {
-                quality: Quality::default(),
-            },
-            ChannelLayout::STEREO,
-        ),
-    )?;
 
     // ---- DC, where the exact expected value is knowable -------------------
     //

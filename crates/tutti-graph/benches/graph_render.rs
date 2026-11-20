@@ -34,7 +34,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_units::{SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
@@ -213,13 +213,13 @@ fn executor_for(shape: &Topo) -> Executor {
         })
     };
     let lowpass = |i: usize| -> Box<dyn Node> { Box::new(Lowpass::new(cutoff(i), 0.7)) };
-    let wire = |ed: &mut Editor, sink: NodeKey, port: u16, from: Source| {
+    let wire = |ed: &mut Editor, sink: NodeKey, port: u16, from: PortSource| {
         ed.spec_mut()
             .topology
             .edges
             .insert(InPort { node: sink, port }, vec![Edge::Direct(from)]);
     };
-    let node = |k: NodeKey| Source::Node(OutPort { node: k, port: 0 });
+    let node = |k: NodeKey| PortSource::Node(OutPort { node: k, port: 0 });
     let last = match *shape {
         Topo::Chain(depth) => {
             let src = NodeKey(0);
@@ -249,7 +249,7 @@ fn executor_for(shape: &Topo) -> Executor {
         }
         Topo::Nops(n) => {
             ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-            let mut from = Source::Global(0);
+            let mut from = PortSource::Global(0);
             let mut last = NodeKey(0);
             for i in 0..n {
                 let k = NodeKey(i as u64);
@@ -381,9 +381,9 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
         ed.insert(k, "nop", Unforkable(Box::new(nop()) as Box<dyn Node>));
         for c in 0..width {
             let from = if i == 0 {
-                Source::Global(c)
+                PortSource::Global(c)
             } else {
-                Source::Node(OutPort {
+                PortSource::Node(OutPort {
                     node: NodeKey(i as u64 - 1),
                     port: c,
                 })
@@ -396,7 +396,7 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(n as u64 - 1),
             port: 0,
         })]);

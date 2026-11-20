@@ -10,8 +10,8 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, EventOut, Executor, ForkByClone, Io, Law, Node, NodeKey, OutPort, ParamEvent,
-    ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, Prepare, Shape,
-    Source, Status, TransportPosition, declare_params,
+    ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, PortSource, Prepare,
+    Shape, Status, TransportPosition, declare_params,
 };
 use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, ParamKey, Samples, UnitParam};
@@ -107,10 +107,12 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
-        node: LANE,
-        port: 0,
-    })]);
+    ed.spec_mut()
+        .topology
+        .set_outputs([PortSource::Node(OutPort {
+            node: LANE,
+            port: 0,
+        })]);
     ed.spec_mut()
         .connect_param(at, EventOut { node: SRC, port: 0 });
     if let Some(range) = range {
@@ -236,10 +238,12 @@ fn a_range_change_lands_on_the_next_block() {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
-        node: LANE,
-        port: 0,
-    })]);
+    ed.spec_mut()
+        .topology
+        .set_outputs([PortSource::Node(OutPort {
+            node: LANE,
+            port: 0,
+        })]);
     ed.spec_mut()
         .connect_param(at, EventOut { node: SRC, port: 0 });
     ed.commit().expect("commits");
@@ -321,17 +325,17 @@ fn block(exec: &mut Executor<f64>, ed: &mut Editor<f64>) -> Vec<f64> {
 /// `k` of the next block, to `f64` rounding.
 #[test]
 fn an_f64_edge_weight_ramps_in_f64() {
-    use tutti_graph::{Edge, EdgeGain, EdgeId, Sink};
+    use tutti_graph::{Edge, EdgeGain, EdgeId, PortSink};
     use tutti_units::Amplitude;
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
-    let from = Source::Node(OutPort {
+    let from = PortSource::Node(OutPort {
         node: LANE,
         port: 0,
     });
     ed.spec_mut().topology.set_outputs([from]);
     let id = EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: Edge::Direct(from),
     };
     ed.spec_mut()
@@ -364,15 +368,17 @@ fn an_f64_mix_ramps_in_f64() {
             node: LANE,
             port: 0,
         },
-        tutti_graph::Edge::Direct(Source::Node(OutPort {
+        tutti_graph::Edge::Direct(PortSource::Node(OutPort {
             node: NodeKey(5),
             port: 0,
         })),
     );
-    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
-        node: LANE,
-        port: 0,
-    })]);
+    ed.spec_mut()
+        .topology
+        .set_outputs([PortSource::Node(OutPort {
+            node: LANE,
+            port: 0,
+        })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     let first = block(&mut exec, &mut ed);
@@ -444,10 +450,12 @@ fn render_segment(
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "lane", lane);
     ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
-    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
-        node: LANE,
-        port: 0,
-    })]);
+    ed.spec_mut()
+        .topology
+        .set_outputs([PortSource::Node(OutPort {
+            node: LANE,
+            port: 0,
+        })]);
     ed.spec_mut().connect_param(
         ParamIn {
             node: LANE,

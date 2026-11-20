@@ -67,8 +67,8 @@ pub enum VirtualProtocol {
 /// optional Product Instance Id (§7.1.5) it is built with: an app gives the one it
 /// presents to the session ([`MidiSession::present`](crate::MidiSession::present))
 /// and the Id the session reports ([`MidiSession::instance_id`](crate::MidiSession::instance_id)),
-/// so other apps recognise the endpoint again. macOS publishes both with the
-/// endpoint's Function Blocks. The ALSA backend does not publish the identity yet.
+/// so other apps recognise the endpoint again. Both backends publish both: macOS
+/// with the endpoint's Function Blocks, ALSA in the endpoint's record.
 #[derive(Clone, Debug)]
 #[must_use = "a spec does nothing until an endpoint is opened from it"]
 pub struct VirtualSpec {
@@ -123,7 +123,7 @@ impl VirtualSpec {
     #[must_use]
     #[allow(
         dead_code,
-        reason = "the macOS backend reads it; the ALSA backend does not publish the identity yet"
+        reason = "the ALSA and macOS backends read it; Windows has no virtual endpoint"
     )]
     pub(crate) fn device(&self) -> &DeviceIdentity {
         &self.device
@@ -133,7 +133,7 @@ impl VirtualSpec {
     #[must_use]
     #[allow(
         dead_code,
-        reason = "the macOS backend reads it; the ALSA backend does not publish the identity yet"
+        reason = "the ALSA and macOS backends read it; Windows has no virtual endpoint"
     )]
     pub(crate) fn instance(&self) -> Option<&ProductInstanceId> {
         self.instance.as_ref()

@@ -174,14 +174,12 @@ fn long_int_wave() -> (Vec<i16>, Wave<i16>) {
 #[test]
 fn an_integer_wave_written_to_a_vec_reads_back_exactly() {
     use crate::{Pcm, read_wave};
-    let (samples, wave) = long_int_wave();
+    let (_, wave) = long_int_wave();
     let mut bytes = vec![0xAAu8];
     write_wave(&wave, &mut bytes, Format::Wav(Pcm::Int16)).unwrap();
     assert_eq!(bytes[0], 0xAA, "a Vec is appended to");
     let back = read_wave::<i16>(bytes[1..].to_vec()).unwrap();
-    assert!(back.channel(0).iter().eq(samples.iter()));
-    assert_eq!(back.sample_rate(), wave.sample_rate());
-    assert_eq!(back.topology(), wave.topology());
+    assert_eq!(back, wave);
 }
 
 /// The same round trip through a writer that cannot seek.
@@ -189,9 +187,29 @@ fn an_integer_wave_written_to_a_vec_reads_back_exactly() {
 #[test]
 fn an_integer_wave_written_to_a_non_seek_writer_reads_back_exactly() {
     use crate::{Pcm, read_wave};
-    let (samples, wave) = long_int_wave();
+    let (_, wave) = long_int_wave();
     let mut sink = AppendOnly(Vec::new());
     write_wave(&wave, &mut sink, Format::Wav(Pcm::Int16)).unwrap();
-    let back = read_wave::<i16>(sink.0).unwrap();
-    assert!(back.channel(0).iter().eq(samples.iter()));
+    assert_eq!(read_wave::<i16>(sink.0).unwrap(), wave);
+}
+
+/// A wave written as WAV and read back is equal to the original: the same
+/// samples, rate and speakers are the same wave, whether the original's
+/// topology was stated or only assumed from its channel count.
+#[cfg(all(feature = "encode-wav", decode))]
+#[test]
+fn a_wave_written_as_wav_reads_back_equal() {
+    use crate::{Pcm, read_wave};
+    let (_, mono) = long_int_wave();
+    let stereo = ramp_wave(
+        ChannelTopology::assumed(ChannelLayout::STEREO),
+        44_100.0,
+        500,
+    );
+    let mut bytes = Vec::new();
+    write_wave(&mono, &mut bytes, Format::Wav(Pcm::Int16)).unwrap();
+    assert_eq!(read_wave::<i16>(bytes).unwrap(), mono);
+    let mut bytes = Vec::new();
+    write_wave(&stereo, &mut bytes, Format::Wav(Pcm::Float32)).unwrap();
+    assert_eq!(read_wave::<f32>(bytes).unwrap(), stereo);
 }

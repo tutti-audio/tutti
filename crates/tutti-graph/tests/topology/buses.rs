@@ -12,7 +12,7 @@ use common::{Kind, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Edge, GraphSpec, InPort, MAX_BUSES, NodeKey, NodeSpec, OutPort, PortKind,
-    Shape, Source, Topology, compile,
+    PortSource, Shape, Topology, compile,
 };
 
 fn width(n: u16) -> ChannelLayout {
@@ -161,7 +161,7 @@ fn declaring_buses_changes_no_plan() {
                 node: NodeKey(2),
                 port: p,
             },
-            Edge::Direct(Source::Node(OutPort {
+            Edge::Direct(PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: p,
             })),
@@ -170,7 +170,7 @@ fn declaring_buses_changes_no_plan() {
     t.outputs = vec![
         (0..6u16)
             .map(|p| {
-                Source::Node(OutPort {
+                PortSource::Node(OutPort {
                     node: NodeKey(2),
                     port: p,
                 })

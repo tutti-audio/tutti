@@ -1,11 +1,13 @@
-//! `check-session-api`: the session's public API has no `run` and no `*_blocking`, and the
-//! main-thread proof is held only by the types of [`ALLOW`].
+//! `check-session-api`: the session's public API has no `pub fn run` that borrows (a
+//! session-driving call) and no `*_blocking`, and the main-thread proof is held only by the
+//! types of [`ALLOW`]. A work value's consuming `run(self ..)` is the app's own call on its
+//! thread, and is allowed.
 //!
 //! The gate reads every `crates/tutti-session/src/**/*.rs` (not a `tests` directory, a
 //! `tests.rs` file or a `#[cfg(test)]` item), comments and literals blanked, and fails on:
 //!
-//! - a `pub fn` named `run` or ending in `_blocking`, a method or a free function; a
-//!   `pub(crate)`, `pub(super)` or `pub(in ..)` function is not public;
+//! - a `pub fn` named `run` whose receiver is not `self` or `mut self` by value, or ending in
+//!   `_blocking`, a method or a free function; a `pub(crate)`, `pub(super)` or `pub(in ..)` function is not public;
 //! - a `pub struct` or `pub enum` with a `MainThreadMarker` in its body, in any spelling
 //!   (`Option<MainThreadMarker>`, `PhantomData<MainThreadMarker>`, a path to it), unless
 //!   [`ALLOW`] has the row `<file>::<Type>`.
@@ -86,6 +88,22 @@ fn pub_fn(code: &str, at: usize) -> Option<(&str, usize)> {
     }
 }
 
+/// Whether the function whose name starts at `name_at` takes `self` or `mut self` by value
+/// as its first parameter.
+fn consumes_self(code: &str, name_at: usize) -> bool {
+    let b = code.as_bytes();
+    let Some(open) = code[name_at..].find('(') else {
+        return false;
+    };
+    let mut i = skip_ws(b, name_at + open + 1);
+    let (mut w, mut end) = ident(code, i);
+    if w == "mut" {
+        i = skip_ws(b, end);
+        (w, end) = ident(code, i);
+    }
+    w == "self" && matches!(b.get(skip_ws(b, end)), Some(b',' | b')'))
+}
+
 /// The name and body of the type a plain `pub` at `at` introduces: a `pub struct` or
 /// `pub enum`, its header skipped to the first `{`, `(` or `;` outside the generics.
 fn pub_type(code: &str, at: usize) -> Option<(&str, &str)> {
@@ -146,7 +164,7 @@ fn scan(tree: &dyn Tree) -> (Found, usize) {
                 continue;
             }
             if let Some((name, n)) = pub_fn(&code, at) {
-                if name == "run" || name.ends_with("_blocking") {
+                if (name == "run" && !consumes_self(&code, n)) || name.ends_with("_blocking") {
                     let line = code[..n].matches('\n').count() + 1;
                     found.fns.push((
                         format!("{file}::{name}"),
@@ -218,8 +236,8 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
         .collect();
     if !loose_fns.is_empty() {
         r.fail(
-            "check-session-api: FAIL (a public fn is named `run` or `*_blocking`; a result lands in \
-             `update()` and `Job::wait` is the one blocking door, or the fn is a row of the list):",
+            "check-session-api: FAIL (a public fn is a borrowing `run` or named `*_blocking`; a work \
+             value's consuming `run(self ..)` is the app's door, or the fn is a row of the list):",
         );
         loose_fns.into_iter().for_each(|f| r.fail(format!("  {f}")));
     }
@@ -295,6 +313,28 @@ mod tests {
     }
 
     #[test]
+    fn a_consuming_run_passes_and_a_borrowing_or_free_run_fails() {
+        let at = |src: &str| run(&[("crates/tutti-session/src/a.rs", src)], "").passed();
+        for ok in [
+            "impl W { pub fn run(self) {} }",
+            "impl W { pub fn run(mut self) {} }",
+            "impl W { pub fn run(self, main: M) -> R {} }",
+            "impl W { pub fn run( self ) {} }",
+        ] {
+            assert!(at(ok), "{ok}");
+        }
+        for bad in [
+            "impl W { pub fn run(&self) {} }",
+            "impl W { pub fn run(&mut self) {} }",
+            "pub fn run() {}",
+            "impl W { pub fn run(x: Self) {} }",
+            "impl W { pub fn run(x: u8, self) {} }",
+        ] {
+            assert!(!at(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn a_restricted_run_and_look_alikes_pass() {
         let src = "pub(crate) fn run() {}\npub(super) fn x_blocking() {}\n\
                    pub(in crate::a) fn run() {}\nfn run() {}\npub fn running() {}\n\
@@ -355,9 +395,9 @@ mod tests {
     fn an_allowed_fn_passes_and_a_stale_fn_row_fails() {
         let a = "crates/tutti-session/src/a.rs";
         let row = "crates/tutti-session/src/a.rs::run  the spawner's door";
-        let r = run(&[(a, "impl T { pub fn run(self) {} }")], row);
+        let r = run(&[(a, "impl T { pub fn run(&self) {} }")], row);
         assert!(r.passed(), "{:?}", r.findings);
-        let r = run(&[(a, "impl T { pub(crate) fn run(self) {} }")], row);
+        let r = run(&[(a, "impl T { pub(crate) fn run(&self) {} }")], row);
         assert!(!r.passed());
         let b = "crates/tutti-session/src/b.rs";
         let r = run(&[(a, "pub fn run() {}"), (b, "pub fn run() {}")], row);

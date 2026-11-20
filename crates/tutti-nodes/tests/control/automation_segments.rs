@@ -27,7 +27,7 @@ use tutti_graph::{
     Cx, Editor, EventOut, Executor, Io, Node, Offset, ParamIn, Prepare, Shape, Status,
     TransportChanges, TransportPosition, Unforkable,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::ControlProgram;
 use tutti_modulation::Curve;
 use tutti_music::{FrameClock, LoopRange};
@@ -83,7 +83,7 @@ fn graph(lane: ControlLaneNode) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "lane", lane);
     ed.insert(NodeKey(2), "probe", Unforkable(Probe));
     let s = ed.spec_mut();
-    s.topology.set_outputs(vec![Source::Node(OutPort {
+    s.topology.set_outputs(vec![PortSource::Node(OutPort {
         node: NodeKey(2),
         port: 0,
     })]);

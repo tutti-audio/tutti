@@ -38,7 +38,7 @@ use tutti_graph::{
     Cx, Editor, EventIn, EventKind, Executor, IntoNode, Io, Node, Prepare, Shape, Status,
     Unforkable,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_timeline::{
     AfterLocate, FadeOut, LoopEdit, MotionCommand, Timeline, Transport, TransportCommand,
@@ -58,7 +58,7 @@ fn prepare(max_block: usize) -> Prepare {
 fn outputs(ed: &mut Editor, node: NodeKey, width: u16) {
     ed.spec_mut()
         .topology
-        .set_outputs((0..width).map(|port| Source::Node(OutPort { node, port })));
+        .set_outputs((0..width).map(|port| PortSource::Node(OutPort { node, port })));
 }
 
 /// Render `blocks` (frame counts) through `engine` into one interleaved
@@ -1030,7 +1030,7 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     ed.spec_mut()
         .topology
         .set_outputs((0..wide as u16).map(|c| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: c % 3,
             })
@@ -1047,7 +1047,7 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     ed.spec_mut()
         .topology
         .set_outputs((0..MAX_CHANNELS as u16 + 1).map(|c| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: c % 3,
             })

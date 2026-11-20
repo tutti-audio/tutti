@@ -17,7 +17,7 @@ use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, InputDelay, Node, NodeKey, NodeSpec, OutPort, OutputDelay,
-    Reference, Source, Topology, TransportPosition, delays, graph_tail, latency_plan,
+    PortSource, Reference, Topology, TransportPosition, delays, graph_tail, latency_plan,
 };
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -36,7 +36,7 @@ fn out(node: NodeKey, port: u16) -> OutPort {
 }
 
 fn direct(node: NodeKey) -> Edge {
-    Edge::Direct(Source::Node(out(node, 0)))
+    Edge::Direct(PortSource::Node(out(node, 0)))
 }
 
 fn spec(ins: u16, outs: u16) -> NodeSpec {
@@ -103,7 +103,7 @@ fn each_source_of_a_fan_in_port_is_delayed_to_the_arrival() {
         t.connect(at(SINK, 0), direct(from));
     }
     t.connect(at(SINK, 1), direct(MID));
-    t.set_outputs([Source::Node(out(SINK, 0))]);
+    t.set_outputs([PortSource::Node(out(SINK, 0))]);
 
     let d = delays(&t, SampleRate::SR_48K);
     assert_eq!(
@@ -133,8 +133,8 @@ fn a_global_source_of_a_fan_in_waits_for_the_slowest() {
     let mut t = sources();
     t.inputs = ChannelLayout::MONO;
     t.connect(at(SINK, 0), direct(MID));
-    t.connect(at(SINK, 0), Edge::Direct(Source::Global(0)));
-    t.set_outputs([Source::Node(out(SINK, 0))]);
+    t.connect(at(SINK, 0), Edge::Direct(PortSource::Global(0)));
+    t.set_outputs([PortSource::Node(out(SINK, 0))]);
 
     assert_eq!(
         sorted_inputs(&t),
@@ -149,8 +149,8 @@ fn two_ports_of_one_node_into_a_port_are_one_delay() {
     t.nodes
         .insert(MID, spec(0, 2).with_latency(Samples::new(100)));
     t.connect(at(SINK, 0), direct(SLOW));
-    t.connect(at(SINK, 0), Edge::Direct(Source::Node(out(MID, 0))));
-    t.connect(at(SINK, 0), Edge::Direct(Source::Node(out(MID, 1))));
+    t.connect(at(SINK, 0), Edge::Direct(PortSource::Node(out(MID, 0))));
+    t.connect(at(SINK, 0), Edge::Direct(PortSource::Node(out(MID, 1))));
 
     assert_eq!(
         sorted_inputs(&t),
@@ -181,8 +181,11 @@ fn a_feedback_addend_is_not_aligned_and_does_not_delay() {
 #[test]
 fn each_source_of_a_fan_in_output_is_delayed_to_the_output_time() {
     let mut t = sources();
-    t.set_outputs([Source::Node(out(SLOW, 0)), Source::Node(out(MID, 0))]);
-    t.outputs[0].push(Source::Node(out(DRY, 0)));
+    t.set_outputs([
+        PortSource::Node(out(SLOW, 0)),
+        PortSource::Node(out(MID, 0)),
+    ]);
+    t.outputs[0].push(PortSource::Node(out(DRY, 0)));
 
     let d = delays(&t, SampleRate::SR_48K);
     assert_eq!(
@@ -208,15 +211,15 @@ fn the_tail_of_a_sum_is_the_longest_of_its_sources() {
     node(&mut t, SINK, 1, 0, 100);
     t.connect(at(SINK, 0), direct(key(1)));
     t.connect(at(SINK, 0), direct(key(2)));
-    t.set_outputs([Source::Node(out(SINK, 0))]);
+    t.set_outputs([PortSource::Node(out(SINK, 0))]);
     assert_eq!(
         graph_tail(&t, SampleRate::SR_48K).samples(),
         Some(Samples::new(3100))
     );
 
     // The same two into one output channel.
-    t.set_outputs([Source::Node(out(key(1), 0))]);
-    t.outputs[0].push(Source::Node(out(key(2), 0)));
+    t.set_outputs([PortSource::Node(out(key(1), 0))]);
+    t.outputs[0].push(PortSource::Node(out(key(2), 0)));
     assert_eq!(
         graph_tail(&t, SampleRate::SR_48K).samples(),
         Some(Samples::new(3000))
@@ -286,7 +289,7 @@ fn summed(list: &[(NodeKey, f32)]) -> (Topology, BTreeMap<NodeKey, Kind>) {
         edges.push(direct(k));
     }
     t.edges.insert(at(PASS, 0), edges);
-    t.set_outputs([Source::Node(out(PASS, 0))]);
+    t.set_outputs([PortSource::Node(out(PASS, 0))]);
     (t, kinds)
 }
 
@@ -340,7 +343,7 @@ fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
             latency: LAG_FRAMES,
         },
     );
-    t.connect(at(LAG, 0), Edge::Direct(Source::Global(0)));
+    t.connect(at(LAG, 0), Edge::Direct(PortSource::Global(0)));
     t.nodes.insert(PASS, spec(1, 1));
     kinds.insert(
         PASS,
@@ -360,8 +363,8 @@ fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
 fn a_fan_in_input_port_aligns_its_sources_across_blocks() {
     let (mut t, kinds) = lag_into_pass();
     t.connect(at(PASS, 0), direct(LAG));
-    t.connect(at(PASS, 0), Edge::Direct(Source::Global(0)));
-    t.set_outputs([Source::Node(out(PASS, 0))]);
+    t.connect(at(PASS, 0), Edge::Direct(PortSource::Global(0)));
+    t.set_outputs([PortSource::Node(out(PASS, 0))]);
     let input = impulse_input(60, 2);
     let got = render(t, kinds, &input, 2);
     let mut want = vec![0.0f32; 2 * BLOCK];
@@ -377,8 +380,8 @@ fn a_fan_in_output_channel_aligns_its_sources() {
     t.nodes.remove(&PASS);
     let mut kinds = kinds;
     kinds.remove(&PASS);
-    t.set_outputs([Source::Node(out(LAG, 0))]);
-    t.outputs[0].push(Source::Global(0));
+    t.set_outputs([PortSource::Node(out(LAG, 0))]);
+    t.outputs[0].push(PortSource::Global(0));
     let input = impulse_input(3, 1);
     let got = render(t, kinds, &input, 1);
     let mut want = vec![0.0f32; BLOCK];

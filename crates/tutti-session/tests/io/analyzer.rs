@@ -92,8 +92,10 @@ fn live_and_offline_finish_at_the_constants_peak() {
     let live = analyzer.finish();
 
     let wave = Wave::from_mono(RATE, Mono::new(&[0.25f32; 10 * BLOCK]));
-    let job = s.analyze(wave, peak_blocks(BLOCK));
-    let offline = job.wait(&mut s).expect("the wave analyzes");
+    let offline = s
+        .analyze(wave, peak_blocks(BLOCK))
+        .run()
+        .expect("the wave analyzes");
 
     assert_eq!(peaks(&live), [0.25; 10]);
     assert_eq!(peaks(&offline), [0.25; 10]);

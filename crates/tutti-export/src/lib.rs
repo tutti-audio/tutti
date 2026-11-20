@@ -36,12 +36,11 @@
 //! that is handed a `Progress`, a `Stage` and one fraction of the whole render.
 //! `Control::none()` is a render nobody watches or stops. A cancelled render is
 //! `Outcome::Cancelled`, with every temporary removed and every target as it was.
-//! Encoding is WAV, FLAC, AIFF or OGG Vorbis, each
-//! behind its own `tutti-codec` feature (`encode-wav`, `encode-flac`, `encode-aiff`,
-//! `encode-vorbis`). **None is on by default**: `encode-vorbis` links the C Vorbis
-//! library, so a consumer names the formats it writes. The umbrellas (`tutti`,
-//! `tutti-session`) forward them under the same names; their `export` feature
-//! implies `encode-wav` only, so `encode-vorbis` is the one path to C.
+//! Encoding is WAV, FLAC or AIFF, each
+//! behind its own `tutti-codec` feature (`encode-wav`, `encode-flac`, `encode-aiff`).
+//! **None is on by default**, so a consumer names the formats it writes. The
+//! umbrellas (`tutti`, `tutti-session`) forward them under the same names; their
+//! `export` feature implies `encode-wav` only.
 //!
 //! This crate re-exports no other crate's type: a `Format` or `Pcm` is
 //! `tutti_codec`'s, a `ChannelLayout` is `tutti_buffers`', and the clocks (`RenderClock`,
@@ -170,8 +169,8 @@
 //!
 //! ## Features
 //!
-//! None. The formats are `tutti-codec`'s `encode-wav`, `encode-flac`,
-//! `encode-aiff` and `encode-vorbis` (a consumer turns them on beside this
+//! None. The formats are `tutti-codec`'s `encode-wav`, `encode-flac`
+//! and `encode-aiff` (a consumer turns them on beside this
 //! crate), and a `Format` variant exists only with its feature.
 //!
 //! Resampling (`tutti_dsp::StreamingResampler`, an FFT resampler on
@@ -253,7 +252,7 @@ pub struct Written {
     /// format's `MAX` or `MIN`, held there by the rule in
     /// [`Sample`](tutti_buffers::Sample); an infinity is counted. A NaN is
     /// written as 0 and is not counted. `0` for a format that does not quantize (`Pcm::Float32`,
-    /// `Pcm::Float64`, and Ogg Vorbis, whose encoder takes the float stream). A
+    /// `Pcm::Float64`). A
     /// normalizing export keeps its target and ceiling one LSB plus the dither
     /// amplitude below full scale for an integer format, so this stays `0`
     /// unless the programme itself was past full scale.

@@ -17,7 +17,7 @@ use tutti_graph::{
     CommitError, Cx, Editor, Executor, IntoNode, Io, Node, NodeParts, Prepare, QUEUE_CAPACITY,
     Shape, SilenceMask, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_rt::Param;
 use tutti_ump::{Message, Voice1};
 use tutti_units::{Amplitude, Latency, Samples, Tail};
@@ -31,7 +31,7 @@ fn wire(ed: &mut Editor, sink: NodeKey, from: NodeKey) {
             node: sink,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: from,
             port: 0,
         }))],
@@ -78,7 +78,7 @@ fn counted_after_silence_with(
     wire(&mut ed, FX, SRC);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: FX, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: FX, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -208,8 +208,8 @@ fn status_silent_zeroes_and_flags() {
     );
     wire(&mut ed, FX, SRC);
     ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort { node: SRC, port: 0 }),
-        Source::Node(OutPort { node: FX, port: 0 }),
+        PortSource::Node(OutPort { node: SRC, port: 0 }),
+        PortSource::Node(OutPort { node: FX, port: 0 }),
     ]);
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -269,12 +269,12 @@ fn masked_status_reaches_the_next_nodes_mask() {
     for port in 0..2 {
         ed.spec_mut().topology.edges.insert(
             InPort { node: FX, port },
-            vec![Edge::Direct(Source::Node(OutPort { node: SRC, port }))],
+            vec![Edge::Direct(PortSource::Node(OutPort { node: SRC, port }))],
         );
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: FX, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: FX, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -318,7 +318,7 @@ fn freeing_a_control_freed_value_inside_process_panics_in_debug() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: SRC, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -343,8 +343,8 @@ fn queue_two_outputs(ed: &mut Editor) {
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
     ed.insert(FX, "b", Unforkable(const_node(0.25)));
     ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort { node: SRC, port: 0 }),
-        Source::Node(OutPort { node: FX, port: 0 }),
+        PortSource::Node(OutPort { node: SRC, port: 0 }),
+        PortSource::Node(OutPort { node: FX, port: 0 }),
     ]);
     ed.commit().expect("commits");
 }
@@ -440,7 +440,7 @@ fn insert_returns_typed_controls() {
     wire(&mut ed, FX, SRC);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: FX, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: FX, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -462,7 +462,7 @@ fn commits_queue_up_to_capacity_then_backpressure_without_advancing() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: SRC, port: 0 })]);
     for i in 0..QUEUE_CAPACITY {
         ed.insert(SRC, "c", Unforkable(const_node(i as f32 + 1.0)));
         ed.commit().expect("room in the queue");
@@ -501,7 +501,7 @@ fn queued_commits_apply_in_fifo_order() {
     ed.insert(SRC, "c", Unforkable(const_node(1.0)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: SRC, port: 0 })]);
     ed.commit().unwrap();
     // Second: a gain after it. Third: the gain changed. Each is compiled on
     // the one before, none of which has run.
@@ -516,7 +516,7 @@ fn queued_commits_apply_in_fifo_order() {
     wire(&mut ed, FX, SRC);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: FX, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: FX, port: 0 })]);
     ed.commit().unwrap();
     ed.insert(
         FX,
@@ -542,7 +542,7 @@ fn probe_d_can_no_longer_be_expressed_and_its_interleaving_works() {
     ed.insert(a, "a", Unforkable(const_node(1.0)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: a, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: a, port: 0 })]);
     ed.commit().unwrap(); // c1
     render(&mut exec, 8, 1); // applied
     ed.insert(b, "b", Unforkable(const_node(2.0)));
@@ -550,9 +550,9 @@ fn probe_d_can_no_longer_be_expressed_and_its_interleaving_works() {
     ed.insert(c, "c", Unforkable(const_node(3.0)));
     ed.commit().unwrap(); // c3, in flight behind it
     ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort { node: a, port: 0 }),
-        Source::Node(OutPort { node: b, port: 0 }),
-        Source::Node(OutPort { node: c, port: 0 }),
+        PortSource::Node(OutPort { node: a, port: 0 }),
+        PortSource::Node(OutPort { node: b, port: 0 }),
+        PortSource::Node(OutPort { node: c, port: 0 }),
     ]);
     ed.commit()
         .expect("the next commit compiles against c3 and needs no lost unit");
@@ -574,7 +574,7 @@ fn applying_frees_nothing_on_the_audio_thread() {
     ed.insert(FX, "f", Unforkable(const_node(0.0)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: SRC, port: 0 })]);
     ed.commit().unwrap();
     let mut back = Vec::new();
     for v in 2..6 {
@@ -615,7 +615,7 @@ fn reinserting_a_key_replaces_its_unit() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: SRC, port: 0 })]);
     ed.commit().unwrap();
     exec.apply_pending();
     assert!(ed.collect().is_empty());
@@ -645,7 +645,7 @@ fn reinserting_a_key_replaces_its_unit() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: SRC, port: 0 })]);
     ed.commit().unwrap();
     exec.apply_pending();
     assert_eq!(ed.collect(), vec![SRC]);
@@ -820,7 +820,7 @@ fn run_synth(synth: Synth, on_at: u64, off_at: u64, blocks: usize) -> Vec<f32> {
         );
     }
     spec.topology
-        .set_outputs(vec![Source::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -987,7 +987,7 @@ impl Node for OutOfBand {
     fn reset(&mut self) {}
 }
 
-/// `node` at key 1, its inputs wired to silence (`Source::Zero`, which the
+/// `node` at key 1, its inputs wired to silence (`PortSource::Zero`, which the
 /// executor knows is silent), its first output (if any) the graph's.
 fn out_of_band_graph(node: OutOfBand) -> Executor {
     let (mut ed, mut exec) = Editor::new(prepare(64));
@@ -999,7 +999,7 @@ fn out_of_band_graph(node: OutOfBand) -> Executor {
     if outputs > 0 {
         ed.spec_mut()
             .topology
-            .set_outputs(vec![Source::Node(OutPort { node: key, port: 0 })]);
+            .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
     }
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1081,7 +1081,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
     ed.insert(SRC, "c", Unforkable(const_node(1.0)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: SRC, port: 0 })]);
     ed.commit().expect("commits");
     assert_eq!(ed.in_flight(), 1);
     let base = Arc::clone(ed.base().expect("sent"));
@@ -1128,7 +1128,9 @@ fn too_few_input_slices_assert_in_debug() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
     ed.spec_mut().topology.inputs = tutti_buffers::ChannelLayout::MONO;
-    ed.spec_mut().topology.set_outputs(vec![Source::Global(0)]);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![PortSource::Global(0)]);
     ed.commit().expect("commits");
     render(&mut exec, 16, 1);
 }
@@ -1139,7 +1141,9 @@ fn too_few_input_slices_render_silence_in_release() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
     ed.spec_mut().topology.inputs = tutti_buffers::ChannelLayout::MONO;
-    ed.spec_mut().topology.set_outputs(vec![Source::Global(0)]);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![PortSource::Global(0)]);
     ed.commit().expect("commits");
     let out = render(&mut exec, 16, 1);
     assert!(out[0].iter().all(|&x| x == 0.0));
@@ -1168,12 +1172,12 @@ fn ringer_after_silence(
     for port in 0..width as u16 {
         ed.spec_mut().topology.edges.insert(
             InPort { node: FX, port },
-            vec![Edge::Direct(Source::Node(OutPort { node: SRC, port }))],
+            vec![Edge::Direct(PortSource::Node(OutPort { node: SRC, port }))],
         );
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: FX, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: FX, port: 0 })]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

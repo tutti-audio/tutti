@@ -20,7 +20,7 @@
 //! # Examples
 //!
 //! ```
-//! use tutti_graph::{Edge, InPort, NodeSpec, OutPort, Source};
+//! use tutti_graph::{Edge, InPort, NodeSpec, OutPort, PortSource};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_graph::{NodeKey, Topology};
 //!
@@ -30,9 +30,9 @@
 //! g.nodes.insert(gain, NodeSpec::new("gain", ChannelLayout::MONO, ChannelLayout::MONO));
 //! g.connect(
 //!     InPort { node: gain, port: 0 },
-//!     Edge::Direct(Source::Node(OutPort { node: osc, port: 0 })),
+//!     Edge::Direct(PortSource::Node(OutPort { node: osc, port: 0 })),
 //! );
-//! g.set_outputs([Source::Node(OutPort { node: gain, port: 0 })]);
+//! g.set_outputs([PortSource::Node(OutPort { node: gain, port: 0 })]);
 //!
 //! let valid = g.validate().expect("well formed");
 //! assert_eq!(valid.get().topo_order(), Ok(vec![osc, gain]));
@@ -95,7 +95,7 @@ pub struct InPort {
 /// Where signals arrive: an input port of a node, or a global output channel.
 /// Both are sinks, and both take a set of sources.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Sink {
+pub enum PortSink {
     /// An input port of a node.
     Port(InPort),
     /// A global output channel.
@@ -111,7 +111,7 @@ pub enum Sink {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EdgeId {
     /// Where the edge arrives.
-    pub sink: Sink,
+    pub sink: PortSink,
     /// What feeds it.
     pub from: Edge,
 }
@@ -122,7 +122,7 @@ pub struct EdgeId {
 /// ([`Topology::edges`]), so the representation holds several, and the compiler sums them
 /// in source order (`Op::Sum`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Source {
+pub enum PortSource {
     /// An output port of another node in this topology.
     Node(OutPort),
     /// A channel of the topology's own global input.
@@ -151,7 +151,7 @@ pub enum Source {
 ///
 /// The rest of this module's "last block" wording means this delay.
 ///
-/// **The only way to express feedback.** A [`Source`] edge that closes a cycle
+/// **The only way to express feedback.** A [`PortSource`] edge that closes a cycle
 /// is an [`Invalid::Cycle`]; a feedback edge is a cycle the author declared. The
 /// mandatory delay is a property of the *edge kind*, not a node the author has
 /// to remember to insert, so "I forgot the delay" is unrepresentable rather than
@@ -187,7 +187,7 @@ impl FeedbackFrom {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Edge {
     /// This block's value, from the named source.
-    Direct(Source),
+    Direct(PortSource),
     /// Last block's value, from the named port — a declared cycle.
     Feedback(FeedbackFrom),
 }
@@ -268,14 +268,14 @@ pub struct Topology {
     /// Silence is the empty set: an absent key and an empty `Vec` mean the
     /// same (nothing feeds the port), and [`disconnect`](Self::disconnect)
     /// removes the key when the last edge goes, so the derived `Eq` and `Hash`
-    /// agree. `Source::Zero` is never stored. A raw write is legal and
+    /// agree. `PortSource::Zero` is never stored. A raw write is legal and
     /// [`validate`](Self::validate) checks it: the same edge twice is
-    /// [`Invalid::DuplicateEdge`], and a stored `Source::Zero` is
+    /// [`Invalid::DuplicateEdge`], and a stored `PortSource::Zero` is
     /// [`Invalid::StoredSilence`].
     pub edges: BTreeMap<InPort, Vec<Edge>>,
     /// The sources of each global output channel, in channel order, with the
     /// same rules as [`edges`](Self::edges) (a sink is a sink).
-    pub outputs: Vec<Vec<Source>>,
+    pub outputs: Vec<Vec<PortSource>>,
     /// The topology's own global input width — [`ChannelLayout::EMPTY`] for a
     /// master graph, which has none.
     pub inputs: ChannelLayout,
@@ -315,7 +315,7 @@ pub enum MeterSpec {
         /// One per lane. A lane naming a port that does not exist (a node
         /// replaced by one with fewer outputs, a removed node) reads
         /// silence; it does not fail a commit.
-        sources: Vec<Source>,
+        sources: Vec<PortSource>,
         /// Where the reading sits in time: as the sources leave their nodes
         /// ([`TapAlign::Raw`]) or delayed by the compiler to the output time
         /// ([`TapAlign::ToOutput`], with a ring per lane).
@@ -326,7 +326,7 @@ pub enum MeterSpec {
 impl MeterSpec {
     /// A meter on `sources` as they leave their nodes: a track's level.
     #[must_use]
-    pub fn raw(sources: Vec<Source>) -> Self {
+    pub fn raw(sources: Vec<PortSource>) -> Self {
         Self::Ports {
             sources,
             align: TapAlign::Raw,
@@ -336,7 +336,7 @@ impl MeterSpec {
     /// A meter on `sources` aligned to the output time, as an output of the
     /// same sources would carry them.
     #[must_use]
-    pub fn aligned(sources: Vec<Source>) -> Self {
+    pub fn aligned(sources: Vec<PortSource>) -> Self {
         Self::Ports {
             sources,
             align: TapAlign::ToOutput,
@@ -460,7 +460,7 @@ pub enum TapSpec {
         /// replaced by one with fewer outputs, a removed node, a global input
         /// past the declared width) reads silence; it does not fail a commit.
         /// Opening a tap refuses a source that does not exist at that moment.
-        sources: Vec<Source>,
+        sources: Vec<PortSource>,
         /// Where the copy sits in time.
         align: TapAlign,
     },
@@ -469,7 +469,7 @@ pub enum TapSpec {
 impl TapSpec {
     /// A tap on `sources` as they leave their nodes.
     #[must_use]
-    pub fn raw(sources: Vec<Source>) -> Self {
+    pub fn raw(sources: Vec<PortSource>) -> Self {
         Self::Ports {
             sources,
             align: TapAlign::Raw,
@@ -479,7 +479,7 @@ impl TapSpec {
     /// A tap on `sources` aligned to the output time, as an output of the
     /// same sources would carry them.
     #[must_use]
-    pub fn aligned(sources: Vec<Source>) -> Self {
+    pub fn aligned(sources: Vec<PortSource>) -> Self {
         Self::Ports {
             sources,
             align: TapAlign::ToOutput,
@@ -509,7 +509,7 @@ impl TapSpec {
 /// added to it.
 ///
 /// Hand-written: `ChannelLayout` has no `Default`, so the width is chosen here.
-/// With no global inputs, a stray `Source::Global` edge is rejected by
+/// With no global inputs, a stray `PortSource::Global` edge is rejected by
 /// [`Topology::validate`] rather than resolving against inputs nobody asked
 /// for.
 impl Default for Topology {
@@ -572,19 +572,19 @@ pub enum Invalid {
     /// a duplicate is a mistake.
     DuplicateEdge {
         /// The sink: an input port or a global output channel.
-        at: Sink,
+        at: PortSink,
         /// The edge listed more than once (a global output's source is a
         /// `Direct` edge).
         edge: Edge,
     },
-    /// A `Source::Zero` stored in a sink's set, alone or beside others.
+    /// A `PortSource::Zero` stored in a sink's set, alone or beside others.
     ///
     /// Silence has one representation: the empty set. A `Zero` in a set would
     /// make two equal wirings compare unequal, so every writer drops it and
     /// `validate` refuses one a raw write left.
     StoredSilence {
         /// The sink: an input port or a global output channel.
-        at: Sink,
+        at: PortSink,
     },
     /// A global output channel is sourced from a node port that does not exist.
     OutputOutOfRange {
@@ -677,20 +677,22 @@ impl Topology {
                     width: sink.inputs,
                 });
             }
-            if edges.contains(&Edge::Direct(Source::Zero)) {
-                errs.push(Invalid::StoredSilence { at: Sink::Port(at) });
+            if edges.contains(&Edge::Direct(PortSource::Zero)) {
+                errs.push(Invalid::StoredSilence {
+                    at: PortSink::Port(at),
+                });
             }
             for (n, edge) in edges.iter().enumerate() {
                 if edges[..n].contains(edge) {
                     errs.push(Invalid::DuplicateEdge {
-                        at: Sink::Port(at),
+                        at: PortSink::Port(at),
                         edge: *edge,
                     });
                 }
                 let from = match *edge {
-                    Edge::Direct(Source::Node(p))
+                    Edge::Direct(PortSource::Node(p))
                     | Edge::Feedback(FeedbackFrom { from: p, .. }) => Some(p),
-                    Edge::Direct(Source::Global(ch)) => {
+                    Edge::Direct(PortSource::Global(ch)) => {
                         if ch >= self.inputs.count() {
                             errs.push(Invalid::GlobalInputOutOfRange {
                                 at,
@@ -700,7 +702,7 @@ impl Topology {
                         }
                         None
                     }
-                    Edge::Direct(Source::Zero) => None,
+                    Edge::Direct(PortSource::Zero) => None,
                 };
                 if let Some(from) = from {
                     match self.nodes.get(&from.node) {
@@ -722,19 +724,19 @@ impl Topology {
         }
 
         for (channel, sources) in self.outputs.iter().enumerate() {
-            if sources.contains(&Source::Zero) {
+            if sources.contains(&PortSource::Zero) {
                 errs.push(Invalid::StoredSilence {
-                    at: Sink::Output(channel as u16),
+                    at: PortSink::Output(channel as u16),
                 });
             }
             for (n, src) in sources.iter().enumerate() {
                 if sources[..n].contains(src) {
                     errs.push(Invalid::DuplicateEdge {
-                        at: Sink::Output(channel as u16),
+                        at: PortSink::Output(channel as u16),
                         edge: Edge::Direct(*src),
                     });
                 }
-                if let Source::Node(from) = *src {
+                if let PortSource::Node(from) = *src {
                     let resolves = self
                         .nodes
                         .get(&from.node)
@@ -767,10 +769,10 @@ impl Topology {
     /// Two topologies that wire the same sources compare and hash equal
     /// whatever order they were wired in.
     ///
-    /// `Edge::Direct(Source::Zero)` adds nothing: silence is the empty set and
+    /// `Edge::Direct(PortSource::Zero)` adds nothing: silence is the empty set and
     /// is never stored.
     pub fn connect(&mut self, at: InPort, edge: Edge) {
-        if edge == Edge::Direct(Source::Zero) {
+        if edge == Edge::Direct(PortSource::Zero) {
             return;
         }
         let list = self.edges.entry(at).or_default();
@@ -799,13 +801,13 @@ impl Topology {
     /// Adds `source` to the sources of global output `channel`, keeping the
     /// list sorted and free of duplicates, as [`connect`](Self::connect) does
     /// for an input port (the output is a sink too: several sources sum).
-    /// `Source::Zero` adds nothing. Returns whether the set changed.
+    /// `PortSource::Zero` adds nothing. Returns whether the set changed.
     ///
     /// # Panics
     ///
     /// If `channel` is past [`outputs`](Self::outputs).
-    pub fn connect_output(&mut self, channel: usize, source: Source) -> bool {
-        if source == Source::Zero {
+    pub fn connect_output(&mut self, channel: usize, source: PortSource) -> bool {
+        if source == PortSource::Zero {
             return false;
         }
         let list = &mut self.outputs[channel];
@@ -824,7 +826,7 @@ impl Topology {
     /// # Panics
     ///
     /// If `channel` is past [`outputs`](Self::outputs).
-    pub fn disconnect_output(&mut self, channel: usize, source: Source) -> bool {
+    pub fn disconnect_output(&mut self, channel: usize, source: PortSource) -> bool {
         let list = &mut self.outputs[channel];
         match list.binary_search(&source) {
             Ok(i) => {
@@ -836,12 +838,18 @@ impl Topology {
     }
 
     /// Sets the global outputs to one source per channel, in order, replacing
-    /// every channel's set: the one-source wiring. A `Source::Zero` is an
+    /// every channel's set: the one-source wiring. A `PortSource::Zero` is an
     /// empty channel (silence is the empty set, never a stored `Zero`).
-    pub fn set_outputs(&mut self, sources: impl IntoIterator<Item = Source>) {
+    pub fn set_outputs(&mut self, sources: impl IntoIterator<Item = PortSource>) {
         self.outputs = sources
             .into_iter()
-            .map(|s| if s == Source::Zero { vec![] } else { vec![s] })
+            .map(|s| {
+                if s == PortSource::Zero {
+                    vec![]
+                } else {
+                    vec![s]
+                }
+            })
             .collect();
     }
 
@@ -866,7 +874,7 @@ impl Topology {
             .filter(move |(at, _)| at.node == node)
             .flat_map(|(_, es)| es)
             .filter_map(|e| match e {
-                Edge::Direct(Source::Node(p)) => Some(p.node),
+                Edge::Direct(PortSource::Node(p)) => Some(p.node),
                 _ => None,
             })
     }
@@ -966,8 +974,8 @@ impl LatencyGraph for Topology {
                 .get(&InPort { node, port })
                 .map_or(&[][..], Vec::as_slice);
             let feed = |e: &Edge| match e {
-                Edge::Direct(Source::Node(p)) => Feed::Node(p.node),
-                Edge::Direct(Source::Global(_)) => Feed::Outside,
+                Edge::Direct(PortSource::Node(p)) => Feed::Node(p.node),
+                Edge::Direct(PortSource::Global(_)) => Feed::Outside,
                 _ => Feed::None,
             };
             let empty = edges.is_empty().then_some(PortFeed {
@@ -985,10 +993,10 @@ impl LatencyGraph for Topology {
     /// yields one whose feed is `Feed::None`.
     fn outputs(&self) -> impl Iterator<Item = ChannelFeed<NodeKey>> {
         self.outputs.iter().enumerate().flat_map(|(ch, sources)| {
-            let feed = |s: &Source| match s {
-                Source::Node(p) => Feed::Node(p.node),
-                Source::Global(_) => Feed::Outside,
-                Source::Zero => Feed::None,
+            let feed = |s: &PortSource| match s {
+                PortSource::Node(p) => Feed::Node(p.node),
+                PortSource::Global(_) => Feed::Outside,
+                PortSource::Zero => Feed::None,
             };
             let empty = sources.is_empty().then_some(ChannelFeed {
                 channel: ch,

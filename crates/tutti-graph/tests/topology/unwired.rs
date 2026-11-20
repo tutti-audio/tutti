@@ -13,8 +13,8 @@ use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor,
     EventEdge, EventIn, EventOut, Executor, FeedbackFrom, InPort, Io, Node, NodeKey, OutPort,
-    Prepare, Shape, Sink, Source, Status, TapAlign, TapId, TapOptions, TapSpec, TransportPosition,
-    Unforkable, Unwired,
+    PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TapSpec,
+    TransportPosition, Unforkable, Unwired,
 };
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
@@ -53,12 +53,12 @@ fn inp(node: NodeKey, port: u16) -> InPort {
 }
 
 fn direct(node: NodeKey, port: u16) -> Edge {
-    Edge::Direct(Source::Node(out(node, port)))
+    Edge::Direct(PortSource::Node(out(node, port)))
 }
 
 fn id(sink: InPort, from: Edge) -> EdgeId {
     EdgeId {
-        sink: Sink::Port(sink),
+        sink: PortSink::Port(sink),
         from,
     }
 }
@@ -102,8 +102,10 @@ fn rig() -> (Editor, Executor) {
     ] {
         spec.connect(at, from);
     }
-    spec.topology
-        .set_outputs(vec![Source::Node(out(X, 0)), Source::Node(out(X, 1))]);
+    spec.topology.set_outputs(vec![
+        PortSource::Node(out(X, 0)),
+        PortSource::Node(out(X, 1)),
+    ]);
     spec.connect_events(ein(X, 0), EventEdge::Direct(eout(A, 0)));
     spec.connect_events(ein(X, 2), EventEdge::Direct(eout(A, 2)));
     spec.connect_events(ein(B, 0), EventEdge::Direct(eout(X, 0)));
@@ -154,7 +156,7 @@ fn a_narrower_shape_drops_exactly_the_edges_to_missing_ports() {
             Edge::Feedback(FeedbackFrom::new(out(X, 2), DELAY)),
         ),
         EdgeId {
-            sink: Sink::Output(1),
+            sink: PortSink::Output(1),
             from: direct(X, 1),
         },
     ]
@@ -171,7 +173,7 @@ fn a_narrower_shape_drops_exactly_the_edges_to_missing_ports() {
     );
     assert!(!t.edges.contains_key(&inp(B, 2)));
     assert!(!t.edges.contains_key(&inp(A, 2)));
-    assert_eq!(t.outputs[0], vec![Source::Node(out(X, 0))]);
+    assert_eq!(t.outputs[0], vec![PortSource::Node(out(X, 0))]);
     assert!(t.outputs[1].is_empty());
 }
 
@@ -472,11 +474,11 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     ed.insert(X, "const", konst(2));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(out(X, 0))]);
+        .set_outputs(vec![PortSource::Node(out(X, 0))]);
     let mut tap = ed
         .open_tap(
             TapId::of(1),
-            vec![Source::Node(out(X, 0)), Source::Node(out(X, 1))],
+            vec![PortSource::Node(out(X, 0)), PortSource::Node(out(X, 1))],
             TapOptions::new(Samples::new(256)).align(TapAlign::Raw),
         )
         .expect("the sources exist");
@@ -518,7 +520,7 @@ fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
     ed.spec_mut().root_id = ed.spec().root_id.next();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
     let lost = EdgeId {
-        sink: Sink::Output(1),
+        sink: PortSink::Output(1),
         from: direct(X, 1),
     };
     assert!(placed.unwired.edges.contains(&lost));
@@ -527,7 +529,7 @@ fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
             .unwired
             .edges
             .iter()
-            .filter(|e| matches!(e.sink, Sink::Output(_)))
+            .filter(|e| matches!(e.sink, PortSink::Output(_)))
             .count(),
         1,
         "only the new root's own output edge: nothing of the bank is in the spec"

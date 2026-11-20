@@ -7,7 +7,7 @@ use tutti_platform::Instant;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, Io, Node, NodeKey,
-    OutPort, Prepare, Shape, Source, Status, TransportPosition,
+    OutPort, PortSource, Prepare, Shape, Status, TransportPosition,
 };
 use tutti_ump::Ump;
 use tutti_units::{Frame, Moment, SampleRate, Samples};
@@ -146,7 +146,7 @@ impl EventRig {
             editor
                 .spec_mut()
                 .topology
-                .set_outputs(vec![Source::Node(OutPort {
+                .set_outputs(vec![PortSource::Node(OutPort {
                     node: Self::SINK,
                     port: 0,
                 })]);

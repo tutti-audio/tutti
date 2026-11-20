@@ -27,7 +27,7 @@ use tutti_buffers::Wave;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_timeline::{AfterLocate, FadeOut, LoopEdit, MotionCommand, Timeline, Transport};
@@ -89,7 +89,7 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, E
     ed.spec_mut()
         .topology
         .set_outputs(routes(n).into_iter().map(|(unit, port)| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(unit as u64 + 1),
                 port: port as u16,
             })
