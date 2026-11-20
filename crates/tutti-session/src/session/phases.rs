@@ -65,7 +65,7 @@ pub enum Phase {
     /// resyncs the apply owes are sent.
     AfterCommit,
     /// Every output's event tap drained to its device or sink (feature `midi`:
-    /// the `midi_sink` entries, and with `midi-hardware` the `midi_output` ones).
+    /// the sinks, and with `midi-hardware` the output ports).
     MidiOut,
     /// The stream's faults, as [`SessionEvent::Fault`] (a real-time clock),
     /// and the device's own events (feature `device`).

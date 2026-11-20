@@ -191,7 +191,11 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
 #[test]
 fn dropping_a_job_whose_landed_lease_is_live_does_not_deadlock() {
     let queue: JobOutputQueue = Arc::default();
-    let link = PortLink::new(std::sync::Weak::new(), Arc::clone(&queue));
+    let link = PortLink::new(
+        std::sync::Weak::new(),
+        std::sync::Weak::new(),
+        Arc::clone(&queue),
+    );
     let peer = property_peer(
         device_id(),
         MidiGroup::FIRST,
@@ -213,4 +217,33 @@ fn dropping_a_job_whose_landed_lease_is_live_does_not_deadlock() {
     assert_eq!(queue.lock().unwrap().len(), 1, "the lease is in the queue");
     drop(job);
     assert!(queue.lock().unwrap().is_empty());
+}
+
+/// **A request on a port that is gone ends as the port went**: `Released` when
+/// the session lives (every handle was dropped and the port taken out), and
+/// `Disconnected` when the session itself ended.
+#[test]
+fn a_request_on_a_gone_port_ends_by_why_it_is_gone() {
+    let ask = |session: std::sync::Weak<()>| {
+        let queue: JobOutputQueue = Arc::default();
+        let link = PortLink::new(std::sync::Weak::new(), session, Arc::clone(&queue));
+        let job = link.submit::<crate::SwitchProfile, _, _>(
+            (),
+            |_, ()| true,
+            |(), _| unreachable!("the port is gone: nothing is queued"),
+        );
+        let mut outputs: Vec<_> = queue.lock().unwrap().drain(..).collect();
+        outputs.iter_mut().find_map(|l| l.take(&job))
+    };
+    let alive = Arc::new(());
+    assert_eq!(
+        ask(Arc::downgrade(&alive)),
+        Some(Err(PeerError::Released)),
+        "the session lives"
+    );
+    assert_eq!(
+        ask(std::sync::Weak::new()),
+        Some(Err(PeerError::Disconnected)),
+        "the session ended"
+    );
 }

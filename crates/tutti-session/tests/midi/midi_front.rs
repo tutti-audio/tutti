@@ -397,9 +397,7 @@ mod hardware {
     use super::*;
     use tutti_midi_device::{EndpointId, Identity, PortDirection};
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
-    use tutti_session::{
-        LoadError, MidiPortError, Peer, PoolState, PortCause, Presence, midi_input, midi_output,
-    };
+    use tutti_session::{MidiPortError, Peer, PortCause, Presence};
     use tutti_ump::ProductInstanceId;
 
     fn session() -> (Session, FakeCounters) {
@@ -419,11 +417,11 @@ mod hardware {
         e
     }
 
-    /// **The view lists the devices, and the pool opens and closes them as
-    /// ports**: an input and an output are declared and open; the output's node
-    /// is in the graph; undeclaring them closes the input's connection.
+    /// **The view lists the devices, and a session opens and closes them as
+    /// ports**: an input and an output are opened; the output's node is in the
+    /// graph; dropping the input closes its connection.
     #[test]
-    fn the_view_lists_devices_and_the_pool_opens_and_closes_ports() {
+    fn the_view_lists_devices_and_a_session_opens_and_closes_ports() {
         let (mut s, fake) = session();
         fake.plug(endpoint(1, "Keys"), PortDirection::Input);
         fake.plug(endpoint(10, "Synth"), PortDirection::Output);
@@ -433,43 +431,35 @@ mod hardware {
         let names: Vec<&str> = all.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["Keys", "Synth"], "inputs and outputs, by id");
 
-        s.pool((
-            midi_input("keys", all[0].clone()),
-            midi_output("synth", all[1].clone()),
-        ))
-        .expect("declares");
-        let _ = s.update();
+        let keys = s.open_midi_input(all[0].clone()).expect("opens");
+        let out = s.open_midi_output(all[1].clone()).run().expect("opens");
         assert_eq!(fake.connected_inputs(), [EndpointId::from_raw(1)], "Keys");
-        let out = s.midi_output(&"synth").expect("loaded");
         assert_eq!(out.presence(), Presence::Live);
         assert!(s.graph_ref().contains(out.node()), "the output's node");
         assert_eq!(out.info().device(), &all[1]);
 
-        s.pool(Vec::<
-            tutti_session::Declared<&str, tutti_session::MidiOutputEntry>,
-        >::new())
-            .expect("declares nothing");
+        drop(keys);
         let _ = s.update();
         assert!(
             fake.connected_inputs().is_empty(),
-            "the input's connection closed with its entry"
+            "the input's connection closed with its last handle"
         );
-        assert_eq!(out.presence(), Presence::Closed);
+        assert_eq!(out.presence(), Presence::Live, "the output is still held");
     }
 
-    /// **A session with no OS layer lists nothing**; an entry naming a device
-    /// fails to load by name (`midi_ports`).
+    /// **A session with no OS layer lists nothing**; opening a port of a device
+    /// fails by name (`midi_ports`).
     #[test]
     fn a_session_with_no_os_layer_lists_nothing() {
         let mut bare = offline();
         assert!(bare.midi().devices().is_empty());
     }
 
-    /// **A saved device is bound at load when it is the one, and fails with its
+    /// **A saved device is bound at open when it is the one, and fails with its
     /// candidates when it could be several.** A device named by its unit binds; a
     /// saved output of a unit whose port went, with another port of the unit
     /// present, is ambiguous with that port as the one candidate; none present
-    /// loads absent.
+    /// opens absent.
     #[test]
     fn a_saved_device_binds_when_it_is_the_one_and_asks_when_it_is_not() {
         let (mut s, fake) = session();
@@ -481,19 +471,13 @@ mod hardware {
         let saved = |name: &str| all.iter().find(|d| d.name == name).cloned().unwrap();
         let (pad_out, keys) = (saved("Pad Out"), saved("Keys"));
 
-        s.pool((
-            midi_output("pad out", pad_out.clone()),
-            midi_input("keys", keys.clone()),
-        ))
-        .expect("declares");
-        let _ = s.update();
-        assert_eq!(
-            s.midi_output(&"pad out").unwrap().presence(),
-            Presence::Live,
-            "named by its unit"
+        let (pad_port, keys_port) = (
+            s.open_midi_output(pad_out.clone()).run().expect("opens"),
+            s.open_midi_input(keys.clone()).expect("opens"),
         );
+        assert_eq!(pad_port.presence(), Presence::Live, "named by its unit");
         assert_eq!(
-            s.midi_input(&"keys").unwrap().presence(),
+            keys_port.presence(),
             Presence::Live,
             "the only device of its name"
         );
@@ -502,26 +486,20 @@ mod hardware {
         // with one other present device, so it can no longer be told for sure.
         fake.unplug(EndpointId::from_raw(2));
         let _ = s.update();
-        s.pool(midi_output("again", pad_out.clone()))
-            .expect("declares");
-        let _ = s.update();
-        let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"again") else {
-            panic!("ambiguous: {:?}", s.pool_state(&"again"));
-        };
+        let error = s
+            .open_midi_output(pad_out.clone())
+            .run()
+            .expect_err("it can no longer be told for sure");
         assert!(matches!(
-            &*error,
+            &error,
             MidiPortError::Ambiguous(c) if c.len() == 1 && c[0].name == "Pad In"
         ));
 
         fake.unplug(EndpointId::from_raw(1));
         fake.unplug(EndpointId::from_raw(3));
         let _ = s.update();
-        s.pool(midi_output("gone", pad_out)).expect("declares");
-        let _ = s.update();
-        assert_eq!(
-            s.midi_output(&"gone").unwrap().presence(),
-            Presence::Lost(PortCause::Unplugged)
-        );
+        let gone = s.open_midi_output(pad_out).run().expect("opens absent");
+        assert_eq!(gone.presence(), Presence::Lost(PortCause::Unplugged));
     }
 
     /// **What a device says of itself is its port's info**: a device that has
@@ -535,9 +513,7 @@ mod hardware {
         let _ = s.update();
         let keys = s.midi().devices().into_iter().next().unwrap();
 
-        s.pool(midi_input("keys", keys.clone())).expect("declares");
-        let _ = s.update();
-        let info = s.midi_input(&"keys").unwrap().info();
+        let info = s.open_midi_input(keys.clone()).expect("opens").info();
         assert!(info.learned().is_empty());
         let saved = info.saved();
         assert_eq!(saved.info(), &keys);
