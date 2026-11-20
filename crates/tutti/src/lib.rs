@@ -281,6 +281,7 @@ pub mod nodes {
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
+    pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
@@ -629,9 +630,9 @@ pub mod measure {
     };
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
-        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, CosineWindow,
-        FrameCount, FrameIndex, Grid, HopSize, HopSizeError, StftError, WindowLength,
-        WindowLengthError,
+        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
+        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, StftError, StftGeometry,
+        WindowLength, WindowLengthError,
     };
 }
 
