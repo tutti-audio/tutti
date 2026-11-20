@@ -25,7 +25,7 @@ use tutti_graph::{
     ForkTarget, Forked, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_rt::SplitMix64;
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteId, NoteNumber, Ump};
@@ -680,7 +680,7 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
             node: NodeKey(2),
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: NodeKey(4),
             port: 0,
         }))],
@@ -736,7 +736,7 @@ fn forkable_rig() -> (
     connect(&mut ed, 1, 2);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         })]);

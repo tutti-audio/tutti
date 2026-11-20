@@ -16,7 +16,7 @@ use crate::node::{Node, Wired};
 use crate::param::ParamState;
 use crate::plan::{Delta, Placement, Plan};
 use crate::spec::{GraphSpec, ValidGraph};
-use crate::{Edge, EdgeId, Sink, Source};
+use crate::{Edge, EdgeId, PortSink, PortSource};
 use crate::{Fade, NodeKey, RootBank};
 use tutti_units::Amplitude;
 
@@ -369,20 +369,20 @@ impl<F: Float> Editor<F> {
             let valid = now.spec.validate().map_err(CommitError::Invalid)?;
             return Ok((valid, now.weights(), None));
         }
-        let alive = |source: Source| match source {
-            Source::Node(p) => self
+        let alive = |source: PortSource| match source {
+            PortSource::Node(p) => self
                 .shapes
                 .get(&p.node)
                 .is_some_and(|shape| usize::from(p.port) < usize::from(shape.audio_out().count())),
-            Source::Global(ch) => ch < now.spec.topology.inputs.count(),
-            Source::Zero => false,
+            PortSource::Global(ch) => ch < now.spec.topology.inputs.count(),
+            PortSource::Zero => false,
         };
         let mut kept = false;
         for (c, sources) in before.spec.topology.outputs.iter().enumerate() {
             let mut bank_sources = Vec::new();
             for &source in sources.iter().filter(|&&s| alive(s)) {
                 let was_id = EdgeId {
-                    sink: Sink::Output(c as u16),
+                    sink: PortSink::Output(c as u16),
                     from: Edge::Direct(source),
                 };
                 let gain = before.spec.gains.get(&was_id);
@@ -390,7 +390,7 @@ impl<F: Float> Editor<F> {
                     continue;
                 }
                 let id = EdgeId {
-                    sink: Sink::Output((base + c) as u16),
+                    sink: PortSink::Output((base + c) as u16),
                     from: Edge::Direct(source),
                 };
                 let weight = gain.map_or(Amplitude::UNITY, |g| g.base);
@@ -406,10 +406,10 @@ impl<F: Float> Editor<F> {
         if !kept {
             now.spec.topology.outputs.truncate(base);
             now.lanes
-                .retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
+                .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= base));
             now.spec
                 .gains
-                .retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
+                .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= base));
         }
         let valid = now.spec.validate().map_err(CommitError::Invalid)?;
         if !kept {

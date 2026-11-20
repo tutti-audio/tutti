@@ -17,7 +17,7 @@ use tutti_buffers::MaxBlock;
 use tutti_engine::{Engine, GraphEngineError};
 use tutti_graph::NodeKey;
 use tutti_graph::{CommitError, Editor, ForkByClone, Prepare};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_timeline::Transport;
 use tutti_units::{Hz, SampleRate, Samples};
 
@@ -31,12 +31,12 @@ fn root(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor) {
     ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
     ed.spec_mut().topology.set_outputs((0..outputs).map(|ch| {
         if wire.contains(&ch) {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: 0,
             })
         } else {
-            Source::Zero
+            PortSource::Zero
         }
     }));
     ed.commit().expect("commits");

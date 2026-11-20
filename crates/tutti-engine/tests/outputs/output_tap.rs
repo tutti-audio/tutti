@@ -11,7 +11,7 @@ use tutti_buffers::MaxBlock;
 use tutti_engine::{Engine, OutputTapError, OutputTapOpen};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TapReader, Unforkable};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
@@ -48,7 +48,7 @@ fn engine(width: u16) -> Engine {
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }));
     ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(1),
             port,
         })

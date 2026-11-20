@@ -27,7 +27,7 @@ use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, GraphSpec, Io, Node,
     Prepare, Reference, Shape, Shapes, Status, TransportPosition, compile,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, Source};
+use tutti_graph::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, PortSource};
 use tutti_graph::{NodeKey, Topology};
 use tutti_ump::Ump;
 use tutti_units::{At, Frame, Latency, Samples, Tail};
@@ -165,7 +165,10 @@ fn spec_of(ph: &Phase, emitters: &[(u32, u64)]) -> (GraphSpec, Shapes) {
     );
     t.edges.insert(
         InPort { node: REC, port: 0 },
-        vec![Edge::Direct(Source::Node(OutPort { node: LAG, port: 0 }))],
+        vec![Edge::Direct(PortSource::Node(OutPort {
+            node: LAG,
+            port: 0,
+        }))],
     );
     let mut g = GraphSpec::new(t);
     for (p, srcs) in ph.edges.iter().enumerate() {
@@ -672,7 +675,7 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
                     Samples::new(DELAY),
                 ))],
             );
-            t.set_outputs(vec![Source::Node(OutPort { node: tap, port: 0 })]);
+            t.set_outputs(vec![PortSource::Node(OutPort { node: tap, port: 0 })]);
             let mut g = GraphSpec::new(t);
             g.connect_events(
                 EventIn { node: tap, port: 0 },

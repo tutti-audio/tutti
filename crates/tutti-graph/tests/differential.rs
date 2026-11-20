@@ -20,7 +20,9 @@ use proptest::prelude::*;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Topology;
 use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapId, TapOptions, TapSpec};
-use tutti_graph::{Edge, EdgeGain, EdgeId, FeedbackFrom, InPort, NodeSpec, OutPort, Sink, Source};
+use tutti_graph::{
+    Edge, EdgeGain, EdgeId, FeedbackFrom, InPort, NodeSpec, OutPort, PortSink, PortSource,
+};
 use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec, Unforkable};
 use tutti_units::{Amplitude, Samples};
 
@@ -169,10 +171,10 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
         let at = InPort { node: key, port };
         let roll = rng.below(100);
         let edge = if roll < 64 {
-            rng.pick(&direct).map(|p| Edge::Direct(Source::Node(p)))
+            rng.pick(&direct).map(|p| Edge::Direct(PortSource::Node(p)))
         } else if roll < 76 {
             let width = u64::from(desc.spec.topology.inputs.count());
-            Some(Edge::Direct(Source::Global(rng.below(width) as u16)))
+            Some(Edge::Direct(PortSource::Global(rng.below(width) as u16)))
         } else if roll < 80 {
             // Silence is no edge.
             None
@@ -202,14 +204,14 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
                 let extra = match fan.below(10) {
                     0 | 1 => {
                         let width = u64::from(desc.spec.topology.inputs.count());
-                        Some(Edge::Direct(Source::Global(fan.below(width) as u16)))
+                        Some(Edge::Direct(PortSource::Global(fan.below(width) as u16)))
                     }
                     2 => {
                         let delay = Samples::new(MAX_BLOCK + 17 * fan.below(3) as usize);
                         fan.pick(&any)
                             .map(|from| Edge::Feedback(FeedbackFrom::new(from, delay)))
                     }
-                    _ => fan.pick(&direct).map(|p| Edge::Direct(Source::Node(p))),
+                    _ => fan.pick(&direct).map(|p| Edge::Direct(PortSource::Node(p))),
                 };
                 if let Some(e) = extra
                     && !set.contains(&e)
@@ -272,9 +274,9 @@ fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
     desc.spec
         .topology
         .set_outputs((0..1 + rng.below(4)).map(|_| match rng.below(10) {
-            0 => Source::Zero,
-            1 => Source::Global(rng.below(width) as u16),
-            _ => rng.pick(&outs).map_or(Source::Zero, Source::Node),
+            0 => PortSource::Zero,
+            1 => PortSource::Global(rng.below(width) as u16),
+            _ => rng.pick(&outs).map_or(PortSource::Zero, PortSource::Node),
         }));
     // A channel now and then sums several sources, aligned to the output time
     // each on its own.
@@ -285,11 +287,11 @@ fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
         }
         for _ in 0..1 + fan.below(3) {
             let extra = match fan.below(8) {
-                0 => Source::Global(fan.below(width) as u16),
-                _ => fan.pick(&outs).map_or(Source::Zero, Source::Node),
+                0 => PortSource::Global(fan.below(width) as u16),
+                _ => fan.pick(&outs).map_or(PortSource::Zero, PortSource::Node),
             };
             let set = &mut desc.spec.topology.outputs[ch];
-            if extra != Source::Zero && !set.contains(&extra) {
+            if extra != PortSource::Zero && !set.contains(&extra) {
                 set.push(extra);
             }
         }
@@ -365,7 +367,7 @@ fn mutate(desc: &Desc, rng: &mut Rng) -> Desc {
         t.edges.retain(|at, es| {
             es.retain(|e| {
                 let from = match *e {
-                    Edge::Direct(Source::Node(p))
+                    Edge::Direct(PortSource::Node(p))
                     | Edge::Feedback(FeedbackFrom { from: p, .. }) => Some(p.node),
                     Edge::Direct(_) => None,
                 };
@@ -374,7 +376,7 @@ fn mutate(desc: &Desc, rng: &mut Rng) -> Desc {
             at.node != victim && !es.is_empty()
         });
         for s in &mut t.outputs {
-            s.retain(|src| !matches!(src, Source::Node(p) if p.node == victim));
+            s.retain(|src| !matches!(src, PortSource::Node(p) if p.node == victim));
         }
         d.spec.events.retain(|at, _| at.node != victim);
         for v in d.spec.events.values_mut() {
@@ -581,7 +583,7 @@ proptest! {
     fn an_aligned_tap_of_the_outputs_is_the_output(seed in any::<u64>(), which in 0usize..5) {
         for workers in modes(seed) {
             let desc = random_graph(seed);
-            let outputs: Vec<Source> = desc
+            let outputs: Vec<PortSource> = desc
                 .spec
                 .topology
                 .outputs
@@ -590,7 +592,7 @@ proptest! {
                     [one] => one,
                     // A ports tap names no sum: its lane reads silence and is
                     // not compared.
-                    _ => Source::Zero,
+                    _ => PortSource::Zero,
                 })
                 .collect();
             let summed: Vec<bool> = desc.spec.topology.outputs.iter().map(|s| s.len() > 1).collect();
@@ -902,7 +904,7 @@ fn the_generator_covers_what_the_suite_claims() {
             if matches!(
                 d.key,
                 tutti_graph::DelayKey::Audio {
-                    from: Source::Global(_),
+                    from: PortSource::Global(_),
                     ..
                 }
             ) {
@@ -1135,7 +1137,7 @@ fn close_a_cycle(desc: &mut Desc, rng: &mut Rng) -> bool {
                     .iter()
                     .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))
                 {
-                    if let Edge::Direct(Source::Node(p)) = e
+                    if let Edge::Direct(PortSource::Node(p)) = e
                         && p.node == k
                     {
                         stack.push(at.node);
@@ -1160,7 +1162,7 @@ fn close_a_cycle(desc: &mut Desc, rng: &mut Rng) -> bool {
                     node: early,
                     port: 0,
                 },
-                vec![Edge::Direct(Source::Node(OutPort {
+                vec![Edge::Direct(PortSource::Node(OutPort {
                     node: late,
                     port: 0,
                 }))],
@@ -1317,7 +1319,7 @@ fn an_unrelated_edit_does_not_disturb_the_running_graph() {
     for (&k, kind) in &kinds {
         t.nodes.insert(k, spec_for(kind));
     }
-    let src = |node| Edge::Direct(Source::Node(OutPort { node, port: 0 }));
+    let src = |node| Edge::Direct(PortSource::Node(OutPort { node, port: 0 }));
     t.edges.insert(InPort { node: b, port: 0 }, vec![src(a)]);
     t.edges.insert(InPort { node: c, port: 0 }, vec![src(a)]);
     t.edges.insert(InPort { node: mix, port: 0 }, vec![src(b)]);
@@ -1329,7 +1331,7 @@ fn an_unrelated_edit_does_not_disturb_the_running_graph() {
             Samples::new(MAX_BLOCK),
         ))],
     );
-    t.set_outputs(vec![Source::Node(OutPort { node: mix, port: 0 })]);
+    t.set_outputs(vec![PortSource::Node(OutPort { node: mix, port: 0 })]);
     let before = GraphSpec::new(t.clone());
     let mut after_t = t;
     let mut kinds_after = kinds.clone();
@@ -1356,7 +1358,7 @@ fn an_unrelated_edit_does_not_disturb_the_running_graph() {
             .unwrap()
             .delay(tutti_graph::DelayKey::Audio {
                 at: InPort { node: mix, port: 1 },
-                from: Source::Node(OutPort { node: c, port: 0 })
+                from: PortSource::Node(OutPort { node: c, port: 0 })
             }),
         tutti_units::Samples::new(37),
         "the edit must land while a PDC ring is full of signal"
@@ -1497,19 +1499,19 @@ fn every_borrow_form_matches_the_reference() {
     for (&k, kind) in &kinds {
         t.nodes.insert(k, spec_for(kind));
     }
-    let out = |node, port| Source::Node(OutPort { node, port });
+    let out = |node, port| PortSource::Node(OutPort { node, port });
     let mut wire = |node, port, from| {
         t.edges
             .insert(InPort { node, port }, vec![Edge::Direct(from)]);
     };
-    wire(split, 0, Source::Global(0));
+    wire(split, 0, PortSource::Global(0));
     wire(inplace, 0, out(split, 0));
     for c in 0..6 {
         wire(
             six,
             c,
             if c % 2 == 0 {
-                Source::Global(1)
+                PortSource::Global(1)
             } else {
                 out(src, 0)
             },
@@ -1522,13 +1524,13 @@ fn every_borrow_form_matches_the_reference() {
             if c < 6 {
                 out(six, c)
             } else {
-                Source::Global(0)
+                PortSource::Global(0)
             },
         );
     }
     // Every other port of the sum reads something different; the rest read
     // nothing, so the zero slot is borrowed many times over.
-    let feeds: Vec<Source> = (0..20)
+    let feeds: Vec<PortSource> = (0..20)
         .map(|c| out(twenty, c))
         .chain([out(inplace, 0), out(emit, 0), out(consume, 0)])
         .collect();
@@ -1538,14 +1540,14 @@ fn every_borrow_form_matches_the_reference() {
     // `pre6` and `pre2` feed only their mixer, so the mixer's channels are
     // aliased in place; `mixwide` reads a global input, which cannot be.
     for c in 0..6 {
-        wire(pre6, c, Source::Global(c % 2));
+        wire(pre6, c, PortSource::Global(c % 2));
         wire(mix6, c, out(pre6, c));
     }
     for c in 0..20 {
-        wire(mixwide, c, Source::Global(1 - c % 2));
+        wire(mixwide, c, PortSource::Global(1 - c % 2));
     }
     for c in 0..2 {
-        wire(pre2, c, Source::Global(c));
+        wire(pre2, c, PortSource::Global(c));
         wire(mix2, c, out(pre2, c));
     }
     // The direct stereo shapes: a stereo source, mono to stereo, stereo to
@@ -1619,21 +1621,21 @@ fn every_borrow_form_matches_the_reference() {
         t.edges
             .insert(InPort { node, port }, vec![Edge::Direct(from)]);
     };
-    wire(fan12, 0, Source::Global(1));
+    wire(fan12, 0, PortSource::Global(1));
     wire(sum2, 0, out(st_src, 0));
     wire(sum2, 1, out(fan12, 1));
-    wire(sum2dup, 0, Source::Global(0));
-    wire(sum2dup, 1, Source::Global(0));
+    wire(sum2dup, 0, PortSource::Global(0));
+    wire(sum2dup, 1, PortSource::Global(0));
     for c in 0..2 {
-        wire(st_pre, c, Source::Global(c));
+        wire(st_pre, c, PortSource::Global(c));
         wire(st_in, c, out(st_pre, c));
     }
     // `half` is the last reader of `fan12`'s port 0 only: channel 0 is in
     // place, channel 1 reads a global input.
     wire(half, 0, out(fan12, 0));
-    wire(half, 1, Source::Global(1));
+    wire(half, 1, PortSource::Global(1));
     for c in 0..3 {
-        wire(w3, c, Source::Global(c % 2));
+        wire(w3, c, PortSource::Global(c % 2));
     }
     t.set_outputs(vec![
         out(sum, 0),
@@ -2239,8 +2241,8 @@ const WEIGHTS: [f64; 9] = [1.0, 0.5, -0.75, 0.0, 1.5, 0.3, 0.1, -1.0, 2.0];
 /// Whether `id` names an edge of `t`.
 fn has_edge(t: &Topology, id: EdgeId) -> bool {
     match id.sink {
-        Sink::Port(at) => t.edges.get(&at).is_some_and(|e| e.contains(&id.from)),
-        Sink::Output(ch) => match id.from {
+        PortSink::Port(at) => t.edges.get(&at).is_some_and(|e| e.contains(&id.from)),
+        PortSink::Output(ch) => match id.from {
             Edge::Direct(s) => t
                 .outputs
                 .get(usize::from(ch))
@@ -2265,14 +2267,14 @@ fn weigh(desc: &mut Desc, rng: &mut Rng) {
         .iter()
         .flat_map(|(&at, es)| {
             es.iter().map(move |&from| EdgeId {
-                sink: Sink::Port(at),
+                sink: PortSink::Port(at),
                 from,
             })
         })
         .collect();
     for (ch, sources) in t.outputs.iter().enumerate() {
         ids.extend(sources.iter().map(|&s| EdgeId {
-            sink: Sink::Output(ch as u16),
+            sink: PortSink::Output(ch as u16),
             from: Edge::Direct(s),
         }));
     }
@@ -3078,7 +3080,7 @@ fn bus_graph(seed: u64) -> BusGraph {
             for c in 0..width as u16 {
                 spec.topology.connect(
                     InPort { node, port: c },
-                    Edge::Direct(Source::Global(c % globals as u16)),
+                    Edge::Direct(PortSource::Global(c % globals as u16)),
                 );
             }
         } else {
@@ -3103,7 +3105,7 @@ fn bus_graph(seed: u64) -> BusGraph {
                         node,
                         port: rng.below(width as u64) as u16,
                     },
-                    Edge::Direct(Source::Node(OutPort {
+                    Edge::Direct(PortSource::Node(OutPort {
                         node: from,
                         port: rng.below(w as u64) as u16,
                     })),
@@ -3118,7 +3120,7 @@ fn bus_graph(seed: u64) -> BusGraph {
     let &(last, width) = widths.last().expect("a node");
     spec.topology.set_outputs(
         (0..width as u16)
-            .map(|port| Source::Node(OutPort { node: last, port }))
+            .map(|port| PortSource::Node(OutPort { node: last, port }))
             .collect::<Vec<_>>(),
     );
     BusGraph { spec, kinds }
@@ -3167,13 +3169,13 @@ fn the_bus_generator_reaches_folds_copies_and_mixes() {
         unity += usize::from(lowering.lanes.values().any(|w| w.get() == 1.0));
         mixed += usize::from(lowering.lanes.keys().any(|id| {
             match id.sink {
-                Sink::Port(at) => graph
+                PortSink::Port(at) => graph
                     .spec
                     .topology
                     .edges
                     .get(&at)
                     .is_some_and(|edges| !edges.is_empty()),
-                Sink::Output(_) => false,
+                PortSink::Output(_) => false,
             }
         }));
     }
@@ -3253,19 +3255,19 @@ fn the_root_generator_reaches_folds_copies_and_mixes() {
             lowering
                 .lanes
                 .iter()
-                .filter(|(id, _)| matches!(id.sink, Sink::Output(_)))
+                .filter(|(id, _)| matches!(id.sink, PortSink::Output(_)))
         };
         weighted += usize::from(roots().any(|(_, w)| w.get() != 1.0));
         unity += usize::from(roots().any(|(_, w)| w.get() == 1.0));
         mixed += usize::from(roots().any(|(id, _)| {
             match id.sink {
-                Sink::Output(c) => graph
+                PortSink::Output(c) => graph
                     .spec
                     .topology
                     .outputs
                     .get(usize::from(c))
                     .is_some_and(|o| !o.is_empty()),
-                Sink::Port(_) => false,
+                PortSink::Port(_) => false,
             }
         }));
     }

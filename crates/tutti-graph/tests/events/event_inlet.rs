@@ -20,7 +20,7 @@ use tutti_graph::{
     Edge, Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
     EventKind, EventOut, EventTapId, EventTapReader, Executor, ForkCause, ForkMode, ForkSource,
     ForkTarget, Forked, InPort, IntoNode, Losses, Node, NodeKey, NodeParts, OutPort, PlayClock,
-    Prepare, Source, Stamp, TapAlign, TapEvent, TransportChanges, TransportPosition,
+    PortSource, Prepare, Stamp, TapAlign, TapEvent, TransportChanges, TransportPosition,
 };
 use tutti_rt::PushError;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
@@ -490,8 +490,8 @@ impl IntoNode for Forkable {
     }
 }
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(node),
         port: 0,
     })

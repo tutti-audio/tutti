@@ -10,7 +10,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::Engine;
 use tutti_graph::{Edge, Editor, Fade, FadeLaw, ForkByClone, InPort, NodeKey, OutPort};
-use tutti_graph::{Pool, Prepare, Source, WorkerPool};
+use tutti_graph::{Pool, PortSource, Prepare, WorkerPool};
 use tutti_timeline::Transport;
 use tutti_units::{Hz, SampleRate, Samples, Seconds};
 
@@ -35,7 +35,7 @@ impl Pool for Counting {
 fn wire(ed: &mut Editor, pair: [u64; 2]) {
     ed.spec_mut().topology.set_outputs(
         pair.map(|k| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(k),
                 port: 0,
             })
@@ -75,7 +75,7 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
                 node: NodeKey(k + 11),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutPort {
                 node: NodeKey(k + 1),
                 port: 0,
             }))],

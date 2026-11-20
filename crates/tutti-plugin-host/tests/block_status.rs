@@ -17,7 +17,7 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::{self, Direct, assert_declared_tail, drive_input};
 use tutti_graph::{
     Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, Node,
-    NodeKey, OutPort, PlayClock, Prepare as GraphPrepare, Source, Status, TransportChanges,
+    NodeKey, OutPort, PlayClock, PortSource, Prepare as GraphPrepare, Status, TransportChanges,
     TransportPosition, Unforkable,
 };
 use tutti_plugin_host::{ClientOverError, PluginNode, client_over};
@@ -164,7 +164,7 @@ fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| Source::Node(OutPort { node: plugin, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: plugin, port })));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

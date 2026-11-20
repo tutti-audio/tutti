@@ -19,7 +19,7 @@ use crate::bus_edge::{BusFeed, BusRef};
 use crate::gain::EdgeGain;
 use crate::mode::{NodeMix, NodeMode};
 use crate::{ChannelFeed, LatencyGraph, PortFeed};
-use crate::{Edge, EdgeId, InPort, Sink, Source};
+use crate::{Edge, EdgeId, InPort, PortSink, PortSource};
 use crate::{Invalid, Valid};
 use crate::{NodeKey, Topology};
 use tutti_buffers::BusTopology;
@@ -220,7 +220,7 @@ impl GraphSpec {
     /// [`validate`](Self::validate)). Returns whether the edge was there.
     pub fn disconnect(&mut self, at: InPort, edge: Edge) -> bool {
         self.gains.remove(&EdgeId {
-            sink: Sink::Port(at),
+            sink: PortSink::Port(at),
             from: edge,
         });
         self.topology.disconnect(at, edge)
@@ -232,9 +232,9 @@ impl GraphSpec {
     /// # Panics
     ///
     /// If `channel` is past [`Topology::outputs`].
-    pub fn disconnect_output(&mut self, channel: usize, source: Source) -> bool {
+    pub fn disconnect_output(&mut self, channel: usize, source: PortSource) -> bool {
         self.gains.remove(&EdgeId {
-            sink: Sink::Output(channel as u16),
+            sink: PortSink::Output(channel as u16),
             from: Edge::Direct(source),
         });
         self.topology.disconnect_output(channel, source)
@@ -309,13 +309,13 @@ impl GraphSpec {
             match g.fade {
                 EdgeFade::None => {}
                 EdgeFade::Out => match (id.sink, id.from) {
-                    (Sink::Port(at), from) => {
+                    (PortSink::Port(at), from) => {
                         spec.disconnect(at, from);
                     }
-                    (Sink::Output(c), Edge::Direct(s)) => {
+                    (PortSink::Output(c), Edge::Direct(s)) => {
                         spec.disconnect_output(usize::from(c), s);
                     }
-                    (Sink::Output(_), Edge::Feedback(_)) => {}
+                    (PortSink::Output(_), Edge::Feedback(_)) => {}
                 },
                 EdgeFade::In => {
                     spec.set_edge_gain(
@@ -336,12 +336,12 @@ impl GraphSpec {
     #[must_use]
     pub fn has_edge(&self, id: EdgeId) -> bool {
         match id.sink {
-            Sink::Port(at) => self
+            PortSink::Port(at) => self
                 .topology
                 .edges
                 .get(&at)
                 .is_some_and(|e| e.contains(&id.from)),
-            Sink::Output(ch) => match id.from {
+            PortSink::Output(ch) => match id.from {
                 Edge::Direct(s) => self
                     .topology
                     .outputs
@@ -992,7 +992,7 @@ fn driving_nodes<'a>(
     // is aligned to the node's arrival, as a param's source is.
     let gain_sources = gains
         .iter()
-        .filter(move |(id, _)| matches!(id.sink, Sink::Port(at) if at.node == node))
+        .filter(move |(id, _)| matches!(id.sink, PortSink::Port(at) if at.node == node))
         .filter_map(|(_, g)| g.source.map(|s| s.node));
     event_sources.chain(param_sources).chain(gain_sources)
 }
@@ -1002,6 +1002,6 @@ fn driving_nodes<'a>(
 fn output_gain_sources(gains: &BTreeMap<EdgeId, EdgeGain>) -> impl Iterator<Item = NodeKey> + '_ {
     gains
         .iter()
-        .filter(|(id, _)| matches!(id.sink, Sink::Output(_)))
+        .filter(|(id, _)| matches!(id.sink, PortSink::Output(_)))
         .filter_map(|(_, g)| g.source.map(|s| s.node))
 }

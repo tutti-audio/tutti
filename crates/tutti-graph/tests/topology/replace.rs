@@ -16,7 +16,7 @@ use tutti_graph::{
     CommitError, Cx, Editor, EventIn, EventKind, Executor, Fade, FadeLaw, Io, Node, Prepare, Shape,
     Status, TransportPosition, Unforkable, compile,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_rt::RtScope;
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Samples};
@@ -38,11 +38,11 @@ fn gain_graph(g: f32) -> (Editor, Executor) {
             node: NODE,
             port: 0,
         },
-        vec![Edge::Direct(Source::Global(0))],
+        vec![Edge::Direct(PortSource::Global(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NODE,
             port: 0,
         })]);
@@ -194,11 +194,11 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
             node: NODE,
             port: 0,
         },
-        vec![Edge::Direct(Source::Global(0))],
+        vec![Edge::Direct(PortSource::Global(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NODE,
             port: 0,
         })]);
@@ -327,7 +327,7 @@ fn a_shape_mismatch_is_refused() {
     ed.spec_mut()
         .topology
         .outputs
-        .push(vec![Source::Node(OutPort {
+        .push(vec![PortSource::Node(OutPort {
             node: lagged,
             port: 0,
         })]);
@@ -381,7 +381,7 @@ fn a_shape_mismatch_is_refused() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: lagged,
             port: 0,
         })]);
@@ -524,7 +524,7 @@ fn events_go_to_the_incoming_unit_only() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NODE,
             port: 0,
         })]);
@@ -672,9 +672,9 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
                 node: NODE,
                 port: 0,
             },
-            vec![Edge::Direct(Source::Global(0))],
+            vec![Edge::Direct(PortSource::Global(0))],
         );
-        t.set_outputs(vec![Source::Node(OutPort {
+        t.set_outputs(vec![PortSource::Node(OutPort {
             node: NODE,
             port: 0,
         })]);

@@ -13,7 +13,7 @@ use crate::mode::{MixError, ModeCell, ModeError, NodeMix, NodeMode};
 use crate::param::{ParamIn, ParamRange, ParamRangeCell};
 use crate::pass::Pass;
 use crate::spec::GraphInvalid;
-use crate::{Edge, EdgeId, Sink};
+use crate::{Edge, EdgeId, PortSink};
 
 impl<F: Float> Editor<F> {
     /// Sets param port `at`'s range — what its driven value is clamped
@@ -283,11 +283,11 @@ impl<F: Float> Editor<F> {
             };
             return match kind {
                 EdgeFade::Out => match (id.sink, id.from) {
-                    (Sink::Port(at), from) => self.spec.disconnect(at, from),
-                    (Sink::Output(c), Edge::Direct(s)) => {
+                    (PortSink::Port(at), from) => self.spec.disconnect(at, from),
+                    (PortSink::Output(c), Edge::Direct(s)) => {
                         self.spec.disconnect_output(usize::from(c), s)
                     }
-                    (Sink::Output(_), Edge::Feedback(_)) => false,
+                    (PortSink::Output(_), Edge::Feedback(_)) => false,
                 },
                 EdgeFade::In => {
                     let plain = g.base == Amplitude::UNITY

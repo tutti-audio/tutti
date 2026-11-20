@@ -9,7 +9,7 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{InterleavedMut, Pull, Source as _};
-use tutti_graph::{CloseError, Edge, InPort, OutPort, Source};
+use tutti_graph::{CloseError, Edge, InPort, OutPort, PortSource};
 use tutti_graph::{
     Editor, Executor, ForkCause, ForkMode, ForkSource, ForkTarget, Forked, IntoNode, MissingSource,
     Node, NodeParts, Op, TapReader, TransportPosition,
@@ -45,8 +45,8 @@ impl IntoNode for Forkable {
 const MAX_BLOCK: usize = 128;
 const CHAINS: u64 = 6;
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(node),
         port: 0,
     })
@@ -55,7 +55,7 @@ fn out(node: u64) -> Source {
 /// `CHAINS` independent chains `Global(0) -> Lag(5 * k) -> Gain`, each its own
 /// output channel: different latencies, so the compiler aligns the outputs.
 /// Returns the sources of the six gains.
-fn build(ed: &mut Editor) -> Vec<Source> {
+fn build(ed: &mut Editor) -> Vec<PortSource> {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     let mut gains = Vec::new();
     for k in 0..CHAINS {
@@ -81,7 +81,7 @@ fn build(ed: &mut Editor) -> Vec<Source> {
                 node: NodeKey(lag),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Global(0))],
+            vec![Edge::Direct(PortSource::Global(0))],
         );
         t.edges.insert(
             InPort {
@@ -99,7 +99,7 @@ fn build(ed: &mut Editor) -> Vec<Source> {
 struct Rig {
     ed: Editor,
     exec: Executor,
-    gains: Vec<Source>,
+    gains: Vec<PortSource>,
     gated: bool,
 }
 
@@ -219,7 +219,7 @@ fn run(r: &mut Rig, blocks: usize) -> Read {
     let mut edges =
         r.ed.open_tap(
             TapId::of(4),
-            vec![Source::Global(0), Source::Zero],
+            vec![PortSource::Global(0), PortSource::Zero],
             TapOptions::new(cap),
         )
         .expect("the sources exist");
@@ -796,7 +796,7 @@ impl Drop for Raise<'_> {
 fn concurrent_drain(workers: usize, width: usize, align: TapAlign) {
     const BLOCKS: usize = 130;
     let mut r = rig(workers, workers > 1);
-    let sources: Vec<Source> = (0..width).map(|k| r.gains[k * 5 / (width - 1)]).collect();
+    let sources: Vec<PortSource> = (0..width).map(|k| r.gains[k * 5 / (width - 1)]).collect();
     let chains: Vec<u64> = (0..width as u64)
         .map(|k| k * 5 / (width as u64 - 1))
         .collect();
@@ -948,7 +948,7 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
     else {
         panic!("a ports tap")
     };
-    sources.push(Source::Zero);
+    sources.push(PortSource::Zero);
     assert_eq!(
         r.ed.commit(),
         Err(tutti_graph::CommitError::TapWidth {
@@ -1018,8 +1018,8 @@ fn wide(r: &mut Rig, value: f32, width: usize) {
     r.ed.insert(NodeKey(1), "const", Forkable(Kind::Const { value, width }));
 }
 
-fn port(node: u64, port: u16) -> Source {
-    Source::Node(OutPort {
+fn port(node: u64, port: u16) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(node),
         port,
     })
@@ -1070,7 +1070,7 @@ fn a_tap_on_a_global_input_that_goes_missing_reads_silence() {
     let mut tap =
         r.ed.open_tap(
             TapId::of(1),
-            vec![Source::Global(0), Source::Global(1)],
+            vec![PortSource::Global(0), PortSource::Global(1)],
             TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("both inputs exist when it opens");
@@ -1095,7 +1095,7 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
     let mut r = rig(1, false);
     wide(&mut r, 0.5, 2);
     let cap = Samples::new(1024);
-    let tap = |r: &mut Rig, sources: Vec<Source>| {
+    let tap = |r: &mut Rig, sources: Vec<PortSource>| {
         r.ed.open_tap(
             TapId::of(9),
             sources,
@@ -1117,14 +1117,14 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
         "a typo'd key"
     );
     assert_eq!(
-        tap(&mut r, vec![Source::Global(3)]).err(),
+        tap(&mut r, vec![PortSource::Global(3)]).err(),
         Some(MissingSource::Global {
             channel: 3,
             width: 1
         }),
         "a global input past the graph's width"
     );
-    let meter = |r: &mut Rig, sources: Vec<Source>| {
+    let meter = |r: &mut Rig, sources: Vec<PortSource>| {
         r.ed.open_meter(MeterId::of(9), MeterSpec::raw(sources))
             .err()
     };
@@ -1142,7 +1142,7 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
         "a meter on a missing node"
     );
     assert_eq!(
-        meter(&mut r, vec![Source::Global(1)]),
+        meter(&mut r, vec![PortSource::Global(1)]),
         Some(MissingSource::Global {
             channel: 1,
             width: 1
@@ -1154,7 +1154,11 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
     );
     // Nothing was committed: node 1 and the input exist only in the edited
     // spec, and that is what is checked.
-    tap(&mut r, vec![port(1, 1), Source::Global(0), Source::Zero]).expect("all exist");
+    tap(
+        &mut r,
+        vec![port(1, 1), PortSource::Global(0), PortSource::Zero],
+    )
+    .expect("all exist");
     assert_eq!(
         meter(&mut r, vec![port(1, 1)]),
         None,

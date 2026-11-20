@@ -32,7 +32,7 @@ use tutti_units::{SampleRate, Samples, Seconds};
 /// assert_eq!(wave.channel(1).samples(), &[-0.5, -0.25]);
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct Wave<S: Sample = f32> {
     /// One vector per channel, all of length `len`.
     vec: Vec<Vec<S>>,
@@ -44,6 +44,19 @@ pub struct Wave<S: Sample = f32> {
     topology: ChannelTopology,
     /// Whether `topology` was stated or guessed from the count.
     placement: Placement,
+}
+
+/// Two waves are equal when their samples, rate and speakers are: the
+/// [`placement`](Wave::placement) says where the topology came from, not what
+/// the wave is, so a wave and its WAV round trip (a stated mono against an
+/// assumed one) are equal.
+impl<S: Sample> PartialEq for Wave<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.sample_rate == other.sample_rate
+            && self.len == other.len
+            && self.topology == other.topology
+            && self.vec == other.vec
+    }
 }
 
 /// What a bare channel count is taken to mean: [`ChannelTopology::assumed`].

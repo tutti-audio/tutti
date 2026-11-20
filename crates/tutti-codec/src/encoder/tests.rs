@@ -27,13 +27,6 @@ fn formats() -> Vec<(&'static str, Format)> {
             level: crate::FlacLevel::default(),
         },
     ));
-    #[cfg(feature = "encode-vorbis")]
-    all.push((
-        "ogg",
-        Format::Vorbis {
-            quality: crate::Quality::default(),
-        },
-    ));
     all
 }
 
@@ -180,7 +173,7 @@ fn a_spec_that_cannot_be_written_is_refused_without_a_file() {
 }
 
 /// Widths past a container's header are refused as spec errors where the
-/// container counts them: AIFF in an `i16`, Ogg Vorbis in a `u8`.
+/// container counts them: AIFF in an `i16`.
 #[test]
 fn a_width_past_the_containers_header_is_refused() {
     #[cfg(feature = "encode-aiff")]
@@ -198,34 +191,13 @@ fn a_width_past_the_containers_header_is_refused() {
             "{err}"
         );
     }
-    #[cfg(feature = "encode-vorbis")]
-    {
-        let s = spec(
-            Format::Vorbis {
-                quality: crate::Quality::default(),
-            },
-            257,
-        );
-        let err = Encoder::create(&s, Cursor::new(Vec::new())).expect_err("past u8");
-        assert!(
-            matches!(
-                err,
-                Error::Spec(SpecError::TooManyChannels {
-                    channels: 257,
-                    max: 255
-                })
-            ),
-            "{err}"
-        );
-    }
 }
 
 /// A take that outgrows its sink never reports success: some write, or at
 /// the latest `finish`, fails, and the failure is the sink's own.
 ///
-/// The sink holds the headers (Ogg's are a few KiB) and little more. WAV, AIFF and FLAC fail on the
-/// write that reaches the sink; Ogg Vorbis encodes on a thread, so its
-/// failure may come with the next write or `finish`.
+/// The sink holds the headers and little more. Every format fails on the write
+/// that reaches the sink.
 #[test]
 fn a_take_that_outgrows_its_sink_fails_by_finish_at_the_latest() {
     for (ext, format) in formats() {
@@ -256,9 +228,8 @@ fn a_take_that_outgrows_its_sink_fails_by_finish_at_the_latest() {
 
 /// An encoder is `Send`, so a recording can move it to its pump thread.
 ///
-/// The property is a compile-time one:
-/// holding the `VorbisEncoder` in `VorbisWriter` (built on the caller's thread)
-/// makes this stop compiling.
+/// The property is a compile-time one: holding a value that is not `Send` in a
+/// writer makes this stop compiling.
 #[test]
 fn an_encoder_can_move_to_another_thread() {
     fn is_send<T: Send>() {}

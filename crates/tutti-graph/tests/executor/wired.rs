@@ -13,8 +13,8 @@ use common::{Kind, TestNode, WORKERS, prepare, test_pool};
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor,
-    FeedbackFrom, InPort, Io, Node, NodeKey, OutPort, Prepare, Rewired, Shape, Sink, Source,
-    Status, TapAlign, TapId, TapOptions, TransportPosition, Unforkable, Wired, WiredMask,
+    FeedbackFrom, InPort, Io, Node, NodeKey, OutPort, PortSink, PortSource, Prepare, Rewired,
+    Shape, Status, TapAlign, TapId, TapOptions, TransportPosition, Unforkable, Wired, WiredMask,
 };
 use tutti_units::{Samples, Tail};
 
@@ -158,7 +158,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
         })),
     );
     let at = |port| InPort { node: PROBE, port };
-    let from = |port| Edge::Direct(Source::Node(out(SRC, port)));
+    let from = |port| Edge::Direct(PortSource::Node(out(SRC, port)));
     let mut steps = Vec::new();
 
     // Nothing wired.
@@ -174,14 +174,14 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
     let tap = ed
         .open_tap(
             TapId::of(1),
-            vec![Source::Node(out(PROBE, 1))],
+            vec![PortSource::Node(out(PROBE, 1))],
             TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(out(PROBE, 2))]);
+        .set_outputs(vec![PortSource::Node(out(PROBE, 2))]);
     steps.push(step(&mut ed, &mut exec, &seen, 1));
     // Back to nothing: the last source of each input goes, the output
     // leaves, the tap closes.
@@ -395,12 +395,12 @@ fn a_shape_with_64_ports_reads_bit_63() {
             node: PROBE,
             port: 63,
         },
-        Edge::Direct(Source::Node(out(SRC, 63))),
+        Edge::Direct(PortSource::Node(out(SRC, 63))),
     );
     let _tap = ed
         .open_tap(
             TapId::of(1),
-            vec![Source::Node(out(PROBE, 63))],
+            vec![PortSource::Node(out(PROBE, 63))],
             TapOptions::new(Samples::new(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
@@ -428,7 +428,7 @@ fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
             seen: Arc::clone(&seen),
         }),
     );
-    let from = Edge::Direct(Source::Node(out(SRC, 0)));
+    let from = Edge::Direct(PortSource::Node(out(SRC, 0)));
     let sink = InPort {
         node: PROBE,
         port: 0,
@@ -438,7 +438,7 @@ fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
     render(&mut exec, 0);
     ed.collect();
     let id = EdgeId {
-        sink: Sink::Port(sink),
+        sink: PortSink::Port(sink),
         from,
     };
     (ed, exec, seen, id)
@@ -485,10 +485,10 @@ fn a_fade_in_counts_as_wired_at_once() {
         node: PROBE,
         port: 1,
     };
-    let from = Edge::Direct(Source::Node(out(SRC, 1)));
+    let from = Edge::Direct(PortSource::Node(out(SRC, 1)));
     ed.spec_mut().connect(sink, from);
     let id = EdgeId {
-        sink: Sink::Port(sink),
+        sink: PortSink::Port(sink),
         from,
     };
     ed.set_edge_fade(id, EdgeFade::In).expect("an edge");
