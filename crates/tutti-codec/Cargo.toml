@@ -42,14 +42,10 @@ serde = ["dep:serde"]
 
 [dependencies]
 thiserror = { workspace = true, features = ["std"] }
-# An unfinished file that cannot be removed is logged.
-tracing.workspace = true
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-# `spawn_named`: the encoders' worker threads.
+# `spawn_named`: the encoders' worker threads; `Staged`: the files written beside their path.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
-# `Mint`: the staged files' names.
-tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 # No default features: the encoder drives flacenc's frame encoder on its own
 # workers, so flacenc's `par` (and its `serde`/`log`) are unused.

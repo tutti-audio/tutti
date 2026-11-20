@@ -2633,12 +2633,10 @@ dependencies = [
  "symphonia",
  "tempfile",
  "thiserror 2.0.21",
- "tracing",
  "tutti-buffers",
  "tutti-codec",
  "tutti-fixtures",
  "tutti-platform",
- "tutti-rt",
  "tutti-units",
  "vorbis_rs",
 ]
@@ -3050,6 +3048,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "thread-priority",
+ "tracing",
  "web-time",
  "windows",
 ]

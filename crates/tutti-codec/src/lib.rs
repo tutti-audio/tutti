@@ -24,7 +24,8 @@
 //!   error, else the result of `finish`. It writes in place rather than staged,
 //!   because a recording cut short is worth keeping.
 //! - `write_wave(&wave, dest, format)` saves a `Wave` at its own rate and topology, to
-//!   a path (staged) or into a borrowed writer.
+//!   a path (staged: replacing what is there, or refusing it under
+//!   `Destination::create_new`) or into a borrowed writer.
 //! - Decoding is plain functions and types of our own, no trait: `read_wave`
 //!   decodes a path or bytes (any `impl Into<tutti_platform::Asset>`) into a `Wave` (a resident, planar sample buffer),
 //!   `Wave::topology` and `FileIn::topology` say which speaker each channel feeds,
@@ -71,7 +72,6 @@ mod flac;
 mod format;
 mod pcm;
 mod spec;
-mod staged;
 #[cfg(test)]
 mod test_sink;
 #[cfg(feature = "encode-vorbis")]

@@ -27,8 +27,11 @@
 //!   (`impl Into<Asset>`): a path or shared bytes, or an app's own [`Open`]
 //!   source that opens again and again, with an [`Identity`] to cache by (a
 //!   path's carries its [`Stamp`]). [`Destination`] is where one write goes: a
-//!   path, written staged, or a borrowed writer. The path implementation fails
-//!   at `open` on the web.
+//!   path, written staged and replacing by default (or refusing an existing file
+//!   with [`create_new`](Destination::create_new)), or a borrowed writer;
+//!   [`Staged`] is the temporary beside a path that a destination writes
+//!   through, committed by rename. The path implementations fail at `open` on
+//!   the web.
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
 //!   restores the mode after, unwinding included.
 //!
@@ -68,7 +71,7 @@ mod priority;
 mod sleep;
 mod thread;
 
-pub use asset::{Asset, Destination, Identity, Open, ReadSeek, Stamp};
+pub use asset::{Asset, Destination, Identity, Open, ReadSeek, Staged, Stamp};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use executor::Executor;

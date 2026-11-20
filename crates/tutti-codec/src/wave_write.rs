@@ -4,7 +4,7 @@ use crate::encoder::check_planned;
 use crate::{Encoder, Format, Result, Spec};
 use std::io::{Cursor, Seek, Write};
 use tutti_buffers::{InterleavedMut, Sample, Wave, interleave};
-use tutti_platform::Destination;
+use tutti_platform::{Destination, Staged};
 use tutti_units::Samples;
 
 /// Frames written to the encoder at a time by [`write_wave`].
@@ -16,7 +16,10 @@ const WRITE_CHUNK: usize = 8192;
 ///
 /// - A path is written beside itself and renamed over it when whole, as
 ///   [`Encoder::create_file`] does, so a failure leaves what was at the path as
-///   it was.
+///   it was. An existing file is replaced unless the destination is
+///   [`create_new`](Destination::create_new), which refuses it with an
+///   [`Error::Io`](crate::Error::Io) of kind
+///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists).
 /// - A writer (`&mut W` for any [`Write`]; a `Vec<u8>` is appended
 ///   to) is encoded into memory first and then handed over in one `write_all`,
 ///   so it needs no `Seek` and never holds a partial file from an encode error.
@@ -58,11 +61,16 @@ pub fn write_wave<'a, S: Sample>(
 ) -> Result<()> {
     let spec = Spec::new(format, wave.topology().clone(), wave.sample_rate());
     match dest.into() {
-        Destination::Path(path) => write_all(
-            wave,
-            Encoder::create_file_planned(&spec, &path, wave.len())?,
-        )
-        .map(drop),
+        Destination::Path { path, create_new } => {
+            check_planned(&spec, wave.len())?;
+            let staged = Staged::new(&path);
+            let staged = if create_new {
+                staged.create_new()
+            } else {
+                staged
+            };
+            write_all(wave, Encoder::create_staged(&spec, staged)?).map(drop)
+        }
         Destination::Writer(writer) => {
             check_planned(&spec, wave.len())?;
             // The Vorbis encoder's thread owns its sink, so a borrowed writer

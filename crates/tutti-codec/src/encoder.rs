@@ -4,7 +4,6 @@ use crate::error::{Error, Result};
 #[cfg(encode)]
 use crate::format::Format;
 use crate::spec::Spec;
-use crate::staged::Staged;
 #[cfg(encode)]
 use crate::writer::FormatWriter;
 use std::fs::File;
@@ -12,6 +11,7 @@ use std::io::{BufWriter, Seek, Write};
 use std::path::Path;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sample};
+use tutti_platform::Staged;
 use tutti_units::Samples;
 
 /// Writes blocks of audio as one file of a [format](crate::Format): the
@@ -319,9 +319,13 @@ impl Encoder<BufWriter<File>> {
     /// As [`create`](Self::create), and [`Error::Io`] when the temporary cannot
     /// be created.
     pub fn create_file(spec: &Spec, path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let staged = Staged::beside(path);
-        let sink = BufWriter::new(File::create(staged.temp())?);
+        Self::create_staged(spec, Staged::new(path.as_ref()))
+    }
+
+    /// Starts the file `staged` stands for: its temporary is created here and
+    /// `staged` decides at the commit whether an existing target is replaced.
+    pub(crate) fn create_staged(spec: &Spec, staged: Staged) -> Result<Self> {
+        let sink = BufWriter::new(staged.open()?);
         // Created before the header is written: a failure from here on drops
         // `staged`, which removes the temporary.
         let mut encoder = Self::create(spec, sink)?;
