@@ -99,11 +99,13 @@ fn layout(mode: &str) {
 /// An offline session with `recovery` as its policy (`None`: recovery off).
 fn session_with(recovery: Option<RecoveryPolicy>) -> Session {
     servers();
-    Session::builder()
-        .max_block(MaxBlock::of(Samples::new(BLOCK)))
-        .plugin_recovery(recovery)
-        .build()
-        .expect("an offline session builds")
+    let builder = Session::builder().max_block(MaxBlock::of(Samples::new(BLOCK)));
+    match recovery {
+        Some(policy) => builder.plugin_recovery(policy),
+        None => builder.no_plugin_recovery(),
+    }
+    .build()
+    .expect("an offline session builds")
 }
 
 fn session(recovery: bool) -> Session {
@@ -756,11 +758,13 @@ fn detached() -> DetachedSession {
 /// [`detached`] with `recovery` as its policy (`None`: recovery off).
 fn detached_with(recovery: Option<RecoveryPolicy>) -> DetachedSession {
     servers();
-    Session::builder()
-        .max_block(MaxBlock::of(Samples::new(BLOCK)))
-        .plugin_recovery(recovery)
-        .build_detached(SampleRate::SR_48K)
-        .expect("a detached session builds")
+    let builder = Session::builder().max_block(MaxBlock::of(Samples::new(BLOCK)));
+    match recovery {
+        Some(policy) => builder.plugin_recovery(policy),
+        None => builder.no_plugin_recovery(),
+    }
+    .build_detached(SampleRate::SR_48K)
+    .expect("a detached session builds")
 }
 
 /// One session with the first plugin loaded and in a node, under key `fx`.

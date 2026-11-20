@@ -1163,8 +1163,8 @@ impl<F: Float> Graph<F> {
     /// worker.
     ///
     /// The fork renders on the session's render pool unless `serial`, and
-    /// places the master's channels by `root` when it is `Some` (the bounce's
-    /// own), else by the session's declared root.
+    /// places the master's channels by `root`: the session's declared root, the
+    /// engine's order for the width, or the bounce's own topology.
     ///
     /// # Errors
     ///
@@ -1175,9 +1175,13 @@ impl<F: Float> Graph<F> {
         &self,
         rate: SampleRate,
         serial: bool,
-        root: Option<Option<tutti_buffers::ChannelTopology>>,
+        root: crate::bounce::RootChoice,
     ) -> tutti_export::Result<PendingExport<F>> {
-        let root = root.unwrap_or_else(|| self.root.clone());
+        let root = match root {
+            crate::bounce::RootChoice::Session => self.root.clone(),
+            crate::bounce::RootChoice::Engine => None,
+            crate::bounce::RootChoice::Placed(topology) => Some(topology),
+        };
         // Its own pool, not the live engine's: the live callback would find a
         // shared one busy with the bounce's job and render alone. No start
         // hook: a bounce's threads are not the callback's, and promoting

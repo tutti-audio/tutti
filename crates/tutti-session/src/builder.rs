@@ -859,13 +859,11 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// What a hosted plugin's death or hang does. Default
-    /// `Some(RecoveryPolicy::default())`: the plugin reloads at its node with
-    /// its last snapshot. `None`: a pooled plugin's node stays silent at its
-    /// key and the entry reads lost, and a node of a plugin the host inserted
-    /// itself is removed ([`PluginChange::Died`](crate::PluginChange::Died));
-    /// the host decides, a prompt to the user for instance. A hang is detected
-    /// either way ([`plugin_hang`](Self::plugin_hang)): the hung server is
-    /// ended and its death is what this decides.
+    /// `RecoveryPolicy::default()`: the plugin reloads at its node with its
+    /// last snapshot, within the policy's budget. A hang is detected either
+    /// way ([`plugin_hang`](Self::plugin_hang)): the hung server is ended and
+    /// its death is what this decides. See
+    /// [`no_plugin_recovery`](Self::no_plugin_recovery) for a host that decides itself.
     ///
     /// It covers out-of-process plugins loaded through the session's load
     /// path ([`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)). It does not
@@ -875,8 +873,23 @@ impl<C: Clock> SessionBuilder<C> {
     /// removed or left as before.
     #[cfg(feature = "plugin")]
     #[must_use]
-    pub fn plugin_recovery(mut self, policy: Option<crate::RecoveryPolicy>) -> Self {
-        self.opts.plugins.recovery = policy;
+    pub fn plugin_recovery(mut self, policy: crate::RecoveryPolicy) -> Self {
+        self.opts.plugins.recovery = Some(policy);
+        self
+    }
+
+    /// A hosted plugin's death or hang is not recovered: a pooled plugin's node
+    /// stays silent at its key and the entry reads lost, and a node of a plugin
+    /// the host inserted itself is removed
+    /// ([`PluginChange::Died`](crate::PluginChange::Died)); the host decides, a
+    /// prompt to the user for instance. Replaces
+    /// [`plugin_recovery`](Self::plugin_recovery).
+    ///
+    /// It covers the same plugins as `plugin_recovery`.
+    #[cfg(feature = "plugin")]
+    #[must_use]
+    pub fn no_plugin_recovery(mut self) -> Self {
+        self.opts.plugins.recovery = None;
         self
     }
 

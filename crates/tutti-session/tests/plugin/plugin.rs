@@ -284,7 +284,7 @@ fn a_plugin_added_mid_export_is_told_offline() {
 #[test]
 fn a_plugin_dead_for_the_window_stays_silent_at_its_node_and_is_reported_once() {
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
-        b.plugin_recovery(None)
+        b.no_plugin_recovery()
     });
     let (node, _) = wired_probe(&mut s);
 
@@ -731,11 +731,11 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
 #[test]
 fn a_plugin_that_crashes_every_time_is_given_up_on() {
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
-        b.plugin_recovery(Some(tutti_session::RecoveryPolicy {
+        b.plugin_recovery(tutti_session::RecoveryPolicy {
             max_failures: 2,
             backoff: Duration::from_millis(1),
             ..Default::default()
-        }))
+        })
     });
     let (node, _) = wired_probe(&mut s);
     let mut drive = Drive::new();
@@ -816,10 +816,10 @@ fn a_reload_completes_with_no_host_code_but_update() {
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
         ],
         |b| {
-            b.plugin_recovery(Some(tutti_session::RecoveryPolicy {
+            b.plugin_recovery(tutti_session::RecoveryPolicy {
                 backoff: Duration::from_millis(1),
                 ..Default::default()
-            }))
+            })
             // A thread per job, the way a host without a pool of its own runs
             // them: nothing here touches a job but to start it.
             .executor(tutti_platform::Executor::new(|job| {
@@ -888,10 +888,10 @@ fn a_reload_job_the_spawner_drops_is_a_failed_attempt() {
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
         ],
         |b| {
-            b.plugin_recovery(Some(tutti_session::RecoveryPolicy {
+            b.plugin_recovery(tutti_session::RecoveryPolicy {
                 backoff: Duration::from_millis(1),
                 ..Default::default()
-            }))
+            })
             .executor(tutti_platform::Executor::new(move |job| {
                 if drops.load(Ordering::SeqCst) {
                     counted.fetch_add(1, Ordering::SeqCst);
@@ -938,7 +938,7 @@ fn a_killed_server_reads_died_then_reloading() {
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
         ],
-        |b| b.plugin_recovery(Some(tutti_session::RecoveryPolicy::default())),
+        |b| b.plugin_recovery(tutti_session::RecoveryPolicy::default()),
     );
     let (node, _) = wired_probe(&mut s);
     assert!(
@@ -1026,7 +1026,7 @@ fn a_plugin_that_stops_answering_is_declared_hung_with_recovery_off() {
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
             ("TUTTI_CLAP_PROBE_BLOCK_FROM", "20"),
         ],
-        |b| b.plugin_hang(quick_hang_policy()).plugin_recovery(None),
+        |b| b.plugin_hang(quick_hang_policy()).no_plugin_recovery(),
     );
     let (node, _) = wired_probe(&mut s);
 
@@ -1084,7 +1084,7 @@ fn a_slow_plugin_that_still_answers_is_not_declared_hung() {
         &[PASSTHROUGH, ("TUTTI_CLAP_PROBE_STALL_US", "80000")],
         |b| {
             b.plugin_hang(quick_hang_policy())
-                .plugin_recovery(Some(quick_reload_policy()))
+                .plugin_recovery(quick_reload_policy())
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -1141,12 +1141,13 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
             ("TUTTI_CLAP_PROBE_RESTART_PORT_LAYOUT", "1"),
         ],
         |b| {
-            b.snapshot_interval(Duration::from_secs(1))
-                .plugin_recovery(Some(tutti_session::RecoveryPolicy {
+            b.snapshot_interval(Duration::from_secs(1)).plugin_recovery(
+                tutti_session::RecoveryPolicy {
                     max_failures: 2,
                     backoff: Duration::from_millis(1),
                     ..Default::default()
-                }))
+                },
+            )
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -1281,11 +1282,12 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
             ("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD", "1"),
         ],
         |b| {
-            b.snapshot_interval(Duration::from_secs(1))
-                .plugin_recovery(Some(tutti_session::RecoveryPolicy {
+            b.snapshot_interval(Duration::from_secs(1)).plugin_recovery(
+                tutti_session::RecoveryPolicy {
                     backoff: Duration::from_millis(1),
                     ..Default::default()
-                }))
+                },
+            )
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -1391,11 +1393,11 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
 fn a_plugin_that_dies_soon_after_restoring_loses_the_snapshot() {
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "3")], |b| {
         b.snapshot_interval(Duration::from_secs(1))
-            .plugin_recovery(Some(tutti_session::RecoveryPolicy {
+            .plugin_recovery(tutti_session::RecoveryPolicy {
                 max_failures: 5,
                 backoff: Duration::from_millis(1),
                 ..Default::default()
-            }))
+            })
     });
     let (node, _) = wired_probe(&mut s);
     snapshot_now(&mut s, node);
@@ -1440,10 +1442,10 @@ fn an_export_during_the_recovery_window_is_refused() {
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
         ],
         |b| {
-            b.plugin_recovery(Some(tutti_session::RecoveryPolicy {
+            b.plugin_recovery(tutti_session::RecoveryPolicy {
                 backoff: Duration::from_secs(3_600),
                 ..Default::default()
-            }))
+            })
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -1580,12 +1582,13 @@ fn a_death_after_a_refused_restore_does_not_withhold_the_snapshot() {
             ("TUTTI_CLAP_PROBE_REFUSE_STATE_LOAD", "1"),
         ],
         |b| {
-            b.snapshot_interval(Duration::from_secs(1))
-                .plugin_recovery(Some(tutti_session::RecoveryPolicy {
+            b.snapshot_interval(Duration::from_secs(1)).plugin_recovery(
+                tutti_session::RecoveryPolicy {
                     max_failures: 5,
                     backoff: Duration::from_millis(1),
                     ..Default::default()
-                }))
+                },
+            )
         },
     );
     let (node, _) = wired_probe(&mut s);
