@@ -212,7 +212,7 @@ fn an_unchanged_set_marks_nothing_edited() {
 }
 
 /// Silence is the empty set: an empty `set_sources` and `disconnect_all` clear
-/// the port, and nothing stores a `Source::Zero`.
+/// the port, and nothing stores a `PortSource::Zero`.
 #[test]
 fn silence_is_the_empty_set() {
     let mut r = rig();
@@ -244,7 +244,7 @@ fn silence_is_the_empty_set() {
     );
     assert!(
         r.s.graph_ref().testing().planned_compensation().is_some(),
-        "no `Source::Zero` is stored: the spec validates"
+        "no `PortSource::Zero` is stored: the spec validates"
     );
     assert!(left(&mut r.s).iter().all(|&x| x == 0.0));
 }
