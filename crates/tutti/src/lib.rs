@@ -190,7 +190,9 @@ pub use tutti_session::{
     SaveState,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
-pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
+pub use tutti_session::{
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
