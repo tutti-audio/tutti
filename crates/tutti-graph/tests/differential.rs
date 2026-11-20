@@ -645,7 +645,7 @@ proptest! {
     /// ahead of the playhead, behind it, and inside the loop — scheduled all
     /// through the run, and the graph is recompiled halfway, so some lose
     /// their node. The reference resolves beats with its own interval-based
-    /// playhead, sharing no code with the executor's `Playhead` and
+    /// playhead, sharing no code with the executor's `BeatCrossings` and
     /// `Env::due_at_arrival`, so a time-logic bug in either diverges here.
     #[test]
     fn scheduled_commands_are_bit_identical(seed in any::<u64>(), which in 0usize..5) {

@@ -41,7 +41,7 @@
 //! **Beats** are resolved with the graph's rule (`tutti_graph::Env::due`):
 //! the first frame at or after the beat that playback reaches, the piece's
 //! own transport deciding. A beat continuous playback already crossed is late;
-//! one a seek or loop jumped over waits (`tutti_graph::Playhead`).
+//! one a seek or loop jumped over waits (`tutti_graph::BeatCrossings`).
 //!
 //! **The declick is audio only, and its fade-out ends on the command's
 //! frame.** A declick stop or seek moves the transport on its command's
@@ -107,7 +107,7 @@
 //! callback never meets a graph it cannot render.
 
 use tutti_graph::{
-    CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, Playhead, RootId,
+    BeatCrossings, CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, RootId,
     TransportChanges, declick_frames, fade_gains, fade_in,
 };
 
@@ -236,7 +236,7 @@ struct GraphRender<F: Float> {
     /// `SCRATCH_CHUNKS` planar channels of `stride` frames each.
     scratch: Vec<F>,
     stride: usize,
-    playhead: Playhead,
+    crossings: BeatCrossings,
     /// The executor's [`dropped_event_count`](Executor::dropped_event_count) already
     /// forwarded to the block counts.
     dropped_seen: u64,
@@ -521,7 +521,7 @@ impl<F: Float> Engine<F> {
                 transport: audio,
                 scratch: vec![F::ZERO; SCRATCH_CHUNKS * stride],
                 stride,
-                playhead: Playhead::new(),
+                crossings: BeatCrossings::new(),
                 dropped_seen,
                 clock,
                 dates: DateKeeper::new(dates),
@@ -732,7 +732,7 @@ impl<F: Float> Engine<F> {
             budget.add(Samples::new(len), rate);
             // Kept current, so a later `process` tells a late beat from one
             // jumped over across this block too.
-            g.playhead.observe(&Env {
+            g.crossings.observe(&Env {
                 frame: g.exec.frame(),
                 sample_rate: rate,
                 block_len: Samples::new(len),
@@ -852,7 +852,7 @@ impl<F: Float> Engine<F> {
             let walk = self.walk(
                 Track {
                     transport: &mut g.transport,
-                    playhead: &mut g.playhead,
+                    crossings: &mut g.crossings,
                 },
                 frame0,
                 len,
@@ -912,7 +912,7 @@ impl<F: Float> Engine<F> {
     ) -> Walk {
         let Track {
             transport,
-            playhead,
+            crossings,
         } = track;
         let fade = fade_frames(rate);
         let mut walk = Walk {
@@ -922,10 +922,10 @@ impl<F: Float> Engine<F> {
         };
         let mut t = walk.start;
         let mut cursor = 0;
-        // The playhead as of the start of the current piece. Each piece is
+        // The crossing tracker as of the start of the current piece. Each piece is
         // observed with its real length once it is cut; before that, a copy
         // observes it with the rest of the block, to answer `crossed`.
-        let mut base = *playhead;
+        let mut base = *crossings;
         transport.drain_commands();
         loop {
             // The map's tempo steps from the cursor on, assuming no command
@@ -1029,7 +1029,7 @@ impl<F: Float> Engine<F> {
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         });
-        *playhead = base;
+        *crossings = base;
         transport.advance(frames - cursor, &t);
         pieces.ran();
         walk.frames = frames;
@@ -1080,10 +1080,10 @@ impl<F: Float> Engine<F> {
 }
 
 /// The render state a block's walk moves: the transport its commands go
-/// through, and the playhead it observes.
+/// through, and the crossings it observes.
 struct Track<'a> {
     transport: &'a mut TransportAudio,
-    playhead: &'a mut Playhead,
+    crossings: &'a mut BeatCrossings,
 }
 
 /// What a block's walk leaves for after the render.
@@ -1694,11 +1694,11 @@ mod tests {
             },
             settings,
         };
-        let mut playhead = Playhead::new();
+        let mut crossings = BeatCrossings::new();
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
-                playhead: &mut playhead,
+                crossings: &mut crossings,
             },
             Frame::ZERO,
             512,
@@ -1952,11 +1952,11 @@ mod tests {
         let mut pieces = GraphPieces {
             changes: TransportChanges::NONE,
         };
-        let mut playhead = Playhead::new();
+        let mut crossings = BeatCrossings::new();
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
-                playhead: &mut playhead,
+                crossings: &mut crossings,
             },
             Frame::ZERO,
             512,
@@ -1981,7 +1981,7 @@ mod tests {
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
-                playhead: &mut playhead,
+                crossings: &mut crossings,
             },
             Frame::ZERO,
             512,

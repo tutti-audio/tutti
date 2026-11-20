@@ -340,7 +340,10 @@ mod tests {
     fn a_waiting_command_outlives_its_audio_side() {
         let t = Transport::new(SampleRate::SR_48K);
         t.motion
-            .schedule(At::Beat(tutti_units::Beat::new(1000.0)), MotionCommand::Play)
+            .schedule(
+                At::Beat(tutti_units::Beat::new(1000.0)),
+                MotionCommand::Play,
+            )
             .expect("room");
         let mut first = t.audio(SampleRate::SR_48K).expect("first");
         first.drain_commands();

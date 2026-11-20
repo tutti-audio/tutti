@@ -85,7 +85,9 @@ fn the_session_and_its_handles_share_the_rolling_record() {
     let s = offline();
     let handle = s.transport_handle();
     s.play().unwrap();
-    handle.schedule(Beat::new(4.0), MotionCommand::Play).unwrap();
+    handle
+        .schedule(Beat::new(4.0), MotionCommand::Play)
+        .unwrap();
     handle.stop(FadeOut::Immediate).unwrap();
     assert!(matches!(
         s.schedule(Beat::new(4.0), MotionCommand::Play),

@@ -27,7 +27,7 @@
 //! **Beats: reached, not passed.** An `At::Beat` fires when the playhead
 //! reaches or crosses it **through continuous playback** — a loop wrap that
 //! lands at or after it counts as reaching it (see
-//! [`Playhead`]). A seek, or a loop that jumps *over* it,
+//! [`BeatCrossings`]). A seek, or a loop that jumps *over* it,
 //! does not fire it: it stays pending until reached, or cancelled. It is late
 //! only when continuous playback crossed it before the command was
 //! processed; it then lands at offset 0 of the block and is counted. So a
@@ -104,7 +104,7 @@ use crate::node::MAX_PORTS;
 use crate::param_event::{ParamEvent, ParamKind};
 use crate::plan::Plan;
 use crate::spec::EventIn;
-use crate::time::{Due, Offset, Playhead};
+use crate::time::{BeatCrossings, Due, Offset};
 
 /// Commands that may be outstanding at once: sent, and not yet delivered
 /// or cancelled.
@@ -305,7 +305,7 @@ pub(crate) struct CommandRx {
     cancelled: u64,
     /// What continuous playback has crossed: tells a late beat from one a
     /// seek jumped over.
-    playhead: Playhead,
+    crossings: BeatCrossings,
 }
 
 impl CommandTx {
@@ -342,7 +342,7 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
             late: 0,
             unrouted: 0,
             cancelled: 0,
-            playhead: Playhead::new(),
+            crossings: BeatCrossings::new(),
         },
     )
 }
@@ -495,9 +495,9 @@ impl CommandRx {
     }
 
     /// Record a block the executor rendered without resolving commands (a
-    /// suspended one): the transport moved, and the playhead must know.
+    /// suspended one): the transport moved, and the crossing tracker must know.
     pub(crate) fn observe(&mut self, env: &Env) {
-        self.playhead.observe(env);
+        self.crossings.observe(env);
     }
 
     /// The sample rate changed by `ratio` (new / old): every pending
@@ -524,7 +524,7 @@ impl CommandRx {
     /// credit count keeps them under.
     pub(crate) fn gather(&mut self, env: &Env, plan: &Plan, applied: u64, has_due: &mut [bool]) {
         self.pull();
-        self.playhead.observe(env);
+        self.crossings.observe(env);
         self.due.clear();
         self.due_events.clear();
         self.due_params.clear();
@@ -534,7 +534,7 @@ impl CommandRx {
         }
         let (due, due_params) = (&mut self.due, &mut self.due_params);
         let (late, unrouted) = (&mut self.late, &mut self.unrouted);
-        let playhead = &self.playhead;
+        let crossings = &self.crossings;
         let mut finished = 0u64;
         // `retain` keeps arrival order and shifts in place: no allocation.
         self.pending.retain_mut(|cmd| {
@@ -561,7 +561,7 @@ impl CommandRx {
                     && (shape.param_events || matches!(cmd.payload, Scheduled::Event(_)))
             });
             let was_beat = matches!(cmd.at, At::Beat(_));
-            let resolved = env.due_at_arrival(&mut cmd.at, arrival, playhead);
+            let resolved = env.due_at_arrival(&mut cmd.at, arrival, crossings);
             match cmd.at {
                 At::Frame(f) if was_beat => cmd.pos = f.get() as f64,
                 At::NextBlock => cmd.pos = env.frame.get() as f64,

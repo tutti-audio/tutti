@@ -38,8 +38,8 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_timeline::{
-    AfterLocate, FadeOut, LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig, Timeline,
-    Transport, TransportCommand, render_graph,
+    AfterLocate, FadeOut, LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig,
+    Timeline, Transport, TransportCommand, render_graph,
 };
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
