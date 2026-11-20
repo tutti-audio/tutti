@@ -15,7 +15,6 @@ use tutti_ump::{
 
 const KEYS: &str = "tutti-ffi-test Keys";
 const PORT: &str = "tutti-ffi-test Port";
-const INSTANCE: &str = "tutti-ffi-test-1";
 
 fn instance(text: &str) -> ProductInstanceId {
     ProductInstanceId::new(text).expect("printable ASCII, at most 42 bytes")
@@ -75,43 +74,44 @@ fn identity() -> DeviceIdentity {
     }
 }
 
-fn is_ours(endpoint: &UmpEndpointInfo) -> bool {
-    endpoint
-        .blocks
-        .iter()
-        .any(|b| b.name.as_deref() == Some(KEYS))
-}
-
 fn jr() -> Ump {
     Ump::from(Message::Utility(Utility::JrTimestamp(0x1234)))
 }
 
-/// Creates the endpoint of the cases: `Some` on macOS 15 or later, where it must
-/// be created, and `None` before it, where it must be refused by name.
-fn endpoint(on_ump: impl FnMut(Option<Duration>, Ump) + Send + 'static) -> Option<UmpEndpoint> {
+/// Creates the endpoint of the cases with its Product Instance Id: `Some` on
+/// macOS 15 or later, where it must be created, and `None` before it, where it
+/// must be refused by name. The name and the id are unique on the machine, so a
+/// case never meets an endpoint of another case or of another test run.
+fn endpoint(
+    on_ump: impl FnMut(Option<Duration>, Ump) + Send + 'static,
+) -> Option<(UmpEndpoint, String)> {
     let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
+    let id = tutti_fixtures::unique_name("tutti-ffi");
     let created = UmpEndpoint::new(
         main_thread(),
-        "tutti-ffi-test-endpoint",
+        &tutti_fixtures::unique_name("tutti-ffi-test-endpoint"),
         Protocol::Midi2,
         &identity(),
-        Some(&instance(INSTANCE)),
+        Some(&instance(&id)),
         &[(keys(), Some(KEYS)), (port(), Some(PORT))],
         on_ump,
     );
     if major >= 15 {
-        Some(created.expect("macOS 15 creates the endpoint"))
+        Some((created.expect("macOS 15 creates the endpoint"), id))
     } else {
         assert_eq!(created.err(), Some(Error::UmpEndpointUnsupported));
         None
     }
 }
 
-fn listed() -> UmpEndpointInfo {
+/// The listed endpoint whose Product Instance Id is `id`. Finding it is the
+/// check that CoreMIDI lists the id as it was given: an empty or cut id is not
+/// found.
+fn listed(id: &str) -> UmpEndpointInfo {
     ump_endpoints()
         .expect("CoreMIDI lists the endpoints")
         .into_iter()
-        .find(is_ours)
+        .find(|e| e.instance.as_deref() == Some(id))
         .expect("the created endpoint is listed")
 }
 
@@ -122,10 +122,10 @@ fn listed() -> UmpEndpointInfo {
 /// carries the Device Identity and Product Instance Id it was created with
 /// (§7.1.3, §7.1.5).
 pub fn an_endpoint_lists_the_blocks_it_was_created_with() {
-    let Some(endpoint) = endpoint(|_, _| {}) else {
+    let Some((endpoint, id)) = endpoint(|_, _| {}) else {
         return;
     };
-    let ours = listed();
+    let ours = listed(&id);
     assert_eq!(ours.protocol, Protocol::Midi2);
     assert!(ours.offered.static_function_blocks);
     assert_eq!(
@@ -134,7 +134,6 @@ pub fn an_endpoint_lists_the_blocks_it_was_created_with() {
     );
     assert!(ours.source_unique_id.is_some() && ours.destination_unique_id.is_some());
     assert_eq!(ours.identity, Some(identity()));
-    assert_eq!(ours.instance.as_deref(), Some(INSTANCE));
     let named = |name: &str| {
         ours.blocks
             .iter()
@@ -167,10 +166,10 @@ pub fn an_endpoint_lists_the_blocks_it_was_created_with() {
 /// **The numbers `blocks` reports are the numbers CoreMIDI lists**: the first
 /// block's absolute number, then the second's, in the order registered.
 pub fn the_block_numbers_read_back_are_the_numbers_coremidi_lists() {
-    let Some(endpoint) = endpoint(|_, _| {}) else {
+    let Some((endpoint, id)) = endpoint(|_, _| {}) else {
         return;
     };
-    let ours = listed();
+    let ours = listed(&id);
     let listed_number = |name: &str| {
         ours.blocks
             .iter()
@@ -196,7 +195,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
         "tutti-ffi-test-ci",
         Protocol::Midi2,
         &identity(),
-        Some(&instance(INSTANCE)),
+        Some(&instance("tutti-ffi-test-ci")),
         &[(ci, None)],
         |_, _| {},
     );
@@ -213,11 +212,11 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
 /// (M2-104 §7.1.5): `ProductInstanceId` makes a longer one unwritable, and
 /// CoreMIDI accepts the longest.
 pub fn a_42_character_instance_id_is_listed_back_intact() {
-    let longest = "x".repeat(42);
+    let longest = format!("{:x<42}", tutti_fixtures::unique_name("t"));
     let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
     let created = UmpEndpoint::new(
         main_thread(),
-        "tutti-ffi-test-instance",
+        &tutti_fixtures::unique_name("tutti-ffi-test-instance"),
         Protocol::Midi2,
         &identity(),
         Some(&instance(&longest)),
@@ -229,7 +228,7 @@ pub fn a_42_character_instance_id_is_listed_back_intact() {
         return;
     }
     let _endpoint = created.expect("macOS 15 accepts 42 characters");
-    assert_eq!(listed().instance.as_deref(), Some(longest.as_str()));
+    listed(&longest);
 }
 
 /// What an output port sends to the endpoint's destination reaches the callback
@@ -239,13 +238,13 @@ pub fn a_42_character_instance_id_is_listed_back_intact() {
 /// the one sent arrives.
 pub fn an_endpoint_receives_what_is_sent_to_its_destination() {
     let (tx, rx) = mpsc::channel();
-    let Some(endpoint) = endpoint(move |_, ump| {
+    let Some((endpoint, id)) = endpoint(move |_, ump| {
         let _ = tx.send(ump);
     }) else {
         return;
     };
     let destination = find_destination(
-        listed()
+        listed(&id)
             .destination_unique_id
             .expect("the endpoint has a destination"),
     )
@@ -266,11 +265,11 @@ pub fn an_endpoint_receives_what_is_sent_to_its_destination() {
 /// source. CoreMIDI sends messages of its own first, so the port is read until
 /// the one sent arrives.
 pub fn what_the_sender_publishes_reaches_a_port_connected_to_the_source() {
-    let Some(endpoint) = endpoint(|_, _| {}) else {
+    let Some((endpoint, id)) = endpoint(|_, _| {}) else {
         return;
     };
     let source = find_source(
-        listed()
+        listed(&id)
             .source_unique_id
             .expect("the endpoint has a source"),
     )
@@ -306,7 +305,7 @@ pub fn what_the_sender_publishes_reaches_a_port_connected_to_the_source() {
 pub fn a_sender_on_another_thread_sees_the_endpoint_go_by_name() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    let Some(endpoint) = endpoint(|_, _| {}) else {
+    let Some((endpoint, _)) = endpoint(|_, _| {}) else {
         return;
     };
     let sender = endpoint.sender();
@@ -347,7 +346,7 @@ pub fn a_sender_on_another_thread_sees_the_endpoint_go_by_name() {
 /// A send on a sender whose endpoint was dropped is refused by name, and its
 /// counters still read.
 pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
-    let Some(endpoint) = endpoint(|_, _| {}) else {
+    let Some((endpoint, _)) = endpoint(|_, _| {}) else {
         return;
     };
     let sender = endpoint.sender();
