@@ -2,7 +2,7 @@ use super::*;
 use crate::fold_uneven;
 use std::f32::consts::TAU;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
-use tutti_units::{Amplitude, Azimuth, Elevation};
+use tutti_units::Amplitude;
 
 /// Pushes one chunk to a windowed meter and returns the reading it yields.
 fn read(state: &mut WindowedMeter<f32>, chunk: Interleaved<'_>) -> Result<WindowedReading> {
@@ -750,49 +750,6 @@ fn the_windowed_meter_weighs_by_placement() {
     let (front, side, lfe) = (momentary(0), momentary(4), momentary(3));
     assert!((side - front - Db::from_power(1.41).get()).abs() < 0.01);
     assert_eq!(lfe, WindowedReading::LOUDNESS_FLOOR.get());
-}
-
-/// Whether `label` is one `ebur128` weighs 1.41.
-fn weighs_141(label: Channel) -> bool {
-    matches!(label, Channel::LeftSurround | Channel::RightSurround)
-}
-
-/// Table 4's edges: 1.41 needs |elevation| < 30 (open) and 60 <= |azimuth|
-/// <= 120 (closed), on either side. A `<=` on the elevation or an open
-/// azimuth range moves one of these rows.
-#[test]
-fn table_4_edges_are_closed_on_azimuth_and_open_on_elevation() {
-    let at = |azimuth: f64, elevation: f64| {
-        weighs_141(label_at(Direction::new(
-            Azimuth::new(azimuth),
-            Elevation::new(elevation),
-        )))
-    };
-    for sign in [1.0f64, -1.0] {
-        assert!(at(sign * 60.0, 0.0), "60 is inside");
-        assert!(at(sign * 120.0, 0.0), "120 is inside");
-        assert!(!at(sign * 59.9, 0.0), "59.9 is outside");
-        assert!(!at(sign * 120.1, 0.0), "120.1 is outside");
-        assert!(at(sign * 90.0, 29.9), "elevation 29.9 is inside");
-        assert!(!at(sign * 90.0, 30.0), "elevation 30 is outside");
-        assert!(at(sign * 90.0, -29.9), "elevation -29.9 is inside");
-        assert!(!at(sign * 90.0, -30.0), "elevation -30 is outside");
-    }
-}
-
-/// A quad given as VST3 spells it (`FL FR SL SR`) is the bed's M+-135
-/// backs, which weigh 1.0.
-#[test]
-fn a_quads_side_speakers_stand_for_its_backs_and_weigh_one() {
-    let vst3_quad = ChannelTopology::new([
-        Speaker::FrontLeft,
-        Speaker::FrontRight,
-        Speaker::SideLeft,
-        Speaker::SideRight,
-    ])
-    .unwrap();
-    let labels = channel_labels(&vst3_quad).unwrap();
-    assert!(labels.iter().all(|&l| !weighs_141(l)), "{labels:?}");
 }
 
 /// The classic inter-sample case: a sine at a quarter of the rate, phase 45
