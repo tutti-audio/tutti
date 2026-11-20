@@ -748,6 +748,8 @@ fn only_a_source_that_cannot_speak_midi2_is_opened_as_midi1() {
         protocol,
         offered: offered(midi1, midi2),
         name: None,
+        device: None,
+        instance: None,
         blocks: Vec::new(),
     };
     let version = super::input::version_for;
@@ -1100,6 +1102,8 @@ fn plug_ump(name: &str, protocol: Protocol) -> Virtual {
             protocol,
             offered: offered(true, true),
             name: Some("Endpoint".into()),
+            device: None,
+            instance: None,
             blocks: vec![tutti_alsa_ffi::UmpBlock {
                 info: FunctionBlockInfo {
                     active: true,

@@ -4,8 +4,9 @@
 //! The client is a UMP client speaking the protocol the spec asks for, or MIDI
 //! 1.0 where the kernel's sequencer has no MIDI 2.0 client mode; the protocol it
 //! got is what the endpoint reports. It publishes a UMP Endpoint record (the
-//! protocol, and the spec's Function Blocks), so an application enumerating it
-//! reads the protocol it carries instead of taking it for a legacy port.
+//! protocol, the spec's Device Identity and Product Instance Id, and its Function
+//! Blocks), so an application enumerating it reads the protocol it carries
+//! instead of taking it for a legacy port.
 
 use tutti_alsa_ffi::{
     Blocking, Client, Operation, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint, UmpVersion,
@@ -57,8 +58,8 @@ fn ump_block(block: &FunctionBlock) -> UmpBlock {
     }
 }
 
-/// Publishes the endpoint record on `client`: the protocol it carries and the
-/// spec's blocks.
+/// Publishes the endpoint record on `client`: the protocol it carries, the spec's
+/// Device Identity and Product Instance Id, and its blocks.
 fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Result<()> {
     let (in_use, midi1, midi2) = match protocol {
         VirtualProtocol::Midi1 => (Protocol::Midi1, true, false),
@@ -80,6 +81,8 @@ fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Re
             tx_jr: false,
         },
         name: Some(spec.name().as_str().to_owned()),
+        device: Some(*spec.device()),
+        instance: spec.instance().copied(),
         blocks,
     })?;
     Ok(())
