@@ -7,8 +7,12 @@
 //! platform; the object is sized by one `ftruncate`, and the tests pin that no
 //! later `ftruncate` is accepted.
 //!
-//! The object may be rounded up to a page, so the receiver accepts any length of at
-//! least the layout, and both ends map exactly the layout's length.
+//! XNU rounds the object up to a page (16 KiB on Apple Silicon), so `fstat` reports
+//! the rounded length. The receiver refuses a layout that needs more than that
+//! length, which keeps everything it maps backed (no `SIGBUS`), and both ends map
+//! exactly the layout's length. It cannot tell a layout that is short but fits in
+//! the rounded page from the one the object was made for: the header's magic,
+//! version and ring depth are the guard against a mismatched layout.
 //!
 //! The descriptor is made close-on-exec by a call right after `shm_open` and after
 //! `recvmsg` (neither takes the flag atomically here). A fork and exec on another

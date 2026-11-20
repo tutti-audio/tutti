@@ -359,7 +359,8 @@ mod tests {
         let mut back = [0u8; 16];
         peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
         assert_eq!(back, [7u8; 16]);
-        let err = MappingWriter::open(&handle, size + 1).expect_err("a short slab");
+        // More than the slab holds by far: past a page the platform may round it up to.
+        let err = MappingWriter::open(&handle, size + (1 << 20)).expect_err("a short slab");
         assert!(matches!(err, SlabError::Short { .. }), "got {err}");
     }
 

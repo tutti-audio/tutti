@@ -946,7 +946,9 @@ mod tests {
         let small = stereo_layout(64, FloatWidth::F32);
         let (_owner, handle) = AudioSlab::create(small).unwrap();
 
-        let big = stereo_layout(256, FloatWidth::F32);
+        // Past any page the platform rounds the small slab up to (macOS rounds a
+        // shared memory object to 16 KiB; some systems use 64 KiB): about 128 KiB.
+        let big = stereo_layout(4096, FloatWidth::F32);
         let err = AudioSlab::open(&handle, big).expect_err("an oversized layout must not open");
         assert!(format!("{err}").contains("bytes"), "got: {err}");
     }
