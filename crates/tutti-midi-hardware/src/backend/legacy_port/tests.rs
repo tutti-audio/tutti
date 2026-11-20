@@ -751,8 +751,7 @@ impl MidiEndpoints for Captured {
 }
 
 /// A poll whose executor has shut down ends without a look: a `Timer`'s sleep
-/// resolves at once from then on, before its deadline, and a poll that looked
-/// again would spin. The future is polled once by hand on a thread, under a hang
+/// fails from then on, and a poll that looked again would spin. The future is polled once by hand on a thread, under a hang
 /// guard: one that loops never returns.
 #[test]
 fn a_poll_ends_when_its_executor_has_shut_down() {

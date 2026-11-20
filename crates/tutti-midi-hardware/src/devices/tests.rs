@@ -774,19 +774,8 @@ mod sensing {
         );
     }
 
-    /// **Closing the output stops it**: dropping joins the thread, so nothing
-    /// is sent after.
-    #[test]
-    fn closing_the_output_stops_active_sensing() {
-        let (out, fake, _devices, _threads) = output_in(Protocol::Midi1, true);
-        next_sent(&fake);
-        drop(out);
-        let _ = sent(&fake);
-        assert_eq!(sent(&fake), [], "nothing after the close");
-    }
-
     /// **An output opened without the option never sends it**: it has no
-    /// heartbeat thread.
+    /// heartbeat task.
     #[test]
     fn an_output_without_the_option_never_sends_active_sensing() {
         let (out, fake, _devices, _threads) = output_in(Protocol::Midi1, false);

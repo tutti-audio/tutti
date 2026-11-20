@@ -48,8 +48,8 @@ pub(in crate::backend) fn start(
 }
 
 /// Looks every `interval` and reports the difference, until a look panics or the
-/// executor behind `timer` shuts down. A `Timer`'s sleep resolves at once after
-/// the shutdown, before its deadline: that ends the poll, so it never spins.
+/// executor behind `timer` shuts down: a `Timer`'s sleep fails then, so the poll
+/// never spins.
 pub(in crate::backend) async fn run(
     timer: Timer,
     mut reporter: Reporter,
@@ -58,9 +58,7 @@ pub(in crate::backend) async fn run(
     interval: Duration,
 ) {
     loop {
-        let deadline = Instant::now() + interval;
-        timer.sleep_until(deadline).await;
-        if Instant::now() < deadline {
+        if timer.sleep_until(Instant::now() + interval).await.is_err() {
             return;
         }
         let look = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

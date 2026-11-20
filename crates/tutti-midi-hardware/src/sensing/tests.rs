@@ -118,8 +118,7 @@ fn dropping_a_heartbeat_releases_the_sink_its_task_held() {
 }
 
 /// A heartbeat whose executor has shut down ends without sending: a `Timer`'s
-/// sleep resolves at once from then on, before its deadline, and a heartbeat that
-/// slept again would spin. The future is polled once by hand on a thread, under
+/// sleep fails from then on, and a heartbeat that slept again would spin. The future is polled once by hand on a thread, under
 /// a hang guard: one that loops never returns.
 #[test]
 fn a_heartbeat_ends_when_its_executor_has_shut_down() {

@@ -98,17 +98,15 @@ fn lock(schedule: &Mutex<ActiveSensingSender>) -> MutexGuard<'_, ActiveSensingSe
 /// Sleeps to the schedule's deadline, sends what is due, and repeats until the
 /// task is cancelled or the executor shuts down.
 ///
-/// A [`Timer`]'s sleep resolves at once after the shutdown, before its deadline:
-/// a sleep that resolves early ends the heartbeat, so it never spins.
+/// A [`Timer`]'s sleep fails once the executor has shut down: that ends the
+/// heartbeat, so it never spins.
 async fn beat(timer: &Timer, sink: &Arc<dyn DeviceOut>, pulse: &Pulse) {
     loop {
         let deadline = pulse.deadline();
-        timer.sleep_until(deadline).await;
-        let now = Instant::now();
-        if now < deadline {
+        if timer.sleep_until(deadline).await.is_err() {
             return;
         }
-        if let Some(ump) = pulse.due(now) {
+        if let Some(ump) = pulse.due(Instant::now()) {
             let _ = sink.queue(&[(Offset::ZERO, ump)]);
         }
     }
