@@ -60,6 +60,10 @@
 //! - **Level and pan modulation** — `TremoloNode` and `AutoPanNode` (an LFO of a chosen
 //!   `OscillatorWave` scales the level, or places a stereo pair by a `PanLaw`) and `RingModNode`
 //!   (the input times a sine carrier), from a `TremoloConfig`, `AutoPanConfig` and `RingModConfig`.
+//! - **Comb filter and frequency shifter** — `CombFilterNode` (a feedforward or feedback
+//!   `CombForm` of one delay, its coefficient live) and `FrequencyShifterNode` (single-sideband
+//!   modulation by a signed shift in hertz through a Hilbert all-pass network, with no latency),
+//!   from a `CombFilterConfig` and a `FrequencyShifterConfig`.
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
@@ -370,6 +374,16 @@ pub use ring_mod::{RingModConfig, RingModKernel, RingModNode, RingModSet};
 pub use tremolo::{TremoloConfig, TremoloKernel, TremoloNode, TremoloSet};
 // The controls those start at, the wave of their LFOs and the law an auto-pan places by.
 pub use tutti_dsp::{AutoPanControls, OscillatorWave, PanLaw, RingModControls, TremoloControls};
+
+// Comb filter and frequency shifter.
+mod comb;
+mod frequency_shifter;
+pub use comb::{CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet};
+pub use frequency_shifter::{
+    FrequencyShifterConfig, FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet,
+};
+// The controls those start at and the form of a comb.
+pub use tutti_dsp::{CombControls, CombForm, FrequencyShifterControls};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.
