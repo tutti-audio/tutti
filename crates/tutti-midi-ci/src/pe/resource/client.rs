@@ -838,8 +838,8 @@ impl ResourceInitiator {
     ) -> Result<(), PeError> {
         loop {
             let page = walk.next_page();
-            // The walk rebuilds the page's JSON from its decoded data, which round-trips
-            // for every decoded type: `x-` properties are kept, opaque JSON is as sent.
+            // The walk rebuilds the page's JSON from its decoded data. That keeps what a
+            // fresh walk's decode keeps: `x-` properties, and opaque JSON as sent.
             let held = self
                 .cache
                 .fresh(&walk.target, Some(page), now)

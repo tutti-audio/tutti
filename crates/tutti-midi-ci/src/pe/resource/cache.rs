@@ -34,11 +34,11 @@ pub enum PeCacheScope {
     #[default]
     PerRequest,
     /// One `cacheTime` per Resource entry, `resId` and all: the data held for an
-    /// entry expires together. The oldest `cacheTime` is retained (#5), read
+    /// entry expires together. The oldest `cacheTime` is retained (M2-103 §7.4.3), read
     /// strictly: a reply that arrives while data is held cannot lengthen the
     /// time, and one with a shorter time shortens it, so no page is used past its
     /// own reply's `cacheTime` or the oldest. A reply that arrives after the time
-    /// held ended finds all the data held dropped, and only it is valid (#6).
+    /// held ended finds all the data held dropped, and only it is valid.
     PerResource,
 }
 
