@@ -29,7 +29,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::{AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, CONTROL_FRAME_BYTES};
-use super::{AudioReply, AudioRequest, ControlFrame, Request};
+use super::{AudioReply, AudioRequest, ControlFrame, ControlReply, Request};
+use crate::BlobWire;
 
 /// A wire type with the longest frame its lane carries it in.
 ///
@@ -39,6 +40,12 @@ use super::{AudioReply, AudioRequest, ControlFrame, Request};
 pub trait Framed: Serialize + DeserializeOwned {
     /// The most body bytes a frame of this type may advertise or carry.
     const CAP: usize;
+
+    /// The blob this frame announces, which follows it on the stream as a
+    /// message of its own: what a reader takes right after the frame.
+    fn blob(&self) -> Option<&BlobWire> {
+        None
+    }
 }
 
 impl Framed for AudioRequest {
@@ -52,6 +59,16 @@ impl Framed for Request {
 }
 impl Framed for ControlFrame {
     const CAP: usize = CONTROL_FRAME_BYTES;
+
+    fn blob(&self) -> Option<&BlobWire> {
+        match self {
+            Self::Reply {
+                reply: ControlReply::StateReady { blob, .. },
+                ..
+            } => Some(blob),
+            _ => None,
+        }
+    }
 }
 
 /// The error for a frame of `len` bytes, over `cap`.
@@ -103,7 +120,7 @@ pub fn decode_body<T: DeserializeOwned>(body: &[u8]) -> IpcResult<T> {
 }
 
 /// How much capacity a frame buffer keeps between frames. A block's frames
-/// are a few KiB; a state chunk is far larger and rare, so a buffer it grew is
+/// are a few KiB; a large control frame is rare, so a buffer it grew is
 /// trimmed back rather than held for the connection's life.
 pub(crate) const KEEP_BYTES: usize = 256 * 1024;
 
@@ -273,13 +290,6 @@ const _: () = {
          `body_len as u32` in `encode_prefix` can still truncate and desynchronise \
          the stream"
     );
-    // The control cap leaves room for the largest message the control lane
-    // carries: a state chunk of `STATE_CHUNK_BYTES` and its header.
-    assert!(
-        CONTROL_FRAME_BYTES >= super::STATE_CHUNK_BYTES + 1024,
-        "the control cap is below a state chunk, so `save_state`/`load_state` would \
-         fail on real plugins"
-    );
 };
 
 #[cfg(test)]
@@ -385,7 +395,7 @@ mod tests {
 
     /// **The caps differ by lane:** a block's request may be megabytes of
     /// automation, a block's reply is bounded by its MIDI, and the control
-    /// lane holds a state chunk. A reply the audio lane takes at its cap is
+    /// lane holds a parameter or preset list. A reply the audio lane takes at its cap is
     /// refused one byte over, though the control lane would take it.
     #[test]
     fn the_lanes_hold_different_caps() {

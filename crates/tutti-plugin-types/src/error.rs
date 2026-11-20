@@ -183,44 +183,25 @@ pub enum StateError {
         limit: usize,
     },
 
-    /// The transfer stopped making progress: no further chunk arrived within
-    /// the per-chunk deadline.
-    ///
-    /// **A progress deadline, not a total one, and the variant exists because
-    /// the two are different diagnoses.** State travels as chunks, so the honest
-    /// question is "is this transfer still moving?" — not "has it finished
-    /// yet?". A fixed total budget answers the second, and answering the second
-    /// makes the size limit unreachable: a large-but-legal state that streams
-    /// steadily is failed for being big, while the message blames the plugin for
-    /// hanging. A plugin that is slow but advancing is *working*, and must be
-    /// allowed to finish however long it takes.
+    /// The server did not answer a state request within its deadline: it neither
+    /// saved nor restored the state in time.
     ///
     /// Distinct from its three neighbours because each calls for a different
-    /// response. [`TooLarge`](Self::TooLarge) is a size the host refused before
-    /// or during transfer and will refuse again identically;
-    /// [`Rejected`](Self::Rejected) is the plugin answering "no";
-    /// [`PluginCrashed`](Self::PluginCrashed) means the subprocess is gone and
-    /// every later call fails the same way. This is none of those — the socket
-    /// is intact and the session is still healthy, so a retry is reasonable and
-    /// the plugin may simply be wedged rather than dead.
+    /// response. [`TooLarge`](Self::TooLarge) is a size the host refused and will
+    /// refuse again identically; [`Rejected`](Self::Rejected) is the plugin
+    /// answering "no"; [`PluginCrashed`](Self::PluginCrashed) means the
+    /// subprocess is gone and every later call fails the same way. This is none
+    /// of those: the socket is intact and the session is still healthy, so a
+    /// retry is reasonable and the plugin may simply be wedged rather than dead.
     ///
     /// **Whoever produces this must leave the session alive.** The variant
     /// promises a healthy socket and a worthwhile retry, so a transport that
     /// reports a stall *and* tears the connection down is telling the caller two
-    /// incompatible things — and the caller acts on the error it can see, not on
-    /// the teardown it cannot.
-    ///
-    /// `bytes` is what had arrived when progress stopped, which is what
-    /// separates "never started" (0) from "died four fifths of the way in".
-    #[error(
-        "plugin state transfer stalled after {bytes} bytes: no chunk arrived within {}ms",
-        after.as_millis()
-    )]
+    /// incompatible things: the caller acts on the error it can see, not on the
+    /// teardown it cannot.
+    #[error("plugin state request stalled: no answer within {}ms", after.as_millis())]
     Stalled {
-        /// Bytes transferred before progress stopped. Zero means nothing ever
-        /// arrived, which points at the plugin rather than the transport.
-        bytes: usize,
-        /// The per-chunk progress deadline that expired.
+        /// The deadline that expired.
         after: std::time::Duration,
     },
 }

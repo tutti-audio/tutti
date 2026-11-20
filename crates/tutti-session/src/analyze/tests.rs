@@ -244,7 +244,7 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let mut s = Session::builder()
         .executor(executor.clone())
         .build_detached(RATE)
@@ -254,7 +254,7 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
     let wave = Wave::from_mono(RATE, Mono::new(&vec![0.0; 10 * CHUNK_FRAMES]));
     let job = s.analyze(wave, Counting(Arc::clone(&pushed)));
     drop(job);
-    executor.poll(usize::MAX);
+    executor.run_until_stalled();
     assert_eq!(pushed.load(Ordering::SeqCst), 0);
     let landed = s
         .update()

@@ -1,4 +1,4 @@
-//! [`Routing`]: which channel's delayed tap recirculates into which channel's line.
+//! [`FeedbackRouting`]: which channel's delayed tap recirculates into which channel's line.
 
 use tutti_buffers::BusTopology;
 use tutti_units::{Amplitude, Gain};
@@ -15,8 +15,9 @@ pub(crate) const MAX_WIDTH: usize = tutti_buffers::MAX_CHANNELS;
 /// feedback bounded as a pair ([`Feedback::stable_pair`](tutti_units::Feedback::stable_pair)),
 /// that keeps each line's loop gain under
 /// [`Feedback::MAX_STABLE`](tutti_units::Feedback::MAX_STABLE) whatever the matrix says.
-/// [`new`](Self::new) refuses a row that sums past 1; [`normalized`](Self::normalized) is
-/// the named saturation, which scales it down. A weight that is not finite is refused by
+/// [`FeedbackRoutingBuilder::build`] refuses a row that sums past 1;
+/// [`normalized`](FeedbackRoutingBuilder::normalized) is the named saturation, which scales it
+/// down. A weight that is not finite is refused by
 /// both: it would survive the scaling (`inf / inf` is NaN) and poison the loop it feeds
 /// for good.
 ///
@@ -25,7 +26,7 @@ pub(crate) const MAX_WIDTH: usize = tutti_buffers::MAX_CHANNELS;
 /// [`ring`](Self::ring) (channel `c` fed by `c - 1`, which spins echoes around a surround
 /// field).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Routing {
+pub struct FeedbackRouting {
     input: BusTopology,
     weights: [[Gain; MAX_WIDTH]; MAX_WIDTH],
 }
@@ -33,7 +34,7 @@ pub struct Routing {
 /// A refused routing.
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
-pub enum RoutingError {
+pub enum FeedbackRoutingError {
     /// The matrix is not `width x width`, row-major.
     #[error("a {width}-channel routing has {expected} weights, not {got}")]
     Length {
@@ -54,7 +55,7 @@ pub enum RoutingError {
         /// The refused weight.
         weight: Gain,
     },
-    /// A row's absolute weights sum past 1 ([`Routing::normalized`] scales it down).
+    /// A row's absolute weights sum past 1 ([`FeedbackRoutingBuilder::normalized`] scales it down).
     #[error("row {row} sums to {sum}, past 1")]
     Row {
         /// The row.
@@ -72,7 +73,7 @@ pub enum RoutingError {
     },
 }
 
-impl Routing {
+impl FeedbackRouting {
     /// No routing between channels: each renders independently, and the cross-feedback
     /// is inert.
     #[must_use]
@@ -107,69 +108,16 @@ impl Routing {
         r
     }
 
-    /// The routing `matrix`, `width x width` row-major: entry `matrix[c * width + j]`
-    /// is how much of channel `j`'s tap feeds channel `c`. Refuses a matrix of another
-    /// length, a weight that is not finite and a row whose absolute weights sum past 1.
-    ///
-    /// # Errors
-    ///
-    /// [`RoutingError::Length`], [`NotFinite`](RoutingError::NotFinite) or
-    /// [`Row`](RoutingError::Row), the first found.
-    pub fn new(input: BusTopology, matrix: &[Gain]) -> Result<Self, RoutingError> {
-        let mut r = Self::checked(input, matrix)?;
-        let n = r.width();
-        for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f64 = row.iter().map(|w| w.magnitude().get()).sum();
-            if sum > 1.0 {
-                return Err(RoutingError::Row {
-                    row: c,
-                    sum: Amplitude::new(sum),
-                });
-            }
-            r.weights[c][..n].copy_from_slice(row);
+    /// A [`FeedbackRoutingBuilder`] for the routing `matrix` on `input`, `width x width`
+    /// row-major: entry `matrix[c * width + j]` is how much of channel `j`'s tap feeds
+    /// channel `c`.
+    #[must_use]
+    pub const fn builder(input: BusTopology, matrix: &[Gain]) -> FeedbackRoutingBuilder<'_> {
+        FeedbackRoutingBuilder {
+            input,
+            matrix,
+            normalize: false,
         }
-        Ok(r)
-    }
-
-    /// As [`new`](Self::new), with each row that sums past 1 scaled down to sum to 1
-    /// (to within rounding) instead of refused. The named saturation: the one way
-    /// a matrix is rescaled.
-    ///
-    /// # Errors
-    ///
-    /// [`RoutingError::Length`] or [`NotFinite`](RoutingError::NotFinite).
-    pub fn normalized(input: BusTopology, matrix: &[Gain]) -> Result<Self, RoutingError> {
-        let mut r = Self::checked(input, matrix)?;
-        let n = r.width();
-        for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f64 = row.iter().map(|w| w.magnitude().get()).sum();
-            let scale = Gain::new(if sum > 1.0 { 1.0 / sum } else { 1.0 });
-            for (j, &w) in row.iter().enumerate() {
-                r.weights[c][j] = w * scale;
-            }
-        }
-        Ok(r)
-    }
-
-    /// `none(input)` after the length and finiteness of `matrix` are checked.
-    fn checked(input: BusTopology, matrix: &[Gain]) -> Result<Self, RoutingError> {
-        let r = Self::none(input);
-        let width = r.width();
-        if matrix.len() != width * width {
-            return Err(RoutingError::Length {
-                width,
-                expected: width * width,
-                got: matrix.len(),
-            });
-        }
-        if let Some(i) = matrix.iter().position(|w| !w.get().is_finite()) {
-            return Err(RoutingError::NotFinite {
-                row: i / width,
-                column: i % width,
-                weight: matrix[i],
-            });
-        }
-        Ok(r)
     }
 
     /// The bus this routing is for.
@@ -199,5 +147,73 @@ impl Routing {
     #[must_use]
     pub fn is_none(&self) -> bool {
         self.weights.iter().flatten().all(|&w| w == Gain::SILENT)
+    }
+}
+
+/// The terminal step of a [`FeedbackRouting`] made from a matrix: [`build`](Self::build)
+/// checks that the matrix is `width x width`, that every weight is finite and that every row
+/// sums to at most 1, which depend on the bus and the matrix together.
+#[derive(Clone, Copy, Debug)]
+pub struct FeedbackRoutingBuilder<'a> {
+    input: BusTopology,
+    matrix: &'a [Gain],
+    normalize: bool,
+}
+
+impl FeedbackRoutingBuilder<'_> {
+    /// Scales each row that sums past 1 down to sum to 1 (to within rounding) instead of
+    /// refusing it. The named saturation: the one way a matrix is rescaled.
+    #[must_use]
+    pub const fn normalized(mut self) -> Self {
+        self.normalize = true;
+        self
+    }
+
+    /// The routing.
+    ///
+    /// # Errors
+    ///
+    /// [`FeedbackRoutingError::Length`], [`NotFinite`](FeedbackRoutingError::NotFinite) or,
+    /// unless [`normalized`](Self::normalized), [`Row`](FeedbackRoutingError::Row), the first
+    /// found.
+    pub fn build(self) -> Result<FeedbackRouting, FeedbackRoutingError> {
+        let Self {
+            input,
+            matrix,
+            normalize,
+        } = self;
+        let mut r = FeedbackRouting::none(input);
+        let n = r.width();
+        if matrix.len() != n * n {
+            return Err(FeedbackRoutingError::Length {
+                width: n,
+                expected: n * n,
+                got: matrix.len(),
+            });
+        }
+        if let Some(i) = matrix.iter().position(|w| !w.get().is_finite()) {
+            return Err(FeedbackRoutingError::NotFinite {
+                row: i / n,
+                column: i % n,
+                weight: matrix[i],
+            });
+        }
+        for (c, row) in matrix.chunks(n).enumerate() {
+            let sum: f64 = row.iter().map(|w| w.magnitude().get()).sum();
+            if normalize {
+                let scale = Gain::new(if sum > 1.0 { 1.0 / sum } else { 1.0 });
+                for (j, &w) in row.iter().enumerate() {
+                    r.weights[c][j] = w * scale;
+                }
+            } else if sum > 1.0 {
+                return Err(FeedbackRoutingError::Row {
+                    row: c,
+                    sum: Amplitude::new(sum),
+                });
+            } else {
+                r.weights[c][..n].copy_from_slice(row);
+            }
+        }
+        Ok(r)
     }
 }

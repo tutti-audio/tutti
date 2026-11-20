@@ -14,7 +14,7 @@ use crate::MaxDelay;
 /// flanger at a short one (1 ms) so the copy combs against the original and the sweep
 /// moves the notches.
 ///
-/// A range-checked value: [`new`](Self::new) refuses
+/// A range-checked value: [`SweepBuilder::build`] refuses
 /// what the line could not hold, and never clamps. The longest delay the sweep reaches is
 /// `base + depth_max`, which must fit in `max_delay`, the size of the lines.
 ///
@@ -62,14 +62,20 @@ pub enum SweepError {
 }
 
 impl Sweep {
-    /// A sweep around `base`, its depth in `depth_min..=depth_max`, held in a line of
-    /// `max_delay`, applying at most `feedback_max`.
-    ///
-    /// # Errors
-    ///
-    /// [`SweepError::Base`], [`Depth`](SweepError::Depth), [`Reach`](SweepError::Reach) for
-    /// a sweep past the line, and [`FeedbackMax`](SweepError::FeedbackMax).
-    pub const fn new(
+    /// A [`SweepBuilder`] for a sweep around `base`, held in a line of `max_delay`: no depth
+    /// and no feedback until it says so.
+    #[must_use]
+    pub const fn builder(base: Seconds, max_delay: MaxDelay) -> SweepBuilder {
+        SweepBuilder {
+            base,
+            max_delay,
+            depth_min: Seconds::ZERO,
+            depth_max: Seconds::ZERO,
+            feedback_max: Feedback::NONE,
+        }
+    }
+
+    const fn checked(
         base: Seconds,
         max_delay: MaxDelay,
         depth_min: Seconds,
@@ -110,7 +116,7 @@ impl Sweep {
     ///
     /// # Panics
     ///
-    /// If [`new`](Self::new) refuses it.
+    /// If [`SweepBuilder::build`] refuses it.
     #[must_use]
     pub const fn of(
         base: Seconds,
@@ -119,7 +125,7 @@ impl Sweep {
         depth_max: Seconds,
         feedback_max: Feedback,
     ) -> Self {
-        match Self::new(base, max_delay, depth_min, depth_max, feedback_max) {
+        match Self::checked(base, max_delay, depth_min, depth_max, feedback_max) {
             Ok(s) => s,
             Err(_) => panic!("a sweep stays inside its line"),
         }
@@ -194,14 +200,59 @@ impl Sweep {
     }
 }
 
+/// The terminal step of a [`Sweep`] of your own numbers: [`build`](Self::build) checks that
+/// they fit each other and the line.
+#[derive(Clone, Copy, Debug)]
+pub struct SweepBuilder {
+    base: Seconds,
+    max_delay: MaxDelay,
+    depth_min: Seconds,
+    depth_max: Seconds,
+    feedback_max: Feedback,
+}
+
+impl SweepBuilder {
+    /// The depth the sweep takes, `min..=max`: a depth asked for outside it reads as the
+    /// nearer end.
+    #[must_use]
+    pub const fn depth(mut self, min: Seconds, max: Seconds) -> Self {
+        self.depth_min = min;
+        self.depth_max = max;
+        self
+    }
+
+    /// The most feedback the sweep applies.
+    #[must_use]
+    pub const fn feedback_max(mut self, most: Feedback) -> Self {
+        self.feedback_max = most;
+        self
+    }
+
+    /// The sweep.
+    ///
+    /// # Errors
+    ///
+    /// [`SweepError::Base`], [`Depth`](SweepError::Depth), [`Reach`](SweepError::Reach) for
+    /// a sweep past the line, and [`FeedbackMax`](SweepError::FeedbackMax).
+    pub const fn build(self) -> Result<Sweep, SweepError> {
+        Sweep::checked(
+            self.base,
+            self.max_delay,
+            self.depth_min,
+            self.depth_max,
+            self.feedback_max,
+        )
+    }
+}
+
 /// How each channel's sweep is staggered from channel 0's, in LFO cycles.
 ///
 /// A range-checked value: every offset is finite, and
 /// every channel's offset is wrapped into one cycle ([`Phase`]'s own wrap): at construction
-/// for [`each`](Self::each), and in [`offset`](Self::offset) for a [`step`](Self::step), whose
+/// for [`try_from`](TryFrom) a slice of offsets, and in [`offset`](Self::offset) for a [`step`](Self::step), whose
 /// channel `c` is `c` times it. A stagger that names
-/// one offset per channel ([`each`](Self::each)) is checked against the bus it is built for
-/// by [`ModDelayLayout::new`](crate::ModDelayLayout::new).
+/// one offset per channel (a slice of offsets) is checked against the bus it is built for
+/// by [`ModDelayLayoutBuilder::build`](crate::ModDelayLayoutBuilder::build).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stagger {
     kind: Kind,
@@ -279,12 +330,38 @@ impl Stagger {
         }
     }
 
-    /// One offset for each channel, channel 0's first (usually zero).
-    ///
+    /// How many channels it names an offset for, or `None` for a [`step`](Self::step),
+    /// which fits any width.
+    #[must_use]
+    pub const fn channels(&self) -> Option<usize> {
+        match self.kind {
+            Kind::Step(_) => None,
+            Kind::Each { count, .. } => Some(count),
+        }
+    }
+
+    /// Channel `c`'s offset in cycles, wrapped into `[0, 1)`: `c` times the step, or the
+    /// offset it was given (zero for a channel a slice of offsets names none for).
+    #[must_use]
+    pub fn offset(&self, channel: ChannelIndex) -> PhaseIncrement {
+        match self.kind {
+            Kind::Step(step) => wrap(step * channel.get() as f64),
+            Kind::Each { offsets, .. } => offsets
+                .get(channel.get())
+                .copied()
+                .unwrap_or(PhaseIncrement::new(0.0)),
+        }
+    }
+}
+
+/// One offset for each channel, channel 0's first (usually zero).
+impl TryFrom<&[PhaseIncrement]> for Stagger {
+    type Error = StaggerError;
+
     /// # Errors
     ///
     /// [`StaggerError::NotFinite`] or [`TooMany`](StaggerError::TooMany).
-    pub fn each(offsets: &[PhaseIncrement]) -> Result<Self, StaggerError> {
+    fn try_from(offsets: &[PhaseIncrement]) -> Result<Self, StaggerError> {
         if offsets.len() > MAX_CHANNELS {
             return Err(StaggerError::TooMany {
                 count: offsets.len(),
@@ -304,29 +381,6 @@ impl Stagger {
                 offsets: all,
             },
         })
-    }
-
-    /// How many channels it names an offset for, or `None` for a [`step`](Self::step),
-    /// which fits any width.
-    #[must_use]
-    pub const fn channels(&self) -> Option<usize> {
-        match self.kind {
-            Kind::Step(_) => None,
-            Kind::Each { count, .. } => Some(count),
-        }
-    }
-
-    /// Channel `c`'s offset in cycles, wrapped into `[0, 1)`: `c` times the step, or the
-    /// offset it was given (zero for a channel an [`each`](Self::each) names none for).
-    #[must_use]
-    pub fn offset(&self, channel: ChannelIndex) -> PhaseIncrement {
-        match self.kind {
-            Kind::Step(step) => wrap(step * channel.get() as f64),
-            Kind::Each { offsets, .. } => offsets
-                .get(channel.get())
-                .copied()
-                .unwrap_or(PhaseIncrement::new(0.0)),
-        }
     }
 }
 

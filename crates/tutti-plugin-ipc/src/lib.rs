@@ -81,14 +81,12 @@ pub use protocol::frame::{FrameBuf, read_frame, write_frame};
 pub use protocol::{
     AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest,
     CONTROL_FRAME_BYTES, ControlFrame, ControlReply, ControlRequest, Framed, News,
-    PROTOCOL_VERSION, ProcessAudioData, ReqId, Request, STATE_CHUNK_BYTES, SlabLayout, StagedState,
-    Working,
+    PROTOCOL_VERSION, ProcessAudioData, ReqId, Request, SlabLayout, StagedState, Working,
 };
 pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;
 pub use subprocess::{LoadRequest, Restore};
+#[cfg(feature = "testing")]
+pub use transport::control::send_state_reply;
 pub use transport::control::socket_name;
-pub use transport::shm::{AudioSlab, RING_SLOTS, SlabHandle, SlabWire, SlabWriter};
-// Splitting and reassembling plugin state across frames: both ends must chunk
-// identically, so the server uses this one.
-pub use transport::state_chunk;
+pub use transport::shm::{AudioSlab, BlobWire, RING_SLOTS, SlabHandle, SlabWire, SlabWriter};

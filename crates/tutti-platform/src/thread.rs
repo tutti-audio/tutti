@@ -23,10 +23,9 @@ use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
-use std::thread::{Builder, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::Instant;
 use crate::priority::{PriorityOutcome, PriorityRequest, request_priority};
 
 /// A `Mutex`'s guard whether or not a panicking holder poisoned it. Each lock here guards
@@ -88,26 +87,6 @@ impl Drop for SetOnDrop {
     }
 }
 
-/// The end of a [`StopToken::wait`]: a function of the `now` it is asked at.
-#[derive(Debug, Clone, Copy)]
-struct Deadline(Option<Instant>);
-
-impl Deadline {
-    /// The deadline `timeout` after `now`; a timeout that overflows the clock
-    /// never ends.
-    fn after(now: Instant, timeout: Duration) -> Self {
-        Self(now.checked_add(timeout))
-    }
-
-    /// The time left at `now`, or `None` once the deadline is reached.
-    fn left(self, now: Instant) -> Option<Duration> {
-        match self.0 {
-            Some(end) => end.checked_duration_since(now).filter(|d| !d.is_zero()),
-            None => Some(Duration::MAX),
-        }
-    }
-}
-
 /// A stop request a thread's body polls or sleeps on: a shared flag and a wake.
 ///
 /// Clones share one request. Raising it never waits on the body.
@@ -140,24 +119,12 @@ impl StopToken {
 
     /// Sleeps for at most `timeout`, waking early when the stop is requested.
     /// Returns whether the stop was requested.
+    ///
+    /// The web cannot block: there it returns at once, with whether the stop was
+    /// requested.
     #[must_use = "true means the body should return"]
     pub fn wait(&self, timeout: Duration) -> bool {
-        let deadline = Deadline::after(Instant::now(), timeout);
-        let mut gate = lock_recover(&self.state.gate);
-        loop {
-            if self.is_stopped() {
-                return true;
-            }
-            let Some(left) = deadline.left(Instant::now()) else {
-                return false;
-            };
-            gate = self
-                .state
-                .wake
-                .wait_timeout(gate, left)
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
-        }
+        os::wait(&self.state, timeout)
     }
 }
 
@@ -275,7 +242,8 @@ fn message(payload: &(dyn Any + Send)) -> String {
 ///
 /// # Errors
 ///
-/// The OS's refusal to start a thread.
+/// The OS's refusal to start a thread. On the web, which has no threads, always
+/// [`io::ErrorKind::Unsupported`].
 pub fn spawn_named<T, F>(
     name: &str,
     priority: Option<PriorityRequest>,
@@ -290,7 +258,7 @@ where
     let (applied_tx, applied_rx) = mpsc::sync_channel::<Option<PriorityOutcome>>(1);
     let join = {
         let (stop, ended, name_owned) = (stop.clone(), Arc::clone(&ended), name.to_owned());
-        Builder::new().name(name.to_owned()).spawn(move || {
+        os::spawn(name, move || {
             let _ended = SetOnDrop(ended);
             catch_unwind(AssertUnwindSafe(move || {
                 let _ = applied_tx.send(priority.map(request_priority));
@@ -313,6 +281,10 @@ where
         join: Some(join),
     })
 }
+
+#[cfg_attr(not(target_arch = "wasm32"), path = "thread/native.rs")]
+#[cfg_attr(target_arch = "wasm32", path = "thread/web.rs")]
+mod os;
 
 #[cfg(test)]
 mod tests;

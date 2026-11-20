@@ -80,10 +80,12 @@ struct Rig {
 }
 
 fn rig(config: InputConfig, lead: Samples) -> Rig {
-    rig_on(config, lead, tutti_platform::Executor::default())
+    rig_on(config, lead, None)
 }
 
-fn rig_on(config: InputConfig, lead: Samples, executor: tutti_platform::Executor) -> Rig {
+/// A rig whose session runs its background work on `executor` (driven by `update`), or,
+/// with `None`, on its own.
+fn rig_on(config: InputConfig, lead: Samples, executor: Option<tutti_platform::Executor>) -> Rig {
     let capture = Arc::new(Mutex::new(Capture {
         writer: None,
         lead,
@@ -95,8 +97,11 @@ fn rig_on(config: InputConfig, lead: Samples, executor: tutti_platform::Executor
         ChannelLayout::STEREO,
         tutti_buffers::SampleFormat::F32,
     );
-    let live = Session::builder()
-        .executor(executor)
+    let mut builder = Session::builder();
+    if let Some(executor) = executor {
+        builder = builder.executor(executor);
+    }
+    let live = builder
         .input_opener(Opener(Arc::clone(&capture)))
         .device(Default::default())
         .build_device_on(spec, driver)
@@ -695,7 +700,7 @@ fn a_take_on_a_polled_session_records_and_its_file_holds_the_frames_written() {
     let mut rig = rig_on(
         InputConfig::default(),
         Samples::new(0),
-        tutti_platform::Executor::polled(),
+        Some(tutti_platform::Executor::new()),
     );
     rig.step(256);
     let path = wav(&dir, "polled.wav");
@@ -732,7 +737,7 @@ fn finish_returns_at_once_and_the_completion_lands_in_the_updates_after() {
     let mut rig = rig_on(
         InputConfig::default(),
         Samples::new(0),
-        tutti_platform::Executor::polled(),
+        Some(tutti_platform::Executor::new()),
     );
     rig.step(256);
     let take = rig
@@ -773,7 +778,7 @@ fn an_idle_take_on_a_polled_session_never_stalls_update() {
     let mut rig = rig_on(
         InputConfig::default(),
         Samples::new(0),
-        tutti_platform::Executor::polled(),
+        Some(tutti_platform::Executor::new()),
     );
     rig.step(256);
     let take = rig
@@ -812,8 +817,12 @@ fn an_idle_take_on_a_polled_session_never_stalls_update() {
 fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "dropped.wav");
-    let executor = tutti_platform::Executor::polled();
-    let mut rig = rig_on(InputConfig::default(), Samples::new(0), executor.clone());
+    let executor = tutti_platform::Executor::new();
+    let mut rig = rig_on(
+        InputConfig::default(),
+        Samples::new(0),
+        Some(executor.clone()),
+    );
     rig.step(256);
     let take = rig
         .session
@@ -826,7 +835,7 @@ fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
     assert!(!path.exists(), "the file is committed when the pump ends");
 
     drop(rig);
-    executor.poll(usize::MAX);
+    executor.run_until_stalled();
 
     let frames = read(&path);
     assert!(!frames.is_empty(), "the committed file holds the take");
@@ -844,7 +853,7 @@ fn record_polled(target: TakeTarget) -> Vec<SessionEvent> {
     let mut rig = rig_on(
         InputConfig::default(),
         Samples::new(0),
-        tutti_platform::Executor::polled(),
+        Some(tutti_platform::Executor::new()),
     );
     rig.step(256);
     let take = rig
