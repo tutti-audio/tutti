@@ -1,5 +1,5 @@
 //! A `MidiInput` handle reads its timing: the latest correction its clock map
-//! made and the count of its re-anchors. The cells belong to the port's entry:
+//! made and the count of its re-anchors. The cells belong to the port:
 //! they are the same across an unplug and a replug, open while a device is
 //! connected and closed while it is away.
 //!

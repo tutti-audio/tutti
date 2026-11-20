@@ -1,89 +1,46 @@
 //! A host's own MIDI sink (feature `midi`): [`Session::open_midi_sink`] opens
 //! a [`MidiOut`] the app implements and returns a [`MidiSink`].
 //!
-//! A sink is an output as a [`MidiOutput`](crate::MidiOutput) port is: a
+//! A sink is an output as a `MidiOutput` port is: a
 //! [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own, fed by the
 //! session's clock, whose events the session sends to the sink each update at
 //! the time its frame has on the OS clock (the same drain, the same timing, as a
-//! device's). A sink needs no device, so it reads [`Presence::Live`] for as
-//! long as a clone of its handle lives, and closes when the last is dropped.
+//! device's). A sink needs no device, so it is always there while a clone of its
+//! handle lives. The last clone's drop closes it: its node leaves the graph at
+//! the next [`update`](Session::update), or at the next open, whichever comes
+//! first.
 
-use std::convert::Infallible;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_runtime::MidiOut;
 
+use crate::Session;
 use crate::midi::{
-    LossReaders, LossWriters, OutputTiming, Stamping, UmpOut, drain_events, loss_cells,
+    Claim, Held, LossReaders, LossWriters, OutputTiming, Stamping, UmpOut, drain_events, loss_cells,
 };
-use crate::{Peer, Presence, Resource, ResourceId, Session};
-
-// --- The options ---
-
-/// What a sink is sent with: the options of [`Session::open_midi_sink_with`].
-///
-/// Like `OutputOptions` for a device's port, these are
-/// the options only a host's sink has: whether it is JR-stamped.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[non_exhaustive]
-pub struct SinkOptions {
-    /// Whether the sink is sent JR Timestamps.
-    pub stamping: Stamping,
-}
-
-impl SinkOptions {
-    /// The options of a sink opened with none: unstamped.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            stamping: Stamping::Off,
-        }
-    }
-
-    /// These options with `stamping`.
-    #[must_use]
-    pub const fn stamping(mut self, stamping: Stamping) -> Self {
-        self.stamping = stamping;
-        self
-    }
-}
 
 // --- The shared record ---
 
-/// What the session writes and the handle reads of one sink.
-struct SinkShared {
-    id: ResourceId,
-    info: Arc<MidiSinkInfo>,
+/// What the session reads and the handle writes and reads of one sink.
+#[derive(Debug)]
+pub(crate) struct SinkShared {
+    /// Whether the sink is sent JR Timestamps.
+    jr: AtomicBool,
     /// What its node's tap had no room for, and what the sink refused or was
     /// scheduled too far ahead to send.
     losses: LossReaders,
 }
 
-/// What the handles of a sink share: its record and its node. The session
-/// watches it by a weak reference, so the sink closes with the last clone of
-/// its [`MidiSink`].
-#[derive(Debug)]
-struct SinkClaim {
-    shared: Arc<SinkShared>,
-    node: NodeKey,
-}
-
-impl std::fmt::Debug for SinkShared {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SinkShared")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
+impl SinkShared {
+    fn stamping(&self) -> Stamping {
+        if self.jr.load(Ordering::Acquire) {
+            Stamping::Jr
+        } else {
+            Stamping::Off
+        }
     }
-}
-
-/// What a [`MidiSink`] says of itself: one snapshot.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct MidiSinkInfo {
-    /// What it was opened with.
-    pub options: SinkOptions,
 }
 
 // --- The handle ---
@@ -94,7 +51,7 @@ pub struct MidiSinkInfo {
 /// is dropped.
 #[derive(Clone, Debug)]
 pub struct MidiSink {
-    claim: Arc<SinkClaim>,
+    claim: Arc<Claim<SinkShared>>,
 }
 
 impl MidiSink {
@@ -118,47 +75,31 @@ impl MidiSink {
     pub fn losses(&self) -> Losses {
         self.claim.shared.losses.get()
     }
-}
 
-impl crate::peer::sealed::Sealed for MidiSink {}
-
-impl Resource for MidiSink {
-    fn id(&self) -> ResourceId {
-        self.claim.shared.id
-    }
-}
-
-impl Peer for MidiSink {
-    type Info = MidiSinkInfo;
-    /// A sink is never lost: only its last handle's drop closes it.
-    type Cause = Infallible;
-
-    fn info(&self) -> Arc<MidiSinkInfo> {
-        Arc::clone(&self.claim.shared.info)
+    /// Sets whether the sink is sent JR Timestamps. It gates timestamps, not
+    /// delivery: with it off the events still go out, unstamped. A sink opens
+    /// unstamped, and a change applies from the next drain.
+    pub fn set_stamping(&self, stamping: Stamping) {
+        self.claim
+            .shared
+            .jr
+            .store(stamping == Stamping::Jr, Ordering::Release);
     }
 
-    fn presence(&self) -> Presence<Infallible> {
-        Presence::Live
+    /// Whether the sink is sent JR Timestamps.
+    #[must_use]
+    pub fn stamping(&self) -> Stamping {
+        self.claim.shared.stamping()
     }
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// Opens `sink` as an output, unstamped: wire what it should receive to
-    /// its [`node`](MidiSink::node). It closes when every clone of the handle
-    /// is dropped.
+    /// Opens `sink` as an output, unstamped ([`MidiSink::set_stamping`]): wire
+    /// what it should receive to its [`node`](MidiSink::node). It closes when
+    /// every clone of the handle is dropped, at the next
+    /// [`update`](Self::update) or open.
     pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> MidiSink {
-        self.open_midi_sink_with(sink, SinkOptions::new())
-    }
-
-    /// Opens `sink` with `options`.
-    pub fn open_midi_sink_with(
-        &mut self,
-        sink: Arc<dyn MidiOut>,
-        options: SinkOptions,
-    ) -> MidiSink {
-        let (mut midi, ids) = self.midi_and_ids();
-        let id = ids.mint();
-        midi.open_sink(id, sink, options)
+        self.midi().open_sink(sink)
     }
 }
 
@@ -166,8 +107,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
 /// One sink as the session keeps it.
 struct SinkPort {
-    /// Upgrades while a handle of the sink lives.
-    claim: Weak<SinkClaim>,
+    claim: Held<SinkShared>,
+    shared: Arc<SinkShared>,
     node: NodeKey,
     tap: EventTapReader,
     out: UmpOut,
@@ -181,27 +122,22 @@ pub(crate) struct Sinks {
 }
 
 impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
-    /// Opens the sink `sink` as `id`: its output node joins the graph, fed by
-    /// the session's clock.
-    pub(crate) fn open_sink(
-        &mut self,
-        id: ResourceId,
-        sink: Arc<dyn MidiOut>,
-        options: SinkOptions,
-    ) -> MidiSink {
+    /// Opens the sink `sink`: its output node joins the graph, fed by the
+    /// session's clock.
+    pub(crate) fn open_sink(&mut self, sink: Arc<dyn MidiOut>) -> MidiSink {
+        self.close_dropped();
         let rate = self.graph.prepared().sample_rate();
         let (node, tap) = self.add_output_node();
-        let mut out = UmpOut::new(sink, rate);
-        out.set_stamping(options.stamping);
+        let out = UmpOut::new(sink, rate);
         let (losses, readers) = loss_cells();
         let shared = Arc::new(SinkShared {
-            id,
-            info: Arc::new(MidiSinkInfo { options }),
+            jr: AtomicBool::new(false),
             losses: readers,
         });
-        let claim = Arc::new(SinkClaim { shared, node });
+        let (claim, held) = Held::new(Arc::clone(&shared), node);
         self.state.sinks.ports.push(SinkPort {
-            claim: Arc::downgrade(&claim),
+            claim: held,
+            shared,
             node,
             tap,
             out,
@@ -235,19 +171,31 @@ impl Sinks {
         edited
     }
 
-    /// Each sink's tap, read dry and sent to its sink, and the sinks whose
-    /// handles dropped taken out of the graph after what their taps held was sent.
-    /// Whether the graph was edited.
+    /// Each held sink's tap, read dry and sent to its sink, and the sinks
+    /// whose handles were all dropped closed. Whether the graph was edited.
     pub(crate) fn drain<F: tutti_buffers::Float>(
+        &mut self,
+        graph: &mut crate::graph::Graph<F>,
+        timing: Option<&OutputTiming>,
+    ) -> bool {
+        for port in self.ports.iter_mut().filter(|port| port.claim.is_held()) {
+            port.drain(timing);
+        }
+        self.close_dropped(graph, timing)
+    }
+
+    /// The sinks whose handles were all dropped, closed: what their taps held
+    /// is sent, and the nodes leave the graph. Whether the graph was edited.
+    pub(crate) fn close_dropped<F: tutti_buffers::Float>(
         &mut self,
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&OutputTiming>,
     ) -> bool {
         let mut edited = false;
         self.ports.retain_mut(|port| {
-            port.drain(timing);
-            let held = port.claim.strong_count() > 0;
+            let held = port.claim.is_held();
             if !held {
+                port.drain(timing);
                 // A host that removed the node itself leaves nothing to take.
                 let _ = graph.remove(port.node);
                 edited = true;
@@ -259,8 +207,10 @@ impl Sinks {
 }
 
 impl SinkPort {
-    /// Reads the tap dry to the sink, and counts what did not go.
+    /// Reads the tap dry to the sink with the stamping the handles set, and
+    /// counts what did not go.
     fn drain(&mut self, timing: Option<&OutputTiming>) {
+        self.out.set_stamping(self.shared.stamping());
         drain_events(&mut self.tap, Some(&mut self.out), &mut self.losses, timing);
     }
 }

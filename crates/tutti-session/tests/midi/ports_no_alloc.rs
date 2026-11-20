@@ -53,7 +53,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
         .expect("routes");
     let list = s.midi().devices();
     let input = s.open_midi_input(list[0].clone()).expect("opens");
-    let output = s.open_midi_output(list[1].clone()).expect("opens");
+    let output = s.open_midi_output(list[1].clone()).run().expect("opens");
     let _ = s.update();
     s.midi_nodes()
         .unwrap()

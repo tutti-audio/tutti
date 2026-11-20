@@ -12,7 +12,10 @@
 //! A handle is a reference-counted claim on the port: clones share it, and
 //! the port closes when the last clone is dropped. The session tracks its open
 //! ports by a weak reference to that claim, so a dropped handle needs no
-//! release call.
+//! release call. The close happens at the session's next
+//! [`update`](Session::update) or at the next open, whichever comes first: the
+//! OS port, an output's connection and its Active Sensing thread end then, and
+//! a device the dropped port held can be opened by the open that follows.
 //!
 //! An input is fed to the graph through an input node of its own, made when
 //! the port opens: it releases the notes its device holds before it goes, and
@@ -20,7 +23,7 @@
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
 //! whose events the session sends to the device each update.
 
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
@@ -37,7 +40,7 @@ use tutti_ump::StreamConfig;
 use tutti_units::{Resyncs, Seconds};
 
 use crate::job::Ticket;
-use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
+use crate::midi::{Claim, Held, LossReaders, LossWriters, UmpOut, loss_cells};
 use crate::midi_ci::{
     EndSubscription, GetProperty, Pending, PortLink, ProfilePeer, ReportPeer, RequestReport,
     ResourcePeer, SetProperty, Subscribe, SwitchProfile,
@@ -74,50 +77,6 @@ pub enum PortCause {
     /// port reads this only when that failed; it is tried again when its device
     /// next appears in the device list.
     ReaderFailed(InputFault),
-}
-
-/// What an output port is opened with: the options of
-/// [`Session::open_midi_output_with`].
-///
-/// ```
-/// use tutti_session::OutputOptions;
-///
-/// let options = OutputOptions::new().active_sensing(true);
-/// assert_ne!(options, OutputOptions::new());
-/// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[non_exhaustive]
-pub struct OutputOptions {
-    /// Whether the port sends Active Sensing: see [`active_sensing`](Self::active_sensing).
-    pub active_sensing: bool,
-}
-
-impl OutputOptions {
-    /// The options of an output opened with none.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            active_sensing: false,
-        }
-    }
-
-    /// Whether the port sends Active Sensing (`0xFE`) for its whole life: from
-    /// its own thread, whenever it has been silent for 270 ms
-    /// ([`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL)),
-    /// until the port closes. Re-declaring the port's node or a stalled
-    /// [`update`](crate::Session::update) does not stop it, and a receiver that
-    /// has seen one releases its notes when they stop (MIDI 1.0 Detailed
-    /// Specification p. 32).
-    ///
-    /// A port whose device is in the MIDI 2.0 Protocol sends none: MIDI 2.0
-    /// has no Active Sensing. It starts when a negotiation moves the device to
-    /// the MIDI 1.0 Protocol.
-    #[must_use]
-    pub const fn active_sensing(mut self, on: bool) -> Self {
-        self.active_sensing = on;
-        self
-    }
 }
 
 /// The session has no OS MIDI layer
@@ -440,33 +399,18 @@ impl OutputShared {
 
 // --- The entries ---
 
-/// What the handles of an input port share: its record and its node. The
-/// session watches it by a weak reference, so the port closes with the last
-/// clone of its [`MidiInput`].
-#[derive(Debug)]
-struct InputClaim {
-    shared: Arc<InputShared>,
-    node: NodeKey,
-}
-
-/// What the handles of an output port share: as [`InputClaim`].
-#[derive(Debug)]
-struct OutputClaim {
-    shared: Arc<OutputShared>,
-    node: NodeKey,
-}
-
 // --- The handles ---
 
 /// An input port: [`Session::open_midi_input`].
 ///
 /// `Clone` and `Send`. Clones share the port, and it closes when the last
-/// clone is dropped: the session takes its input node out of the graph once
-/// that node has released the notes its device held. It follows its device
-/// across an unplug and a replug.
+/// clone is dropped, at the session's next [`update`](Session::update) or
+/// open: the OS port is released then, and the session takes the input node
+/// out of the graph once that node has released the notes its device held. It
+/// follows its device across an unplug and a replug.
 #[derive(Clone, Debug)]
 pub struct MidiInput {
-    claim: Arc<InputClaim>,
+    claim: Arc<Claim<InputShared>>,
 }
 
 impl std::fmt::Debug for InputShared {
@@ -567,10 +511,12 @@ impl Peer for MidiInput {
 }
 
 /// An output port: [`Session::open_midi_output`]. As [`MidiInput`], for the
-/// device an output sends to.
+/// device an output sends to: when the last clone is dropped, what the port's
+/// node held is sent to the device first, and then the connection and its
+/// Active Sensing thread end, at the next [`update`](Session::update) or open.
 #[derive(Clone, Debug)]
 pub struct MidiOutput {
-    claim: Arc<OutputClaim>,
+    claim: Arc<Claim<OutputShared>>,
 }
 
 impl std::fmt::Debug for OutputShared {
@@ -631,7 +577,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Opens the input port of the saved device `saved`: its input node joins
     /// the graph (the next [`update`](Session::update) commits it), and the
     /// device opens into it when it is present. The port lives while any clone
-    /// of the handle does.
+    /// of the handle does; after the last is dropped, the device is free to open
+    /// again from the next call to this or to an `open` (the call closes what was
+    /// dropped first).
     ///
     /// It binds a device that is surely the saved one, or the only present one
     /// of its name; an absent device opens the port reading
@@ -652,29 +600,69 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         midi.open_input_port(id, ids, saved)
     }
 
-    /// Opens the output port of the saved device `saved`, with no options: as
-    /// [`open_midi_input`](Self::open_midi_input), for a device a port sends to.
+    /// A request to open the output port of the saved device `saved`: as
+    /// [`open_midi_input`](Self::open_midi_input), for a device a port sends
+    /// to. [`active_sensing`](OpenMidiOutput::active_sensing) sets what the
+    /// port sends, and [`run`](OpenMidiOutput::run) opens it.
+    pub fn open_midi_output(&mut self, saved: DeviceInfo) -> OpenMidiOutput<'_, K, C> {
+        OpenMidiOutput {
+            session: self,
+            saved,
+            active_sensing: false,
+        }
+    }
+}
+
+/// An output port to open, built by [`Session::open_midi_output`]: it borrows
+/// the session until [`run`](Self::run) opens the port.
+///
+/// The port's Active Sensing is set here and not on the handle: a transmitter
+/// that has started Active Sensing goes on (MIDI 1.0 Detailed Specification
+/// p. 32), so a running port cannot turn it off.
+#[must_use = "the port opens when the request runs"]
+pub struct OpenMidiOutput<'s, K: crate::AppKey, C: crate::Clock> {
+    session: &'s mut Session<K, C>,
+    saved: DeviceInfo,
+    active_sensing: bool,
+}
+
+impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpenMidiOutput<'_, K, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenMidiOutput")
+            .field("saved", &self.saved)
+            .field("active_sensing", &self.active_sensing)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<K: crate::AppKey, C: crate::Clock> OpenMidiOutput<'_, K, C> {
+    /// Whether the port sends Active Sensing (`0xFE`) for its whole life: from
+    /// its own thread, whenever it has been silent for 270 ms
+    /// ([`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL)),
+    /// until the port closes, and again on each device it reopens on. A stalled
+    /// [`update`](Session::update) does not stop it, and a receiver that has
+    /// seen one releases its notes when they stop (MIDI 1.0 Detailed
+    /// Specification p. 32). Off by default.
     ///
-    /// # Errors
-    ///
-    /// As [`open_midi_input`](Self::open_midi_input).
-    pub fn open_midi_output(&mut self, saved: DeviceInfo) -> Result<MidiOutput, MidiPortError> {
-        self.open_midi_output_with(saved, OutputOptions::new())
+    /// A port whose device is in the MIDI 2.0 Protocol sends none: MIDI 2.0
+    /// has no Active Sensing. It starts when a negotiation moves the device to
+    /// the MIDI 1.0 Protocol.
+    pub const fn active_sensing(mut self, on: bool) -> Self {
+        self.active_sensing = on;
+        self
     }
 
-    /// Opens the output port of `saved` with `options`.
+    /// Opens the port: its output node joins the graph (the next
+    /// [`update`](Session::update) commits it), and the device opens into it when
+    /// it is present. The port lives while any clone of the handle does.
     ///
     /// # Errors
     ///
-    /// As [`open_midi_input`](Self::open_midi_input).
-    pub fn open_midi_output_with(
-        &mut self,
-        saved: DeviceInfo,
-        options: OutputOptions,
-    ) -> Result<MidiOutput, MidiPortError> {
-        let (mut midi, ids) = self.midi_and_ids();
+    /// As [`Session::open_midi_input`].
+    pub fn run(self) -> Result<MidiOutput, MidiPortError> {
+        let (mut midi, ids) = self.session.midi_and_ids();
         let id = ids.mint();
-        midi.open_output_port(id, saved, options)
+        midi.open_output_port(id, self.saved, self.active_sensing)
     }
 }
 
@@ -683,7 +671,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 /// One input port as the session keeps it.
 struct InputPort {
     /// Upgrades while a handle of the port lives.
-    claim: Weak<InputClaim>,
+    claim: Held<InputShared>,
     shared: Arc<InputShared>,
     node: NodeKey,
     controls: MidiInputControls,
@@ -704,13 +692,13 @@ struct InputPort {
 /// One output port as the session keeps it.
 struct OutputPort {
     /// Upgrades while a handle of the port lives.
-    claim: Weak<OutputClaim>,
+    claim: Held<OutputShared>,
     shared: Arc<OutputShared>,
     node: NodeKey,
     tap: EventTapReader,
     saved: DeviceInfo,
-    /// What the port is opened with: applied to each device output it opens.
-    options: OutputOptions,
+    /// Whether each device output the port opens sends Active Sensing.
+    active_sensing: bool,
     losses: LossWriters,
     /// What the open device's output had counted of its own losses when they
     /// were last folded into `losses`.
@@ -732,6 +720,9 @@ struct Retiring {
 /// The ports of the session, and what they are opened with.
 #[derive(Default)]
 pub(crate) struct Ports {
+    /// Held for as long as the ports are: what a request tells a released port
+    /// from an ended session by.
+    alive: Arc<()>,
     inputs: Vec<InputPort>,
     outputs: Vec<OutputPort>,
     retiring: Vec<Retiring>,
@@ -836,7 +827,7 @@ impl InputPort {
 
     /// Whether a handle of this port lives.
     fn is_held(&self) -> bool {
-        self.claim.strong_count() > 0
+        self.claim.is_held()
     }
 
     /// Takes in what the OS layer reads of the open device, saying so when it
@@ -998,9 +989,9 @@ impl Ports {
         edits
     }
 
-    /// Ends the ports whose handles were all dropped, and takes out the
+    /// Ends the input ports whose handles were all dropped, and takes out the
     /// input nodes that have released what their devices held.
-    fn retire<F: tutti_buffers::Float>(
+    pub(crate) fn retire<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
@@ -1023,19 +1014,10 @@ impl Ports {
             edits.graph = true;
             edits.routes = true;
         }
-        let before = self.outputs.len();
-        self.outputs.retain_mut(|port| {
-            let held = port.claim.strong_count() > 0;
-            if !held {
-                // A host that removed the node itself leaves nothing to take.
-                let _ = graph.remove(port.node);
-            }
-            held
-        });
-        edits.graph |= self.outputs.len() != before;
         self.retiring.retain(|going| {
-            // The node's block that released the notes has run.
-            let done = going.generation.is_idle();
+            // The node's block that released the notes has run, or a host
+            // removed the node itself.
+            let done = going.generation.is_idle() || !graph.contains(going.node);
             if done {
                 // A host that removed the node itself leaves nothing to take.
                 let _ = graph.remove(going.node);
@@ -1136,7 +1118,7 @@ impl Ports {
             {
                 continue;
             }
-            let presence = match open_device_output(io, &arrived.id, &port.options) {
+            let presence = match open_device_output(io, &arrived.id, port.active_sensing) {
                 Ok(device) => {
                     port.out = Some(match port.parked.take() {
                         Some(stream) => UmpOut::resumed(device, stream),
@@ -1335,6 +1317,12 @@ impl Ports {
 }
 
 impl OutputPort {
+    /// Reads the tap dry to the device, and counts what did not go.
+    fn drain(&mut self, timing: Option<&crate::midi::OutputTiming>) {
+        crate::midi::drain_events(&mut self.tap, self.out.as_mut(), &mut self.losses, timing);
+        self.fold_device_losses();
+    }
+
     /// Counts what the device's output refused or lost after taking since the
     /// last call: a device counts its own, which a send's return does not carry.
     fn fold_device_losses(&mut self) {
@@ -1368,16 +1356,16 @@ impl OutputPort {
 
 // --- Opening ---
 
-/// The output of device `id`, with the port's options applied.
+/// The output of device `id`, sending Active Sensing when `active_sensing`.
 fn open_device_output(
     io: &MidiSession,
     id: &DeviceId,
-    options: &OutputOptions,
+    active_sensing: bool,
 ) -> Result<tutti_midi_hardware::OpenOutput, MidiPortError> {
     let mut device = io
         .connect_output(id)
         .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
-    if options.active_sensing {
+    if active_sensing {
         device
             .active_sensing()
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
@@ -1394,6 +1382,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         ids: crate::peer::ResourceIds,
         saved: DeviceInfo,
     ) -> Result<MidiInput, MidiPortError> {
+        self.close_dropped();
         let io = self
             .io
             .as_deref_mut()
@@ -1424,7 +1413,11 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         let input = controls.clone();
         let pending = Pending::new(ids);
         let shared = Arc::new_cyclic(|weak| {
-            let link = PortLink::new(weak.clone(), landed);
+            let link = PortLink::new(
+                weak.clone(),
+                Arc::downgrade(&self.state.ports.alive),
+                landed,
+            );
             InputShared {
                 id,
                 cell: Mutex::new(Cell {
@@ -1437,12 +1430,9 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 input,
             }
         });
-        let claim = Arc::new(InputClaim {
-            shared: Arc::clone(&shared),
-            node,
-        });
+        let (claim, held) = Held::new(Arc::clone(&shared), node);
         self.state.ports.inputs.push(InputPort {
-            claim: Arc::downgrade(&claim),
+            claim: held,
             shared: Arc::clone(&shared),
             node,
             controls,
@@ -1455,10 +1445,6 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         });
         let at = self.state.ports.inputs.len() - 1;
         if let Some(info) = found {
-            let io = self
-                .io
-                .as_deref_mut()
-                .ok_or(MidiPortError::from(NoHardware))?;
             if let Err(error) = self.state.ports.connect_input(at, io, self.graph, &info) {
                 // The port was never loaded: it leaves with the open's failure.
                 self.state.ports.inputs.remove(at);
@@ -1467,7 +1453,6 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 debug_assert!(removed.is_ok());
                 return Err(error);
             }
-            let io = self.io.as_deref().ok_or(MidiPortError::from(NoHardware))?;
             let mut cell = shared.cell.lock_recover();
             cell.info = Arc::new(input_info(
                 io,
@@ -1488,8 +1473,9 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         &mut self,
         id: ResourceId,
         saved: DeviceInfo,
-        options: OutputOptions,
+        active_sensing: bool,
     ) -> Result<MidiOutput, MidiPortError> {
+        self.close_dropped();
         let io = self.io.as_deref().ok_or(MidiPortError::from(NoHardware))?;
         let found = match io.devices().resolve(&saved) {
             Resolved::Exact(info) | Resolved::SameName(info) => Some(info),
@@ -1498,7 +1484,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         };
         let found = found.filter(|info| info.direction.is_output());
         let device = match &found {
-            Some(info) => Some(open_device_output(io, &info.id, &options)?),
+            Some(info) => Some(open_device_output(io, &info.id, active_sensing)?),
             None => None,
         };
         let rate = self.graph.prepared().sample_rate();
@@ -1526,17 +1512,14 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 },
             }),
         });
-        let claim = Arc::new(OutputClaim {
-            shared: Arc::clone(&shared),
-            node,
-        });
+        let (claim, held) = Held::new(Arc::clone(&shared), node);
         self.state.ports.outputs.push(OutputPort {
-            claim: Arc::downgrade(&claim),
+            claim: held,
             shared: Arc::clone(&shared),
             node,
             tap,
             saved,
-            options,
+            active_sensing,
             losses,
             device_seen: Losses::NONE,
             out: device.map(|device| UmpOut::of_device(device, rate)),
@@ -1580,12 +1563,39 @@ impl Ports {
         edited
     }
 
-    /// Each output port's tap, read dry and routed to its device.
-    pub(crate) fn drain_outputs(&mut self, timing: Option<&crate::midi::OutputTiming>) {
-        for port in &mut self.outputs {
-            crate::midi::drain_events(&mut port.tap, port.out.as_mut(), &mut port.losses, timing);
-            port.fold_device_losses();
+    /// Each held output port's tap, read dry and routed to its device, and the
+    /// ports whose handles were all dropped closed. Whether the graph was edited.
+    pub(crate) fn drain_outputs<F: tutti_buffers::Float>(
+        &mut self,
+        graph: &mut crate::graph::Graph<F>,
+        timing: Option<&crate::midi::OutputTiming>,
+    ) -> bool {
+        for port in self.outputs.iter_mut().filter(|port| port.claim.is_held()) {
+            port.drain(timing);
         }
+        self.close_dropped_outputs(graph, timing)
+    }
+
+    /// The output ports whose handles were all dropped, closed: what their taps
+    /// held is sent to the device, and the nodes leave the graph. Whether the
+    /// graph was edited.
+    pub(crate) fn close_dropped_outputs<F: tutti_buffers::Float>(
+        &mut self,
+        graph: &mut crate::graph::Graph<F>,
+        timing: Option<&crate::midi::OutputTiming>,
+    ) -> bool {
+        let mut edited = false;
+        self.outputs.retain_mut(|port| {
+            let held = port.claim.is_held();
+            if !held {
+                port.drain(timing);
+                // A host that removed the node itself leaves nothing to take.
+                let _ = graph.remove(port.node);
+                edited = true;
+            }
+            held
+        });
+        edited
     }
 }
 

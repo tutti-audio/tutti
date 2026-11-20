@@ -75,7 +75,7 @@ fn wired_with(last_group: u8, config: MidiHardwareConfig) -> (Session, FakeCount
         .expect("Wire is listed");
     let ports = Ports {
         input: s.open_midi_input(wire.clone()).expect("opens"),
-        output: s.open_midi_output(wire).expect("opens"),
+        output: s.open_midi_output(wire).run().expect("opens"),
     };
     (s, fake, ports)
 }

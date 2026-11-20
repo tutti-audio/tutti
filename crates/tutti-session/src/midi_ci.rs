@@ -139,12 +139,22 @@ impl PeFailure {
 #[derive(Clone)]
 pub(crate) struct PortLink {
     shared: Weak<InputShared>,
+    /// Upgrades while the session's ports live.
+    session: Weak<()>,
     outputs: JobOutputQueue,
 }
 
 impl PortLink {
-    pub(crate) fn new(shared: Weak<InputShared>, outputs: JobOutputQueue) -> Self {
-        Self { shared, outputs }
+    pub(crate) fn new(
+        shared: Weak<InputShared>,
+        session: Weak<()>,
+        outputs: JobOutputQueue,
+    ) -> Self {
+        Self {
+            shared,
+            session,
+            outputs,
+        }
     }
 
     /// A job for `request`, queued for the next poll, or already ended when
@@ -162,8 +172,10 @@ impl PortLink {
     {
         let (job, ticket) = Ticket::new(&self.outputs);
         match self.shared.upgrade() {
-            // Every handle of the port was dropped, and the session took the port out.
-            None => ticket.land(Err(PeerError::Released)),
+            // The port is gone: released when every handle was dropped and the
+            // session took it out, disconnected when the session itself ended.
+            None if self.session.strong_count() > 0 => ticket.land(Err(PeerError::Released)),
+            None => ticket.land(Err(PeerError::Disconnected)),
             Some(shared) => shared.push(request, ticket, lists, make),
         }
         job

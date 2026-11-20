@@ -750,7 +750,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
     );
 }
 
-/// What an open MIDI port is across a switch: the pool entry stays loaded, the
+/// What an open MIDI port is across a switch: the handle stays live, the
 /// port's input node stays the graph's, and the device stays connected.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports {

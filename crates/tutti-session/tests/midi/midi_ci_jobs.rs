@@ -417,7 +417,7 @@ fn a_report_of_another_kind_waits_behind_the_one_in_flight() {
     assert_eq!(wire.result(&second), Some(Ok(())));
 }
 
-/// A request pending when the entry is released ends as `Released`, and one made
+/// A request pending when the port's last handle is dropped ends as `Released`, and one made
 /// after it ends at the call.
 #[test]
 fn a_request_pending_when_the_port_is_released_ends_released() {

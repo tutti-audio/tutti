@@ -2058,7 +2058,7 @@ fn open_dev(s: &mut Session) -> (tutti_session::MidiInput, tutti_session::MidiOu
         .find(|d| d.name == "Dev")
         .expect("Dev is listed");
     let input = s.open_midi_input(dev.clone()).expect("opens");
-    let output = s.open_midi_output(dev).expect("opens");
+    let output = s.open_midi_output(dev).run().expect("opens");
     (input, output)
 }
 

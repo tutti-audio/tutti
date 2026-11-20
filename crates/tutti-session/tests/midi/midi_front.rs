@@ -432,7 +432,7 @@ mod hardware {
         assert_eq!(names, ["Keys", "Synth"], "inputs and outputs, by id");
 
         let keys = s.open_midi_input(all[0].clone()).expect("opens");
-        let out = s.open_midi_output(all[1].clone()).expect("opens");
+        let out = s.open_midi_output(all[1].clone()).run().expect("opens");
         assert_eq!(fake.connected_inputs(), [EndpointId::from_raw(1)], "Keys");
         assert_eq!(out.presence(), Presence::Live);
         assert!(s.graph_ref().contains(out.node()), "the output's node");
@@ -447,8 +447,8 @@ mod hardware {
         assert_eq!(out.presence(), Presence::Live, "the output is still held");
     }
 
-    /// **A session with no OS layer lists nothing**; an entry naming a device
-    /// fails to open by name (`midi_ports`).
+    /// **A session with no OS layer lists nothing**; opening a port of a device
+    /// fails by name (`midi_ports`).
     #[test]
     fn a_session_with_no_os_layer_lists_nothing() {
         let mut bare = offline();
@@ -472,7 +472,7 @@ mod hardware {
         let (pad_out, keys) = (saved("Pad Out"), saved("Keys"));
 
         let (pad_port, keys_port) = (
-            s.open_midi_output(pad_out.clone()).expect("opens"),
+            s.open_midi_output(pad_out.clone()).run().expect("opens"),
             s.open_midi_input(keys.clone()).expect("opens"),
         );
         assert_eq!(pad_port.presence(), Presence::Live, "named by its unit");
@@ -488,6 +488,7 @@ mod hardware {
         let _ = s.update();
         let error = s
             .open_midi_output(pad_out.clone())
+            .run()
             .expect_err("it can no longer be told for sure");
         assert!(matches!(
             &error,
@@ -497,7 +498,7 @@ mod hardware {
         fake.unplug(EndpointId::from_raw(1));
         fake.unplug(EndpointId::from_raw(3));
         let _ = s.update();
-        let gone = s.open_midi_output(pad_out).expect("opens absent");
+        let gone = s.open_midi_output(pad_out).run().expect("opens absent");
         assert_eq!(gone.presence(), Presence::Lost(PortCause::Unplugged));
     }
 

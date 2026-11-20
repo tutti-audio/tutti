@@ -13,8 +13,8 @@ use tutti_midi_hardware::InputFault;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
-    EventInPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, OutputOptions, Peer,
-    PortCause, Presence, Resource, ResourceFact, Session, SessionEvent,
+    EventInPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, Peer, PortCause, Presence,
+    Resource, ResourceFact, Session, SessionEvent,
 };
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, U7, Voice2};
 use tutti_units::{Beat, BeatDuration, SampleRate};
@@ -60,7 +60,7 @@ fn input(s: &mut Session, info: &DeviceInfo) -> MidiInput {
 
 /// Opens the output port of `info`, and updates.
 fn output(s: &mut Session, info: &DeviceInfo) -> MidiOutput {
-    let port = s.open_midi_output(info.clone()).expect("opens");
+    let port = s.open_midi_output(info.clone()).run().expect("opens");
     let _ = s.update();
     port
 }
@@ -385,6 +385,67 @@ fn a_session_without_the_hardware_layer_fails_the_open_by_name() {
     let mut s = Session::builder().build().expect("builds");
     let error = s.open_midi_input(keys).expect_err("no OS MIDI layer");
     assert!(matches!(error, MidiPortError::NoHardware(_)), "{error:?}");
+}
+
+/// **A dropped output sends what its node held, before it closes**: the clock's
+/// ticks of the blocks rendered since the last update reach the device when the
+/// last handle is dropped in the update that closes the port.
+#[test]
+fn a_dropped_output_sends_what_its_node_held() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let out = output(&mut s, &synth);
+    s.midi_nodes()
+        .unwrap()
+        .sync_controls
+        .messages()
+        .store(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
+        });
+    roll(&s, 4_096);
+    assert!(
+        fake.take_sent(EndpointId::from_raw(10)).is_empty(),
+        "nothing is drained before an update"
+    );
+    drop(out);
+    let _ = s.update();
+    assert!(
+        !fake.take_sent(EndpointId::from_raw(10)).is_empty(),
+        "the node's events were sent before the port closed"
+    );
+}
+
+/// **A device is free to open again as soon as its port's last handle is
+/// dropped**: the open sweeps the dropped port first, with no update between.
+#[test]
+fn a_dropped_input_can_be_opened_again_at_once() {
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    let _ = s.update();
+    let keys = device(&mut s, "Keys");
+    let first = input(&mut s, &keys);
+    drop(first);
+    let again = s.open_midi_input(keys).expect("the dropped port freed it");
+    assert_eq!(again.presence(), Presence::Live);
+    assert_eq!(fake.connected_inputs().len(), 1, "one connection");
+}
+
+/// **An output opened again sweeps the dropped one**: its node is out of the
+/// graph before the new port's is added, with no update between.
+#[test]
+fn a_dropped_output_is_closed_by_the_next_open() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let first = output(&mut s, &synth);
+    let node = first.node();
+    drop(first);
+    let _second = s.open_midi_output(synth).run().expect("opens");
+    assert!(!s.graph_ref().contains(node), "the dropped output closed");
 }
 
 /// **A port closes when its last handle is dropped, and not before**: a clone
@@ -848,21 +909,29 @@ fn is_active_sensing(u: &tutti_ump::Ump) -> bool {
     )
 }
 
-/// A session with a MIDI 1.0 Protocol `Synth` output opened with `options`, and
-/// its handle.
-fn sensing_session(options: OutputOptions) -> (Session, FakeCounters, MidiOutput) {
-    let (mut s, fake) = session();
+/// The `Synth` output of a MIDI 1.0 port that declares no block: the Protocol in
+/// use is MIDI 1.0 and there is no UMP Stream to ask.
+fn midi1_synth() -> tutti_midi_hardware::OsEndpoint {
     let mut synth = persistent_endpoint(SYNTH, "Synth");
-    // A MIDI 1.0 port that declares no block: the Protocol in use is MIDI 1.0 and
-    // there is no UMP Stream to ask.
     synth.capability = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
     }));
-    fake.plug(synth, PortDirection::Output);
+    synth
+}
+
+/// A session with a MIDI 1.0 Protocol `Synth` output opened with Active Sensing
+/// on or off, and its handle.
+fn sensing_session(active_sensing: bool) -> (Session, FakeCounters, MidiOutput) {
+    let (mut s, fake) = session();
+    fake.plug(midi1_synth(), PortDirection::Output);
     let _ = s.update();
     let device = device(&mut s, "Synth");
-    let out = s.open_midi_output_with(device, options).expect("opens");
+    let out = s
+        .open_midi_output(device)
+        .active_sensing(active_sensing)
+        .run()
+        .expect("opens");
     (s, fake, out)
 }
 
@@ -895,7 +964,7 @@ fn sent_until(
 /// node does not stop it.**
 #[test]
 fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
-    let (mut s, fake, out) = sensing_session(OutputOptions::new().active_sensing(true));
+    let (mut s, fake, out) = sensing_session(true);
     let first = sent_until(&fake, "no Active Sensing was sent", |sent| !sent.is_empty());
     assert!(first.iter().all(is_active_sensing), "{first:?}");
     // The node's sources are replaced, and no update runs while it goes on.
@@ -921,7 +990,7 @@ fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
 /// **An output port declared without the option never sends Active Sensing.**
 #[test]
 fn an_output_port_without_the_option_never_sends_active_sensing() {
-    let (_s, fake, _out) = sensing_session(OutputOptions::new());
+    let (_s, fake, _out) = sensing_session(false);
     std::thread::sleep(SECOND);
     assert!(sent_by_the_port(&fake).is_empty());
 }
@@ -930,13 +999,30 @@ fn an_output_port_without_the_option_never_sends_active_sensing() {
 /// more reaches the device.
 #[test]
 fn closing_an_output_port_stops_its_active_sensing() {
-    let (mut s, fake, out) = sensing_session(OutputOptions::new().active_sensing(true));
+    let (mut s, fake, out) = sensing_session(true);
     let _ = sent_until(&fake, "precondition: it runs", |sent| !sent.is_empty());
     drop(out);
     let _ = s.update();
     let _ = sent_by_the_port(&fake);
     std::thread::sleep(SECOND);
     assert!(sent_by_the_port(&fake).is_empty());
+}
+
+/// **A reopened output keeps its Active Sensing**: the device unplugged and
+/// back, the port sends Active Sensing again on the new connection.
+#[test]
+fn a_reopened_output_port_sends_active_sensing_again() {
+    let (mut s, fake, _out) = sensing_session(true);
+    let _ = sent_until(&fake, "precondition: it runs", |sent| !sent.is_empty());
+    unplug(&fake, SYNTH);
+    let _ = s.update();
+    let _ = sent_by_the_port(&fake);
+    fake.plug(midi1_synth(), PortDirection::Output);
+    let _ = s.update();
+    let sent = sent_until(&fake, "the reopened port sends", |sent| {
+        sent.iter().any(is_active_sensing)
+    });
+    assert!(sent.iter().all(is_active_sensing), "{sent:?}");
 }
 
 /// **A port whose device is in the MIDI 2.0 Protocol sends no Active Sensing**,
@@ -948,7 +1034,9 @@ fn a_midi2_protocol_output_port_sends_no_active_sensing() {
     let _ = s.update();
     let device = device(&mut s, "Synth");
     let _out = s
-        .open_midi_output_with(device, OutputOptions::new().active_sensing(true))
+        .open_midi_output(device)
+        .active_sensing(true)
+        .run()
         .expect("opens");
     std::thread::sleep(SECOND);
     assert!(sent_by_the_port(&fake).is_empty());

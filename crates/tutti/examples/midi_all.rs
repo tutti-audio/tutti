@@ -3,7 +3,7 @@
 //! It builds a session, adds a synth as an instrument, sets MPE once, builds a
 //! MIDI file and plays it as a clip, sends live notes, routes the hardware
 //! input by Group, records a take from the live input and drains it, reads the
-//! session's MIDI events, lists the devices, and declares an input port for the
+//! session's MIDI events, lists the devices, and opens an input port for the
 //! first one listed. It needs no hardware: a session with no OS MIDI layer
 //! lists no devices, and the program goes on without a port.
 //!

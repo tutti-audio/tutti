@@ -19,7 +19,7 @@ use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 use tutti_platform::Instant;
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
@@ -552,6 +552,33 @@ fn route_drain(
     }
 }
 
+/// What the handles of an output port, an input port or a sink share: its
+/// record and its node. Clones of a handle share one claim.
+#[derive(Debug)]
+pub(crate) struct Claim<S> {
+    pub(crate) shared: Arc<S>,
+    pub(crate) node: NodeKey,
+}
+
+/// The session's side of a [`Claim`]: a weak reference, so a port or sink is
+/// held exactly as long as some handle of it lives.
+#[derive(Debug)]
+pub(crate) struct Held<S>(Weak<Claim<S>>);
+
+impl<S> Held<S> {
+    /// The new claim on `shared` and `node`, and the session's side of it.
+    pub(crate) fn new(shared: Arc<S>, node: NodeKey) -> (Arc<Claim<S>>, Self) {
+        let claim = Arc::new(Claim { shared, node });
+        let held = Self(Arc::downgrade(&claim));
+        (claim, held)
+    }
+
+    /// Whether a handle lives.
+    pub(crate) fn is_held(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+}
+
 tutti_rt::id! {
     /// An id [`Midi::route`] returns, for [`Midi::unroute`].
     pub struct MidiRouteId;
@@ -783,7 +810,7 @@ impl MidiState {
         Some(clip)
     }
 
-    /// `Phase::Poll`, for the ports: retires those whose entry ended, takes in
+    /// `Phase::Poll`, for the ports: retires those whose handles were all dropped, takes in
     /// the devices that came and went (each a [`MidiReport`], and a port that
     /// held one reads it as its [`Presence`](crate::Presence)), sends what the
     /// handles asked of the MIDI-CI peers, steps the UMP Stream negotiations and
@@ -986,7 +1013,7 @@ impl MidiState {
         let mut edited = self.follow_rate(graph, now);
         let timing = self.output_timing(now);
         edited |= self.sinks.drain(graph, timing.as_ref());
-        self.ports.drain_outputs(timing.as_ref());
+        edited |= self.ports.drain_outputs(graph, timing.as_ref());
         edited
     }
 }
@@ -1104,6 +1131,24 @@ impl<'a, F: Float> Midi<'a, F> {
 }
 
 impl<F: Float> Midi<'_, F> {
+    /// Closes the ports and sinks whose handles were all dropped: what their
+    /// taps held is sent first, and an input's connection to its device ends,
+    /// so a device they held can be opened again by the call that follows.
+    pub(crate) fn close_dropped(&mut self) {
+        let timing = self.state.output_timing(Instant::now());
+        self.state.sinks.close_dropped(self.graph, timing.as_ref());
+        self.state
+            .ports
+            .close_dropped_outputs(self.graph, timing.as_ref());
+        #[cfg(feature = "midi-hardware")]
+        if let Some(io) = self.io.as_deref_mut() {
+            let edits = self.state.ports.retire(io, self.graph);
+            if edits.routes {
+                self.compile_session_routes();
+            }
+        }
+    }
+
     /// `target`, if it takes MIDI: it is in the graph with an event input.
     fn takes_midi(&self, target: NodeKey) -> Result<()> {
         if self.graph.node_event_inputs(target).is_ok_and(|n| n > 0) {
