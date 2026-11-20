@@ -2,7 +2,7 @@ use super::*;
 use crate::served::format::clap::{THREAD_POOL, flush_out_of_band, pool_participants};
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
-use tutti_plugin_ipc::BridgeMessage;
+use tutti_plugin_ipc::News;
 use tutti_plugin_types::Control;
 
 use std::path::Path;
@@ -78,26 +78,26 @@ impl Served<HostLoaded> {
     fn take_io_changed(&mut self) -> bool {
         let before = self.events.len();
         self.events
-            .retain(|e| !matches!(e, BridgeMessage::PluginIoChanged { .. }));
+            .retain(|e| !matches!(e, News::PluginIoChanged { .. }));
         self.events.len() != before
     }
 
     fn take_changes(&mut self) -> ClapChanges {
         let mut changes = ClapChanges::default();
         self.events.retain(|event| match event {
-            BridgeMessage::LatencyChanged { samples } => {
+            News::LatencyChanged { samples } => {
                 changes.latency = Some(*samples);
                 false
             }
-            BridgeMessage::TailChanged { tail } => {
+            News::TailChanged { tail } => {
                 changes.tail = Some(*tail);
                 false
             }
-            BridgeMessage::PluginParamValuesChanged => {
+            News::PluginParamValuesChanged => {
                 changes.param_values = true;
                 false
             }
-            BridgeMessage::PluginParamTitlesChanged => {
+            News::PluginParamTitlesChanged => {
                 changes.param_titles = true;
                 false
             }
@@ -295,7 +295,7 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
     let announced: Vec<_> = told
         .iter()
         .filter_map(|e| match e {
-            BridgeMessage::PluginIoChanged { layout } => Some(layout.clone()),
+            News::PluginIoChanged { layout } => Some(layout.clone()),
             _ => None,
         })
         .collect();
@@ -313,7 +313,7 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
         !plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
+            .any(|e| matches!(e, News::PluginIoChanged { .. })),
         "once"
     );
 }
@@ -488,7 +488,7 @@ fn a_served_ports_rescan_is_polled_as_io_changed() {
         plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. }))
+            .any(|e| matches!(e, News::PluginIoChanged { .. }))
     };
     assert!(io_changed(&mut plugin), "the host is told");
     assert_eq!(plugin.loaded().total_inputs(), 3);
@@ -515,7 +515,7 @@ fn the_buses_are_announced_when_they_change_and_not_otherwise() {
             .poll(main_thread())
             .into_iter()
             .filter_map(|e| match e {
-                BridgeMessage::PluginIoChanged { layout } => Some(layout),
+                News::PluginIoChanged { layout } => Some(layout),
                 _ => None,
             })
             .collect();
@@ -547,10 +547,7 @@ fn the_buses_are_announced_when_they_change_and_not_otherwise() {
     // What the host is sent when the plugin is lost, or a refusal leaves it
     // silent, with the buses unchanged: the report, with no layout.
     assert!(
-        matches!(
-            plugin.io_changed(),
-            BridgeMessage::PluginIoChanged { layout: None }
-        ),
+        matches!(plugin.io_changed(), News::PluginIoChanged { layout: None }),
         "the buses the host was told are not sent again"
     );
     let other = rescan(&mut plugin, TwoMono);
@@ -2476,7 +2473,7 @@ fn a_tail_change_without_the_extension_is_an_unknown_tail() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            BridgeMessage::TailChanged {
+            News::TailChanged {
                 tail: PluginTail::Unknown
             }
         )),
@@ -2521,15 +2518,13 @@ fn a_clap_tail_change_reaches_the_event_list() {
 
     let events = plugin.poll(main_thread());
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, BridgeMessage::TailChanged { .. })),
+        events.iter().any(|e| matches!(e, News::TailChanged { .. })),
         "the tail notification was polled and dropped; got {events:?}"
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::LatencyChanged { .. })),
+            .any(|e| matches!(e, News::LatencyChanged { .. })),
         "the latency notification went missing; got {events:?}"
     );
 
@@ -2576,7 +2571,7 @@ fn a_transport_request_is_sent_to_the_host_in_the_order_made() {
         .events
         .iter()
         .filter_map(|e| match e {
-            BridgeMessage::TransportRequested { request } => Some(*request),
+            News::TransportRequested { request } => Some(*request),
             _ => None,
         })
         .collect();

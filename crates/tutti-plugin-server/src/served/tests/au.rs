@@ -29,7 +29,7 @@ impl Served<AuLoaded> {
     }
 }
 use tutti_fixtures::main_thread;
-use tutti_plugin_ipc::BridgeMessage;
+use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
     Control, Event, Hand, HostOp, Lifecycle, MaxBlock, ProcessContext, ProcessOutput, Request,
     RescanScope, SampleRate, Samples,
@@ -143,19 +143,17 @@ fn an_au_property_change_reaches_the_event_list() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::LatencyChanged { .. })),
+            .any(|e| matches!(e, News::LatencyChanged { .. })),
         "the latency change was polled and dropped; got {events:?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, BridgeMessage::TailChanged { .. })),
+        events.iter().any(|e| matches!(e, News::TailChanged { .. })),
         "the tail change went missing; got {events:?}"
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginParamTitlesChanged)),
+            .any(|e| matches!(e, News::PluginParamTitlesChanged)),
         "a parameter-list change must ask the client to re-pull the list; \
          got {events:?}"
     );
@@ -199,14 +197,14 @@ fn an_au_latency_poll_refreshes_the_cached_wiring() {
     let reported_latency = events
         .iter()
         .find_map(|e| match e {
-            BridgeMessage::LatencyChanged { samples } => Some(*samples),
+            News::LatencyChanged { samples } => Some(*samples),
             _ => None,
         })
         .expect("a raised latency request must produce a re-read");
     let reported_tail = events
         .iter()
         .find_map(|e| match e {
-            BridgeMessage::TailChanged { tail } => Some(*tail),
+            News::TailChanged { tail } => Some(*tail),
             _ => None,
         })
         .expect("a raised tail request must produce a re-read");

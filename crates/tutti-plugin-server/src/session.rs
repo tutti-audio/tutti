@@ -1,7 +1,7 @@
 //! Pure message dispatch — no I/O, no async, no sockets.
 //!
 //! [`Session`] owns the plugin's control half and tells the render thread what its blocks read.
-//! [`Session::handle`] translates one [`HostMessage`] into state changes and returns a [`Reaction`]
+//! [`Session::handle`] translates one [`ControlRequest`] into state changes and returns a [`Reaction`]
 //! describing what the transport loop should do next. Because it has no `async` and no `Transport`
 //! dependency, it's unit-testable without tokio or sockets.
 
@@ -14,22 +14,22 @@ use crate::ties::Ties;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
-use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, StagedState};
+use tutti_plugin_ipc::{AudioSlab, ControlReply, ControlRequest, News, StagedState};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, EditorError, MAX_STATE_BYTES, MainThreadMarker, MainWork,
-    MainWorkHandle, ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult,
-    SampleRate, StateUse, Wakeups, WindowHandle,
+    BridgeResult, EditorError, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
+    ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, SampleRate,
+    StateUse, Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
-// One value per message, moved once to the transport loop; a `BridgeMessage`
+// One value per message, moved once to the transport loop; a `ControlReply`
 // carries a block's inline MIDI list.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum Reaction {
     /// Send this reply back to the host.
-    Reply(BridgeMessage),
+    Reply(ControlReply),
     /// Send these replies back, in order, as one logical answer.
     ///
     /// Exists for plugin state, which does not fit a single frame and so is
@@ -38,22 +38,22 @@ pub(crate) enum Reaction {
     /// stays a pure function of the request — the property the whole `Reaction`
     /// enum exists to preserve, and what makes `handle` testable without a
     /// socket.
-    ReplyMany(Vec<BridgeMessage>),
+    ReplyMany(Vec<ControlReply>),
     /// No reply; keep looping.
     None,
     /// The host asked for shutdown; leave the loop.
     Shutdown,
 }
 
-impl From<BridgeMessage> for Reaction {
-    fn from(m: BridgeMessage) -> Self {
+impl From<ControlReply> for Reaction {
+    fn from(m: ControlReply) -> Self {
         Self::Reply(m)
     }
 }
 
 #[cfg(test)]
 impl Reaction {
-    fn into_reply(self) -> BridgeMessage {
+    fn into_reply(self) -> ControlReply {
         match self {
             Reaction::Reply(m) => m,
             // A single-frame `ReplyMany` is the same answer in the shape a state
@@ -66,7 +66,7 @@ impl Reaction {
 
     /// Every frame of a multi-frame answer, in order.
     #[cfg(feature = "clap")]
-    fn into_replies(self) -> Vec<BridgeMessage> {
+    fn into_replies(self) -> Vec<ControlReply> {
         match self {
             Reaction::Reply(m) => vec![m],
             Reaction::ReplyMany(ms) => ms,
@@ -81,7 +81,7 @@ impl Reaction {
 /// The blocks are the render thread's ([`RenderSide`]): this holds the
 /// plugin's `Controller` half and tells the render thread what its blocks read
 /// (`RenderLink`). It holds no transport, so a test drives it by calling
-/// [`Session::handle`] directly with a [`HostMessage`].
+/// [`Session::handle`] directly with a [`ControlRequest`].
 pub(crate) struct Session {
     /// The hosted plugin, or `None` before a load and after an unload. Every
     /// handler that needs one refuses explicitly rather than going silent.
@@ -216,21 +216,21 @@ impl Session {
     pub(crate) fn handle(
         &mut self,
         main: MainThreadMarker,
-        msg: HostMessage,
+        msg: ControlRequest,
     ) -> BridgeResult<Reaction> {
         self.handle_with(main, msg, &mut |_| {})
     }
 
     /// [`handle`](Self::handle), with `interim` for a message that cannot wait
     /// for the reply: the host is told a load has begun restoring its state
-    /// ([`BridgeMessage::RestoringState`]) before the restore, so what it waits
+    /// ([`ControlReply::RestoringState`]) before the restore, so what it waits
     /// for changes with it. Dispatch stays a function of the request; `interim`
     /// is a sink, not a source.
     pub(crate) fn handle_with(
         &mut self,
         main: MainThreadMarker,
-        msg: HostMessage,
-        interim: &mut dyn FnMut(BridgeMessage),
+        msg: ControlRequest,
+        interim: &mut dyn FnMut(ControlReply),
     ) -> BridgeResult<Reaction> {
         let reaction = self.dispatch(main, msg, interim);
         // What the message changed that a block reads reaches the render thread
@@ -243,10 +243,10 @@ impl Session {
     fn dispatch(
         &mut self,
         main: MainThreadMarker,
-        msg: HostMessage,
-        interim: &mut dyn FnMut(BridgeMessage),
+        msg: ControlRequest,
+        interim: &mut dyn FnMut(ControlReply),
     ) -> BridgeResult<Reaction> {
-        use HostMessage as M;
+        use ControlRequest as M;
         match msg {
             M::LoadPlugin {
                 path,
@@ -276,16 +276,6 @@ impl Session {
                 Ok(Reaction::None)
             }
 
-            // A block belongs to the audio connection, where the render thread
-            // answers it: one here is a peer that confuses its connections,
-            // and it expects an answer.
-            M::ProcessAudio(_) | M::ApplyParameters { .. } => Ok(BridgeMessage::Error {
-                message:
-                    "a block, and the parameters outside one, are carried on the audio connection"
-                        .to_string(),
-            }
-            .into()),
-
             M::SetAutomationState { mode } => {
                 self.write_pending = true;
                 if let Some(plugin) = self.plugin.as_mut() {
@@ -304,7 +294,7 @@ impl Session {
                     .plugin
                     .as_ref()
                     .and_then(|p| p.plugin().parameter(main, param_id));
-                Ok(BridgeMessage::ParameterValue { value }.into())
+                Ok(ControlReply::ParameterValue { value }.into())
             }
             M::GetParameterList => {
                 let parameters = self
@@ -312,7 +302,7 @@ impl Session {
                     .as_ref()
                     .map(|p| p.plugin().parameters(main))
                     .unwrap_or_default();
-                Ok(BridgeMessage::ParameterList { parameters }.into())
+                Ok(ControlReply::ParameterList { parameters }.into())
             }
             M::GetPresetList => {
                 // `unwrap_or_default` — an empty list, matching
@@ -325,7 +315,7 @@ impl Session {
                     .as_mut()
                     .map(|p| p.plugin_mut().presets(main))
                     .unwrap_or_default();
-                Ok(BridgeMessage::PresetList { presets }.into())
+                Ok(ControlReply::PresetList { presets }.into())
             }
             M::LoadPreset { id } => {
                 self.write_pending = true;
@@ -335,35 +325,35 @@ impl Session {
                     .as_mut()
                     .is_some_and(|p| p.plugin_mut().load_preset(main, &id));
                 self.forget_informs();
-                Ok(BridgeMessage::PresetLoaded { ok }.into())
+                Ok(ControlReply::PresetLoaded { ok }.into())
             }
             M::GetCurrentPreset => {
                 let id = self
                     .plugin
                     .as_mut()
                     .and_then(|p| p.plugin_mut().current_preset(main));
-                Ok(BridgeMessage::CurrentPreset { id }.into())
+                Ok(ControlReply::CurrentPreset { id }.into())
             }
             M::GetParameterPlain { param_id, value } => {
                 let plain = self
                     .plugin
                     .as_ref()
                     .and_then(|p| p.plugin().parameter_plain(main, param_id, value));
-                Ok(BridgeMessage::ParameterPlain { plain }.into())
+                Ok(ControlReply::ParameterPlain { plain }.into())
             }
             M::GetParameterNormalized { param_id, plain } => {
                 let value = self
                     .plugin
                     .as_ref()
                     .and_then(|p| p.plugin().parameter_normalized(main, param_id, plain));
-                Ok(BridgeMessage::ParameterNormalized { value }.into())
+                Ok(ControlReply::ParameterNormalized { value }.into())
             }
             M::GetParameterText { param_id, value } => {
                 let text = self
                     .plugin
                     .as_ref()
                     .and_then(|p| p.plugin().parameter_text(main, param_id, value));
-                Ok(BridgeMessage::ParameterText { text }.into())
+                Ok(ControlReply::ParameterText { text }.into())
             }
             M::GetParameterValueFromText { param_id, text } => {
                 // Reads as a query, but is not one on every format: VST2's
@@ -375,7 +365,7 @@ impl Session {
                     .plugin
                     .as_ref()
                     .and_then(|p| p.plugin().parameter_value_from_text(main, param_id, &text));
-                Ok(BridgeMessage::ParameterValueFromText { value }.into())
+                Ok(ControlReply::ParameterValueFromText { value }.into())
             }
 
             M::SetSampleRate { rate } => {
@@ -397,7 +387,7 @@ impl Session {
                 // The wire carries the reason as text; the session keeps it typed.
                 let error = refusal.as_ref().map(ToString::to_string);
                 self.rate_refused = refusal;
-                Ok(BridgeMessage::SampleRateSet { rate, error }.into())
+                Ok(ControlReply::SampleRateSet { rate, error }.into())
             }
             M::SetRenderMode { mode } => {
                 // The plugin's answer is deliberately not returned to the host:
@@ -412,19 +402,12 @@ impl Session {
                 }
                 Ok(Reaction::None)
             }
-            // The plugin forgets its signal history, in order with the
-            // blocks: the audio connection's, where the render thread owns the
-            // Processor that forgets (`RenderSide::handle`).
-            M::Reset => Err(BridgeError::ProtocolError(
-                "a reset is carried on the audio connection",
-            )),
-
             M::OpenEditor { parent, scale } => {
                 // The wire's result carries the reason as text.
                 let result = self
                     .open_editor(main, parent, scale)
                     .map_err(|e| editor_wire_text(&e));
-                Ok(BridgeMessage::EditorOpened { result }.into())
+                Ok(ControlReply::EditorOpened { result }.into())
             }
             M::CloseEditor => {
                 self.close_editor(main);
@@ -434,7 +417,7 @@ impl Session {
                 let result = self
                     .set_editor_size(main, size)
                     .map_err(|e| editor_wire_text(&e));
-                Ok(BridgeMessage::EditorSized { result }.into())
+                Ok(ControlReply::EditorSized { result }.into())
             }
 
             M::SaveState { state_use } => Ok(self.handle_save_state(main, state_use)),
@@ -461,9 +444,9 @@ impl Session {
                         // The scratch is sized here, to the most a block may
                         // carry; the render thread refuses any block longer.
                         self.render.attach_slab(slab);
-                        Ok(BridgeMessage::SharedMemoryReady.into())
+                        Ok(ControlReply::SharedMemoryReady.into())
                     }
-                    Err(e) => Ok(BridgeMessage::Error {
+                    Err(e) => Ok(ControlReply::Error {
                         message: e.to_string(),
                     }
                     .into()),
@@ -496,9 +479,9 @@ impl Session {
     }
 
     /// Drain async events from the loaded plugin, mapping each into a
-    /// `BridgeMessage` the transport can push back. Called from the
+    /// `ControlReply` the transport can push back. Called from the
     /// main thread's loop after every message dispatch and on every tick.
-    pub(crate) fn drain_async_events(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage> {
+    pub(crate) fn drain_async_events(&mut self, main: MainThreadMarker) -> Vec<News> {
         let Some(plugin) = self.plugin.as_mut() else {
             // A plugin rang as it was unloaded: nothing is left to tell.
             self.render.ties().bell.take();
@@ -513,12 +496,10 @@ impl Session {
         // emitted queue counts, so the instance drops (and counts) points past them before they
         // reach this output. A CLAP plugin's `params.rescan` that changes the list reaches this as
         // `PluginParamTitlesChanged` (the instance re-read it).
-        if events.iter().any(|e| {
-            matches!(
-                e,
-                BridgeMessage::PluginParamTitlesChanged | BridgeMessage::PluginReloaded
-            )
-        }) {
+        if events
+            .iter()
+            .any(|e| matches!(e, News::PluginParamTitlesChanged | News::PluginReloaded))
+        {
             let params = plugin.plugin().parameter_count(main);
             self.render.fit_params(params);
         }
@@ -548,7 +529,7 @@ impl Session {
         main: MainThreadMarker,
         ready: &[Ready],
         now: Instant,
-    ) -> Vec<BridgeMessage> {
+    ) -> Vec<News> {
         if let Some(control) = self
             .plugin
             .as_mut()
@@ -564,7 +545,7 @@ impl Session {
     /// the open editor's idle (VST2's `effEditIdle`, VST3's run loop), a size
     /// the plugin asked its window to take, and the news that the editor was
     /// closed here. Allocates only to hold what it tells the host.
-    pub(crate) fn tick(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage> {
+    pub(crate) fn tick(&mut self, main: MainThreadMarker) -> Vec<News> {
         self.work.run(main);
         self.inform_controller(main);
         self.render.report_losses();
@@ -577,11 +558,11 @@ impl Session {
         {
             control.editor_idle(main);
             if let Some(size) = control.poll_editor_resize_request(main) {
-                told.push(BridgeMessage::EditorWantsSize { size });
+                told.push(News::EditorWantsSize { size });
             }
         }
         if std::mem::take(&mut self.editor_closed_unasked) {
-            told.push(BridgeMessage::EditorClosed);
+            told.push(News::EditorClosed);
         }
         told
     }
@@ -736,7 +717,7 @@ impl Session {
         block_size: usize,
         preferred_format: FloatWidth,
         declared: Option<StagedState>,
-        interim: &mut dyn FnMut(BridgeMessage),
+        interim: &mut dyn FnMut(ControlReply),
     ) -> BridgeResult<Reaction> {
         // What a host staged for this load, restored before the activation: only
         // when the load declares exactly it. Staged here or declared here and not
@@ -755,7 +736,7 @@ impl Session {
             (None, None) => {}
             (Some(d), Some(bytes)) if d.len == bytes.len() as u64 => {}
             (declared, staged) => {
-                return Ok(BridgeMessage::Error {
+                return Ok(ControlReply::Error {
                     message: format!(
                         "the load declares a state of {:?} bytes and the server holds {:?}",
                         declared.map(|d| d.len),
@@ -765,7 +746,7 @@ impl Session {
                 .into());
             }
         }
-        let mut restoring = || interim(BridgeMessage::RestoringState);
+        let mut restoring = || interim(ControlReply::RestoringState);
         let (plugin, state_error, seat) = match AnyServed::load(
             main,
             &self.work_handle,
@@ -782,7 +763,7 @@ impl Session {
             Err(e) => return Ok(load_failure(&e).into()),
         };
         let Some(id) = plugin.plugin().origin().id().cloned() else {
-            return Ok(BridgeMessage::Error {
+            return Ok(ControlReply::Error {
                 message: "the loaded plugin names no id of its own".into(),
             }
             .into());
@@ -806,7 +787,7 @@ impl Session {
         self.publish();
         self.declare_informs(main);
         self.render.send(ToRender::Seat(seat));
-        Ok(BridgeMessage::PluginLoaded {
+        Ok(ControlReply::PluginLoaded {
             id,
             descriptor: Box::new(descriptor),
             loaded,
@@ -851,7 +832,7 @@ impl Session {
                 // A plugin that fails to serialise is not a transport problem:
                 // one `Error` frame, and the host reports it as a rejection.
                 Err(e) => {
-                    return BridgeMessage::Error {
+                    return ControlReply::Error {
                         message: format!("failed to save state: {e}"),
                     }
                     .into();
@@ -862,7 +843,7 @@ impl Session {
         // Refuse an over-limit state here rather than streaming a gigabyte the
         // host is only going to reject on reassembly.
         if data.len() > MAX_STATE_BYTES {
-            return BridgeMessage::Error {
+            return ControlReply::Error {
                 message: format!(
                     "plugin state is {} bytes, over the {MAX_STATE_BYTES}-byte limit",
                     data.len()
@@ -872,7 +853,7 @@ impl Session {
         }
         Reaction::ReplyMany(
             state_chunk::split(&data)
-                .map(|(seq, last, bytes)| BridgeMessage::StateChunk {
+                .map(|(seq, last, bytes)| ControlReply::StateChunk {
                     seq,
                     last,
                     bytes: bytes.to_vec(),
@@ -892,13 +873,13 @@ impl Session {
             Ok(true) => {
                 let data = self.stage_in.take().expect("just inserted").into_inner();
                 self.staged = Some(data);
-                BridgeMessage::StateLoaded { error: None }.into()
+                ControlReply::StateLoaded { error: None }.into()
             }
             Err(e) => {
                 self.stage_in = None;
                 self.staged = None;
                 let error = e.to_string();
-                BridgeMessage::StateLoaded { error: Some(error) }.into()
+                ControlReply::StateLoaded { error: Some(error) }.into()
             }
         }
     }
@@ -941,7 +922,7 @@ impl Session {
                 return Reaction::None;
             }
             let error = self.state_in_refused.take().map(|e| e.to_string());
-            return BridgeMessage::StateLoaded { error }.into();
+            return ControlReply::StateLoaded { error }.into();
         }
         let acc = self.state_in.get_or_insert_with(Reassembler::default);
         let complete = match acc.push(seq, last, bytes) {
@@ -949,7 +930,7 @@ impl Session {
             Err(e) => {
                 self.state_in = None;
                 if last {
-                    return BridgeMessage::StateLoaded {
+                    return ControlReply::StateLoaded {
                         error: Some(e.to_string()),
                     }
                     .into();
@@ -964,13 +945,13 @@ impl Session {
         let data = self.state_in.take().expect("just inserted").into_inner();
 
         let Some(plugin) = self.plugin.as_mut() else {
-            return BridgeMessage::StateLoaded {
+            return ControlReply::StateLoaded {
                 error: Some("no plugin is loaded".to_string()),
             }
             .into();
         };
         let Some(state_use) = ending else {
-            return BridgeMessage::StateLoaded {
+            return ControlReply::StateLoaded {
                 error: Some("the state sequence ended without naming its use".to_string()),
             }
             .into();
@@ -979,7 +960,7 @@ impl Session {
             Ok(()) => None,
             Err(e) => Some(format!("failed to load state: {e}")),
         };
-        BridgeMessage::StateLoaded { error }.into()
+        ControlReply::StateLoaded { error }.into()
     }
 }
 
@@ -994,12 +975,12 @@ fn editor_wire_text(e: &PluginError) -> String {
 
 /// The reply to a load that failed. The wire carries a message and no stage, so
 /// a loader failure keeps its stage in the text.
-fn load_failure(e: &PluginError) -> BridgeMessage {
+fn load_failure(e: &PluginError) -> ControlReply {
     let message = match e {
         PluginError::Load { stage, reason } => format!("{stage}: {reason}"),
         other => other.to_string(),
     };
-    BridgeMessage::Error { message }
+    ControlReply::Error { message }
 }
 
 // Tests — pure dispatch, no tokio, no sockets.
@@ -1009,6 +990,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, MutexGuard};
+    use tutti_plugin_ipc::{AudioReply, AudioRequest};
 
     /// A session with its render side running beside it, as the server runs
     /// them: a thread steps the side (applies the commands, trades the
@@ -1063,19 +1045,20 @@ mod tests {
             self.session.render.attach_slab(slab);
         }
 
-        /// One message of either connection: a block or a reset is the render
-        /// side's (the audio connection), the rest the session's (control).
-        fn handle(&mut self, main: MainThreadMarker, msg: HostMessage) -> BridgeResult<Reaction> {
-            match msg {
-                HostMessage::ProcessAudio(_)
-                | HostMessage::Reset
-                | HostMessage::ApplyParameters { .. } => {
-                    let mut side = self.side();
-                    side.poll_seat();
-                    Ok(side.handle(msg)?.map_or(Reaction::None, Reaction::Reply))
-                }
-                other => self.session.handle(main, other),
-            }
+        /// One message of the control connection, on the session.
+        fn handle(
+            &mut self,
+            main: MainThreadMarker,
+            msg: ControlRequest,
+        ) -> BridgeResult<Reaction> {
+            self.session.handle(main, msg)
+        }
+
+        /// One message of the audio connection, on the render side.
+        fn handle_audio(&mut self, msg: AudioRequest) -> BridgeResult<Option<AudioReply>> {
+            let mut side = self.side();
+            side.poll_seat();
+            side.handle(msg)
         }
     }
 
@@ -1119,47 +1102,6 @@ mod tests {
 
     fn assert_none(r: Reaction) {
         assert!(matches!(r, Reaction::None), "got {r:?}");
-    }
-
-    fn assert_error_contains(r: Reaction, needle: &str) {
-        let reply = r.into_reply();
-        match reply {
-            BridgeMessage::Error { ref message } if message.contains(needle) => {}
-            _ => panic!("expected Error containing {needle:?}, got {reply:?}"),
-        }
-    }
-
-    /// **A block on the control connection is refused, and answered**: blocks
-    /// belong to the audio connection, where the render thread serves them, and
-    /// a peer that confuses its connections is told rather than left waiting.
-    /// A reset there ends the session (it has no answer to carry the refusal).
-    #[test]
-    fn the_control_connection_refuses_a_block() {
-        let mut s = Rig::new();
-        let block = HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData::empty(
-            tutti_plugin_types::SampleRate::SR_48K,
-        ));
-        assert_error_contains(
-            s.session.handle(main_thread(), block).unwrap(),
-            "audio connection",
-        );
-        assert!(matches!(
-            s.session.handle(main_thread(), HostMessage::Reset),
-            Err(BridgeError::ProtocolError(_))
-        ));
-    }
-
-    /// **The audio connection carries blocks and resets and nothing else**: a
-    /// request for the control connection is a protocol error, not a message to
-    /// drop (the host would wait for its answer).
-    #[test]
-    fn the_audio_connection_refuses_a_control_message() {
-        let s = Rig::new();
-        let refused = s.side().handle(HostMessage::GetParameterList);
-        assert!(matches!(
-            refused,
-            Err(BridgeError::UnexpectedMessage { .. })
-        ));
     }
 
     /// What a save in the middle of steady playback did to the blocks around it.
@@ -1226,7 +1168,7 @@ mod tests {
                         let mut side = side.lock().unwrap();
                         side.drain();
                         side.poll_seat();
-                        side.handle(HostMessage::ProcessAudio(
+                        side.handle(AudioRequest::ProcessAudio(
                             tutti_plugin_ipc::ProcessAudioData {
                                 seq,
                                 num_samples: FRAMES,
@@ -1276,10 +1218,10 @@ mod tests {
         rendered_to(WARM_UP + SETTLED);
         if write {
             let r = s
-                .handle(main_thread(), apply_parameter(GAIN, 0.25))
+                .handle_audio(apply_parameter(GAIN, 0.25))
                 .unwrap()
-                .into_reply();
-            assert!(matches!(r, BridgeMessage::ParametersApplied), "{r:?}");
+                .expect("answered");
+            assert!(matches!(r, AudioReply::ParametersApplied), "{r:?}");
         }
         let after = save_state_bytes(&mut s);
         let saved_at = tutti_platform::Instant::now();
@@ -1353,10 +1295,10 @@ mod tests {
         let (mut s, _shm) = load_clap("save_quiet", FloatWidth::F32);
         let before = save_state_bytes(&mut s);
         let r = s
-            .handle(main_thread(), apply_parameter(77, 0.25))
+            .handle_audio(apply_parameter(77, 0.25))
             .unwrap()
-            .into_reply();
-        assert!(matches!(r, BridgeMessage::ParametersApplied), "{r:?}");
+            .expect("answered");
+        assert!(matches!(r, AudioReply::ParametersApplied), "{r:?}");
         assert_ne!(before, save_state_bytes(&mut s));
     }
 
@@ -1365,88 +1307,70 @@ mod tests {
     /// never with silence. The host blocks on a reply frame for each of the
     /// query-shaped ones, so a missing answer is a hang rather than an error.
     ///
-    /// The table is the point: adding a `HostMessage` variant without adding a
+    /// The table is the point: adding a `ControlRequest` variant without adding a
     /// row leaves its no-plugin path uncovered, and the panic messages name the
     /// variant so a failure says which one.
     #[test]
     fn every_request_is_answered_with_no_plugin_loaded() {
-        /// What a no-plugin reply is allowed to be.
-        enum Expect {
-            /// Nothing to say, and nothing waiting on it.
-            Silent,
-            /// A reply frame whose payload must be absent or empty.
-            EmptyPayload,
-            /// A block's reply that publishes nothing: the host reads silence.
-            RefusedBlock,
-        }
-        use Expect::*;
-
-        let cases: Vec<(&str, HostMessage, Expect)> = vec![
+        let cases: Vec<(&str, ControlRequest)> = vec![
             (
                 "GetParameter",
-                HostMessage::GetParameter {
+                ControlRequest::GetParameter {
                     param_id: ParamId::new(0),
                 },
-                EmptyPayload,
             ),
-            (
-                "GetParameterList",
-                HostMessage::GetParameterList,
-                EmptyPayload,
-            ),
+            ("GetParameterList", ControlRequest::GetParameterList),
             (
                 "SaveState",
-                HostMessage::SaveState {
+                ControlRequest::SaveState {
                     state_use: StateUse::Project,
                 },
-                EmptyPayload,
             ),
-            (
-                "ProcessAudio",
-                HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
-                    seq: 0,
-                    num_samples: 256,
-                    midi_events: MidiEventVec::new(),
-                    param_changes: ParameterChanges::new(),
-                    note_expression: NoteExpressionChanges::new(),
-                    ..tutti_plugin_ipc::ProcessAudioData::empty(
-                        tutti_plugin_types::SampleRate::SR_48K,
-                    )
-                }),
-                RefusedBlock,
-            ),
-            ("Reset", HostMessage::Reset, Silent),
         ];
 
-        for (name, msg, expect) in cases {
+        for (name, msg) in cases {
             let mut s = Rig::new();
             let r = s
                 .handle(main_thread(), msg)
                 .unwrap_or_else(|e| panic!("{name} errored with no plugin: {e:?}"));
 
-            match expect {
-                Silent => assert!(matches!(r, Reaction::None), "{name}: got {r:?}"),
-                RefusedBlock => match r.into_reply() {
-                    BridgeMessage::AudioProcessed { refused, .. } => {
-                        assert!(refused, "{name}: a block with no plugin publishes nothing")
-                    }
-                    other => panic!("{name}: expected a refused block, got {other:?}"),
-                },
-                EmptyPayload => match r.into_reply() {
-                    BridgeMessage::ParameterValue { value } => {
-                        assert!(value.is_none(), "{name}: got a value with no plugin")
-                    }
-                    BridgeMessage::ParameterList { parameters } => {
-                        assert!(parameters.is_empty(), "{name}: got parameters")
-                    }
-                    BridgeMessage::StateChunk { bytes, last, .. } => {
-                        assert!(bytes.is_empty(), "{name}: got state bytes");
-                        assert!(last, "{name}: an empty state must terminate its sequence");
-                    }
-                    other => panic!("{name}: unexpected reply {other:?}"),
-                },
+            match r.into_reply() {
+                ControlReply::ParameterValue { value } => {
+                    assert!(value.is_none(), "{name}: got a value with no plugin")
+                }
+                ControlReply::ParameterList { parameters } => {
+                    assert!(parameters.is_empty(), "{name}: got parameters")
+                }
+                ControlReply::StateChunk { bytes, last, .. } => {
+                    assert!(bytes.is_empty(), "{name}: got state bytes");
+                    assert!(last, "{name}: an empty state must terminate its sequence");
+                }
+                other => panic!("{name}: unexpected reply {other:?}"),
             }
         }
+    }
+
+    /// **A block with no plugin loaded is answered, refused**: the host reads
+    /// silence for it. A reset has no answer and no plugin to reach, and is
+    /// not an error.
+    #[test]
+    fn a_block_and_a_reset_with_no_plugin_are_served() {
+        let mut s = Rig::new();
+        let block = AudioRequest::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+            seq: 0,
+            num_samples: 256,
+            midi_events: MidiEventVec::new(),
+            param_changes: ParameterChanges::new(),
+            note_expression: NoteExpressionChanges::new(),
+            ..tutti_plugin_ipc::ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
+        });
+        match s.handle_audio(block).unwrap() {
+            Some(AudioReply::AudioProcessed { refused, .. }) => {
+                assert!(refused, "a block with no plugin publishes nothing")
+            }
+            other => panic!("expected a refused block, got {other:?}"),
+        }
+        assert!(s.handle_audio(AudioRequest::Reset).unwrap().is_none());
     }
 
     #[test]
@@ -1455,7 +1379,7 @@ mod tests {
         let r = s
             .handle(
                 main_thread(),
-                HostMessage::SetSampleRate {
+                ControlRequest::SetSampleRate {
                     rate: tutti_plugin_types::SampleRate::SR_96K,
                 },
             )
@@ -1463,7 +1387,7 @@ mod tests {
             .into_reply();
         assert!(matches!(
             r,
-            BridgeMessage::SampleRateSet { rate, error: None } if rate.get() == 96000.0
+            ControlReply::SampleRateSet { rate, error: None } if rate.get() == 96000.0
         ));
     }
 
@@ -1479,7 +1403,7 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                HostMessage::LoadStateChunk {
+                ControlRequest::LoadStateChunk {
                     seq: 0,
                     last: Some(StateUse::Project),
                     bytes: vec![1, 2, 3],
@@ -1488,7 +1412,7 @@ mod tests {
             .unwrap()
             .into_reply();
         match reply {
-            BridgeMessage::StateLoaded { error: Some(msg) } => {
+            ControlReply::StateLoaded { error: Some(msg) } => {
                 assert!(msg.contains("no plugin"), "unhelpful message: {msg:?}");
             }
             other => panic!("expected a StateLoaded carrying a refusal, got {other:?}"),
@@ -1505,7 +1429,7 @@ mod tests {
         let mut chunk = |seq, last: bool| {
             s.handle(
                 main_thread(),
-                HostMessage::LoadStateChunk {
+                ControlRequest::LoadStateChunk {
                     seq,
                     last: last.then_some(StateUse::Project),
                     bytes: vec![1, 2, 3],
@@ -1517,14 +1441,14 @@ mod tests {
         assert_none(chunk(2, false)); // out of order: refused, not yet answered
         assert_none(chunk(3, false));
         match chunk(4, true).into_reply() {
-            BridgeMessage::StateLoaded { error: Some(msg) } => {
+            ControlReply::StateLoaded { error: Some(msg) } => {
                 assert!(msg.contains("chunk 2"), "the refusal's own reason: {msg:?}");
             }
             other => panic!("expected the refusal at `last`, got {other:?}"),
         }
         // A new sequence is not refused for the last one's fault.
         match chunk(0, true).into_reply() {
-            BridgeMessage::StateLoaded { error: Some(msg) } => {
+            ControlReply::StateLoaded { error: Some(msg) } => {
                 assert!(msg.contains("no plugin"), "{msg:?}");
             }
             other => panic!("expected the no-plugin refusal, got {other:?}"),
@@ -1534,7 +1458,9 @@ mod tests {
     #[test]
     fn unload_plugin_clears_shm() {
         let mut s = Rig::new();
-        let r = s.handle(main_thread(), HostMessage::UnloadPlugin).unwrap();
+        let r = s
+            .handle(main_thread(), ControlRequest::UnloadPlugin)
+            .unwrap();
         assert_none(r);
         assert!(s.plugin.is_none());
         assert!(!s.side().has_slab());
@@ -1558,10 +1484,10 @@ mod tests {
             "the plugin made the request"
         );
         assert!(s.ties().bell.rung(), "the request rang the bell");
-        let told = |events: &[BridgeMessage]| {
+        let told = |events: &[News]| {
             events
                 .iter()
-                .filter(|e| matches!(e, BridgeMessage::ProcessRequested))
+                .filter(|e| matches!(e, News::ProcessRequested))
                 .count()
         };
         assert_eq!(told(&s.drain_async_events(main)), 1);
@@ -1585,19 +1511,19 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                HostMessage::SetupSharedMemory {
+                ControlRequest::SetupSharedMemory {
                     shm_name: format!("tutti_no_such_slab_{}", std::process::id()),
                     layout,
                 },
             )
             .expect("a refused slab is a reply, not a failure of the session");
         assert!(
-            matches!(reply, Reaction::Reply(BridgeMessage::Error { .. })),
+            matches!(reply, Reaction::Reply(ControlReply::Error { .. })),
             "the host hears the refusal"
         );
         assert!(!s.side().has_slab(), "nothing was attached");
         assert!(matches!(
-            s.handle(main_thread(), HostMessage::Shutdown).unwrap(),
+            s.handle(main_thread(), ControlRequest::Shutdown).unwrap(),
             Reaction::Shutdown
         ));
     }
@@ -1688,7 +1614,7 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                HostMessage::LoadPlugin {
+                ControlRequest::LoadPlugin {
                     path: std::path::PathBuf::from("/nonexistent/path/plugin.vst3"),
                     format: PluginFormat::Vst3,
                     plugin: None,
@@ -1702,7 +1628,7 @@ mod tests {
             .expect("a failed load is a reply, not a server error")
             .into_reply();
         match reply {
-            BridgeMessage::Error { message } => {
+            ControlReply::Error { message } => {
                 assert!(message.starts_with(&format!("{}:", LoadStage::Scanning)));
                 assert!(message.contains("does not exist"));
             }
@@ -1732,7 +1658,7 @@ mod tests {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
-            HostMessage::LoadPlugin {
+            ControlRequest::LoadPlugin {
                 path: std::path::PathBuf::from(clap_plugin()),
                 format: PluginFormat::Clap,
                 plugin: None,
@@ -1762,11 +1688,11 @@ mod tests {
 
     /// The reply to loading the reference CLAP plugin's file choosing `plugin`.
     #[cfg(feature = "clap")]
-    fn load_clap_choosing(plugin: Option<PluginId>) -> BridgeMessage {
+    fn load_clap_choosing(plugin: Option<PluginId>) -> ControlReply {
         Rig::new()
             .handle(
                 main_thread(),
-                HostMessage::LoadPlugin {
+                ControlRequest::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
                     format: PluginFormat::Clap,
                     plugin,
@@ -1791,8 +1717,8 @@ mod tests {
     #[cfg(feature = "clap")]
     fn a_load_that_chooses_a_plugin_loads_that_one() {
         let _lock = crate::test_utils::plugin_load_lock();
-        let id_of = |reply: BridgeMessage| match reply {
-            BridgeMessage::PluginLoaded { id, .. } => id,
+        let id_of = |reply: ControlReply| match reply {
+            ControlReply::PluginLoaded { id, .. } => id,
             other => panic!("expected PluginLoaded, got {other:?}"),
         };
         let first = tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8");
@@ -1808,7 +1734,7 @@ mod tests {
             "the second plugin of the factory"
         );
         match load_clap_choosing(Some(clap("tutti.no-such-plugin"))) {
-            BridgeMessage::Error { message } => {
+            ControlReply::Error { message } => {
                 assert!(message.contains("tutti.no-such-plugin"), "{message}");
             }
             other => panic!("a plugin the file does not hold must be refused, got {other:?}"),
@@ -1823,20 +1749,19 @@ mod tests {
         }
         shm.publish(seq);
         let reply = s
-            .handle(
-                main_thread(),
-                HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+            .handle_audio(AudioRequest::ProcessAudio(
+                tutti_plugin_ipc::ProcessAudioData {
                     seq,
                     num_samples: F64_FRAMES,
                     ..tutti_plugin_ipc::ProcessAudioData::empty(
                         tutti_plugin_types::SampleRate::SR_48K,
                     )
-                }),
-            )
+                },
+            ))
             .unwrap()
-            .into_reply();
+            .expect("answered");
         assert!(
-            matches!(reply, BridgeMessage::AudioProcessed { .. }),
+            matches!(reply, AudioReply::AudioProcessed { .. }),
             "{reply:?}"
         );
     }
@@ -1862,7 +1787,7 @@ mod tests {
         let set = |s: &mut Rig, rate: f64| {
             s.handle(
                 main_thread(),
-                HostMessage::SetSampleRate {
+                ControlRequest::SetSampleRate {
                     rate: tutti_plugin_types::SampleRate::of(rate),
                 },
             )
@@ -1872,7 +1797,7 @@ mod tests {
 
         let accepted = set(&mut s, 48000.0);
         assert!(
-            matches!(accepted, BridgeMessage::SampleRateSet { error: None, .. }),
+            matches!(accepted, ControlReply::SampleRateSet { error: None, .. }),
             "{accepted:?}"
         );
         assert!(
@@ -1888,7 +1813,7 @@ mod tests {
         assert!(
             matches!(
                 &refused,
-                BridgeMessage::SampleRateSet { rate, error: Some(e) }
+                ControlReply::SampleRateSet { rate, error: Some(e) }
                     if rate.get() == 96000.0 && !e.is_empty()
             ),
             "the host is told, with a reason: {refused:?}"
@@ -1897,7 +1822,7 @@ mod tests {
         assert!(
             s.drain_async_events(main_thread())
                 .iter()
-                .any(|m| matches!(m, BridgeMessage::PluginIoChanged { .. })),
+                .any(|m| matches!(m, News::PluginIoChanged { .. })),
             "the host is told the instance can no longer run"
         );
         process_block(&mut s, &mut shm, 2, 0.5);
@@ -1906,7 +1831,7 @@ mod tests {
         // Refused again at the same rate: still silent.
         assert!(matches!(
             set(&mut s, 96000.0),
-            BridgeMessage::SampleRateSet { error: Some(_), .. }
+            ControlReply::SampleRateSet { error: Some(_), .. }
         ));
         process_block(&mut s, &mut shm, 3, 0.5);
         assert!(!shm.has_output(3), "still silent");
@@ -1916,7 +1841,7 @@ mod tests {
         let _flagged = crate::test_utils::clap_probe_ports_64bit(both);
         let revived = set(&mut s, 88200.0);
         assert!(
-            matches!(revived, BridgeMessage::SampleRateSet { error: None, .. }),
+            matches!(revived, ControlReply::SampleRateSet { error: None, .. }),
             "{revived:?}"
         );
         assert!(s.rate_refused.is_none());
@@ -1967,20 +1892,19 @@ mod tests {
         }
         shm.publish(SEQ);
         let reply = s
-            .handle(
-                main_thread(),
-                HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+            .handle_audio(AudioRequest::ProcessAudio(
+                tutti_plugin_ipc::ProcessAudioData {
                     seq: SEQ,
                     num_samples: F64_FRAMES,
                     ..tutti_plugin_ipc::ProcessAudioData::empty(
                         tutti_plugin_types::SampleRate::SR_48K,
                     )
-                }),
-            )
+                },
+            ))
             .unwrap()
-            .into_reply();
+            .expect("answered");
         assert!(
-            matches!(reply, BridgeMessage::AudioProcessed { .. }),
+            matches!(reply, AudioReply::AudioProcessed { .. }),
             "unexpected reply: {reply:?}"
         );
         assert!(
@@ -2009,7 +1933,7 @@ mod tests {
     }
 
     /// **A reset reaches the plugin, between the blocks it was sent between**.
-    /// The server dropped `HostMessage::Reset`, so a seek
+    /// The server dropped `AudioRequest::Reset`, so a seek
     /// left every out-of-process CLAP and VST3 plugin's delay lines, reverb
     /// tails and filter memories sounding across the jump.
     ///
@@ -2033,20 +1957,19 @@ mod tests {
             }
             shm.publish(seq);
             let reply = s
-                .handle(
-                    main_thread(),
-                    HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+                .handle_audio(AudioRequest::ProcessAudio(
+                    tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: F64_FRAMES,
                         ..tutti_plugin_ipc::ProcessAudioData::empty(
                             tutti_plugin_types::SampleRate::SR_48K,
                         )
-                    }),
-                )
+                    },
+                ))
                 .unwrap()
-                .into_reply();
+                .expect("answered");
             assert!(
-                matches!(reply, BridgeMessage::AudioProcessed { .. }),
+                matches!(reply, AudioReply::AudioProcessed { .. }),
                 "{reply:?}"
             );
         };
@@ -2055,7 +1978,7 @@ mod tests {
         assert_eq!(visits(Site::Process), processes_at_load + 1);
         assert_eq!(visits(Site::Reset), resets_at_load, "no reset was sent yet");
 
-        s.handle(main_thread(), HostMessage::Reset).unwrap();
+        s.handle_audio(AudioRequest::Reset).unwrap();
         assert_eq!(
             visits(Site::Reset),
             resets_at_load + 1,
@@ -2098,20 +2021,19 @@ mod tests {
             }
             shm.publish(seq);
             let reply = s
-                .handle(
-                    main_thread(),
-                    HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+                .handle_audio(AudioRequest::ProcessAudio(
+                    tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: frames,
                         ..tutti_plugin_ipc::ProcessAudioData::empty(
                             tutti_plugin_types::SampleRate::SR_48K,
                         )
-                    }),
-                )
+                    },
+                ))
                 .unwrap()
-                .into_reply();
+                .expect("answered");
             assert!(
-                matches!(reply, BridgeMessage::AudioProcessed { .. }),
+                matches!(reply, AudioReply::AudioProcessed { .. }),
                 "every block is answered: {reply:?}"
             );
             shm.has_output(seq)
@@ -2164,19 +2086,18 @@ mod tests {
             }
             host.publish(seq);
             let reply = s
-                .handle(
-                    main_thread(),
-                    HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+                .handle_audio(AudioRequest::ProcessAudio(
+                    tutti_plugin_ipc::ProcessAudioData {
                         seq,
                         num_samples: 256,
                         ..tutti_plugin_ipc::ProcessAudioData::empty(
                             tutti_plugin_types::SampleRate::SR_48K,
                         )
-                    }),
-                )
+                    },
+                ))
                 .unwrap()
-                .into_reply();
-            assert!(matches!(reply, BridgeMessage::AudioProcessed { .. }));
+                .expect("answered");
+            assert!(matches!(reply, AudioReply::AudioProcessed { .. }));
             host.has_output(seq)
         };
 
@@ -2362,10 +2283,10 @@ mod tests {
         let _lock = crate::test_utils::plugin_load_lock();
         let (mut s, _shm) = load_clap("get_param_list_clap", FloatWidth::F32);
         let reply = s
-            .handle(main_thread(), HostMessage::GetParameterList)
+            .handle(main_thread(), ControlRequest::GetParameterList)
             .unwrap()
             .into_reply();
-        let BridgeMessage::ParameterList { parameters } = reply else {
+        let ControlReply::ParameterList { parameters } = reply else {
             panic!("expected ParameterList, got {reply:?}");
         };
         let listed: Vec<u32> = parameters.iter().map(|p| p.id().get()).collect();
@@ -2386,14 +2307,14 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                HostMessage::GetParameter {
+                ControlRequest::GetParameter {
                     param_id: ParamId::new(CUTOFF),
                 },
             )
             .unwrap()
             .into_reply();
         match reply {
-            BridgeMessage::ParameterValue { value } => {
+            ControlReply::ParameterValue { value } => {
                 assert_eq!(value.map(Normalized::get), Some(0.5));
             }
             other => panic!("expected ParameterValue, got {other:?}"),
@@ -2410,20 +2331,20 @@ mod tests {
         let (mut s, mut shm) = load_clap("set_param_clap", FloatWidth::F32);
         let param_id = ParamId::new(CUTOFF);
         let r = s
-            .handle(main_thread(), apply_parameter(param_id.get(), 0.25))
+            .handle_audio(apply_parameter(param_id.get(), 0.25))
             .unwrap()
-            .into_reply();
-        assert!(matches!(r, BridgeMessage::ParametersApplied), "{r:?}");
+            .expect("answered");
+        assert!(matches!(r, AudioReply::ParametersApplied), "{r:?}");
         assert!(
             run_silent_block(&mut s, &mut shm, 1, 64),
             "the block renders"
         );
         let reply = s
-            .handle(main_thread(), HostMessage::GetParameter { param_id })
+            .handle(main_thread(), ControlRequest::GetParameter { param_id })
             .unwrap()
             .into_reply();
         match reply {
-            BridgeMessage::ParameterValue { value } => {
+            ControlReply::ParameterValue { value } => {
                 assert_eq!(value.map(Normalized::get), Some(0.25));
             }
             other => panic!("expected ParameterValue, got {other:?}"),
@@ -2438,7 +2359,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn assert_state_loaded(r: Reaction) {
         match r.into_reply() {
-            BridgeMessage::StateLoaded { error: None } => {}
+            ControlReply::StateLoaded { error: None } => {}
             other => panic!("expected an accepted StateLoaded, got {other:?}"),
         }
     }
@@ -2457,7 +2378,7 @@ mod tests {
         for m in s
             .handle(
                 main_thread(),
-                HostMessage::SaveState {
+                ControlRequest::SaveState {
                     state_use: StateUse::Project,
                 },
             )
@@ -2465,7 +2386,7 @@ mod tests {
             .into_replies()
         {
             match m {
-                BridgeMessage::StateChunk { seq, last, bytes } => {
+                ControlReply::StateChunk { seq, last, bytes } => {
                     assert!(!done, "chunks continued after `last`");
                     done = acc
                         .push(seq, last, &bytes)
@@ -2491,7 +2412,7 @@ mod tests {
             last_reaction = s
                 .handle(
                     main_thread(),
-                    HostMessage::LoadStateChunk {
+                    ControlRequest::LoadStateChunk {
                         seq,
                         last: last.then_some(StateUse::Project),
                         bytes: bytes.to_vec(),
@@ -2511,7 +2432,7 @@ mod tests {
             last_reaction = s
                 .handle(
                     main_thread(),
-                    HostMessage::StageStateChunk {
+                    ControlRequest::StageStateChunk {
                         seq,
                         last,
                         bytes: bytes.to_vec(),
@@ -2527,7 +2448,7 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                HostMessage::LoadPlugin {
+                ControlRequest::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
                     format: PluginFormat::Clap,
                     plugin: None,
@@ -2541,15 +2462,15 @@ mod tests {
             .unwrap()
             .into_reply();
         match reply {
-            BridgeMessage::PluginLoaded { state_error, .. } => state_error,
+            ControlReply::PluginLoaded { state_error, .. } => state_error,
             other => panic!("expected PluginLoaded, got {other:?}"),
         }
     }
 
-    fn load_declaring(s: &mut Rig, declared: Option<StagedState>) -> BridgeMessage {
+    fn load_declaring(s: &mut Rig, declared: Option<StagedState>) -> ControlReply {
         s.handle(
             main_thread(),
-            HostMessage::LoadPlugin {
+            ControlRequest::LoadPlugin {
                 path: std::path::PathBuf::from("/nonexistent/plugin.clap"),
                 format: PluginFormat::Clap,
                 plugin: None,
@@ -2575,14 +2496,14 @@ mod tests {
         load_reply(&mut s, None);
         assert!(s.plugin.is_some(), "the first load holds a plugin");
         let reply = load_declaring(&mut s, None);
-        assert!(matches!(reply, BridgeMessage::Error { .. }), "{reply:?}");
+        assert!(matches!(reply, ControlReply::Error { .. }), "{reply:?}");
         assert!(s.plugin.is_none(), "the refused load left the first plugin");
     }
 
     fn stage(s: &mut Rig, seq: u32, last: bool, bytes: &[u8]) -> Reaction {
         s.handle(
             main_thread(),
-            HostMessage::StageStateChunk {
+            ControlRequest::StageStateChunk {
                 seq,
                 last,
                 bytes: bytes.to_vec(),
@@ -2591,9 +2512,9 @@ mod tests {
         .unwrap()
     }
 
-    fn assert_mismatch(reply: BridgeMessage) {
+    fn assert_mismatch(reply: ControlReply) {
         match reply {
-            BridgeMessage::Error { message } => {
+            ControlReply::Error { message } => {
                 assert!(message.contains("declares a state"), "{message}");
             }
             other => panic!("expected the mismatch refused, got {other:?}"),
@@ -2634,7 +2555,7 @@ mod tests {
 
         let mut s = Rig::new();
         match load_declaring(&mut s, None) {
-            BridgeMessage::Error { message } => {
+            ControlReply::Error { message } => {
                 assert!(message.contains("does not exist"), "{message}");
             }
             other => panic!("{other:?}"),
@@ -2643,7 +2564,7 @@ mod tests {
 
     fn assert_state_loaded_reply(r: Reaction) {
         match r.into_reply() {
-            BridgeMessage::StateLoaded { error: None } => {}
+            ControlReply::StateLoaded { error: None } => {}
             other => panic!("expected a staged state, got {other:?}"),
         }
     }
@@ -2654,12 +2575,12 @@ mod tests {
     fn a_stage_does_not_outlive_the_next_request() {
         let mut s = Rig::new();
         assert_state_loaded_reply(stage(&mut s, 0, true, &[1]));
-        let _ = s.handle(main_thread(), HostMessage::UnloadPlugin);
+        let _ = s.handle(main_thread(), ControlRequest::UnloadPlugin);
         assert!(s.staged.is_none(), "an unload discards the stage");
 
         assert!(matches!(stage(&mut s, 0, false, &[1]), Reaction::None));
         assert!(s.stage_in.is_some());
-        let _ = s.handle(main_thread(), HostMessage::UnloadPlugin);
+        let _ = s.handle(main_thread(), ControlRequest::UnloadPlugin);
         assert!(s.stage_in.is_none(), "and a half-received one");
     }
 
@@ -2728,7 +2649,7 @@ mod tests {
             let reply = s
                 .handle_with(
                     main_thread(),
-                    HostMessage::LoadPlugin {
+                    ControlRequest::LoadPlugin {
                         path: std::path::PathBuf::from(clap_plugin()),
                         format: PluginFormat::Clap,
                         plugin: None,
@@ -2754,10 +2675,10 @@ mod tests {
             }),
         );
         assert!(
-            matches!(heard.as_slice(), [BridgeMessage::RestoringState]),
+            matches!(heard.as_slice(), [ControlReply::RestoringState]),
             "{heard:?}"
         );
-        assert!(matches!(reply, BridgeMessage::PluginLoaded { .. }));
+        assert!(matches!(reply, ControlReply::PluginLoaded { .. }));
 
         let mut s = Rig::new();
         let (heard, _) = load(&mut s, None);
@@ -2773,7 +2694,7 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                HostMessage::StageStateChunk {
+                ControlRequest::StageStateChunk {
                     seq: 5,
                     last: true,
                     bytes: vec![1],
@@ -2782,7 +2703,7 @@ mod tests {
             .unwrap()
             .into_reply();
         assert!(
-            matches!(reply, BridgeMessage::StateLoaded { error: Some(_) }),
+            matches!(reply, ControlReply::StateLoaded { error: Some(_) }),
             "{reply:?}"
         );
         assert!(s.staged.is_none());
@@ -2830,16 +2751,13 @@ mod tests {
         let r = s
             .handle(
                 main_thread(),
-                HostMessage::SetSampleRate {
+                ControlRequest::SetSampleRate {
                     rate: tutti_plugin_types::SampleRate::SR_96K,
                 },
             )
             .unwrap()
             .into_reply();
-        assert!(matches!(
-            r,
-            BridgeMessage::SampleRateSet { error: None, .. }
-        ));
+        assert!(matches!(r, ControlReply::SampleRateSet { error: None, .. }));
     }
 
     #[test]
@@ -2849,7 +2767,9 @@ mod tests {
         let (mut s, _shm) = load_clap("unload_clap", FloatWidth::F32);
         assert!(s.plugin.is_some());
         assert!(s.side().has_slab());
-        let r = s.handle(main_thread(), HostMessage::UnloadPlugin).unwrap();
+        let r = s
+            .handle(main_thread(), ControlRequest::UnloadPlugin)
+            .unwrap();
         assert_none(r);
         assert!(s.plugin.is_none());
         assert!(!s.side().has_slab());
@@ -2861,9 +2781,8 @@ mod tests {
         let _lock = crate::test_utils::plugin_load_lock();
         let (mut s, _shm) = load_clap("proc_audio_clap", FloatWidth::F32);
         let reply = s
-            .handle(
-                main_thread(),
-                HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+            .handle_audio(AudioRequest::ProcessAudio(
+                tutti_plugin_ipc::ProcessAudioData {
                     seq: 0,
                     num_samples: 512,
                     midi_events: MidiEventVec::new(),
@@ -2872,12 +2791,12 @@ mod tests {
                     ..tutti_plugin_ipc::ProcessAudioData::empty(
                         tutti_plugin_types::SampleRate::SR_48K,
                     )
-                }),
-            )
+                },
+            ))
             .unwrap()
-            .into_reply();
+            .expect("answered");
         assert!(
-            matches!(reply, BridgeMessage::AudioProcessed { .. }),
+            matches!(reply, AudioReply::AudioProcessed { .. }),
             "unexpected reply: {reply:?}"
         );
     }
@@ -2895,7 +2814,7 @@ mod tests {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
-            HostMessage::LoadPlugin {
+            ControlRequest::LoadPlugin {
                 path: bundle,
                 format: PluginFormat::Vst3,
                 plugin: None,
@@ -2924,10 +2843,10 @@ mod tests {
     /// The host's write of `id` to `value`, as the audio lane sends it between
     /// blocks.
     #[cfg(feature = "clap")]
-    fn apply_parameter(id: u32, value: f64) -> HostMessage {
+    fn apply_parameter(id: u32, value: f64) -> AudioRequest {
         let mut changes = ParameterChanges::reserved(1, 1);
         assert!(changes.add_change(ParamId::new(id), 0, value));
-        HostMessage::ApplyParameters {
+        AudioRequest::ApplyParameters {
             param_changes: changes,
         }
     }
@@ -2942,20 +2861,19 @@ mod tests {
         }
         shm.publish(seq);
         let reply = s
-            .handle(
-                main_thread(),
-                HostMessage::ProcessAudio(tutti_plugin_ipc::ProcessAudioData {
+            .handle_audio(AudioRequest::ProcessAudio(
+                tutti_plugin_ipc::ProcessAudioData {
                     seq,
                     num_samples: frames,
                     ..tutti_plugin_ipc::ProcessAudioData::empty(
                         tutti_plugin_types::SampleRate::SR_48K,
                     )
-                }),
-            )
+                },
+            ))
             .expect("a failed block does not end the server")
-            .into_reply();
+            .expect("answered");
         assert!(
-            matches!(reply, BridgeMessage::AudioProcessed { seq: s, .. } if s == seq),
+            matches!(reply, AudioReply::AudioProcessed { seq: s, .. } if s == seq),
             "{reply:?}"
         );
         shm.has_output(seq)
@@ -3074,7 +2992,7 @@ mod tests {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
-            HostMessage::LoadPlugin {
+            ControlRequest::LoadPlugin {
                 path: bundle,
                 format: PluginFormat::Vst3,
                 plugin: None,
@@ -3115,7 +3033,7 @@ mod tests {
         assert!(
             messages
                 .iter()
-                .any(|m| matches!(m, BridgeMessage::PluginParamTitlesChanged)),
+                .any(|m| matches!(m, News::PluginParamTitlesChanged)),
             "the restart reaches the session: {messages:?}"
         );
         assert_eq!(s.side().pipeline().param_queues(), params);

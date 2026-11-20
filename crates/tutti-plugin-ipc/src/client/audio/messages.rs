@@ -1,5 +1,5 @@
 //! In-process messages between the audio thread and the bridge thread.
-//! Distinct from wire-format `HostMessage`/`BridgeMessage` in `protocol/`.
+//! Distinct from wire-format `AudioRequest`/`ControlRequest` and their replies in `protocol/`.
 
 use super::ask::Reply;
 use dpi::Size;
@@ -237,7 +237,7 @@ pub enum BridgeEvent {
         samples: Samples,
     },
     /// The plugin reported a new tail length at runtime (CLAP only — see
-    /// [`BridgeMessage::TailChanged`](crate::BridgeMessage)).
+    /// [`News::TailChanged`](crate::News::TailChanged)).
     TailChanged {
         /// The tail it reports now.
         tail: PluginTail,

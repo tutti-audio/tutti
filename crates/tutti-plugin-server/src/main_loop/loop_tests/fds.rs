@@ -30,7 +30,8 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
 
     let driver = std::thread::spawn(move || {
         write_frame(&mut host_end, &load_message()).expect("sends the load");
-        let _loaded: BridgeMessage = read_frame(&mut host_end).expect("the load is answered");
+        let _loaded: tutti_plugin_ipc::ControlFrame =
+            read_frame(&mut host_end).expect("the load is answered");
         assert!(
             host.block(1, 64, Duration::from_secs(5)).is_some(),
             "the render thread answers the block"
@@ -49,7 +50,7 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
                 crate::test_utils::clap_probe_thread_capture().fd_fires >= fire
             });
         }
-        write_frame(&mut host_end, &HostMessage::Shutdown).expect("asks it to stop");
+        write_frame(&mut host_end, &ControlRequest::Shutdown).expect("asks it to stop");
     });
 
     let main = main_thread();

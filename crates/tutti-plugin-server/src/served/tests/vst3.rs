@@ -1,6 +1,6 @@
 use super::*;
 use tutti_fixtures::main_thread;
-use tutti_plugin_ipc::BridgeMessage;
+use tutti_plugin_ipc::News;
 use tutti_plugin_types::{Control, ProcessOutput, Request};
 use tutti_vst3_host::Vst3Loaded;
 
@@ -188,7 +188,7 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
     plugin_restart_component(loaded, K_PARAM_VALUES_CHANGED);
     assert!(matches!(
         instance.poll(main_thread()).as_slice(),
-        [BridgeMessage::PluginParamValuesChanged]
+        [News::PluginParamValuesChanged]
     ));
     assert!(
         instance.poll(main_thread()).is_empty(),
@@ -224,7 +224,7 @@ fn a_latency_that_follows_the_rate_is_reread_after_a_rate_change() {
     assert!(
         matches!(
             instance.poll(main_thread()).as_slice(),
-            [BridgeMessage::LatencyChanged { samples }] if *samples == Samples::new(96)
+            [News::LatencyChanged { samples }] if *samples == Samples::new(96)
         ),
         "the new figure reaches the host"
     );
@@ -261,7 +261,7 @@ fn a_prefetchable_support_change_restarts_the_plugin() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
+            .any(|e| matches!(e, News::PluginIoChanged { .. })),
         "the layout was not asked about: {events:?}"
     );
     assert_eq!(
@@ -295,7 +295,7 @@ fn a_param_id_remap_is_reported_as_a_changed_list() {
         instance
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginParamTitlesChanged))
+            .any(|e| matches!(e, News::PluginParamTitlesChanged))
     );
 }
 
@@ -332,7 +332,7 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
     let told = instance.poll(main_thread());
     assert!(
         told.iter()
-            .all(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
+            .all(|e| matches!(e, News::PluginIoChanged { .. })),
         "{told:?}"
     );
     assert_eq!(instance.wiring.inputs, layout.inputs);

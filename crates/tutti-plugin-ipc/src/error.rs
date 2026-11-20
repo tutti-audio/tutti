@@ -62,10 +62,10 @@ pub enum PluginRenderFault {
 }
 
 /// Builds an `UnexpectedMessage` error by Debug-formatting the received
-/// `BridgeMessage`.
+/// message.
 pub(crate) fn unexpected_message(
     expected: &'static str,
-    got: &crate::BridgeMessage,
+    got: &impl std::fmt::Debug,
 ) -> BridgeError {
     BridgeError::UnexpectedMessage {
         expected,

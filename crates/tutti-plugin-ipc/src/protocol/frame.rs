@@ -28,6 +28,17 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::MAX_FRAME_BYTES;
+use super::{AudioReply, AudioRequest, ControlFrame, ControlRequest};
+
+/// A message of one of the connections' wire types: the bound of every read and
+/// write of a frame, so a function over frames takes only what a connection
+/// carries.
+pub trait Framed: Serialize + DeserializeOwned {}
+
+impl Framed for AudioRequest {}
+impl Framed for AudioReply {}
+impl Framed for ControlRequest {}
+impl Framed for ControlFrame {}
 
 /// The error for a frame of `len` bytes, over [`MAX_FRAME_BYTES`].
 const fn too_large(len: usize) -> FrameTooLarge {
@@ -110,7 +121,7 @@ thread_local! {
 ///
 /// `FrameTooLarge` (as `BridgeError::FrameTooLarge`) when the body is
 /// over the cap, with nothing written; a serialization or I/O error otherwise.
-pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> BridgeResult<()> {
+pub fn write_frame<W: Write, T: Framed>(w: &mut W, msg: &T) -> BridgeResult<()> {
     OUT.with_borrow_mut(|frame| {
         frame.clear();
         frame.extend_from_slice(&[0; 4]);
@@ -140,7 +151,7 @@ pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> BridgeResult<(
 /// [`BridgeError::FrameTooLarge`]) for an advertised length over the cap,
 /// before any allocation; a codec error for a body that does not decode as
 /// exactly one message.
-pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> BridgeResult<T> {
+pub fn read_frame<R: Read, T: Framed>(r: &mut R) -> BridgeResult<T> {
     let mut prefix = [0u8; 4];
     r.read_exact(&mut prefix)?;
     let len = decode_prefix(prefix)?;
@@ -167,13 +178,13 @@ pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> BridgeResult<T> {
 /// move it there. The wire is the same as [`read_frame`] and [`write_frame`].
 ///
 /// ```
-/// use tutti_plugin_ipc::FrameBuf;
+/// use tutti_plugin_ipc::{AudioReply, FrameBuf};
 ///
 /// let mut buf = FrameBuf::new(16, 16);
 /// let mut wire = Vec::new();
-/// buf.write(&mut wire, &0x0102u16).unwrap();
-/// let back: u16 = buf.read(&mut wire.as_slice()).unwrap();
-/// assert_eq!(back, 0x0102);
+/// buf.write(&mut wire, &AudioReply::ParametersApplied).unwrap();
+/// let back: AudioReply = buf.read(&mut wire.as_slice()).unwrap();
+/// assert!(matches!(back, AudioReply::ParametersApplied));
 /// ```
 #[derive(Debug)]
 pub struct FrameBuf {
@@ -201,7 +212,7 @@ impl FrameBuf {
     /// length over the inbound capacity (or [`MAX_FRAME_BYTES`]), before any
     /// body is read; a codec error for a body that does not decode as exactly
     /// one message.
-    pub fn read<R: Read, T: DeserializeOwned>(&mut self, r: &mut R) -> BridgeResult<T> {
+    pub fn read<R: Read, T: Framed>(&mut self, r: &mut R) -> BridgeResult<T> {
         let mut prefix = [0u8; PREFIX_BYTES];
         r.read_exact(&mut prefix)?;
         let len = decode_prefix(prefix)?;
@@ -223,7 +234,7 @@ impl FrameBuf {
     ///
     /// A serialization error when the message does not fit the outbound
     /// capacity, with nothing written; an I/O error otherwise.
-    pub fn write<W: Write, T: Serialize>(&mut self, w: &mut W, msg: &T) -> BridgeResult<()> {
+    pub fn write<W: Write, T: Framed>(&mut self, w: &mut W, msg: &T) -> BridgeResult<()> {
         let (prefix, body) = self.outbound.split_at_mut(PREFIX_BYTES);
         let len = postcard::to_slice(msg, body).map_err(codec)?.len();
         prefix.copy_from_slice(&encode_prefix(len)?);
@@ -271,6 +282,11 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Framed for u8 {}
+    impl Framed for u16 {}
+    impl Framed for (u32, [u8; 3]) {}
+    impl Framed for [u8; 8] {}
 
     /// **The frame is a big-endian `u32` length and the postcard body.** Bytes
     /// written out by hand for a `u16` message, so a change of prefix width or

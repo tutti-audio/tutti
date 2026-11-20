@@ -13,8 +13,11 @@ use crate::AudioSlab;
 use crate::PluginBridge;
 use crate::SlabLayout;
 use crate::unique_socket_path;
+use crate::{
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News,
+    PROTOCOL_VERSION,
+};
 use crate::{BridgeEvent, BridgeThread};
-use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION};
 use param_list::ParamList as _;
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
@@ -95,8 +98,8 @@ fn unique_shm_name(label: &str) -> String {
     tutti_fixtures::unique_name(&format!("test_{label}"))
 }
 
-/// Read a `HostMessage` from an interprocess socket (blocking).
-fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> HostMessage {
+/// Read a request from an interprocess socket (blocking).
+fn recv_host_msg<T: Framed>(stream: &interprocess::local_socket::Stream) -> T {
     use std::io::Read;
     let mut stream = stream;
     let mut len_buf = [0u8; 4];
@@ -107,36 +110,40 @@ fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> HostMessage {
     postcard::from_bytes(&buf).unwrap()
 }
 
-/// Send a `BridgeMessage` to an interprocess socket (blocking).
-fn send_bridge_msg(stream: &interprocess::local_socket::Stream, msg: &BridgeMessage) {
+/// Send a reply to an interprocess socket (blocking).
+fn send_bridge_msg<T: Framed>(stream: &interprocess::local_socket::Stream, msg: &T) {
     let mut stream = stream;
     crate::write_frame(&mut stream, msg).unwrap();
 }
 
 /// Accepts the host's audio connection and then its control one, as the
 /// server does (the host connects the second after the first one's `Ready`),
-/// and serves each on its own thread with `lane`. The returned handle is the
-/// audio lane's, which ends with the host; the socket file is removed then.
+/// and serves the control one on its own thread with `lane`. The audio
+/// connection is read and not answered. The returned handle is the audio
+/// lane's, which ends with the host; the socket file is removed then.
 fn serve_lanes(
     listener: &interprocess::local_socket::Listener,
     path: std::path::PathBuf,
     lane: impl Fn(&interprocess::local_socket::Stream) + Send + Sync + 'static,
 ) -> std::thread::JoinHandle<()> {
     use interprocess::local_socket::traits::Listener as _;
-    let lane = Arc::new(lane);
-    let ready = BridgeMessage::Ready {
-        protocol_version: PROTOCOL_VERSION,
-    };
     let audio = listener.accept().unwrap();
-    send_bridge_msg(&audio, &ready);
+    send_bridge_msg(
+        &audio,
+        &AudioReply::Ready {
+            protocol_version: PROTOCOL_VERSION,
+        },
+    );
     let control = listener.accept().unwrap();
-    send_bridge_msg(&control, &ready);
+    send_bridge_msg(
+        &control,
+        &ControlFrame::Reply(ControlReply::Ready {
+            protocol_version: PROTOCOL_VERSION,
+        }),
+    );
     std::thread::Builder::new()
         .name("mock-plugin-server-control".to_string())
-        .spawn({
-            let lane = Arc::clone(&lane);
-            move || lane(&control)
-        })
+        .spawn(move || lane(&control))
         .unwrap();
     std::thread::Builder::new()
         .name("mock-plugin-server".to_string())
@@ -148,16 +155,20 @@ fn serve_lanes(
                 }
             }
             let _cleanup = Cleanup(path);
-            lane(&audio);
+            while std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                recv_host_msg::<AudioRequest>(&audio)
+            }))
+            .is_ok()
+            {}
         })
         .unwrap()
 }
 
 /// Create a `PluginHandle` backed by a responsive mock server. The
-/// `respond` callback is invoked for each inbound `HostMessage`; returning
-/// `Some(..)` sends that `BridgeMessage` back, `None` silently drops.
+/// `respond` callback is invoked for each inbound `ControlRequest`; returning
+/// `Some(..)` sends that answer back, `None` silently drops.
 fn handle_with_mock_server(
-    respond: impl Fn(HostMessage) -> Option<BridgeMessage> + Send + 'static,
+    respond: impl Fn(ControlRequest) -> Option<ControlReply> + Send + 'static,
 ) -> (PluginHandle, BridgeThread, std::thread::JoinHandle<()>) {
     use interprocess::local_socket::ListenerOptions;
 
@@ -196,7 +207,7 @@ fn handle_with_mock_server(
     let server_thread = serve_lanes(&listener, path, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                recv_host_msg(stream)
+                recv_host_msg::<ControlRequest>(stream)
             })) {
                 Ok(msg) => msg,
                 Err(_) => break,
@@ -204,7 +215,7 @@ fn handle_with_mock_server(
             let response = (respond.lock().unwrap())(msg);
             if let Some(response) = response
                 && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    send_bridge_msg(stream, &response)
+                    send_bridge_msg(stream, &ControlFrame::Reply(response))
                 }))
                 .is_err()
             {
@@ -240,7 +251,7 @@ fn handle_with_mock_server(
 /// listener, and (2) lets `respond` emit zero-or-more messages per
 /// request — which is what allows scripting trailing unsolicited events.
 fn handle_with_multi_reply_server(
-    respond: impl Fn(HostMessage) -> Vec<BridgeMessage> + Send + 'static,
+    respond: impl Fn(ControlRequest) -> Vec<ControlFrame> + Send + 'static,
 ) -> (
     PluginHandle,
     Arc<PluginBridge>,
@@ -284,7 +295,7 @@ fn handle_with_multi_reply_server(
     let server_thread = serve_lanes(&listener, path, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                recv_host_msg(stream)
+                recv_host_msg::<ControlRequest>(stream)
             })) {
                 Ok(msg) => msg,
                 Err(_) => break,
@@ -338,26 +349,30 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
 
     let (handle, bridge, _bridge_thread, _server_thread) =
         handle_with_multi_reply_server(move |msg| match msg {
-            HostMessage::GetParameterList => vec![
-                BridgeMessage::ParameterList {
+            ControlRequest::GetParameterList => vec![
+                ControlFrame::from(ControlReply::ParameterList {
                     parameters: vec![ParameterInfo::new(ParamId::new(0), "Vol".to_string())],
-                },
-                BridgeMessage::LatencyChanged {
+                }),
+                ControlFrame::from(News::LatencyChanged {
                     samples: Samples::new(256),
-                },
-                BridgeMessage::ParameterChanged {
+                }),
+                ControlFrame::from(News::ParameterChanged {
                     edit: tutti_plugin_types::ParamEdit::change(
                         ParamId::new(7),
                         Normalized::of(0.42),
                     ),
-                },
+                }),
             ],
-            HostMessage::GetParameter { param_id } if param_id == ParamId::new(0) => {
-                vec![BridgeMessage::ParameterValue {
+            ControlRequest::GetParameter { param_id } if param_id == ParamId::new(0) => {
+                vec![ControlFrame::from(ControlReply::ParameterValue {
                     value: Some(Normalized::of(0.5)),
-                }]
+                })]
             }
-            HostMessage::GetParameter { .. } => vec![BridgeMessage::ParameterValue { value: None }],
+            ControlRequest::GetParameter { .. } => {
+                vec![ControlFrame::from(ControlReply::ParameterValue {
+                    value: None,
+                })]
+            }
             _ => {
                 // Count any other request as a test failure signal.
                 events_for_server.fetch_add(1, Ordering::Relaxed);
@@ -429,18 +444,18 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
 fn a_tail_change_reaches_the_listener() {
     let (handle, bridge, _bridge_thread, _server_thread) =
         handle_with_multi_reply_server(move |msg| match msg {
-            HostMessage::GetParameterList => vec![
-                BridgeMessage::ParameterList {
+            ControlRequest::GetParameterList => vec![
+                ControlFrame::from(ControlReply::ParameterList {
                     parameters: vec![ParameterInfo::new(ParamId::new(0), "Vol".to_string())],
-                },
-                BridgeMessage::TailChanged {
+                }),
+                ControlFrame::from(News::TailChanged {
                     tail: PluginTail::Unbounded,
-                },
+                }),
             ],
-            HostMessage::GetParameter { .. } => {
-                vec![BridgeMessage::ParameterValue {
+            ControlRequest::GetParameter { .. } => {
+                vec![ControlFrame::from(ControlReply::ParameterValue {
                     value: Some(Normalized::of(0.5)),
-                }]
+                })]
             }
             _ => vec![],
         });
@@ -476,14 +491,14 @@ fn a_tail_change_reaches_the_listener() {
 #[test]
 fn handle_save_state_roundtrip() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
-        HostMessage::SaveState { .. } => Some(BridgeMessage::StateChunk {
+        ControlRequest::SaveState { .. } => Some(ControlReply::StateChunk {
             seq: 0,
             last: true,
             bytes: vec![0xDE, 0xAD, 0xBE, 0xEF],
         }),
         // A load is answered only on its final chunk; this mock sends none,
         // which is the "no response" this test's other arms rely on.
-        HostMessage::LoadStateChunk { .. } => None,
+        ControlRequest::LoadStateChunk { .. } => None,
         _ => None,
     });
 
@@ -494,7 +509,7 @@ fn handle_save_state_roundtrip() {
 #[test]
 fn handle_get_parameter_list() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
-        HostMessage::GetParameterList => Some(BridgeMessage::ParameterList {
+        ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
             parameters: vec![
                 ParameterInfo::new(ParamId::new(0), "Volume".to_string()),
                 ParameterInfo::new(ParamId::new(1), "Pan".to_string()),
@@ -515,15 +530,15 @@ fn handle_get_parameter_list() {
 fn handle_get_parameter_value() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
         // The mirror's read lists the parameters, then asks for each value.
-        HostMessage::GetParameterList => Some(BridgeMessage::ParameterList {
+        ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
             parameters: vec![ParameterInfo::new(ParamId::new(42), "Gain".to_string())],
         }),
-        HostMessage::GetParameter { param_id } if param_id == ParamId::new(42) => {
-            Some(BridgeMessage::ParameterValue {
+        ControlRequest::GetParameter { param_id } if param_id == ParamId::new(42) => {
+            Some(ControlReply::ParameterValue {
                 value: Some(Normalized::of(0.75)),
             })
         }
-        HostMessage::GetParameter { .. } => Some(BridgeMessage::ParameterValue { value: None }),
+        ControlRequest::GetParameter { .. } => Some(ControlReply::ParameterValue { value: None }),
         _ => None,
     });
 

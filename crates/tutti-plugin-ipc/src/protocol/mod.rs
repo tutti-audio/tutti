@@ -11,7 +11,7 @@ pub(crate) mod process;
 pub(crate) mod shm;
 pub(crate) mod wire;
 
-/// Wire protocol version, exchanged in the [`BridgeMessage::Ready`] handshake.
+/// Wire protocol version, exchanged in the [`ControlReply::Ready`] handshake.
 ///
 /// Bump on ANY change to the host↔server wire shape (a new or reordered field on
 /// a serialized type), since the wire's codec (postcard) is not self-describing
@@ -138,7 +138,11 @@ pub(crate) mod wire;
 ///   defines the map), a field of every entry of `ParameterList`, so a
 ///   version-48 server's list reads differently from the first parameter's last
 ///   byte.
-pub const PROTOCOL_VERSION: u32 = 49;
+/// - **Version 50** splits the host's and the server's messages by connection
+///   (`AudioRequest`/`AudioReply` on the audio connection, `ControlRequest`/
+///   `ControlReply`/`News` on the control one), so a message of the other
+///   connection has no variant to be written as.
+pub const PROTOCOL_VERSION: u32 = 50;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
@@ -205,7 +209,10 @@ pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::BridgeResu
 }
 
 pub(crate) use envelope::default_format;
-pub use envelope::{BridgeMessage, HostMessage, StagedState};
+pub use envelope::{
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, StagedState,
+};
+pub use frame::Framed;
 pub use process::ProcessAudioData;
 pub use shm::SlabLayout;
 
@@ -217,8 +224,8 @@ mod tests {
 
     use tutti_plugin_types::{
         ChordValue, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue, ParameterInfo,
-        PluginFormat, PluginId, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleValue,
-        TransportInfo, Uid, WireMidi,
+        PluginFormat, PluginId, PluginTail, Preset, PresetId, Samples, ScaleValue, TransportInfo,
+        Uid, WireMidi,
     };
     use tutti_ump::{CCNumber, ControlValue, Message, MidiChannel, NoteVelocity, U7, Ump, Voice2};
     use tutti_units::{Normalized, ParamId, SampleRate};
@@ -231,11 +238,11 @@ mod tests {
     /// protocol change, and this fails until the version moves.
     #[test]
     fn a_plugin_io_changed_without_a_layout_is_two_bytes() {
-        let none = postcard::to_allocvec(&BridgeMessage::PluginIoChanged { layout: None })
-            .expect("serialize");
+        let none =
+            postcard::to_allocvec(&News::PluginIoChanged { layout: None }).expect("serialize");
         assert_eq!(none.len(), 2, "{none:?}");
         assert_eq!(none[1], 0, "no layout is a zero option byte");
-        let some = postcard::to_allocvec(&BridgeMessage::PluginIoChanged {
+        let some = postcard::to_allocvec(&News::PluginIoChanged {
             layout: Some(tutti_plugin_types::Layout::default()),
         })
         .expect("serialize");
@@ -252,24 +259,24 @@ mod tests {
     #[test]
     fn every_preset_frame_round_trips() {
         let requests = [
-            HostMessage::GetPresetList,
-            HostMessage::LoadPreset {
+            ControlRequest::GetPresetList,
+            ControlRequest::LoadPreset {
                 id: PresetId::Number(9000),
             },
-            HostMessage::LoadPreset {
+            ControlRequest::LoadPreset {
                 id: PresetId::Program {
                     list_id: 3,
                     index: 7,
                 },
             },
-            HostMessage::LoadPreset {
+            ControlRequest::LoadPreset {
                 id: PresetId::Location(PathBuf::from("/p/lead.clap-preset")),
             },
-            HostMessage::GetCurrentPreset,
+            ControlRequest::GetCurrentPreset,
         ];
         for msg in requests {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
-            let back: HostMessage = postcard::from_bytes(&bytes).expect("deserialize");
+            let back: ControlRequest = postcard::from_bytes(&bytes).expect("deserialize");
             assert_eq!(
                 format!("{back:?}"),
                 format!("{msg:?}"),
@@ -278,7 +285,7 @@ mod tests {
         }
 
         let responses = [
-            BridgeMessage::PresetList {
+            ControlReply::PresetList {
                 presets: vec![
                     Preset::new(PresetId::Number(0), "Init"),
                     Preset::in_bank(
@@ -291,100 +298,22 @@ mod tests {
                     ),
                 ],
             },
-            BridgeMessage::PresetLoaded { ok: true },
-            BridgeMessage::PresetLoaded { ok: false },
-            BridgeMessage::CurrentPreset {
+            ControlReply::PresetLoaded { ok: true },
+            ControlReply::PresetLoaded { ok: false },
+            ControlReply::CurrentPreset {
                 id: Some(PresetId::Number(4)),
             },
-            BridgeMessage::CurrentPreset { id: None },
+            ControlReply::CurrentPreset { id: None },
         ];
         for msg in responses {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
-            let back: BridgeMessage = postcard::from_bytes(&bytes).expect("deserialize");
+            let back: ControlReply = postcard::from_bytes(&bytes).expect("deserialize");
             assert_eq!(
                 format!("{back:?}"),
                 format!("{msg:?}"),
                 "{msg:?} did not survive the wire"
             );
         }
-    }
-
-    /// The preset frames were **appended**, leaving every older tag untouched.
-    ///
-    /// postcard encodes an enum as a leading varint discriminant over
-    /// declaration order, so inserting a variant mid-enum silently renumbers every later
-    /// one — and a symmetric round-trip cannot catch it, because both ends move
-    /// together. The two ends here are not one build: a host and its subprocess
-    /// negotiate `PROTOCOL_VERSION` and then trust each other's bytes.
-    ///
-    /// Pinning the *first* variant's tag is what makes this an append check
-    /// rather than a restatement: tag 0 stays 0 only if nothing was inserted
-    /// ahead of it, and the new variants land past every v13 tag.
-    ///
-    /// v21 removed `ProbePlugin` (the probe is its own binary and file now,
-    /// `tutti-plugin-probe`), which was tag 0: every tag after it moved down
-    /// one, and `LoadPlugin` is the first. v25 removed `OpenEditor` and
-    /// `CloseEditor` (nothing sent them), two more ahead of `SetRenderMode`.
-    #[test]
-    fn the_preset_frames_are_appended_not_inserted() {
-        /// `SetRenderMode`'s tag — the last variant v13 shipped (17 until v21
-        /// removed the request ahead of it, 16 until v25 removed `OpenEditor`
-        /// and `CloseEditor` ahead of it). Pinned as a literal so a shift is
-        /// a failure here rather than an agreement between two expressions that
-        /// move together.
-        const V13_LAST_TAG: u32 = 13;
-
-        // A tag under 128 is one varint byte; a larger one would need decoding.
-        let tag = |bytes: &[u8]| {
-            assert!(bytes[0] < 0x80, "a one-byte varint tag");
-            u32::from(bytes[0])
-        };
-
-        let first = postcard::to_allocvec(&HostMessage::UnloadPlugin).expect("serialize");
-        assert_eq!(tag(&first), 1, "UnloadPlugin follows LoadPlugin, the first");
-        let load = postcard::to_allocvec(&HostMessage::LoadPlugin {
-            path: PathBuf::new(),
-            format: PluginFormat::Clap,
-            plugin: None,
-            sample_rate: SampleRate::SR_48K,
-            block_size: 64,
-            preferred_format: FloatWidth::F32,
-            shm_name: String::new(),
-            state: None,
-        })
-        .expect("serialize");
-        assert_eq!(tag(&load), 0, "LoadPlugin must stay tag 0");
-
-        // Absolute tags, not a relative comparison. A variant inserted
-        // *between* two existing ones keeps both the tag-0 anchor and any
-        // "later than" ordering intact while renumbering everything after the
-        // insertion point — so only pinned numbers catch it: inserting ahead of
-        // `SetRenderMode` survives a relative
-        // check and fails these.
-        assert_eq!(
-            tag(&postcard::to_allocvec(&HostMessage::SetRenderMode {
-                mode: RenderMode::Offline,
-            })
-            .expect("serialize")),
-            V13_LAST_TAG,
-            "v13's last request variant moved; a v13 peer would mis-decode it"
-        );
-        assert_eq!(
-            tag(&postcard::to_allocvec(&HostMessage::GetPresetList).expect("serialize")),
-            V13_LAST_TAG + 1,
-            "GetPresetList must be the first v14 request frame"
-        );
-        assert_eq!(
-            tag(&postcard::to_allocvec(&HostMessage::LoadPreset {
-                id: PresetId::Number(0),
-            })
-            .expect("serialize")),
-            V13_LAST_TAG + 2,
-        );
-        assert_eq!(
-            tag(&postcard::to_allocvec(&HostMessage::GetCurrentPreset).expect("serialize")),
-            V13_LAST_TAG + 3,
-        );
     }
 
     /// Every parameter-display frame survives the wire in both directions.
@@ -397,27 +326,27 @@ mod tests {
     #[test]
     fn every_parameter_display_frame_round_trips() {
         let requests = [
-            HostMessage::GetParameterText {
+            ControlRequest::GetParameterText {
                 param_id: ParamId::new(0x8000_0001),
                 value: Normalized::of(0.375),
             },
             // The other addressing model, which VST2 uses.
-            HostMessage::GetParameterText {
+            ControlRequest::GetParameterText {
                 param_id: ParamId::new(3),
                 value: Normalized::of(1.0),
             },
-            HostMessage::GetParameterValueFromText {
+            ControlRequest::GetParameterValueFromText {
                 param_id: ParamId::new(7),
                 text: "800 Hz".to_string(),
             },
-            HostMessage::GetParameterValueFromText {
+            ControlRequest::GetParameterValueFromText {
                 param_id: ParamId::new(0),
                 text: String::new(),
             },
         ];
         for msg in requests {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
-            let back: HostMessage = postcard::from_bytes(&bytes).expect("deserialize");
+            let back: ControlRequest = postcard::from_bytes(&bytes).expect("deserialize");
             assert_eq!(
                 format!("{back:?}"),
                 format!("{msg:?}"),
@@ -426,26 +355,26 @@ mod tests {
         }
 
         let responses = [
-            BridgeMessage::ParameterText {
+            ControlReply::ParameterText {
                 text: Some("Bandpass".to_string()),
             },
-            BridgeMessage::ParameterText { text: None },
-            BridgeMessage::ParameterValueFromText {
+            ControlReply::ParameterText { text: None },
+            ControlReply::ParameterValueFromText {
                 value: Some(Normalized::of(0.375)),
             },
-            BridgeMessage::ParameterValueFromText { value: None },
-            BridgeMessage::SampleRateSet {
+            ControlReply::ParameterValueFromText { value: None },
+            ControlReply::SampleRateSet {
                 rate: SampleRate::SR_96K,
                 error: None,
             },
-            BridgeMessage::SampleRateSet {
+            ControlReply::SampleRateSet {
                 rate: SampleRate::SR_96K,
                 error: Some("refused".to_string()),
             },
         ];
         for msg in responses {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
-            let back: BridgeMessage = postcard::from_bytes(&bytes).expect("deserialize");
+            let back: ControlReply = postcard::from_bytes(&bytes).expect("deserialize");
             assert_eq!(
                 format!("{back:?}"),
                 format!("{msg:?}"),
@@ -461,152 +390,118 @@ mod tests {
     #[test]
     fn every_parameter_conversion_frame_round_trips() {
         let requests = [
-            HostMessage::GetParameterPlain {
+            ControlRequest::GetParameterPlain {
                 param_id: ParamId::new(3),
                 value: Normalized::of(0.375),
             },
-            HostMessage::GetParameterNormalized {
+            ControlRequest::GetParameterNormalized {
                 param_id: ParamId::new(3),
                 plain: 632.455_532_033_675_8,
             },
         ];
         for msg in requests {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
-            let back: HostMessage = postcard::from_bytes(&bytes).expect("deserialize");
+            let back: ControlRequest = postcard::from_bytes(&bytes).expect("deserialize");
             assert_eq!(format!("{back:?}"), format!("{msg:?}"), "{msg:?}");
         }
         let replies = [
-            BridgeMessage::ParameterPlain {
+            ControlReply::ParameterPlain {
                 plain: Some(632.455_532_033_675_8),
             },
-            BridgeMessage::ParameterPlain { plain: None },
-            BridgeMessage::ParameterNormalized {
+            ControlReply::ParameterPlain { plain: None },
+            ControlReply::ParameterNormalized {
                 value: Some(Normalized::of(0.5)),
             },
-            BridgeMessage::ParameterNormalized { value: None },
+            ControlReply::ParameterNormalized { value: None },
         ];
         for msg in replies {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
-            let back: BridgeMessage = postcard::from_bytes(&bytes).expect("deserialize");
+            let back: ControlReply = postcard::from_bytes(&bytes).expect("deserialize");
             assert_eq!(format!("{back:?}"), format!("{msg:?}"), "{msg:?}");
         }
     }
 
-    /// The v30 conversion frames were **appended**: the request tags follow the
-    /// last request variant that v29 shipped, `StageStateChunk`, and the reply
-    /// tags its last reply, `RestoringState`.
-    #[test]
-    fn the_conversion_frames_are_appended_not_inserted() {
-        let tag = |bytes: &[u8]| {
-            assert!(bytes[0] < 0x80, "a one-byte varint tag");
-            u32::from(bytes[0])
-        };
-        let last_request = tag(&postcard::to_allocvec(&HostMessage::StageStateChunk {
-            seq: 0,
-            last: true,
-            bytes: Vec::new(),
-        })
-        .expect("serialize"));
-        assert_eq!(
-            tag(&postcard::to_allocvec(&HostMessage::GetParameterPlain {
-                param_id: ParamId::new(0),
-                value: Normalized::of(0.0),
-            })
-            .expect("serialize")),
-            last_request + 1,
-            "GetParameterPlain must follow v29's last request"
-        );
-        assert_eq!(
-            tag(
-                &postcard::to_allocvec(&HostMessage::GetParameterNormalized {
-                    param_id: ParamId::new(0),
-                    plain: 0.0,
-                })
-                .expect("serialize")
-            ),
-            last_request + 2,
-        );
-        let last_reply =
-            tag(&postcard::to_allocvec(&BridgeMessage::RestoringState).expect("serialize"));
-        assert_eq!(
-            tag(
-                &postcard::to_allocvec(&BridgeMessage::ParameterPlain { plain: None })
-                    .expect("serialize")
-            ),
-            last_reply + 1,
-            "ParameterPlain must follow v29's last reply"
-        );
-        assert_eq!(
-            tag(
-                &postcard::to_allocvec(&BridgeMessage::ParameterNormalized { value: None })
-                    .expect("serialize")
-            ),
-            last_reply + 2,
-        );
-    }
-
-    /// The v17 frames were **appended**, leaving every older tag untouched.
+    /// **Each enum's tags are its declaration order, pinned here as literals.**
     ///
-    /// Same argument as [`the_preset_frames_are_appended_not_inserted`], and the
-    /// same absolute pinning: a variant inserted between two existing ones keeps
-    /// both the tag-0 anchor and any "later than" ordering intact while
-    /// renumbering everything after it, so only literal numbers catch it.
+    /// postcard encodes an enum as a leading varint discriminant over
+    /// declaration order, so inserting a variant mid-enum silently renumbers
+    /// every later one, and a symmetric round trip cannot catch it because both
+    /// ends move together. The two ends are not one build: a host and its
+    /// server negotiate `PROTOCOL_VERSION` and then trust each other's bytes. A
+    /// change of order fails here until the version moves and the pins with it.
     #[test]
-    fn the_parameter_display_frames_are_appended_not_inserted() {
-        /// `GetCurrentPreset`'s tag — the last request variant v14 shipped (20 until v21
-        /// removed the request ahead of it, 19 until v25 removed `OpenEditor` and
-        /// `CloseEditor` ahead of it).
-        const V16_LAST_REQUEST_TAG: u32 = 16;
-
-        // A tag under 128 is one varint byte; a larger one would need decoding.
-        let tag = |bytes: &[u8]| {
+    fn the_wire_tags_are_the_declaration_order() {
+        use tutti_plugin_types::{AutomationMode, RenderMode, StateUse};
+        let tag = |bytes: Vec<u8>| {
             assert!(bytes[0] < 0x80, "a one-byte varint tag");
-            u32::from(bytes[0])
+            bytes[0]
         };
-
+        let block = ProcessAudioData::empty(SampleRate::SR_48K);
         assert_eq!(
-            tag(&postcard::to_allocvec(&HostMessage::GetCurrentPreset).expect("serialize")),
-            V16_LAST_REQUEST_TAG,
-            "v16's last request variant moved; a v16 peer would mis-decode it"
+            tag(postcard::to_allocvec(&AudioRequest::ProcessAudio(block)).unwrap()),
+            0
         );
+        assert_eq!(tag(postcard::to_allocvec(&AudioRequest::Reset).unwrap()), 2);
         assert_eq!(
-            tag(&postcard::to_allocvec(&HostMessage::GetParameterText {
-                param_id: ParamId::new(0),
-                value: Normalized::of(0.0),
+            tag(postcard::to_allocvec(&AudioReply::AudioProcessed {
+                latency_us: 0,
+                seq: 0,
+                midi_out: Default::default(),
+                status: Default::default(),
+                refused: false,
             })
-            .expect("serialize")),
-            V16_LAST_REQUEST_TAG + 1,
-            "GetParameterText must be the first v17 request frame"
+            .unwrap()),
+            0
         );
         assert_eq!(
-            tag(
-                &postcard::to_allocvec(&HostMessage::GetParameterValueFromText {
-                    param_id: ParamId::new(0),
-                    text: String::new(),
-                })
-                .expect("serialize")
-            ),
-            V16_LAST_REQUEST_TAG + 2,
+            tag(postcard::to_allocvec(&AudioReply::ParametersApplied).unwrap()),
+            3
         );
 
-        // The reply direction is a separate enum with its own numbering, so it
-        // needs its own anchor rather than an offset from the request side.
-        let shutdown = tag(&postcard::to_allocvec(&BridgeMessage::Shutdown).expect("serialize"));
+        let control = |m: ControlRequest| tag(postcard::to_allocvec(&m).unwrap());
+        assert_eq!(control(ControlRequest::UnloadPlugin), 1);
         assert_eq!(
-            tag(
-                &postcard::to_allocvec(&BridgeMessage::ParameterText { text: None })
-                    .expect("serialize")
-            ),
-            shutdown + 1,
-            "ParameterText must follow v16's last reply variant"
+            control(ControlRequest::SetAutomationState {
+                mode: AutomationMode::default()
+            }),
+            2
+        );
+        assert_eq!(control(ControlRequest::GetParameterList), 4);
+        assert_eq!(
+            control(ControlRequest::SaveState {
+                state_use: StateUse::Project
+            }),
+            6
         );
         assert_eq!(
-            tag(
-                &postcard::to_allocvec(&BridgeMessage::ParameterValueFromText { value: None })
-                    .expect("serialize")
-            ),
-            shutdown + 2,
+            control(ControlRequest::SetRenderMode {
+                mode: RenderMode::Realtime
+            }),
+            10
         );
+        assert_eq!(control(ControlRequest::GetPresetList), 11);
+        assert_eq!(control(ControlRequest::GetCurrentPreset), 13);
+        assert_eq!(control(ControlRequest::CloseEditor), 20);
+
+        let reply = |m: ControlReply| tag(postcard::to_allocvec(&m).unwrap());
+        assert_eq!(reply(ControlReply::ParameterValue { value: None }), 1);
+        assert_eq!(reply(ControlReply::SharedMemoryReady), 7);
+        assert_eq!(reply(ControlReply::Shutdown), 10);
+        assert_eq!(reply(ControlReply::RestoringState), 15);
+        assert_eq!(reply(ControlReply::ParameterNormalized { value: None }), 17);
+
+        let news = |m: News| tag(postcard::to_allocvec(&m).unwrap());
+        assert_eq!(news(News::PluginParamValuesChanged), 3);
+        assert_eq!(news(News::PluginReloaded), 6);
+        assert_eq!(news(News::EditorClosed), 8);
+        assert_eq!(news(News::ProcessRequested), 9);
+
+        let frame = |m: ControlFrame| tag(postcard::to_allocvec(&m).unwrap());
+        assert_eq!(
+            frame(ControlFrame::Reply(ControlReply::SharedMemoryReady)),
+            0
+        );
+        assert_eq!(frame(ControlFrame::News(News::EditorClosed)), 1);
     }
 
     fn is_note_on(ev: &WireMidi) -> bool {
@@ -652,7 +547,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let msg = BridgeMessage::AudioProcessed {
+        let msg = AudioReply::AudioProcessed {
             latency_us: 42,
             seq: 7,
             midi_out,
@@ -660,9 +555,9 @@ mod tests {
             refused: true,
         };
         let bytes = postcard::to_allocvec(&msg).unwrap();
-        let back: BridgeMessage = postcard::from_bytes(&bytes).unwrap();
+        let back: AudioReply = postcard::from_bytes(&bytes).unwrap();
         match back {
-            BridgeMessage::AudioProcessed {
+            AudioReply::AudioProcessed {
                 latency_us,
                 seq,
                 midi_out,
@@ -702,9 +597,9 @@ mod tests {
             PluginTail::Finite(Samples::new(96_000)),
             PluginTail::Unbounded,
         ] {
-            let bytes = postcard::to_allocvec(&BridgeMessage::TailChanged { tail }).unwrap();
-            match postcard::from_bytes::<BridgeMessage>(&bytes).unwrap() {
-                BridgeMessage::TailChanged { tail: back } => assert_eq!(back, tail),
+            let bytes = postcard::to_allocvec(&News::TailChanged { tail }).unwrap();
+            match postcard::from_bytes::<News>(&bytes).unwrap() {
+                News::TailChanged { tail: back } => assert_eq!(back, tail),
                 other => panic!("expected TailChanged, got {other:?}"),
             }
         }
@@ -729,7 +624,7 @@ mod tests {
     fn audio_processed_midi_out_has_pinned_bytes() {
         #[rustfmt::skip]
         const BYTES: [u8; 27] = [
-            1, // variant
+            0, // variant
             42, // latency_us
             7, // seq
             2, // two events
@@ -750,7 +645,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let msg = BridgeMessage::AudioProcessed {
+        let msg = AudioReply::AudioProcessed {
             latency_us: 42,
             seq: 7,
             midi_out,
@@ -758,7 +653,7 @@ mod tests {
             refused: true,
         };
         assert_eq!(postcard::to_allocvec(&msg).unwrap(), BYTES);
-        let back: BridgeMessage = postcard::from_bytes(&BYTES).unwrap();
+        let back: AudioReply = postcard::from_bytes(&BYTES).unwrap();
         assert_eq!(postcard::to_allocvec(&back).unwrap(), BYTES);
     }
 
@@ -793,7 +688,7 @@ mod tests {
         .into_iter()
         .collect();
 
-        let msg = HostMessage::ProcessAudio(ProcessAudioData {
+        let msg = AudioRequest::ProcessAudio(ProcessAudioData {
             seq: 42,
             num_samples: 512,
             midi_events,
@@ -801,10 +696,10 @@ mod tests {
         });
 
         let encoded = postcard::to_allocvec(&msg).unwrap();
-        let decoded: HostMessage = postcard::from_bytes(&encoded).unwrap();
+        let decoded: AudioRequest = postcard::from_bytes(&encoded).unwrap();
 
         match decoded {
-            HostMessage::ProcessAudio(data) => {
+            AudioRequest::ProcessAudio(data) => {
                 assert_eq!(data.seq, 42);
                 assert_eq!(data.num_samples, 512);
                 assert_eq!(data.midi_events.len(), 3);
@@ -825,7 +720,7 @@ mod tests {
 
     #[test]
     fn test_load_plugin_f64_serialization() {
-        let msg = HostMessage::LoadPlugin {
+        let msg = ControlRequest::LoadPlugin {
             path: PathBuf::from("/test/reverb.so"),
             format: PluginFormat::Vst3,
             plugin: Some(PluginId::Vst3(Uid::new([
@@ -840,10 +735,10 @@ mod tests {
         };
 
         let encoded = postcard::to_allocvec(&msg).unwrap();
-        let decoded: HostMessage = postcard::from_bytes(&encoded).unwrap();
+        let decoded: ControlRequest = postcard::from_bytes(&encoded).unwrap();
 
         match decoded {
-            HostMessage::LoadPlugin {
+            ControlRequest::LoadPlugin {
                 path,
                 format,
                 plugin,
@@ -952,10 +847,10 @@ mod tests {
             .with_overview(true);
         let untyped = ParameterInfo::new(ParamId::new(3), "Other");
 
-        let list = BridgeMessage::ParameterList {
+        let list = ControlReply::ParameterList {
             parameters: vec![typed.clone(), untyped],
         };
-        let BridgeMessage::ParameterList { parameters } =
+        let ControlReply::ParameterList { parameters } =
             postcard::from_bytes(&postcard::to_allocvec(&list).unwrap()).unwrap()
         else {
             panic!("a ParameterList decodes as one");

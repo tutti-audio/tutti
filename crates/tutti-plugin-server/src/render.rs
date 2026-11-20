@@ -44,10 +44,9 @@ use tutti_platform::Instant;
 use tutti_platform::{StopToken, ThreadHandle};
 use tutti_rt::LockExt;
 
-use std::borrow::Cow;
 use tutti_buffers::Float;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
+use tutti_plugin_ipc::{AudioReply, AudioRequest, SlabLayout, SlabWriter};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
     BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginIo, PluginResult,
@@ -64,7 +63,7 @@ use crate::audio_pipeline::{
 use crate::main_loop::Bell;
 use crate::served::Render;
 use crate::ties::{Notify, Patience, Ties, ties};
-use crate::transport::Transport;
+use crate::transport::AudioTransport;
 
 /// How many commands may be queued to the render thread. A load is a handful;
 /// the queue is sized so the handshake, which runs before the thread does,
@@ -747,8 +746,8 @@ impl RenderSide {
     /// # Errors
     ///
     /// The transport fails (the host went away, or sent a frame that does not
-    /// decode), or the host sent a message that is not the audio connection's.
-    pub(crate) fn step(&mut self, io: Option<&mut Box<dyn Transport>>) -> BridgeResult<()> {
+    /// decode).
+    pub(crate) fn step(&mut self, io: Option<&mut Box<AudioTransport>>) -> BridgeResult<()> {
         self.drain();
         self.poll_seat();
         let Some(io) = io else {
@@ -771,16 +770,15 @@ impl RenderSide {
         Ok(())
     }
 
-    /// Serves one message of the audio connection: `ProcessAudio` (answered)
-    /// and `Reset` (not).
+    /// Serves one message of the audio connection: `ProcessAudio` and
+    /// `ApplyParameters` (answered) and `Reset` (not).
     ///
     /// # Errors
     ///
-    /// The message is not one the audio connection carries: a peer that
-    /// confuses its two connections.
-    pub(crate) fn handle(&mut self, msg: HostMessage) -> BridgeResult<Option<BridgeMessage>> {
+    /// A block's reply cannot be built.
+    pub(crate) fn handle(&mut self, msg: AudioRequest) -> BridgeResult<Option<AudioReply>> {
         match msg {
-            HostMessage::ProcessAudio(data) => {
+            AudioRequest::ProcessAudio(data) => {
                 let began = self.informs.begin();
                 let midi = &data.midi_events;
                 let reply = self.handle_process(AudioBlock {
@@ -798,7 +796,7 @@ impl RenderSide {
             // The host's writes no block has carried, in order with the blocks
             // on this connection: the plugin has them, through the format's own
             // route for parameters outside a block, before the answer.
-            HostMessage::ApplyParameters { param_changes } => {
+            AudioRequest::ApplyParameters { param_changes } => {
                 let began = self.informs.begin();
                 if let Some(seat) = self.seat.as_mut()
                     && seat.flush_parameters(&param_changes).is_err()
@@ -806,7 +804,7 @@ impl RenderSide {
                     self.failures += 1;
                 }
                 self.informs.note(&param_changes, began);
-                Ok(Some(BridgeMessage::ParametersApplied))
+                Ok(Some(AudioReply::ParametersApplied))
             }
             // The plugin forgets its signal history,
             // in order with the blocks on this connection, so a reset is never
@@ -816,19 +814,12 @@ impl RenderSide {
             // sequence, so a pre-seek block published late is structurally
             // unmatchable), and anything done to it here would be a second
             // mechanism that could disagree with the first.
-            HostMessage::Reset => {
+            AudioRequest::Reset => {
                 if let Some(seat) = self.seat.as_mut() {
                     seat.reset();
                 }
                 Ok(None)
             }
-            // The control connection's messages: a peer that confuses its two
-            // connections. Named, not formatted: the render thread builds no
-            // text.
-            _ => Err(BridgeError::UnexpectedMessage {
-                expected: "a message the audio connection carries",
-                got: Cow::Borrowed("a control connection message"),
-            }),
         }
     }
 
@@ -864,11 +855,11 @@ impl RenderSide {
         fits
     }
 
-    fn handle_process(&mut self, block: AudioBlock<'_>) -> BridgeResult<BridgeMessage> {
+    fn handle_process(&mut self, block: AudioBlock<'_>) -> BridgeResult<AudioReply> {
         // Read before `block` is moved into the pipeline: every reply below
         // echoes it.
         let seq = block.seq;
-        let silent = || BridgeMessage::AudioProcessed {
+        let silent = || AudioReply::AudioProcessed {
             latency_us: 0,
             seq,
             midi_out: MidiEventVec::new(),
@@ -941,7 +932,7 @@ impl RenderSide {
                 losses.back_refused.add(1);
             }
         }
-        Ok(BridgeMessage::AudioProcessed {
+        Ok(AudioReply::AudioProcessed {
             latency_us: output.latency_us,
             seq,
             // An allocation-free copy of the inline list, which stays in the
@@ -1009,7 +1000,7 @@ impl RenderThread {
     /// for whoever still has a Processor to bring home through it.
     pub(crate) fn spawn(
         side: RenderSide,
-        audio: Option<Box<dyn Transport>>,
+        audio: Option<Box<AudioTransport>>,
     ) -> Result<Self, Box<SpawnFailed>> {
         let ended = Arc::new(OnceLock::new());
         let wake = side.wake.clone();
@@ -1109,7 +1100,7 @@ impl Drop for RenderThread {
 /// trading the Processor until `stop`.
 fn run(
     mut side: RenderSide,
-    mut audio: Option<Box<dyn Transport>>,
+    mut audio: Option<Box<AudioTransport>>,
     stop: &StopToken,
     ended: &OnceLock<Arc<BridgeError>>,
 ) -> RenderSide {
@@ -1185,7 +1176,7 @@ mod tests {
         informs.note(&changes_of(0.75), began);
         assert_eq!(told(&mut reader), [0.75]);
     }
-    use crate::transport::AUDIO_REPLY_BYTES;
+    use crate::transport::{AUDIO_REPLY_BYTES, Transport};
     use std::io::Write as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tutti_plugin_ipc::{AudioSlab, FrameBuf, ProcessAudioData, SlabLayout, write_frame};
@@ -1236,10 +1227,12 @@ mod tests {
     /// A host connection that says a frame has begun and then does what `recv`
     /// is told to: a peer whose frame never completes, or a transport that
     /// breaks.
-    struct Begun<F: FnMut() -> BridgeResult<HostMessage> + Send>(F);
+    struct Begun<F: FnMut() -> BridgeResult<AudioRequest> + Send>(F);
 
-    impl<F: FnMut() -> BridgeResult<HostMessage> + Send> Transport for Begun<F> {
-        fn recv(&mut self) -> BridgeResult<HostMessage> {
+    impl<F: FnMut() -> BridgeResult<AudioRequest> + Send> Transport<AudioRequest, AudioReply>
+        for Begun<F>
+    {
+        fn recv(&mut self) -> BridgeResult<AudioRequest> {
             (self.0)()
         }
 
@@ -1247,7 +1240,7 @@ mod tests {
             Ok(true)
         }
 
-        fn send(&mut self, _: &BridgeMessage) -> BridgeResult<()> {
+        fn send(&mut self, _: &AudioReply) -> BridgeResult<()> {
             Ok(())
         }
     }
@@ -1472,8 +1465,8 @@ mod tests {
         (link, side, host)
     }
 
-    fn block(seq: u64) -> HostMessage {
-        HostMessage::ProcessAudio(ProcessAudioData {
+    fn block(seq: u64) -> AudioRequest {
+        AudioRequest::ProcessAudio(ProcessAudioData {
             seq,
             num_samples: FRAMES,
             ..ProcessAudioData::empty(SampleRate::SR_48K)
@@ -1522,7 +1515,7 @@ mod tests {
             }
             // Past the activated length: refused.
             on_render_thread(&mut || {
-                side.handle(HostMessage::ProcessAudio(ProcessAudioData {
+                side.handle(AudioRequest::ProcessAudio(ProcessAudioData {
                     seq: 6,
                     num_samples: FRAMES + 1,
                     ..ProcessAudioData::empty(SampleRate::SR_48K)
@@ -1541,7 +1534,7 @@ mod tests {
                 let reply = side.handle(block(7)).expect("answered").expect("a reply");
                 assert!(matches!(
                     reply,
-                    BridgeMessage::AudioProcessed { ref midi_out, .. } if midi_out.len() == MIDI_STACK_CAPACITY
+                    AudioReply::AudioProcessed { ref midi_out, .. } if midi_out.len() == MIDI_STACK_CAPACITY
                 ));
             });
             // A rate the plugin refused.
@@ -1718,8 +1711,8 @@ mod tests {
         replies: usize,
     }
 
-    impl Transport for Replay {
-        fn recv(&mut self) -> BridgeResult<HostMessage> {
+    impl Transport<AudioRequest, AudioReply> for Replay {
+        fn recv(&mut self) -> BridgeResult<AudioRequest> {
             self.frames.read(&mut self.request.as_slice())
         }
 
@@ -1727,7 +1720,7 @@ mod tests {
             Ok(true)
         }
 
-        fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
+        fn send(&mut self, msg: &AudioReply) -> BridgeResult<()> {
             let mut sink: &mut [u8] = &mut self.sink;
             self.frames.write(&mut sink, msg)?;
             sink.flush()?;
@@ -1768,8 +1761,8 @@ mod tests {
             value: 3,
         });
         let mut request = Vec::new();
-        write_frame(&mut request, &HostMessage::ProcessAudio(block)).unwrap();
-        let mut io: Box<dyn Transport> = Box::new(Replay {
+        write_frame(&mut request, &AudioRequest::ProcessAudio(block)).unwrap();
+        let mut io: Box<AudioTransport> = Box::new(Replay {
             frames: FrameBuf::new(request.len(), AUDIO_REPLY_BYTES),
             request,
             sink: vec![0; AUDIO_REPLY_BYTES + 4].into_boxed_slice(),

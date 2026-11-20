@@ -78,8 +78,8 @@ pub use offline_wait::OfflineWait;
 pub use process_guard::ProcessGuard;
 pub use protocol::frame::{FrameBuf, read_frame, write_frame};
 pub use protocol::{
-    BridgeMessage, HostMessage, MAX_FRAME_BYTES, PROTOCOL_VERSION, ProcessAudioData,
-    STATE_CHUNK_BYTES, SlabLayout, StagedState,
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, MAX_FRAME_BYTES,
+    News, PROTOCOL_VERSION, ProcessAudioData, STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
 pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;

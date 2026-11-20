@@ -17,7 +17,9 @@ use std::time::Duration;
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_ipc::{BridgeMessage, HostMessage, read_frame, socket_name, write_frame};
+use tutti_plugin_ipc::{
+    AudioReply, ControlFrame, ControlReply, ControlRequest, read_frame, socket_name, write_frame,
+};
 use tutti_plugin_types::{PluginFormat, PluginId, SampleRate};
 
 /// Kills the server if the test fails before it shuts it down.
@@ -50,7 +52,7 @@ fn connect(socket: &Path, server: &mut Server) -> Stream {
     connected.expect("the wait ended on a connection")
 }
 
-fn load(stream: &mut Stream, path: &Path, format: PluginFormat) -> BridgeMessage {
+fn load(stream: &mut Stream, path: &Path, format: PluginFormat) -> ControlReply {
     load_choosing(stream, path, format, None)
 }
 
@@ -59,10 +61,10 @@ fn load_choosing(
     path: &Path,
     format: PluginFormat,
     plugin: Option<PluginId>,
-) -> BridgeMessage {
+) -> ControlReply {
     write_frame(
         stream,
-        &HostMessage::LoadPlugin {
+        &ControlRequest::LoadPlugin {
             path: path.to_path_buf(),
             format,
             plugin,
@@ -74,7 +76,10 @@ fn load_choosing(
         },
     )
     .expect("send LoadPlugin");
-    read_frame(stream).expect("the server answers a load; it did not exit")
+    match read_frame(stream).expect("the server answers a load; it did not exit") {
+        ControlFrame::Reply(reply) => reply,
+        ControlFrame::News(news) => panic!("news where the load was answered: {news:?}"),
+    }
 }
 
 /// The reference CLAP plugin's library, and a copy of it named `.vst3` that
@@ -110,8 +115,8 @@ fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
     );
     let mut stream = connect(&socket, &mut server);
     assert!(matches!(
-        read_frame::<_, BridgeMessage>(&mut stream),
-        Ok(BridgeMessage::Ready { .. })
+        read_frame::<_, ControlFrame>(&mut stream),
+        Ok(ControlFrame::Reply(ControlReply::Ready { .. }))
     ));
     (server, stream, socket)
 }
@@ -123,7 +128,7 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
     let (mut server, mut stream) = start_server();
 
     match load(&mut stream, &not_a_plugin, PluginFormat::Vst3) {
-        BridgeMessage::Error { message } => {
+        ControlReply::Error { message } => {
             assert!(
                 !message.contains("unsupported plugin format"),
                 "the library was refused before a format read it: {message}"
@@ -143,12 +148,12 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
     assert!(
         matches!(
             load(&mut stream, &good, PluginFormat::Clap),
-            BridgeMessage::PluginLoaded { .. }
+            ControlReply::PluginLoaded { .. }
         ),
         "the same server loads a good plugin after a failed one"
     );
 
-    write_frame(&mut stream, &HostMessage::Shutdown).expect("send Shutdown");
+    write_frame(&mut stream, &ControlRequest::Shutdown).expect("send Shutdown");
     drop(server);
 }
 
@@ -160,8 +165,8 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
 fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
     let (_not_a_plugin, good) = fixtures();
     let (server, mut stream) = start_server();
-    let id_of = |reply: BridgeMessage| match reply {
-        BridgeMessage::PluginLoaded { id, .. } => id,
+    let id_of = |reply: ControlReply| match reply {
+        ControlReply::PluginLoaded { id, .. } => id,
         other => panic!("expected PluginLoaded, got {other:?}"),
     };
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID
@@ -189,7 +194,7 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
         "the named plugin loads, not the first"
     );
 
-    write_frame(&mut stream, &HostMessage::Shutdown).expect("send Shutdown");
+    write_frame(&mut stream, &ControlRequest::Shutdown).expect("send Shutdown");
     drop(server);
 }
 
@@ -218,10 +223,10 @@ fn a_shutdown_in_the_handshake_releases_the_plugin() {
     let (mut server, mut stream) = start_server();
     assert!(matches!(
         load(&mut stream, &good, PluginFormat::Clap),
-        BridgeMessage::PluginLoaded { .. }
+        ControlReply::PluginLoaded { .. }
     ));
 
-    write_frame(&mut stream, &HostMessage::Shutdown).expect("send Shutdown");
+    write_frame(&mut stream, &ControlRequest::Shutdown).expect("send Shutdown");
     let (status, logged) = ended(&mut server);
     // Not 3 (`EXIT_PLUGIN_LEAKED`): the plugin was destroyed, not leaked.
     assert_eq!(status.code(), Some(0), "{status:?}: {logged}");
@@ -284,22 +289,24 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
 
     let mut handshake = connect(&socket, &mut host);
     assert!(matches!(
-        read_frame::<_, BridgeMessage>(&mut handshake),
-        Ok(BridgeMessage::Ready { .. })
+        read_frame::<_, ControlFrame>(&mut handshake),
+        Ok(ControlFrame::Reply(ControlReply::Ready { .. }))
     ));
     assert!(matches!(
         load(&mut handshake, &good, PluginFormat::Clap),
-        BridgeMessage::PluginLoaded { .. }
+        ControlReply::PluginLoaded { .. }
     ));
     drop(handshake);
     let mut audio = connect(&socket, &mut host);
     let mut control = connect(&socket, &mut host);
-    for stream in [&mut audio, &mut control] {
-        assert!(matches!(
-            read_frame::<_, BridgeMessage>(stream),
-            Ok(BridgeMessage::Ready { .. })
-        ));
-    }
+    assert!(matches!(
+        read_frame::<_, AudioReply>(&mut audio),
+        Ok(AudioReply::Ready { .. })
+    ));
+    assert!(matches!(
+        read_frame::<_, ControlFrame>(&mut control),
+        Ok(ControlFrame::Reply(ControlReply::Ready { .. }))
+    ));
     let (ended, server_ended) = std::sync::mpsc::channel();
     tutti_plugin_ipc_ffi::watch_host(server, move || ended.send(()).expect("listening"))
         .expect("the watch starts");
@@ -308,7 +315,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     host.0.wait().expect("the host ends");
     // The server's teardown closes its end of the control connection.
     assert!(
-        read_frame::<_, BridgeMessage>(&mut control).is_err(),
+        read_frame::<_, ControlFrame>(&mut control).is_err(),
         "the server answered after its host ended"
     );
     server_ended.recv().expect("the server ends");

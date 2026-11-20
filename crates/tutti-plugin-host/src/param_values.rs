@@ -20,7 +20,7 @@
 //! **Every format reports**: each plugin's own edits reach
 //! the parameter callback as [`ParamEdit`](tutti_plugin_types::ParamEdit)s, in
 //! process through `Control::take_reported_edits` and through the plugin-server
-//! as `BridgeMessage::ParameterChanged`.
+//! as `News::ParameterChanged`.
 //!
 //! **An echo is not an edit.** A plugin that reports the value a host just
 //! set (from inside `setParameter`) would make that value an edit. The VST2

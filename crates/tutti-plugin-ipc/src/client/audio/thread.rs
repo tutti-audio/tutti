@@ -15,18 +15,18 @@ use super::ListenerSlot;
 use super::channels::response_ring;
 use super::channels::{Channels, ResponseWriter, Stamped, Waits};
 use super::dispatch::{
-    Lane, Owed, apply_setting, handle_audio, handle_control, handle_setting, read_news,
+    AudioOwed, Lane, Owed, apply_setting, handle_audio, handle_control, handle_setting, read_news,
 };
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioCommand, AudioResponse, BridgeEvent, ControlCommand, Unsolicited};
 use super::payload_pool::PayloadPool;
-use crate::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
+use crate::{AudioReply, ControlFrame, ControlReply, ControlRequest};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::ThreadHandle;
-use tutti_plugin_types::{BridgeError, PluginFailure};
+use tutti_plugin_types::{BridgeError, BridgeResult, PluginFailure};
 use tutti_rt::Parker;
 
 /// The bridge's audio lane thread of an `AudioBridge`, which owns the control
@@ -134,7 +134,7 @@ fn run_thread(
     } = waits;
     // The response ring's writer is this thread's alone: it lives in the audio
     // lane's state.
-    let mut owed = Owed::audio(lifecycle.timeouts().drain, responses);
+    let mut owed = AudioOwed::new(lifecycle.timeouts().drain, responses);
     // A bridge that never connects is as dead as one whose socket drops later,
     // and the audio thread tells them apart only through `is_crashed`. Every
     // exit below must mark the crash: returning silently would leave the flag
@@ -156,7 +156,7 @@ fn run_thread(
             (channels.clone(), lifecycle.clone(), Arc::clone(&listener));
         let lane = Lane {
             stream: control,
-            owed: Owed::control(lifecycle.timeouts().drain),
+            owed: Owed::new(lifecycle.timeouts().drain),
         };
         tutti_platform::spawn_named("plugin-control", None, move |_| {
             control_loop(&channels, &control_wait, &lifecycle, &listener, lane);
@@ -204,14 +204,22 @@ fn run_thread(
 /// a skew becomes a mis-parse instead of an error.
 fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), PluginFailure> {
     let connect = || {
-        let mut stream = ipc::connect(socket_path).map_err(|e| PluginFailure::Connect {
+        let stream = ipc::connect(socket_path).map_err(|e| PluginFailure::Connect {
             source: Arc::new(e),
         })?;
-        expect_ready(&mut stream)?;
         Ok(stream)
     };
-    let audio = connect()?;
-    Ok((audio, connect()?))
+    let mut audio = connect()?;
+    expect_ready(ipc::recv::<AudioReply>(&mut audio).map(|r| match r {
+        AudioReply::Ready { protocol_version } => Ok(protocol_version),
+        other => Err(format!("{other:?}")),
+    }))?;
+    let mut control = connect()?;
+    expect_ready(ipc::recv::<ControlFrame>(&mut control).map(|f| match f {
+        ControlFrame::Reply(ControlReply::Ready { protocol_version }) => Ok(protocol_version),
+        other => Err(format!("{other:?}")),
+    }))?;
+    Ok((audio, control))
 }
 
 /// The audio lane's loop: park until a block-lane command is
@@ -226,9 +234,8 @@ fn audio_loop(
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
-    mut lane: Lane,
+    mut lane: Lane<AudioOwed>,
 ) {
-    let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
     let mut failed = false;
     while live(lifecycle) {
         // Read before the pop: a block pushed after this read is not counted,
@@ -260,8 +267,7 @@ fn audio_loop(
                 apply_setting(channels, lifecycle, setting);
             }
         }
-        let result = handle_audio(cmd, &mut lane, channels, payloads, &mut inbox, lifecycle);
-        drain_unsolicited(&mut inbox, channels, listener);
+        let result = handle_audio(cmd, &mut lane, channels, payloads, lifecycle);
         channels.turn_done();
 
         if let Err(e) = result {
@@ -301,7 +307,7 @@ fn control_loop(
     wait: &ControlWait,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
-    mut lane: Lane,
+    mut lane: Lane<Owed>,
 ) {
     // Unsolicited events read while a request waited for its reply. One
     // buffer for the connection, handed to the listener after each turn.
@@ -324,7 +330,7 @@ fn control_loop(
         let result = if let Some((setting, applied)) = channels.take_setting() {
             // A command's turn reads the news that comes during it too.
             channels.set_news();
-            handle_setting(setting, applied, &mut lane, channels, &mut inbox, lifecycle)
+            handle_setting(setting, applied, &mut lane, &mut inbox, lifecycle)
         } else if let Some((stamped, deadline)) =
             held.take_if(|(c, _)| channels.handled() >= c.after)
         {
@@ -333,7 +339,7 @@ fn control_loop(
             // block it follows.
             let _ = deadline;
             channels.set_news();
-            handle_control(stamped.cmd, &mut lane, channels, &mut inbox, lifecycle)
+            handle_control(stamped.cmd, &mut lane, &mut inbox, lifecycle)
         } else if let Some((stamped, deadline)) = &held {
             // Not yet: wait for the audio lane (or a setting it is holding the
             // block for, the end of the bridge, the command's own bound). A
@@ -359,7 +365,7 @@ fn control_loop(
             match wait.wait(&lane.stream, None) {
                 Ok(woken) if woken.stream => {
                     channels.set_news();
-                    read_news(&mut lane, channels, &mut inbox)
+                    read_news(&mut lane, &mut inbox)
                 }
                 // A ring: look at the queue and the stop condition again.
                 Ok(_) => continue,
@@ -388,9 +394,9 @@ fn control_loop(
 /// itself, and the host's wait for the process's end (the guard's) is the
 /// grace. Best effort: a server that cannot be written to is gone or hung, and
 /// the guard kills it at the end of the grace.
-fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane) {
+fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane<Owed>) {
     if !lifecycle.is_running() && lifecycle.crash_cause().is_none() {
-        let _ = ipc::send(&mut lane.stream, &HostMessage::Shutdown);
+        let _ = ipc::send(&mut lane.stream, &ControlRequest::Shutdown);
     }
 }
 
@@ -399,29 +405,21 @@ fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane) {
 /// The reason is spelled out per case rather than as one string: a version skew
 /// and a peer that never said `Ready` are different problems for whoever reads
 /// the message, and the first is actionable.
-fn expect_ready(stream: &mut ControlStream) -> Result<(), PluginFailure> {
-    match ipc::recv(stream) {
-        Ok(crate::BridgeMessage::Ready { protocol_version })
-            if crate::protocol::check_protocol_version(protocol_version).is_ok() =>
-        {
-            Ok(())
-        }
-        other => {
-            let source = match other {
-                Ok(crate::BridgeMessage::Ready { protocol_version }) => {
-                    BridgeError::ProtocolMismatch {
-                        expected: crate::PROTOCOL_VERSION,
-                        got: protocol_version,
-                    }
-                }
-                Ok(got) => crate::error::unexpected_message("Ready", &got),
-                Err(e) => e,
-            };
-            Err(PluginFailure::Handshake {
-                source: Arc::new(source),
-            })
-        }
-    }
+fn expect_ready(read: BridgeResult<Result<u32, String>>) -> Result<(), PluginFailure> {
+    let source = match read {
+        Ok(Ok(version)) => match crate::protocol::check_protocol_version(version) {
+            Ok(()) => return Ok(()),
+            Err(skew) => skew,
+        },
+        Ok(Err(got)) => BridgeError::UnexpectedMessage {
+            expected: "Ready",
+            got: got.into(),
+        },
+        Err(e) => e,
+    };
+    Err(PluginFailure::Handshake {
+        source: Arc::new(source),
+    })
 }
 
 /// Declare the bridge dead: latch the cause, then tell whoever is listening.
@@ -489,7 +487,7 @@ fn drain_unsolicited(inbox: &mut Unsolicited, channels: &Channels, listener: &Li
 /// Answer every queued block-lane command with an error. A queued chunk is
 /// never sent, so its MIDI is counted dropped; nothing can splice past it, as
 /// the server is gone.
-fn drain_with_errors(channels: &Channels, owed: &mut Owed) {
+fn drain_with_errors(channels: &Channels, owed: &mut AudioOwed) {
     while let Some(cmd) = channels.pop_block() {
         if let AudioCommand::Process(payload) = &cmd {
             channels.note_dropped_midi(payload.midi_events.len() as u64);
@@ -526,7 +524,7 @@ mod tests {
         let channels = Channels::new(SampleRate::SR_48K, Arc::default())
             .expect("the channels")
             .0;
-        let mut owed = Owed::audio(
+        let mut owed = AudioOwed::new(
             tutti_plugin_types::Timeouts::default().drain,
             response_ring().0,
         );

@@ -818,7 +818,7 @@ mode is one. The server's `LoadPlugin` activated at once and the state came
 after `PluginLoaded`, so such a plugin kept the default: every first load with
 a state, a crash-recovery reload, and a graph fork (four runs in six came up in
 the default mode). The state is now staged before the load
-(`HostMessage::StageStateChunk`), the loader restores it between opening the
+(`ControlRequest::StageStateChunk`), the loader restores it between opening the
 plugin and activating it, and the `PluginLoaded` reply (buses, latency) is the
 state's; a plugin that refuses the state loads at its defaults and the reply
 says so. The load declares the state it restores (`LoadPlugin { state: Some(StagedState { len }) }`) and the server refuses one that does not match what it holds; a stage is discarded by any other request. The server says `RestoringState` just before the restore, and from then the host waits a flat 60 s (a restore is one opaque call with nothing in it to measure progress by) and blames a failure on the state (`BridgeError::StateRestore`, which the session answers by withholding the snapshot); a failure before it, in the library or its init, is a load failure and blames nothing. `PluginClient::new_with_state`, `Plugin::open_with_state` and
