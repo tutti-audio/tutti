@@ -16,7 +16,7 @@
 //! `reverbEffectsSend` generators (SF2 2.04 section 8.1.2, generators 15 and 16)
 //! and the channel's CC 93 and CC 91, and a send nothing is sent to is reported
 //! silent (`Status::Masked`). The chorus and reverb are graph nodes
-//! (`tutti_nodes::ModDelayNode::general_midi_chorus`, and
+//! (`tutti_nodes::ModDelayConfig::general_midi_chorus`, and
 //! `tutti_nodes::FreeverbNode`), summed with the dry pair by the graph (the fader's ports take all three);
 //! `tutti-session`'s `Session::add_general_midi` wires the three, and a host that
 //! wants other effects wires the sends itself. `Settings` has no switch for
@@ -235,7 +235,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// inside it: the sends are what each voice would send to one, at the level the
 /// preset and the channel ask (SF2 2.04 section 8.1.2, generators 15 and 16, and
 /// CC 93 and CC 91), and the chorus and reverb are graph nodes
-/// (`tutti_nodes::ModDelayNode::general_midi_chorus`, and
+/// (`tutti_nodes::ModDelayConfig::general_midi_chorus`, and
 /// `tutti_nodes::FreeverbNode`) summed back with the dry pair by the graph's
 /// fan-in (the setup's fader holds all three as sources); `tutti-session`'s `Session::add_general_midi` wires all of
 /// that. A send with nothing to send is reported silent in the block's status

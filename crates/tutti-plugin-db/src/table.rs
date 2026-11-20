@@ -104,7 +104,7 @@ impl FileRow {
     pub fn probed(format: PluginFormat, facts: &FileFacts) -> Probed {
         Probed {
             format,
-            mtime: facts.mtime,
+            mtime: facts.mtime(),
             plugins: Vec::new(),
         }
     }
@@ -137,7 +137,7 @@ impl FileRow {
     #[must_use]
     pub fn blacklisted(reason: String, facts: &FileFacts) -> Self {
         Self {
-            mtime: facts.mtime,
+            mtime: facts.mtime(),
             state: FileState::Blacklisted { reason },
         }
     }
@@ -440,12 +440,10 @@ mod tests {
     const T: u64 = 1_700_000_000;
 
     pub(crate) fn facts(mtime: u64) -> FileFacts {
-        FileFacts {
-            exists: true,
+        FileFacts::Present {
             mtime: Mtime::new(
                 std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(mtime),
             ),
-            format: Some(PluginFormat::Vst3),
         }
     }
 
@@ -472,7 +470,7 @@ mod tests {
         assert_eq!(db.len(), 1);
         assert_eq!(
             db.row(Path::new("/p/a.vst3")).unwrap().mtime,
-            facts(T + 1).mtime
+            facts(T + 1).mtime()
         );
 
         db.apply(RowChange::remove("/p/a.vst3"));

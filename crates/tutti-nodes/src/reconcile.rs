@@ -421,7 +421,8 @@ struct SourcePlan {
 ///     Clock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
 ///     Source, SourceKey, TargetDecl, TargetKey, Waveform,
 /// };
-/// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterNode, SvfType, Target};
+/// use tutti_buffers::ChannelLayout;
+/// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
 /// use tutti_graph::NodeKey;
 /// use tutti_units::{Depth, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
 /// use tutti_rt::{Param, ParamCell};
@@ -431,7 +432,11 @@ struct SourcePlan {
 /// let params = editor.insert(
 ///     filter,
 ///     "svf",
-///     SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)),
+///     SvfFilterNode::<f32>::from(
+///         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+///             .freq(Hz::new(1_000.0))
+///             .q(Q::new(0.7)),
+///     ),
 /// )
 /// .controls;
 /// // A native target's range cell exists once its node is placed.

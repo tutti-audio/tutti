@@ -6,8 +6,8 @@
 //! more than its node: it also takes per-block MIDI, chord/scale context and
 //! note expression, reached here through capability accessors.
 
-use crate::host::placement::placement;
-use tutti_plugin_db::{Hosting, Loadable};
+use crate::host::placement::{ResolvedHosting, placement};
+use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::LockExt;
@@ -19,7 +19,7 @@ use tutti_plugin_host::{
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::IpcResult;
 use tutti_plugin_types::PluginFormat;
-use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor, PluginRole};
+use tutti_plugin_types::{LoadedPlugin, PluginDescriptor, StateError};
 use tutti_units::SampleRate;
 
 /// The audio node, wherever it runs.
@@ -43,7 +43,7 @@ enum Placed {
 /// inputs it can accept.
 ///
 /// Created by [`Plugin::open`] or `PluginLoad::run`.
-/// Where a plugin runs is its load's [`Hosting`]: by default VST3, CLAP and AU
+/// Where a plugin runs is its load's [`Hosting`](tutti_plugin_db::Hosting): by default VST3, CLAP and AU
 /// plugins run in a `plugin-server` subprocess and VST2 (with the `vst2`
 /// feature) in the host process; [`Loadable::hosting`] asks for the other
 /// where the format allows it. Which one a plugin landed in does not change
@@ -58,13 +58,17 @@ enum Placed {
 ///
 /// ```no_run
 /// use tutti_units::SampleRate;
-/// use tutti_plugin::catalog::{Loadable, Plugin, PluginRef};
+/// use tutti_plugin::catalog::Plugin;
+/// use tutti_plugin_db::Loadable;
+/// use tutti_plugin_ipc::AudioConfig;
+/// use tutti_plugin_types::{Features, PluginRef};
 ///
 /// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3");
-/// let (_collector, work) = tutti_plugin::MainWork::new();
-/// let plugin = Plugin::open(None, &work, &Loadable::uncatalogued(file), SampleRate::SR_48K)?;
-/// println!("{} ({:?})", plugin.descriptor().name, plugin.role());
-/// if plugin.takes_midi() {
+/// let (_collector, work) = tutti_plugin_types::MainWork::new();
+/// let loadable = Loadable::uncatalogued(file);
+/// let plugin = Plugin::open_served(&AudioConfig::default(), &work, &loadable, SampleRate::SR_48K)?;
+/// println!("{} ({:?})", plugin.descriptor().name, plugin.descriptor().class.role());
+/// if plugin.loaded().features.contains(Features::MIDI_IN) {
 ///     // wire a MIDI source to the node's event input
 /// }
 /// # Ok::<(), tutti_plugin_types::IpcError>(())
@@ -88,20 +92,37 @@ impl std::fmt::Debug for Plugin {
     }
 }
 
+/// Why a plugin did not take the state a load staged for it. The plugin is loaded
+/// at its defaults then, which beats no plugin.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RestoreRefused {
+    /// An in-process plugin's refusal.
+    #[error(transparent)]
+    State(#[from] StateError),
+    /// A served plugin's: the server's account of it, as the wire carries it.
+    #[error("{0}")]
+    Served(String),
+}
+
 impl Plugin {
-    /// Opens a plugin with the default bridge settings.
+    /// Opens a plugin where its load resolves ([`placement`]) with the default
+    /// bridge settings, holding the proof of the main thread an in-process load
+    /// needs. A caller off the main thread opens a served plugin with
+    /// [`open_served`](Self::open_served).
     ///
     /// ```no_run
-    /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
-    /// use tutti_plugin::catalog::{Catalog, CatalogConfig, Plugin, PluginId};
+    /// # fn ex(main: tutti_plugin_types::MainThreadMarker) -> Result<(), Box<dyn std::error::Error>> {
+    /// use tutti_plugin::catalog::Plugin;
+    /// use tutti_plugin_db::{Catalog, CatalogConfig};
+    /// use tutti_plugin_types::PluginId;
     /// use tutti_plugin_db::PluginDb;
     /// # let dir = std::path::PathBuf::from("/my/app/state");
     /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir), |_| Ok(()));
     /// let foo = catalog
     ///     .resolve(&"vst3.00112233-44556677-8899AABB-CCDDEEFF".parse::<PluginId>()?)
     ///     .bind()?;
-    /// let (_collector, work) = tutti_plugin::MainWork::new();
-    /// let plugin = Plugin::open(None, &work, &foo, tutti_units::SampleRate::SR_48K)?;
+    /// let (_collector, work) = tutti_plugin_types::MainWork::new();
+    /// let plugin = Plugin::open(main, &work, &foo, tutti_units::SampleRate::SR_48K)?;
     /// # Ok(()) }
     /// ```
     ///
@@ -109,126 +130,159 @@ impl Plugin {
     ///
     /// `plugin` names the plugin: its file, the format that opens it and which
     /// plugin of the file: a bundle that exports several opens the one its id
-    /// names, not the first. The [`Hosting`] is the load's. `Auto` runs VST2 (with
+    /// names, not the first. The [`Hosting`](tutti_plugin_db::Hosting) is the load's. `Auto` runs VST2 (with
     /// the `vst2` feature) in the host process, since its `AEffect` fuses
     /// editor and audio processor into one instance, and every other format in
     /// a `plugin-server` subprocess with an IPC bridge. This call blocks while
     /// the subprocess starts and the plugin loads, so call it off the audio
     /// thread.
     ///
-    /// `main` is the proof that the caller is on the main thread. Only an
-    /// in-process load needs it, and refuses to load without it; a plugin
-    /// served from a subprocess loads from any thread, so a caller that is not
-    /// on the main thread passes `None`.
-    ///
     /// The load asks `plugin`'s blacklist where it opens the plugin, so a plugin
     /// blacklisted since it was resolved is refused.
     ///
     /// # Errors
     ///
-    /// Returns [`IpcError::Blacklisted`](tutti_plugin_types::IpcError::Blacklisted)
+    /// As [`open_served`](Self::open_served) for a served plugin and
+    /// [`open_in_process`](Self::open_in_process) for an in-process one, and the
+    /// refusals of [`placement`].
+    pub fn open(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        plugin: &Loadable,
+        sample_rate: SampleRate,
+    ) -> IpcResult<Self> {
+        match placement(plugin)? {
+            ResolvedHosting::OutOfProcess => {
+                Self::open_served(&AudioConfig::default(), work, plugin, sample_rate)
+            }
+            ResolvedHosting::InProcess => Self::open_in_process(main, work, plugin, sample_rate),
+        }
+    }
+
+    /// Opens a plugin in a `plugin-server` subprocess over `audio`'s bridge, from
+    /// any thread.
+    ///
+    /// # Errors
+    ///
+    /// [`IpcError::Blacklisted`](tutti_plugin_types::IpcError::Blacklisted)
     /// for a blacklisted plugin,
     /// [`IpcError::ServerNotFound`](tutti_plugin_types::IpcError::ServerNotFound)
     /// when the `plugin-server` binary cannot be located,
     /// [`IpcError::LoadFailed`](tutti_plugin_types::IpcError::LoadFailed)
     /// when the plugin does not load, [`IpcError::NotOutOfProcess`] for a
-    /// VST2 plugin whose load asks for [`Hosting::OutOfProcess`],
-    /// [`IpcError::NotInProcess`] for a format this build has no in-process
-    /// host for, and a connection, protocol or timeout variant when the
+    /// VST2 plugin, and a connection, protocol or timeout variant when the
     /// subprocess cannot be reached.
     ///
     /// [`IpcError::NotOutOfProcess`]: tutti_plugin_types::IpcError::NotOutOfProcess
-    /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
-    pub fn open(
-        main: Option<MainThreadMarker>,
-        work: &MainWorkHandle,
-        plugin: &Loadable,
-        sample_rate: SampleRate,
-    ) -> IpcResult<Self> {
-        Self::open_with(main, work, &AudioConfig::default(), plugin, sample_rate)
-    }
-
-    /// Opens a plugin file with explicit bridge settings.
-    ///
-    /// See [`open`](Self::open).
-    ///
-    /// # Errors
-    ///
-    /// The same as [`open`](Self::open).
-    pub(crate) fn open_with(
-        main: Option<MainThreadMarker>,
-        work: &MainWorkHandle,
+    pub fn open_served(
         audio: &AudioConfig,
+        work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
     ) -> IpcResult<Self> {
-        Self::open_with_state(main, work, audio, plugin, sample_rate, None)
-            .map(|(plugin, _)| plugin)
+        Self::serve(audio, work, plugin, sample_rate, None).map(|(plugin, _)| plugin)
     }
 
-    /// `open_with`, restoring `state` into the plugin
+    /// [`open_served`](Self::open_served), restoring `state` into the plugin
     /// **before it is activated**: every format takes a state on a plugin that is
     /// open and not yet active, and a plugin may take its mode from the state at
-    /// activation. The second value is what became of it: `None` when none was
-    /// given, else the plugin's refusal as text (the plugin is then loaded at its
-    /// defaults, which beats no plugin).
+    /// activation. The second value is what became of it (the plugin is loaded at
+    /// its defaults if it refused, which beats no plugin).
     ///
     /// # Errors
     ///
-    /// The same as [`open`](Self::open).
-    pub fn open_with_state(
-        main: Option<MainThreadMarker>,
-        work: &MainWorkHandle,
+    /// The same as [`open_served`](Self::open_served).
+    pub fn open_served_restoring(
         audio: &AudioConfig,
+        work: &MainWorkHandle,
+        plugin: &Loadable,
+        sample_rate: SampleRate,
+        state: &[u8],
+    ) -> IpcResult<(Self, Result<(), RestoreRefused>)> {
+        Self::serve(audio, work, plugin, sample_rate, Some(state))
+            .map(|(plugin, restored)| (plugin, restored.unwrap_or(Ok(()))))
+    }
+
+    /// Opens a plugin in this process, on the main thread `main` proves.
+    ///
+    /// # Errors
+    ///
+    /// [`IpcError::Blacklisted`](tutti_plugin_types::IpcError::Blacklisted) for a
+    /// blacklisted plugin, [`IpcError::LoadFailed`](tutti_plugin_types::IpcError::LoadFailed)
+    /// when the plugin does not load, and [`IpcError::NotInProcess`] for a format
+    /// this build has no in-process host for.
+    ///
+    /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
+    pub fn open_in_process(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        plugin: &Loadable,
+        sample_rate: SampleRate,
+    ) -> IpcResult<Self> {
+        Self::host(main, work, plugin, sample_rate, None).map(|(plugin, _)| plugin)
+    }
+
+    /// [`open_in_process`](Self::open_in_process), restoring `state` before the
+    /// plugin is activated, as [`open_served_restoring`](Self::open_served_restoring).
+    ///
+    /// # Errors
+    ///
+    /// The same as [`open_in_process`](Self::open_in_process).
+    pub fn open_in_process_restoring(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        plugin: &Loadable,
+        sample_rate: SampleRate,
+        state: &[u8],
+    ) -> IpcResult<(Self, Result<(), RestoreRefused>)> {
+        Self::host(main, work, plugin, sample_rate, Some(state))
+            .map(|(plugin, restored)| (plugin, restored.unwrap_or(Ok(()))))
+    }
+
+    fn serve(
+        audio: &AudioConfig,
+        work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)> {
-        if placement(plugin)? == Hosting::InProcess {
-            // A served load asks the blacklist in `PluginClient::open`; a
-            // session load has asked it once already, before it defers.
-            plugin.check()?;
-            // An in-process plugin loads in this process, on the main thread:
-            // the caller says it is there by passing the token.
-            let Some(main) = main else {
-                return Err(tutti_plugin_types::IpcError::LoadFailed {
-                    path: Some(plugin.plugin().path().to_path_buf()),
-                    stage: tutti_plugin_types::LoadStage::Opening,
-                    reason: "a plugin hosted in the host process loads on the main thread \
-                             and needs it"
-                        .into(),
-                });
-            };
-            return Self::open_in_process(
-                main,
-                work,
-                plugin.plugin(),
-                crate::host::placement::format_of(plugin)?,
-                sample_rate,
-                state,
-            );
-        }
-
-        let ((client, restored), handle) =
-            PluginClient::open(audio.to_bridge_config()?, work, plugin, sample_rate, state).map(
-                |(client, restored)| {
-                    let handle = client.handle();
-                    ((client, restored), handle)
-                },
-            )?;
+    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)> {
+        let (client, restored) =
+            PluginClient::open(audio.to_bridge_config()?, work, plugin, sample_rate, state)?;
+        let handle = client.handle();
+        let restored = restored.map(|restored| restored.map_err(RestoreRefused::Served));
         Ok((Self::from_subprocess(client, handle), restored))
+    }
+
+    fn host(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        plugin: &Loadable,
+        sample_rate: SampleRate,
+        state: Option<&[u8]>,
+    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)> {
+        // A served load asks the blacklist in `PluginClient::open`; a session load
+        // has asked it once already, before it defers.
+        plugin.check()?;
+        Self::open_in_process_of(
+            main,
+            work,
+            plugin.plugin(),
+            crate::host::placement::format_of(plugin)?,
+            sample_rate,
+            state,
+        )
     }
 
     /// The in-process load, by format.
     #[allow(unused_variables)]
-    fn open_in_process(
+    fn open_in_process_of(
         main: MainThreadMarker,
         work: &MainWorkHandle,
         plugin: &PluginRef,
         format: PluginFormat,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)> {
+    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)> {
         match format {
             #[cfg(feature = "vst2")]
             PluginFormat::Vst2 => Self::load_in_process::<tutti_vst2_host::Vst2Loaded>(
@@ -262,11 +316,11 @@ impl Plugin {
                 sample_rate,
                 state,
             ),
-            // `Loadable::placement` refused every format with no host built in; this
-            // arm is the same refusal, for a caller that skipped it.
+            // `placement` refused every format with no host built in; this arm is
+            // the same refusal, for a caller that asked for in-process directly.
             _ => Err(tutti_plugin_types::IpcError::NotInProcess {
                 path: plugin.path().to_path_buf(),
-                format: "plugin",
+                format,
             }),
         }
     }
@@ -285,7 +339,7 @@ impl Plugin {
         plugin: &PluginRef,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)>
+    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)>
     where
         L: tutti_plugin_types::InProcess + 'static,
         L::Processor: 'static,
@@ -318,9 +372,7 @@ impl Plugin {
                 handle,
                 plugin,
             },
-            // The served path's restore result is the server's text, so this
-            // one is text too.
-            restored.map(|restored| restored.map_err(|refused| refused.to_string())),
+            restored.map(|restored| restored.map_err(RestoreRefused::State)),
         ))
     }
 
@@ -333,12 +385,11 @@ impl Plugin {
         }
     }
 
-    /// Where the plugin runs: [`Hosting::InProcess`] or
-    /// [`Hosting::OutOfProcess`], never `Auto`.
-    pub fn hosting(&self) -> Hosting {
+    /// Where the plugin runs.
+    pub fn hosting(&self) -> ResolvedHosting {
         match &self.placed {
-            Placed::Served(_) => Hosting::OutOfProcess,
-            Placed::InProcess(_) => Hosting::InProcess,
+            Placed::Served(_) => ResolvedHosting::OutOfProcess,
+            Placed::InProcess(_) => ResolvedHosting::InProcess,
         }
     }
 
@@ -368,96 +419,7 @@ impl Plugin {
         self.handle.loaded()
     }
 
-    /// Returns what this plugin is (instrument, effect, …), normalized across
-    /// formats.
-    pub fn role(&self) -> PluginRole {
-        self.descriptor().class.role()
-    }
-
     // ---- Per-block inputs -------------------------------------------------
-
-    /// Whether the plugin accepts this input, i.e. did not answer `false`.
-    ///
-    /// Shares `is_declined` with the [`PluginClient`] accessors, so the two
-    /// agree about what an unprobed capability means.
-    fn accepts(&self, f: Features) -> bool {
-        !crate::host::node::is_declined(self.loaded(), f)
-    }
-
-    /// Returns whether the plugin takes MIDI, that is, it did not decline MIDI
-    /// input.
-    ///
-    /// When `true`, wire MIDI to its node's event input.
-    pub fn takes_midi(&self) -> bool {
-        self.accepts(Features::MIDI_IN)
-    }
-
-    /// Returns whether the plugin sends MIDI, that is, it did not decline MIDI
-    /// output.
-    ///
-    /// When `true`, its node's event output carries it.
-    pub fn sends_midi(&self) -> bool {
-        self.accepts(Features::MIDI_OUT)
-    }
-
-    /// Tells the plugin whether it is being rendered under realtime pressure.
-    ///
-    /// Set this **before** pulling blocks for an offline bounce: a plugin may
-    /// spend more per block when it knows there is no deadline, and three of
-    /// the four formats can only take the change while the plugin is
-    /// deactivated. Leaving it unset renders the live-quality result into a
-    /// file the user asked to be exact.
-    ///
-    /// `false` if the plugin declared it does not honour a render-mode change
-    /// — a CLAP plugin that does not implement `clap.render`, or an AU without
-    /// `kAudioUnitProperty_OfflineRender`. That is a refusal, not a failure:
-    /// such a plugin renders identically either way, which is exactly what
-    /// declining the extension means.
-    #[must_use = "a false return means the plugin declined the render mode and nothing was applied"]
-    pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        if !self.accepts(Features::RENDER_MODE) {
-            return false;
-        }
-        match &self.placed {
-            Placed::Served(c) => c.set_render_mode(mode),
-            Placed::InProcess(c) => c.set_render_mode(mode),
-        }
-    }
-
-    /// Gives the plugin the project meter, for the time signature and bar of
-    /// the transport it is told. The node's meter follows the project meter
-    /// the host publishes edits to, so an edit reaches the running plugin
-    /// with nothing re-installed.
-    ///
-    /// The transport itself needs no install: every plugin node reads it from
-    /// each block's graph context once it is in a graph (the transport its
-    /// input was rendered at).
-    ///
-    /// Returns `false` if the plugin declared it does not want a transport
-    /// snapshot.
-    #[must_use = "a false return means the plugin declined this input and nothing was installed"]
-    pub fn set_meter(&self, meter: tutti_timeline::ProjectMeter) -> bool {
-        if !self.accepts(Features::TRANSPORT) {
-            return false;
-        }
-        self.meter().set_meter(meter);
-        true
-    }
-
-    /// Drops the meter; the plugin is told 4/4 from bar 0.
-    pub fn clear_meter(&self) {
-        self.meter().clear_meter();
-    }
-
-    /// The node's meter cell, as a handle of its own, for either hosting:
-    /// what a host keeps to install the meter after the plugin has moved
-    /// into a graph (the same cell [`set_meter`](Self::set_meter) writes).
-    pub fn meter(&self) -> tutti_plugin_host::PluginTimeSignature {
-        match &self.placed {
-            Placed::Served(c) => c.controls().meter(),
-            Placed::InProcess(c) => c.meter(),
-        }
-    }
 
     /// What the node counts and holds, for either hosting: its meter cell and
     /// the delivery counters (events it dropped, parameter points it sent,
@@ -467,19 +429,6 @@ impl Plugin {
         match &self.placed {
             Placed::Served(c) => (*c.controls()).clone(),
             Placed::InProcess(c) => c.controls(),
-        }
-    }
-
-    /// Returns whether the plugin takes chord and scale context (it declared
-    /// sequencer context).
-    ///
-    /// When `true`, wire a `HarmonyNode` (from `tutti-midi-runtime`) to its
-    /// event input. `false` for a plugin that declined, and for an in-process
-    /// node, whose event input takes only MIDI.
-    pub fn takes_harmony(&self) -> bool {
-        match &self.placed {
-            Placed::Served(c) => c.takes_harmony(),
-            Placed::InProcess(_) => false,
         }
     }
 
@@ -559,7 +508,7 @@ impl Plugin {
 /// control surface is needed after the node moves into the graph.
 ///
 /// The controls are the subprocess node's [`PluginControls`]; `None` for an
-/// in-process plugin, whose meter is reached through [`Plugin::meter`]
+/// in-process plugin, whose meter is reached through [`Plugin::node_controls`]
 /// (take it before binding; its own `IntoNode` hands back its
 /// `NodeControls`, which carry its parameter counters too). Either
 /// hands the editor its fork source: a fork by state transfer, into a new
@@ -782,7 +731,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
                 fork: Some(fork),
             },
             // An in-process node has no `PluginControls` (its meter is reached
-            // through `Plugin::meter`, taken before binding).
+            // through `Plugin::node_controls`, taken before binding).
             BoundPlaced::InProcess(node) => {
                 let parts = node.into_parts();
                 tutti_graph::NodeParts {
@@ -792,37 +741,5 @@ impl tutti_graph::IntoNode for BoundPlugin {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::host::node::is_declined;
-    use tutti_plugin_types::{Features, LoadedPlugin};
-
-    /// `Plugin`'s capability gate is the one the node accessors use.
-    ///
-    /// The installers on `Plugin` dispatch across the hostings, so they cannot
-    /// share the accessors themselves — but they must not restate the rule.
-    /// This pins that the shared predicate is what both consult, so a change to
-    /// "declined" reaches the unified surface too.
-    #[test]
-    fn the_unified_surface_gates_on_the_same_predicate_as_the_node() {
-        let declined = LoadedPlugin {
-            probed: Features::TRANSPORT,
-            features: Features::empty(),
-            ..Default::default()
-        };
-        assert!(is_declined(&declined, Features::TRANSPORT));
-
-        let advertised = LoadedPlugin {
-            probed: Features::TRANSPORT,
-            features: Features::TRANSPORT,
-            ..Default::default()
-        };
-        assert!(!is_declined(&advertised, Features::TRANSPORT));
-
-        // Unprobed stays open.
-        assert!(!is_declined(&LoadedPlugin::default(), Features::TRANSPORT));
     }
 }

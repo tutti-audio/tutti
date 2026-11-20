@@ -235,14 +235,6 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
-    /// The node with its kernel edited by `edit`, before the node has a rate: the kernel reads
-    /// what it was given at its `prepare`.
-    #[must_use]
-    pub(crate) fn map_kernel(mut self, edit: impl FnOnce(&mut K)) -> Self {
-        edit(&mut self.kernel);
-        self
-    }
-
     /// Back to silence: the grid counted from here, no ring-out owed, no input heard.
     fn clear(&mut self) {
         self.kernel.reset();
@@ -697,13 +689,14 @@ impl<K: Kernel> IntoNode<K::Float> for KernelNode<K> {
 
 #[cfg(test)]
 mod tests {
-    use tutti_dsp::{DelayControls, MaxDelay};
+    use tutti_buffers::BusTopology;
+    use tutti_dsp::{DelayControls, DelayLayout, InterpolationMode, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
     use tutti_units::{Frame, Seconds};
 
     use super::*;
-    use crate::DelayNode;
+    use crate::{DelayConfig, DelayNode};
 
     /// The earliest frame wins across channels, the lowest channel on a tie, and channels of
     /// unequal length are each read to their own end.
@@ -736,12 +729,16 @@ mod tests {
     fn a_kernel_with_an_unknown_tail_is_never_narrowed_cut_or_parked() {
         let rate = SampleRate::SR_48K;
         let mut node = prepared(
-            DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds::new(0.01)),
-                DelayControls {
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(0.01)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(DelayControls {
                     feedback: tutti_units::Feedback::new(0.5),
                     ..DelayControls::DEFAULT
-                },
+                }),
             ),
             rate,
             64,

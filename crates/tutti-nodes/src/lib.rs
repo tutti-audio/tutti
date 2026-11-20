@@ -23,7 +23,7 @@
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
 //!   bands sum to flat magnitude; IIR, so not linear-phase and no latency). Each
 //!   crossover is an indexed `Cutoff` param (`UnitAddr::new(UnitParam::Cutoff, i)`).
-//! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `Routing`),
+//! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `FeedbackRouting`),
 //!   a `KernelNode` over `DelayKernel` (`tutti_dsp::DelayBank`); the time and feedback are
 //!   read per frame when driven.
 //! - **Dynamics** — `CompressorNode`, `GateNode`, `BrickwallLimiterNode` and
@@ -104,16 +104,19 @@
 //!
 //! ```rust
 //! # use tutti_buffers::Planes;
-//! use tutti_buffers::MaxBlock;
+//! use tutti_buffers::{ChannelLayout, MaxBlock};
 //! use tutti_units::{Hz, Q, UnitParam};
 //! use tutti_graph::{Prepare, Standalone};
-//! use tutti_nodes::{SvfFilterNode, SvfType};
+//! use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 //! use tutti_units::{SampleRate, Samples};
 //!
 //! // A lowpass alone in a graph, fed by the graph's input. The filter is a
 //! // graph node: inserted, it hands back its `ParamSet` — cutoff, Q and
 //! // gain by `UnitParam` — and the graph prepares it at the graph's rate.
-//! let filter = SvfFilterNode::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707));
+//! let config = SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+//!     .freq(Hz::new(800.0))
+//!     .q(Q::new(0.707));
+//! let filter = SvfFilterNode::from(config);
 //! let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 //! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //!
@@ -239,8 +242,8 @@
 //! - Modules: [`automation`] (lanes and recording).
 //!
 
-// The fallible constructions are the crossover's (`CrossoverControls::new`,
-// `CrossoverNode::new`), all `CrossoverError`; the rest of this crate has no `Error` type.
+// The fallible constructions are the crossover's (`CrossoverControls::try_from`,
+// `CrossoverNode::try_from`), all `CrossoverError`; the rest of this crate has no `Error` type.
 
 // Per-block control reads and the ramps that keep them from stepping.
 mod buses;
@@ -283,16 +286,18 @@ mod oscillator;
 pub use oscillator::OscillatorNode;
 
 mod delay;
-pub use delay::{DelayKernel, DelayNode, DelaySet};
-// `InterpolationMode` and the delay's controls are in `DelayNode::new`'s signature;
-// the ring itself (`DelayLine`) is `tutti-dsp`'s only.
+pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
+// `InterpolationMode`, the routing, the channel times and the controls are in `DelayConfig`'s
+// signatures, and a refusal is a `DelayLayoutError`; the ring itself (`DelayLine`) is
+// `tutti-dsp`'s only.
 pub use tutti_dsp::{
-    ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, InterpolationMode, MaxDelay,
-    MaxDelayError, Routing, RoutingError,
+    ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, DelayLayoutBuilder,
+    DelayLayoutError, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
+    InterpolationMode, MaxDelay, MaxDelayError,
 };
 
 mod distortion;
-pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
+pub use distortion::{DistortionConfig, DistortionKernel, DistortionNode, DistortionSet};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
 pub use tutti_dsp::{Antialiasing, OversamplingFactor, ShapeKind};
@@ -310,10 +315,11 @@ pub use tutti_dsp::DcBlockerControls;
 mod filter;
 pub use filter::{
     BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
-    CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig, CutFilterControls,
-    CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, EqControls, EqKernel,
-    LadderFilterNode, LadderKernel, LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
-    TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
+    CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig,
+    CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet, EqBandConfig, EqBandNode,
+    EqControls, EqKernel, LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet,
+    MIN_CUT_CUTOFF, SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet, TiltFilterConfig,
+    TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
@@ -379,11 +385,11 @@ pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl,
 // Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
 // player's General MIDI setup uses.
 mod reverb_freeverb;
-pub use reverb_freeverb::{FreeverbKernel, FreeverbNode, FreeverbSet};
+pub use reverb_freeverb::{FreeverbConfig, FreeverbKernel, FreeverbNode, FreeverbSet};
 
 // The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
-pub use reverb_fdn::{FdnKernel, FdnNode, FdnSet};
+pub use reverb_fdn::{FdnConfig, FdnKernel, FdnNode, FdnSet};
 
 // Dattorro's plate as a `KernelNode`.
 mod reverb_plate;
@@ -400,13 +406,14 @@ pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
 
 mod modulation;
 pub use modulation::{
-    ModDelayKernel, ModDelayNode, ModDelaySet, PhaserKernel, PhaserNode, PhaserSet,
+    ModDelayConfig, ModDelayKernel, ModDelayNode, ModDelaySet, PhaserConfig, PhaserKernel,
+    PhaserNode, PhaserSet,
 };
-// The sweep, its stagger and the controls are in `ModDelayNode::new`'s and `PhaserNode::new`'s
-// signatures.
+// The layout, the sweep, its stagger and the controls are in `ModDelayConfig`'s and
+// `PhaserConfig`'s signatures.
 pub use tutti_dsp::{
-    ModDelayControls, PhaserControls, Stages, StagesError, Stagger, StaggerError, Sweep,
-    SweepError, SweepRange, SweepRangeError,
+    ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder, PhaserControls, Stages, StagesError,
+    Stagger, StaggerError, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError,
 };
 
 // The control sources' node (`SourceNode<S: ControlSource>`) and the

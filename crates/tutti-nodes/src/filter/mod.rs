@@ -18,7 +18,7 @@ pub use bell::{
     BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
 };
 pub(crate) use crossover::Splits;
-pub use crossover::{CrossoverKernel, CrossoverNode, CrossoverSet};
+pub use crossover::{CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet};
 pub use cut::{
     CutAlignment, CutFilterConfig, CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet,
     MIN_CUT_CUTOFF,
@@ -27,9 +27,9 @@ pub use envelope::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
 pub use eq::{EqControls, EqKernel};
-pub use eq_band::EqBandNode;
-pub use ladder::{LadderFilterNode, LadderKernel, LadderSet};
-pub use svf::{SvfFilterNode, SvfKernel, SvfSet};
+pub use eq_band::{EqBandConfig, EqBandNode};
+pub use ladder::{LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet};
+pub use svf::{SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet};
 pub use tilt::{
     TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };

@@ -29,9 +29,10 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{
-    CompressorConfig, CompressorControls, CompressorNode, KeySource, LadderFilterNode, LadderType,
-    LfoNode, LimiterConfig, LimiterControls, LimiterNode, ModDelayNode, PhaserControls, PhaserNode,
-    Stages, SvfFilterNode, SvfType,
+    CompressorConfig, CompressorControls, CompressorNode, KeySource, LadderFilterConfig,
+    LadderFilterNode, LadderType, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
+    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, SvfFilterConfig, SvfFilterNode,
+    SvfType,
 };
 use tutti_units::UnitParam;
 use tutti_units::{
@@ -50,11 +51,10 @@ fn addresses<N: ParamNode>(node: &N, p: UnitParam) -> bool {
 }
 
 fn svf() -> SvfFilterNode<f32> {
-    SvfFilterNode::<f32>::with_channels(
-        ChannelLayout::STEREO,
-        SvfType::LowPass,
-        Hz::new(1000.0),
-        Q::new(0.7),
+    SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+            .freq(Hz::new(1000.0))
+            .q(Q::new(0.7)),
     )
 }
 
@@ -77,11 +77,10 @@ fn a_param_the_set_lacks_has_no_address() {
 
 #[test]
 fn ladder_addresses_q_and_drive_but_not_feedback() {
-    let node = LadderFilterNode::<f32>::with_channels(
-        ChannelLayout::STEREO,
-        LadderType::LP24,
-        Hz::new(800.0),
-        Resonance::new(0.5),
+    let node = LadderFilterNode::<f32>::from(
+        LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+            .freq(Hz::new(800.0))
+            .res(Resonance::new(0.5)),
     );
     assert!(addresses(&node, UnitParam::Cutoff));
     assert!(addresses(&node, UnitParam::Q));
@@ -280,7 +279,7 @@ fn delay_at(out: &[f32], n: usize) -> f32 {
 /// A chorus on the bus `input` with no feedback, so its output is the input delayed by
 /// the sweep alone.
 fn dry_chorus(input: BusTopology) -> ModDelayNode<f32> {
-    let n = ModDelayNode::<f32>::chorus(input);
+    let n = ModDelayNode::<f32>::from(ModDelayConfig::chorus(input));
     assert!(set(&n, UnitParam::Feedback, 0.0));
     n
 }
@@ -323,7 +322,7 @@ fn a_lane_modulates_a_chorus_rate_around_its_own_cell() {
 
 #[test]
 fn chorus_rate_write_moves_the_nodes_own_cell() {
-    let node = ModDelayNode::<f32>::chorus(BusTopology::STEREO);
+    let node = ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO));
     let cell = node.param_set().cell(UnitParam::Rate).expect("addressed");
     let base = cell.load(Ordering::Acquire);
     assert!(
@@ -613,7 +612,8 @@ fn a_phaser_driven_past_its_depth_range_stays_stable() {
         // Knob 0.5 plus `depth` of the 16-wide range: 8.5 (held at the
         // range's 8) and -7.5.
         let out = render_driven(
-            PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT),
+            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+                .unwrap(),
             UnitParam::Depth,
             ParamRange::new(-8.0, 8.0),
             depth,
@@ -740,14 +740,11 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
 /// route removed, then 512 frames more, in blocks of `block`: the output, the
 /// shelf's DC gain at each frame.
 fn shelf_handed_back(block: usize) -> Vec<f32> {
-    let shelf = SvfFilterNode::<f32>::with_controls(
-        ChannelLayout::MONO,
-        tutti_nodes::SvfControls {
-            ty: SvfType::LowShelf,
-            freq: Hz::new(1000.0),
-            q: Q::new(0.7),
-            gain: Db::new(0.0),
-        },
+    let shelf = SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowShelf)
+            .freq(Hz::new(1000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(0.0)),
     );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, params) = g.add_with_controls(shelf);

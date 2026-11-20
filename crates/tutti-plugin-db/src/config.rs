@@ -3,6 +3,8 @@
 //! The caller supplies `pedal_dir` and `scan_dirs`: this library has no opinion
 //! on OS conventions or app names.
 
+use crate::probe::DEFAULT_PROBE_TIMEOUT;
+use crate::probing::DEFAULT_MEASURE_TIMEOUT;
 use std::path::PathBuf;
 use std::time::Duration;
 use tutti_plugin_types::Locator;
@@ -22,13 +24,13 @@ pub struct CatalogConfig {
     /// [`Locator::Search`] unless a host or a test names the binary.
     pub probe_locator: Locator,
 
-    /// How long a probe may take, or `None` for the catalog's default (fifteen
-    /// seconds, a cold plugin's load included).
-    pub probe_timeout: Option<Duration>,
+    /// How long a probe may take, a cold plugin's load included
+    /// ([`DEFAULT_PROBE_TIMEOUT`]).
+    pub probe_timeout: Duration,
 
-    /// How long a measuring probe may take, or `None` for the catalog's default
-    /// (three minutes: two renders of up to the longest tail).
-    pub measure_timeout: Option<Duration>,
+    /// How long a measuring probe may take, its renders included
+    /// ([`DEFAULT_MEASURE_TIMEOUT`]).
+    pub measure_timeout: Duration,
 
     /// Whether scans and registrations also measure the plugins they probe
     /// ([`measuring`](Self::measuring())).
@@ -43,8 +45,8 @@ impl CatalogConfig {
             pedal_dir: pedal_dir.into(),
             scan_dirs: Vec::new(),
             probe_locator: Locator::Search,
-            probe_timeout: None,
-            measure_timeout: None,
+            probe_timeout: DEFAULT_PROBE_TIMEOUT,
+            measure_timeout: DEFAULT_MEASURE_TIMEOUT,
             measuring: false,
         }
     }
@@ -79,14 +81,14 @@ impl CatalogConfig {
     /// Sets how long a probe may take.
     #[must_use]
     pub fn probe_timeout(mut self, timeout: Duration) -> Self {
-        self.probe_timeout = Some(timeout);
+        self.probe_timeout = timeout;
         self
     }
 
     /// Sets how long a measuring probe may take.
     #[must_use]
     pub fn measure_timeout(mut self, timeout: Duration) -> Self {
-        self.measure_timeout = Some(timeout);
+        self.measure_timeout = timeout;
         self
     }
 

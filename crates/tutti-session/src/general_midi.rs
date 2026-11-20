@@ -5,7 +5,7 @@
 //! pair, the chorus send pair and the reverb send), and a synthesizer with the
 //! sound of a General MIDI one needs what its sends were for. [`Session::add_general_midi`]
 //! wires them: the chorus is a `ModDelayNode` with
-//! [`ModDelayNode::general_midi_chorus`] (wet only), the reverb a
+//! [`ModDelayConfig::general_midi_chorus`] (wet only), the reverb a
 //! [`FreeverbNode`], the graph sums the dry pair and both effects' pairs into
 //! one stereo mix (each of the fader's two inputs has three sources), and a
 //! [`BusStripNode`] after the sum is the setup's fader, whose output is [`out`](GeneralMidi::out). The sends are
@@ -17,7 +17,7 @@
 
 use tutti_buffers::{BusTopology, Float};
 use tutti_dsp::{Lerp, SimdLanes};
-use tutti_nodes::{BusStripNode, FreeverbNode, ModDelayNode};
+use tutti_nodes::{BusStripNode, FreeverbConfig, FreeverbNode, ModDelayConfig, ModDelayNode};
 use tutti_soundfont::SoundFontUnit;
 use tutti_units::Amplitude;
 
@@ -123,7 +123,7 @@ where
     ///
     /// The wiring is the unit's dry pair (through the handle's strip), its
     /// chorus send pair through a wet-only
-    /// [`ModDelayNode::general_midi_chorus`], and its reverb send through a
+    /// [`ModDelayConfig::general_midi_chorus`], and its reverb send through a
     /// [`FreeverbNode`], each effect's stereo pair a source of the fader's
     /// left and right inputs beside the dry pair's: the graph sums them. Each effect declares its
     /// own tail, so an export that ends at the last note-off keeps the release
@@ -143,10 +143,12 @@ where
         } = self.add_instrument_unwired(unit)?;
         let unit = instrument.node().erase();
         let graph = self.graph();
-        let (chorus, _) = graph.add(ModDelayNode::<C::Float>::general_midi_chorus(
-            BusTopology::STEREO,
+        let (chorus, _) = graph.add(ModDelayNode::<C::Float>::from(
+            ModDelayConfig::general_midi_chorus(BusTopology::STEREO),
         ));
-        let (reverb, _) = graph.add(FreeverbNode::<C::Float>::general_midi());
+        let (reverb, _) = graph.add(FreeverbNode::<C::Float>::from(
+            FreeverbConfig::general_midi(),
+        ));
         let (strip, _) = graph.add(BusStripNode::stereo());
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.
         graph.connect(OutPort::new(unit, 2), chorus.input(0))?;

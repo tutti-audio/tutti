@@ -30,7 +30,7 @@
 //! `1 / (1 - g z^-d)`.
 //!
 //! The memory is the sweep's own [`MaxDelay`]: a line holds that long, and `base +
-//! depth_max` fits in it by [`Sweep::new`]. The state is the bank's float `F`.
+//! depth_max` fits in it by [`SweepBuilder::build`](crate::SweepBuilder::build). The state is the bank's float `F`.
 
 use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
@@ -133,22 +133,14 @@ pub struct ModDelayLayout {
 }
 
 impl ModDelayLayout {
-    /// A swept delay on the bus `input`, built to `sweep`, its channels' sweeps offset by
-    /// `stagger`.
-    ///
-    /// # Errors
-    ///
-    /// [`StaggerError::Length`] when `stagger` names an offset for each channel
-    /// ([`Stagger::each`]) and not for the `input`'s.
-    pub fn new(input: BusTopology, sweep: Sweep, stagger: Stagger) -> Result<Self, StaggerError> {
-        let width = usize::from(input.layout().count());
-        match stagger.channels() {
-            Some(got) if got != width => Err(StaggerError::Length { width, got }),
-            _ => Ok(Self {
-                input,
-                sweep,
-                stagger,
-            }),
+    /// A [`ModDelayLayoutBuilder`] for a swept delay on the bus `input`, built to `sweep`, its
+    /// channels' sweeps in step.
+    #[must_use]
+    pub const fn builder(input: BusTopology, sweep: Sweep) -> ModDelayLayoutBuilder {
+        ModDelayLayoutBuilder {
+            input,
+            sweep,
+            stagger: Stagger::NONE,
         }
     }
 
@@ -198,6 +190,12 @@ impl ModDelayLayout {
         &self.sweep
     }
 
+    /// How the channels' sweeps are offset from channel 0's.
+    #[must_use]
+    pub const fn stagger(&self) -> &Stagger {
+        &self.stagger
+    }
+
     /// The longest delay a line holds.
     #[must_use]
     pub const fn max_delay(&self) -> MaxDelay {
@@ -217,6 +215,47 @@ impl ModDelayLayout {
             *o = self.stagger.offset(c);
         }
         offsets
+    }
+}
+
+/// The terminal step of a [`ModDelayLayout`] of your own: [`build`](Self::build) checks the
+/// stagger against the bus, which the option cannot see.
+#[derive(Clone, Copy, Debug)]
+pub struct ModDelayLayoutBuilder {
+    input: BusTopology,
+    sweep: Sweep,
+    stagger: Stagger,
+}
+
+impl ModDelayLayoutBuilder {
+    /// Offsets the channels' sweeps by `stagger`.
+    #[must_use]
+    pub const fn stagger(mut self, stagger: Stagger) -> Self {
+        self.stagger = stagger;
+        self
+    }
+
+    /// The layout.
+    ///
+    /// # Errors
+    ///
+    /// [`StaggerError::Length`] when the stagger names an offset for each channel
+    /// ([`Stagger::try_from`] a slice) and not for the bus's.
+    pub fn build(self) -> Result<ModDelayLayout, StaggerError> {
+        let Self {
+            input,
+            sweep,
+            stagger,
+        } = self;
+        let width = usize::from(input.layout().count());
+        match stagger.channels() {
+            Some(got) if got != width => Err(StaggerError::Length { width, got }),
+            _ => Ok(ModDelayLayout {
+                input,
+                sweep,
+                stagger,
+            }),
+        }
     }
 }
 

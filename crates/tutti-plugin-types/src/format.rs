@@ -104,6 +104,18 @@ impl PluginFormat {
     }
 }
 
+/// The format as a user knows it: `VST3`, `VST2`, `CLAP`, `AU`.
+impl std::fmt::Display for PluginFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PluginFormat::Vst3 => "VST3",
+            PluginFormat::Vst2 => "VST2",
+            PluginFormat::Clap => "CLAP",
+            PluginFormat::AudioUnit => "AU",
+        })
+    }
+}
+
 /// A file extension no plugin format claims.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("`.{extension}` is not a plugin extension")]

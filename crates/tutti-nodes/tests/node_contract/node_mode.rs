@@ -12,7 +12,7 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::bits;
 use tutti_graph::{IntoNode, NodeMode, Prepare, Standalone, declick_frames};
-use tutti_nodes::{BusStripNode, EqBandNode, SvfType};
+use tutti_nodes::{BusStripNode, EqBandConfig, EqBandNode, SvfType};
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -46,11 +46,11 @@ fn input() -> Vec<f32> {
 /// multiplied the tone by ~250; the band is not called to do it.
 #[test]
 fn a_bypassed_band_is_its_input_bit_for_bit() {
-    let mut s = solo(EqBandNode::<f32>::new(
-        SvfType::Bell,
-        Hz::new(1_000.0),
-        Q::new(1.0),
-        Db::new(24.0),
+    let mut s = solo(EqBandNode::<f32>::from(
+        EqBandConfig::new(SvfType::Bell)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(1.0))
+            .gain(Db::new(24.0)),
     ));
     set_mode(&mut s, NodeMode::Bypassed);
     let x = input();

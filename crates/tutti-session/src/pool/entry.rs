@@ -420,7 +420,7 @@ pub enum LoadError {
     /// The plugin's id names no plugin of the catalog, or several.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
-    Unresolved(tutti_plugin::catalog::BindError),
+    Unresolved(tutti_plugin_db::BindError),
     /// The landed plugin has other ports than the node over the entry, which
     /// keeps the plugin it has.
     #[cfg(feature = "plugin")]

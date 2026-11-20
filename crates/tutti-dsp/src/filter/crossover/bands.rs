@@ -13,6 +13,16 @@ pub(super) const MIN_BANDS: usize = 2;
 /// The most bands.
 pub(super) const MAX_BANDS: usize = MAX_SPLITS + 1;
 
+tutti_units::ranged! {
+    /// How many bands a crossover splits into: 2 to 6, one more than its splits.
+    ///
+    /// A range-checked value: [`new`](Self::new) refuses a count the band tree is not defined
+    /// for and never clamps.
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    CrossoverBands(usize), CrossoverBandsError, "within 2..=6 bands",
+    |raw| raw >= MIN_BANDS && raw <= MAX_BANDS
+}
+
 /// Highest frequency the coefficients are solved at, as a fraction of the
 /// sample rate. `tan` diverges at Nyquist; a frequency a rate change leaves
 /// above this is solved here instead. It is 0.998 of Nyquist, the margin of

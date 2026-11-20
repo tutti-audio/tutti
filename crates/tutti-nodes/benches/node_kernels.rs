@@ -27,9 +27,10 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, ChannelTimes, CompressorConfig,
-    CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
-    FdnControls, FdnNode, FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode,
-    KeySource, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind,
+    CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
+    DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
+    GateControls, GateNode, InterpolationMode, KeySource, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ShapeKind,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Samples, Seconds};
@@ -144,14 +145,24 @@ fn distortion(c: &mut Criterion) {
         c,
         "distortion",
         "tanh_2",
-        || DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(2.0)),
+            )
+        },
         None,
     );
     run(
         c,
         "distortion",
         "softsign_2",
-        || DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                    .drive(Drive::new(2.0)),
+            )
+        },
         None,
     );
     for (case, kind) in [
@@ -163,7 +174,11 @@ fn distortion(c: &mut Criterion) {
             c,
             "distortion",
             case,
-            || DistortionNode::<f32>::new(kind, Drive::new(2.0)),
+            || {
+                DistortionNode::<f32>::from(
+                    DistortionConfig::new(ChannelLayout::STEREO, kind).drive(Drive::new(2.0)),
+                )
+            },
             None,
         );
     }
@@ -171,14 +186,23 @@ fn distortion(c: &mut Criterion) {
         c,
         "distortion",
         "hardclip_6",
-        || DistortionNode::<f32>::with_channels(6u16, ShapeKind::HardClip, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(6u16, ShapeKind::HardClip).drive(Drive::new(2.0)),
+            )
+        },
         None,
     );
     run(
         c,
         "distortion",
         "softsign_2_fed",
-        || DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                    .drive(Drive::new(2.0)),
+            )
+        },
         Some(drive_sweep),
     );
 }
@@ -241,7 +265,16 @@ fn delay(c: &mut Criterion) {
         c,
         "delay",
         "1",
-        || DelayNode::<f32>::mono(MaxDelay::of(Seconds::new(1.0)), delay_at_quarter()),
+        || {
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(1.0)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(delay_at_quarter()),
+            )
+        },
         None,
     );
     run(
@@ -249,11 +282,13 @@ fn delay(c: &mut Criterion) {
         "delay",
         "6",
         || {
-            DelayNode::<f32>::new(
-                BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
-                MaxDelay::of(Seconds::new(1.0)),
-                InterpolationMode::Linear,
-                delay_at_quarter(),
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    MaxDelay::of(Seconds::new(1.0)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(delay_at_quarter()),
             )
         },
         None,
@@ -263,20 +298,18 @@ fn delay(c: &mut Criterion) {
         "delay",
         "2_cross",
         || {
-            let layout = DelayLayout::new(
+            let layout = DelayLayout::builder(
                 BusTopology::STEREO,
                 MaxDelay::of(Seconds::new(1.0)),
                 InterpolationMode::Linear,
             )
-            .with_times(ChannelTimes::each(&[Seconds::new(0.3)]).expect("a time"))
-            .expect("one time for the right channel");
-            DelayNode::<f32>::from_layout(
-                layout,
-                DelayControls {
-                    cross_feedback: Feedback::new(0.3),
-                    ..delay_at_quarter()
-                },
-            )
+            .times(ChannelTimes::try_from(&[Seconds::new(0.3)][..]).expect("a time"))
+            .build()
+            .unwrap();
+            DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+                cross_feedback: Feedback::new(0.3),
+                ..delay_at_quarter()
+            }))
         },
         None,
     );
@@ -457,14 +490,14 @@ fn reverb(c: &mut Criterion) {
         c,
         "reverb",
         "freeverb",
-        FreeverbNode::<f32>::general_midi,
+        || FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
         None,
     );
     run(
         c,
         "reverb",
         "fdn",
-        || FdnNode::<f32>::live(tutti_nodes::FdnLayout::default(), FdnControls::DEFAULT),
+        || FdnNode::<f32>::from(FdnConfig::new().layout(tutti_nodes::FdnLayout::default())),
         None,
     );
 }

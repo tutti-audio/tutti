@@ -6,10 +6,10 @@
 use crate::pooled::{LoadPlugin, Spec, catalog_of};
 use crate::support::clap_probe;
 use tutti_buffers::MaxBlock;
-use tutti_plugin::catalog::{PluginId, PluginRef};
 use tutti_plugin_db::PluginEntry;
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{PluginClass, PluginDescriptor, StateUse};
+use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{PeerState, RestoreError, SavedPeer, Session};
 use tutti_units::Samples;
 
