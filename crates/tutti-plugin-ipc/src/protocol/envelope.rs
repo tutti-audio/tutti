@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
-use crate::SlabWire;
+use crate::{BlobWire, SlabWire};
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MidiEventVec;
@@ -188,7 +188,7 @@ pub enum AudioReply {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ControlRequest {
     /// Instantiate and activate the plugin, ready to process audio. A state
-    /// staged before ([`StageStateChunk`](Self::StageStateChunk)) and declared
+    /// staged before ([`StageState`](Self::StageState)) and declared
     /// in `state` is restored between the two; the server says
     /// [`ControlFrame::Working`] (`Restoring`) just before it starts.
     LoadPlugin {
@@ -219,7 +219,7 @@ pub enum ControlRequest {
         #[serde(default = "default_format")]
         preferred_format: FloatWidth,
         /// The state this load restores, staged before it
-        /// ([`StageStateChunk`](Self::StageStateChunk)): what the host expects the
+        /// ([`StageState`](Self::StageState)): what the host expects the
         /// server to hold. The server refuses a load whose declaration and stage
         /// do not agree (a state staged and none declared, or the reverse, or
         /// another length), so a stage left over from another load is never
@@ -255,35 +255,26 @@ pub enum ControlRequest {
         /// What the state is saved for.
         state_use: StateUse,
     },
-    /// One slice of a plugin state being restored, in order.
+    /// Restore a plugin state, which follows this frame as a memory object of its
+    /// own (`send_attached` writes both, and the server's transport reads both
+    /// before this reaches its session), answered by
+    /// [`ControlReply::StateLoaded`].
     ///
-    /// State is the only message whose size a plugin chooses, and it routinely
-    /// exceeds what a single frame may carry — see [`MAX_STATE_BYTES`]. So it
-    /// travels as a sequence rather than one `LoadState`, and the receiver
-    /// reassembles. Every frame stays under [`CONTROL_FRAME_BYTES`], so the
-    /// allocation and deadline bounds on the wire are untouched by a large
-    /// state.
-    ///
-    /// `seq` is checked, not trusted: a gap or a repeat means the sequence is
-    /// not what the sender thinks it is, and silently reassembling it would
-    /// hand the plugin a corrupt blob it would then try to parse.
+    /// State is the one message whose size a plugin chooses, and it routinely
+    /// exceeds what a frame may carry (see [`MAX_STATE_BYTES`]), so it travels as
+    /// an object and the frame only declares it. The receiver refuses an object
+    /// of another length than `len`, and a `len` over the limit, before it
+    /// copies a byte.
     ///
     /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
-    /// [`CONTROL_FRAME_BYTES`]: crate::CONTROL_FRAME_BYTES
-    LoadStateChunk {
-        /// Position in the sequence, starting at 0 and incrementing by one.
-        seq: u32,
-        /// The length in bytes of the whole state, the same in every chunk: the
-        /// receiver sizes its buffer once from it, and refuses a total over its
-        /// limit before it allocates.
-        total: u64,
-        /// `Some` on the final chunk, naming what the whole state is restored
-        /// for, and `None` on every other: the sequence names its use once. A
-        /// one-chunk state is `Some` on `seq` 0.
-        last: Option<StateUse>,
-        /// Opaque, format-defined bytes. Never interpret them host-side.
-        #[serde(with = "super::wire::bytes")]
-        bytes: Vec<u8>,
+    LoadState {
+        /// What the state is restored for.
+        state_use: StateUse,
+        /// The length in bytes of the state, which the object must have.
+        len: u64,
+        /// What the frame carries of the object: nothing on unix, where the
+        /// object follows, and its checked name on Windows.
+        blob: BlobWire,
     },
     /// Point the subprocess at the shared-memory audio slab, which follows this
     /// frame as a descriptor of its own on unix (`send_setup` writes both, and the
@@ -344,28 +335,21 @@ pub enum ControlRequest {
         /// Display text to parse, in whatever form the plugin renders.
         text: String,
     },
-    /// One slice of a plugin state to restore into the plugin the **next**
-    /// [`LoadPlugin`](Self::LoadPlugin) opens, in order, as
-    /// [`LoadStateChunk`](Self::LoadStateChunk) is for the plugin that is open.
+    /// A plugin state to restore into the plugin the **next**
+    /// [`LoadPlugin`](Self::LoadPlugin) opens, which follows this frame as a
+    /// memory object, as [`LoadState`](Self::LoadState)'s does for the plugin
+    /// that is open.
     ///
     /// A load activates the plugin, and a plugin may take its mode from the
     /// state when it is activated; a state restored after is restored too late.
     /// So the state is staged first and the server applies it between opening the
-    /// plugin and activating it. Answered once, on `last` (or on a failure), by
-    /// [`ControlReply::StateLoaded`]: `error: None` means staged, not
-    /// applied.
-    StageStateChunk {
-        /// Position in the sequence, starting at 0 and incrementing by one.
-        seq: u32,
-        /// The length in bytes of the whole state, the same in every chunk: the
-        /// receiver sizes its buffer once from it, and refuses a total over its
-        /// limit before it allocates.
-        total: u64,
-        /// Whether this is the final chunk.
-        last: bool,
-        /// Opaque, format-defined bytes. Never interpret them host-side.
-        #[serde(with = "super::wire::bytes")]
-        bytes: Vec<u8>,
+    /// plugin and activating it. Answered by [`ControlReply::StateLoaded`]:
+    /// `error: None` means staged, not applied.
+    StageState {
+        /// The length in bytes of the state, which the object must have.
+        len: u64,
+        /// What the frame carries of the object, as for [`LoadState`](Self::LoadState).
+        blob: BlobWire,
     },
     /// Ask the plugin's format for the plain value `value` stands for
     /// (`Control::parameter_plain`): the conversion is the format's, so the
@@ -446,7 +430,7 @@ pub enum ControlReply {
         /// host's preference.
         negotiated_format: FloatWidth,
         /// The plugin refused the staged state
-        /// ([`ControlRequest::StageStateChunk`]): it loaded at its defaults. `None`
+        /// ([`ControlRequest::StageState`]): it loaded at its defaults. `None`
         /// when it took the state, and when none was staged.
         #[serde(default)]
         state_error: Option<String>,
@@ -462,30 +446,21 @@ pub enum ControlReply {
         /// The declarations, empty if the plugin exposes no parameters.
         parameters: Vec<ParameterInfo>,
     },
-    /// One slice of the plugin's serialized state, answering
-    /// [`ControlRequest::SaveState`], in order.
+    /// The plugin's serialized state, answering [`ControlRequest::SaveState`]:
+    /// the state follows this frame as a memory object, as
+    /// [`ControlRequest::LoadState`]'s does, and the host refuses one of another
+    /// length than `len`, or a `len` over [`MAX_STATE_BYTES`].
     ///
-    /// The mirror of [`ControlRequest::LoadStateChunk`] and chunked for the same
-    /// reason: a sample-embedding instrument's state does not fit one frame.
-    /// The host reassembles against [`MAX_STATE_BYTES`].
-    ///
-    /// An **empty** state — a plugin that declines, or no plugin loaded — is
-    /// one chunk with `last: true` and no bytes, not an absent reply. A caller
-    /// waiting on a sequence must always see it terminate.
+    /// An **empty** state (a plugin that declines, or no plugin loaded) is an
+    /// object of length 0, not an absent reply.
     ///
     /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
-    StateChunk {
-        /// Position in the sequence, starting at 0 and incrementing by one.
-        seq: u32,
-        /// The length in bytes of the whole state, the same in every chunk: the
-        /// receiver sizes its buffer once from it, and refuses a total over its
-        /// limit before it allocates.
-        total: u64,
-        /// Whether this is the final chunk.
-        last: bool,
-        /// Opaque, format-defined bytes. Never interpret them host-side.
-        #[serde(with = "super::wire::bytes")]
-        bytes: Vec<u8>,
+    StateReady {
+        /// The length in bytes of the state, which the object must have.
+        len: u64,
+        /// What the frame carries of the object, as for
+        /// [`ControlRequest::LoadState`].
+        blob: BlobWire,
     },
     /// The plugin's preset list.
     ///
@@ -682,8 +657,7 @@ pub enum News {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ControlFrame {
-    /// A frame of the answer to request `id`. A state is answered in several,
-    /// the last of which ends the answer ([`ControlReply::ends`]).
+    /// The answer to request `id`.
     Reply {
         /// The `id` of the request.
         id: ReqId,
@@ -709,15 +683,6 @@ pub enum ControlFrame {
         /// The subprocess's [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
         protocol_version: u32,
     },
-}
-
-impl ControlReply {
-    /// Whether no frame of this answer follows it: a state chunk that is not
-    /// the last has more behind it.
-    #[must_use]
-    pub fn ends(&self) -> bool {
-        !matches!(self, Self::StateChunk { last: false, .. })
-    }
 }
 
 impl From<News> for ControlFrame {

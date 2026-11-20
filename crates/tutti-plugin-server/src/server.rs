@@ -292,6 +292,15 @@ impl PluginServer {
                 Ok(Incoming::SetupSlab { id, layout, slab }) => {
                     (id, self.session.setup_slab(&slab, layout))
                 }
+                Ok(Incoming::LoadState {
+                    id,
+                    state_use,
+                    state,
+                }) => (id, self.session.load_state(self.main, &state, state_use)),
+                Ok(Incoming::StageState { id, state }) => (id, self.session.stage_state(state)),
+                Ok(Incoming::StateRefused { id, staging, error }) => {
+                    (id, self.session.refuse_state(staging, error))
+                }
                 Err(IpcError::Io(_)) => return Ok(false),
                 Err(e) => return Err(e),
             };
@@ -302,11 +311,9 @@ impl PluginServer {
                         return Ok(false);
                     }
                 }
-                Reaction::ReplyMany(replies) => {
-                    for reply in replies {
-                        if transport.send(&ControlFrame::Reply { id, reply }).is_err() {
-                            return Ok(false);
-                        }
+                Reaction::State(state) => {
+                    if crate::transport::send_state(transport, id, &state).is_err() {
+                        return Ok(false);
                     }
                 }
                 Reaction::None => {}

@@ -84,6 +84,10 @@ impl Connection<'_> {
     }
 }
 
+/// Whether the platform rounds an object's length up past what it was sized to:
+/// a file is exactly its size.
+pub(super) const ROUNDS_UP: bool = false;
+
 /// What ends the name: the creator's handle to the file, kept for as long as
 /// its mapping lives. The name stays openable while it is held. It exists from
 /// the moment the creator's file does, so a failure after that closes it and

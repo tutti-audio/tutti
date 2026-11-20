@@ -169,12 +169,12 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
             ControlRequest::GetCurrentPreset => Some(ControlReply::CurrentPreset {
                 id: Some(PresetId::Number(PRESET)),
             }),
-            ControlRequest::SaveState { .. } => Some(ControlReply::StateChunk {
-                seq: 0,
-                total: STATE.len() as u64,
-                last: true,
-                bytes: STATE.to_vec(),
-            }),
+            ControlRequest::SaveState { .. } => {
+                if tutti_plugin_ipc::send_state_reply(stream, id, &STATE).is_err() {
+                    break;
+                }
+                None
+            }
             ControlRequest::SetSampleRate { rate } => {
                 log.lock()
                     .unwrap()

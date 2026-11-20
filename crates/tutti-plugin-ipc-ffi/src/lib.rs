@@ -63,12 +63,14 @@ pub use exit::{ExitWait, HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
-pub use mapping::{Connection, MappingWriter, SharedMapping, SlabHandle, SlabWire};
+pub use mapping::{
+    Blob, BlobWire, Connection, Lease, MappingWriter, Received, SharedMapping, SlabHandle, SlabWire,
+};
 pub use os::*;
 pub use reaped::Reaped;
 pub use wakeups::{FdId, Interest, Ready, Watch};
 
-/// Why a slab could not be made, opened or trusted.
+/// Why a slab or a blob could not be made, opened or trusted.
 #[derive(Debug, thiserror::Error)]
 pub enum SlabError {
     /// The slab's memory could not be created, opened, sized, sealed or mapped.
@@ -126,6 +128,28 @@ pub enum SlabError {
         /// The OS error.
         #[source]
         source: std::io::Error,
+    },
+    /// A blob's declared length is over the limit the receiver allows.
+    #[error("blob is declared {declared} bytes, over the {limit}-byte limit")]
+    BlobTooLarge {
+        /// The length the frame declared.
+        declared: u64,
+        /// The limit it exceeded.
+        limit: usize,
+    },
+    /// A blob's object is not the length its frame declared.
+    #[error("blob object is {actual} bytes, its frame declared {declared}")]
+    BlobSize {
+        /// The length the frame declared.
+        declared: u64,
+        /// The object's length.
+        actual: u64,
+    },
+    /// The memory for a blob's copy could not be allocated.
+    #[error("no room for a blob of {bytes} bytes")]
+    NoRoom {
+        /// The length asked for.
+        bytes: usize,
     },
     /// The mapping does not begin with the tutti slab magic: it is not a slab.
     #[error("not a tutti audio slab: magic {found:#x}, expected {expected:#x}")]

@@ -257,15 +257,20 @@ pub(crate) fn serve_every(
         let (id, reaction) = match transport.recv()? {
             Incoming::Request(Request { id, body }) => (id, session.handle(main, body)?),
             Incoming::SetupSlab { id, layout, slab } => (id, session.setup_slab(&slab, layout)),
+            Incoming::LoadState {
+                id,
+                state_use,
+                state,
+            } => (id, session.load_state(main, &state, state_use)),
+            Incoming::StageState { id, state } => (id, session.stage_state(state)),
+            Incoming::StateRefused { id, staging, error } => {
+                (id, session.refuse_state(staging, error))
+            }
         };
         match reaction {
             Reaction::Shutdown => return Ok(()),
             Reaction::Reply(reply) => transport.send(&ControlFrame::Reply { id, reply })?,
-            Reaction::ReplyMany(replies) => {
-                for reply in replies {
-                    transport.send(&ControlFrame::Reply { id, reply })?;
-                }
-            }
+            Reaction::State(state) => crate::transport::send_state(transport, id, &state)?,
             Reaction::None => {}
         }
         for event in session.drain_async_events(main) {

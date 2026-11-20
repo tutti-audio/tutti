@@ -32,6 +32,10 @@ pub(super) type Slab = OwnedFd;
 
 pub use crate::descriptor::{Connection, SlabWire};
 
+/// Whether the platform rounds an object's length up past what it was sized to
+/// (macOS, to a page): a blob's length is then checked as at least its declared one.
+pub(super) const ROUNDS_UP: bool = false;
+
 /// What the platform keeps beside the mapping: nothing.
 pub(super) type Backing = ();
 

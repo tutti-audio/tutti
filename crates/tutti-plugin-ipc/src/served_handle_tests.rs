@@ -116,6 +116,8 @@ fn send_bridge_msg<T: Framed>(stream: &interprocess::local_socket::Stream, msg: 
 enum Say {
     Reply(ControlReply),
     News(News),
+    /// A state: its `StateReady` frame and the object that follows it.
+    State(Vec<u8>),
 }
 
 impl From<ControlReply> for Say {
@@ -310,12 +312,23 @@ fn handle_with_multi_reply_server(
             };
             let replies = (respond.lock().unwrap())(msg.body);
             for said in replies {
-                let frame = match said {
-                    Say::Reply(reply) => ControlFrame::Reply { id: msg.id, reply },
-                    Say::News(news) => ControlFrame::News(news),
+                let (frame, object) = match said {
+                    Say::Reply(reply) => (ControlFrame::Reply { id: msg.id, reply }, None),
+                    Say::News(news) => (ControlFrame::News(news), None),
+                    Say::State(bytes) => {
+                        let object = tutti_plugin_ipc_ffi::Blob::create(&bytes).unwrap();
+                        let reply = ControlReply::StateReady {
+                            len: bytes.len() as u64,
+                            blob: object.wire(),
+                        };
+                        (ControlFrame::Reply { id: msg.id, reply }, Some(object))
+                    }
                 };
                 if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    send_bridge_msg(stream, &frame)
+                    send_bridge_msg(stream, &frame);
+                    if let Some(object) = object {
+                        let _lease = object.send(crate::transport::connection(stream)).unwrap();
+                    }
                 }))
                 .is_err()
                 {
@@ -500,18 +513,11 @@ fn a_tail_change_reaches_the_listener() {
 
 #[test]
 fn handle_save_state_roundtrip() {
-    let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
-        ControlRequest::SaveState { .. } => Some(ControlReply::StateChunk {
-            total: 4,
-            seq: 0,
-            last: true,
-            bytes: vec![0xDE, 0xAD, 0xBE, 0xEF],
-        }),
-        // A load is answered only on its final chunk; this mock sends none,
-        // which is the "no response" this test's other arms rely on.
-        ControlRequest::LoadStateChunk { .. } => None,
-        _ => None,
-    });
+    let (handle, _bridge, _bridge_handle, _server_thread) =
+        handle_with_multi_reply_server(|msg| match msg {
+            ControlRequest::SaveState { .. } => vec![Say::State(vec![0xDE, 0xAD, 0xBE, 0xEF])],
+            _ => Vec::new(),
+        });
 
     let state = handle.save_state(tutti_plugin_types::StateUse::Project);
     assert_eq!(state.expect("mock answered"), vec![0xDE, 0xAD, 0xBE, 0xEF]);

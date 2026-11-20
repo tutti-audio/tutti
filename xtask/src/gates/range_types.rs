@@ -111,16 +111,6 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: a test-local codec fixture, never read from a document",
     ),
     (
-        "crates/tutti-plugin-ipc/src/protocol/wire.rs",
-        "Plain",
-        "permanent: a test-local codec fixture, never read from a document",
-    ),
-    (
-        "crates/tutti-plugin-ipc/src/protocol/wire.rs",
-        "Coded",
-        "permanent: a test-local codec fixture, never read from a document",
-    ),
-    (
         "crates/tutti-plugin-types/src/automation.rs",
         "Raw",
         "permanent: the local shape `ParameterQueue`'s `Deserialize` reads, then checks",

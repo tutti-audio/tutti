@@ -36,6 +36,7 @@ use std::time::Duration;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_platform::Instant;
+use tutti_plugin_ipc_ffi::Blob;
 use tutti_plugin_types::ChannelLayout;
 use tutti_plugin_types::{IpcError, PluginFailure, StateError, Timeouts};
 use tutti_units::Normalized;
@@ -65,13 +66,11 @@ fn unreachable_deadline() -> Timeouts {
 /// out the real margin.
 const REPLY_MARGIN: Duration = Duration::from_millis(200);
 
-/// The shortened deadline the stall tests run with (the chunked-reassembly test
-/// has its own, wider one).
+/// The shortened state deadline the stall tests run with.
 ///
-/// Two orders of magnitude under production, so a stalled transfer is detected
-/// in a fraction of a second, and comfortably over the 20 ms poll interval so a
-/// scheduling hiccup does not read as a stall.
-const STATE_PROGRESS_TIMEOUT: Duration = Duration::from_millis(400);
+/// Two orders of magnitude under production, so a stalled request is detected in
+/// a fraction of a second.
+const STATE_TIMEOUT: Duration = Duration::from_millis(400);
 
 /// The default [`Timeouts`] with the wait for a rate change's answer set to
 /// `ms` milliseconds.
@@ -144,8 +143,8 @@ trait Wire: Framed {
     type Body;
     fn split(self) -> (ReqId, Self::Body);
 
-    /// Reads what follows the frame on the stream: a setup's slab, which the
-    /// mock server takes and never opens.
+    /// Reads what follows the frame on the stream: a setup's slab or a state's
+    /// object, which the mock server takes and never opens.
     fn follow(_body: &Self::Body, _stream: &Stream) {}
 }
 
@@ -156,9 +155,16 @@ impl Wire for Request {
     }
 
     fn follow(body: &ControlRequest, stream: &Stream) {
-        if let ControlRequest::SetupSharedMemory { slab, .. } = body {
-            SlabHandle::receive(crate::transport::connection(stream), slab.clone())
-                .expect("the slab follows its setup");
+        match body {
+            ControlRequest::SetupSharedMemory { slab, .. } => {
+                SlabHandle::receive(crate::transport::connection(stream), slab.clone())
+                    .expect("the slab follows its setup");
+            }
+            ControlRequest::LoadState { blob, .. } | ControlRequest::StageState { blob, .. } => {
+                Blob::receive(crate::transport::connection(stream), blob.clone())
+                    .expect("the object follows its state");
+            }
+            _ => {}
         }
     }
 }
@@ -203,22 +209,13 @@ enum Action {
     Die,
     /// Send a raw, deliberately malformed frame: `(advertised_len, body)`.
     Raw(u32, Vec<u8>),
-    /// Answer with a sequence of frames, in order.
-    ///
-    /// Needed for plugin state, which is chunked: a single-`Reply` mock cannot
-    /// produce a multi-frame answer, so without this the chunked path could
-    /// only be tested one chunk long — the length at which it is
-    /// indistinguishable from the single-frame shape it replaced.
-    ReplyMany(Vec<ControlReply>),
-    /// Answer with a sequence of frames, pausing `gap` before each.
-    ///
-    /// A slow-but-progressing peer: the thing a progress deadline must tolerate
-    /// and a total budget cannot. `ReplyMany` sends back-to-back and so proves
-    /// nothing about either.
-    ReplyManySlowly {
-        msgs: Vec<ControlReply>,
-        gap: Duration,
-    },
+    /// Answer, pausing `gap` before the reply: a slow peer.
+    ReplyAfter { reply: ControlReply, gap: Duration },
+    /// Answer a `SaveState` with a `StateReady` frame that declares `len`, and
+    /// the object holding `bytes`: an honest server's `len` is `bytes.len()`.
+    State { len: u64, bytes: Vec<u8> },
+    /// Answer a `SaveState` with a `StateReady` frame and no object after it.
+    StateWithoutObject,
     /// Advertise `len`, then dribble one byte every `gap` — forever.
     ///
     /// The peer a per-syscall receive timeout cannot bound. `SO_RCVTIMEO`
@@ -270,17 +267,32 @@ fn serve_lane<Req: Wire>(
                     }
                 }
             }
-            Action::ReplyMany(ms) => {
-                if ms.iter().any(|m| send_reply(&stream, id, m).is_err()) {
+            Action::ReplyAfter { reply, gap } => {
+                std::thread::sleep(gap);
+                if send_reply(&stream, id, &reply).is_err() {
                     return;
                 }
             }
-            Action::ReplyManySlowly { msgs, gap } => {
-                for m in &msgs {
-                    std::thread::sleep(gap);
-                    if send_reply(&stream, id, m).is_err() {
-                        return;
-                    }
+            Action::State { len, bytes } => {
+                let blob = Blob::create(&bytes).expect("the mock's state object");
+                let reply = ControlReply::StateReady {
+                    len,
+                    blob: blob.wire(),
+                };
+                if send_reply(&stream, id, &reply).is_err()
+                    || blob.send(crate::transport::connection(&stream)).is_err()
+                {
+                    return;
+                }
+            }
+            Action::StateWithoutObject => {
+                let blob = Blob::create(&[]).expect("the mock's state object");
+                let reply = ControlReply::StateReady {
+                    len: 0,
+                    blob: blob.wire(),
+                };
+                if send_reply(&stream, id, &reply).is_err() {
+                    return;
                 }
             }
             Action::Silent => {}
@@ -356,20 +368,18 @@ impl MockServer {
         Self::start_with_timeouts(label, Timeouts::default(), respond)
     }
 
-    /// As [`start`](Self::start), with an explicit state-transfer progress
-    /// deadline.
+    /// As [`start`](Self::start), with an explicit state request deadline.
     ///
     /// The stall tests pass a shortened one: production's is 10 s, and a test
-    /// that proved the stall path by waiting it out would spend all of it. The
-    /// chunked-reassembly test passes a window far past anything it spends.
-    fn start_with_state_progress_timeout(
+    /// that proved the stall path by waiting it out would spend all of it.
+    fn start_with_state_timeout(
         label: &str,
-        state_progress: Duration,
+        state: Duration,
         respond: impl Fn(ControlRequest) -> Action + Send + 'static,
     ) -> Self {
         let timeouts = {
             let mut t = Timeouts::default();
-            t.state_progress = state_progress;
+            t.state = state;
             t
         };
         Self::start_with_timeouts(label, timeouts, respond)
@@ -1189,20 +1199,17 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
 #[test]
 fn a_valid_but_wrong_reply_type_does_not_satisfy_the_request() {
     let mock = MockServer::start("wrong-type", |msg| match msg {
-        // Asked for a parameter value; answer with state data instead.
-        ControlRequest::GetParameter { .. } => Action::Reply(Box::new(ControlReply::StateChunk {
-            seq: 0,
-            total: 4,
-            last: true,
-            bytes: vec![1, 2, 3, 4],
-        })),
+        // Asked for a parameter value; answer with a state acknowledgement instead.
+        ControlRequest::GetParameter { .. } => {
+            Action::Reply(Box::new(ControlReply::StateLoaded { error: None }))
+        }
         _ => Action::Silent,
     });
 
     let value = mock.bridge.audio().parameter(ParamId::new(1));
     assert_eq!(
         value, None,
-        "a StateData reply was accepted as the answer to GetParameter — the \
+        "a StateLoaded reply was accepted as the answer to GetParameter — the \
          host is matching on 'a reply arrived', not on which reply"
     );
 }
@@ -1339,8 +1346,8 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
 #[test]
 fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
     let mock = MockServer::start_with_timeouts("late_rate", rate_timeout(300), |msg| match msg {
-        ControlRequest::SetSampleRate { rate } => Action::ReplyManySlowly {
-            msgs: vec![ControlReply::SampleRateSet { rate, error: None }],
+        ControlRequest::SetSampleRate { rate } => Action::ReplyAfter {
+            reply: ControlReply::SampleRateSet { rate, error: None },
             gap: Duration::from_millis(800),
         },
         ControlRequest::GetParameter { .. } => {
@@ -1588,42 +1595,27 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
     mock.wait_for_crash("the bridge to report a crash");
 }
 
-/// A large state survives the round trip, in both directions.
+/// A large state survives the trip from the server.
 ///
-/// A state over `CONTROL_FRAME_BYTES` must travel as chunks, not fail as a *crash*
+/// A state over `CONTROL_FRAME_BYTES` must arrive whole, not fail as a *crash*
 /// (`save_state` answering "the bridge process crashed"), which would be
 /// indistinguishable from a segfault and lose the user's preset under a wrong
-/// explanation.
-///
-/// **Sized by `STATE_CHUNK_BYTES`, not by `CONTROL_FRAME_BYTES`.** What this test
-/// has to prove is that a state spanning *several* chunks reassembles in order
-/// and intact, and the chunk size is what decides that — a 68 MiB fixture
-/// would prove the same property while moving 68 MiB through a socket, which
-/// under parallel load overruns the harness's 10 s deadline and fails as a timeout
-/// rather than a defect. Three chunks and a remainder exercises every boundary
-/// the reassembler has: first, middle, last, and a partial final chunk.
+/// explanation. The state is an object beside its frame, so it is read at its
+/// own length, past the frame cap.
 #[test]
-fn a_state_larger_than_one_frame_round_trips() {
-    use crate::STATE_CHUNK_BYTES;
-
-    // A byte pattern, not zeros: a chunking bug that drops or reorders a piece
-    // leaves the length right and the contents wrong, which zeros would hide.
-    let big: Vec<u8> = (0..STATE_CHUNK_BYTES * 3 + 4096)
+fn a_state_larger_than_one_frame_arrives_whole() {
+    // A byte pattern, not zeros: a copy that drops or reorders a piece leaves
+    // the length right and the contents wrong, which zeros would hide.
+    let big: Vec<u8> = (0..crate::CONTROL_FRAME_BYTES + 4096)
         .map(|i| (i % 251) as u8)
         .collect();
     let expected = big.clone();
 
     let mock = MockServer::start("big-state", move |msg| match msg {
-        ControlRequest::SaveState { .. } => Action::ReplyMany(
-            crate::transport::state_chunk::split(&big)
-                .map(|(seq, last, bytes)| ControlReply::StateChunk {
-                    seq,
-                    total: big.len() as u64,
-                    last,
-                    bytes: bytes.to_vec(),
-                })
-                .collect(),
-        ),
+        ControlRequest::SaveState { .. } => Action::State {
+            len: big.len() as u64,
+            bytes: big.clone(),
+        },
         _ => Action::Silent,
     });
 
@@ -1633,33 +1625,95 @@ fn a_state_larger_than_one_frame_round_trips() {
             .audio()
             .save_state(tutti_plugin_types::StateUse::Project)
     })
-    .unwrap_or_else(|w| panic!("save_state on a multi-chunk state blocked for {w:?}"));
+    .unwrap_or_else(|w| panic!("save_state on a large state blocked for {w:?}"));
     let got = got.unwrap_or_else(|e| {
         panic!(
-            "a {}-byte state failed with {e} — a state larger than one frame \
+            "a {}-byte state failed with {e}: a state larger than one frame \
              must be carried, not refused",
             expected.len()
         )
     });
-    assert_eq!(
-        got.len(),
-        expected.len(),
-        "reassembled state has the wrong length"
-    );
-    assert!(
-        got == expected,
-        "reassembled state does not match what was sent"
-    );
+    assert_eq!(got.len(), expected.len(), "the state has the wrong length");
+    assert!(got == expected, "the state does not match what was sent");
+}
 
-    // Sanity: the fixture really did span several chunks. Without this the
-    // test would still pass if `STATE_CHUNK_BYTES` were raised past the
-    // fixture size, silently reverting to the single-frame shape it exists to
-    // distinguish itself from.
+/// **A state object of another length than its frame declared is rejected, by
+/// the plugin's fault and not the connection's**: the typed refusal reaches the
+/// caller, and the session still completes a round trip.
+#[test]
+fn a_state_object_of_another_length_than_declared_is_rejected() {
+    for (declared, held) in [(100u64, 50usize), (50, 100)] {
+        let mock = MockServer::start("state-length", move |msg| match msg {
+            ControlRequest::SaveState { .. } => Action::State {
+                len: declared,
+                bytes: vec![9u8; held],
+            },
+            ControlRequest::GetParameterList => {
+                Action::Reply(Box::new(ControlReply::ParameterList {
+                    parameters: Vec::new(),
+                }))
+            }
+            _ => Action::Silent,
+        });
+        let err = mock
+            .bridge
+            .audio()
+            .save_state(tutti_plugin_types::StateUse::Project)
+            .expect_err("a state of the wrong length was accepted");
+        assert!(
+            matches!(&err, StateError::Rejected(why) if why.contains("declared")),
+            "declared {declared}, held {held}: {err:?}"
+        );
+        assert_healthy_after_stall(&mock, "mismatched save_state");
+    }
+}
+
+/// **A declared state length past `MAX_STATE_BYTES` is `TooLarge`**, before a
+/// byte of the object is read, and the session goes on.
+#[test]
+fn a_declared_state_past_the_limit_is_too_large() {
+    use tutti_plugin_types::MAX_STATE_BYTES;
+    let mock = MockServer::start("state-cap", |msg| match msg {
+        ControlRequest::SaveState { .. } => Action::State {
+            len: MAX_STATE_BYTES as u64 + 1,
+            bytes: vec![0u8; 16],
+        },
+        ControlRequest::GetParameterList => Action::Reply(Box::new(ControlReply::ParameterList {
+            parameters: Vec::new(),
+        })),
+        _ => Action::Silent,
+    });
+    let err = mock
+        .bridge
+        .audio()
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect_err("a state past the limit was accepted");
     assert!(
-        crate::transport::state_chunk::split(&expected).count() >= 4,
-        "the fixture no longer spans multiple chunks, so this test would pass \
-         without chunking existing"
+        matches!(err, StateError::TooLarge { bytes, limit }
+            if bytes == MAX_STATE_BYTES + 1 && limit == MAX_STATE_BYTES),
+        "{err:?}"
     );
+    assert_healthy_after_stall(&mock, "oversized save_state");
+}
+
+/// **A state frame whose object never follows ends in bounded time**, as the
+/// connection's failure: the stream has no object where the frame announced one,
+/// so the host cannot read on from it.
+#[test]
+fn a_state_frame_without_its_object_ends_the_connection() {
+    let mock = MockServer::start("state-no-object", |msg| match msg {
+        ControlRequest::SaveState { .. } => Action::StateWithoutObject,
+        _ => Action::Silent,
+    });
+    let bridge = Arc::clone(&mock.bridge);
+    let got = call_within(move || {
+        bridge
+            .audio()
+            .save_state(tutti_plugin_types::StateUse::Project)
+    })
+    .unwrap_or_else(|w| panic!("a missing object left save_state blocked for {w:?}"));
+    assert!(got.is_err(), "a state with no object was accepted");
+    mock.wait_for_crash("the bridge to end on a state frame with no object");
 }
 
 /// An over-limit `load_state` is a typed refusal, not a crash.
@@ -1721,113 +1775,34 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
     );
 }
 
-// ── State transfer: progress, not a total ────────────────────────────────────
+// ── A state request the server does not answer ───────────────────────────────
 
-/// A *steadily progressing* transfer must complete, however long it takes in
-/// total.
+/// A `save_state` the server never answers must fail as a typed stall,
+/// promptly, and leave a session that still works.
 ///
-/// A fixed budget for the whole transfer would make
-/// [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES) unreachable. That a
-/// transfer advancing inside its window is live however many windows it spans
-/// is the `StallWatch` rule, tested over constructed instants in
-/// `client::audio::progress`; this test carries the reassembly through the
-/// bridge: 60 chunks, a byte each, arriving with a gap, come back in order.
-/// The window and the guard are far past anything a loaded machine spends, and
-/// the test asserts completion, never how long it took.
-#[test]
-fn a_chunked_state_transfer_reassembles_in_order() {
-    const CHUNKS: usize = 60;
-    const GAP: Duration = Duration::from_millis(2);
-
-    // One byte per chunk; the byte pattern catches a chunk dropped or
-    // reordered by a progress-accounting bug.
-    let expected: Vec<u8> = (0..CHUNKS).map(|i| (i % 251) as u8).collect();
-    let msgs: Vec<ControlReply> = (0..CHUNKS)
-        .map(|i| ControlReply::StateChunk {
-            seq: i as u32,
-            total: CHUNKS as u64,
-            last: i == CHUNKS - 1,
-            bytes: vec![(i % 251) as u8],
-        })
-        .collect();
-
-    let mock = MockServer::start_with_state_progress_timeout(
-        "slow-state",
-        Duration::from_secs(60),
-        move |msg| match msg {
-            ControlRequest::SaveState { .. } => Action::ReplyManySlowly {
-                msgs: msgs.clone(),
-                gap: GAP,
-            },
-            _ => Action::Silent,
-        },
-    );
-
-    let bridge = Arc::clone(&mock.bridge);
-    let (tx, rx) = crossbeam_channel::bounded(1);
-    std::thread::spawn(move || {
-        let _ = tx.send(
-            bridge
-                .audio()
-                .save_state(tutti_plugin_types::StateUse::Project),
-        );
-    });
-    let got = rx
-        .recv_timeout(Duration::from_secs(60))
-        .expect("a progressing save_state never returned");
-    let got = got.unwrap_or_else(|e| panic!("a progressing transfer failed with {e}"));
-    assert_eq!(
-        got, expected,
-        "the reassembled state does not match what the peer sent"
-    );
-}
-
-/// A `save_state` that *stops* must fail as a typed stall, promptly, and leave
-/// a session that still works.
-///
-/// The complement of the test above: tolerating a slow transfer is only correct
-/// if a stalled one is still caught. Four properties:
+/// Three properties:
 ///
 /// - **Typed.** [`StateError::Stalled`] and not `Rejected`. The plugin refused
-///   nothing — it went quiet mid-stream — and a string like
-///   `"the plugin did not answer within the state timeout"` would blame it for
-///   a judgement the host made. Also distinct from `TooLarge`: nothing here is
-///   over any limit, and a caller that cannot tell the two apart cannot decide
-///   whether retrying is worth anything.
-/// - **Not crashed**, and held past the *production* deadline. The bridge
-///   thread's own read expires first, and if that expiry were connection-level
-///   the crash would land while the caller was still waiting.
+///   nothing: it went quiet, and a string like `"the plugin did not answer"`
+///   would blame it for a judgement the host made. Also distinct from
+///   `TooLarge`: nothing here is over any limit, and a caller that cannot tell
+///   the two apart cannot decide whether retrying is worth anything.
+/// - **Not crashed.** The bridge thread's own deadline expires first, and if
+///   that expiry were connection-level the crash would land while the caller
+///   was still waiting.
 /// - **Actually usable**, which `is_crashed()` only implies.
 ///
-/// **The health probe is a live round trip, deliberately.** It read
-/// `parameters().is_none()`, which proved nothing: `parameters` answers `None`
-/// both when the bridge is crashed *and* when a healthy bridge times out
-/// against a silent peer, so that assertion could not fail either way. Here the
-/// peer answers `GetParameterList` with a real list, so `Some` is reachable only
-/// by a command reaching a live bridge thread and a reply coming back —
-/// impossible on a crashed bridge, which short-circuits on `is_crashed` before
-/// it sends anything.
+/// **The health probe is a live round trip, deliberately.** `parameters`
+/// answers `None` both when the bridge is crashed *and* when a healthy bridge
+/// times out against a silent peer, so `parameters().is_none()` could not fail
+/// either way. Here the peer answers `GetParameterList` with a real list, so
+/// `Some` is reachable only by a command reaching a live bridge thread and a
+/// reply coming back, impossible on a crashed bridge.
 #[test]
 fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
-    // Two chunks, then silence with `last` never sent: the transfer starts,
-    // makes real progress, and then stops. Progress-then-stop is the case a
-    // naive implementation gets wrong — it is neither "never answered" nor a
-    // completed transfer.
-    let mock = MockServer::start_with_state_progress_timeout(
-        "stalled-save",
-        STATE_PROGRESS_TIMEOUT,
-        move |msg| match msg {
-            ControlRequest::SaveState { .. } => Action::ReplyManySlowly {
-                msgs: (0..2)
-                    .map(|i| ControlReply::StateChunk {
-                        seq: i,
-                        total: 96,
-                        last: false,
-                        bytes: vec![7u8; 32],
-                    })
-                    .collect(),
-                gap: Duration::from_millis(10),
-            },
+    let mock = MockServer::start_with_state_timeout("stalled-save", STATE_TIMEOUT, move |msg| {
+        match msg {
+            ControlRequest::SaveState { .. } => Action::Silent,
             // Answered, so the health probe below is a real round trip rather
             // than another timeout.
             ControlRequest::GetParameterList => {
@@ -1836,8 +1811,8 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
                 }))
             }
             _ => Action::Silent,
-        },
-    );
+        }
+    });
 
     let bridge = Arc::clone(&mock.bridge);
     let got = call_within(move || {
@@ -1846,52 +1821,38 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
             .save_state(tutti_plugin_types::StateUse::Project)
     })
     .unwrap_or_else(|w| panic!("a stalled save_state never returned; blocked for {w:?}"));
-    let err = got.expect_err("a stalled transfer reported success");
+    let err = got.expect_err("an unanswered save reported success");
 
     assert!(
-        matches!(err, StateError::Stalled { .. }),
-        "a stalled transfer reported {err:?}; the caller cannot tell a wedged \
+        matches!(err, StateError::Stalled { after } if after == STATE_TIMEOUT),
+        "an unanswered save reported {err:?}; the caller cannot tell a wedged \
          plugin from one that refused, from a state over the size limit, or \
          from a dead subprocess"
     );
-    // It stalled *after* progress, and the error says so — which is what makes
-    // the variant more useful than a bare timeout.
-    if let StateError::Stalled { bytes, .. } = &err {
-        assert_eq!(
-            *bytes, 64,
-            "the stall reported {bytes} bytes transferred; the count is what \
-             separates a transfer that never started from one that died part-way"
-        );
-    }
     assert_healthy_after_stall(&mock, "save_state");
 }
 
-/// The same, for `load_state`.
+/// The same, for `load_state`: the object is sent and the server never says it
+/// took it.
 ///
 /// A separate test rather than a parameter on the one above, because the two
 /// directions stall through *different code*: `save_state` gives up waiting for
-/// a chunk to arrive, `load_state` writes every chunk successfully and then
-/// waits on the single `StateLoaded` acknowledgement that never comes. Only the
-/// receive path was covered, so the load path's timeout — a distinct call
-/// site, the `LoadState` arm's `answer` — was crashing the bridge with no test
-/// to say so.
+/// the `StateReady` frame, `load_state` writes its object successfully and then
+/// waits on the `StateLoaded` acknowledgement that never comes.
 #[test]
 fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
-    let mock = MockServer::start_with_state_progress_timeout(
-        "stalled-load",
-        STATE_PROGRESS_TIMEOUT,
-        move |msg| match msg {
-            // Chunks are accepted and never acknowledged: the transfer makes
-            // full progress and then hangs on the answer.
-            ControlRequest::LoadStateChunk { .. } => Action::Silent,
+    let mock = MockServer::start_with_state_timeout("stalled-load", STATE_TIMEOUT, move |msg| {
+        match msg {
+            // The object is accepted and never acknowledged.
+            ControlRequest::LoadState { .. } => Action::Silent,
             ControlRequest::GetParameterList => {
                 Action::Reply(Box::new(ControlReply::ParameterList {
                     parameters: Vec::new(),
                 }))
             }
             _ => Action::Silent,
-        },
-    );
+        }
+    });
 
     let bridge = Arc::clone(&mock.bridge);
     let got = call_within(move || {
@@ -1905,10 +1866,9 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
     let err = got.expect_err("an unacknowledged load reported success");
 
     assert!(
-        matches!(err, StateError::Stalled { bytes: 128, .. }),
-        "an unacknowledged load reported {err:?}; the bytes went out but the \
-         plugin never confirmed it took them, which is a stall (after the 128 \
-         bytes the bridge advanced the shared counter for) and not a \
+        matches!(err, StateError::Stalled { after } if after == STATE_TIMEOUT),
+        "an unacknowledged load reported {err:?}; the object went out but the \
+         plugin never confirmed it took it, which is a stall and not a \
          rejection, a size refusal or a crash"
     );
     assert_healthy_after_stall(&mock, "load_state");

@@ -20,15 +20,14 @@ use thiserror::Error;
 /// The most one plugin state holds, in bytes: 1 GiB.
 ///
 /// Every layer that accumulates a state a plugin or a peer sends (a format's
-/// stream, the out-of-process reassembly of a `StateChunk` sequence, the
+/// stream, the object a state travels in between processes, the
 /// server's reply) refuses what passes it. It sits above the real tail and
 /// below anything that threatens the host: the largest states in practice are
 /// sample-embedding instruments and convolution reverbs, which reach high
 /// hundreds of MiB, because the formats stream rather than inline beyond that.
 /// A larger blob is a plugin misbehaving or a corrupt project, and refusing it
 /// (`StateError::TooLarge`) is survivable, unlike an allocation the host
-/// cannot satisfy. An accumulation across many individually-valid frames needs
-/// this bound as a single frame needs its own.
+/// cannot satisfy.
 pub const MAX_STATE_BYTES: usize = 1 << 30;
 
 /// A saved state read through a [`StateFrame`] that did not read.
