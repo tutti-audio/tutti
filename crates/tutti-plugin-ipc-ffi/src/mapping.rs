@@ -105,17 +105,25 @@ pub struct SlabHandle {
 
 /// A handle as it travels: the name alone, unchecked until it becomes one.
 #[derive(Deserialize)]
-struct WireName(pub String);
+struct WireName(String);
 
 impl TryFrom<WireName> for SlabHandle {
     type Error = String;
 
     fn try_from(WireName(name): WireName) -> Result<Self, String> {
+        // Exactly what `fresh` writes: the prefix, a decimal pid, a decimal
+        // count and sixteen lowercase hex digits, joined by `-`.
+        let decimal = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
         let spelled = name.strip_prefix(NAME_PREFIX).is_some_and(|rest| {
-            !rest.is_empty()
-                && rest
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            let mut parts = rest.split('-');
+            matches!(
+                (parts.next(), parts.next(), parts.next(), parts.next()),
+                (Some(pid), Some(count), Some(hex), None)
+                    if decimal(pid)
+                        && decimal(count)
+                        && hex.len() == 16
+                        && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            )
         });
         if spelled {
             Ok(Self { name })
@@ -430,13 +438,30 @@ mod tests {
             "tutti_plugin-/../x",
             "tutti_plugin-a/b",
             "other-1-2-3",
+            "tutti_plugin-1-2-0123456789abcde",
+            "tutti_plugin-1-2-0123456789abcdef0",
+            "tutti_plugin-1-2-0123456789ABCDEF",
+            "tutti_plugin-1-2-0123456789abcdef-3",
+            "tutti_plugin-1-0123456789abcdef",
+            "tutti_plugin-x-2-0123456789abcdef",
         ] {
             assert!(decode(bad).is_err(), "{bad:?} decoded");
         }
     }
 
+    /// **`create` is exclusive.** The same name made twice through the
+    /// platform's create fails the second time: an existing file (a collision,
+    /// or one a peer planted) is refused, never truncated or reused.
+    #[test]
+    fn creating_an_existing_name_is_refused() {
+        let size = SLAB_HEADER_BYTES + 16;
+        let (_w, existing) = MappingWriter::create(size).unwrap();
+        let again = platform::open_file(&existing.name, size, Open::Create);
+        assert!(again.is_err(), "a second create reused the name");
+    }
+
     /// A symlink planted at the handle's name is refused by `open`
-    /// (`O_NOFOLLOW`), and `create` never reuses an existing name.
+    /// (`O_NOFOLLOW`).
     #[cfg(unix)]
     #[test]
     fn a_symlink_at_the_name_is_refused() {

@@ -67,9 +67,9 @@ fn unique_name(stem: &str) -> Result<String, RandomSourceError> {
 
 /// Sixteen hex digits from the operating system's random source, for a name in
 /// a shared directory that must not be predictable (the control socket).
-/// Sixty-four bits: enough that
-/// guessing is not an attack, short enough that a macOS socket path (104 bytes,
-/// under a long per-user temporary directory) still fits.
+/// Sixty-four bits: enough that guessing is not an attack, short enough that a
+/// macOS socket path (104 bytes, under a long per-user temporary directory)
+/// still fits.
 ///
 /// # Errors
 ///
@@ -87,10 +87,11 @@ fn unguessable() -> Result<String, RandomSourceError> {
 /// `IpcConfig` from it. `tutti-plugin-server` takes one to know where to
 /// listen.
 ///
-/// [`at`](Self::at) takes the socket path and uses 8192-frame blocks, the default
-/// [`Timeouts`] and 32-bit float samples. There is no `Default`: a fresh path ([`unique_socket_path`]) needs
-/// the operating system's random source, which can fail, and a fixed one would
-/// make every default a collision.
+/// [`at`](Self::at) takes the socket path and uses 8192-frame blocks, the
+/// default [`Timeouts`] and 32-bit float samples. There is no `Default`: a
+/// fresh path ([`unique_socket_path`]) needs the operating system's random
+/// source, which can fail, and a fixed one would make every default a
+/// collision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpcConfig {
     /// Local-socket path this bridge's host/server pair meet on (on Windows,

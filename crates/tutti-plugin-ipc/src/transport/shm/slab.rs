@@ -91,9 +91,10 @@ pub struct AudioSlab {
 impl AudioSlab {
     // ---- Construction: one side creates, the other opens ----
 
-    /// Creates the slab, the host's end: allocates the backing file, sizes it to hold the header and both rings, maps it, and stamps the
-    /// header. Returns the writer of the inputs and the [`SlabHandle`] the other
-    /// side opens it with.
+    /// Creates the slab, the host's end: allocates the backing file, sizes it
+    /// to hold the header and both rings, maps it, and stamps the header.
+    /// Returns the writer of the inputs and the [`SlabHandle`] the other side
+    /// opens it with.
     ///
     /// The file ends with this side's mapping. Exactly one side
     /// calls this; the other calls [`open`](Self::open) with a matching
