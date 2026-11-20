@@ -45,8 +45,8 @@ tutti-measure = { version = "0.0.1", path = "../tutti-measure" }
 
 [dev-dependencies]
 # Every encoder on for this crate's own tests, examples and bench (none is
-# default: `encode-vorbis` links C). A consumer's build never sees it.
-tutti-codec = { path = "../tutti-codec", features = ["encode-wav", "encode-flac", "encode-aiff", "encode-vorbis"] }
+# default). A consumer's build never sees it.
+tutti-codec = { path = "../tutti-codec", features = ["encode-wav", "encode-flac", "encode-aiff"] }
 criterion.workspace = true
 # An independent reader for the WAV files the tests export.
 hound = "3.5"
@@ -68,11 +68,11 @@ tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["
 # acyclic: tutti-sampler does NOT depend on tutti-export.
 tutti-sampler = { path = "../tutti-sampler", default-features = false }
 # An independent decoder for every container this crate writes, for
-# `tests/formats/oracle_decode.rs`. `hound` only speaks WAV, so FLAC/AIFF/Ogg were
+# `tests/formats/oracle_decode.rs`. `hound` only speaks WAV, so FLAC/AIFF were
 # checked by frame count and header, never by content. The feature list is the
 # minimum that reads what this crate emits — do NOT add `isomp4` or the
 # mp3/aac bundles; nothing here writes those.
-symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm", "flac", "ogg", "vorbis", "aiff"] }
+symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm", "flac", "aiff"] }
 
 [[bench]]
 name = "offline_render"

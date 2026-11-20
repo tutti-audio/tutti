@@ -8,7 +8,7 @@ use crate::mode::NodeMix;
 use crate::node::Shape;
 use crate::param::ParamIn;
 use crate::spec::{EventEdge, EventIn, EventOut};
-use crate::{Edge, EdgeId, FeedbackFrom, NodeKey, Sink, Source};
+use crate::{Edge, EdgeId, FeedbackFrom, NodeKey, PortSink, PortSource};
 use tutti_buffers::Float;
 
 /// A unit placed at a key, and what the placement left unwired.
@@ -37,7 +37,7 @@ pub struct Inserted<C> {
 pub struct Unwired {
     /// Audio edges, direct and feedback, into an input port or out of an
     /// output port the shape lacks. A global output channel an edge fed is
-    /// its [`Sink::Output`].
+    /// its [`PortSink::Output`].
     pub edges: Vec<EdgeId>,
     /// Event edges, direct and feedback, into an event input or out of an
     /// event output the shape lacks, by the sink port they fed.
@@ -77,7 +77,7 @@ impl<F: Float> Editor<F> {
             spec.gains.get(&id).is_some_and(|g| g.fade == EdgeFade::Out)
         };
         let gone_source =
-            |s: &Source| matches!(s, Source::Node(p) if p.node == key && p.port >= aout);
+            |s: &PortSource| matches!(s, PortSource::Node(p) if p.node == key && p.port >= aout);
 
         // Audio edges into a node's input ports.
         let mut dropped: Vec<EdgeId> = Vec::new();
@@ -92,7 +92,7 @@ impl<F: Float> Editor<F> {
                 let gone = (at.node == key && at.port >= ain) || from_gone;
                 if gone {
                     dropped.push(EdgeId {
-                        sink: Sink::Port(at),
+                        sink: PortSink::Port(at),
                         from: *e,
                     });
                 }
@@ -106,7 +106,7 @@ impl<F: Float> Editor<F> {
                 let gone = gone_source(s);
                 if gone {
                     dropped.push(EdgeId {
-                        sink: Sink::Output(c as u16),
+                        sink: PortSink::Output(c as u16),
                         from: Edge::Direct(*s),
                     });
                 }

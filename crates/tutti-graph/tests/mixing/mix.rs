@@ -26,7 +26,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CommitError, Cx, Edge, Editor, EventOut, FadeLaw, ForkMode, ForkTarget, GraphInvalid,
     GraphSpec, InPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, PassError,
-    Prepare, Shape, Source, Status, Topology, TransportPosition, Unforkable,
+    PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable,
 };
 use tutti_units::{Mix, Samples, Tail};
 
@@ -49,8 +49,8 @@ fn at(node: u64, port: u16) -> InPort {
     }
 }
 
-fn out(node: u64, port: u16) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64, port: u16) -> PortSource {
+    PortSource::Node(OutPort {
         node: key(node),
         port,
     })
@@ -107,7 +107,7 @@ impl Rig {
         let mut t = Topology::default();
         t.nodes.insert(key(1), spec_of(kind));
         t.inputs = ChannelLayout::MONO;
-        t.connect(at(1, 0), Edge::Direct(Source::Global(0)));
+        t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
         t.set_outputs(vec![out(1, 0)]);
         let mut spec = GraphSpec::new(t);
         if let Some(m) = mix {
@@ -258,7 +258,7 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
     );
     ed.spec_mut()
         .topology
-        .connect(at(1, 0), Edge::Direct(Source::Global(0)));
+        .connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
     ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
     ed.set_mix(key(1), Mix::DRY).expect("a node");
     ed.commit().expect("commits");
@@ -631,7 +631,7 @@ fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
     ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
     ed.spec_mut()
         .topology
-        .connect(at(1, 0), Edge::Direct(Source::Global(0)));
+        .connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
     ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
     if let Some(m) = mix {
         ed.set_mix(key(1), m).expect("a node");
@@ -806,7 +806,7 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
     );
     ed.spec_mut()
         .topology
-        .connect(at(1, 0), Edge::Direct(Source::Global(0)));
+        .connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
     ed.spec_mut()
         .topology
         .set_outputs(vec![out(1, 0), out(1, 1)]);

@@ -2158,12 +2158,12 @@ impl<F: Float> BlockRig<F> {
                     node: key,
                     port: c as u16,
                 },
-                crate::Edge::Direct(crate::Source::Global(c as u16)),
+                crate::Edge::Direct(crate::PortSource::Global(c as u16)),
             );
         }
         topology.outputs = (0..outs)
             .map(|c| {
-                vec![crate::Source::Node(OutPort {
+                vec![crate::PortSource::Node(OutPort {
                     node: key,
                     port: c as u16,
                 })]

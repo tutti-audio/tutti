@@ -5,8 +5,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::Engine;
 use tutti_graph::{
-    Cx, Editor, Io, LogFilter, Node, NodeKey, OutPort, Prepare, RtLevel, RtLogReaders, RtRecord,
-    RtValue, Shape, Source, Status, Unforkable,
+    Cx, Editor, Io, LogFilter, Node, NodeKey, OutPort, PortSource, Prepare, RtLevel, RtLogReaders,
+    RtRecord, RtValue, Shape, Status, Unforkable,
 };
 use tutti_timeline::Transport;
 use tutti_units::{Frame, SampleRate, Samples, Tail};
@@ -47,7 +47,7 @@ fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_fil
     ed.insert(NodeKey(1), "logger", Unforkable(Logger));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);

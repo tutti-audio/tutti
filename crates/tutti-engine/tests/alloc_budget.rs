@@ -40,7 +40,7 @@ mod support;
 
 use support::{Gain, Sine};
 use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{Editor, Executor, ForkByClone, Prepare};
 use tutti_units::Hz;
 use tutti_units::{SampleRate, Samples};
@@ -127,13 +127,13 @@ fn graph(nodes: usize) -> (Editor, Executor) {
                 node: NodeKey(i),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutPort {
                 node: NodeKey(i - 1),
                 port: 0,
             }))],
         );
     }
-    let last = Source::Node(OutPort {
+    let last = PortSource::Node(OutPort {
         node: NodeKey(nodes as u64),
         port: 0,
     });
@@ -245,7 +245,7 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
                 node: NodeKey(i),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutPort {
                 node: NodeKey(0),
                 port: 0,
             }))],
@@ -254,7 +254,7 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
     ed.spec_mut().topology.set_outputs(
         [1, 2]
             .map(|k| {
-                Source::Node(OutPort {
+                PortSource::Node(OutPort {
                     node: NodeKey(k),
                     port: 0,
                 })

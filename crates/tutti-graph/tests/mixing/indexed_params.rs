@@ -26,7 +26,7 @@ use tutti_graph::{
     NodeParts, ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError,
     ParamSegment, ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_rt::Param;
 use tutti_units::{Db, Samples, UnitAddr, UnitParam};
 
@@ -122,8 +122,8 @@ impl Node for Steps {
     fn reset(&mut self) {}
 }
 
-fn out(node: NodeKey, port: u16) -> Source {
-    Source::Node(OutPort { node, port })
+fn out(node: NodeKey, port: u16) -> PortSource {
+    PortSource::Node(OutPort { node, port })
 }
 
 const BANDS: NodeKey = NodeKey(1);

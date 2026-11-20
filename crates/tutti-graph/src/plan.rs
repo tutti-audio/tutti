@@ -47,7 +47,7 @@
 use std::num::NonZeroU32;
 
 use crate::NodeKey;
-use crate::{EdgeId, InPort, OutPort, Source};
+use crate::{EdgeId, InPort, OutPort, PortSource};
 use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::arena::Role;
@@ -59,7 +59,7 @@ use crate::node::{InPlaceMask, Prepare, Shape, Wired};
 use crate::param::ParamIn;
 use crate::spec::{EventIn, EventOut};
 
-/// The audio slot every unconnected or `Source::Zero` input reads.
+/// The audio slot every unconnected or `PortSource::Zero` input reads.
 pub const ZERO_SLOT: u32 = 0;
 /// The event slot every unconnected event input reads.
 pub const EMPTY_SLOT: u32 = 0;
@@ -102,7 +102,7 @@ pub enum DelayKey {
         /// The sink port.
         at: InPort,
         /// What feeds it: a node port or a global input channel.
-        from: Source,
+        from: PortSource,
     },
     /// One source of an event input port. Each source of a fan-in port can
     /// need a different delay.
@@ -139,7 +139,7 @@ pub enum DelayKey {
         /// The graph output channel.
         channel: u16,
         /// What feeds it.
-        from: Source,
+        from: PortSource,
     },
     /// One lane of an aligned meter, delayed like an output channel.
     Meter {
@@ -148,7 +148,7 @@ pub enum DelayKey {
         /// The lane within it.
         lane: usize,
         /// What feeds it.
-        from: Source,
+        from: PortSource,
     },
     /// An aligned event tap's source, delayed to the output time as an event
     /// edge into an output-time sink would be.
@@ -165,7 +165,7 @@ pub enum DelayKey {
         /// The lane within it.
         lane: usize,
         /// What feeds it.
-        from: Source,
+        from: PortSource,
     },
 }
 
@@ -473,7 +473,7 @@ pub enum Op {
         dst: u32,
     },
     /// Merge several event streams by `(offset, source order)` — event
-    /// fan-in. Source order is the source port's
+    /// fan-in. PortSource order is the source port's
     /// `(NodeKey, port)`.
     EventMerge {
         /// Event slots read, in source order (into [`Plan::event_list`]).

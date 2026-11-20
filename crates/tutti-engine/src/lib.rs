@@ -51,7 +51,7 @@
 //!
 //! ```rust
 //! use tutti_buffers::MaxBlock;
-//! use tutti_graph::{OutPort, Source};
+//! use tutti_graph::{OutPort, PortSource};
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples, Tail};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
@@ -92,7 +92,7 @@
 //! let beats = NodeKey(1);
 //! editor.insert(beats, "beats", ForkByClone(Beats));
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| Source::Node(OutPort { node: beats, port })));
+//!     .map(|port| PortSource::Node(OutPort { node: beats, port })));
 //! editor.commit().expect("the graph compiles");
 //!
 //! let engine = Engine::new(&transport, &mut editor, executor, tutti_engine::BlockDates::Os).expect("within the limits");

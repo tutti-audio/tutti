@@ -743,7 +743,7 @@ mod tests {
         use tutti_graph::{GraphBuilder, Prepare};
 
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-        g.set_output(0, tutti_graph::Source::Zero);
+        g.set_output(0, tutti_graph::PortSource::Zero);
         let (_editor, mut exec) = g
             .build(Prepare::new(
                 SampleRate::SR_48K,

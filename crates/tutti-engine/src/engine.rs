@@ -227,7 +227,8 @@ impl<F: Float> std::fmt::Debug for Engine<F> {
 /// The graph's executor, the clock that feeds its `Env`, and the
 /// planar scratch its outputs land in before the fold.
 struct GraphRender<F: Float> {
-    exec: Executor<F>,
+    /// Boxed once at construction, so an `Engine` moves cheaply.
+    exec: Box<Executor<F>>,
     /// The transport's audio side: motion machine, playhead clock and
     /// commands. The graph reads the transport from `Env`, so the engine
     /// drives the clock itself; every node reads what it publishes from its
@@ -517,7 +518,7 @@ impl<F: Float> Engine<F> {
         let stage = AudioThreadCell::new(output.stage().reader());
         Ok(Self {
             graph: AudioThreadCell::new(GraphRender {
-                exec: executor,
+                exec: Box::new(executor),
                 transport: audio,
                 scratch: vec![F::ZERO; SCRATCH_CHUNKS * stride],
                 stride,
@@ -2046,10 +2047,10 @@ mod tests {
     /// commit.
     fn rewire(ed: &mut Editor, width: u16) {
         use tutti_graph::NodeKey;
-        use tutti_graph::{OutPort, Source};
+        use tutti_graph::{OutPort, PortSource};
         ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
         ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port,
             })
@@ -2909,14 +2910,14 @@ mod tests {
     /// Feeds the constant at key 1 to channel `channel` of a `width`-wide
     /// root, the others silent, in the editor's spec.
     fn feed(ed: &mut Editor, width: usize, channel: usize) {
-        use tutti_graph::{NodeKey, OutPort, Source};
-        let dc = Source::Node(OutPort {
+        use tutti_graph::{NodeKey, OutPort, PortSource};
+        let dc = PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         });
         ed.spec_mut()
             .topology
-            .set_outputs((0..width).map(|c| if c == channel { dc } else { Source::Zero }));
+            .set_outputs((0..width).map(|c| if c == channel { dc } else { PortSource::Zero }));
     }
 
     /// The smootherstep `s(x) = x³ (6x² − 15x + 10)` the equal-amplitude
@@ -3345,7 +3346,7 @@ mod tests {
         let control = engine.output_control();
         move_root(&mut ed, &control, None, 2, 1);
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
-        let dc = tutti_graph::Source::Node(tutti_graph::OutPort {
+        let dc = tutti_graph::PortSource::Node(tutti_graph::OutPort {
             node: tutti_graph::NodeKey(1),
             port: 0,
         });
@@ -3421,18 +3422,18 @@ mod tests {
     /// starts from the same history, so it has no gap either.
     #[test]
     fn a_compensated_old_root_crossfades_out_with_its_history() {
-        use tutti_graph::{NodeKey, OutPort, Source};
+        use tutti_graph::{NodeKey, OutPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = Source::Node(OutPort {
+        let count = PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         });
-        let late = Source::Node(OutPort {
+        let late = PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         });
@@ -3491,18 +3492,18 @@ mod tests {
     /// the new root's (none), not the old root's 16.
     #[test]
     fn a_latent_source_the_new_root_lacks_does_not_move_the_new_root() {
-        use tutti_graph::{NodeKey, OutPort, Source};
+        use tutti_graph::{NodeKey, OutPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = Source::Node(OutPort {
+        let count = PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         });
-        let late = Source::Node(OutPort {
+        let late = PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         });
@@ -3532,7 +3533,9 @@ mod tests {
             .publish_root(id, None, ChannelLayout::STEREO)
             .unwrap();
         ed.spec_mut().root_id = id;
-        ed.spec_mut().topology.set_outputs([count, Source::Zero]);
+        ed.spec_mut()
+            .topology
+            .set_outputs([count, PortSource::Zero]);
         ed.commit().expect("commits");
         assert_eq!(
             ed.base().map(|p| p.total_latency().samples()),

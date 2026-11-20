@@ -27,7 +27,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES, OutputBlock, process_audio};
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapId, TapOptions};
 use tutti_nodes::testing::Osc;
@@ -78,13 +78,13 @@ fn rolling_state_with(
             node: filter,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: source,
             port: 0,
         }))],
     );
     ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: filter,
             port: 0,
         });

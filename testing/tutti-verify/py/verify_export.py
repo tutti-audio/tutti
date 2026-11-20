@@ -8,8 +8,8 @@ rather than folded -- never read from the Rust source. The point is a second
 opinion that cannot inherit the implementation's assumptions.
 
 This complements rather than duplicates the Rust suite. `tests/formats/roundtrip.rs`
-reads files back with hound, which only speaks WAV, so FLAC/AIFF/Ogg are checked
-there by frame count and header alone. soundfile decodes all four uniformly,
+reads files back with hound, which only speaks WAV, so FLAC/AIFF are checked
+there by frame count and header alone. soundfile decodes all three uniformly,
 which is what makes "does the FLAC hold the same samples as the WAV" answerable
 at all.
 
@@ -164,21 +164,6 @@ def check_formats(d):
             print(fail(name, f"max sample deviation {dev:.2e} > {tol:.2e}"))
             continue
         print("ok")
-
-    # Ogg is lossy: spectral only, never sample-wise.
-    p = d / "fmt_ogg.ogg"
-    if p.exists():
-        x, rate = load(p)
-        left = settled(x[:, 0], rate)
-        hz = dominant_hz(left, rate)
-        pur = energy_near(left, rate, TONE_HZ)
-        print(f"{'fmt_ogg.ogg':28} {rate:6d} {hz:8.2f}  {rms(left):7.4f}  {'':>6}", end="  ")
-        if abs(hz - TONE_HZ) / TONE_HZ > 0.01:
-            print(fail("fmt_ogg", f"f0 {hz:.1f} != {TONE_HZ}"))
-        elif pur < 0.95:
-            print(fail("fmt_ogg", f"purity {pur:.3f} < 0.95"))
-        else:
-            print(f"ok (purity {pur:.3f})")
 
 
 # ---------------------------------------------------------------------------
