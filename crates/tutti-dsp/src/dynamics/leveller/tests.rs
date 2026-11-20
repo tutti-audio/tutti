@@ -7,8 +7,8 @@ use crate::{ChannelWeight, KWeighting};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The K-weighting at `RATE`.
-fn weighting() -> Sos {
-    KWeighting::design(RATE).unwrap()
+fn weighting<F: Float + SimdLanes>() -> SosCoefficients<F> {
+    SosCoefficients::new(&KWeighting::design(RATE).unwrap()).unwrap()
 }
 
 /// The weights of these channels.
@@ -35,7 +35,7 @@ fn tone(dbfs: f64, seconds: usize) -> [Vec<f32>; 2] {
 
 /// A bank at `RATE` on the stereo weights, at `controls`, its gain at rest.
 fn bank(controls: LevellerControls) -> LevellerBank<f32> {
-    let mut bank = LevellerBank::new(&weighting(), &stereo());
+    let mut bank = LevellerBank::new(RATE, weighting(), &stereo());
     bank.retarget(&controls);
     bank
 }
@@ -96,7 +96,7 @@ fn the_first_reading_is_the_first_complete_hop() {
 #[test]
 fn a_second_equal_channel_adds_3_01_db() {
     let x = tone(-23.0, 4);
-    let mut mono = LevellerBank::<f32>::new(&weighting(), &weights(&[ChannelWeight::Unity]));
+    let mut mono = LevellerBank::<f32>::new(RATE, weighting(), &weights(&[ChannelWeight::Unity]));
     run(&mut mono, &x[..1], 480);
     let mut stereo = bank(LevellerControls::DEFAULT);
     run(&mut stereo, &x, 480);
@@ -110,7 +110,7 @@ fn a_second_equal_channel_adds_3_01_db() {
 fn channel_weights_scale_the_power_and_the_lfe_is_silent() {
     let x = tone(-23.0, 4);
     let read = |w: ChannelWeight| {
-        let mut b = LevellerBank::<f32>::new(&weighting(), &weights(&[w]));
+        let mut b = LevellerBank::<f32>::new(RATE, weighting(), &weights(&[w]));
         run(&mut b, &x[..1], 480);
         b.short_term().unwrap().get()
     };
@@ -168,7 +168,7 @@ fn the_settled_gain_is_the_target_less_the_short_term_loudness() {
 /// figure an `f32` gain state could not resolve.
 #[test]
 fn an_f64_bank_settles_the_gain_to_the_target_less_the_loudness_in_f64() {
-    let mut bank = LevellerBank::<f64>::new(&weighting(), &stereo());
+    let mut bank = LevellerBank::<f64>::new(RATE, weighting(), &stereo());
     let step = std::f64::consts::TAU * 1_000.0 / 48_000.0;
     let amp = Db::new(-29.0).to_amplitude().get();
     let x: Vec<f64> = (0..48_000 * 60)
@@ -358,12 +358,15 @@ fn a_non_finite_control_is_the_default() {
     assert_eq!(got.release, d.release);
 }
 
-/// A cascade of no section measures the plain signal: one channel's sine of peak `a` reads
+/// A bank over `SosCoefficients::THROUGH` measures the plain signal: one channel's sine of peak `a` reads
 /// `-0.691 + 10 log10(a^2 / 2)` LUFS, to 1e-3 (the mean square of a whole number of periods).
 #[test]
 fn a_bank_over_no_section_reads_the_plain_mean_square() {
-    let wire = Sos::new(Vec::new(), RATE);
-    let mut bank = LevellerBank::<f32>::new(&wire, &weights(&[ChannelWeight::Unity]));
+    let mut bank = LevellerBank::<f32>::new(
+        RATE,
+        SosCoefficients::THROUGH,
+        &weights(&[ChannelWeight::Unity]),
+    );
     run(&mut bank, &tone(-23.0, 4)[..1], 480);
     let a = Db::new(-23.0).to_amplitude().get();
     let want = -0.691 + 10.0 * (a * a / 2.0).log10();

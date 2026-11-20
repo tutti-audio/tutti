@@ -5,7 +5,7 @@ use tutti_buffers::{BusTopology, ChannelTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, ChannelWeightError, ChannelWeights, KWeighting, LevellerBank, LevellerControls,
-    SimdLanes, Sos, channel_weights,
+    SimdLanes, SosCoefficients, channel_weights,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
@@ -172,9 +172,12 @@ impl<F: Float + SimdLanes> Kernel for LevellerKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         // A rate with no K-weighting design (under about 3.4 kHz) cannot be refused here, so the
-        // bank measures unweighted there: a cascade of no section.
-        let weighting = KWeighting::design(rate).unwrap_or_else(|_| Sos::new(Vec::new(), rate));
-        self.bank = Some(LevellerBank::new(&weighting, &self.weights));
+        // bank measures unweighted there.
+        let weighting = KWeighting::design(rate)
+            .ok()
+            .and_then(|sos| SosCoefficients::new(&sos))
+            .unwrap_or(SosCoefficients::THROUGH);
+        self.bank = Some(LevellerBank::new(rate, weighting, &self.weights));
     }
 
     fn reset(&mut self) {

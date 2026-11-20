@@ -51,7 +51,7 @@ use tutti_units::{Db, SampleRate, Samples, Seconds};
 use super::curves::db_gain;
 use super::gain_pass::{CHUNK, floored};
 use crate::follower::{Follower, Smoothed};
-use crate::{ChannelWeights, Ramp, SimdLanes, Sos, SosBank, SosCoefficients};
+use crate::{ChannelWeights, Ramp, SimdLanes, SosBank, SosCoefficients};
 
 /// The controls of a [`LevellerBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -234,20 +234,17 @@ pub struct LevellerBank<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes> LevellerBank<F> {
-    /// A leveller measuring through `weighting` (its rate is the bank's: a
-    /// [`KWeighting::design`](crate::KWeighting::design), which fails at a rate with no design, so a bank has one) over
-    /// channels weighted by `weights` (at most [`MAX_CHANNELS`]; a channel past that is not
-    /// heard), at [`LevellerControls::DEFAULT`] and 0 dB. A cascade of another shape measures
-    /// another loudness: no section measures the unweighted signal. Allocates: build it on
-    /// the control side.
+    /// A leveller at `rate` measuring through the cascade `weighting`, over channels weighted
+    /// by `weights`, at [`LevellerControls::DEFAULT`] and 0 dB.
     ///
-    /// # Panics
-    ///
-    /// Never for a K-weighting design or a cascade of no section; a cascade of more than
-    /// [`MAX_SECTIONS`](crate::MAX_SECTIONS) sections does.
+    /// The cascade is [`SosCoefficients`] of a [`KWeighting::design`](crate::KWeighting::design)
+    /// at `rate`, which fails at a rate with no design, so the bank has one. A bank of
+    /// [`SosCoefficients::THROUGH`] measures the unweighted signal. A cascade is the bounded
+    /// type a bank runs, so no section count can overflow it, which a [`Sos`](crate::Sos) could.
+    /// At most [`MAX_CHANNELS`] channels are heard; a channel past that is not. Allocates:
+    /// build it on the control side.
     #[must_use]
-    pub fn new(weighting: &Sos, weights: &ChannelWeights) -> Self {
-        let rate = weighting.rate();
+    pub fn new(rate: SampleRate, weighting: SosCoefficients<F>, weights: &ChannelWeights) -> Self {
         let weights: Box<[f64]> = weights
             .as_slice()
             .iter()
@@ -258,12 +255,10 @@ impl<F: Float + SimdLanes> LevellerBank<F> {
         let settings = LevellerControls::DEFAULT.designed();
         // `SosBank::process` takes its coefficients as a `Ramp`: this one holds the cascade
         // and is never retargeted, so it stays constant.
-        let coefficients = SosCoefficients::new(weighting)
-            .expect("a measurement cascade is at most a bank's sections");
         Self {
             weights,
             filter: SosBank::new(width),
-            coefficients: Ramp::new(coefficients),
+            coefficients: Ramp::new(weighting),
             window: ShortTerm::new(rate),
             settings,
             rate,
