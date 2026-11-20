@@ -51,6 +51,7 @@ use tutti_rt::Exclusive;
 use tutti_rt::LockExt;
 
 use tutti_buffers::FloatWidth;
+use tutti_platform::{Executor, WeakExecutor};
 use tutti_plugin_types::{
     ChunkCounters, Controller, IpcError, IpcResult, LoadStage, Loaded, LoadedPlugin,
     MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
@@ -80,6 +81,9 @@ pub struct LaunchSpec {
     /// Loads the editor-only instance, as the first launch's did; `None`
     /// again for an editor in the server.
     pub load_editor: Option<EditorLoader>,
+    /// Reaches the executor that runs the new server's exit watch, as the first
+    /// launch's did, while it lives.
+    pub executor: WeakExecutor,
 }
 
 impl LaunchSpec {
@@ -90,8 +94,10 @@ impl LaunchSpec {
     ///
     /// # Errors
     ///
-    /// As [`Ipc::launch`].
+    /// [`IpcError::ShutDown`] once the executor has shut down, else as
+    /// [`Ipc::launch`].
     pub fn reopen(&self, rate: SampleRate, state: Option<&[u8]>) -> IpcResult<Launched> {
+        let executor = self.executor.upgrade().ok_or(IpcError::ShutDown)?;
         let config = IpcConfig {
             // Its own rendezvous: two bridges on one socket path is the
             // collision `unique_socket_path` exists to prevent.
@@ -110,6 +116,7 @@ impl LaunchSpec {
                 }),
             },
             self.load_editor.clone(),
+            &executor,
         )
     }
 }
@@ -556,6 +563,9 @@ impl Ipc {
     /// second instance in this process (CLAP, VST3, AU), `None` opens it on the
     /// served instance in the server, parented to the host's window.
     ///
+    /// `executor` runs the server's exit watch; the plugin's origin keeps a weak
+    /// handle to it, so a reopen watches its server on the same one while it lives.
+    ///
     /// # Errors
     ///
     /// The server cannot be found or spawned, the handshake fails or times
@@ -564,8 +574,9 @@ impl Ipc {
         config: IpcConfig,
         request: &LoadRequest<'_>,
         load_editor: Option<EditorLoader>,
+        executor: &Executor,
     ) -> IpcResult<Launched> {
-        let server = launch(&config, request)?;
+        let server = launch(&config, request, executor)?;
         let LoadRequest { format, rate, .. } = *request;
         // The plugin the server opened, so a reopen and the editor instance
         // load that one, though the request chose none.
@@ -607,6 +618,7 @@ impl Ipc {
                 origin: origin.clone(),
                 format,
                 load_editor,
+                executor: executor.downgrade(),
             }),
         });
         Ok(Launched { ipc, restored })

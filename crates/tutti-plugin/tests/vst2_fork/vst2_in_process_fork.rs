@@ -352,6 +352,7 @@ fn a_plugin_handed_back_by_into_client_forks() {
     let _env = ProbeEnv::new(true);
     let plugin = tutti_plugin::catalog::Plugin::open(
         main_thread(),
+        tutti_fixtures::executor(),
         &tutti_fixtures::pumped_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::vst2_probe(),
