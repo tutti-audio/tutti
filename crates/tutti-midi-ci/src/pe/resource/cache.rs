@@ -8,13 +8,37 @@ use super::data::PeData;
 use super::request::ResourceTarget;
 use crate::deadline::Pending;
 
+/// What a reply gave: its Property Data, and the `totalCount` of its header.
+#[derive(Debug)]
+pub(super) struct Kept {
+    pub(super) data: PeData,
+    pub(super) total_count: Option<u32>,
+}
+
 /// One request's reply: the request is the Resource, its entry and its page.
 #[derive(Debug)]
 struct Held {
     target: ResourceTarget,
     page: Option<PePage>,
-    data: PeData,
+    kept: Kept,
     life: Pending,
+}
+
+/// Whether the `cacheTime`s of a Resource's requests are kept apart or as one
+/// (M2-103 §7.4.3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PeCacheScope {
+    /// Each request, each page of a paginated Get, expires by its own
+    /// `cacheTime`: the spec's recommendation.
+    #[default]
+    PerRequest,
+    /// One `cacheTime` per Resource entry: the data held for it expires together.
+    /// A reply that arrives while data is held cannot lengthen the time: the
+    /// Resource expires at the sooner of the time held and the reply's own, so no
+    /// page is used past either limit. A reply that arrives after the time held
+    /// ended drops all the data held, and only it is valid.
+    PerResource,
 }
 
 impl Held {
@@ -27,6 +51,7 @@ impl Held {
 #[derive(Debug, Default)]
 pub(super) struct GetCache {
     held: Vec<Held>,
+    scope: PeCacheScope,
     /// How many times held data was dropped for a change.
     drops: u64,
 }
@@ -36,6 +61,12 @@ impl GetCache {
     /// another was overtaken by a change and its reply is not kept.
     pub(super) fn drops(&self) -> u64 {
         self.drops
+    }
+
+    /// Keeps the replies by `scope` from now on, and drops what is held.
+    pub(super) fn set_scope(&mut self, scope: PeCacheScope) {
+        self.scope = scope;
+        self.clear();
     }
 
     /// Drops what has expired at `now`.
@@ -49,11 +80,11 @@ impl GetCache {
         target: &ResourceTarget,
         page: Option<PePage>,
         now: Instant,
-    ) -> Option<&PeData> {
+    ) -> Option<&Kept> {
         self.held
             .iter()
             .find(|h| h.is(target, page) && !h.life.expired(now))
-            .map(|h| &h.data)
+            .map(|h| &h.kept)
     }
 
     /// Holds the reply to the request for its `time` from `now`, in place of the
@@ -63,7 +94,7 @@ impl GetCache {
         &mut self,
         target: &ResourceTarget,
         page: Option<PePage>,
-        data: PeData,
+        kept: Kept,
         time: PeCacheTime,
         began_at: u64,
         now: Instant,
@@ -71,11 +102,21 @@ impl GetCache {
         self.held
             .retain(|h| !h.is(target, page) && !h.life.expired(now));
         if time.as_secs() > 0 && began_at == self.drops {
+            let mut life = Pending::after(now, time.into());
+            if self.scope == PeCacheScope::PerResource {
+                // What is held here has not expired: the retain above dropped the rest.
+                for held in self.held.iter().filter(|h| h.target == *target) {
+                    life = life.sooner(held.life);
+                }
+                for held in self.held.iter_mut().filter(|h| h.target == *target) {
+                    held.life = life;
+                }
+            }
             self.held.push(Held {
                 target: target.clone(),
                 page,
-                data,
-                life: Pending::after(now, time.into()),
+                kept,
+                life,
             });
         }
     }

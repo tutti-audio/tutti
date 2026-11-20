@@ -16,7 +16,7 @@ use super::super::limits::{MediaType, SubscribeId};
 use super::super::partial::PartialUpdate;
 use super::super::reassemble::PeFlowControl;
 use super::super::tree::{PeJson, PeJsonError};
-use super::cache::GetCache;
+use super::cache::{GetCache, Kept, PeCacheScope};
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::fields::PeDataError;
@@ -224,6 +224,56 @@ struct Walk {
     size: NonZeroU32,
     pages: Vec<PeJson>,
     have: usize,
+    /// The page the request in flight asks for.
+    asked: PePage,
+    /// The cache's drop count when that request started.
+    drops: u64,
+}
+
+/// What a page did to a walk.
+enum Stepped {
+    /// The walk needs the next page.
+    More,
+    /// The walk is over, with its list or its failure.
+    Ended(Result<PeData, ResourceFailure>),
+}
+
+impl Walk {
+    /// The page after the entries held.
+    fn next_page(&self) -> PePage {
+        PePage {
+            offset: u32::try_from(self.have).unwrap_or(u32::MAX),
+            limit: self.size,
+        }
+    }
+
+    /// Takes a page of the walk, with the `totalCount` of its reply.
+    fn step(&mut self, step: Result<(PeJson, u32), ResourceFailure>) -> Stepped {
+        let (page, total) = match step {
+            Ok(step) => step,
+            Err(failure) => return Stepped::Ended(Err(failure)),
+        };
+        let items = page.as_array().map_or(0, <[PeJson]>::len);
+        self.have += items;
+        self.pages.push(page);
+        let have = u32::try_from(self.have).unwrap_or(u32::MAX);
+        if self.have > MAX_LIST_ENTRIES {
+            return Stepped::Ended(Err(PaginationFault::TooLong.into()));
+        }
+        if have >= total {
+            let joined = PeData::decode_pages(self.target.resource(), &self.pages)
+                .map_err(ResourceFailure::from);
+            return Stepped::Ended(joined);
+        }
+        if items == 0 {
+            let fault = PaginationFault::EmptyPage {
+                have: self.have,
+                total,
+            };
+            return Stepped::Ended(Err(fault.into()));
+        }
+        Stepped::More
+    }
 }
 
 #[derive(Debug)]
@@ -310,6 +360,14 @@ impl ResourceInitiator {
         (this, out)
     }
 
+    /// Keeps the `cacheTime`s of a Resource's requests apart, or as one
+    /// (M2-103 §7.4.3); [`PeCacheScope::PerRequest`] without this.
+    #[must_use]
+    pub fn cache_scope(mut self, scope: PeCacheScope) -> Self {
+        self.cache.set_scope(scope);
+        self
+    }
+
     /// The ResourceList of the peer, once it has come.
     #[must_use]
     pub fn resource_list(&self) -> Option<&PeResourceList> {
@@ -371,8 +429,9 @@ impl ResourceInitiator {
     /// request (Resource, entry and page) has not elapsed at `now`, the data is
     /// that reply's: the returned actions hold its [`ResourceEvent::Got`] and
     /// nothing is sent (M2-103 §7.4.3). A Subscription update of the Resource
-    /// drops what is held for it (§7.4.3). A successful Set of it does too, which
-    /// the spec does not ask for: the data held is the data the Set replaced.
+    /// drops what is held for it, every page (§7.4.3). A successful Set of it does
+    /// too, which the spec does not ask for: the data held is the data the Set
+    /// replaced.
     ///
     /// # Errors
     ///
@@ -391,11 +450,11 @@ impl ResourceInitiator {
         }
         let call = self.call_id();
         self.cache.prune(now);
-        if let Some(data) = self.cache.fresh(get.target(), get.page(), now) {
+        if let Some(kept) = self.cache.fresh(get.target(), get.page(), now) {
             let got = event(ResourceEvent::Got {
                 call,
                 target: get.target().clone(),
-                result: Ok(data.clone()),
+                result: Ok(kept.data.clone()),
             });
             return Ok((call, vec![got]));
         }
@@ -414,8 +473,9 @@ impl ResourceInitiator {
     ///
     /// The walk asks for offset 0, then for the offset after the entries it has,
     /// until it has `totalCount` of them. A reply with no `totalCount`, or an
-    /// empty page before the end, fails the call. A walk that paginates always
-    /// asks: it neither uses nor holds the data of [`get`](Self::get)'s cache.
+    /// empty page before the end, fails the call. Each page is a request of
+    /// [`get`](Self::get)'s cache: a page held at `now` is not asked for again, and
+    /// a page that came with a `cacheTime` is held for it (§7.4.3).
     ///
     /// # Errors
     ///
@@ -436,12 +496,12 @@ impl ResourceInitiator {
         if !paginates {
             return self.get(get, now);
         }
-        let first = get.clone().paged(PePage {
+        let page = PePage {
             offset: 0,
             limit: page_size,
-        });
+        };
         if let Some(entry) = self.entry(get.target().resource())? {
-            first.check_get(entry)?;
+            get.clone().paged(page).check_get(entry)?;
         }
         let call = self.call_id();
         let walk = Walk {
@@ -451,9 +511,13 @@ impl ResourceInitiator {
             size: page_size,
             pages: Vec::new(),
             have: 0,
+            asked: page,
+            drops: 0,
         };
-        let actions = self.start(PeCall::Get(pe_get(&first)), Op::Walk(walk), now)?;
-        Ok((call, actions))
+        let mut out = Vec::new();
+        self.cache.prune(now);
+        self.walk_on(walk, now, &mut out)?;
+        Ok((call, out))
     }
 
     /// Set Property Data.
@@ -620,10 +684,14 @@ impl ResourceInitiator {
                 drops,
             } => {
                 let cache_time = reply.as_ref().ok().and_then(|r| r.header.cache_time);
+                let total_count = reply.as_ref().ok().and_then(|r| r.header.total_count);
                 let result = reply.and_then(|r| decode(target.resource(), &r));
                 if let (Ok(data), Some(time)) = (&result, cache_time) {
-                    self.cache
-                        .keep(&target, page, data.clone(), time, drops, now);
+                    let kept = Kept {
+                        data: data.clone(),
+                        total_count,
+                    };
+                    self.cache.keep(&target, page, kept, time, drops, now);
                 }
                 out.push(event(ResourceEvent::Got {
                     call,
@@ -716,7 +784,8 @@ impl ResourceInitiator {
         }
     }
 
-    /// A page of a walk arrived: ask for the next, or end the walk.
+    /// A page of a walk arrived: hold it for its `cacheTime`, then ask for the
+    /// next, or end the walk.
     fn walked(
         &mut self,
         mut walk: Walk,
@@ -724,63 +793,86 @@ impl ResourceInitiator {
         now: Instant,
         out: &mut Vec<ResourceAction>,
     ) {
+        let cache_time = reply.as_ref().ok().and_then(|r| r.header.cache_time);
         let step = reply.and_then(|response| {
             let page = parse(&response)?;
-            let items = page.as_array().map_or(0, <[PeJson]>::len);
             let total = response
                 .header
                 .total_count
                 .ok_or(PaginationFault::NoTotalCount)?;
-            Ok((page, items, total))
+            Ok((page, total))
         });
-        let (page, items, total) = match step {
-            Ok(step) => step,
-            Err(failure) => return self.walk_ended(walk, Err(failure), out),
-        };
-        walk.have += items;
-        walk.pages.push(page);
-        let have = u32::try_from(walk.have).unwrap_or(u32::MAX);
-        if walk.have > MAX_LIST_ENTRIES {
-            return self.walk_ended(walk, Err(PaginationFault::TooLong.into()), out);
-        }
-        if have >= total {
-            let joined = PeData::decode_pages(walk.target.resource(), &walk.pages)
-                .map_err(ResourceFailure::from);
-            return self.walk_ended(walk, joined, out);
-        }
-        if items == 0 {
-            let fault = PaginationFault::EmptyPage {
-                have: walk.have,
-                total,
+        if let (Ok((page, total)), Some(time)) = (&step, cache_time)
+            && let Ok(data) = PeData::decode(walk.target.resource(), page)
+        {
+            let kept = Kept {
+                data,
+                total_count: Some(*total),
             };
-            return self.walk_ended(walk, Err(fault.into()), out);
+            let (target, asked, drops) = (walk.target.clone(), walk.asked, walk.drops);
+            self.cache
+                .keep(&target, Some(asked), kept, time, drops, now);
         }
-        let next = ResourceGet::new(walk.target.clone())
-            .encoded(walk.encoding)
-            .paged(PePage {
-                offset: have,
-                limit: walk.size,
-            });
-        let call = PeCall::Get(pe_get(&next));
-        match self.pe.start(call, now) {
-            Ok((id, actions)) => {
-                self.ops.push((id, Op::Walk(walk)));
-                let more = self.map(actions, now);
-                out.extend(more);
+        match walk.step(step) {
+            Stepped::More => {
+                let (call, target) = (walk.call, walk.target.clone());
+                if let Err(error) = self.walk_on(walk, now, out) {
+                    out.push(event(ResourceEvent::Got {
+                        call,
+                        target,
+                        result: Err(error.into()),
+                    }));
+                }
             }
-            Err(error) => self.walk_ended(walk, Err(error.into()), out),
+            Stepped::Ended(result) => self.walk_ended(&walk, result, out),
+        }
+    }
+
+    /// Takes the pages of the walk that are held, and asks the peer for the first
+    /// that is not.
+    fn walk_on(
+        &mut self,
+        mut walk: Walk,
+        now: Instant,
+        out: &mut Vec<ResourceAction>,
+    ) -> Result<(), PeError> {
+        loop {
+            let page = walk.next_page();
+            let held = self
+                .cache
+                .fresh(&walk.target, Some(page), now)
+                .and_then(|k| Some((k.data.to_json()?, k.total_count?)));
+            if let Some(held) = held {
+                match walk.step(Ok(held)) {
+                    Stepped::More => continue,
+                    Stepped::Ended(result) => {
+                        self.walk_ended(&walk, result, out);
+                        return Ok(());
+                    }
+                }
+            }
+            walk.asked = page;
+            walk.drops = self.cache.drops();
+            let get = ResourceGet::new(walk.target.clone())
+                .encoded(walk.encoding)
+                .paged(page);
+            let (id, actions) = self.pe.start(PeCall::Get(pe_get(&get)), now)?;
+            self.ops.push((id, Op::Walk(walk)));
+            let more = self.map(actions, now);
+            out.extend(more);
+            return Ok(());
         }
     }
 
     fn walk_ended(
         &mut self,
-        walk: Walk,
+        walk: &Walk,
         result: Result<PeData, ResourceFailure>,
         out: &mut Vec<ResourceAction>,
     ) {
         out.push(event(ResourceEvent::Got {
             call: walk.call,
-            target: walk.target,
+            target: walk.target.clone(),
             result,
         }));
     }

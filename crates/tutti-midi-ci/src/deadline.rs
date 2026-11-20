@@ -34,6 +34,15 @@ impl Pending {
         now >= self.deadline
     }
 
+    /// Whichever of the two waits ends first.
+    pub(crate) fn sooner(self, other: Self) -> Self {
+        if other.deadline < self.deadline {
+            other
+        } else {
+            self
+        }
+    }
+
     /// The instant the wait ends.
     pub(crate) fn deadline(self) -> Instant {
         self.deadline

@@ -19,6 +19,7 @@ use super::super::limits::{MediaType, ResourceId, ResourceName, SubscribeId};
 use super::super::partial::{JsonPointer, PartialUpdate, PartialValue};
 use super::super::reassemble::{BufferLimit, PeFlowControl, PeReassemblyLimits, StreamLimit};
 use super::super::tree::PeJson;
+use super::cache::PeCacheScope;
 use super::state::StateDevice;
 use super::*;
 use crate::Initiator;
@@ -792,9 +793,15 @@ pub(super) struct Script {
 impl Script {
     /// An Initiator that has the peer's capabilities and a ResourceList of `list`.
     pub(super) fn new(list: &PeResourceList) -> Self {
+        Self::caching(list, PeCacheScope::PerRequest)
+    }
+
+    /// As [`new`](Self::new), the Initiator keeping the cache `scope`.
+    pub(super) fn caching(list: &PeResourceList, scope: PeCacheScope) -> Self {
         let now = Instant::now();
         let (init, actions) =
             ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);
+        let init = init.cache_scope(scope);
         let mut script = Self {
             init,
             start: now,
