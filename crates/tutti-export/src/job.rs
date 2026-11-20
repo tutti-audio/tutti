@@ -15,7 +15,7 @@ use tutti_units::{SampleRate, Samples};
 #[non_exhaustive]
 pub enum EventLossPolicy {
     /// The render stops at the first block that dropped an event with
-    /// [`Error::EventsDropped`](crate::Error::EventsDropped), and a file it
+    /// [`RenderError::EventsDropped`](crate::RenderError::EventsDropped), and a file it
     /// wrote is removed. [`write_buffers`](crate::write_buffers) applies it to
     /// the planes' own count.
     #[default]
@@ -31,7 +31,7 @@ pub enum EventLossPolicy {
 /// `u32::MAX`, which is 6.2 hours at 192 kHz.
 ///
 /// A bound rather than a measure of memory: a render held in memory can fail
-/// to allocate well under it ([`Error::RenderTooLarge`](crate::Error::RenderTooLarge)),
+/// to allocate well under it ([`RenderError::RenderTooLarge`](crate::RenderError::RenderTooLarge)),
 /// and one written to a file is under the WAV format's own size limit long
 /// before it.
 pub const MAX_FRAMES: Samples = Samples::new(u32::MAX as usize);

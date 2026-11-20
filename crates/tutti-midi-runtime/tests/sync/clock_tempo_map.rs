@@ -32,7 +32,7 @@ use tutti_engine::Engine;
 use tutti_graph::{Editor, Executor, NodeKey, Prepare};
 use tutti_midi_runtime::{SyncMessages, SyncOut};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_timeline::{AfterLocate, FadeOut, MotionEvent, Transport};
+use tutti_timeline::{AfterLocate, FadeOut, MotionCommand, Transport};
 use tutti_ump::{Message, System, U14};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -171,7 +171,7 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
 }
 
 impl Rig {
-    fn send(&self, event: MotionEvent) {
+    fn send(&self, event: MotionCommand) {
         self.transport.motion().try_send(event).expect("room");
     }
 
@@ -214,7 +214,7 @@ impl Rig {
 /// A play from `start`, rendered for `frames` in `block`-sized blocks.
 fn play(map: &Arc<TempoMap>, start: f64, frames: usize, block: usize) -> Vec<Sent> {
     let rig = rig(map, false);
-    rig.send(MotionEvent::play_from(Beat::new(start)));
+    rig.send(MotionCommand::play_from(Beat::new(start)));
     let mut sent = Vec::new();
     rig.render(frames, block, &mut sent);
     sent
@@ -369,10 +369,10 @@ fn the_ticks_do_not_depend_on_the_block_size() {
 #[test]
 fn a_locate_inside_a_ramp_sends_one_song_position_then_the_maps_ticks() {
     let rig = rig(&ramp(), false);
-    rig.send(MotionEvent::play_from(Beat::new(0.0)));
+    rig.send(MotionCommand::play_from(Beat::new(0.0)));
     let mut sent = Vec::new();
     rig.render(96_000, 512, &mut sent);
-    rig.send(MotionEvent::Locate {
+    rig.send(MotionCommand::Locate {
         beat: Beat::new(3.0),
         fade: FadeOut::Immediate,
         then: AfterLocate::Keep,
@@ -411,7 +411,7 @@ fn mtc_keeps_wall_clock_time_across_a_ramp() {
     let frames = 4 * 48_000;
     let run = |block: usize| {
         let rig = rig(&ramp(), true);
-        rig.send(MotionEvent::play_from(Beat::new(0.0)));
+        rig.send(MotionCommand::play_from(Beat::new(0.0)));
         let mut sent = Vec::new();
         rig.render(frames, block, &mut sent);
         sent

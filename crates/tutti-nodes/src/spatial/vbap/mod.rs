@@ -14,4 +14,4 @@ mod error;
 mod node;
 
 pub use error::VbapError;
-pub use node::VbapPannerNode;
+pub use node::{VbapPannerConfig, VbapPannerNode};

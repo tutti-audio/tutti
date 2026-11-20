@@ -17,18 +17,18 @@ use std::sync::Arc;
 
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::Float;
-use tutti_export::{Error, RenderGraph, RtLogSink, Setup};
+use tutti_export::{RenderError, RenderGraph, RtLogSink, Setup};
 use tutti_graph::{
     CommitError, Editor, Executor, ForkError, ForkMode, ForkRemains, ForkTarget, PendingFork, Pool,
 };
 use tutti_units::SampleRate;
 
-/// A fork's refusal as the export reports it: [`Error::NotForkable`] for
-/// the one a host acts on, [`Error::Fork`] for the rest.
-fn fork_error(e: ForkError) -> Error {
+/// A fork's refusal as the export reports it: [`RenderError::NotForkable`] for
+/// the one a host acts on, [`RenderError::Fork`] for the rest.
+fn fork_error(e: ForkError) -> RenderError {
     match e {
-        ForkError::NotForkable { key } => Error::NotForkable { key },
-        other => Error::Fork(other),
+        ForkError::NotForkable { key } => RenderError::NotForkable { key },
+        other => RenderError::Fork(other),
     }
 }
 
@@ -52,7 +52,7 @@ impl<F: Float> PendingExport<F> {
     /// # Errors
     ///
     /// What the gather refuses; a node that cannot be forked is
-    /// [`Error::NotForkable`], checked before anything is forked.
+    /// [`RenderError::NotForkable`], checked before anything is forked.
     ///
     /// # Threading
     ///
@@ -65,7 +65,7 @@ impl<F: Float> PendingExport<F> {
         rate: SampleRate,
         pool: Option<Arc<dyn Pool>>,
         root: Option<ChannelTopology>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, RenderError> {
         let fork = live
             .fork_gather(target, ForkMode::Offline, RenderGraph::prepare(rate))
             .map_err(fork_error)?;
@@ -83,11 +83,11 @@ impl<F: Float> PendingExport<F> {
     ///
     /// # Errors
     ///
-    /// A deferred fork source's failure ([`Error::Fork`] with
+    /// A deferred fork source's failure ([`RenderError::Fork`] with
     /// `ForkError::Source`, naming its node) or a fork that does not commit,
     /// with what was built, to drop where a pinned unit belongs (the main
     /// thread).
-    pub(crate) fn build(self) -> Result<ForkedPair<F>, (Error, ForkRemains<F>)> {
+    pub(crate) fn build(self) -> Result<ForkedPair<F>, (RenderError, ForkRemains<F>)> {
         let (editor, executor) = self.fork.build().map_err(|(e, r)| (fork_error(e), r))?;
         let mut setup = Setup::new().rt_log(self.rt_log);
         if let Some(pool) = self.pool {

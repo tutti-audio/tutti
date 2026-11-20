@@ -8,7 +8,7 @@
 
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
-use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
+use super::bands::{CrossoverBands, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING};
 use super::blend::Tpt;
 use super::{CrossoverBlend, CrossoverControls};
 use crate::design::prewarp;
@@ -41,45 +41,20 @@ impl CrossoverModel {
     /// The most bands.
     pub const MAX_BANDS: usize = MAX_BANDS;
 
-    /// A model with a split at each of `frequencies` at `rate`, so
-    /// `frequencies.len() + 1` bands.
-    ///
-    /// # Errors
-    ///
-    /// [`CrossoverError`]: a band count
-    /// outside 2 to 6, a rate that is not finite and positive, or frequencies that
-    /// are not finite, above 0, strictly increasing and below Nyquist.
-    pub fn new(frequencies: &[Hz], rate: impl Into<SampleRate>) -> Result<Self, CrossoverError> {
-        let rate = rate.into();
-        validate(frequencies, rate)?;
-        let mut model = Self::empty(frequencies.len() + 1, rate);
-        model.freqs[..frequencies.len()].copy_from_slice(frequencies);
-        model.solve();
-        Ok(model)
-    }
-
     /// The model of `controls` at `rate`, `bands` bands wide. Total in the controls (see
     /// [`design_into`](Self::design_into)).
-    ///
-    /// # Errors
-    ///
-    /// [`CrossoverError::Bands`] outside 2 to 6.
-    pub fn designed(
-        bands: usize,
-        controls: &CrossoverControls,
-        rate: SampleRate,
-    ) -> Result<Self, CrossoverError> {
-        check_bands(bands)?;
-        let mut model = Self::empty(bands, rate);
+    #[must_use]
+    pub fn designed(bands: CrossoverBands, controls: &CrossoverControls, rate: SampleRate) -> Self {
+        let mut model = Self::empty(bands.get(), rate);
         model.design_into(controls, rate);
-        Ok(model)
+        model
     }
 
     /// Designs `controls` at `rate` in place, keeping the band count. Total: a frequency is
     /// held between the split below it (1 Hz for the first) and what the coefficients can
     /// be solved at ([`SOLVE_CEILING`] of the rate), a NaN reading as the floor, so a set
     /// that is not increasing is solved with its splits no lower than the one before.
-    /// [`CrossoverControls::new`] is what refuses one. Allocates nothing.
+    /// [`CrossoverControls`]'s `TryFrom` is what refuses one. Allocates nothing.
     pub fn design_into(&mut self, controls: &CrossoverControls, rate: SampleRate) {
         self.rate = rate;
         let cap = SOLVE_CEILING * rate.get();

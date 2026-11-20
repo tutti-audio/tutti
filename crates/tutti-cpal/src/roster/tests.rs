@@ -1,5 +1,5 @@
 use super::*;
-use Direction::{Input, Output};
+use DeviceDirection::{Input, Output};
 
 fn out(names: &[&str], default: Option<&str>) -> Snapshot {
     Snapshot::from_names(names.iter().copied(), [], default, None)

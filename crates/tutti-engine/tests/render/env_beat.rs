@@ -38,8 +38,8 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_timeline::{
-    AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Timeline,
-    Transport, TransportCommand, render_graph,
+    AfterLocate, FadeOut, LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig,
+    Timeline, Transport, TransportCommand, render_graph,
 };
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
@@ -188,13 +188,13 @@ fn the_env_walk_is_the_env_beat() {
     let env_beats = Arc::clone(&sink.1);
     let (graph, _ed) = graph_engine(&transport, Unforkable(sink), 1);
 
-    let locate = |beat: f64| MotionEvent::Locate {
+    let locate = |beat: f64| MotionCommand::Locate {
         beat: Beat::new(beat),
         fade: FadeOut::Immediate,
         then: AfterLocate::Keep,
     };
     let m = &transport.motion();
-    m.try_send(MotionEvent::Play).expect("room");
+    m.try_send(MotionCommand::Play).expect("room");
     let at = |f: u64| At::Frame(Frame::new(f));
     // Armed with the playhead inside it (~0.03): wraps from ~1 600.
     m.schedule(
@@ -217,9 +217,9 @@ fn the_env_walk_is_the_env_beat() {
     .expect("room");
     // Into it, just before its end: wraps ~300 frames on.
     m.schedule(at(6_000), locate(1.99)).expect("room");
-    m.schedule(at(8_000), MotionEvent::stop_unfaded())
+    m.schedule(at(8_000), MotionCommand::stop_unfaded())
         .expect("room");
-    m.schedule(at(9_500), MotionEvent::Play).expect("room");
+    m.schedule(at(9_500), MotionCommand::Play).expect("room");
     m.schedule(at(30_000), TransportCommand::Loop(LoopEdit::armed(false)))
         .expect("room");
     let blocks = blocks(40_000);
@@ -349,7 +349,7 @@ fn click_clicks_on_the_model_beats() {
     let graph = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
     let m = &transport.motion();
-    m.try_send(MotionEvent::Play).expect("room");
+    m.try_send(MotionCommand::Play).expect("room");
     // 151 BPM from the beat frame 20 111 reaches at 120: a step inside a block.
     transport.settings().set_tempo_map(step_map(&[
         (0.0, 120.0),
@@ -357,7 +357,7 @@ fn click_clicks_on_the_model_beats() {
     ]));
     m.schedule(
         At::Frame(Frame::new(30_000)),
-        MotionEvent::Locate {
+        MotionCommand::Locate {
             beat: Beat::new(6.9),
             fade: FadeOut::Immediate,
             then: AfterLocate::Keep,
@@ -468,7 +468,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
         .expect("room");
     live_t
         .motion()
-        .try_send(MotionEvent::play_from(Beat::new(BAR_2)))
+        .try_send(MotionCommand::play_from(Beat::new(BAR_2)))
         .expect("room");
     for &n in &blocks {
         render(&live, ChannelLayout::MONO, n);

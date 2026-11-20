@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tutti_platform::Asset;
-use tutti_sampler::{OpenError, Placement, Stream, StreamReader};
+use tutti_sampler::{OpenError, Stream, StreamReader, StreamStart};
 
 use tutti_rt::LockExt;
 
@@ -102,7 +102,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     pub fn open_stream(
         &mut self,
         asset: impl Into<Asset>,
-        place: Placement,
+        place: StreamStart,
     ) -> Result<SamplerLoad, SamplerError> {
         let streamer = self
             .sampler

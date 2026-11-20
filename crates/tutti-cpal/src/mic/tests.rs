@@ -104,7 +104,7 @@ fn a_chosen_input_format_the_device_lacks_is_a_named_error() {
     assert!(
         matches!(
             &err,
-            Error::InputFormatUnavailable { device_name, format: SampleFormat::I16, rate }
+            DeviceError::InputFormatUnavailable { device_name, format: SampleFormat::I16, rate }
                 if device_name == "Format Mic" && *rate == SampleRate::SR_48K
         ),
         "{err:?}"
@@ -121,7 +121,10 @@ fn a_chosen_format_on_a_device_missing_the_rate_is_a_rate_mismatch() {
         Some(SampleFormat::I16),
     )
     .expect_err("44.1k cannot serve a 48k graph");
-    assert!(matches!(err, Error::SampleRateMismatch { .. }), "{err:?}");
+    assert!(
+        matches!(err, DeviceError::SampleRateMismatch { .. }),
+        "{err:?}"
+    );
 }
 
 /// **A device that can run at the graph's rate is opened at it**, not at
@@ -198,7 +201,7 @@ fn a_device_that_cannot_reach_the_graph_rate_is_refused() {
     .expect_err("44.1k-only cannot serve a 48k graph");
 
     match err {
-        Error::SampleRateMismatch {
+        DeviceError::SampleRateMismatch {
             device_name,
             device,
             graph,
@@ -375,21 +378,22 @@ fn the_default_is_the_first_two_inputs_or_the_lone_one_twice() {
     assert_eq!(default_inputs(ChannelLayout::from(16u16)), [0, 1]);
 }
 
-/// An input the device does not have is an `Error::Inputs`, with `FoldError`'s
+/// An input the device does not have is a `DeviceError::Inputs`, with `FoldError`'s
 /// reason; so is an empty selection.
 #[test]
 fn an_input_past_the_devices_last_is_an_error() {
-    let err = Error::from(Fold::<f32>::select(ChannelLayout::from(4u16), &[2, 4]).unwrap_err());
+    let err =
+        DeviceError::from(Fold::<f32>::select(ChannelLayout::from(4u16), &[2, 4]).unwrap_err());
     assert!(
         matches!(
             err,
-            Error::Inputs(tutti_buffers::FoldError::NoSuchChannel { channel: 4, .. })
+            DeviceError::Inputs(tutti_buffers::FoldError::NoSuchChannel { channel: 4, .. })
         ),
         "{err}"
     );
     assert!(matches!(
-        Error::from(Fold::<f32>::select(ChannelLayout::STEREO, &[]).unwrap_err()),
-        Error::Inputs(tutti_buffers::FoldError::Buffer(
+        DeviceError::from(Fold::<f32>::select(ChannelLayout::STEREO, &[]).unwrap_err()),
+        DeviceError::Inputs(tutti_buffers::FoldError::Buffer(
             tutti_buffers::BufferError::ZeroWidth
         ))
     ));

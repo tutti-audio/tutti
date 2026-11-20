@@ -28,6 +28,7 @@
 //! use tutti_plugin_db::{Catalog, CatalogConfig};
 //! use tutti_plugin_types::PluginId;
 //! use tutti_plugin_db::PluginDb;
+//! use tutti_plugin_ipc::AudioConfig;
 //! use tutti_units::Samples;
 //! use tutti_graph::NodeKey;
 //! use tutti_timeline::TempoReader;
@@ -46,7 +47,13 @@
 //! let loadable = catalog.resolve(&id).bind()?;
 //! let (_collector, work) = tutti_plugin_types::MainWork::new();
 //! let executor = tutti_platform::Executor::new();
-//! let plugin = Plugin::open(None, &executor, &work, &loadable, SampleRate::SR_48K)?;
+//! let plugin = Plugin::open_served(
+//!     &AudioConfig::default(),
+//!     &executor,
+//!     &work,
+//!     &loadable,
+//!     SampleRate::SR_48K,
+//! )?;
 //! println!("{} by {}", plugin.descriptor().name, plugin.descriptor().vendor);
 //!
 //! // Two handles, one subprocess: keep the control surface before the node goes
@@ -368,8 +375,8 @@ mod host;
 /// as a graph node, and [`PluginRebinder`](catalog::PluginRebinder) builds the node
 /// that replaces it when the plugin changes its audio ports.
 pub mod catalog {
-    pub use crate::host::placement::placement;
-    pub use crate::host::plugin::{BoundPlugin, Plugin, PluginRebinder, Rebuilt};
+    pub use crate::host::placement::{ResolvedHosting, placement};
+    pub use crate::host::plugin::{BoundPlugin, Plugin, PluginRebinder, Rebuilt, RestoreRefused};
 }
 
 // The graph node of a served plugin and its two states. The control handle,

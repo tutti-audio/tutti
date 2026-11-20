@@ -73,7 +73,7 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
                 thread::sleep(Duration::from_millis(2));
             }
             ScanPoll::Done(result) => {
-                assert!(result.failures.is_empty(), "{:?}", result.failures);
+                assert!(result.failures().is_empty(), "{:?}", result.failures());
                 break;
             }
             ScanPoll::Died => panic!("the probe's worker died"),

@@ -174,7 +174,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
         0,
     )
     .expect_err("silence has no reading");
-    assert!(matches!(err, Error::Unmeasurable { .. }), "{err:?}");
+    assert!(matches!(err, RenderError::Unmeasurable { .. }), "{err:?}");
     assert!(names(dir.path()).is_empty());
 }
 
@@ -194,7 +194,7 @@ fn planes_no_allocator_can_give_are_render_too_large() {
     };
     let err = reserve_planes::<f32>(&plan, ChannelLayout::STEREO).unwrap_err();
     assert!(
-        matches!(err, Error::RenderTooLarge { channels, .. } if channels == ChannelLayout::STEREO),
+        matches!(err, RenderError::RenderTooLarge { channels, .. } if channels == ChannelLayout::STEREO),
         "{err:?}"
     );
 }

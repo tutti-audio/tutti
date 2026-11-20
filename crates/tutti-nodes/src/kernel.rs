@@ -235,14 +235,6 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
-    /// The node with its kernel edited by `edit`, before the node has a rate: the kernel reads
-    /// what it was given at its `prepare`.
-    #[must_use]
-    pub(crate) fn map_kernel(mut self, edit: impl FnOnce(&mut K)) -> Self {
-        edit(&mut self.kernel);
-        self
-    }
-
     /// Back to silence: the grid counted from here, no ring-out owed, no input heard.
     fn clear(&mut self) {
         self.kernel.reset();

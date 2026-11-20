@@ -282,7 +282,7 @@ impl PluginClient<Unbound> {
         if format == tutti_plugin_types::PluginFormat::Vst2 {
             return Err(IpcError::NotOutOfProcess {
                 path: plugin_path,
-                format: "VST2",
+                format: tutti_plugin_types::PluginFormat::Vst2,
             });
         }
         let origin = plugin.clone();

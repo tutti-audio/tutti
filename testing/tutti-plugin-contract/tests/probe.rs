@@ -62,7 +62,7 @@ fn run_task(
             ScanPoll::Died => panic!("the task's worker died"),
         }
     };
-    match result.failures.into_iter().next() {
+    match result.failures().into_iter().next() {
         Some(failed) => Err(failed.failure),
         None => Ok(catalog.db().clone()),
     }

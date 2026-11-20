@@ -44,18 +44,18 @@
 //! Baselines are per-machine and do not travel; see `cargo xtask bench-save`.
 
 use std::hint::black_box;
-use tutti_buffers::MaxBlock;
+use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::ChannelLayout;
-use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{BusStripNode, EqBandNode, SvfFilterNode, SvfType};
-use tutti_timeline::MotionEvent;
+use tutti_nodes::{
+    BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, SvfFilterConfig, SvfFilterNode, SvfType,
+};
+use tutti_timeline::MotionCommand;
 use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 use tutti_units::{Bpm, Samples};
@@ -89,9 +89,18 @@ fn chain_engine(outputs: usize) -> Engine {
     ed.insert(
         eq,
         "eq",
-        EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(6.0)),
+        EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(6.0)),
+        ),
     );
-    ed.insert(strip, "strip", BusStripNode::stereo());
+    ed.insert(
+        strip,
+        "strip",
+        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)),
+    );
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);
@@ -106,7 +115,7 @@ fn chain_engine(outputs: usize) -> Engine {
         .expect("within the limits");
 
     transport.settings().set_tempo(Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     engine
 }
 
@@ -340,10 +349,10 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     for i in 0..depth {
         let cutoff = 500.0 + (i as f64) * 7.0;
         let f: Box<dyn tutti_graph::Node> = if ours {
-            tutti_graph::IntoNode::into_node(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(cutoff),
-                Q::new(0.7),
+            tutti_graph::IntoNode::into_node(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(cutoff))
+                    .q(Q::new(0.7)),
             ))
             .0
         } else {

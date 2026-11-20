@@ -3,10 +3,9 @@
 //! undeclared ones, and the render on a pool is bit for bit the serial one.
 
 use std::sync::Arc;
-use tutti_buffers::MaxBlock;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::signal::plane_bits as bits;
 
-use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::ParamNode;
 use tutti_graph::WorkerPool;
@@ -47,7 +46,7 @@ impl<N: Node> Node for Undeclared<N> {
 
 /// A stereo panner aimed by `k`.
 fn panner(k: u64) -> VbapPannerNode<f32> {
-    let node = VbapPannerNode::<f32>::stereo();
+    let node = vbap::<f32>(tutti_buffers::Bed::Stereo);
     aim(
         &node.param_set(),
         Azimuth::new(-30.0 + 4.0 * k as f64),
@@ -139,9 +138,9 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
 #[test]
 fn a_panner_is_moderate() {
     for node in [
-        VbapPannerNode::<f32>::stereo(),
-        VbapPannerNode::<f32>::quad(),
-        VbapPannerNode::<f32>::surround_5_1(),
+        vbap::<f32>(tutti_buffers::Bed::Stereo),
+        vbap::<f32>(tutti_buffers::Bed::Quad),
+        vbap::<f32>(tutti_buffers::Bed::Surround51),
     ] {
         assert_eq!(node.shape().cost, Cost::Moderate);
     }
@@ -181,4 +180,10 @@ fn moderate_panners_pack_and_render_bit_identically() {
         assert!(exec.is_parallel());
         assert_eq!(bits(&serial), bits(&render(&mut exec)), "{workers} workers");
     }
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
 }

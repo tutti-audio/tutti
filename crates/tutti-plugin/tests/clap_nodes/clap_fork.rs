@@ -744,7 +744,7 @@ fn an_export_through_a_failing_fork_fails_by_name() {
     assert!(healthy.planes()[0].iter().any(|&s| s != 0.0), "audible");
 
     let failed = |kind: ForkFaultKind| match export_through_a_fork(&live) {
-        Err(tutti_export::Error::ForkFailed {
+        Err(tutti_export::RenderError::ForkFailed {
             key,
             kind: got,
             cause,
@@ -902,7 +902,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
     };
     let err = render(tutti_export::EventLossPolicy::Fail).expect_err("144 note-ons were lost");
     assert!(
-        matches!(err, tutti_export::Error::EventsDropped { count: 144 }),
+        matches!(err, tutti_export::RenderError::EventsDropped { count: 144 }),
         "{err:?}"
     );
     let rendered = render(tutti_export::EventLossPolicy::Allow).expect("allowed");

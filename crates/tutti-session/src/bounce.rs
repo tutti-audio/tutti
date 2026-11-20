@@ -530,7 +530,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
 
     /// The master file's width. Without it, the root's: a wider graph folds
     /// onto a narrower file, never truncates, and a narrowing with no placement
-    /// is an error ([`tutti_export::Error`]). It replaces a
+    /// is an error ([`tutti_export::RenderError`]). It replaces a
     /// [`file_topology`](Self::file_topology) named before it.
     pub fn channels(mut self, channels: ChannelLayout) -> Self {
         self.channels = Some(channels);
@@ -568,7 +568,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     /// finishes. A path that exists then fails the commit with
     /// [`tutti_codec::Error::Commit`] of kind `AlreadyExists`, reported as
     /// [`BounceError::Export`] (or inside
-    /// [`NotCommitted`](tutti_export::Error::NotCommitted) when earlier files
+    /// [`NotCommitted`](tutti_export::RenderError::NotCommitted) when earlier files
     /// had landed). What is at the path is left alone and the complete file is
     /// kept at the error's `kept` path: the app owns it, to move or delete.
     pub fn create_new(mut self) -> Self {
@@ -1020,7 +1020,7 @@ impl tutti_timeline::Timeline for Stopped {
 /// What a bounce refuses that no render would: a request that names no
 /// span, a graph with nothing to render, and an edit that
 /// left the fork unusable. The pipeline's own refusals are
-/// [`tutti_export::Error`] ([`BounceError::Export`]).
+/// [`tutti_export::RenderError`] ([`BounceError::Export`]).
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum BounceConfigError {
@@ -1115,7 +1115,7 @@ pub enum BounceError {
     /// The pipeline's: an I/O or encoder error, a fork that failed mid-render
     /// (naming its node's key), a lost event.
     #[error("bounce: {0}")]
-    Export(tutti_export::Error),
+    Export(tutti_export::RenderError),
 }
 
 /// `file` with the bounce's resample, dither and normalize, each only when set.
@@ -1144,11 +1144,11 @@ fn refusing_existing(file: FileTarget, create_new: bool) -> FileTarget {
     if create_new { file.create_new() } else { file }
 }
 
-impl From<tutti_export::Error> for BounceError {
-    fn from(e: tutti_export::Error) -> Self {
+impl From<tutti_export::RenderError> for BounceError {
+    fn from(e: tutti_export::RenderError) -> Self {
         match e {
-            tutti_export::Error::NotForkable { key } => Self::NotForkable { node: key },
-            tutti_export::Error::Fork(e) => Self::Fork(e),
+            tutti_export::RenderError::NotForkable { key } => Self::NotForkable { node: key },
+            tutti_export::RenderError::Fork(e) => Self::Fork(e),
             other => Self::Export(other),
         }
     }
@@ -1433,7 +1433,7 @@ impl Figures {
             // Planes that cannot be held are the pipeline's error, as when
             // the allocation fails.
             Err(JobError::TooLong { total: Some(total) }) if self.held_in_memory.is_some() => {
-                Err(tutti_export::Error::RenderTooLarge {
+                Err(tutti_export::RenderError::RenderTooLarge {
                     frames: total,
                     channels: self.held_in_memory.expect("checked"),
                 }
@@ -2012,7 +2012,7 @@ where
         let ctx = clock.offline();
         let pending = match self.graph.gather_for_bounce(rate, serial, root_topology) {
             Ok(pending) => pending,
-            Err(tutti_export::Error::Fork(
+            Err(tutti_export::RenderError::Fork(
                 tutti_graph::ForkError::NoOutputs { .. }
                 | tutti_graph::ForkError::NoSuchNode { .. },
             )) => {
@@ -2165,7 +2165,7 @@ mod tests {
     /// and renders once it landed.
     #[test]
     fn a_bounce_is_refused_while_a_declared_pool_entry_is_pending() {
-        use crate::{Declared, Life, Load, PoolEntry, PoolKey};
+        use crate::{Declared, Life, PoolEntry, PoolKey, PoolLoad};
 
         struct Slow;
         impl PoolEntry for Slow {
@@ -2173,8 +2173,8 @@ mod tests {
             type Loaded = ();
             type Handle = ();
             fn identity(&self) {}
-            fn load(&self) -> Load<()> {
-                Load::on_worker(|| Ok(()))
+            fn load(&self) -> PoolLoad<()> {
+                PoolLoad::on_worker(|| Ok(()))
             }
             fn handle(_: &(), _: &Life) {}
         }

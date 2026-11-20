@@ -19,18 +19,17 @@
 //! //! ```
 
 use std::hint::black_box;
-use tutti_buffers::MaxBlock;
+use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::{BusTopology, ChannelLayout, Float};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, ChannelTimes, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
-    DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls,
-    GateNode, InterpolationMode, KeySource, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
-    ShapeKind,
+    DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
+    GateControls, GateNode, InterpolationMode, KeySource, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ShapeKind,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Samples, Seconds};
@@ -145,14 +144,24 @@ fn distortion(c: &mut Criterion) {
         c,
         "distortion",
         "tanh_2",
-        || DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(2.0)),
+            )
+        },
         None,
     );
     run(
         c,
         "distortion",
         "softsign_2",
-        || DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                    .drive(Drive::new(2.0)),
+            )
+        },
         None,
     );
     for (case, kind) in [
@@ -164,7 +173,11 @@ fn distortion(c: &mut Criterion) {
             c,
             "distortion",
             case,
-            || DistortionNode::<f32>::new(kind, Drive::new(2.0)),
+            || {
+                DistortionNode::<f32>::from(
+                    DistortionConfig::new(ChannelLayout::STEREO, kind).drive(Drive::new(2.0)),
+                )
+            },
             None,
         );
     }
@@ -172,14 +185,23 @@ fn distortion(c: &mut Criterion) {
         c,
         "distortion",
         "hardclip_6",
-        || DistortionNode::<f32>::with_channels(6u16, ShapeKind::HardClip, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(6u16, ShapeKind::HardClip).drive(Drive::new(2.0)),
+            )
+        },
         None,
     );
     run(
         c,
         "distortion",
         "softsign_2_fed",
-        || DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(2.0)),
+        || {
+            DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                    .drive(Drive::new(2.0)),
+            )
+        },
         Some(drive_sweep),
     );
 }
@@ -481,13 +503,13 @@ fn reverb(c: &mut Criterion) {
 fn convolver(c: &mut Criterion) {
     use tutti_buffers::Mono;
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::ConvolverNode;
+
     let ir = decay_ir(256, Seconds::new(0.05), SR);
     run(
         c,
         "convolver",
         "1",
-        || ConvolverNode::new(Mono::new(&ir), Samples::new(64)),
+        || mono_node(Mono::new(&ir), Samples::new(64)),
         None,
     );
 }
@@ -503,3 +525,15 @@ criterion_group!(
     convolver
 );
 criterion_main!(benches);
+
+/// A one-channel convolver over `ir`.
+fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+            .block_size(block_size),
+    )
+    .expect("one response on a mono bus")
+}

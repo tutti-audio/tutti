@@ -65,7 +65,7 @@ impl InputOpener for Capture {
         let n = rec.writers.len();
         rec.log.push(format!("open {}", rate.get()));
         if rec.fail_from.is_some_and(|from| n >= from) {
-            return Err(tutti_cpal::Error::InvalidDevice("unplugged".into()));
+            return Err(tutti_cpal::DeviceError::InvalidDevice("unplugged".into()));
         }
         let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(256), rate);
         rec.writers.push(writer);
@@ -83,7 +83,7 @@ impl InputOpener for Capture {
 /// refuses a format it cannot give.
 impl InputOpener<f64> for Capture {
     fn open(&mut self, _: &MicConfig, _: SampleRate) -> tutti_cpal::Result<OpenedInput<f64>> {
-        Err(tutti_cpal::Error::InvalidConfig(
+        Err(tutti_cpal::DeviceError::InvalidConfig(
             "this capture serves one sample width only".into(),
         ))
     }
@@ -220,7 +220,7 @@ fn an_input_that_cannot_be_reopened_is_reported_with_its_error() {
         .unwrap_or_else(|| panic!("no InputReopenFailed in {events:?}"));
     assert_eq!(*failed.0, input.node().erase());
     assert!(
-        matches!(failed.1, Error::Device(tutti_cpal::Error::InvalidDevice(why)) if why == "unplugged"),
+        matches!(failed.1, Error::Device(tutti_cpal::DeviceError::InvalidDevice(why)) if why == "unplugged"),
         "{:?}",
         failed.1
     );
@@ -413,7 +413,7 @@ fn a_capture_refusing_the_sessions_width_fails_the_add_input_call() {
     assert!(
         matches!(
             refused,
-            Err(Error::Device(tutti_cpal::Error::InvalidConfig(_)))
+            Err(Error::Device(tutti_cpal::DeviceError::InvalidConfig(_)))
         ),
         "{refused:?}"
     );

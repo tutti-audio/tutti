@@ -5,15 +5,14 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, MaxBlock};
+use tutti_buffers::{BusTopology, MaxBlock, Planes};
 
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, EqBandNode, InterpolationMode, LimiterConfig, LimiterControls,
-    LimiterNode, MaxDelay, SvfType,
+    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, DelayConfig,
+    DelayControls, DelayLayout, DelayNode, EqBandConfig, EqBandNode, InterpolationMode,
+    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
@@ -119,7 +118,7 @@ fn the_strip_holds_off_non_finite_volume_and_balance() {
     ];
     for (name, write) in cells {
         for bad in BAD {
-            let mut node = BusStripNode::stereo();
+            let mut node = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
             Node::<f32>::prepare(
                 &mut node,
                 &Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
@@ -210,7 +209,12 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("eq band", || {
-        let n = EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(3.0));
+        let n = EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(3.0)),
+        );
         let cells = vec![
             (
                 "frequency",

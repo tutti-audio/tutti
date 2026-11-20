@@ -14,5 +14,5 @@ mod hrtf;
 mod target;
 mod vbap;
 
-pub use hrtf::HrtfBinauralNode;
-pub use vbap::{VbapError, VbapPannerNode};
+pub use hrtf::{HrtfBinauralConfig, HrtfBinauralNode};
+pub use vbap::{VbapError, VbapPannerConfig, VbapPannerNode};

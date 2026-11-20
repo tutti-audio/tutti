@@ -12,11 +12,23 @@
 
 use tutti_midi_protocol::{MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti_ump::{
-    Address, Attribute, Bank, BendValue, BlockDirection, CCNumber, ControlValue, Message,
-    Midi1Port, MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn, Stream, U7, Ump, Voice1,
-    Voice2,
+    Address, Attribute, Bank, BendValue, BlockDirection, CCNumber, ControlValue, DeviceIdentity,
+    ManufacturerId, Message, Midi1Port, MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn,
+    SoftwareRevision, Stream, U7, Ump, Voice1, Voice2,
 };
 use tutti_units::Semitones;
+
+/// A Device Identity for a test endpoint: the non-commercial manufacturer id
+/// (M2-104 §7.10) with a family, model and revision whose two 7-bit bytes differ,
+/// so a swapped byte shows.
+pub fn device_identity() -> DeviceIdentity {
+    DeviceIdentity {
+        manufacturer: ManufacturerId::NON_COMMERCIAL,
+        family: [U7::of(1), U7::of(2)],
+        model: [U7::of(3), U7::of(4)],
+        revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
+    }
+}
 
 /// A MIDI 2.0 Note On with no attribute.
 pub fn note_on(address: impl Into<Address>, n: u8, velocity: u16) -> Ump {

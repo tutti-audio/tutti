@@ -777,7 +777,7 @@ place that loses precision to be written out explicitly:
    tolerance is now the engine-wide rule, `FRAME_TOLERANCE`.)
 
    **Transport commands.** `MotionFsm::schedule(At,
-   TransportCommand)` queues a play, stop, seek or scrub (`MotionEvent`) or
+   TransportCommand)` queues a play, stop, seek or scrub (`MotionCommand`) or
    a loop change (a timed tempo command was retired by doc 020 stage 6: the
    tempo is the map). No untimed overload: `try_send` is `schedule` at
    `At::NextBlock`, on the same queue, so commands due on one frame keep send order across

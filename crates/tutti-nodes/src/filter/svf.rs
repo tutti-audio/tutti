@@ -23,19 +23,22 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// Eight responses ([`SvfType`]) share one coefficient solve (Cytomic /
 /// Zavalishin TPT form), so switching type is as cheap as any parameter
 /// change. The response is fixed at construction: a node with another one is
-/// another node.
+/// another node. Made from an [`SvfFilterConfig`] (`SvfFilterNode::from`).
 ///
 /// # Examples
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_buffers::MaxBlock;
+/// use tutti_buffers::{ChannelLayout, MaxBlock};
 /// use tutti_units::{Hz, Q, UnitParam};
 /// use tutti_graph::{Prepare, Standalone};
-/// use tutti_nodes::{SvfFilterNode, SvfType};
+/// use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 /// use tutti_units::{SampleRate, Samples};
 ///
-/// let filter = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707));
+/// let config = SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+///     .freq(Hz::new(800.0))
+///     .q(Q::new(0.707));
+/// let filter = SvfFilterNode::<f32>::from(config);
 /// let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 1);
@@ -81,58 +84,74 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// its input stops, for as long as its Q says, so the graph's tail fold must not
 /// read it as `None`; it never parks. The graph prepares it at the device rate
 /// before its first block. Rendering allocates nothing.
+///
+/// # Panics
+///
+/// `SvfFilterNode::from` panics past 16 channels: a filter is one bus.
 pub type SvfFilterNode<F> = KernelNode<SvfKernel<F>>;
 
-impl<F: Float + SimdLanes> SvfFilterNode<F> {
-    /// A mono filter (1 in, 1 out) of `filter_type` at `frequency` cutoff and
-    /// resonance `q`, with 0 dB gain.
+/// What an [`SvfFilterNode`] is made from: its width and its controls' start.
+///
+/// A config starts at a 1 kHz Butterworth response of the given type with 0 dB gain
+/// ([`SvfControls::DEFAULT`]); the options set the cutoff, the resonance and the gain. The
+/// response is fixed: a node with another one is another node.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SvfFilterConfig {
+    width: ChannelLayout,
+    controls: SvfControls,
+}
+
+impl SvfFilterConfig {
+    /// A filter of `width` channels with the response `filter_type`.
     ///
-    /// `q` around `0.707` is the flattest (Butterworth) response; higher values
-    /// resonate at the cutoff, and a band-pass or notch narrows as it rises.
+    /// The coefficients are channel-shared, one linked control surface across all
+    /// channels, and only the per-channel integrator state is replicated, so widening costs
+    /// state but not parameter work. Speaker placement is the upstream panner's job: this
+    /// is a per-channel filter, not a spatial process.
+    #[must_use]
+    pub fn new(width: impl Into<ChannelLayout>, filter_type: SvfType) -> Self {
+        Self {
+            width: width.into(),
+            controls: SvfControls {
+                ty: filter_type,
+                ..SvfControls::DEFAULT
+            },
+        }
+    }
+
+    /// The cutoff, centre or corner, at the start.
     ///
     /// The coefficients are solved at the rate [`prepare`](tutti_graph::Node::prepare)
-    /// hands it.
-    pub fn new(filter_type: SvfType, frequency: impl Into<Hz>, q: impl Into<Q>) -> Self {
-        Self::with_channels(ChannelLayout::MONO, filter_type, frequency, q)
-    }
-
-    /// A filter `channels` wide (clamped to at least 1).
-    ///
-    /// The coefficients are channel-shared — one linked control surface across
-    /// all channels — and only the per-channel integrator state is replicated,
-    /// so widening costs state but not parameter work.
-    ///
-    /// Speaker placement is the upstream panner's job: this is a per-channel
-    /// filter, not a spatial process.
-    pub fn with_channels(
-        channels: impl Into<ChannelLayout>,
-        filter_type: SvfType,
-        frequency: impl Into<Hz>,
-        q: impl Into<Q>,
-    ) -> Self {
-        Self::with_controls(
-            channels,
-            SvfControls {
-                ty: filter_type,
-                freq: frequency.into(),
-                q: q.into(),
-                gain: Db::new(0.0),
-            },
-        )
-    }
-
-    /// A filter `channels` wide with every control of `controls` (the response,
-    /// cutoff, Q and the gain of a bell or shelf, read only by those three).
-    ///
-    /// [`new`](Self::new) and [`with_channels`](Self::with_channels) start at
-    /// 0 dB; this is the constructor of a gain-bearing filter. The response is
-    /// fixed here: a node with another one is another node.
+    /// hands the node.
     #[must_use]
-    pub fn with_controls(channels: impl Into<ChannelLayout>, controls: SvfControls) -> Self {
+    pub fn freq(mut self, frequency: Hz) -> Self {
+        self.controls.freq = frequency;
+        self
+    }
+
+    /// The resonance at the start. Around `0.707` is the flattest (Butterworth) response;
+    /// higher values resonate at the cutoff, and a band-pass or notch narrows as it rises.
+    #[must_use]
+    pub fn q(mut self, q: Q) -> Self {
+        self.controls.q = q;
+        self
+    }
+
+    /// The gain of a bell or shelf at the start, read only by [`Bell`](SvfType::Bell),
+    /// [`LowShelf`](SvfType::LowShelf) and [`HighShelf`](SvfType::HighShelf).
+    #[must_use]
+    pub fn gain(mut self, gain: Db) -> Self {
+        self.controls.gain = gain;
+        self
+    }
+}
+
+impl<F: Float + SimdLanes> From<SvfFilterConfig> for SvfFilterNode<F> {
+    fn from(config: SvfFilterConfig) -> Self {
         Self::with_kernel(
-            SvfKernel::new(filter_bus(channels.into())),
-            SvfSet(controls.ty),
-            controls,
+            SvfKernel::new(filter_bus(config.width)),
+            SvfSet(config.controls.ty),
+            config.controls,
         )
     }
 }
@@ -277,14 +296,11 @@ mod tests {
     /// `tutti_graph::contract::assert_param_fork` for what it pins.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
-        let node = SvfFilterNode::<f32>::with_controls(
-            ChannelLayout::MONO,
-            SvfControls {
-                ty: SvfType::Bell,
-                freq: Hz::new(500.0),
-                q: Q::new(0.707),
-                gain: Db::new(-3.0),
-            },
+        let node = SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Bell)
+                .freq(Hz::new(500.0))
+                .q(Q::new(0.707))
+                .gain(Db::new(-3.0)),
         );
         assert_eq!(
             node.param_set().params().collect::<Vec<_>>(),
@@ -295,7 +311,13 @@ mod tests {
 
     #[test]
     fn test_svf_lowpass_attenuates_high_freq() {
-        let make = || SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(500.0), Q::new(0.707));
+        let make = || {
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(500.0))
+                    .q(Q::new(0.707)),
+            )
+        };
         let out_low = render(make(), &generate_sine(100.0, 44100.0, 4096));
         let out_high = render(make(), &generate_sine(5000.0, 44100.0, 4096));
         let rms_low = rms(&out_low[512..]);
@@ -308,7 +330,13 @@ mod tests {
 
     #[test]
     fn test_svf_highpass_attenuates_low_freq() {
-        let make = || SvfFilterNode::<f32>::new(SvfType::HighPass, Hz::new(2000.0), Q::new(0.707));
+        let make = || {
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::HighPass)
+                    .freq(Hz::new(2000.0))
+                    .q(Q::new(0.707)),
+            )
+        };
         let out_low = render(make(), &generate_sine(100.0, 44100.0, 4096));
         let out_high = render(make(), &generate_sine(5000.0, 44100.0, 4096));
         let rms_low = rms(&out_low[512..]);
@@ -321,7 +349,13 @@ mod tests {
 
     #[test]
     fn test_svf_bandpass() {
-        let make = || SvfFilterNode::<f32>::new(SvfType::BandPass, Hz::new(1000.0), Q::new(5.0));
+        let make = || {
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::BandPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(5.0)),
+            )
+        };
         let out_on = render(make(), &generate_sine(1000.0, 44100.0, 4096));
         let out_off = render(make(), &generate_sine(100.0, 44100.0, 4096));
         let rms_on = rms(&out_on[512..]);
@@ -334,7 +368,13 @@ mod tests {
 
     #[test]
     fn test_svf_notch() {
-        let make = || SvfFilterNode::<f32>::new(SvfType::Notch, Hz::new(1000.0), Q::new(5.0));
+        let make = || {
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Notch)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(5.0)),
+            )
+        };
         let out_on = render(make(), &generate_sine(1000.0, 44100.0, 4096));
         let out_off = render(make(), &generate_sine(5000.0, 44100.0, 4096));
         let rms_on = rms(&out_on[512..]);
@@ -353,7 +393,11 @@ mod tests {
         for hz in [200.0, 1000.0, 5000.0] {
             let sig = generate_sine(hz, 44100.0, 8192);
             let out = render(
-                SvfFilterNode::<f32>::new(SvfType::Allpass, Hz::new(1000.0), Q::new(0.707)),
+                SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Allpass)
+                        .freq(Hz::new(1000.0))
+                        .q(Q::new(0.707)),
+                ),
                 &sig,
             );
             let (rin, rout) = (rms(&sig[1024..]), rms(&out[1024..]));
@@ -368,7 +412,11 @@ mod tests {
     #[test]
     fn test_svf_impulse_response_finite() {
         let ir = render(
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1000.0), Q::new(0.707)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
+            ),
             &impulse(1024),
         );
         let first_half_energy: f32 = ir[..512].iter().map(|s| s * s).sum();
@@ -382,10 +430,10 @@ mod tests {
     /// `reset` clears the integrators: silence in is silence out.
     #[test]
     fn test_svf_reset() {
-        let mut filter = prepared(SvfFilterNode::<f32>::new(
-            SvfType::LowPass,
-            Hz::new(1000.0),
-            Q::new(0.707),
+        let mut filter = prepared(SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(0.707)),
         ));
         drive_block(&mut filter, &[&generate_sine(100.0, 48_000.0, 100)]);
         Node::reset(&mut filter);
@@ -402,11 +450,10 @@ mod tests {
     /// address the node does not own is refused.
     #[test]
     fn test_svf_set_via_unit_param() {
-        let node = SvfFilterNode::<f32>::with_channels(
-            ChannelLayout::STEREO,
-            SvfType::LowPass,
-            Hz::new(1000.0),
-            Q::new(0.707),
+        let node = SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(0.707)),
         );
         let params = node.param_set();
         assert!(params.set(UnitParam::Cutoff, 5000.0));
@@ -422,10 +469,18 @@ mod tests {
             .map(|i| ((i * 7 + 3) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let out1 = render(
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(500.0), Q::new(0.707)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(500.0))
+                    .q(Q::new(0.707)),
+            ),
             &noise,
         );
-        let high = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(500.0), Q::new(0.707));
+        let high = SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(500.0))
+                .q(Q::new(0.707)),
+        );
         assert!(high.param_set().set(UnitParam::Cutoff, 5000.0));
         let out2 = render(high, &noise);
         let rms1 = rms(&out1[100..]);
@@ -441,12 +496,20 @@ mod tests {
         let input = generate_sine(500.0, 44100.0, 2048);
         let rate = SampleRate::SR_44K1;
         let mut f64_node = tutti_graph::contract::prepared(
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1000.0), Q::new(0.707)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
+            ),
             rate,
             2048,
         );
         let mut f32_node = tutti_graph::contract::prepared(
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1000.0), Q::new(0.707)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
+            ),
             rate,
             2048,
         );
@@ -466,15 +529,18 @@ mod tests {
         // Identical signal on L+R must match what a mono SVF would produce.
         let signal = generate_sine(440.0, 44100.0, 2048);
         let mono_out = render(
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1000.0), Q::new(0.707)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
+            ),
             &signal,
         );
         let out = render_wide(
-            SvfFilterNode::<f32>::with_channels(
-                ChannelLayout::STEREO,
-                SvfType::LowPass,
-                Hz::new(1000.0),
-                Q::new(0.707),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
             ),
             &[&signal, &signal],
         );
@@ -496,11 +562,10 @@ mod tests {
         let l_in = generate_sine(200.0, 44100.0, 2048);
         let r_in = vec![0.0f32; 2048];
         let out = render_wide(
-            SvfFilterNode::<f32>::with_channels(
-                ChannelLayout::STEREO,
-                SvfType::LowPass,
-                Hz::new(1000.0),
-                Q::new(0.707),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
             ),
             &[&l_in, &r_in],
         );
@@ -515,11 +580,10 @@ mod tests {
 
     #[test]
     fn test_stereo_svf_reset_clears_both_channels() {
-        let mut stereo = prepared(SvfFilterNode::<f32>::with_channels(
-            ChannelLayout::STEREO,
-            SvfType::LowPass,
-            Hz::new(1000.0),
-            Q::new(0.707),
+        let mut stereo = prepared(SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(0.707)),
         ));
         let signal = generate_sine(100.0, 48_000.0, 200);
         drive_block(&mut stereo, &[&signal, &signal]);
@@ -533,11 +597,10 @@ mod tests {
     /// `Tail::Unknown`.
     #[test]
     fn the_shape_is_the_width_and_declares_cutoff_q_and_gain() {
-        let f = SvfFilterNode::<f32>::with_channels(
-            6u16,
-            SvfType::LowPass,
-            Hz::new(1000.0),
-            Q::new(0.7),
+        let f = SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(6u16, SvfType::LowPass)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(0.7)),
         );
         let shape = f.shape();
         assert_eq!(
@@ -567,16 +630,19 @@ mod tests {
         let mut frames: Vec<&[f32]> = vec![&silent; 6];
         frames[4] = &sig;
         let out = render_wide(
-            SvfFilterNode::<f32>::with_channels(
-                6u16,
-                SvfType::LowPass,
-                Hz::new(1000.0),
-                Q::new(0.707),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(6u16, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
             ),
             &frames,
         );
         let mono_out = render(
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1000.0), Q::new(0.707)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
+            ),
             &sig,
         );
         for i in 0..sig.len() {
@@ -602,11 +668,10 @@ mod tests {
             .map(|i| ((i * 7 + 3) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let run = |cutoff: f32| -> f32 {
-            let mut f = prepared(SvfFilterNode::<f32>::with_channels(
-                ChannelLayout::STEREO,
-                SvfType::LowPass,
-                Hz::new(200.0),
-                Q::new(0.707),
+            let mut f = prepared(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+                    .freq(Hz::new(200.0))
+                    .q(Q::new(0.707)),
             ));
             let held = vec![cutoff; noise.len()];
             let out = drive(
@@ -632,11 +697,10 @@ mod tests {
         // faithful superset.
         let signal = generate_sine(440.0, 48_000.0, 1024);
         let make = || {
-            prepared(SvfFilterNode::<f32>::with_channels(
-                ChannelLayout::STEREO,
-                SvfType::LowPass,
-                Hz::new(1000.0),
-                Q::new(0.707),
+            prepared(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(0.707)),
             ))
         };
         let plain = drive_block(&mut make(), &[&signal, &signal]);
@@ -675,11 +739,10 @@ mod tests {
         // 1.5 kHz: two whole periods in a 64-frame block, so a block's RMS is exact.
         let x = sine(1_500.0, 48_000.0, 64 + 512);
         let make = || {
-            SvfFilterNode::<f32>::with_channels(
-                ChannelLayout::STEREO,
-                SvfType::LowPass,
-                Hz::new(400.0),
-                Q::new(0.707),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+                    .freq(Hz::new(400.0))
+                    .q(Q::new(0.707)),
             )
         };
         let change = |n: &SvfFilterNode<f32>| {
@@ -726,7 +789,11 @@ mod tests {
         use crate::test_support::sine;
         let rate = SampleRate::SR_48K;
         let mut node = tutti_graph::contract::prepared(
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(400.0), Q::new(0.707)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(400.0))
+                    .q(Q::new(0.707)),
+            ),
             rate,
             64,
         );
@@ -757,10 +824,10 @@ mod tests {
     #[test]
     fn a_nan_q_at_construction_is_butterworth_and_recovers() {
         let x = generate_sine(800.0, 44_100.0, 8 * 1024);
-        let mut f = prepared(SvfFilterNode::<f32>::new(
-            SvfType::LowPass,
-            Hz::new(800.0),
-            Q::new(f64::NAN),
+        let mut f = prepared(SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(800.0))
+                .q(Q::new(f64::NAN)),
         ));
         let mut last = Vec::new();
         for block in x.chunks(1024) {
@@ -791,10 +858,10 @@ mod tests {
         // 800 Hz: 60 frames a period, so 4 800 frames are whole periods.
         let tone = sine(800.0, 48_000.0, 64 * 400);
         let mut blocks = tone.chunks(64);
-        let mut f = prepared(SvfFilterNode::<f32>::new(
-            SvfType::LowPass,
-            Hz::new(800.0),
-            Q::new(0.7),
+        let mut f = prepared(SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(800.0))
+                .q(Q::new(0.7)),
         ));
         let mut next = |f: &mut SvfFilterNode<f32>| {
             drive_block(f, &[blocks.next().expect("a block of the tone")]).remove(0)
