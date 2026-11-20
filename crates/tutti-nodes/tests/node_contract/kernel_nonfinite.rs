@@ -24,6 +24,7 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TiltFilterConfig,
     TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
+use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
@@ -147,6 +148,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 Hz::new(2_000.0),
                 Q::new(2.0),
                 Db::new(6.0),
+            ))),
+        ),
+        (
+            "graphic eq",
+            Box::new(GraphicEqNode::from(GraphicEqConfig::new(
+                BusTopology::STEREO,
+                GraphicBands::ThirdOctave,
             ))),
         ),
         (
