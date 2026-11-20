@@ -261,12 +261,6 @@ tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinau
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new
 
 # tutti-plugin
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/capability_view.rs::TransportView::set_meter
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/mod.rs::PluginClient::set_automation_state
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/mod.rs::PluginClient::set_parameter
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/mod.rs::PluginClient::set_render_mode
-tutti-plugin  setter  crates/tutti-plugin/src/host/plugin.rs::Plugin::set_meter
-tutti-plugin  setter  crates/tutti-plugin/src/host/plugin.rs::Plugin::set_render_mode
 
 # tutti-plugin-host
 tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_invalidate_sink

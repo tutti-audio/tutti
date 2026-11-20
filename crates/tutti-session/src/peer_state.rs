@@ -12,9 +12,9 @@ use tutti_midi_ci::MediaType;
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_device::{Match, SavedDevice};
 #[cfg(feature = "plugin")]
-use tutti_plugin::catalog::PluginRef;
-#[cfg(feature = "plugin")]
 use tutti_plugin_types::PluginFormat;
+#[cfg(feature = "plugin")]
+use tutti_plugin_types::PluginRef;
 
 /// The peer a state was saved from: what [`PeerState::check_for`] compares.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -19,7 +19,7 @@ use tutti_plugin_host::{
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::IpcResult;
 use tutti_plugin_types::PluginFormat;
-use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor, PluginRole};
+use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
 use tutti_units::SampleRate;
 
 /// The audio node, wherever it runs.
@@ -43,7 +43,7 @@ enum Placed {
 /// inputs it can accept.
 ///
 /// Created by [`Plugin::open`] or `PluginLoad::run`.
-/// Where a plugin runs is its load's [`Hosting`]: by default VST3, CLAP and AU
+/// Where a plugin runs is its load's [`Hosting`](tutti_plugin_db::Hosting): by default VST3, CLAP and AU
 /// plugins run in a `plugin-server` subprocess and VST2 (with the `vst2`
 /// feature) in the host process; [`Loadable::hosting`] asks for the other
 /// where the format allows it. Which one a plugin landed in does not change
@@ -58,10 +58,12 @@ enum Placed {
 ///
 /// ```no_run
 /// use tutti_units::SampleRate;
-/// use tutti_plugin::catalog::{Loadable, Plugin, PluginRef};
+/// use tutti_plugin::catalog::Plugin;
+/// use tutti_plugin_db::Loadable;
+/// use tutti_plugin_types::PluginRef;
 ///
 /// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3");
-/// let (_collector, work) = tutti_plugin::MainWork::new();
+/// let (_collector, work) = tutti_plugin_types::MainWork::new();
 /// let plugin = Plugin::open(None, &work, &Loadable::uncatalogued(file), SampleRate::SR_48K)?;
 /// println!("{} ({:?})", plugin.descriptor().name, plugin.role());
 /// if plugin.takes_midi() {
@@ -93,14 +95,16 @@ impl Plugin {
     ///
     /// ```no_run
     /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
-    /// use tutti_plugin::catalog::{Catalog, CatalogConfig, Plugin, PluginId};
+    /// use tutti_plugin::catalog::Plugin;
+    /// use tutti_plugin_db::{Catalog, CatalogConfig};
+    /// use tutti_plugin_types::PluginId;
     /// use tutti_plugin_db::PluginDb;
     /// # let dir = std::path::PathBuf::from("/my/app/state");
     /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir), |_| Ok(()));
     /// let foo = catalog
     ///     .resolve(&"vst3.00112233-44556677-8899AABB-CCDDEEFF".parse::<PluginId>()?)
     ///     .bind()?;
-    /// let (_collector, work) = tutti_plugin::MainWork::new();
+    /// let (_collector, work) = tutti_plugin_types::MainWork::new();
     /// let plugin = Plugin::open(None, &work, &foo, tutti_units::SampleRate::SR_48K)?;
     /// # Ok(()) }
     /// ```
@@ -368,96 +372,7 @@ impl Plugin {
         self.handle.loaded()
     }
 
-    /// Returns what this plugin is (instrument, effect, …), normalized across
-    /// formats.
-    pub fn role(&self) -> PluginRole {
-        self.descriptor().class.role()
-    }
-
     // ---- Per-block inputs -------------------------------------------------
-
-    /// Whether the plugin accepts this input, i.e. did not answer `false`.
-    ///
-    /// Shares `is_declined` with the [`PluginClient`] accessors, so the two
-    /// agree about what an unprobed capability means.
-    fn accepts(&self, f: Features) -> bool {
-        !crate::host::node::is_declined(self.loaded(), f)
-    }
-
-    /// Returns whether the plugin takes MIDI, that is, it did not decline MIDI
-    /// input.
-    ///
-    /// When `true`, wire MIDI to its node's event input.
-    pub fn takes_midi(&self) -> bool {
-        self.accepts(Features::MIDI_IN)
-    }
-
-    /// Returns whether the plugin sends MIDI, that is, it did not decline MIDI
-    /// output.
-    ///
-    /// When `true`, its node's event output carries it.
-    pub fn sends_midi(&self) -> bool {
-        self.accepts(Features::MIDI_OUT)
-    }
-
-    /// Tells the plugin whether it is being rendered under realtime pressure.
-    ///
-    /// Set this **before** pulling blocks for an offline bounce: a plugin may
-    /// spend more per block when it knows there is no deadline, and three of
-    /// the four formats can only take the change while the plugin is
-    /// deactivated. Leaving it unset renders the live-quality result into a
-    /// file the user asked to be exact.
-    ///
-    /// `false` if the plugin declared it does not honour a render-mode change
-    /// — a CLAP plugin that does not implement `clap.render`, or an AU without
-    /// `kAudioUnitProperty_OfflineRender`. That is a refusal, not a failure:
-    /// such a plugin renders identically either way, which is exactly what
-    /// declining the extension means.
-    #[must_use = "a false return means the plugin declined the render mode and nothing was applied"]
-    pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        if !self.accepts(Features::RENDER_MODE) {
-            return false;
-        }
-        match &self.placed {
-            Placed::Served(c) => c.set_render_mode(mode),
-            Placed::InProcess(c) => c.set_render_mode(mode),
-        }
-    }
-
-    /// Gives the plugin the project meter, for the time signature and bar of
-    /// the transport it is told. The node's meter follows the project meter
-    /// the host publishes edits to, so an edit reaches the running plugin
-    /// with nothing re-installed.
-    ///
-    /// The transport itself needs no install: every plugin node reads it from
-    /// each block's graph context once it is in a graph (the transport its
-    /// input was rendered at).
-    ///
-    /// Returns `false` if the plugin declared it does not want a transport
-    /// snapshot.
-    #[must_use = "a false return means the plugin declined this input and nothing was installed"]
-    pub fn set_meter(&self, meter: tutti_transport::ProjectMeter) -> bool {
-        if !self.accepts(Features::TRANSPORT) {
-            return false;
-        }
-        self.meter().set_meter(meter);
-        true
-    }
-
-    /// Drops the meter; the plugin is told 4/4 from bar 0.
-    pub fn clear_meter(&self) {
-        self.meter().clear_meter();
-    }
-
-    /// The node's meter cell, as a handle of its own, for either hosting:
-    /// what a host keeps to install the meter after the plugin has moved
-    /// into a graph (the same cell [`set_meter`](Self::set_meter) writes).
-    pub fn meter(&self) -> tutti_plugin_host::PluginTimeSignature {
-        match &self.placed {
-            Placed::Served(c) => c.controls().meter(),
-            Placed::InProcess(c) => c.meter(),
-        }
-    }
 
     /// What the node counts and holds, for either hosting: its meter cell and
     /// the delivery counters (events it dropped, parameter points it sent,
@@ -467,19 +382,6 @@ impl Plugin {
         match &self.placed {
             Placed::Served(c) => (*c.controls()).clone(),
             Placed::InProcess(c) => c.controls(),
-        }
-    }
-
-    /// Returns whether the plugin takes chord and scale context (it declared
-    /// sequencer context).
-    ///
-    /// When `true`, wire a `HarmonyNode` (from `tutti-midi-runtime`) to its
-    /// event input. `false` for a plugin that declined, and for an in-process
-    /// node, whose event input takes only MIDI.
-    pub fn takes_harmony(&self) -> bool {
-        match &self.placed {
-            Placed::Served(c) => c.takes_harmony(),
-            Placed::InProcess(_) => false,
         }
     }
 
@@ -559,7 +461,7 @@ impl Plugin {
 /// control surface is needed after the node moves into the graph.
 ///
 /// The controls are the subprocess node's [`PluginControls`]; `None` for an
-/// in-process plugin, whose meter is reached through [`Plugin::meter`]
+/// in-process plugin, whose meter is reached through [`Plugin::node_controls`]
 /// (take it before binding; its own `IntoNode` hands back its
 /// `NodeControls`, which carry its parameter counters too). Either
 /// hands the editor its fork source: a fork by state transfer, into a new
@@ -782,7 +684,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
                 fork: Some(fork),
             },
             // An in-process node has no `PluginControls` (its meter is reached
-            // through `Plugin::meter`, taken before binding).
+            // through `Plugin::node_controls`, taken before binding).
             BoundPlaced::InProcess(node) => {
                 let parts = node.into_parts();
                 tutti_graph::NodeParts {
@@ -792,37 +694,5 @@ impl tutti_graph::IntoNode for BoundPlugin {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::host::node::is_declined;
-    use tutti_plugin_types::{Features, LoadedPlugin};
-
-    /// `Plugin`'s capability gate is the one the node accessors use.
-    ///
-    /// The installers on `Plugin` dispatch across the hostings, so they cannot
-    /// share the accessors themselves — but they must not restate the rule.
-    /// This pins that the shared predicate is what both consult, so a change to
-    /// "declined" reaches the unified surface too.
-    #[test]
-    fn the_unified_surface_gates_on_the_same_predicate_as_the_node() {
-        let declined = LoadedPlugin {
-            probed: Features::TRANSPORT,
-            features: Features::empty(),
-            ..Default::default()
-        };
-        assert!(is_declined(&declined, Features::TRANSPORT));
-
-        let advertised = LoadedPlugin {
-            probed: Features::TRANSPORT,
-            features: Features::TRANSPORT,
-            ..Default::default()
-        };
-        assert!(!is_declined(&advertised, Features::TRANSPORT));
-
-        // Unprobed stays open.
-        assert!(!is_declined(&LoadedPlugin::default(), Features::TRANSPORT));
     }
 }

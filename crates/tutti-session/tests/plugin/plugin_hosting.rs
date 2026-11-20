@@ -6,8 +6,9 @@ use crate::support::clap_probe;
 use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
-use tutti_plugin::catalog::{Hosting, PluginRef};
+use tutti_plugin_db::Hosting;
 use tutti_plugin_types::IpcError;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent};
 use tutti_units::Samples;
 

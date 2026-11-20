@@ -668,10 +668,6 @@ pub mod soundfont {
 /// spawns; build it with `cargo build -p tutti-plugin-server`.
 #[cfg(feature = "plugin")]
 pub mod plugin {
-    pub use tutti_plugin::{
-        AutomationMode, IpcConfig, MainThreadMarker, MainWork, MainWorkHandle, PluginRenderFault,
-        Preset,
-    };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
@@ -680,6 +676,7 @@ pub mod plugin {
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
     pub use tutti_plugin_ipc::RandomSourceError;
+    pub use tutti_plugin_ipc::{IpcConfig, PluginRenderFault};
     pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::features::{FeatureReport, Features};
@@ -692,6 +689,9 @@ pub mod plugin {
         StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
         Vst3PlugType, Vst3SubCategories,
     };
+    pub use tutti_plugin_types::{
+        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
+    };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
@@ -703,10 +703,10 @@ pub mod plugin {
     /// The plugin catalog: scanning, the database and the descriptors it
     /// holds.
     pub mod catalog {
-        pub use tutti_plugin::catalog::AudioConfig;
         pub use tutti_plugin_db::{
             CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
         };
+        pub use tutti_plugin_ipc::AudioConfig;
         pub use tutti_plugin_types::{
             Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid, Widths,
         };

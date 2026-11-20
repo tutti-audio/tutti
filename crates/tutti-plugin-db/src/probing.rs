@@ -1,6 +1,6 @@
 //! The subprocess probe, as the probe `tutti-plugin-db` scans with.
 
-use crate::probe::{DEFAULT_PROBE_TIMEOUT, ProbeState, measure_metadata_with, probe_metadata_with};
+use crate::probe::{ProbeState, measure_metadata_with, probe_metadata_with};
 use crate::{CatalogConfig, ProbeFailure, probe_plugin_fallback};
 use std::path::Path;
 use std::time::Duration;
@@ -30,7 +30,7 @@ pub struct Probing {
 }
 
 /// The probe a scanner calls, as `config` and `how` say: the binary
-/// `config.probe_locator` names, the deadlines `config` gives or the defaults.
+/// `config.probe_locator` names and the deadlines `config` holds.
 pub fn probe_fn(
     config: &CatalogConfig,
     how: Probing,
@@ -40,9 +40,9 @@ pub fn probe_fn(
 + 'static {
     let locator: Locator = config.probe_locator.clone();
     let timeout = if how.measure {
-        config.measure_timeout.unwrap_or(DEFAULT_MEASURE_TIMEOUT)
+        config.measure_timeout
     } else {
-        config.probe_timeout.unwrap_or(DEFAULT_PROBE_TIMEOUT)
+        config.probe_timeout
     };
     move |path, format, stop| {
         let probed = if how.measure {

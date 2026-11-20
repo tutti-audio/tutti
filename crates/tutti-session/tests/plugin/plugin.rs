@@ -33,9 +33,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
-use tutti_plugin::RenderMode;
-use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::PluginFailure;
+use tutti_plugin_types::PluginRef;
+use tutti_plugin_types::RenderMode;
 use tutti_session::BufferMaster;
 use tutti_session::PeerState;
 use tutti_session::{

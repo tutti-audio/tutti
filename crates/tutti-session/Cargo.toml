@@ -73,6 +73,10 @@ tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }
 # The control handle, the node's controls and the host policy over a handle
 # (`Liveness`, `PluginParamValues`): what a hosted plugin is, whatever serves it.
 tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host", optional = true }
+# The catalog a pool entry resolves through (`Loadable`, `Hosting`, `BindError`).
+tutti-plugin-db = { version = "0.0.1", path = "../tutti-plugin-db", optional = true }
+# The bridge settings a plugin opens with (`AudioConfig`).
+tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc", optional = true }
 # `MainThreadMarker`, the proof `Editor` holds, and the editor vocabulary.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", optional = true }
 # `HasWindowHandle`, the parent a view embeds an editor into (`Editor::open`).
@@ -122,7 +126,9 @@ encode-aiff = ["tutti-codec/encode-aiff"]
 encode-vorbis = ["tutti-codec/encode-vorbis"]
 plugin = [
     "dep:tutti-plugin",
+    "dep:tutti-plugin-db",
     "dep:tutti-plugin-host",
+    "dep:tutti-plugin-ipc",
     "dep:tutti-plugin-types",
     "dep:tutti-midi-device",
     "dep:tutti-midi-ci",

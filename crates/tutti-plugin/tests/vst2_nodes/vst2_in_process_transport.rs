@@ -369,14 +369,14 @@ fn plugin_set_meter_reaches_an_in_process_vst2() {
     let plugin = tutti_plugin::catalog::Plugin::open(
         Some(main_thread()),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::vst2_probe(),
         )),
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the probe opens");
     let handle = plugin.handle().clone();
-    assert!(plugin.set_meter(seven_eight()), "a VST2 takes the meter");
+    plugin.node_controls().set_meter(seven_eight());
     let (mut r, _) = rig(plugin.bind(scene_tempo()), 0);
     let seen = render_scenes(&mut r, 1);
     assert_eq!(seen[0].1.numerator, 7);

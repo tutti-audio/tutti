@@ -31,9 +31,7 @@ fn through_server<F: Format>(path: PathBuf) {
     let client = PluginClient::new(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         &tutti_fixtures::detached_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
-            path,
-        )),
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(path)),
         tutti_plugin_types::SampleRate::SR_48K,
     )
     .unwrap_or_else(|e| panic!("{}: the server loads the plugin: {e:?}", F::NAME));

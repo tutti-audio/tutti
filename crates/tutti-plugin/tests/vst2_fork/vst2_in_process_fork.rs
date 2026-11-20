@@ -31,10 +31,10 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, ForkMode, ForkTarget, IntoNode, Prepare, Renderer, TransportPosition};
 use tutti_graph::{OutPort, Source};
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_plugin::{PresetId, RenderMode};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::PluginForkError;
+use tutti_plugin_types::{PresetId, RenderMode};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -353,7 +353,7 @@ fn a_plugin_handed_back_by_into_client_forks() {
     let plugin = tutti_plugin::catalog::Plugin::open(
         Some(main_thread()),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::vst2_probe(),
         )),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),

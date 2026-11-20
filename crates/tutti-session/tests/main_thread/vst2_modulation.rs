@@ -14,7 +14,7 @@ use tutti_session::Root;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{
     DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
     SessionEvent,
