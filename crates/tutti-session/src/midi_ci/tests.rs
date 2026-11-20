@@ -140,7 +140,7 @@ fn device_id() -> DeviceId {
     let session = tutti_midi_hardware::MidiSession::open_over(
         backend,
         inlets,
-        tutti_midi_hardware::MidiHardwareOptions::new(),
+        tutti_midi_hardware::MidiHardwareConfig::new(),
     )
     .expect("opens over the fake OS");
     fake.plug(endpoint(7, "Wire"), PortDirection::Duplex);

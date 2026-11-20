@@ -2178,9 +2178,8 @@ mod tests {
             }
             fn handle(_: &(), _: &Life) {}
         }
-        let held = tutti_fixtures::HeldFutures::new();
         let mut session = Session::builder()
-            .executor(held.executor())
+            .executor(tutti_platform::Executor::polled())
             .build_detached(RATE)
             .unwrap();
         let (dc, _) = session
@@ -2194,7 +2193,6 @@ mod tests {
             }
             other => panic!("refused naming the pending entry, got {other:?}"),
         }
-        held.run_all();
         let _ = session.update();
         assert!(session.bounce(short()).is_ok(), "landed, so it renders");
     }

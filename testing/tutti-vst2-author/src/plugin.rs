@@ -6,15 +6,104 @@ use std::ptr;
 use std::sync::Arc;
 
 use tutti_plugin_types::read_c_str;
-use tutti_vst2_ffi::{
-    api::{self, AEffect, GetChunkError, HostCallbackProc, Supported, TimeInfo, consts::VST_MAGIC},
-    host::{self, Host},
-    speaker::SpeakerArrangement,
+use tutti_vst2_ffi::{AudioMasterOpCode, Host, SpeakerArrangement};
+
+pub use tutti_vst2_ffi::{CanDo, Category, EffectOpCode};
+
+use crate::api::{
+    self, AEffect, GetChunkError, HostCallbackProc, Supported, TimeInfo, consts::VST_MAGIC,
 };
 
-pub use tutti_vst2_ffi::plugin::*;
-
 use crate::{buffer::AudioBuffer, channels::ChannelInfo, editor::Editor};
+
+/// The static information a plugin declares: what `main` builds its `AEffect` from.
+#[derive(Clone, Debug)]
+pub struct Info {
+    /// Plugin Name.
+    pub name: String,
+
+    /// Plugin Vendor.
+    pub vendor: String,
+
+    /// Number of different presets.
+    pub presets: i32,
+
+    /// Number of parameters.
+    pub parameters: i32,
+
+    /// Number of inputs.
+    pub inputs: i32,
+
+    /// Number of outputs.
+    pub outputs: i32,
+
+    /// Number of MIDI input channels (1-16), or 0 for the default of 16 channels.
+    pub midi_inputs: i32,
+
+    /// Number of MIDI output channels (1-16), or 0 for the default of 16 channels.
+    pub midi_outputs: i32,
+
+    /// Unique plugin ID. Can be registered with Steinberg to prevent conflicts with other plugins.
+    ///
+    /// This ID is used to identify a plugin during save and load of a preset and project.
+    pub unique_id: i32,
+
+    /// Plugin version (e.g. 0001 = `v0.0.0.1`, 1283 = `v1.2.8.3`).
+    pub version: i32,
+
+    /// Plugin category: one of the [`Category`] values.
+    pub category: Category,
+
+    /// Latency of the plugin in samples.
+    ///
+    /// This reports how many samples it takes for the plugin to create an output (group delay).
+    pub initial_delay: i32,
+
+    /// Indicates that preset data is handled in formatless chunks.
+    ///
+    /// If false, host saves and restores plugin by reading/writing parameter data. If true, it is
+    /// up to the plugin to manage saving preset data by implementing the
+    /// `{get, load}_{preset, bank}_chunks()` methods. Default is `false`.
+    pub preset_chunks: bool,
+
+    /// Indicates whether this plugin can process f64 based `AudioBuffer` buffers.
+    ///
+    /// Default is `false`.
+    pub f64_precision: bool,
+
+    /// If this is true, the plugin will not produce sound when the input is silence.
+    ///
+    /// Default is `false`.
+    pub silent_when_stopped: bool,
+}
+
+impl Default for Info {
+    fn default() -> Info {
+        Info {
+            name: "VST".to_string(),
+            vendor: String::new(),
+
+            presets: 1, // default preset
+            parameters: 0,
+            inputs: 2, // Stereo in,out
+            outputs: 2,
+
+            midi_inputs: 0,
+            midi_outputs: 0,
+
+            unique_id: 0, // This must be changed.
+            version: 1,   // v0.0.0.1
+
+            category: Category::Effect,
+
+            initial_delay: 0,
+
+            preset_chunks: false,
+            f64_precision: false,
+            silent_when_stopped: false,
+        }
+    }
+}
 
 /// Must be implemented by all VST plugins.
 ///
@@ -522,14 +611,15 @@ impl HostCallback {
         use api::consts::*;
         let version = self.callback(
             self.effect,
-            host::OpCode::CurrentId,
+            AudioMasterOpCode::CurrentId,
             0,
             0,
             ptr::null_mut(),
             0.0,
         ) as isize;
-        let vendor_name = self.read_string(host::OpCode::GetVendorString, MAX_VENDOR_STR_LEN);
-        let product_name = self.read_string(host::OpCode::GetProductString, MAX_PRODUCT_STR_LEN);
+        let vendor_name = self.read_string(AudioMasterOpCode::GetVendorString, MAX_VENDOR_STR_LEN);
+        let product_name =
+            self.read_string(AudioMasterOpCode::GetProductString, MAX_PRODUCT_STR_LEN);
         (version, vendor_name, product_name)
     }
 
@@ -538,7 +628,7 @@ impl HostCallback {
     fn callback(
         &self,
         effect: *mut AEffect,
-        opcode: host::OpCode,
+        opcode: AudioMasterOpCode,
         index: i32,
         value: isize,
         ptr: *mut c_void,
@@ -577,7 +667,7 @@ impl HostCallback {
     pub fn vst_version(&self) -> i32 {
         self.callback(
             self.effect,
-            host::OpCode::Version,
+            AudioMasterOpCode::Version,
             0,
             0,
             ptr::null_mut(),
@@ -597,13 +687,13 @@ impl HostCallback {
         self.effect
     }
 
-    fn read_string(&self, opcode: host::OpCode, max: usize) -> String {
+    fn read_string(&self, opcode: AudioMasterOpCode, max: usize) -> String {
         self.read_string_param(opcode, 0, 0, 0.0, max)
     }
 
     fn read_string_param(
         &self,
-        opcode: host::OpCode,
+        opcode: AudioMasterOpCode,
         index: i32,
         value: isize,
         opt: f32,
@@ -632,7 +722,7 @@ impl Host for HostCallback {
         if self.is_effect_valid() {
             self.callback(
                 self.effect,
-                host::OpCode::Automate,
+                AudioMasterOpCode::Automate,
                 index,
                 0,
                 ptr::null_mut(),
@@ -645,7 +735,7 @@ impl Host for HostCallback {
     fn begin_edit(&self, index: i32) {
         self.callback(
             self.effect,
-            host::OpCode::BeginEdit,
+            AudioMasterOpCode::BeginEdit,
             index,
             0,
             ptr::null_mut(),
@@ -657,7 +747,7 @@ impl Host for HostCallback {
     fn end_edit(&self, index: i32) {
         self.callback(
             self.effect,
-            host::OpCode::EndEdit,
+            AudioMasterOpCode::EndEdit,
             index,
             0,
             ptr::null_mut(),
@@ -668,7 +758,7 @@ impl Host for HostCallback {
     fn get_plugin_id(&self) -> i32 {
         self.callback(
             self.effect,
-            host::OpCode::CurrentId,
+            AudioMasterOpCode::CurrentId,
             0,
             0,
             ptr::null_mut(),
@@ -677,7 +767,14 @@ impl Host for HostCallback {
     }
 
     fn idle(&self) {
-        self.callback(self.effect, host::OpCode::Idle, 0, 0, ptr::null_mut(), 0.0);
+        self.callback(
+            self.effect,
+            AudioMasterOpCode::Idle,
+            0,
+            0,
+            ptr::null_mut(),
+            0.0,
+        );
     }
 
     /// Request time information from Host.
@@ -691,7 +788,7 @@ impl Host for HostCallback {
     /// Also please be aware that requesting information does not necessarily mean that that information is provided in return.
     /// Check the flags field in the `TimeInfo` structure to see if your request was actually met.
     fn get_time_info(&self, mask: i32) -> Option<TimeInfo> {
-        let opcode = host::OpCode::GetTime;
+        let opcode = AudioMasterOpCode::GetTime;
         let mask = mask as isize;
         let null = ptr::null_mut();
         let ptr = self.callback(self.effect, opcode, 0, mask, null, 0.0);
@@ -713,7 +810,7 @@ impl Host for HostCallback {
     fn get_process_level(&self) -> api::ProcessLevel {
         let raw = self.callback(
             self.effect,
-            host::OpCode::GetCurrentProcessLevel,
+            AudioMasterOpCode::GetCurrentProcessLevel,
             0,
             0,
             ptr::null_mut(),
@@ -730,7 +827,7 @@ impl Host for HostCallback {
     fn get_automation_state(&self) -> api::AutomationState {
         let raw = self.callback(
             self.effect,
-            host::OpCode::GetAutomationState,
+            AudioMasterOpCode::GetAutomationState,
             0,
             0,
             ptr::null_mut(),
@@ -746,7 +843,7 @@ impl Host for HostCallback {
     fn get_block_size(&self) -> isize {
         self.callback(
             self.effect,
-            host::OpCode::GetBlockSize,
+            AudioMasterOpCode::GetBlockSize,
             0,
             0,
             ptr::null_mut(),
@@ -758,7 +855,7 @@ impl Host for HostCallback {
     fn update_display(&self) {
         self.callback(
             self.effect,
-            host::OpCode::UpdateDisplay,
+            AudioMasterOpCode::UpdateDisplay,
             0,
             0,
             ptr::null_mut(),

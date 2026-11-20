@@ -21,7 +21,7 @@ use tutti_session::InPort;
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -79,10 +79,10 @@ fn session_built(
     for (key, value) in extra {
         set_env(key, value);
     }
-    // Jobs run inline, in the phase that submits them: what they report lands
-    // in the next `Collect`, in a deterministic order. A test that wants another
-    // spawner says so in `build`.
-    build(Session::builder().executor(tutti_fixtures::inline_executor()))
+    // The executor is polled: a job runs in the `Collect` that polls it and lands
+    // there, in a deterministic order. A test that wants another executor says so
+    // in `build`.
+    build(Session::builder().executor(tutti_platform::Executor::polled()))
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
@@ -476,14 +476,16 @@ fn renders_sound(s: &mut Session) -> bool {
 }
 
 /// A virtual clock for the session's phases, and every event they reported
-/// (the jobs' landings included: the session's spawner runs them inline, so a
-/// job submitted in a frame lands in that frame's `Phase::Collect`).
+/// (the jobs' landings included: the session's executor is polled, so a job
+/// submitted in a frame runs and lands in that frame's `Phase::Collect`).
 struct Drive {
     now: Instant,
     events: Vec<SessionEvent>,
-    /// Set once a `Reloading` has been reported, for a spawner that checks
-    /// something at the load.
-    reloading: Option<Arc<AtomicBool>>,
+    /// Checked in every frame once a `Reloading` has been reported, after the
+    /// plugins' phase submitted the reload and before the `Collect` that runs it.
+    at_reload: Option<Box<dyn Fn()>>,
+    /// Whether a `Reloading` has been reported.
+    reload_reported: bool,
 }
 
 impl Drive {
@@ -491,7 +493,8 @@ impl Drive {
         Self {
             now: Instant::now(),
             events: Vec::new(),
-            reloading: None,
+            at_reload: None,
+            reload_reported: false,
         }
     }
 
@@ -503,21 +506,22 @@ impl Drive {
         self.now += Duration::from_millis(20);
         let mut out = Vec::new();
         s.run_phase(Phase::Plugins, PhaseCx::at(self.now), &mut out);
-        if let Some(flag) = &self.reloading
-            && out.iter().any(|e| {
-                matches!(
-                    e,
-                    SessionEvent::Plugin(PluginEvent {
-                        change: PluginChange::Reloading { .. },
-                        ..
-                    })
-                )
-            })
+        self.reload_reported |= out.iter().any(|e| {
+            matches!(
+                e,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::Reloading { .. },
+                    ..
+                })
+            )
+        });
+        if self.reload_reported
+            && let Some(check) = &self.at_reload
         {
-            flag.store(true, Ordering::SeqCst);
+            check();
         }
         self.events.extend(out);
-        // What the jobs it submitted sent (they ran inline) lands.
+        // The jobs it submitted run, and what they sent lands.
         s.run_phase(Phase::Collect, PhaseCx::at(self.now), &mut self.events);
         // The commit that puts a replacement into the executor's plan, and the
         // collect that frees the plan's old unit on this thread.
@@ -593,7 +597,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     let t0 = Instant::now();
     for at in [0, 2_000] {
         let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs inline, and lands in the next collect.
+        // The snapshot job runs in the collect's poll, and lands there.
         s.run_phase(Phase::Plugins, cx, &mut Vec::new());
         s.run_phase(Phase::Collect, cx, &mut Vec::new());
     }
@@ -802,9 +806,9 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
 
 /// **A reload completes with no host code but `update()`.** The probe's first
 /// server aborts on its first block. The host does nothing with jobs: it renders
-/// and calls `update()`, on the real clock, under a spawner that gives each job
-/// a thread of its own. The death is declared, the reload is submitted to the
-/// spawner, runs off this thread, and lands in a later `update()`: the node is
+/// and calls `update()`, on the real clock, under a threaded executor. The death
+/// is declared, the reload is submitted to the executor, runs off this thread,
+/// and lands in a later `update()`: the node is
 /// `Recovered`, and renders again.
 #[test]
 fn a_reload_completes_with_no_host_code_but_update() {
@@ -820,11 +824,9 @@ fn a_reload_completes_with_no_host_code_but_update() {
                 backoff: Duration::from_millis(1),
                 ..Default::default()
             })
-            // A thread per job, the way a host without a pool of its own runs
-            // them: nothing here touches a job but to start it.
-            .executor(tutti_platform::Executor::new(|job| {
-                std::thread::spawn(move || tutti_fixtures::run_future(job));
-            }))
+            // The threaded executor runs each job on a thread of its own pool:
+            // nothing here touches a job but to start it.
+            .executor(tutti_platform::Executor::threaded())
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -868,60 +870,6 @@ fn a_reload_completes_with_no_host_code_but_update() {
         let _ = s.update();
         std::thread::sleep(Duration::from_millis(5));
     }
-}
-
-/// **A reload job the spawner drops is a failed attempt**, and the next one
-/// is submitted: nothing waits on a job that will never land. The spawner here
-/// drops every job it is handed, so the first reload ends as
-/// `RecoveryFailure::ReloadDropped`, which the second `Reloading` carries.
-#[test]
-fn a_reload_job_the_spawner_drops_is_a_failed_attempt() {
-    let once = once_file("recovery-dropped.once");
-    let dropped = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let counted = Arc::clone(&dropped);
-    // The spawner runs the load of the plugin and drops the reload's jobs.
-    let dropping = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let drops = Arc::clone(&dropping);
-    let mut s = session_built(
-        &[
-            ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
-            ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
-        ],
-        |b| {
-            b.plugin_recovery(tutti_session::RecoveryPolicy {
-                backoff: Duration::from_millis(1),
-                ..Default::default()
-            })
-            .executor(tutti_platform::Executor::new(move |job| {
-                if drops.load(Ordering::SeqCst) {
-                    counted.fetch_add(1, Ordering::SeqCst);
-                    drop(job);
-                } else {
-                    tutti_fixtures::run_future(job);
-                }
-            }))
-        },
-    );
-    let (node, _) = wired_probe(&mut s);
-    dropping.store(true, Ordering::SeqCst);
-    let mut drive = Drive::new();
-    drive.until(&mut s, "a second attempt", |e| {
-        matches!(
-            e,
-            SessionEvent::Plugin(PluginEvent {
-                change: PluginChange::Reloading {
-                    cause: ReloadCause::Attempt(RecoveryFailure::ReloadDropped),
-                    ..
-                },
-                ..
-            })
-        )
-    });
-    assert!(dropped.load(Ordering::SeqCst) >= 1, "the spawner was asked");
-    assert!(matches!(
-        s.plugin_view(node).unwrap().health(),
-        PluginHealth::Reloading { .. }
-    ));
 }
 
 /// **A killed server reads `Died`, then `Reloading`, through `health()` and
@@ -1243,7 +1191,7 @@ fn snapshot_now(s: &mut Session, node: NodeKey) {
     let t0 = Instant::now();
     for at in [0, 2_000] {
         let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs inline, and lands in the next collect.
+        // The snapshot job runs in the collect's poll, and lands there.
         s.run_phase(Phase::Plugins, cx, &mut Vec::new());
         s.run_phase(Phase::Collect, cx, &mut Vec::new());
     }

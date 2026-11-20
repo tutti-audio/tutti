@@ -26,7 +26,7 @@ const KEYS: u64 = 1;
 fn rig_with(groups: Option<MidiGroup>) -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut builder = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new());
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new());
     if let Some(last) = groups {
         builder = builder.midi_groups(last);
     }

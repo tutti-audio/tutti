@@ -761,17 +761,40 @@ pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::sync_channel;
     use std::time::Duration;
-    use tutti_fixtures::HeldFutures;
     use tutti_platform::Instant;
     use tutti_units::SampleRate;
 
     fn session(builder: crate::SessionBuilder) -> crate::DetachedSession {
         builder.build_detached(SampleRate::SR_48K).unwrap()
+    }
+
+    #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+    enum EchoError {
+        #[error(transparent)]
+        Worker(#[from] WorkerError),
+        #[error(transparent)]
+        Wait(#[from] crate::WaitError),
+    }
+
+    crate::job::job_kind!(Echo => u32, EchoError);
+
+    /// Gives the session `fresh` as its executor and drops the old one: the futures
+    /// it still holds are dropped unrun, which ends each of their jobs `Dropped`. The
+    /// caller drops its own clones of the old executor first.
+    pub(crate) fn replace_executor<K: crate::AppKey, C: Clock>(
+        s: &mut Session<K, C>,
+        fresh: Executor,
+    ) {
+        drop(std::mem::replace(&mut s.jobs.executor, fresh));
+    }
+
+    fn drop_executor(s: &mut crate::DetachedSession) {
+        replace_executor(s, Executor::polled());
     }
 
     /// Updates until `done` holds, or panics after a generous wait.
@@ -860,9 +883,8 @@ mod tests {
     }
 
     #[test]
-    fn a_job_the_host_drops_lands_as_dropped_and_its_work_never_runs() {
-        let held = HeldFutures::new();
-        let mut s = session(Session::builder().executor(held.executor()));
+    fn a_job_the_executor_drops_unrun_lands_as_dropped_and_its_work_never_runs() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
         let ran = Arc::new(AtomicBool::new(false));
         let landed = Arc::new(Mutex::new(None));
         let (r, into) = (Arc::clone(&ran), Arc::clone(&landed));
@@ -870,7 +892,7 @@ mod tests {
             move || r.store(true, Ordering::SeqCst),
             move |_, result, _| *into.lock().unwrap() = Some(result),
         );
-        held.drop_all();
+        drop_executor(&mut s);
         let _ = s.update();
         assert_eq!(
             landed.lock().unwrap().take(),
@@ -880,9 +902,47 @@ mod tests {
     }
 
     #[test]
-    fn every_spawned_job_reaches_the_hosts_spawn_function() {
-        let held = HeldFutures::new();
-        let mut s = session(Session::builder().executor(held.executor()));
+    fn wait_ends_dropped_when_the_executor_drops_the_future_unrun() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
+        let job: Job<Echo> = s.jobs.submit_job(
+            |_| 1_u32,
+            |_, done, ticket| ticket.land(done.map_err(EchoError::from)),
+        );
+        drop_executor(&mut s);
+        assert_eq!(
+            job.wait(&mut s),
+            Err(EchoError::Worker(WorkerError::Dropped))
+        );
+    }
+
+    #[test]
+    fn an_awaited_job_whose_work_the_executor_dropped_resolves_dropped() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
+        let awaiting = Executor::polled();
+        let job: Job<Echo> = s.jobs.submit_job(
+            |_| 7_u32,
+            |_, done, ticket| ticket.land(done.map_err(EchoError::from)),
+        );
+        let got = Arc::new(Mutex::new(None));
+        let into = Arc::clone(&got);
+        awaiting
+            .spawn(async move {
+                *into.lock().unwrap() = Some(job.await);
+            })
+            .unwrap();
+        assert_eq!(awaiting.poll(8), 1);
+        drop_executor(&mut s);
+        let _events = s.update();
+        assert_eq!(awaiting.poll(8), 1, "the landing woke the awaiting future");
+        assert_eq!(
+            got.lock().unwrap().take(),
+            Some(Err(EchoError::Worker(WorkerError::Dropped)))
+        );
+    }
+
+    #[test]
+    fn a_polled_sessions_jobs_run_and_land_in_the_order_they_were_spawned() {
+        let mut s = session(Session::builder().executor(Executor::polled()));
         let landed = Arc::new(Mutex::new(Vec::new()));
         for n in 0..3_u8 {
             let into = Arc::clone(&landed);
@@ -891,8 +951,10 @@ mod tests {
                 move |_, r, _| into.lock().unwrap().push(r.unwrap()),
             );
         }
-        assert_eq!(held.len(), 3, "each job is one future handed to the host");
-        held.run_all();
+        assert!(
+            landed.lock().unwrap().is_empty(),
+            "nothing runs before update"
+        );
         let _ = s.update();
         assert_eq!(*landed.lock().unwrap(), [0, 1, 2]);
     }
@@ -940,8 +1002,8 @@ mod tests {
 
     #[test]
     fn a_job_outliving_its_session_sees_it_closed_and_its_sends_come_back() {
-        let held = HeldFutures::new();
-        let mut s = session(Session::builder().executor(held.executor()));
+        let executor = Executor::polled();
+        let mut s = session(Session::builder().executor(executor.clone()));
         let seen = Arc::new(Mutex::new(None));
         let into = Arc::clone(&seen);
         s.jobs.submit_dedicated(
@@ -952,7 +1014,7 @@ mod tests {
             |_, _, _| {},
         );
         drop(s);
-        held.run_all();
+        assert_eq!(executor.poll(usize::MAX), 1);
         let (sent, closed) = seen.lock().unwrap().take().expect("the job ran");
         assert_eq!(sent, Err(7), "the message comes back");
         assert!(closed);

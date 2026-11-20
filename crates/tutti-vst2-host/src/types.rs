@@ -1,16 +1,8 @@
-//! Value types used by the VST2 host.
-//!
-//! Format-neutral types are re-exported from `tutti_plugin_types`; this module
-//! adds the VST2-specific ones, [`PluginInfo`] and [`Vst2ProcessContext`].
+//! The VST2-specific value types of the host, [`PluginInfo`] and [`Vst2ProcessContext`].
 
 use tutti_graph::UmpAt;
 use tutti_plugin_types::SampleRate;
-pub use tutti_plugin_types::{Samples, WireMidi};
-
-pub use tutti_plugin_types::{
-    ChannelLayout, ParameterInfo, PluginTail, PluginVersion, TimeSignature, TransportInfo,
-    WindowHandle,
-};
+use tutti_plugin_types::{PluginVersion, TransportInfo, Vst2Category};
 
 /// What the plugin declared at load time; see [`Vst2Loaded::metadata`](crate::Vst2Loaded::metadata).
 ///
@@ -21,7 +13,7 @@ pub use tutti_plugin_types::{
 ///
 /// VST2 encodes the tail inversely to every other format, which is why
 /// [`Vst2Loaded::tail`](crate::Vst2Loaded::tail) decodes it here rather than
-/// through [`PluginTail::from_vst3_samples`]: on the wire `0` means "no tail
+/// through [`PluginTail::from_vst3_samples`](tutti_plugin_types::PluginTail::from_vst3_samples): on the wire `0` means "no tail
 /// *information*, host decides" and `1` means "no tail at all".
 /// `from_vst3_samples` maps `0 => None`, so feeding it a VST2 answer reads
 /// "unknown" as "silent" — and a bounce sizing its render from that adds no
@@ -57,18 +49,6 @@ pub struct PluginInfo {
     /// narrowing f32 fallback.
     pub supports_f64: bool,
 }
-
-/// The plugin's declared VST2 category, as carried in
-/// [`PluginInfo::category`].
-pub use tutti_plugin_types::Vst2Category;
-
-/// The MIDI events a process call returns.
-///
-/// A `Vec`, reserved once when the instance is built for everything the
-/// plugin's MIDI-out queue can hold (`MidiIo::new`), so draining a full queue
-/// into it on the audio thread never grows it. A process call returns it
-/// borrowed; a caller copies out what it keeps.
-pub type MidiEventVec = Vec<WireMidi>;
 
 /// Per-block inputs to [`Vst2Processor::process_planes`] beyond the audio buffers.
 ///
