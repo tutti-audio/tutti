@@ -73,14 +73,14 @@
 //!
 //! ## Virtual endpoints
 //!
-//! A [`VirtualSource`] is an endpoint this process publishes for other
-//! applications to read from, and a [`VirtualDestination`] one they write to; a
-//! [`VirtualSpec`] gives the name, the Device Identity and Product Instance Id,
-//! the [`VirtualProtocol`] and the Function Blocks. Opening one takes a
-//! `MainThreadMarker`, and both types are `!Send` and `!Sync` on every platform
+//! A [`VirtualEndpoint`] is the one UMP Endpoint this process publishes for other
+//! applications to connect to: they read what it sends and write what it
+//! receives. A [`VirtualSpec`] gives the name, the Device Identity and Product
+//! Instance Id, the [`VirtualProtocol`] and the Function Blocks. Opening one takes
+//! a `MainThreadMarker`, and the type is `!Send` and `!Sync` on every platform
 //! (macOS's UMP Endpoint is a main-thread object); a [`VirtualSender`] sends from
-//! another thread. A destination delivers into an [`InputProducerHandle`], so its events
-//! take the path a device input's do. Where the platform cannot publish what the
+//! another thread. What peers write is delivered into an [`InputProducerHandle`],
+//! so its events take the path a device input's do. Where the platform cannot publish what the
 //! spec asks, opening says so: [`MidiHardwareError::Unsupported`] where there is no backend
 //! or the API has no virtual ports (Windows Multimedia),
 //! [`MidiHardwareError::VirtualBlocksUnsupported`] for Function Blocks on macOS before 15,
@@ -297,9 +297,7 @@ pub use profiles::{
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
-pub use virtual_endpoint::{
-    VirtualDestination, VirtualProtocol, VirtualSender, VirtualSource, VirtualSpec,
-};
+pub use virtual_endpoint::{VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec};
 
 // --- Standard MIDI File codec: NOT here ---
 //

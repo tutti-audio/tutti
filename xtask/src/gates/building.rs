@@ -263,7 +263,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
-        owner: "VirtualSource::open",
+        owner: "VirtualEndpoint::open",
         rules: &[Rule::CtorResult],
         reason: "opening an OS endpoint: the OS refuses, not a value a type could forbid",
     },
@@ -455,7 +455,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-midi-hardware/",
-        "VirtualDestination::open",
+        "VirtualEndpoint::open",
         CTOR,
         "opening an OS endpoint: the failure is the OS's, not a value's",
     ),

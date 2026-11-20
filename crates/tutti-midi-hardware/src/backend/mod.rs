@@ -5,8 +5,8 @@
 //! Every backend yields the same types, so which messages survive does not
 //! depend on where you built. `build.rs` names the backend in the
 //! `midi_backend` cfg, and the `cfg` below chooses one `platform` module from
-//! it: each provides the same surface (`active`, `open_virtual_source` and
-//! `open_virtual_destination`). Nothing else in the crate branches on the platform. Adding a
+//! it: each provides the same surface (`active` and
+//! `open_virtual_endpoint`). Nothing else in the crate branches on the platform. Adding a
 //! backend is one `platform` file and one line here.
 //!
 //! # The platforms, and why they differ
@@ -86,7 +86,7 @@ mod platform;
 #[path = "platform/none.rs"]
 mod platform;
 
-// The platform's surface: `active` and the two virtual-endpoint constructors.
+// The platform's surface: `active` and the virtual-endpoint constructor.
 // Each returns a boxed trait object rather than an `impl Trait` so the return
 // type does not change per platform: a caller stores it in one field.
 pub(crate) use platform::*;
