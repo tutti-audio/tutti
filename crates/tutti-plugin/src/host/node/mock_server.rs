@@ -171,6 +171,7 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
             }),
             ControlRequest::SaveState { .. } => Some(ControlReply::StateChunk {
                 seq: 0,
+                total: STATE.len() as u64,
                 last: true,
                 bytes: STATE.to_vec(),
             }),

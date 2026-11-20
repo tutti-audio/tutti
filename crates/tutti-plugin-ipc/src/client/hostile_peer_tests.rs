@@ -976,7 +976,7 @@ fn a_crash_during_save_state_does_not_block_the_caller_forever() {
 ///
 /// `recv` reads a 4-byte big-endian length. The length comes off the wire, so
 /// `0xFFFFFFFF` asks the host to allocate 4 GiB before a single byte of body
-/// has been validated. `MAX_FRAME_BYTES` is what stops it: the length is
+/// has been validated. `CONTROL_FRAME_BYTES` is what stops it: the length is
 /// checked *before* the `vec![0u8; len]`, so nothing is allocated at all.
 ///
 /// The body deliberately does not follow: a server that advertises 4 GiB and
@@ -1018,7 +1018,7 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
 /// The pair is the point. `an_absurd_length_prefix…` uses `u32::MAX`, which any
 /// plausible bound rejects — it cannot tell a real limit from a stray sanity
 /// check, and would still pass if the constant were off by orders of magnitude.
-/// Straddling `MAX_FRAME_BYTES` pins the constant the transport actually reads.
+/// Straddling `CONTROL_FRAME_BYTES` pins the constant the transport actually reads.
 ///
 /// The under-cap half deliberately advertises a length it never fills, and the
 /// two branches are told apart by the failure each leaves: a rejected length
@@ -1026,12 +1026,12 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
 /// timeout.
 #[test]
 fn the_frame_cap_is_the_boundary_it_claims_to_be() {
-    use crate::MAX_FRAME_BYTES;
+    use crate::CONTROL_FRAME_BYTES;
 
     let over =
         MockServer::start_with_timeouts("cap-over", unreachable_deadline(), |msg| match msg {
             ControlRequest::GetParameter { .. } => {
-                Action::Raw(MAX_FRAME_BYTES as u32 + 1, Vec::new())
+                Action::Raw(CONTROL_FRAME_BYTES as u32 + 1, Vec::new())
             }
             _ => Action::Silent,
         });
@@ -1044,14 +1044,14 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
             over.bridge.audio().crash_cause(),
             Some(PluginFailure::StreamClosed)
         ),
-        "MAX_FRAME_BYTES + 1 was not refused by closing the stream: {:?}",
+        "CONTROL_FRAME_BYTES + 1 was not refused by closing the stream: {:?}",
         over.bridge.audio().crash_cause()
     );
 
     let mut quick = Timeouts::default();
     quick.param = Duration::from_millis(300);
     let under = MockServer::start_with_timeouts("cap-under", quick, |msg| match msg {
-        ControlRequest::GetParameter { .. } => Action::Raw(MAX_FRAME_BYTES as u32, Vec::new()),
+        ControlRequest::GetParameter { .. } => Action::Raw(CONTROL_FRAME_BYTES as u32, Vec::new()),
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&under.bridge);
@@ -1063,7 +1063,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
             under.bridge.audio().crash_cause(),
             Some(PluginFailure::TimedOut { .. })
         ),
-        "a frame of exactly MAX_FRAME_BYTES was refused rather than accepted and \
+        "a frame of exactly CONTROL_FRAME_BYTES was refused rather than accepted and \
          waited on — the bound is off by one in the direction that rejects \
          legitimate traffic: {:?}",
         under.bridge.audio().crash_cause()
@@ -1089,7 +1089,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
 /// The bridge looks healthy and answers nothing, forever.
 ///
 /// **Two mechanisms close this, and this test covers the first.** Here the
-/// advertised length is over `MAX_FRAME_BYTES`, so it is rejected before any
+/// advertised length is over `CONTROL_FRAME_BYTES`, so it is rejected before any
 /// read starts and there is no multi-syscall read for the dribble to extend.
 /// An *under*-cap dribble reaches the read and is stopped by the total-elapsed
 /// deadline instead — see
@@ -1191,6 +1191,7 @@ fn a_valid_but_wrong_reply_type_does_not_satisfy_the_request() {
         // Asked for a parameter value; answer with state data instead.
         ControlRequest::GetParameter { .. } => Action::Reply(Box::new(ControlReply::StateChunk {
             seq: 0,
+            total: 4,
             last: true,
             bytes: vec![1, 2, 3, 4],
         })),
@@ -1546,7 +1547,7 @@ mod shell_server {
 
 /// A dribble **under** the size cap must still end, on the clock.
 ///
-/// This is the hazard `MAX_FRAME_BYTES` does not touch, and the reason the
+/// This is the hazard `CONTROL_FRAME_BYTES` does not touch, and the reason the
 /// deadline exists as a separate mechanism. The advertised length here is a
 /// perfectly ordinary one — the size of a real reply — so the size check passes
 /// it and the host enters `read_exact`. Every real preset frame is in this
@@ -1565,7 +1566,7 @@ mod shell_server {
 fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
     let mock = MockServer::start("dribble-under", |msg| match msg {
         ControlRequest::GetParameter { .. } => Action::Dribble {
-            // Comfortably under MAX_FRAME_BYTES: the size check must let this
+            // Comfortably under CONTROL_FRAME_BYTES: the size check must let this
             // through, or the test proves nothing about the deadline.
             len: 4096,
             gap: Duration::from_millis(50),
@@ -1584,12 +1585,12 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
 
 /// A large state survives the round trip, in both directions.
 ///
-/// A state over `MAX_FRAME_BYTES` must travel as chunks, not fail as a *crash*
+/// A state over `CONTROL_FRAME_BYTES` must travel as chunks, not fail as a *crash*
 /// (`save_state` answering "the bridge process crashed"), which would be
 /// indistinguishable from a segfault and lose the user's preset under a wrong
 /// explanation.
 ///
-/// **Sized by `STATE_CHUNK_BYTES`, not by `MAX_FRAME_BYTES`.** What this test
+/// **Sized by `STATE_CHUNK_BYTES`, not by `CONTROL_FRAME_BYTES`.** What this test
 /// has to prove is that a state spanning *several* chunks reassembles in order
 /// and intact, and the chunk size is what decides that — a 68 MiB fixture
 /// would prove the same property while moving 68 MiB through a socket, which
@@ -1612,6 +1613,7 @@ fn a_state_larger_than_one_frame_round_trips() {
             crate::transport::state_chunk::split(&big)
                 .map(|(seq, last, bytes)| ControlReply::StateChunk {
                     seq,
+                    total: big.len() as u64,
                     last,
                     bytes: bytes.to_vec(),
                 })
@@ -1738,6 +1740,7 @@ fn a_chunked_state_transfer_reassembles_in_order() {
     let msgs: Vec<ControlReply> = (0..CHUNKS)
         .map(|i| ControlReply::StateChunk {
             seq: i as u32,
+            total: CHUNKS as u64,
             last: i == CHUNKS - 1,
             bytes: vec![(i % 251) as u8],
         })
@@ -1813,6 +1816,7 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
                 msgs: (0..2)
                     .map(|i| ControlReply::StateChunk {
                         seq: i,
+                        total: 96,
                         last: false,
                         bytes: vec![7u8; 32],
                     })
@@ -2072,6 +2076,7 @@ fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
                 msgs: (0..2)
                     .map(|seq| ControlReply::StateChunk {
                         seq,
+                        total: 64,
                         last: seq == 1,
                         bytes: vec![7u8; 32],
                     })
