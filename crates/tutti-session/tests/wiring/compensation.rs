@@ -9,11 +9,11 @@
 //! and a restart's republication by `device.rs`'s
 //! `a_rerate_keeps_the_published_compensation_in_step_with_the_plan`.
 
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_nodes::{LimiterControls, LimiterNode};
+use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{DetachedSession, InPort, OutPort, Root, Session};
 use tutti_units::{Db, SampleRate, Samples};
 
@@ -28,11 +28,13 @@ fn detached() -> DetachedSession {
 
 /// A limiter's lookahead is the latency; the one the engine ships.
 fn limiter() -> LimiterNode<f32> {
-    LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db::new(-1.0),
-        ceiling: Db::new(-0.3),
-        ..LimiterControls::DEFAULT
-    })
+    LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+            threshold: Db::new(-1.0),
+            ceiling: Db::new(-0.3),
+            ..LimiterControls::DEFAULT
+        }),
+    )
 }
 
 /// ch0 through a limiter, ch1 dry: ch1's source must pre-roll to match.

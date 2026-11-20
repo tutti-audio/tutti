@@ -15,7 +15,8 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// Hard clipper at a ceiling: `channels` wide, no lookahead, zero latency, no tail.
 ///
-/// A [`KernelNode`] over [`BrickwallKernel`], the clip being [`BrickwallBank`]'s; this file
+/// A [`KernelNode`] over [`BrickwallKernel`], made from a [`BrickwallLimiterConfig`]
+/// (`BrickwallLimiterNode::from`), the clip being [`BrickwallBank`]'s; this file
 /// holds the cell and how the graph's control signal reaches it.
 ///
 /// # The ceiling
@@ -34,36 +35,43 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// A NaN ceiling has no level to clamp to, so it is ignored wherever it comes from: a NaN
 /// in the cell keeps the last ceiling the node clamped at, a NaN frame on the ceiling
-/// port clamps at the cell's ceiling, and a NaN given to [`new`](Self::new) starts the
+/// port clamps at the cell's ceiling, and a NaN given to [`BrickwallLimiterConfig::new`] starts the
 /// node at 0 dB. `+-inf` dB are ceilings: `+inf` passes everything, `-inf` mutes.
 ///
 /// `F` is the float of the graph it runs in, and the precision the ceiling is held and the clamp
 /// runs in.
 pub type BrickwallLimiterNode<F> = KernelNode<BrickwallKernel<F>>;
 
-impl<F: Float> BrickwallLimiterNode<F> {
-    /// Builds a stereo brickwall limiter clamping at `ceiling_db`.
+/// What a [`BrickwallLimiterNode`] is made from: its bus and the ceiling it clamps at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrickwallLimiterConfig {
+    input: BusTopology,
+    ceiling: Db,
+}
+
+impl BrickwallLimiterConfig {
+    /// A brickwall limiter on the bus `input`, as wide as it, clamping at `ceiling`. The clip
+    /// is stateless, so every channel is clamped to the same (linked) ceiling. An
+    /// `n`-channel one is `new(BusTopology::unassigned(n)?, ..)`, which refuses a width past
+    /// one bus.
     ///
     /// **This is a hard clipper, not [`LimiterNode`](super::LimiterNode).** It has no
     /// lookahead, no envelope and no latency: a sample past the ceiling is simply
     /// clamped, which distorts rather than ducking. Reach for it as a safety catch on
     /// an output, and for musical limiting use [`LimiterNode`](super::LimiterNode).
     #[must_use]
-    pub fn new(ceiling_db: impl Into<Db>) -> Self {
-        Self::with_bus(BusTopology::STEREO, ceiling_db)
+    pub fn new(input: BusTopology, ceiling: Db) -> Self {
+        Self { input, ceiling }
     }
+}
 
-    /// A brickwall limiter on the bus `input`, as wide as it. The clip is stateless,
-    /// so every channel is clamped to the same (linked) ceiling.
-    /// `with_bus(BusTopology::STEREO, ..)` is [`new`](Self::new); an `n`-channel one is
-    /// `with_bus(BusTopology::unassigned(n)?, ..)`, which refuses a width past one bus.
-    #[must_use]
-    pub fn with_bus(input: BusTopology, ceiling_db: impl Into<Db>) -> Self {
+impl<F: Float> From<BrickwallLimiterConfig> for BrickwallLimiterNode<F> {
+    fn from(config: BrickwallLimiterConfig) -> Self {
         Self::with_kernel(
-            BrickwallKernel::new(input),
+            BrickwallKernel::new(config.input),
             BrickwallSet,
             BrickwallControls {
-                ceiling: ceiling_db.into(),
+                ceiling: config.ceiling,
             },
         )
     }
@@ -176,7 +184,9 @@ mod tests {
     /// built for.
     #[test]
     fn the_shape_declares_the_ceiling_no_latency_and_no_tail() {
-        let b = prepared(BrickwallLimiterNode::<f32>::new(Db::new(-1.0)));
+        let b = prepared(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(-1.0)),
+        ));
         let shape = b.shape();
         assert_eq!(shape.params.as_slice(), &[UnitParam::Ceiling][..]);
         assert_eq!(
@@ -190,14 +200,22 @@ mod tests {
 
     #[test]
     fn a_brickwall_fork_shares_no_cell() {
-        assert_param_fork(BrickwallLimiterNode::<f32>::new(Db::new(-1.0)));
+        assert_param_fork(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(-1.0)),
+        ));
     }
 
     /// A ceiling set through the brickwall's `ParamSet` reaches the clip on
     /// the next block: the node designs from the cell once per block.
     #[test]
     fn a_brickwall_ceiling_set_by_address_reaches_the_clip() {
-        let mut bw = prepared_at(BrickwallLimiterNode::<f32>::new(Db::new(0.0)), RATE_44K);
+        let mut bw = prepared_at(
+            BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+                BusTopology::STEREO,
+                Db::new(0.0),
+            )),
+            RATE_44K,
+        );
         let set = bw.param_set();
         assert!(set.set(UnitParam::Ceiling, -6.0));
         let mut out = [0.0f32; 2];
@@ -208,7 +226,9 @@ mod tests {
 
     #[test]
     fn test_brickwall_clips_at_ceiling() {
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(0.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(0.0)),
+        ));
 
         let mut out = [0.0f32; 2];
         tick(&mut bw, &[2.0, -3.0], &mut out);
@@ -227,7 +247,9 @@ mod tests {
 
     #[test]
     fn test_brickwall_adjustable_ceiling() {
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(-6.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(-6.0)),
+        ));
         let ceiling_lin = sample_gain(Db::new(-6.0));
 
         let mut out = [0.0f32; 2];
@@ -242,7 +264,9 @@ mod tests {
 
     #[test]
     fn test_brickwall_passes_quiet_signal() {
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(0.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(0.0)),
+        ));
 
         let mut out = [0.0f32; 2];
         tick(&mut bw, &[0.3, -0.2], &mut out);
@@ -254,7 +278,9 @@ mod tests {
     #[test]
     fn brickwall_fed_ceiling_modulates_clip() {
         // A fed ceiling held low clips harder than one held high.
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(0.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(0.0)),
+        ));
         let mut out = [0.0f32; 2];
         // Ceiling -12 dB ≈ 0.251 linear: 1.0 clips to ~0.251.
         tick_fed(&mut bw, &[1.0, 1.0], &[Some(-12.0)], &mut out);
@@ -273,7 +299,13 @@ mod tests {
     /// its own.
     #[test]
     fn brickwall_a_fed_nan_ceiling_clamps_at_the_cell() {
-        let mut bw = prepared_at(BrickwallLimiterNode::<f32>::new(Db::new(-6.0)), RATE_44K);
+        let mut bw = prepared_at(
+            BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+                BusTopology::STEREO,
+                Db::new(-6.0),
+            )),
+            RATE_44K,
+        );
         let cell = sample_gain(Db::new(-6.0));
         let mut out = [0.0f32; 2];
         tick_fed(&mut bw, &[1.0, -1.0], &[Some(f32::NAN)], &mut out);
@@ -288,7 +320,13 @@ mod tests {
     /// construction starts at 0 dB.
     #[test]
     fn brickwall_a_nan_cell_keeps_the_last_ceiling() {
-        let mut bw = prepared_at(BrickwallLimiterNode::<f32>::new(Db::new(-6.0)), RATE_44K);
+        let mut bw = prepared_at(
+            BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+                BusTopology::STEREO,
+                Db::new(-6.0),
+            )),
+            RATE_44K,
+        );
         let set = bw.param_set();
         let mut out = [0.0f32; 2];
         assert!(set.set(UnitParam::Ceiling, f64::NAN));
@@ -304,7 +342,10 @@ mod tests {
         assert!((out[0] - next).abs() < 1e-6, "{}", out[0]);
 
         let mut born_nan = prepared_at(
-            BrickwallLimiterNode::<f32>::new(Db::new(f64::NAN)),
+            BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+                BusTopology::STEREO,
+                Db::new(f64::NAN),
+            )),
             RATE_44K,
         );
         tick(&mut born_nan, &[2.0, -2.0], &mut out);
@@ -336,9 +377,11 @@ mod tests {
             })
             .collect();
         let refs: Vec<&[f32]> = ins.iter().map(|c| &c[..]).collect();
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::with_bus(
-            BusTopology::unassigned(ChannelLayout::from(3u16)).unwrap(),
-            Db::new(0.0),
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(
+                BusTopology::unassigned(ChannelLayout::from(3u16)).unwrap(),
+                Db::new(0.0),
+            ),
         ));
         let out = drive(&mut bw, RATE, Planes::new(&refs).unwrap(), &[Some(&fed)]);
         for (c, (o, x)) in out.iter().zip(&ins).enumerate() {
@@ -363,10 +406,12 @@ mod tests {
     }
 
     #[test]
-    fn brickwall_with_bus_reports_arity_and_clips_all() {
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::with_bus(
-            BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
-            Db::new(0.0),
+    fn a_brickwall_reports_its_bus_width_and_clips_all() {
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
+            BrickwallLimiterConfig::new(
+                BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
+                Db::new(0.0),
+            ),
         ));
         assert_eq!(bw.shape().audio_in().count(), 6);
         assert_eq!(bw.shape().audio_out().count(), 6);

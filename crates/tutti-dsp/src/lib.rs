@@ -204,9 +204,9 @@ pub use dynamics::{
     CompressorBank, CompressorControls, CompressorSignals, DynamicEqBank, DynamicEqControls,
     DynamicMode, GAIN_RAMP, GateBank, GateControls, GateSignals, KeyFilter, KeySource,
     LevellerBank, LevellerControls, LimiterBank, LimiterControls, LimiterCurve, LimiterSignals,
-    Lookahead, LookaheadError, MultibandBank, MultibandSettings, MultibandSignals, PeakDetection,
-    TransientBank, TransientControls, TruePeakError, amplitude_to_db,
-    compute_compressor_gain_reduction, compute_limiter_gain,
+    Lookahead, LookaheadError, MultibandBands, MultibandBandsError, MultibandBank,
+    MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
+    TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
