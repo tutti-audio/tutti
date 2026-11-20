@@ -36,7 +36,7 @@ fn a_vst2_path_is_refused_with_a_typed_error_before_a_server_starts() {
                 format,
             }) => {
                 assert_eq!(refused, path);
-                assert_eq!(format, "VST2");
+                assert_eq!(format, tutti_plugin_types::PluginFormat::Vst2);
             }
             Err(other) => panic!("{name}: expected NotOutOfProcess, got {other:?}"),
             Ok(_) => panic!("{name}: a VST2 file must not be served"),

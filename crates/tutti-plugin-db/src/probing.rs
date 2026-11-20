@@ -17,16 +17,21 @@ use tutti_plugin_types::ProbeError;
 pub const DEFAULT_MEASURE_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// What a probe the catalog hands its scanner does.
-#[derive(Debug, Clone, Default)]
-pub struct Probing {
-    /// Also render each plugin ([`DEFAULT_MEASURE_TIMEOUT`]).
-    pub measure: bool,
-    /// The state a measurement puts one plugin in first.
-    pub state: Option<ProbeState>,
-    /// Answer with filename metadata when `plugin-probe` cannot be found. A scan
-    /// lists what it found by file name then; a task that was asked about one
-    /// file reports the probe's absence instead.
-    pub fallback: bool,
+#[derive(Debug, Clone)]
+pub enum Probing {
+    /// Read each plugin's descriptor.
+    Describe {
+        /// Answer with filename metadata when `plugin-probe` cannot be found. A
+        /// scan lists what it found by file name then; a task that was asked
+        /// about one file reports the probe's absence instead.
+        fallback: bool,
+    },
+    /// Also render each plugin ([`DEFAULT_MEASURE_TIMEOUT`]); a missing
+    /// `plugin-probe` is a failure, since nothing else can measure.
+    Measure {
+        /// The state a measurement puts one plugin in first.
+        state: Option<ProbeState>,
+    },
 }
 
 /// The probe a scanner calls, as `config` and `how` say: the binary
@@ -39,18 +44,21 @@ pub fn probe_fn(
 + Sync
 + 'static {
     let locator: Locator = config.probe_locator.clone();
-    let timeout = if how.measure {
-        config.measure_timeout
-    } else {
-        config.probe_timeout
+    let timeout = match how {
+        Probing::Describe { .. } => config.probe_timeout,
+        Probing::Measure { .. } => config.measure_timeout,
     };
-    move |path, format, stop| {
-        let probed = if how.measure {
-            measure_metadata_with(&locator, path, format, timeout, stop, how.state.as_ref())
-        } else {
-            probe_metadata_with(&locator, path, format, timeout, stop)
-        };
-        interpret_probe(probed, path, how.fallback)
+    move |path, format, stop| match &how {
+        Probing::Describe { fallback } => interpret_probe(
+            probe_metadata_with(&locator, path, format, timeout, stop),
+            path,
+            *fallback,
+        ),
+        Probing::Measure { state } => interpret_probe(
+            measure_metadata_with(&locator, path, format, timeout, stop, state.as_ref()),
+            path,
+            false,
+        ),
     }
 }
 

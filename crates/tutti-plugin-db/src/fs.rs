@@ -34,10 +34,10 @@ impl FileFacts {
             let inner = std::fs::metadata(module).ok().and_then(|m| modified(&m));
             mtime = mtime.max(inner);
         }
-        Self {
-            exists: metadata.is_ok(),
-            mtime,
-            format,
+        if metadata.is_ok() {
+            Self::Present { mtime }
+        } else {
+            Self::Missing
         }
     }
 }
@@ -214,19 +214,17 @@ mod tests {
     }
 
     #[test]
-    fn file_facts_read_reports_a_file_a_missing_path_and_the_extension() {
+    fn file_facts_read_reports_a_file_and_a_missing_path() {
         let dir = TempDir::new().unwrap();
         let file = create_fake_plugin(dir.path(), "a.clap");
 
         let present = FileFacts::read(&file);
-        assert!(present.exists);
-        assert!(present.mtime.is_some());
-        assert_eq!(present.format, Some(PluginFormat::Clap));
+        assert!(present.exists());
+        assert!(present.mtime().is_some());
 
         let absent = FileFacts::read(dir.path().join("gone.vst3"));
-        assert!(!absent.exists);
-        assert_eq!(absent.mtime, None);
-        assert_eq!(absent.format, Some(PluginFormat::Vst3));
+        assert!(!absent.exists());
+        assert_eq!(absent, FileFacts::Missing);
     }
 
     #[cfg(unix)]
@@ -319,10 +317,10 @@ mod tests {
         fn a_bundle_whose_binary_changed_reads_as_changed() {
             for name in ["Reverb.vst3", "Legacy.vst", "Synth.clap", "Verb.component"] {
                 let facts = facts_of_bundle(name, 2_000_000_000, 1_000_000_000);
-                assert_eq!(facts.mtime, at(2_000_000_000), "{name}");
+                assert_eq!(facts.mtime(), at(2_000_000_000), "{name}");
                 // The directory later than the binary still wins.
                 let facts = facts_of_bundle(name, 1_000_000_000, 3_000_000_000);
-                assert_eq!(facts.mtime, at(3_000_000_000), "{name}");
+                assert_eq!(facts.mtime(), at(3_000_000_000), "{name}");
             }
         }
     }

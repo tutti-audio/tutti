@@ -59,13 +59,13 @@ fn scan_picks_up_a_new_file() {
     };
 
     let empty = scan(&mut catalog);
-    assert_eq!((empty.scanned, empty.new), (0, 0));
+    assert_eq!((empty.scanned(), empty.added()), (0, 0));
     assert!(files(&catalog).is_empty());
 
     let first = scanned_dir.join("First.clap");
     std::fs::copy(tutti_fixtures::clap_probe(), &first).expect("drop a plugin in");
     let found = scan(&mut catalog);
-    assert_eq!((found.scanned, found.new), (1, 1));
+    assert_eq!((found.scanned(), found.added()), (1, 1));
     let canonical = |path: &std::path::Path| tutti_plugin_db::canonical_path(path);
     assert_eq!(files(&catalog), [canonical(&first)]);
 
@@ -73,7 +73,7 @@ fn scan_picks_up_a_new_file() {
     std::fs::copy(tutti_fixtures::clap_probe(), &second).expect("drop another in");
     let found = scan(&mut catalog);
     assert_eq!(
-        (found.scanned, found.new),
+        (found.scanned(), found.added()),
         (2, 1),
         "two files are in the directory and only the new one is probed"
     );
@@ -143,7 +143,7 @@ fn measure_measures_a_plugin_a_scan_left_unmeasured() {
 
     let task = catalog.measure(&plugin, None).expect("a file that exists");
     let result = finish(&mut catalog, task);
-    assert_eq!((result.scanned, result.new), (1, 1));
+    assert_eq!((result.scanned(), result.added()), (1, 1));
     let (_, descriptor) = catalog.iter().next().expect("still listed");
     assert!(descriptor.measured.is_some());
 }
@@ -161,7 +161,7 @@ fn register_delivers_the_row_of_a_file_outside_the_scanned_directories() {
     assert_eq!(catalog.iter().count(), 0, "nothing is applied by the call");
     let result = finish(&mut catalog, task);
 
-    assert_eq!((result.scanned, result.new), (1, 1));
+    assert_eq!((result.scanned(), result.added()), (1, 1));
     let rows: Vec<_> = catalog
         .db()
         .rows()
@@ -325,9 +325,10 @@ mod stand_in_probe {
         let task = catalog.register(&file).expect("a plugin file");
         let result = finish(&mut catalog, task);
 
-        assert_eq!(result.newly_blacklisted, 1);
-        let [failed] = result.failures.as_slice() else {
-            panic!("one failure: {:?}", result.failures);
+        assert_eq!(result.newly_blacklisted(), 1);
+        let failures = result.failures();
+        let [failed] = failures.as_slice() else {
+            panic!("one failure: {failures:?}");
         };
         assert_eq!(failed.path, tutti_plugin_db::canonical_path(&file));
         assert_eq!(
@@ -350,8 +351,10 @@ mod stand_in_probe {
         running_pid(&pid_file);
         let result = finish(&mut catalog, task);
 
-        let [failed] = result.failures.as_slice() else {
-            panic!("one failure: {:?}", result.failures);
+        let failures = result.failures();
+
+        let [failed] = failures.as_slice() else {
+            panic!("one failure: {failures:?}");
         };
         assert!(
             matches!(failed.failure.error, ProbeError::TimedOut { .. }),
@@ -378,12 +381,14 @@ fn register_names_a_missing_probe_binary() {
     let task = catalog.register(&file).expect("a plugin file");
     let result = finish(&mut catalog, task);
 
-    let [failed] = result.failures.as_slice() else {
-        panic!("one failure: {:?}", result.failures);
+    let failures = result.failures();
+
+    let [failed] = failures.as_slice() else {
+        panic!("one failure: {failures:?}");
     };
     assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
     assert_eq!(
-        (result.new, result.failed, result.newly_blacklisted),
+        (result.added(), result.failed(), result.newly_blacklisted()),
         (0, 1, 0)
     );
     assert!(catalog.db().is_empty());
@@ -416,8 +421,9 @@ fn a_measure_state_does_not_reach_the_next_measure() {
         .measure(&named, Some(&refused))
         .expect("a file that exists");
     let first = finish(&mut catalog, first);
-    let [failed] = first.failures.as_slice() else {
-        panic!("one failure: {:?}", first.failures);
+    let failures = first.failures();
+    let [failed] = failures.as_slice() else {
+        panic!("one failure: {failures:?}");
     };
     assert!(
         matches!(
@@ -438,7 +444,7 @@ fn a_measure_state_does_not_reach_the_next_measure() {
         .expect("a file that exists");
     let second = finish(&mut catalog, second);
 
-    assert!(second.failures.is_empty(), "{:?}", second.failures);
+    assert!(second.failures().is_empty(), "{:?}", second.failures());
     assert!(!catalog.is_blacklisted(&b));
     let row = catalog.db().row(&tutti_plugin_db::canonical_path(&b));
     assert!(row.is_some(), "the second plugin was measured and recorded");
@@ -459,8 +465,10 @@ fn measure_names_a_missing_probe_binary() {
     let task = catalog.measure(&plugin, None).expect("a plugin file");
     let result = finish(&mut catalog, task);
 
-    let [failed] = result.failures.as_slice() else {
-        panic!("one failure: {:?}", result.failures);
+    let failures = result.failures();
+
+    let [failed] = failures.as_slice() else {
+        panic!("one failure: {failures:?}");
     };
     assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
     assert!(catalog.db().is_empty());
@@ -511,7 +519,7 @@ mod links {
         let task = catalog.register(&link).expect("a plugin file");
         let result = finish(&mut catalog, task);
 
-        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        assert!(result.failures().is_empty(), "{:?}", result.failures());
         let rows: Vec<_> = catalog.db().rows().map(|(p, _)| p.to_path_buf()).collect();
         assert_eq!(rows, [tutti_plugin_db::canonical_path(&real)]);
         let args = std::fs::read_to_string(log).expect("the probe ran");
@@ -536,7 +544,7 @@ mod links {
 
         let task = catalog.register(&link).expect("a plugin file");
         let result = finish(&mut catalog, task);
-        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        assert!(result.failures().is_empty(), "{:?}", result.failures());
         let canonical = tutti_plugin_db::canonical_path(&target);
         let (plugin, _) = catalog.iter().next().expect("the plugin is listed");
         assert_eq!(plugin.path(), canonical);
@@ -544,7 +552,7 @@ mod links {
         let task = catalog.measure(&plugin, None).expect("the key is a file");
         let result = finish(&mut catalog, task);
 
-        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        assert!(result.failures().is_empty(), "{:?}", result.failures());
         let (_, descriptor) = catalog.iter().next().expect("still listed");
         assert!(descriptor.measured.is_some());
         assert!(!catalog.is_blacklisted(&canonical));
@@ -570,10 +578,10 @@ mod links {
         let result = scan(&mut catalog);
 
         assert_eq!(
-            (result.scanned, result.new),
+            (result.scanned(), result.added()),
             (1, 1),
             "{:?}",
-            result.failures
+            result.failures()
         );
         let canonical = tutti_plugin_db::canonical_path(&target);
         let rows: Vec<_> = catalog.db().rows().map(|(p, _)| p.to_path_buf()).collect();
