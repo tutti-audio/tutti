@@ -2653,6 +2653,7 @@ dependencies = [
  "objc2-core-midi",
  "objc2-foundation",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-platform",
  "tutti-ump",
 ]
@@ -3253,6 +3254,7 @@ dependencies = [
  "interprocess",
  "libc",
  "tempfile",
+ "thiserror 2.0.21",
  "tracing",
  "tracing-subscriber",
  "tutti-au-host",

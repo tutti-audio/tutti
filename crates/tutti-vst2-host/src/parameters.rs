@@ -1,7 +1,7 @@
 //! Parameter read / write + shared-`ParameterInfo` exposure.
 //!
 //! VST2 parameters are addressed by a dense `i32` index in
-//! `[0, numParams)` and the value is a normalized `f32` in `[0, 1]`. The shared
+//! `[0, numParams)` and the value is a normalized `f32` word in `[0, 1]`. The shared
 //! vocabulary's [`ParamId`] carries that index (the plugin has no other
 //! identifier), converted here at the boundary. Names and labels come from the
 //! plugin's `PluginParameters` table.
@@ -20,6 +20,7 @@ use tutti_rt::Tally;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
+use crate::host::HostState;
 use crate::loaded::Vst2Loaded;
 use crate::param_properties::{IntegerRange, IntegerSteps};
 
@@ -87,7 +88,9 @@ impl Vst2Loaded {
     /// [`Control::parameter_text`]: tutti_plugin_types::Control::parameter_text
     pub(crate) fn display_if_current(&self, id: ParamId, value: Normalized) -> Option<String> {
         let current = self.parameter_value(id)?;
-        (current.get() == value.get())
+        // The plugin holds the `f32` narrowing of what was written, so `value` is current
+        // when it narrows to what the plugin reads back.
+        (HostState::narrow(value) == HostState::narrow(current))
             .then(|| self.parameter_display(id))
             .flatten()
     }
@@ -102,9 +105,9 @@ impl Vst2Loaded {
     /// value, so it is not the plugin's edit.
     pub fn write_parameter(&self, id: ParamId, value: Normalized) -> bool {
         match self.param_index(id) {
-            Some(index) => {
-                crate::host::host_write(|| self.instance.set_parameter(index, value.get() as f32))
-            }
+            Some(index) => self.host.write(index, value, |word| {
+                self.instance.set_parameter(index, word)
+            }),
             None => false,
         }
     }
@@ -227,8 +230,10 @@ impl Vst2Loaded {
             .initial_values
             .get(id as usize)
             .copied()
-            .unwrap_or_else(|| self.instance.get_parameter(id).unwrap_or(0.0))
-            as f64;
+            .unwrap_or_else(|| {
+                Normalized::clamped(f64::from(self.instance.get_parameter(id).unwrap_or(0.0)))
+            })
+            .get();
 
         let props = self.parameter_properties(ParamId::new(id as u32));
         let int_range = props.as_ref().and_then(|q| q.integer_range);

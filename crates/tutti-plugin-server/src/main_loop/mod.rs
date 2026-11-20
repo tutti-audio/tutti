@@ -44,7 +44,7 @@ use tutti_plugin_types::{IpcError, IpcResult, MainThreadMarker, StateError, Wake
 
 use crate::render::RenderThread;
 use crate::session::{Reaction, Session};
-use crate::transport::ControlTransport;
+use crate::transport::{ControlTransport, Incoming};
 
 /// How often the idle tick runs while nothing else wakes the loop: about 30 Hz,
 /// the rate a plugin's editor idle is conventionally driven at.
@@ -94,7 +94,7 @@ impl Ticker {
 #[cfg_attr(not(unix), path = "windows.rs")]
 mod sys;
 
-pub(crate) use sys::{Bell, Listener, Native, Stream, wait_readable};
+pub(crate) use sys::{Bell, Listener, Native, Stream, connection, wait_readable};
 
 impl Native {
     /// Waits until `transport` has a frame to read (`Ok(true)`), the `bell`
@@ -254,8 +254,11 @@ pub(crate) fn serve_every(
         if !readable {
             continue;
         }
-        let Request { id, body } = transport.recv()?;
-        match session.handle(main, body)? {
+        let (id, reaction) = match transport.recv()? {
+            Incoming::Request(Request { id, body }) => (id, session.handle(main, body)?),
+            Incoming::SetupSlab { id, layout, slab } => (id, session.setup_slab(&slab, layout)),
+        };
+        match reaction {
             Reaction::Shutdown => return Ok(()),
             Reaction::Reply(reply) => transport.send(&ControlFrame::Reply { id, reply })?,
             Reaction::ReplyMany(replies) => {

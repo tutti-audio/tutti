@@ -143,12 +143,23 @@ fn send_reply(stream: &Stream, id: ReqId, reply: &ControlReply) -> std::io::Resu
 trait Wire: Framed {
     type Body;
     fn split(self) -> (ReqId, Self::Body);
+
+    /// Reads what follows the frame on the stream: a setup's slab, which the
+    /// mock server takes and never opens.
+    fn follow(_body: &Self::Body, _stream: &Stream) {}
 }
 
 impl Wire for Request {
     type Body = ControlRequest;
     fn split(self) -> (ReqId, ControlRequest) {
         (self.id, self.body)
+    }
+
+    fn follow(body: &ControlRequest, stream: &Stream) {
+        if let ControlRequest::SetupSharedMemory { slab, .. } = body {
+            SlabHandle::receive(crate::transport::connection(stream), slab.clone())
+                .expect("the slab follows its setup");
+        }
     }
 }
 
@@ -235,6 +246,7 @@ fn serve_lane<Req: Wire>(
             Err(_) => return, // host hung up
         };
         let (id, body) = msg.split();
+        Req::follow(&body, &stream);
         match (respond.lock().unwrap())(body) {
             Action::Reply(m) => {
                 if send_reply(&stream, id, &m).is_err() {

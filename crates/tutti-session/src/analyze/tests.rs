@@ -13,7 +13,7 @@ use tutti_measure::{
 };
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
 
-use super::{Analyze, AnalyzeError};
+use super::{Analyze, AnalyzeError, BindError};
 
 const CHUNK_FRAMES: usize = super::CHUNK_FRAMES.get();
 use crate::{DetachedSession, Job, Session};
@@ -166,7 +166,7 @@ fn a_stereo_analysis_of_mono_audio_fails_with_the_widths() {
     assert!(
         matches!(
             failed,
-            AnalyzeError::Width { needs, found }
+            AnalyzeError::Bind(BindError::Width { needs, found })
                 if needs == tutti_buffers::ChannelLayout::STEREO
                     && found == tutti_buffers::ChannelLayout::MONO
         ),

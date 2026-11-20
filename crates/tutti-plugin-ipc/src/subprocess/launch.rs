@@ -621,13 +621,7 @@ fn setup_shm(
 
     let call = config.timeouts.call;
     let id = launch.open(call, call);
-    launch.send(
-        id,
-        ControlRequest::SetupSharedMemory {
-            slab: handle,
-            layout,
-        },
-    )?;
+    ipc::send_setup(&mut launch.stream, id, layout, &handle)?;
     match launch.answer(id)? {
         ControlReply::SharedMemoryReady => Ok(slab),
         ref other => Err(unexpected_message("SharedMemoryReady", other)),

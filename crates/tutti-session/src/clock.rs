@@ -300,7 +300,7 @@ impl<F: SessionFloat> sealed::Streaming for SystemEngine<F> {
 
 #[cfg(feature = "device")]
 impl<F: SessionFloat> Clock for DeviceClock<F> {
-    type Config = tutti_cpal::DeviceSelector;
+    type Config = tutti_cpal::OutputConfig;
     type Dates = ();
     type Running = crate::device::DeviceHandle<F>;
     type Float = F;

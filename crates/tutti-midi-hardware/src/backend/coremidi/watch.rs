@@ -135,7 +135,7 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
                     hub.notify();
                 }
             });
-            let _ = ready.send(client);
+            let _ = ready.send(client.clone());
             // The client lives as long as the process.
             let Ok(client) = client else {
                 return;

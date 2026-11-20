@@ -7,6 +7,8 @@ use tutti_buffers::{
 };
 use tutti_units::{Amplitude, Samples};
 
+use crate::NoiseShaping;
+use crate::dither::shaping::ErrorFeedback;
 use crate::dither::{DitherNoise, DitherShape};
 
 /// Frames dithered and converted at a time: the stage's whole scratch.
@@ -35,7 +37,12 @@ fn lsb_of<I: Sample>() -> Amplitude {
 /// refused here ([`SinkFailed`]), and [`finalize`](Sink::finalize) is the inner
 /// sink's. A view whose width is not the inner sink's fails the write.
 ///
-/// Nothing allocates after [`new`](Self::new): both scratches are one chunk of
+/// [`shaped`](Self::shaped) runs the quantizer as error feedback through a
+/// [`NoiseShaping`]: the error of each value (against the signal, dither
+/// included) is held within two least significant bits and fed through the
+/// filter into the next values, so a clip cannot make the loop run away.
+///
+/// Nothing allocates after [`new`](Self::new) and [`shaped`](Self::shaped): both scratches are one chunk of
 /// 1024 frames, sized there. An inner sink of a float format has no step, so
 /// no noise is added to it.
 ///
@@ -70,6 +77,7 @@ pub struct DitherSink<K: Sink, F> {
     noise: DitherNoise,
     shape: Option<DitherShape>,
     lsb: Amplitude,
+    shaping: Option<ErrorFeedback<F>>,
     /// The chunk as floats, with its noise.
     noisy: Vec<F>,
     /// The chunk converted to the inner sink's format.
@@ -89,10 +97,24 @@ impl<K: Sink, F: Float> DitherSink<K, F> {
             noise: DitherNoise::new(),
             shape,
             lsb: lsb_of::<K::Sample>(),
+            shaping: None,
             noisy: Vec::with_capacity(if shape.is_some() { room } else { 0 }),
             converted: Vec::with_capacity(room),
             clipped: 0,
         }
+    }
+
+    /// Runs the quantizer as error feedback through `shaping`. The sink has no
+    /// rate of its own, so the caller designs `shaping` for the rate of the
+    /// blocks it writes. Allocates its state, one
+    /// history of [`order`](NoiseShaping::order) errors per channel.
+    #[must_use]
+    pub fn shaped(mut self, shaping: &NoiseShaping) -> Self {
+        self.shaping = Some(ErrorFeedback::new(
+            shaping,
+            usize::from(self.layout.count()),
+        ));
+        self
     }
 
     /// The values the conversion has clipped so far.
@@ -135,18 +157,21 @@ impl<K: Sink, F: Float> Sink for DitherSink<K, F> {
                 .resize(part.samples().len(), K::Sample::SILENCE);
             let converted =
                 InterleavedMut::new(&mut self.converted, layout).map_err(|_| SinkFailed)?;
-            let clipped = match self.shape {
+            let mut noisy;
+            let dithered = match self.shape {
                 Some(shape) => {
                     self.noisy.clear();
                     self.noisy.extend_from_slice(part.samples());
-                    let mut noisy =
-                        InterleavedMut::new(&mut self.noisy, layout).map_err(|_| SinkFailed)?;
+                    noisy = InterleavedMut::new(&mut self.noisy, layout).map_err(|_| SinkFailed)?;
                     self.noise.process(shape, self.lsb, noisy.reborrow());
-                    convert_counting_clips(noisy.as_interleaved(), converted)
+                    noisy.as_interleaved()
                 }
-                None => convert_counting_clips(part, converted),
-            }
-            .map_err(|_| SinkFailed)?;
+                None => part,
+            };
+            let clipped = match &mut self.shaping {
+                Some(feedback) => feedback.process(self.lsb, part, dithered, converted),
+                None => convert_counting_clips(dithered, converted).map_err(|_| SinkFailed)?,
+            };
             self.clipped += clipped as u64;
             let block = Interleaved::new(&self.converted, layout).map_err(|_| SinkFailed)?;
             self.inner.write(block)?;

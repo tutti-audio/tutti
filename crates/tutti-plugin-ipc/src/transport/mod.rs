@@ -22,4 +22,7 @@ mod sys;
 #[path = "sys/windows.rs"]
 mod sys;
 
+/// What a mock server receives a slab over.
+#[cfg(test)]
+pub(crate) use sys::connection;
 pub(crate) use sys::socket_path_in;

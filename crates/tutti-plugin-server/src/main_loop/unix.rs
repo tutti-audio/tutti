@@ -19,6 +19,12 @@ pub(crate) use bell::Bell;
 pub(crate) type Listener = interprocess::os::unix::uds_local_socket::Listener;
 pub(crate) type Stream = interprocess::os::unix::uds_local_socket::Stream;
 
+/// What a slab is received over on `stream`: the socket's descriptor.
+pub(crate) fn connection(stream: &Stream) -> tutti_plugin_ipc_ffi::Connection<'_> {
+    use std::os::fd::AsFd;
+    stream.as_fd()
+}
+
 /// The reactor: what the loop waits with. It keeps the scratch of the wait, so a
 /// steady watch set allocates nothing.
 #[derive(Debug, Default)]
