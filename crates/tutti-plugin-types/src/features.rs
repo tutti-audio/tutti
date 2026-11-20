@@ -65,8 +65,10 @@ bitflags! {
 
         // --- Reactions (host → plugin advisories — NOT per-block feeds) ---
         /// Plugin reacts to host automation-state changes (VST3
-        /// `IAutomationState`): the host tells it when it is reading / writing
-        /// automation so the editor can show UI feedback (a glowing knob ring).
+        /// `IAutomationState`, CLAP `param-indication`, VST2
+        /// `audioMasterGetAutomationState`): the host tells it when it is
+        /// reading / writing automation so the editor can show UI feedback (a
+        /// glowing knob ring).
         /// A *reaction* gate, deliberately NOT part of [`Features::CONSUMES`] —
         /// it gates an edge-triggered host→plugin call, not a per-block send.
         const AUTOMATION_STATE = 1 << 9;
@@ -231,7 +233,10 @@ pub mod probed {
 
     use super::Features;
 
-    /// VST3 probes everything except `AUTOMATION_STATE` and `EDITOR_FLOATING`.
+    /// VST3 probes everything except `EDITOR_FLOATING`.
+    ///
+    /// `AUTOMATION_STATE` is whether the controller implements
+    /// `IAutomationState`.
     ///
     /// Both preset bits are answered from one question — does the plugin
     /// publish program lists — because a VST3 program is loaded by writing the
@@ -245,12 +250,12 @@ pub mod probed {
     /// unconditionally — `IPlugView::attached` takes a parent — so there is no
     /// floating question to ask, and a clear-but-probed bit would spell "asked,
     /// and it said no" for a query that does not exist.
-    pub const VST3: Features = Features::all()
-        .difference(Features::AUTOMATION_STATE)
-        .difference(Features::EDITOR_FLOATING);
+    pub const VST3: Features = Features::all().difference(Features::EDITOR_FLOATING);
 
-    /// CLAP probes everything except `SEQUENCER_CONTEXT`, `AUTOMATION_STATE`
-    /// and `PRESET_LIST`.
+    /// CLAP probes everything except `SEQUENCER_CONTEXT` and `PRESET_LIST`.
+    ///
+    /// `AUTOMATION_STATE` is whether the plugin implements
+    /// `clap.param-indication`.
     ///
     /// The spec has no chord or scale events, so there is no sequencer context
     /// to ask about.
@@ -269,10 +274,9 @@ pub mod probed {
     /// carries information rather than the absence of a question.
     pub const CLAP: Features = Features::all()
         .difference(Features::SEQUENCER_CONTEXT)
-        .difference(Features::AUTOMATION_STATE)
         .difference(Features::PRESET_LIST);
 
-    /// VST2 answers eight, in or out of process.
+    /// VST2 answers nine, in or out of process.
     ///
     /// It has no query for editor
     /// resize, note expression, or sequencer context, and neither loader probes
@@ -287,12 +291,16 @@ pub mod probed {
     /// `audioMasterGetCurrentProcessLevel`, a callback the *host* answers
     /// whenever the plugin asks, so there is nothing to query and no plugin
     /// that can decline.
+    ///
+    /// `AUTOMATION_STATE` is answered unconditionally: the host answers
+    /// `audioMasterGetAutomationState` whenever the plugin asks.
     pub const VST2: Features = Features::F64_AUDIO
         .union(Features::MIDI_IN)
         .union(Features::MIDI_OUT)
         .union(Features::EDITOR)
         .union(Features::TRANSPORT)
         .union(Features::RENDER_MODE)
+        .union(Features::AUTOMATION_STATE)
         .union(Features::PRESET_LIST)
         .union(Features::PRESET_LOAD);
 
@@ -423,8 +431,10 @@ mod tests {
                 | Features::PRESET_LOAD
                 | Features::RENDER_MODE
         );
-        assert_eq!(probed::VST2.bits().count_ones(), 8);
-        assert!(!probed::VST3.contains(Features::AUTOMATION_STATE));
+        assert_eq!(probed::VST2.bits().count_ones(), 9);
+        assert!(probed::VST3.contains(Features::AUTOMATION_STATE));
+        assert!(probed::CLAP.contains(Features::AUTOMATION_STATE));
+        assert!(!probed::AU.contains(Features::AUTOMATION_STATE));
         assert!(!probed::CLAP.contains(Features::SEQUENCER_CONTEXT));
     }
 
@@ -480,23 +490,6 @@ mod tests {
         let report = FeatureReport::new(probed::AU, Features::MIDI_IN);
         assert_eq!(report.get(Features::MIDI_IN), Some(true));
         assert_eq!(report.get(Features::MIDI_OUT), None);
-    }
-
-    /// No loader claims `AUTOMATION_STATE` — nothing sets that bit anywhere, so
-    /// claiming it would assert a probe that does not exist.
-    #[test]
-    fn no_loader_claims_a_capability_nothing_probes() {
-        for (name, mask) in [
-            ("vst3", probed::VST3),
-            ("clap", probed::CLAP),
-            ("vst2", probed::VST2),
-            ("au", probed::AU),
-        ] {
-            assert!(
-                !mask.contains(Features::AUTOMATION_STATE),
-                "{name} claims AUTOMATION_STATE, which no loader populates"
-            );
-        }
     }
 
     /// The two preset bits are independent, because one format answers exactly

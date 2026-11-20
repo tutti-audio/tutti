@@ -1,4 +1,4 @@
-//! Does a render mode set on the *handle* reach the plugin that renders?
+//! Does a render mode (or an automation mode) set on the *handle* reach the plugin that renders?
 //!
 //! `PluginHandle::announce_render_mode` through the handle is the route a bounce driver uses, because `into_parts`
 //! consumes the `Plugin` at load and only the handle survives.
@@ -365,6 +365,52 @@ fn a_rate_change_keeps_the_render_mode() {
     );
 }
 
+/// **An automation mode set through the handle reaches the plugin on the main
+/// thread**: the probe asks `audioMasterGetAutomationState` once per render, and
+/// its answer follows the mode (off 1, read 2, write 3, read and write 4) with
+/// the call taking effect at the next block.
+fn an_automation_mode_set_on_the_handle_reaches_the_plugin() {
+    use tutti_plugin_types::AutomationMode;
+    let _guard = lock_probe();
+    let mut loaded = load();
+
+    drive_block(&mut loaded.unit);
+    assert_eq!(
+        read_capture(&loaded.path).automation_state,
+        1,
+        "off before any mode is set"
+    );
+    for (mode, state) in [
+        (AutomationMode::Reading, 2),
+        (AutomationMode::Writing, 3),
+        (AutomationMode::ReadWriting, 4),
+        (AutomationMode::Off, 1),
+    ] {
+        assert_eq!(loaded.handle.set_automation_mode(mode), Ok(()), "{mode:?}");
+        drive_block(&mut loaded.unit);
+        assert_eq!(
+            read_capture(&loaded.path).automation_state,
+            state,
+            "{mode:?} never reached the plugin the node renders"
+        );
+    }
+}
+
+/// **A VST2 plugin carries the automation-state feature**, so the session
+/// forwards a mode to it: the host answers the query for every plugin.
+fn a_vst2_plugin_claims_the_automation_state_feature() {
+    let _guard = lock_probe();
+    let loaded = load();
+
+    assert!(
+        loaded
+            .handle
+            .loaded()
+            .features
+            .contains(tutti_plugin_types::Features::AUTOMATION_STATE)
+    );
+}
+
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`
 /// and a fork tell the plugin at once only there.
 fn main() {
@@ -374,5 +420,7 @@ fn main() {
         an_offline_mode_set_on_the_handle_reaches_the_plugin,
         restoring_realtime_reaches_the_plugin,
         a_rate_change_keeps_the_render_mode,
+        an_automation_mode_set_on_the_handle_reaches_the_plugin,
+        a_vst2_plugin_claims_the_automation_state_feature,
     ]);
 }

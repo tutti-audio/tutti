@@ -4,6 +4,7 @@
 
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/vst/ivstautomationstate.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/base/ustring.h"
 #include "pluginterfaces/vst/ivstevents.h"
@@ -27,6 +28,12 @@ using namespace Steinberg::Vst;
 
 static const FUID kProcessorUID (0x54534850, 0x43505001, 0x53484152, 0x45440001);
 static const FUID kControllerUID (0x54534850, 0x43505002, 0x53484152, 0x45440001);
+
+// The host's automation state (core.rs, "State"): the controller is told, and the component, which holds the
+// transcript, reads it when it saves. The two objects of one instance share the image, so this is where they meet.
+// They assume one instance per process: the contract runs each case in a process of its own (nextest isolates
+// every test), and no test hosts two instances of this plugin at once.
+static std::atomic<uint32_t> gAutomationN {0}, gAutomationLast {0};
 
 static std::vector<uint8_t> readAll (IBStream* s)
 {
@@ -93,6 +100,7 @@ public:
 	}
 	tresult PLUGIN_API getState (IBStream* s) SMTG_OVERRIDE
 	{
+		core.automationN = gAutomationN.load (); core.automationLast = gAutomationLast.load ();
 		auto b = core.save (); int32 w = 0;
 		return (s && s->write (b.data (), int32 (b.size ()), &w) == kResultOk && w == int32 (b.size ())) ? kResultOk : kResultFalse;
 	}
@@ -193,7 +201,8 @@ class SharedController : public EditControllerEx1,
                          public INoteExpressionPhysicalUIMapping,
                          public IXmlRepresentationController,
                          public IParameterFunctionName,
-                         public IMidiLearn
+                         public IMidiLearn,
+                         public IAutomationState
 {
 public:
 	OBJ_METHODS (SharedController, EditControllerEx1)
@@ -205,8 +214,16 @@ public:
 		DEF_INTERFACE (IXmlRepresentationController)
 		DEF_INTERFACE (IParameterFunctionName)
 		DEF_INTERFACE (IMidiLearn)
+		DEF_INTERFACE (IAutomationState)
 	END_DEFINE_INTERFACES (EditControllerEx1)
 	REFCOUNT_METHODS (EditControllerEx1)
+
+	// IAutomationState: the bitmask the host sent (read 1, write 2), recorded as it came.
+	tresult PLUGIN_API setAutomationState (int32 state) SMTG_OVERRIDE
+	{
+		gAutomationLast = uint32_t (state); gAutomationN++;
+		return kResultOk;
+	}
 
 	// Event bus 0, channel 0: controller 74 drives `level`; nothing else is mapped (core.rs).
 	tresult PLUGIN_API getMidiControllerAssignment (int32 bus, int16 channel, CtrlNumber controller, ParamID& id) SMTG_OVERRIDE

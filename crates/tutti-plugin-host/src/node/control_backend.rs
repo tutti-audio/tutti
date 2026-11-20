@@ -68,8 +68,8 @@ pub(crate) struct ControlBackend<L: InProcess> {
     pub(crate) reporting: Reporting,
     /// Whether the plugin is lost, and why: what the handle's health reads.
     pub(crate) lost: Arc<Lost>,
-    /// The plugin's format name, for the refusal of an advisory no in-process
-    /// format carries.
+    /// The plugin's format name, for the refusal of an advisory the plugin
+    /// does not take.
     pub(crate) format: &'static str,
     /// The collector of the plugin's owner: where an off-main call posts its
     /// work for the main thread's next tick.
@@ -381,11 +381,25 @@ where
             .unwrap_or(false)
     }
 
-    /// No in-process format carries the VST3-style advisory.
-    fn set_automation_mode(&self, _mode: AutomationMode) -> Result<(), AutomationModeError> {
-        Err(AutomationModeError::Unsupported {
-            format: self.format.to_string(),
-        })
+    /// The format's automation-state call, on the main thread
+    /// ([`Control::set_automation_state`]): [`Unsupported`](AutomationModeError::Unsupported)
+    /// for a plugin without the channel, [`PluginDead`](AutomationModeError::PluginDead)
+    /// once it is lost, and [`Dropped`](AutomationModeError::Dropped) when the
+    /// main thread does not run the call (nothing pumps it, or it did not
+    /// within the deadline); a later call may land.
+    fn set_automation_mode(&self, mode: AutomationMode) -> Result<(), AutomationModeError> {
+        match self.on_main(move |main, instance| {
+            instance
+                .control()
+                .map(|control| control.set_automation_state(main, mode))
+        }) {
+            Some(Some(true)) => Ok(()),
+            Some(Some(false)) => Err(AutomationModeError::Unsupported {
+                format: self.format.to_string(),
+            }),
+            Some(None) => Err(AutomationModeError::PluginDead),
+            None => Err(AutomationModeError::Dropped),
+        }
     }
 }
 
@@ -840,19 +854,13 @@ mod off_main_tests {
         );
     }
 
-    /// **No in-process format carries the automation advisory**, and says so
-    /// with `AutomationModeError::Unsupported` for its format, as the handle with
-    /// no such route always did.
+    /// **The automation advisory reaches an in-process plugin that takes it**:
+    /// the reference VST2 plugin carries the channel, so the call on the handle
+    /// answers `Ok` from a thread that is not the main one (the pump runs it).
     #[test]
-    fn the_automation_advisory_is_not_supported_in_process() {
+    fn the_automation_advisory_is_delivered_in_process() {
         let (_unit, handle, _pump) = loaded();
-        let refused = handle
-            .set_automation_mode(AutomationMode::Writing)
-            .expect_err("no in-process format carries it");
-        assert!(
-            matches!(refused, AutomationModeError::Unsupported { ref format } if format == "vst2"),
-            "{refused:?}"
-        );
+        assert_eq!(handle.set_automation_mode(AutomationMode::Writing), Ok(()));
     }
 
     /// **A healthy in-process plugin reads alive, with no refusal and zero
@@ -879,7 +887,7 @@ mod off_main_tests {
     /// **The rest of the calls have the same unavailable answer when nothing
     /// pumps the main thread**: the catalog and the text are `None`, a render
     /// mode is refused (`false`), never a default that looks like an answer.
-    /// (The advisory needs no main thread: it refuses at once.)
+    /// (The advisory runs on the main thread too: it answers `Dropped`.)
     #[test]
     fn an_unpumped_main_thread_refuses_the_other_calls_too() {
         let (_collector, work) = MainWork::new();
@@ -903,9 +911,6 @@ mod off_main_tests {
         assert!(text.is_none());
         assert!(from_text.is_none());
         assert!(!mode);
-        assert!(matches!(
-            automation,
-            Err(AutomationModeError::Unsupported { .. })
-        ));
+        assert_eq!(automation, Err(AutomationModeError::Dropped));
     }
 }

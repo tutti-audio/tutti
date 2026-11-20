@@ -170,6 +170,7 @@
 //! | 60 | `n` (u32), then the last `n` block sizes (u32 each), oldest first |
 //! | after | `m` (u32), then `m` events of 24 bytes in arrival order |
 //! | after | `t` (u32), the transports received since the activation, then the first `min(t, 16)` of 32 bytes each, in arrival order |
+//! | after | the automation state: its count (u32), then its last raw value (u32) |
 //!
 //! A key the host forwarded to the editor is an event of kind 8 (press) or 9
 //! (release): its `id` is the UTF-16 character in the low 16 bits and the virtual
@@ -188,6 +189,18 @@
 //! (`audioMasterGetTime`) once per block. The log is separate from the
 //! events, so a host that sends one every block never overflows them; `t`
 //! counts what it did not keep.
+//!
+//! The automation state is what the host told the plugin of its automation mode,
+//! as the format carries it, in the last 8 bytes of the blob: how many times the
+//! host told it (u32) and the last raw value (u32). Raw is the format's own
+//! number: VST3 `IAutomationState::setAutomationState`'s bitmask (read 1, write
+//! 2), CLAP `param-indication.set_automation`'s state (playing 2, recording 3;
+//! once per automatable parameter, so the count is the parameter count per
+//! call), VST2 `audioMasterGetAutomationState`'s answer (off 1, read 2, write 3,
+//! read and write 4; asked once per block). The count and the last value are the
+//! plugin's whole life's: an activation does not clear them, since the host tells
+//! the plugin before it is activated. An AU is never told: the format has no
+//! such call.
 //!
 //! An AU ramp (kind 10) is recorded as the host sent it: the head's offset is
 //! the ramp's `startBufferOffset` (i32 bits), the id word holds the parameter
@@ -589,6 +602,8 @@ pub struct Core {
     log: [[AtomicU64; 3]; LOG_EVENTS],
     told_n: AtomicU32,
     told: [[AtomicU64; 4]; LOG_TRANSPORTS],
+    automation_n: AtomicU32,
+    automation_last: AtomicU32,
 }
 
 impl Default for Core {
@@ -674,6 +689,8 @@ impl Core {
             log: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU64::new(0))),
             told_n: z(),
             told: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU64::new(0))),
+            automation_n: z(),
+            automation_last: z(),
         }
     }
 
@@ -902,6 +919,13 @@ impl Core {
             slot[3].store(t.beat.to_bits(), Relaxed);
         }
         self.told_n.store(n.saturating_add(1), Release);
+    }
+
+    /// Records the automation state the host told the plugin, in the format's
+    /// raw number. Never allocates; an activation does not clear it.
+    pub fn log_automation(&self, raw: u32) {
+        self.automation_last.store(raw, Relaxed);
+        self.automation_n.fetch_add(1, Relaxed);
     }
 
     fn log(&self, kind: u64, offset: u32, id: u32, value: f64) {
@@ -1173,6 +1197,8 @@ impl Core {
             b.extend_from_slice(&t[2].load(Relaxed).to_le_bytes());
             b.extend_from_slice(&t[3].load(Relaxed).to_le_bytes());
         }
+        b.extend_from_slice(&self.automation_n.load(Relaxed).to_le_bytes());
+        b.extend_from_slice(&self.automation_last.load(Relaxed).to_le_bytes());
         b
     }
 

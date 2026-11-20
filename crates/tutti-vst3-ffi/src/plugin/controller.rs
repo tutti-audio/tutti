@@ -429,6 +429,13 @@ impl Parts {
         (!bytes.is_empty()).then(|| String::from_utf8_lossy(&bytes).into_owned())
     }
 
+    /// Whether the controller implements `IAutomationState`.
+    #[must_use]
+    pub fn has_automation_state(&self, main: MainThreadMarker) -> bool {
+        let _scope = self.scoped(main);
+        self.ext.automation_state.is_some()
+    }
+
     /// `IAutomationState::setAutomationState`; `false` without the interface.
     pub fn set_automation_state(
         &self,

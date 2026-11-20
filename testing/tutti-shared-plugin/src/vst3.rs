@@ -155,7 +155,17 @@ impl Class for Plugin {
         IMidiMapping,
         IUnitInfo,
         IParameterFunctionName,
+        IAutomationState,
     );
+}
+
+/// The host's automation state, recorded as it came (the VST3 bitmask: read 1,
+/// write 2).
+impl IAutomationStateTrait for Plugin {
+    unsafe fn setAutomationState(&self, state: i32) -> tresult {
+        self.core.log_automation(state as u32);
+        kResultOk
+    }
 }
 
 impl IPluginBaseTrait for Plugin {
