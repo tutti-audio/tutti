@@ -19,11 +19,9 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::Bed;
-use tutti_buffers::{Float, PlanesMut};
+use tutti_buffers::{Bed, Float, PlanesMut};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
-use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
 use tutti_rt::SplitMix64;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
@@ -53,7 +51,7 @@ fn bench(c: &mut Criterion) {
             (Bed::Surround51, 6, 1024),
         ] {
             g.throughput(Throughput::Elements(block as u64));
-            let node = VbapPannerNode::<f32>::new(bed).unwrap();
+            let node = vbap::<f32>(bed);
             let params = node.param_set();
             aim(&params, Azimuth::new(20.0), Elevation::LEVEL);
             let mut d = Direct::new(node, SampleRate::SR_48K, block);
@@ -80,3 +78,9 @@ fn bench(c: &mut Criterion) {
 
 criterion_group!(benches, bench);
 criterion_main!(benches);
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
+}

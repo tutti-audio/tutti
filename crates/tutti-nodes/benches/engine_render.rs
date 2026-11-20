@@ -44,18 +44,16 @@
 //! Baselines are per-machine and do not travel; see `cargo xtask bench-save`.
 
 use std::hint::black_box;
-use tutti_buffers::MaxBlock;
+use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::ChannelLayout;
-use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
-    BusStripNode, EqBandConfig, EqBandNode, SvfFilterConfig, SvfFilterNode, SvfType,
+    BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_timeline::MotionEvent;
 use tutti_timeline::Transport;
@@ -98,7 +96,11 @@ fn chain_engine(outputs: usize) -> Engine {
                 .gain(Db::new(6.0)),
         ),
     );
-    ed.insert(strip, "strip", BusStripNode::stereo());
+    ed.insert(
+        strip,
+        "strip",
+        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)),
+    );
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);

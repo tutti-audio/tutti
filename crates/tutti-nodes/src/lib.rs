@@ -373,7 +373,7 @@ pub use tutti_dsp::{AutoPanControls, OscillatorWave, PanLaw, RingModControls, Tr
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.
 mod strip;
-pub use strip::BusStripNode;
+pub use strip::{BusStripConfig, BusStripNode};
 
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
@@ -402,7 +402,9 @@ pub use tutti_dsp::{
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
-pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
+pub use spatial::{
+    HrtfBinauralConfig, HrtfBinauralNode, VbapError, VbapPannerConfig, VbapPannerNode,
+};
 
 mod modulation;
 pub use modulation::{
@@ -429,7 +431,9 @@ pub use signal::{
 mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
-pub use convolution::{ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout, PortSide};
+pub use convolution::{
+    ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout,
+};
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a
 // test, example or bench wires a graph out of.

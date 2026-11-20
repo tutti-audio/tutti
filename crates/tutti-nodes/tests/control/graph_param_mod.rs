@@ -21,12 +21,10 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::{Mono, Planes};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
 use tutti_fixtures::Noise;
 
 use atomic_float::AtomicF64;
-use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -36,7 +34,7 @@ use tutti_graph::{
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{
-    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode, CompressorConfig,
+    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     DistortionConfig, DistortionNode, GateConfig, GateControls, GateNode, InterpolationMode,
     KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LimiterConfig, LimiterControls,
@@ -527,14 +525,14 @@ fn cases() -> Vec<Case> {
             name: "strip volume",
             param: UnitParam::Volume,
             make: |w, v| {
-                let n = BusStripNode::new(
+                let n = BusStripNode::from(BusStripConfig::new(
                     ChannelLayout::try_from(w)
                         .ok()
                         .and_then(BusTopology::assumed)
                         .expect("a test width fits a bus"),
-                );
+                ));
                 if let Some(v) = v {
-                    n.set_volume(Amplitude::new(f64::from(v)));
+                    n.volume().store(Amplitude::new(f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -546,12 +544,12 @@ fn cases() -> Vec<Case> {
             name: "strip balance",
             param: UnitParam::Balance,
             make: |w, v| {
-                let n = BusStripNode::new(
+                let n = BusStripNode::from(BusStripConfig::new(
                     ChannelLayout::try_from(w)
                         .ok()
                         .and_then(BusTopology::assumed)
                         .expect("a test width fits a bus"),
-                );
+                ));
                 if let Some(v) = v {
                     assert!(ParamNode::<f32>::param_set(&n).set(UnitParam::Balance, f64::from(v)));
                 }
@@ -970,7 +968,7 @@ fn mix_cases() -> Vec<MixCase> {
             name: "convolver mix",
             make: |w| {
                 parts_of(
-                    tutti_nodes::ConvolverNode::shared_ir(
+                    shared_ir_node(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                         Mono::new(&[0.0, 0.0, 1.0, -0.5]),
                         Samples::new(64),
@@ -1236,4 +1234,19 @@ fn a_fork_modulates_as_the_live_graph_does() {
             "frame {i}: the fork plays the lane's drive 3"
         );
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
 }

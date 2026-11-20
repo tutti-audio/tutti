@@ -195,7 +195,7 @@ fn a_bearing_ramp_takes_the_short_arc_and_a_height_ramp_a_line() {
 /// overflowed to NaN and found no speaker tuple.
 #[test]
 fn a_huge_width_saturates_instead_of_overflowing() {
-    let layout = SpeakerLayout::from_bed(tutti_buffers::Bed::Surround714).unwrap();
+    let layout = SpeakerLayout::try_from(tutti_buffers::Bed::Surround714).unwrap();
     let solve = |width: f64| {
         VbapKernel::new(layout.clone()).gains(
             Azimuth::new(30.0),

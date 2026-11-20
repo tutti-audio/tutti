@@ -6,7 +6,7 @@ use tutti_buffers::{Bed, ChannelLayout, Speaker};
 use tutti_graph::{GraphBuilder, NodeKey};
 use tutti_units::{Azimuth, Hz, Q, UnitParam};
 
-use crate::{SvfFilterConfig, SvfFilterNode, SvfType, VbapError, VbapPannerNode};
+use crate::{SvfFilterConfig, SvfFilterNode, SvfType, VbapError, VbapPannerConfig, VbapPannerNode};
 
 /// Wire a panner over `bed` per `(source, bearing)` into `g`'s outputs: the
 /// source's ports 0 and 1 feed the panner (at ear level), and each
@@ -22,7 +22,7 @@ pub fn vbap_mix(
     sources: &[(NodeKey, Azimuth)],
 ) -> Result<(), VbapError> {
     for &(source, azimuth) in sources {
-        let panner = VbapPannerNode::new(bed)?;
+        let panner = VbapPannerNode::try_from(VbapPannerConfig::new(bed))?;
         let (pan, params) = g.add_with_controls(panner);
         params.set(UnitParam::Azimuth, azimuth.get());
         g.connect(source, 0, pan, 0).connect(source, 1, pan, 1);
