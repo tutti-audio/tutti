@@ -126,7 +126,7 @@ fn a_sleep_with_a_past_deadline_resolves_on_its_first_poll() {
     let waker = waker();
     let mut cx = Context::from_waker(&waker);
     let mut sleep = Sleep::new(&timers, Instant::now());
-    assert!(Pin::new(&mut sleep).poll(&mut cx).is_ready());
+    assert_eq!(Pin::new(&mut sleep).poll(&mut cx), Poll::Ready(Ok(())));
 }
 
 #[test]
@@ -166,10 +166,19 @@ fn closing_wakes_every_waiting_sleep_and_a_closed_queue_resolves_at_once() {
         2,
         "each waiting sleep woke"
     );
-    assert!(Pin::new(&mut first).poll(&mut cx).is_ready());
-    assert!(Pin::new(&mut second).poll(&mut cx).is_ready());
+    assert_eq!(
+        Pin::new(&mut first).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
+    assert_eq!(
+        Pin::new(&mut second).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
     let mut later = Sleep::new(&timers, far);
-    assert!(Pin::new(&mut later).poll(&mut cx).is_ready());
+    assert_eq!(
+        Pin::new(&mut later).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
     assert_eq!(lock(&timers.state).due.next_deadline(), None);
     assert_eq!(Arc::strong_count(&counting), 2, "no waker is kept");
 }

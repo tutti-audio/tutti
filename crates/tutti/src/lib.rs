@@ -361,8 +361,8 @@ pub mod types {
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Sleep,
-        Staged, StagedCommitError, StagedFile, StagedKeep, Stamp, Threads, Timer,
+        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek,
+        Shutdown, Sleep, Staged, StagedCommitError, StagedFile, StagedKeep, Stamp, Threads, Timer,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,

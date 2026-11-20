@@ -132,6 +132,11 @@ impl Timers {
     }
 }
 
+/// The executor a [`Sleep`] waits on shut down before its deadline came due.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the executor has shut down")]
+pub struct Shutdown;
+
 /// A handle to an executor's deadlines that keeps nothing of the executor alive.
 ///
 /// Made by [`Executor::timer`](super::Executor::timer). `Clone` shares it, and a future
@@ -140,8 +145,8 @@ impl Timers {
 /// sleeps are the executor's own ([`Executor::sleep_until`](super::Executor::sleep_until)
 /// is this type's).
 ///
-/// A [`Sleep`] resolves at once once its executor has shut down; nothing fires deadlines
-/// after that.
+/// A [`Sleep`] resolves at once with `Err(`[`Shutdown`]`)` once its executor has shut down;
+/// nothing fires deadlines after that.
 #[derive(Clone, Debug)]
 pub struct Timer {
     timers: Arc<Timers>,
@@ -159,8 +164,8 @@ impl Timer {
     ///
     /// A driver of the executor fires it, so its resolution is the cadence of whoever
     /// drives. Dropping the [`Sleep`] before it resolves removes it from the queue. It
-    /// resolves at once once the executor has shut down; nothing fires deadlines after
-    /// that.
+    /// resolves at once with `Err(`[`Shutdown`]`)` once the executor has shut down;
+    /// nothing fires deadlines after that.
     pub fn sleep_until(&self, deadline: Instant) -> Sleep {
         Sleep::new(&self.timers, deadline)
     }
@@ -172,12 +177,14 @@ impl Timer {
     }
 }
 
-/// A deadline as a future: resolves once [`Instant::now`] is at or past it.
+/// A deadline as a future: `Ok(())` once [`Instant::now`] is at or past it and a driver
+/// fired it, `Err(`[`Shutdown`]`)` if its executor shut down first.
 ///
 /// Made by [`Executor::sleep_until`](super::Executor::sleep_until) or
 /// [`Timer::sleep_until`]. Dropping a pending
 /// `Sleep` removes it from the executor's queue and drops its waker. A `Sleep` resolves at
-/// once once its executor has shut down; nothing fires deadlines after that.
+/// once with `Err(Shutdown)` once its executor has shut down; nothing fires deadlines
+/// after that.
 #[derive(Debug)]
 #[must_use = "a Sleep does nothing unless awaited"]
 pub struct Sleep {
@@ -209,17 +216,17 @@ impl Sleep {
 }
 
 impl Future for Sleep {
-    type Output = ();
+    type Output = Result<(), Shutdown>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if Instant::now() >= self.deadline {
             self.cancel();
-            return Poll::Ready(());
+            return Poll::Ready(Ok(()));
         }
         let timers = Arc::clone(&self.timers);
         let mut state = lock(&timers.state);
         if state.closed {
-            return Poll::Ready(());
+            return Poll::Ready(Err(Shutdown));
         }
         let earliest = state.due.next_deadline();
         let id = state.due.arm(self.id, self.deadline, cx.waker());
