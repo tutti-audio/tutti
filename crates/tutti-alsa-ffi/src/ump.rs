@@ -104,7 +104,8 @@ pub struct UmpBlock {
 
 /// The numbers of a `snd_ump_endpoint_info_t`'s Device Identity, as alsa-lib gets
 /// and sets them. The record is the kernel's own, filled from a device's Device
-/// Identity Notification with the wire's bytes in these positions, so a number
+/// Identity Notification with the wire's bytes in these positions (Linux
+/// `sound/core/ump.c`, `ump_handle_device_info_msg`), so a number
 /// here is the Notification's bytes (M2-104 §7.1.3) in the wire's order: the
 /// manufacturer's three System Exclusive id bytes first byte most significant,
 /// and a 16-bit family or model with the Notification's second byte (the most
@@ -131,9 +132,9 @@ impl IdentityWords {
         }
     }
 
-    /// The Device Identity the numbers are: `None` for manufacturer bytes that
-    /// are no id, or a byte past 7 bits anywhere (the manufacturer's top byte included) (an identity the record can
-    /// hold but the spec cannot).
+    /// The Device Identity the numbers are, or `None` when the record holds what
+    /// the spec cannot: manufacturer bytes that are no id, a non-zero top byte
+    /// of the manufacturer word, or any byte past 7 bits.
     fn device(self) -> Option<DeviceIdentity> {
         let [0, a, b, c] = self.manufacturer.to_be_bytes() else {
             return None;
