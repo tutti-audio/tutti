@@ -20,7 +20,7 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
     probe.thread_reset();
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_FD);
-    let (mut fixture, _slab) = session("fds");
+    let (mut fixture, _slab) = session();
     let host = fixture.host();
 
     // A real socket pair: the loop polls the socket's descriptor together with

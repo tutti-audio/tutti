@@ -42,7 +42,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
     let _shape = GuiShape::embeddable();
     let probe = crate::test_utils::clap();
     probe.gui_command(GUI_CMD_REQUEST_RESIZE);
-    let (mut session, _slab) = session("editor");
+    let (mut session, _slab) = session();
     let wanted = Size::Physical(PhysicalSize::new(801, 601));
     let mut script = Script::new([
         Step::Send(load_message()),
@@ -125,7 +125,7 @@ fn unloading_a_plugin_closes_its_editor_and_says_so() {
     let _lock = crate::test_utils::plugin_load_lock();
     let _shape = GuiShape::embeddable();
     let probe = crate::test_utils::clap();
-    let (mut session, _slab) = session("unload");
+    let (mut session, _slab) = session();
     let mut script = Script::new([
         Step::Send(load_message()),
         Step::Send(ControlRequest::OpenEditor {

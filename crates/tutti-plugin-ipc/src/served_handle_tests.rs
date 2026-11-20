@@ -94,10 +94,6 @@ fn eventually(what: &str, mut seen: impl FnMut() -> bool) {
     }
 }
 
-fn unique_shm_name(label: &str) -> String {
-    tutti_fixtures::unique_name(&format!("test_{label}"))
-}
-
 /// Read a request from an interprocess socket (blocking).
 fn recv_host_msg<T: Framed>(stream: &interprocess::local_socket::Stream) -> T {
     use std::io::Read;
@@ -196,16 +192,13 @@ fn handle_with_mock_server(
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     // The test writes no audio: the slab is kept for the served plugin it builds.
-    let slab = AudioSlab::create(
-        unique_shm_name("handle"),
-        SlabLayout {
-            slots: crate::RING_SLOTS as u32,
-            samples_per_channel: 512,
-            format: FloatWidth::F32,
-            inputs: vec![ChannelLayout::STEREO],
-            outputs: vec![ChannelLayout::STEREO],
-        },
-    )
+    let (slab, _handle) = AudioSlab::create(SlabLayout {
+        slots: crate::RING_SLOTS as u32,
+        samples_per_channel: 512,
+        format: FloatWidth::F32,
+        inputs: vec![ChannelLayout::STEREO],
+        outputs: vec![ChannelLayout::STEREO],
+    })
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
@@ -284,16 +277,13 @@ fn handle_with_multi_reply_server(
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     // The test writes no audio: the slab is kept for the served plugin it builds.
-    let slab = AudioSlab::create(
-        unique_shm_name("handle-multi"),
-        SlabLayout {
-            slots: crate::RING_SLOTS as u32,
-            samples_per_channel: 512,
-            format: FloatWidth::F32,
-            inputs: vec![ChannelLayout::STEREO],
-            outputs: vec![ChannelLayout::STEREO],
-        },
-    )
+    let (slab, _handle) = AudioSlab::create(SlabLayout {
+        slots: crate::RING_SLOTS as u32,
+        samples_per_channel: 512,
+        format: FloatWidth::F32,
+        inputs: vec![ChannelLayout::STEREO],
+        outputs: vec![ChannelLayout::STEREO],
+    })
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),

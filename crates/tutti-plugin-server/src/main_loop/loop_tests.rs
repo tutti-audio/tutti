@@ -223,13 +223,12 @@ fn load_message() -> ControlRequest {
         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         block_size: 512,
         preferred_format: FloatWidth::F32,
-        shm_name: String::new(),
         state: None,
     }
 }
 
 /// A session with a slab, as the handshake leaves it.
-fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
+fn session() -> (Fixture, tutti_plugin_ipc::SlabWriter) {
     let (mut session, side) = Session::new().expect("bells");
     let layout = tutti_plugin_ipc::SlabLayout {
         samples_per_channel: 512,
@@ -238,11 +237,10 @@ fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
         inputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
         outputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
     };
-    let shm = format!("tutti_evloop_{name}_{}", std::process::id());
-    let creator = AudioSlab::create(shm.clone(), layout.clone()).expect("slab");
+    let (creator, handle) = AudioSlab::create(layout.clone()).expect("slab");
     session
         .render
-        .attach_slab(AudioSlab::open(shm, layout).expect("slab"));
+        .attach_slab(AudioSlab::open(&handle, layout).expect("slab"));
     let (host_end, server_end) = UnixStream::pair().expect("socket pair");
     (
         Fixture {
@@ -306,7 +304,7 @@ fn a_quiet_host_does_not_stop_the_plugins_timers() {
     probe.thread_reset();
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
-    let (mut session, _slab) = session("timers");
+    let (mut session, _slab) = session();
     let host = session.host();
     let mut script = Script::new([
         Step::Send(load_message()),
@@ -346,7 +344,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
     let _period = timer_period(50);
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
-    let (mut session, _slab) = session("period");
+    let (mut session, _slab) = session();
     let host = session.host();
     let mut script = Script::new([
         Step::Send(load_message()),
@@ -374,7 +372,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
 #[test]
 fn a_message_after_silence_is_answered() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let (mut session, _slab) = session("answers");
+    let (mut session, _slab) = session();
     let waits = std::sync::Arc::<std::sync::atomic::AtomicU64>::default();
     let mut script = Script::new([
         Step::Send(load_message()),
@@ -410,7 +408,7 @@ fn a_message_after_silence_is_answered() {
 #[test]
 fn a_lost_plugin_ends_the_server_abnormally() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let (mut fixture, _slab) = session("lost");
+    let (mut fixture, _slab) = session();
     let main = main_thread();
     assert!(matches!(
         fixture.session.handle(main, load_message()).expect("load"),
@@ -450,7 +448,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
 #[test]
 fn an_undecodable_audio_frame_ends_the_session() {
     use std::io::Write as _;
-    let (mut fixture, _slab) = session("garbage");
+    let (mut fixture, _slab) = session();
     let host = fixture.host();
     let main = main_thread();
     let render = RenderThread::spawn(
@@ -495,7 +493,7 @@ fn an_undecodable_audio_frame_ends_the_session() {
 /// host blocks on the open and the resize.
 #[test]
 fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
-    let (mut session, _slab) = session("none");
+    let (mut session, _slab) = session();
     let mut script = Script::new([
         Step::Send(ControlRequest::OpenEditor {
             parent: None,
@@ -550,7 +548,7 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
     let _paint = slow_paint(PAINT_MS);
-    let (mut session, _slab) = session("paint");
+    let (mut session, _slab) = session();
     let host = session.host();
     // The wait count each block was sent and answered within, when it was both.
     let within: Arc<Mutex<Vec<u64>>> = Arc::default();

@@ -26,8 +26,8 @@ use crate::client::audio::IpcThread;
 use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
 use crate::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News,
-    PROTOCOL_VERSION, ReqId, Request, SlabLayout,
+    AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, News,
+    PROTOCOL_VERSION, ReqId, Request, SlabHandle, SlabLayout,
 };
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -807,6 +807,12 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     assert!(resyncs.load(Ordering::Relaxed) >= 1, "the resync is heard");
 }
 
+/// A handle to a real slab of `layout`: what the host sends, to a mock server
+/// that never opens it.
+fn a_handle(layout: &SlabLayout) -> SlabHandle {
+    AudioSlab::create(layout.clone()).unwrap().1
+}
+
 /// **A slab the server opens is taken; one it never answers, or dies over, fails
 /// within the deadline and leaves the caller its old slab.** The bridge only
 /// reports whether the server has the slab; what the caller keeps is its own.
@@ -820,10 +826,10 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         _ => Action::Silent,
     });
     assert!(
-        ready.bridge.audio().setup_shared_memory(
-            tutti_fixtures::unique_name("hostile_slab-new"),
-            layout.clone()
-        ),
+        ready
+            .bridge
+            .audio()
+            .setup_shared_memory(a_handle(&layout), layout.clone()),
         "the server's ready is the answer"
     );
 
@@ -834,10 +840,10 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         _ => Action::Silent,
     });
     assert!(
-        !refusing.bridge.audio().setup_shared_memory(
-            tutti_fixtures::unique_name("hostile_slab-refused"),
-            layout.clone()
-        ),
+        !refusing
+            .bridge
+            .audio()
+            .setup_shared_memory(a_handle(&layout), layout.clone()),
         "the server's error is a refusal"
     );
 
@@ -847,10 +853,9 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     let silent_bridge = Arc::clone(&silent.bridge);
     let silent_layout = layout.clone();
     let answered = call_within(move || {
-        silent_bridge.audio().setup_shared_memory(
-            tutti_fixtures::unique_name("hostile_slab-silent"),
-            silent_layout,
-        )
+        silent_bridge
+            .audio()
+            .setup_shared_memory(a_handle(&silent_layout), silent_layout)
     })
     .unwrap_or_else(|w| panic!("a silent server held the caller for {w:?}"));
     assert!(!answered, "no answer is a refusal");
@@ -860,12 +865,9 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         _ => Action::Silent,
     });
     let dying_bridge = Arc::clone(&dying.bridge);
-    let answered = call_within(move || {
-        dying_bridge
-            .audio()
-            .setup_shared_memory(tutti_fixtures::unique_name("hostile_slab-dies"), layout)
-    })
-    .unwrap_or_else(|w| panic!("a server that died mid-swap held the caller for {w:?}"));
+    let slab = a_handle(&layout);
+    let answered = call_within(move || dying_bridge.audio().setup_shared_memory(slab, layout))
+        .unwrap_or_else(|w| panic!("a server that died mid-swap held the caller for {w:?}"));
     assert!(!answered, "a server that dies mid-swap is a refusal");
     dying.wait_for_crash("the bridge to say the server is gone");
 }

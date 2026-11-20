@@ -193,14 +193,13 @@ fn mock_with(
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
     };
-    let shm = tutti_fixtures::unique_name("ipc");
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
         .name(crate::socket_name(&path).unwrap())
         .create_sync()
         .unwrap();
-    let slab = AudioSlab::create(shm, layout).unwrap();
+    let (slab, _handle) = AudioSlab::create(layout).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
         origin,

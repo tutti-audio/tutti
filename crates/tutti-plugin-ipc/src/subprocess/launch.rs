@@ -168,7 +168,6 @@ pub(super) fn launch_with_state(
     // still needs to drop it.
     let result = (|server: &ProcessGuard| {
         let mut launch = Launch::new(handshake(config, server)?, &config.timeouts);
-        let shm_name = next_shm_name()?;
         // A state the server would not take (over the limit, a broken sequence)
         // is a refusal like any other: the plugin loads at its defaults. A stage
         // that got no answer is not: the stream may have a late reply in flight,
@@ -182,13 +181,13 @@ pub(super) fn launch_with_state(
             _ => None,
         };
         let (id, descriptor, loaded, format, loaded_error) =
-            load_plugin(&mut launch, config, request, &shm_name, declared)?;
+            load_plugin(&mut launch, config, request, declared)?;
         let state_restore = match staged {
             Some(Err(e)) => Some(Err(e)),
             Some(Ok(())) => Some(loaded_error.map_or(Ok(()), Err)),
             None => None,
         };
-        let slab = setup_shm(&mut launch, config, &loaded, format, shm_name)?;
+        let slab = setup_shm(&mut launch, config, &loaded, format)?;
         Ok((id, descriptor, loaded, format, slab, state_restore))
     })(&server);
 
@@ -498,7 +497,6 @@ fn load_plugin(
     launch: &mut Launch<'_>,
     config: &IpcConfig,
     request: &LoadRequest<'_>,
-    shm_name: &str,
     state: Option<StagedState>,
 ) -> IpcResult<(
     PluginId,
@@ -526,7 +524,6 @@ fn load_plugin(
             sample_rate: request.rate,
             block_size: config.max_buffer_size,
             preferred_format: config.preferred_format,
-            shm_name: shm_name.to_string(),
             state,
         },
     )?;
@@ -618,14 +615,19 @@ fn setup_shm(
     config: &IpcConfig,
     loaded: &LoadedPlugin,
     format: FloatWidth,
-    shm_name: String,
 ) -> IpcResult<SlabWriter> {
     let layout = slab_layout_for(loaded, format, config.max_buffer_size);
-    let slab = AudioSlab::create(shm_name.clone(), layout.clone())?;
+    let (slab, handle) = AudioSlab::create(layout.clone())?;
 
     let call = config.timeouts.call;
     let id = launch.open(call, call);
-    launch.send(id, ControlRequest::SetupSharedMemory { shm_name, layout })?;
+    launch.send(
+        id,
+        ControlRequest::SetupSharedMemory {
+            slab: handle,
+            layout,
+        },
+    )?;
     match launch.answer(id)? {
         ControlReply::SharedMemoryReady => Ok(slab),
         ref other => Err(unexpected_message("SharedMemoryReady", other)),
@@ -661,20 +663,12 @@ pub(crate) fn swap_slab(
     if layout == *held && !unsure {
         return Ok(None);
     }
-    let shm_name = next_shm_name()?;
-    let slab = AudioSlab::create(shm_name.clone(), layout.clone())?;
-    if bridge.audio().setup_shared_memory(shm_name, layout) {
+    let (slab, handle) = AudioSlab::create(layout.clone())?;
+    if bridge.audio().setup_shared_memory(handle, layout) {
         Ok(Some(slab))
     } else {
         Err(IpcError::SlabRefused)
     }
-}
-
-fn next_shm_name() -> IpcResult<String> {
-    // Unguessable for the same reason as the socket (`unique_socket_path`):
-    // `/dev/shm` is shared, and `AudioSlab::create` refuses a name that
-    // exists, so a predictable one is a launch another user can block.
-    Ok(crate::config::unique_name("tutti_plugin")?)
 }
 
 #[cfg(test)]

@@ -1037,7 +1037,7 @@ pub(super) fn handle_control(
             reply.send(ok);
         }
         ControlCommand::SetupSharedMemory {
-            shm_name,
+            slab,
             layout,
             reply,
         } => {
@@ -1049,7 +1049,7 @@ pub(super) fn handle_control(
                     lane,
                     inbox,
                     lifecycle,
-                    ControlRequest::SetupSharedMemory { shm_name, layout },
+                    ControlRequest::SetupSharedMemory { slab, layout },
                 )?,
                 Some(ControlReply::SharedMemoryReady)
             );

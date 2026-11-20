@@ -89,7 +89,7 @@ fn block_env(frame: u64, len: usize) -> Env {
 #[test]
 fn a_click_comes_out_one_declared_latency_later() {
     let _machine = machine_lock();
-    let (mut unit, _record, _threads) = new_node(rig("latency"), tempo(STEP_BEAT));
+    let (mut unit, _record, _threads) = new_node(rig(), tempo(STEP_BEAT));
     let declared = unit.node.shape().latency.samples();
     assert_eq!(
         declared,
@@ -144,7 +144,7 @@ fn a_late_reply_still_carries_its_midi_out_offline() {
             release.send(()).expect("the server awaits the release");
         }
     });
-    let (mut unit, _record, _threads) = new_node(rig_gated("late", Some(gate)), tempo(STEP_BEAT));
+    let (mut unit, _record, _threads) = new_node(rig_gated(Some(gate)), tempo(STEP_BEAT));
     let mut heard = Vec::new();
     for (block, frame) in [(0usize, 0u64), (1, 128), (2, 256)] {
         let events: Vec<Event> = if block == 0 {
@@ -233,8 +233,7 @@ fn chord(o: Offset) -> Event {
 fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
     let _machine = machine_lock();
     // The step lands on stream frame 200, half a frame inside it.
-    let (mut unit, record, _threads) =
-        new_node(rig("chunks"), tempo(4.0 + 199.5 * BEATS_PER_FRAME_120));
+    let (mut unit, record, _threads) = new_node(rig(), tempo(4.0 + 199.5 * BEATS_PER_FRAME_120));
     let items = [
         Item {
             frame: 130,
@@ -523,12 +522,11 @@ fn block_env_with(frame: u64, len: usize, playing: bool, bpm: Bpm, beat: Beat) -
 /// `third`'s transport, and returns the chunk 128..256 as the server was sent
 /// it.
 fn chunk_across_the_third_block(
-    label: &str,
     map: tutti_transport::TempoReader,
     first: impl Fn(u64) -> (Bpm, Beat),
     third: (bool, Bpm, Beat),
 ) -> ProcessAudioData {
-    let (mut unit, record, _threads) = new_node(rig(label), map);
+    let (mut unit, record, _threads) = new_node(rig(), map);
     for (frame, len) in [(0u64, 100usize), (100, 60)] {
         let (bpm, beat) = first(frame);
         unit.block_in(&block_env_with(frame, len, true, bpm, beat));
@@ -574,7 +572,7 @@ fn a_stop_and_a_seek_inside_a_chunk_reach_the_server_on_the_chunk_frame() {
         ),
         ("seek", (true, Bpm::of(120.0), Beat::new(10.0)), true, 10.0),
     ] {
-        let chunk = chunk_across_the_third_block(label, tempo(1000.0), steady, third);
+        let chunk = chunk_across_the_third_block(tempo(1000.0), steady, third);
         let moves: Vec<(u32, bool, f64)> = chunk
             .transport_changes
             .iter()
@@ -629,7 +627,7 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
         )
     };
     let (bpm, beat) = at(160);
-    let chunk = chunk_across_the_third_block("ramp", map, at, (true, bpm, beat));
+    let chunk = chunk_across_the_third_block(map, at, (true, bpm, beat));
     let want = k / rate;
     assert!(
         (chunk.transport.timing.tempo_inc - want).abs() < 1e-12,
