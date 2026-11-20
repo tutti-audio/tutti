@@ -133,7 +133,7 @@ pub enum SessionEvent {
     /// later counts as refused.
     ///
     /// `port` is `None` for a loss no output port owns. The graph's total is
-    /// [`LoadReading::dropped_events`](tutti_metering::LoadReading::dropped_events), exact
+    /// [`BlockCounts::dropped_events`](tutti_engine::BlockCounts::dropped_events), exact
     /// where this is per port: a block that loses at more than 64 places, or
     /// a host that does not run `Collect` for long enough to fill a ring of
     /// 256 entries, leaves some out here and not there.
@@ -159,7 +159,7 @@ pub enum SessionEvent {
     /// recording takes the silence too). The count is the blocks silenced
     /// since the last update that reported, one event per update that saw
     /// any; it is derived on the control side from
-    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced), so
+    /// [`BlockCounts::silenced`](tutti_engine::BlockCounts::silenced), so
     /// the audio thread does nothing more than count.
     ///
     /// A block is silenced when the graph was held by the control side as
@@ -169,9 +169,7 @@ pub enum SessionEvent {
     /// when the graph has no output channels, or when the graph's root width
     /// cannot be placed on the device's. Blocks that merely ran past their
     /// budget are not silenced and have no event: that is the polled
-    /// [`LoadReading::over_budget`](tutti_metering::LoadReading::over_budget).
-    /// A [`LoadMeter::reset`](tutti_metering::LoadMeter::reset) between
-    /// updates restarts the count without an event.
+    /// [`BlockCounts::over_budget`](tutti_engine::BlockCounts::over_budget).
     BlocksSilenced(u64),
     /// The session's rate changed with its clock: a switch onto a sound card
     /// that runs at another rate, or the card's rate carried to the timer. A

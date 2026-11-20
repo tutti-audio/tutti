@@ -27,7 +27,7 @@ So `--no-default-features` does **not** test this — it drops the codec and mid
 features instead. Name the feature:
 
 ```bash
-cargo check -p tutti-transport -p tutti-metering -p tutti-engine
+cargo check -p tutti-transport -p tutti-engine
 ```
 
 ## The import-path gate
@@ -109,7 +109,6 @@ crates/             everything shipped, directory name = package name
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
                     #   executor. Design doc 013.
   tutti-transport   # Transport: tempo, loop, motion state machine, timed commands
-  tutti-metering    # LoadMeter (level meters are plan ops in tutti-graph)
   tutti-engine      # Engine: the per-block graph render over a transport
   tutti-cpal        # Device layer: CPAL stream, RT callback, driver lifecycle
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
@@ -458,8 +457,8 @@ param takes nothing. `P` is a packed `UnitAddr` (index in the high byte, the
 plain `{ UnitParam::X as u16 }` and a node with several names the others with
 `{ UnitAddr::new(UnitParam::X, i).to_u16() }` (doc 013, "Param addresses").
 `AudioNode`, the component wrapping a `NodeKey`, is `bevy-tutti`'s; the engine
-and `tutti-session` key a node by `NodeKey`, and `tutti-transport`,
-`tutti-metering` and `tutti-engine` have no `bevy` feature.
+and `tutti-session` key a node by `NodeKey`, and `tutti-transport` and
+`tutti-engine` have no `bevy` feature.
 
 The session runs a frame as the phases of `tutti_session::PHASES`, and
 `bevy-tutti` schedules each in a `SessionPhaseSystems(Phase)` set chained

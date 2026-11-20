@@ -82,23 +82,7 @@ fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
         refused_block(&s);
     }
     assert_eq!(silenced(&s.update()), [2]);
-    assert_eq!(s.load_meter().expect("engine").peek().silenced, 5);
-}
-
-/// A meter reset between updates restarts the count: no event for the
-/// reset, and the next burst is counted from zero.
-#[test]
-fn a_meter_reset_is_no_event_and_restarts_the_count() {
-    let mut s = offline();
-    for _ in 0..4 {
-        refused_block(&s);
-    }
-    assert_eq!(silenced(&s.update()), [4]);
-    s.load_meter().expect("engine").reset();
-    assert!(silenced(&s.update()).is_empty());
-    refused_block(&s);
-    refused_block(&s);
-    assert_eq!(silenced(&s.update()), [2]);
+    assert_eq!(s.blocks().expect("engine").get().silenced, 5);
 }
 
 /// Blocks over their budget and none silenced: the reading rises, the
@@ -117,7 +101,7 @@ fn over_budget_alone_is_no_event() {
     assert!(silenced(&events).is_empty());
     good_block(&s);
     good_block(&s);
-    let r = s.load_meter().expect("engine").peek();
+    let r = s.blocks().expect("engine").get();
     assert!(r.over_budget >= 1, "the node outran its budget: {r:?}");
     assert_eq!(r.silenced, 0);
     assert!(silenced(&s.update()).is_empty());
