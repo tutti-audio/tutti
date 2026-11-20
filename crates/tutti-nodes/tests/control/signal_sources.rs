@@ -22,12 +22,14 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
-    Adsr, Amount, ControlProgram, InputLayer, Law, LayerId, Polarity, SignalKind, SignalSource,
-    SourceId,
+    Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SignalKind,
+    SignalSource, SourceId,
 };
 use tutti_music::FrameClock;
-use tutti_nodes::automation::ControlLaneNode;
-use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
+use tutti_nodes::{
+    EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+};
 use tutti_ump::NoteVelocity;
 use tutti_units::{
     Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamId, ParamKey, SampleRate, Samples,
@@ -359,12 +361,14 @@ fn lane_to_probe(
             curve: Law::Linear,
         },
     };
-    let program = ControlProgram::new(None, vec![], vec![input]).expect("valid");
-    let node = ControlLaneNode::for_unit(
-        ParamKey::<Hz>::CUTOFF.addr(),
-        program,
-        Some(Arc::new(AtomicF64::new(knob)).into()),
-        Some(ed.param_range_cell(cutoff(probe)).expect("committed")),
+    let program = ControlProgramBuilder::new()
+        .inputs(vec![input])
+        .build()
+        .expect("valid");
+    let node = ControlLaneNode::from(
+        UnitLaneConfig::new(ParamKey::<Hz>::CUTOFF.addr(), program)
+            .knob(Arc::new(AtomicF64::new(knob)).into())
+            .range(ed.param_range_cell(cutoff(probe)).expect("committed")),
     );
     ed.insert(NodeKey(lane), "lane", node);
     ed.spec_mut().connect_param(
@@ -468,11 +472,11 @@ fn pole(tau: f32) -> f64 {
 }
 
 fn follower(source: u32, attack: f64, release: f64, width: ChannelLayout) -> EnvelopeFollowerNode {
-    EnvelopeFollowerNode::new(
+    EnvelopeFollowerNode::from(EnvelopeFollowerConfig::new(
+        width,
         SourceId::new(ParamId::new(source)),
         Ballistics::new(Seconds::new(attack), Seconds::new(release)).unwrap(),
-        width,
-    )
+    ))
 }
 
 fn adsr(a: f64, d: f64, s: f64, r: f64) -> Adsr {
@@ -492,7 +496,10 @@ fn envelope_rig(max: usize, plan: Vec<(u64, [u32; 4])>, adsr: Adsr) -> (Editor, 
     ed.insert(
         NodeKey(2),
         "envelope",
-        ForkByClone(NoteEnvelopeNode::new(SourceId::new(ParamId::new(1)), adsr)),
+        ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(
+            SourceId::new(ParamId::new(1)),
+            adsr,
+        ))),
     );
     wire_events(&mut ed, 1, 2);
     tap(&mut ed, 2, 3);
@@ -624,10 +631,10 @@ fn a_follower_and_a_note_envelope_reset_at_play_start() {
     ed.insert(
         NodeKey(5),
         "envelope",
-        ForkByClone(NoteEnvelopeNode::new(
+        ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(
             SourceId::new(ParamId::new(6)),
             adsr(0.001, 0.002, 0.6, 0.01),
-        )),
+        ))),
     );
     wire_events(&mut ed, 4, 5);
     tap(&mut ed, 5, 6);
@@ -722,7 +729,8 @@ fn a_note_envelopes_stages_land_on_their_frames() {
                 adsr: adsr(0.01, 0.02, 0.5, 0.03),
             },
         };
-        let node = NoteEnvelopeNode::from_decl(&decl).expect("a note envelope");
+        let node =
+            NoteEnvelopeNode::from(NoteEnvelopeConfig::from_decl(&decl).expect("a note envelope"));
         assert_eq!(node.source(), SourceId::new(ParamId::new(3)));
         ed.insert(NodeKey(2), "envelope", ForkByClone(node));
         wire_events(&mut ed, 1, 2);
@@ -801,15 +809,17 @@ fn from_decl_builds_its_own_kind() {
             adsr: adsr(0.01, 0.1, 0.5, 0.2),
         },
     };
-    let node = EnvelopeFollowerNode::from_decl(&f, ChannelLayout::STEREO).expect("a follower");
+    let node = EnvelopeFollowerNode::from(
+        EnvelopeFollowerConfig::from_decl(ChannelLayout::STEREO, &f).expect("a follower"),
+    );
     assert_eq!(node.source(), SourceId::new(ParamId::new(9)));
     assert_eq!(Node::<f32>::shape(&node).audio_in(), ChannelLayout::STEREO);
-    assert!(EnvelopeFollowerNode::from_decl(&n, ChannelLayout::MONO).is_none());
+    assert!(EnvelopeFollowerConfig::from_decl(ChannelLayout::MONO, &n).is_none());
     assert_eq!(
-        NoteEnvelopeNode::from_decl(&n).map(|n| n.source()),
+        NoteEnvelopeConfig::from_decl(&n).map(|n| NoteEnvelopeNode::from(n).source()),
         Some(SourceId::new(ParamId::new(4)))
     );
-    assert!(NoteEnvelopeNode::from_decl(&f).is_none());
+    assert!(NoteEnvelopeConfig::from_decl(&f).is_none());
 }
 
 /// **Pad dips with the kick, end to end.** A 50 ms stereo burst from
@@ -915,10 +925,10 @@ fn an_export_is_the_live_render_for_signal_sources() {
     ed.insert(
         NodeKey(6),
         "envelope",
-        ForkByClone(NoteEnvelopeNode::new(
+        ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(
             SourceId::new(ParamId::new(4)),
             adsr(0.002, 0.003, 0.4, 0.2),
-        )),
+        ))),
     );
     wire_events(&mut ed, 5, 6);
     lane_to_probe(&mut ed, 6, 4, 0.5, 0.2, 7, 8);

@@ -173,7 +173,7 @@ pub(super) const MAX_BLOCK: usize = 1 << 20;
 /// A resampler that takes a fixed number of input frames per call and returns
 /// a variable number of output frames (whole blocks of `fft_size_out`).
 #[derive(Debug)]
-pub struct FftResampler<F: FftFloat = f32> {
+pub(crate) struct FftResampler<F: FftFloat = f32> {
     channels: usize,
     chunk_size_in: usize,
     fft_size_in: usize,
@@ -192,7 +192,7 @@ impl<F: FftFloat> FftResampler<F> {
     /// # Errors
     /// [`ResampleError`] for a zero rate, channel count, chunk or sub-chunk
     /// count, or a rate pair whose block exceeds the supported size.
-    pub fn new(
+    pub(crate) fn new(
         source_hz: usize,
         target_hz: usize,
         chunk_size_in: usize,
@@ -235,17 +235,17 @@ impl<F: FftFloat> FftResampler<F> {
     }
 
     /// Input frames the next call takes, per channel.
-    pub fn input_frames_next(&self) -> usize {
+    pub(crate) fn input_frames_next(&self) -> usize {
         self.chunk_size_in
     }
 
     /// The most output frames a call can produce, per channel.
-    pub fn output_frames_max(&self) -> usize {
+    pub(crate) fn output_frames_max(&self) -> usize {
         self.chunk_size_in.div_ceil(self.fft_size_in) * self.fft_size_out
     }
 
     /// Output frames at the head that are filter warm-up, not signal.
-    pub fn output_delay(&self) -> usize {
+    pub(crate) fn output_delay(&self) -> usize {
         self.fft_size_out / 2
     }
 
@@ -255,7 +255,7 @@ impl<F: FftFloat> FftResampler<F> {
     ///
     /// # Errors
     /// [`ResampleError::BufferMismatch`] when the planes are too few or too short.
-    pub fn process(
+    pub(crate) fn process(
         &mut self,
         wave_in: Planes<'_, F>,
         mut wave_out: PlanesMut<'_, '_, F>,

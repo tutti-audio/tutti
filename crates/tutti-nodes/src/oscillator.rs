@@ -1,5 +1,5 @@
 //! The band-limited oscillator source: [`OscillatorNode`], a sine, saw, square or
-//! triangle at a frequency and a level.
+//! triangle at a frequency and a level, made from an [`OscillatorConfig`].
 //!
 //! The node holds the params, the sample rate and the shape; the algorithm is
 //! `tutti_dsp::Oscillator`.
@@ -22,7 +22,8 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 /// Its params are the frequency ([`UnitParam::Frequency`], in [`Hz`]) and the level
 /// ([`UnitParam::Volume`], in [`Amplitude`], a linear gain on the unit-peak
 /// wave), both read per frame: a driven control signal's every frame is heard, and a
-/// non-finite driven value holds the last finite one. Inserted, its controls
+/// non-finite driven value holds the last finite one. Made from an
+/// [`OscillatorConfig`] (`OscillatorNode::from`); inserted, its controls
 /// are a [`ParamSet`]; a fork starts from the values last set through it, at
 /// phase 0.
 ///
@@ -35,12 +36,12 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 /// ```
 /// # use tutti_buffers::Planes;
 /// use tutti_graph::{GraphBuilder, Params, Prepare};
-/// use tutti_nodes::OscillatorNode;
+/// use tutti_nodes::{OscillatorConfig, OscillatorNode, OscillatorWave};
 /// use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
 ///
 /// let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-/// let tone = g.add_with_controls(Params(OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.5))));
+/// let tone = g.add_with_controls(Params(OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)).level(Amplitude::new(0.5)))));
 /// g.pipe_output(tone.0);
 /// let mut r = g
 ///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
@@ -68,61 +69,47 @@ tutti_graph::declare_params!([] OscillatorNode, n {
     Volume => Amplitude = &n.level,
 });
 
-impl OscillatorNode {
-    fn new(wave: OscillatorWave, frequency: Hz) -> Self {
+/// What an [`OscillatorNode`] is made from: its wave, its frequency and its level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OscillatorConfig {
+    wave: OscillatorWave,
+    frequency: Hz,
+    level: Amplitude,
+}
+
+impl OscillatorConfig {
+    /// A `wave` at `frequency`, unity level.
+    #[must_use]
+    pub const fn new(wave: OscillatorWave, frequency: Hz) -> Self {
         Self {
-            wave: tutti_dsp::Oscillator::new(wave),
-            frequency: Param::new(frequency),
-            level: Param::new(Amplitude::UNITY),
-            rate: None,
-            good_frequency: LastGood::new(frequency.get(), 0.0),
-            good_level: LastGood::new(Amplitude::UNITY.get(), 1.0),
+            wave,
+            frequency,
+            level: Amplitude::UNITY,
         }
     }
 
-    /// A sine at `frequency`, unity level.
+    /// The level the output is scaled by, at the start.
     #[must_use]
-    pub fn sine(frequency: impl Into<Hz>) -> Self {
-        Self::new(OscillatorWave::Sine, frequency.into())
-    }
-
-    /// A band-limited rising saw at `frequency`, unity level.
-    #[must_use]
-    pub fn saw(frequency: impl Into<Hz>) -> Self {
-        Self::new(OscillatorWave::Saw, frequency.into())
-    }
-
-    /// A band-limited square at `frequency`, unity level.
-    #[must_use]
-    pub fn square(frequency: impl Into<Hz>) -> Self {
-        Self::new(OscillatorWave::Square, frequency.into())
-    }
-
-    /// A band-limited triangle at `frequency`, unity level.
-    #[must_use]
-    pub fn triangle(frequency: impl Into<Hz>) -> Self {
-        Self::new(OscillatorWave::Triangle, frequency.into())
-    }
-
-    /// Sets the level the output is scaled by.
-    #[must_use]
-    pub fn with_level(self, level: impl Into<Amplitude>) -> Self {
-        self.level.store(level.into());
+    pub const fn level(mut self, level: Amplitude) -> Self {
+        self.level = level;
         self
     }
+}
 
-    /// Sets the frequency; heard from the next block. Lock-free.
-    pub fn set_frequency(&self, frequency: impl Into<Hz>) {
-        self.frequency.store(frequency.into());
+impl From<OscillatorConfig> for OscillatorNode {
+    fn from(config: OscillatorConfig) -> Self {
+        Self {
+            wave: tutti_dsp::Oscillator::new(config.wave),
+            frequency: Param::new(config.frequency),
+            level: Param::new(config.level),
+            rate: None,
+            good_frequency: LastGood::new(config.frequency.get(), 0.0),
+            good_level: LastGood::new(Amplitude::UNITY.get(), 1.0),
+        }
     }
+}
 
-    /// Sets the level; heard from the next block, as a step at its edge.
-    /// Lock-free. A smooth change is a [`tutti_graph::ParamRamp`] on the level
-    /// port, which the graph runs per frame.
-    pub fn set_level(&self, level: impl Into<Amplitude>) {
-        self.level.store(level.into());
-    }
-
+impl OscillatorNode {
     /// A handle on the frequency cell, for a UI or automation to share.
     #[must_use]
     pub fn frequency(&self) -> Param<Hz> {
@@ -262,12 +249,17 @@ mod tests {
 
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(OscillatorNode::saw(Hz::new(220.0)));
+        assert_param_fork(OscillatorNode::from(OscillatorConfig::new(
+            OscillatorWave::Saw,
+            Hz::new(220.0),
+        )));
     }
 
     #[test]
     fn the_shape_is_a_mono_source_declaring_frequency_then_level() {
-        let node = OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.25));
+        let node = OscillatorNode::from(
+            OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)).level(Amplitude::new(0.25)),
+        );
         let shape = Node::<f32>::shape(&node);
         assert_eq!(shape.audio_in().count(), 0);
         assert_eq!(shape.audio_out().count(), 1);
@@ -281,7 +273,10 @@ mod tests {
 
     #[test]
     fn the_sine_is_sin_two_pi_f_t_at_the_graph_rate() {
-        let out = render(OscillatorNode::sine(Hz::new(440.0)), 1_000);
+        let out = render(
+            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0))),
+            1_000,
+        );
         for (n, &y) in out.iter().enumerate() {
             let exact = libm::sin(2.0 * core::f64::consts::PI * 440.0 * n as f64 / 48_000.0);
             assert!((f64::from(y) - exact).abs() < 1e-6, "sample {n}");
@@ -290,9 +285,15 @@ mod tests {
 
     #[test]
     fn level_scales_the_output_exactly() {
-        let full = render(OscillatorNode::saw(Hz::new(997.0)), 512);
+        let full = render(
+            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Saw, Hz::new(997.0))),
+            512,
+        );
         let half = render(
-            OscillatorNode::saw(Hz::new(997.0)).with_level(Amplitude::new(0.5)),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Saw, Hz::new(997.0))
+                    .level(Amplitude::new(0.5)),
+            ),
             512,
         );
         for (a, b) in full.iter().zip(&half) {
@@ -303,8 +304,11 @@ mod tests {
     #[test]
     fn a_square_and_a_saw_have_no_dc_over_whole_periods() {
         for node in [
-            OscillatorNode::square(Hz::new(1_000.0)),
-            OscillatorNode::saw(Hz::new(1_000.0)),
+            OscillatorNode::from(OscillatorConfig::new(
+                OscillatorWave::Square,
+                Hz::new(1_000.0),
+            )),
+            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Saw, Hz::new(1_000.0))),
         ] {
             let out = render(node, 48 * 20);
             assert!(mean(&out).abs() < 1e-6);
@@ -313,7 +317,13 @@ mod tests {
 
     #[test]
     fn a_square_peaks_at_plus_and_minus_one() {
-        let out = render(OscillatorNode::square(Hz::new(1_000.0)), 48);
+        let out = render(
+            OscillatorNode::from(OscillatorConfig::new(
+                OscillatorWave::Square,
+                Hz::new(1_000.0),
+            )),
+            48,
+        );
         let (hi, lo) = out
             .iter()
             .fold((f32::MIN, f32::MAX), |(h, l), &v| (h.max(v), l.min(v)));
@@ -327,13 +337,23 @@ mod tests {
     /// `2/(29 pi)`, each over 0.02; the band-limited one holds under 0.003.
     #[test]
     fn the_saw_does_not_alias_onto_a_non_harmonic_line() {
-        let out = render(OscillatorNode::saw(Hz::new(5_000.0)), 48 * 100);
+        let out = render(
+            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Saw, Hz::new(5_000.0))),
+            48 * 100,
+        );
         assert!(amplitude_at(&out, 1_000.0, 48_000.0) < 0.003);
     }
 
     #[test]
     fn a_driven_frequency_changes_the_pitch_per_frame() {
-        let mut d = Direct::new(OscillatorNode::sine(Hz::new(1_000.0)), RATE, 96);
+        let mut d = Direct::new(
+            OscillatorNode::from(OscillatorConfig::new(
+                OscillatorWave::Sine,
+                Hz::new(1_000.0),
+            )),
+            RATE,
+            96,
+        );
         let signal: Vec<f32> = (0..96)
             .map(|i| if i < 48 { 1_000.0 } else { 2_000.0 })
             .collect();
@@ -354,14 +374,25 @@ mod tests {
         let mut signal = vec![1_000.0f32; 16];
         signal[8] = f32::NAN;
         signal[9] = f32::INFINITY;
-        let mut d = Direct::new(OscillatorNode::sine(Hz::new(500.0)), RATE, 16);
+        let mut d = Direct::new(
+            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(500.0))),
+            RATE,
+            16,
+        );
         d.feed(0, Some(&signal));
         d.block();
         for (n, &y) in d.output().plane(0).iter().enumerate() {
             let exact = libm::sin(2.0 * core::f64::consts::PI * 1_000.0 * n as f64 / 48_000.0);
             assert!((f64::from(y) - exact).abs() < 1e-6, "sample {n}");
         }
-        let mut level = Direct::new(OscillatorNode::sine(Hz::new(1_000.0)), RATE, 4);
+        let mut level = Direct::new(
+            OscillatorNode::from(OscillatorConfig::new(
+                OscillatorWave::Sine,
+                Hz::new(1_000.0),
+            )),
+            RATE,
+            4,
+        );
         level.feed(1, Some(&[0.5, f32::NAN, f32::NEG_INFINITY, 0.5]));
         level.block();
         let held = level.output().plane(0).samples()[1];
@@ -378,7 +409,8 @@ mod tests {
 
     #[test]
     fn an_unprepared_node_renders_silence() {
-        let mut node = OscillatorNode::sine(Hz::new(440.0));
+        let mut node =
+            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)));
         let ones = [1.0f32; 32];
         let out = drive::<f32>(&mut node, RATE, Planes::default(), &[None, Some(&ones)]);
         assert!(out[0].iter().all(|&v| v == 0.0));
@@ -386,7 +418,14 @@ mod tests {
 
     #[test]
     fn reset_restarts_the_cycle() {
-        let mut d = Direct::new(OscillatorNode::triangle(Hz::new(300.0)), RATE, 64);
+        let mut d = Direct::new(
+            OscillatorNode::from(OscillatorConfig::new(
+                OscillatorWave::Triangle,
+                Hz::new(300.0),
+            )),
+            RATE,
+            64,
+        );
         d.block();
         let first = d.output().plane(0).samples().to_vec();
         Node::<f32>::reset(&mut *d.node);
@@ -396,7 +435,10 @@ mod tests {
 
     #[test]
     fn a_set_frequency_is_heard_on_the_next_block() {
-        let node = OscillatorNode::sine(Hz::new(1_000.0));
+        let node = OscillatorNode::from(OscillatorConfig::new(
+            OscillatorWave::Sine,
+            Hz::new(1_000.0),
+        ));
         let cell = node.frequency();
         let mut d = Direct::new(node, RATE, 48);
         d.block();
@@ -417,8 +459,10 @@ mod tests {
     fn in_an_f64_graph_the_saw_is_the_exact_ramp_of_its_cycle() {
         use crate::test_support::{F64_TOLERANCE, render_f64};
         let level = 1.0 / 3.0;
-        let node =
-            OscillatorNode::saw(Hz::new(RATE.get() / 64.0)).with_level(Amplitude::new(level));
+        let node = OscillatorNode::from(
+            OscillatorConfig::new(OscillatorWave::Saw, Hz::new(RATE.get() / 64.0))
+                .level(Amplitude::new(level)),
+        );
         let out = render_f64(node, RATE, &[], 128);
         for k in 2..62 {
             let want = level * (k as f64 / 32.0 - 1.0);

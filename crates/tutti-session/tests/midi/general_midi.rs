@@ -25,7 +25,7 @@ fn offline_session() -> Session {
 fn unit() -> SoundFontUnit<f32> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
     let font = Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
-    SoundFontUnit::new(font, Settings::new()).expect("builds")
+    Settings::new().build(font).expect("builds")
 }
 
 /// The one source a port holds (these tests wire one).
@@ -191,7 +191,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
         ))
         .expect("the built font parses"),
     );
-    let unit = SoundFontUnit::new(font, Settings::new()).expect("builds");
+    let unit = Settings::new().build(font).expect("builds");
     let mut session = offline_session();
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");
     session
@@ -289,7 +289,7 @@ fn short_release_setup() -> (Session, GeneralMidi<f32>) {
         ))
         .expect("the built font parses"),
     );
-    let unit = SoundFontUnit::new(font, Settings::new()).expect("builds");
+    let unit = Settings::new().build(font).expect("builds");
     let mut session = offline_session();
     let gm = session.add_general_midi(unit).expect("a SoundFont unit");
     for c in 0..2 {

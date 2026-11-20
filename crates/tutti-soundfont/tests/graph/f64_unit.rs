@@ -7,7 +7,7 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Node, Offset, Status};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::Settings;
 use tutti_ump::MidiChannel;
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -29,7 +29,9 @@ fn font() -> Arc<SoundFont> {
 #[test]
 fn an_f64_unit_sounds_a_note_and_idles_within_its_declared_tail() {
     let rate = SampleRate::SR_48K;
-    let unit = SoundFontUnit::<f64>::new(font(), Settings::new()).expect("the unit builds");
+    let unit = Settings::new()
+        .build::<f64>(font())
+        .expect("the unit builds");
     let Tail::Finite(tail) = unit.shape().tail else {
         panic!("the font's releases are finite");
     };

@@ -7,7 +7,7 @@
 use std::path::Path;
 
 // ANCHOR: imports
-use tutti::nodes::OscillatorNode;
+use tutti::nodes::{OscillatorConfig, OscillatorNode, OscillatorWave};
 use tutti::{Amplitude, Bounce, ChannelLayout, Format, Hz, Root, SampleRate, Seconds, Session};
 // ANCHOR_END: imports
 
@@ -18,9 +18,9 @@ fn tone() -> Result<Session, tutti::Error> {
     let mut session = Session::new(SampleRate::SR_48K)?;
 
     // An A at 440 Hz, a quarter of full scale.
-    let (sine, _) = session
-        .graph()
-        .add(OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.25)));
+    let (sine, _) = session.graph().add(OscillatorNode::from(
+        OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)).level(Amplitude::new(0.25)),
+    ));
 
     // One mono output, heard in the left and the right channel.
     session.graph().connect(sine.out(0), Root::output(0))?;
