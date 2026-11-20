@@ -12,7 +12,7 @@
 //! `Error`, so `?` runs the whole program.
 
 use tutti::modulation::Lfo;
-use tutti::nodes::{FreeverbNode, SvfFilterNode, SvfType};
+use tutti::nodes::{FreeverbNode, SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
     Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MaxBlock, Pcm, Q,
     Root, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
@@ -82,11 +82,10 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
 
     // A stereo low-pass, then a reverb whose input is mono: that width change
     // is a bus edge, never a truncation (`connect` would refuse it).
-    let (filter, _) = s.graph().add(SvfFilterNode::with_channels(
-        ChannelLayout::STEREO,
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (filter, _) = s.graph().add(SvfFilterNode::from(
+        SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let (reverb, _) = s.graph().add(FreeverbNode::default());
     s.graph().connect(first, filter)?;

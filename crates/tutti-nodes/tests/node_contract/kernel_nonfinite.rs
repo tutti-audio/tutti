@@ -11,11 +11,12 @@ use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
     Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterNode, CompressorControls,
-    CompressorNode, CrossoverNode, DelayControls, DelayNode, DistortionNode, DynamicEqConfig,
-    DynamicEqNode, FdnNode, FreeverbNode, GateControls, GateNode, LadderFilterNode,
-    LimiterControls, LimiterNode, MaxDelay, ModDelayNode, MultibandCompressorNode, PeakDetection,
-    PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
-    SvfFilterNode, TremoloConfig, TremoloNode,
+    CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayControls, DelayNode,
+    DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, FdnNode, FreeverbNode,
+    GateControls, GateNode, LadderFilterConfig, LadderFilterNode, LimiterControls, LimiterNode,
+    MaxDelay, ModDelayNode, MultibandCompressorNode, PeakDetection, PhaserControls, PhaserNode,
+    PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode, SvfFilterConfig, SvfFilterNode,
+    TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -42,24 +43,28 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
     vec![
         (
             "svf",
-            Box::new(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(1_000.0),
-                Q::new(0.707),
+            Box::new(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.707)),
             )),
         ),
         (
             "ladder",
-            Box::new(LadderFilterNode::<f32>::new(
-                LadderType::LP24,
-                Hz::new(1_000.0),
-                Resonance::new(0.5),
+            Box::new(LadderFilterNode::<f32>::from(
+                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
+                    .freq(Hz::new(1_000.0))
+                    .res(Resonance::new(0.5)),
             )),
         ),
         (
             "crossover",
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap(),
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                ))
+                .unwrap(),
             ),
         ),
         (
@@ -77,23 +82,28 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "distortion",
-            Box::new(DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))),
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(4.0)),
+            )),
         ),
         // The antialiasing's history is the shaper's own state: a non-finite sample enters it
         // as 0, so it is heard at its own frame.
         (
             "distortion first order",
-            Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(4.0))
                     .antialiasing(Antialiasing::FirstOrder),
-            ),
+            )),
         ),
         (
             "distortion second order",
-            Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(4.0))
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                    .drive(Drive::new(4.0))
                     .antialiasing(Antialiasing::SecondOrder),
-            ),
+            )),
         ),
         (
             "compressor",

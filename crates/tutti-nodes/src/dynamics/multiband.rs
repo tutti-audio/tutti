@@ -329,7 +329,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandCompressorNode<F> {
         BusTopology::unassigned(layout).ok_or(CrossoverError::Channels { channels })?;
         let shape = BankShape::try_from((layout, bands))?;
         let defaults = default_crossovers(bands);
-        let crossover = CrossoverControls::ordered(defaults)?;
+        let crossover = CrossoverControls::try_from(defaults)?;
         Ok(Self {
             rig: Rig {
                 shape,
@@ -386,7 +386,7 @@ impl Rig {
         let targets = self
             .splits
             .read(rate, |i| signals.cutoff[i].map(|l| l[at].into()));
-        if let Ok(set) = CrossoverControls::new(&targets[..nb - 1], rate) {
+        if let Ok(set) = CrossoverControls::try_from((&targets[..nb - 1], rate)) {
             self.crossover = set;
         }
         let mut settings = MultibandSettings {

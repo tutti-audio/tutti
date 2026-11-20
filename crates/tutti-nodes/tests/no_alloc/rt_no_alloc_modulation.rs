@@ -1316,7 +1316,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         SourceKey, TargetDecl, TargetKey, Waveform,
     };
     use tutti_nodes::testing::Osc;
-    use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterNode, SvfType, Target};
+    use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
     use tutti_units::{
         Beat, Bpm, Depth, Hz, ParamAddr, PhaseIncrement, Q, Samples, Seconds, UnitParam,
     };
@@ -1364,7 +1364,11 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         .insert(
             filter,
             "svf",
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.7)),
+            ),
         )
         .controls;
     let topology = &mut ed.spec_mut().topology;

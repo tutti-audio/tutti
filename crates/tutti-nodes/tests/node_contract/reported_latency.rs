@@ -17,8 +17,8 @@ use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
 use tutti_nodes::{
-    ChannelTimes, CrossoverNode, DelayControls, DelayLayout, DelayNode, InterpolationMode,
-    MaxDelay, ModDelayNode, MultibandCompressorNode,
+    ChannelTimes, CrossoverConfig, CrossoverControls, CrossoverNode, DelayControls, DelayLayout,
+    DelayNode, InterpolationMode, MaxDelay, ModDelayNode, MultibandCompressorNode,
 };
 use tutti_units::Latency;
 use tutti_units::{Feedback, Hz, Mix, Seconds};
@@ -105,8 +105,11 @@ fn onsets(ch: &[f32]) -> Vec<usize> {
 /// the summed output answers well above zero.
 #[test]
 fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
-    let xo = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(300.0), Hz::new(3_000.0)])
-        .unwrap();
+    let xo = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+        BusTopology::MONO,
+        CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+    ))
+    .unwrap();
     assert_eq!(declared(&xo), Latency::ZERO);
     for (b, band) in impulse_response(xo, 64).iter().enumerate() {
         assert!(band[0] > 0.0, "band {b} is silent at frame 0");

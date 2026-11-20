@@ -54,7 +54,9 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{BusStripNode, EqBandNode, SvfFilterNode, SvfType};
+use tutti_nodes::{
+    BusStripNode, EqBandConfig, EqBandNode, SvfFilterConfig, SvfFilterNode, SvfType,
+};
 use tutti_transport::MotionEvent;
 use tutti_transport::Transport;
 use tutti_units::SampleRate;
@@ -89,7 +91,12 @@ fn chain_engine(outputs: usize) -> Engine {
     ed.insert(
         eq,
         "eq",
-        EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(6.0)),
+        EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(6.0)),
+        ),
     );
     ed.insert(strip, "strip", BusStripNode::stereo());
     wire(&mut ed, eq, 0, osc, 0);
@@ -340,10 +347,10 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     for i in 0..depth {
         let cutoff = 500.0 + (i as f64) * 7.0;
         let f: Box<dyn tutti_graph::Node> = if ours {
-            tutti_graph::IntoNode::into_node(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(cutoff),
-                Q::new(0.7),
+            tutti_graph::IntoNode::into_node(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(cutoff))
+                    .q(Q::new(0.7)),
             ))
             .0
         } else {

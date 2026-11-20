@@ -11,8 +11,8 @@ use tutti_buffers::Planes;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode, EqBandNode, LimiterControls,
-    LimiterNode, MaxDelay, SvfType,
+    BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode, EqBandConfig, EqBandNode,
+    LimiterControls, LimiterNode, MaxDelay, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
@@ -192,7 +192,12 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("eq band", || {
-        let n = EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(3.0));
+        let n = EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(3.0)),
+        );
         let cells = vec![
             (
                 "frequency",

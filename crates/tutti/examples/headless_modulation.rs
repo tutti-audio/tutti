@@ -18,7 +18,7 @@
 
 use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti::modulation::{Follower, Lfo};
-use tutti::nodes::{SvfFilterNode, SvfType};
+use tutti::nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
     ChannelLayout, Depth, DepthTarget, Error, Hz, InPort, InterleavedMut, MaxBlock, OutPort, Q,
     Root, RouteSpec, SampleRate, Samples, Session, SessionEvent,
@@ -87,10 +87,10 @@ fn main() -> Result<(), Error> {
         .build()
         .expect("builds");
     let (saw, _) = s.graph().add(ForkByClone(Osc::saw(Hz::new(110.0))));
-    let (filter, _) = s.graph().add(SvfFilterNode::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (filter, _) = s.graph().add(SvfFilterNode::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let (kick, _) = s.graph().add(ForkByClone(Kick));
     s.graph()

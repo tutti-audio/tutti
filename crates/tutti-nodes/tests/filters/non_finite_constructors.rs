@@ -169,79 +169,70 @@ fn sweep() {
             Box::new(BrickwallLimiterNode::<f32>::new(d(b)))
         }));
         add(probe("eq freq", b, || {
-            Box::new(EqBandNode::<f32>::new(
-                SvfType::Bell,
-                Hz::new(bz),
-                Q::new(1.0),
-                d(3.0),
+            Box::new(EqBandNode::<f32>::from(
+                EqBandConfig::new(SvfType::Bell)
+                    .freq(Hz::new(bz))
+                    .q(Q::new(1.0))
+                    .gain(d(3.0)),
             ))
         }));
         add(probe("eq q", b, || {
-            Box::new(EqBandNode::<f32>::new(
-                SvfType::Bell,
-                Hz::new(1000.0),
-                Q::new(f64::from(b)),
-                d(3.0),
+            Box::new(EqBandNode::<f32>::from(
+                EqBandConfig::new(SvfType::Bell)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(f64::from(b)))
+                    .gain(d(3.0)),
             ))
         }));
         add(probe("eq gain", b, || {
-            Box::new(EqBandNode::<f32>::new(
-                SvfType::Bell,
-                Hz::new(1000.0),
-                Q::new(1.0),
-                d(b),
+            Box::new(EqBandNode::<f32>::from(
+                EqBandConfig::new(SvfType::Bell)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(1.0))
+                    .gain(d(b)),
             ))
         }));
         add(probe("svf freq", b, || {
-            Box::new(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(bz),
-                Q::new(1.0),
+            Box::new(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(bz))
+                    .q(Q::new(1.0)),
             ))
         }));
         add(probe("svf q", b, || {
-            Box::new(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(1000.0),
-                Q::new(f64::from(b)),
+            Box::new(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(f64::from(b))),
             ))
         }));
         add(probe("svf gain", b, || {
-            Box::new(SvfFilterNode::<f32>::with_controls(
-                ChannelLayout::MONO,
-                SvfControls {
-                    ty: SvfType::Bell,
-                    freq: Hz::new(1000.0),
-                    q: Q::new(1.0),
-                    gain: d(b),
-                },
+            Box::new(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Bell)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(1.0))
+                    .gain(d(b)),
             ))
         }));
         add(probe("ladder freq", b, || {
-            Box::new(LadderFilterNode::<f32>::new(
-                tutti_nodes::LadderType::LP24,
-                Hz::new(bz),
-                Resonance::new(0.5),
+            Box::new(LadderFilterNode::<f32>::from(
+                LadderFilterConfig::new(ChannelLayout::MONO, tutti_nodes::LadderType::LP24)
+                    .freq(Hz::new(bz))
+                    .res(Resonance::new(0.5)),
             ))
         }));
-        add(probe("crossover", b, || {
+        // A split the controls refuse (a non-finite one) is replaced by the 1 kHz one.
+        let xo = |splits: &[Hz]| {
+            let controls = CrossoverControls::try_from(splits)
+                .unwrap_or_else(|_| CrossoverControls::try_from(&[Hz::new(1000.0)][..]).unwrap());
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(bz)]).unwrap_or_else(
-                    |_| {
-                        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1000.0)])
-                            .unwrap()
-                    },
-                ),
-            )
-        }));
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(BusTopology::STEREO, controls))
+                    .unwrap(),
+            ) as Box<dyn Node<f32>>
+        };
+        add(probe("crossover", b, || xo(&[Hz::new(bz)])));
         add(probe("crossover2", b, || {
-            Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(200.0), Hz::new(bz)])
-                    .unwrap_or_else(|_| {
-                        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1000.0)])
-                            .unwrap()
-                    }),
-            )
+            xo(&[Hz::new(200.0), Hz::new(bz)])
         }));
         // The longest delay is a `MaxDelay`, which refuses a non-finite, negative or
         // huge value by type (`a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds`).

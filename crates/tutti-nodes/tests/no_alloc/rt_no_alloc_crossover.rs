@@ -7,10 +7,13 @@
 //! `ParamSet` before each block, so they take the ramped path (a coefficient
 //! solve every few samples), a solo's mute ramp and a bypass.
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_graph::{IntoNode, ParamNode};
-use tutti_nodes::{BAND_PARAMS, CrossoverNode, MultibandCompressorNode};
+use tutti_nodes::{
+    BAND_PARAMS, CrossoverConfig, CrossoverControls, CrossoverNode, MultibandCompressorNode,
+};
 use tutti_units::{Hz, SampleRate};
 use tutti_units::{UnitAddr, UnitParam};
 
@@ -47,19 +50,22 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 
 #[test]
 fn crossover_node_process_is_allocation_free() {
-    let node = CrossoverNode::<f32>::new(
-        ChannelLayout::STEREO,
-        &[Hz::new(120.0), Hz::new(1_000.0), Hz::new(6_000.0)],
-    )
+    let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+        BusTopology::STEREO,
+        CrossoverControls::try_from(&[Hz::new(120.0), Hz::new(1_000.0), Hz::new(6_000.0)][..])
+            .unwrap(),
+    ))
     .unwrap();
     gate(node, |_, _| {});
 }
 
 #[test]
 fn crossover_node_with_a_moving_frequency_is_allocation_free() {
-    let node =
-        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(200.0), Hz::new(3_000.0)])
-            .unwrap();
+    let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+        BusTopology::STEREO,
+        CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(3_000.0)][..]).unwrap(),
+    ))
+    .unwrap();
     let mut hz = 200.0f32;
     gate(node, move |controls, _| {
         hz = if hz > 2_000.0 { 200.0 } else { hz + 3.0 };

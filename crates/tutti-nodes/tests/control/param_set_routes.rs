@@ -29,9 +29,9 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{
-    CompressorControls, CompressorNode, KeySource, LadderFilterNode, LadderType, LfoNode,
-    LimiterControls, LimiterNode, ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode,
-    SvfType,
+    CompressorControls, CompressorNode, KeySource, LadderFilterConfig, LadderFilterNode,
+    LadderType, LfoNode, LimiterControls, LimiterNode, ModDelayNode, PhaserControls, PhaserNode,
+    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_units::UnitParam;
 use tutti_units::{
@@ -50,11 +50,10 @@ fn addresses<N: ParamNode>(node: &N, p: UnitParam) -> bool {
 }
 
 fn svf() -> SvfFilterNode<f32> {
-    SvfFilterNode::<f32>::with_channels(
-        ChannelLayout::STEREO,
-        SvfType::LowPass,
-        Hz::new(1000.0),
-        Q::new(0.7),
+    SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+            .freq(Hz::new(1000.0))
+            .q(Q::new(0.7)),
     )
 }
 
@@ -77,11 +76,10 @@ fn a_param_the_set_lacks_has_no_address() {
 
 #[test]
 fn ladder_addresses_q_and_drive_but_not_feedback() {
-    let node = LadderFilterNode::<f32>::with_channels(
-        ChannelLayout::STEREO,
-        LadderType::LP24,
-        Hz::new(800.0),
-        Resonance::new(0.5),
+    let node = LadderFilterNode::<f32>::from(
+        LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+            .freq(Hz::new(800.0))
+            .res(Resonance::new(0.5)),
     );
     assert!(addresses(&node, UnitParam::Cutoff));
     assert!(addresses(&node, UnitParam::Q));
@@ -738,14 +736,11 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
 /// route removed, then 512 frames more, in blocks of `block`: the output, the
 /// shelf's DC gain at each frame.
 fn shelf_handed_back(block: usize) -> Vec<f32> {
-    let shelf = SvfFilterNode::<f32>::with_controls(
-        ChannelLayout::MONO,
-        tutti_nodes::SvfControls {
-            ty: SvfType::LowShelf,
-            freq: Hz::new(1000.0),
-            q: Q::new(0.7),
-            gain: Db::new(0.0),
-        },
+    let shelf = SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowShelf)
+            .freq(Hz::new(1000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(0.0)),
     );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, params) = g.add_with_controls(shelf);

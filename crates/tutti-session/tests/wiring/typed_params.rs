@@ -9,7 +9,9 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
-use tutti_nodes::{CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType};
+use tutti_nodes::{
+    CompressorControls, CompressorNode, KeySource, SvfFilterConfig, SvfFilterNode, SvfType,
+};
 use tutti_rt::Param;
 use tutti_session::{DetachedSession, Session, ValueErrorKind};
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
@@ -28,10 +30,10 @@ fn detached() -> DetachedSession {
 #[test]
 fn a_keys_param_methods_name_their_kind_and_index() {
     let mut s = detached();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let cutoff = lp.cutoff();
     assert_eq!(cutoff.node(), lp.erase());
@@ -45,10 +47,10 @@ fn a_keys_param_methods_name_their_kind_and_index() {
 #[test]
 fn a_write_reaches_the_cell_the_key_names() {
     let mut s = detached();
-    let (lp, controls) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, controls) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     s.set(lp.cutoff().to(Hz::new(2_500.0))).unwrap();
     s.set(lp.q().to(Q::new(1.5))).unwrap();
@@ -80,25 +82,25 @@ fn a_write_reaches_the_cell_the_key_names() {
 #[test]
 fn a_write_to_a_missing_node_or_param_is_no_such_target() {
     let mut s = detached();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
-    let (bare, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (bare, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     // `replace` addresses what the incoming node declares: an `Unforkable`
     // declares nothing, so the key's cutoff now reaches no param.
     s.graph()
         .replace(
             bare,
-            Unforkable(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(1_000.0),
-                Q::new(0.7),
+            Unforkable(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.7)),
             )),
             Seconds::new(0.0),
             FadeLaw::EqualPower,

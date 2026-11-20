@@ -2,9 +2,10 @@
 //! the keys are minted, `routes()` / `routes_to()` / `sources()` read what is
 //! declared, and polarity and curve are part of declaring a route.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_modulation::{Law, Lfo, Polarity, Source};
-use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{
     DepthTarget, ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session,
     ValueErrorKind,
@@ -20,10 +21,10 @@ fn session() -> Session {
 }
 
 fn filter(s: &mut Session) -> ParamRef {
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     ParamRef::from(lp.cutoff())
 }
@@ -166,15 +167,16 @@ fn reading_the_declarations_needs_only_a_shared_session() {
 #[test]
 fn recording_where_nothing_is_automated_is_refused() {
     use std::sync::Arc;
+    use tutti_buffers::ChannelLayout;
     use tutti_nodes::automation::{RecordMode, Trajectory};
     use tutti_session::{AutomationTake, NoAutomation};
     use tutti_units::Hz;
 
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     let a = lp.cutoff();
     let mut m = s.mods_mut();

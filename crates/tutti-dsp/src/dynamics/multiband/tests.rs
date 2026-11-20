@@ -168,7 +168,7 @@ fn the_analytic_band_magnitudes_sum_to_one() {
         assert!((sum - 1.0).abs() < 1e-12, "{f} Hz: {sum}");
         assert!((all_pass(f, 1_000.0).norm() - 1.0).abs() < 1e-12);
     }
-    let m = CrossoverModel::new(&[Hz::new(1_000.0)], RATE).unwrap();
+    let m = crate::testing::crossover_model(&[Hz::new(1_000.0)], RATE);
     let mut g = [Complex64::new(0.0, 0.0)];
     m.frequency_response(0, &[Hz::new(1_000.0)], &mut g);
     assert!((g[0].norm() - band_magnitude(0, &[1_000.0], 1_000.0)).abs() < 1e-6);

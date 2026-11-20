@@ -31,8 +31,8 @@ use tutti_units::{Db, Hz, SampleRate, Samples};
 use super::compressor::{CompressorBank, CompressorControls, CompressorSignals};
 use super::gain_pass::{CHUNK, GAIN_RAMP};
 use crate::{
-    COEFF_INTERVAL, CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError,
-    CrossoverModel, Lerp, Ramp, SimdLanes, Steps,
+    COEFF_INTERVAL, CrossoverBands, CrossoverBank, CrossoverBlend, CrossoverControls,
+    CrossoverError, CrossoverModel, Lerp, Ramp, SimdLanes, Steps,
 };
 
 /// The most bands.
@@ -266,8 +266,9 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     pub fn from_shape(shape: BankShape, rate: SampleRate) -> Self {
         let BankShape { width, bands } = shape;
         let channels = usize::from(width.count());
-        let model = CrossoverModel::designed(bands, &CrossoverControls::octaves(rate), rate)
+        let split = CrossoverBands::new(bands)
             .expect("a shape's bands are 2 to 4, inside a crossover's 2 to 6");
+        let model = CrossoverModel::designed(split, &CrossoverControls::octaves(rate), rate);
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
