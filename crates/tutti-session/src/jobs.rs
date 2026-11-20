@@ -14,7 +14,10 @@
 //! The executor is the builder's choice
 //! ([`SessionBuilder::executor`](crate::SessionBuilder::executor)). Its threads are
 //! its own: when the last clone of a threaded executor drops, it joins them, so a
-//! job still running then holds the session's drop until its work returns.
+//! job still running then holds the session's drop until its work returns. Dropping the
+//! session joins in-flight jobs; every blocking plugin job is bounded by its own deadline
+//! (`tutti_plugin_types::Timeouts`: the load, `param_wait` and `state_wait`), and a server
+//! that dies mid-round-trip fails the wait at once.
 
 #![cfg_attr(
     not(any(test, feature = "capture")),

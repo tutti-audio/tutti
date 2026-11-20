@@ -123,7 +123,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         P: crate::AppKey,
     {
         let (handle, plugin, _, _) = self.state_parts(key)?;
-        // blocks: the state save is an IPC round trip.
+        // blocks: the state save is an IPC round trip, bounded by `state_wait`.
+        // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job stalls
+        // `update` until the plugin lane makes it await its reply.
         Ok(self.jobs.submit_job_blocking(
             "tutti-state",
             move |cancel| {

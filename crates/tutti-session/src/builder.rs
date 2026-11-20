@@ -760,7 +760,8 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`WorkerError::NotStarted`](crate::WorkerError::NotStarted), so an executor
     /// that refuses work loses none silently. Dropping the session drops its clone of
     /// the executor; the last clone of a threaded one joins its threads, so a job
-    /// still running then holds the drop until it returns.
+    /// still running then holds the drop until it returns. Dropping the session joins
+    /// in-flight jobs; every blocking plugin job is bounded by its own deadline.
     ///
     /// ```
     /// # use tutti_session::Session;

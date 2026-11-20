@@ -112,7 +112,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let opening = streamer.open(asset, place);
         let id = SamplerLoad::mint(&self.sampler.opens);
         let landed = Arc::clone(&self.sampler.streams);
-        // blocks: `Opening::wait` parks on the streamer's reply; the stream lane awaits it.
+        // blocks: `PendingOpen::wait` parks on the streamer's reply, with no deadline: on a
+        // polled executor it stalls `update` for good, since the streamer runs in the same poll.
+        // The streamer lane makes it await the reply.
         self.jobs.submit_blocking(
             "tutti-open",
             move || opening.wait(),
