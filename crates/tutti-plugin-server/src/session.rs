@@ -62,6 +62,7 @@ impl Reaction {
     }
 
     /// The bytes of a saved state.
+    #[cfg(feature = "clap")]
     fn into_state(self) -> Vec<u8> {
         match self {
             Reaction::State(data) => data,
