@@ -303,7 +303,7 @@ fn two_loads_land_in_update_each_for_its_own_job() {
 mod soundfont {
     use super::*;
     use tutti_session::{LoadError, PoolState, soundfont};
-    use tutti_soundfont::{Settings, SoundFontUnit};
+    use tutti_soundfont::Settings;
 
     /// Updates until the entry under `key` is no longer pending.
     fn settled(s: &mut DetachedSession, key: &'static str) -> PoolState {

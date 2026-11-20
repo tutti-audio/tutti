@@ -238,7 +238,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// `tutti_nodes::FreeverbNode`) summed back with the dry pair by the graph's
 /// fan-in (the setup's fader holds all three as sources); `tutti-session`'s `Session::add_general_midi` wires all of
 /// that. A send with nothing to send is reported silent in the block's status
-/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Build it with [`new`](Self::new), pick a preset with
+/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Build it with [`Settings::build`](crate::Settings::build), pick a preset with
 /// [`select`](Self::select) (a preset's bank and program) or
 /// [`program_change`](Self::program_change), then insert it into a graph
 /// (it implements `tutti_graph::Node` and `tutti_graph::IntoNode`, with no
@@ -307,7 +307,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// # The rate
 ///
 /// A player's voices are built against a rate and cannot be re-rated in place.
-/// [`new`](Self::new) builds at 44.1 kHz; the node's `prepare` swaps in a
+/// [`Settings::build`](crate::Settings::build) builds at 44.1 kHz; the node's `prepare` swaps in a
 /// player at the graph's rate (control thread, keeping the presets and
 /// channel state), and a rate outside 16 to 192 kHz leaves it at its own. The
 /// rate is the graph's: nothing here names one.

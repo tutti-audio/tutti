@@ -9,7 +9,7 @@ use tutti_session::{
     AddedInstrument, InstrumentHandle, OfflineSession, OutPort, Root, Session, Stamp,
 };
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::Settings;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity};
 use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
