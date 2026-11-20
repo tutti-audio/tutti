@@ -530,6 +530,10 @@ impl Recorded {
 }
 
 /// What a take reports to [`Session::update`] ([`SessionEvent::Take`]).
+///
+/// An event is reported only while the session lives: a session dropped before a take's
+/// [`Finished`](Self::Finished) lands loses it, as does a [`Take`] that outlives its
+/// session, whose stop ring finds no bells.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum TakeEvent {
@@ -752,6 +756,11 @@ impl<S: InFlight> Take<S> {
     ///
     /// Never blocks and never joins: on a [`polled`](tutti_platform::Executor::polled)
     /// executor the pump closes the sink inside the `update` that polls it.
+    ///
+    /// The result is lost when the [`Session`] is gone. A `Take` that outlives its
+    /// session, or a session dropped before the take's [`TakeEvent::Finished`] lands,
+    /// has no bells to carry the stop ring, so the parked pump's waker is released and
+    /// no event arrives.
     pub fn finish(self) {
         self.stop.stop();
     }
