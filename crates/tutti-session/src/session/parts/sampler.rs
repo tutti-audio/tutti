@@ -1,5 +1,4 @@
-//! [`SamplerPart`] with the `sampler` feature: the disk streamer and the streams its opens
-//! landed.
+//! [`SamplerPart`] with the `sampler` feature: the disk streamer.
 
 #![cfg_attr(
     not(feature = "device"),
@@ -7,24 +6,18 @@
 )]
 
 use tutti_platform::Executor;
-use tutti_rt::{Bells, Mint};
+use tutti_rt::Bells;
 use tutti_sampler::{DiskStreamer, DiskStreamerConfig, Running};
 use tutti_units::SampleRate;
 
 use crate::SessionFloat;
-use crate::sampler::OpenedStreams;
 
-/// The disk streamer, the names of its opens, and what they landed.
+/// The disk streamer.
 #[derive(Debug)]
 pub(crate) struct SamplerPart<F: SessionFloat> {
     /// Streams the files the session's sampler voices play; `None` when the
     /// clock has no stream.
     pub(crate) streamer: Option<DiskStreamer<Running, F>>,
-    /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
-    pub(crate) opens: Mint,
-    /// What the opens landed, until the host takes it
-    /// ([`Session::take_stream`](crate::Session::take_stream)).
-    pub(crate) streams: OpenedStreams<F>,
 }
 
 impl<F: SessionFloat> SamplerPart<F> {
@@ -45,11 +38,7 @@ impl<F: SessionFloat> SamplerPart<F> {
         } else {
             None
         };
-        Ok(Self {
-            streamer,
-            opens: Mint::new(),
-            streams: Default::default(),
-        })
+        Ok(Self { streamer })
     }
 
     /// The streamer's cycle for this update: it sweeps every ring's retired controls,

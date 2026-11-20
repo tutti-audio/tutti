@@ -7,9 +7,8 @@
 //!
 //! | Source | Rung by |
 //! |---|---|
-//! | a command (open, close, session rate) | [`StreamerSender::send`], after the push |
+//! | a command (adopt, close, session rate) | [`StreamerSender::send`], after the push |
 //! | a loop or direction a stream's control side publishes | [`ControlCell::publish`](super::control_cell::ControlCell::publish) |
-//! | the decode lane's answer to an open | the same send (the lane holds a `StreamerSender`) |
 //! | a voice's ring below its refill threshold, or a jump outside the window | [`RingReader::block`](super::block::RingReader::block), from the audio thread |
 //! | the retired controls of a quiet cell | `Session::update`, through [`DiskStreamer::wake`](crate::DiskStreamer::wake) |
 //! | shutdown | [`Running`](super::thread::Running)'s drop |
@@ -27,7 +26,7 @@ use super::command::StreamerCommand;
 
 /// The sending end of the streamer's command queue: a bounded
 /// `crossbeam_channel` and the [`Bell`] each send rings. Sent on by control
-/// threads, and by the decode lane. A send waits while the queue is full and
+/// threads. A send waits while the queue is full and
 /// fails once the streamer has gone (every receiver dropped: its future ended, a
 /// built streamer's on its drop).
 #[derive(Clone)]
@@ -54,8 +53,8 @@ impl<F: RingFloat> StreamerSender<F> {
         Ok(())
     }
 
-    /// [`send`](Self::send) that refuses instead of waiting: what a future uses,
-    /// which must not block.
+    /// [`send`](Self::send) that refuses instead of waiting (tests).
+    #[cfg(test)]
     pub(crate) fn try_send(
         &self,
         cmd: StreamerCommand<F>,

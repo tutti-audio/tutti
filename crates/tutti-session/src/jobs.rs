@@ -579,37 +579,6 @@ impl Jobs {
         self.start(place, move |landings| async move { work(&landings) }, land);
     }
 
-    /// Runs `future` on the executor as a job whose work awaits (a reply, say), and
-    /// lands its result like [`submit`](Self::submit). The future must not block.
-    #[cfg_attr(
-        not(feature = "sampler"),
-        expect(dead_code, reason = "the stream open (feature `sampler`) is its user")
-    )]
-    pub(crate) fn submit_future<R, Fut, L>(&mut self, future: Fut, land: L)
-    where
-        R: Send + 'static,
-        Fut: Future<Output = R> + Send + 'static,
-        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
-            + Send
-            + 'static,
-    {
-        let mut land = Some(land);
-        self.start(
-            Place::Pool,
-            move |_: Landings<std::convert::Infallible>| future,
-            move |session, landed, events| {
-                let end = match landed {
-                    Stream::Message(never) => match never {},
-                    Stream::Done(result) => Ok(result),
-                    Stream::Failed(failed) => Err(failed),
-                };
-                if let Some(land) = land.take() {
-                    land(session, end, events);
-                }
-            },
-        );
-    }
-
     fn start<M, R, F, W, L>(&mut self, place: Place<'_>, make: W, land: L)
     where
         M: Send + 'static,

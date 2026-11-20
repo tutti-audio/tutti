@@ -4,7 +4,7 @@
 //! `Place` built from the file's topology when the stream opens puts the
 //! channels where the engine has them: a WAV 7.1 (rears before sides) is
 //! permuted, and a narrowing with an
-//! unordered end is refused, all as `OpenError::Placement` from the open that
+//! unordered end is refused, all as `AdoptError::Placement` from the adopt that
 //! would have made the stream. A file already in the engine's order is read as
 //! it was.
 //!
@@ -27,8 +27,8 @@ use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract;
 use tutti_sampler::testing::{MockTransport, wait_for_open};
 use tutti_sampler::{
-    Direction, DiskStreamer, DiskVoice, Loop, Manual, OpenError, PlaceError, Stream, StreamReader,
-    StreamStart,
+    AdoptError, Direction, DiskStreamer, DiskVoice, Loop, Manual, OpenError, PlaceError, Stream,
+    StreamReader, StreamStart,
 };
 use tutti_units::{Beat, Bpm, SampleRate};
 
@@ -83,19 +83,29 @@ fn open(
     width: Option<ChannelLayout>,
 ) -> (
     DiskStreamer<Manual<f32>, f32>,
-    Result<(Stream<f32>, StreamReader<f32>), OpenError>,
+    Result<(Stream<f32>, StreamReader<f32>), Refusal>,
 ) {
     let mut streamer =
         DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
     let opening = match width {
-        Some(width) => streamer.open_into(path, StreamStart::HEAD, width),
-        None => streamer.open(path, StreamStart::HEAD),
+        Some(width) => streamer.open_stream_into(path, StreamStart::HEAD, width),
+        None => streamer.open_stream(path, StreamStart::HEAD),
     };
-    let reader = wait_for_open(&mut streamer, opening);
+    let reader = opening
+        .run()
+        .map_err(Refusal::Read)
+        .and_then(|read| streamer.adopt(read).map_err(Refusal::Adopt));
     if reader.is_ok() {
         assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     }
     (streamer, reader)
+}
+
+/// Why a file did not become a stream: the read refused it, or the adopt did.
+#[derive(Debug, PartialEq)]
+enum Refusal {
+    Read(OpenError),
+    Adopt(AdoptError),
 }
 
 /// A hand-stepped streamer and the handle of the stream it streams: both are
@@ -202,7 +212,11 @@ fn a_mask_naming_a_speaker_past_the_standard_ones_is_refused() {
     write_wav(&path, 2, 0x0200_0001);
     for width in [None, Some(ChannelLayout::STEREO)] {
         let (_streamer, answer) = open(&path, width);
-        assert_eq!(answer.err(), Some(OpenError::Format), "width {width:?}");
+        assert_eq!(
+            answer.err(),
+            Some(Refusal::Read(OpenError::Format)),
+            "width {width:?}"
+        );
     }
 }
 
@@ -219,20 +233,23 @@ fn a_five_one_file_into_a_five_wide_voice_is_refused() {
     assert!(
         matches!(
             refused,
-            Some(OpenError::Placement(PlaceError::Fold(
+            Some(Refusal::Adopt(AdoptError::Placement(PlaceError::Fold(
                 FoldError::Unplaced { channel: 5, .. }
-            )))
+            ))))
         ),
         "{refused:?}"
     );
     // Refused again, the same way: nothing the first refusal did changed it.
-    let opening = streamer.open_into(&path, StreamStart::HEAD, ChannelLayout::from(5u16));
-    assert_eq!(wait_for_open(&mut streamer, opening).err(), refused);
-    let opening = streamer.open_into(&path, StreamStart::HEAD, ChannelLayout::STEREO);
+    let read = streamer
+        .open_stream_into(&path, StreamStart::HEAD, ChannelLayout::from(5u16))
+        .run()
+        .expect("the file reads");
+    assert_eq!(streamer.adopt(read).err().map(Refusal::Adopt), refused);
+    let opening = streamer.open_stream_into(&path, StreamStart::HEAD, ChannelLayout::STEREO);
     let (_stereo_stream, stereo) =
         wait_for_open(&mut streamer, opening).expect("5.1 folds to stereo");
     assert_eq!(settled_block(voice_of(stereo)).len(), 2);
-    let opening = streamer.open(&path, StreamStart::HEAD);
+    let opening = streamer.open_stream(&path, StreamStart::HEAD);
     let (_own_stream, own) =
         wait_for_open(&mut streamer, opening).expect("and opens at its own width");
     assert_eq!(settled_block(voice_of(own)).len(), 6);

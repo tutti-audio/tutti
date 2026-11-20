@@ -340,7 +340,7 @@ fn stream_at(
     clock.seek_seconds(at_sec);
 
     let start = StreamStart::new(SamplePosition::new(at_sec * SR)).expect("a position in the file");
-    let opening = streamer.open(path, start);
+    let opening = streamer.open_stream(path, start);
     let (stream, reader) = wait_for_open(streamer, opening).unwrap_or_else(|e| {
         panic!("the streamer could not open the file streaming from {at_sec}s: {e}")
     });

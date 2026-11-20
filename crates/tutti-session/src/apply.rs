@@ -75,6 +75,8 @@ pub trait Apply: sealed::Sealed {
 }
 
 pub(crate) use sealed::Cut;
+#[cfg(feature = "sampler")]
+pub(crate) use sealed::Sealed;
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Takes back the output of work the app ran, and applies it.

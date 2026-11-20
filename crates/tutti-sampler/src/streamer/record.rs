@@ -48,7 +48,7 @@ pub(super) enum Phase {
 /// One open stream: everything the streamer holds for it.
 ///
 /// Dropping it ends the stream (module docs).
-pub(super) struct Record<F: RingFloat> {
+pub(crate) struct Record<F: RingFloat> {
     phase: Phase,
     /// The ring's writer, the decoder and the resident wave.
     pub(super) out: RegionOut<F>,
@@ -87,6 +87,15 @@ pub(super) struct Record<F: RingFloat> {
     /// The direction the stream was last asked for: forwards, the value its
     /// cell opens holding.
     asked_direction: Direction,
+}
+
+impl<F: RingFloat> std::fmt::Debug for Record<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Record")
+            .field("id", &self.id())
+            .field("phase", &self.phase)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<F: RingFloat> Record<F> {
