@@ -219,13 +219,15 @@ fn loom_recipes_carry_their_environment() {
     );
 }
 
-/// The web build check is the command CI's clippy job runs.
+/// The web build check is the commands CI's clippy job runs: the platform, rt
+/// and umbrella crates, then the umbrella with every feature the web path uses.
 #[test]
-fn check_wasm_lints_the_platform_crate_the_rt_crate_and_the_umbrella_for_the_web() {
+fn check_wasm_lints_the_platform_crate_the_rt_crate_and_the_umbrella_with_the_web_features() {
     assert_eq!(
         dry("check-wasm", &[]),
         [
-            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings"
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,export,midi -- -D warnings",
         ]
     );
 }
