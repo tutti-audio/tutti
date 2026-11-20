@@ -258,10 +258,9 @@ impl HostState {
     /// narrowing of the value the host last wrote there.
     fn echoes_write(&self, index: i32, report: f32) -> bool {
         let slot = usize::try_from(index).ok();
-        self.written
-            .get()
-            .zip(slot)
-            .is_some_and(|(written, slot)| written.echoes(slot, report, Self::narrow))
+        self.written.get().zip(slot).is_some_and(|(written, slot)| {
+            written.echoes(slot, |value| Self::narrow(value) == report)
+        })
     }
 
     pub(crate) fn new(

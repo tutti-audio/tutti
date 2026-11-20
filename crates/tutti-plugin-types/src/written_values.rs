@@ -48,14 +48,13 @@ impl WrittenValues {
         (bits != UNWRITTEN).then(|| Normalized::clamped(f64::from_bits(bits)))
     }
 
-    /// Whether `report`, a word the plugin gave back for `slot`, is the
-    /// `narrow`ing of the value last written there: the format's own rounding
-    /// of the cell (`value as f32` for a normalized word, the denormalized
-    /// plain value for AU). `false` when nothing was written.
+    /// Whether the value last written to `slot` is the one a report repeats:
+    /// `repeats` is given it and answers whether the format's own narrowing of
+    /// it (`value as f32` for a normalized word, the denormalized plain value
+    /// for AU) equals what the plugin reported. `false` when nothing was written.
     #[must_use]
-    pub fn echoes(&self, slot: usize, report: f32, narrow: impl FnOnce(Normalized) -> f32) -> bool {
-        self.recorded(slot)
-            .is_some_and(|written| narrow(written) == report)
+    pub fn echoes(&self, slot: usize, repeats: impl FnOnce(Normalized) -> bool) -> bool {
+        self.recorded(slot).is_some_and(repeats)
     }
 }
 
@@ -72,7 +71,7 @@ mod tests {
         let cells = WrittenValues::new(2);
         cells.record(1, Normalized::of(BELOW_F32));
         assert_ne!(f64::from(BELOW_F32 as f32), BELOW_F32);
-        assert!(cells.echoes(1, BELOW_F32 as f32, |v| v.get() as f32));
+        assert!(cells.echoes(1, |v| v.get() as f32 == BELOW_F32 as f32));
         assert_eq!(cells.recorded(1).map(Normalized::get), Some(BELOW_F32));
     }
 
@@ -82,16 +81,16 @@ mod tests {
         let cells = WrittenValues::new(1);
         cells.record(0, Normalized::of(BELOW_F32));
         let next = (BELOW_F32 as f32).next_up();
-        assert!(!cells.echoes(0, next, |v| v.get() as f32));
+        assert!(!cells.echoes(0, |v| v.get() as f32 == next));
     }
 
     /// A slot never written, or past the cells, echoes nothing.
     #[test]
     fn unwritten_and_out_of_range_slots_echo_nothing() {
         let cells = WrittenValues::new(1);
-        assert!(!cells.echoes(0, 0.0, |v| v.get() as f32));
+        assert!(!cells.echoes(0, |_| true));
         cells.record(5, Normalized::of(0.5));
         assert!(cells.recorded(5).is_none());
-        assert!(!cells.echoes(5, 0.5, |v| v.get() as f32));
+        assert!(!cells.echoes(5, |_| true));
     }
 }

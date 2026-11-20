@@ -172,7 +172,7 @@ impl RangeTable {
     /// parameter off the table or never written.
     pub(crate) fn is_echo(&self, id: u32, plain: f32) -> bool {
         self.bounds(id)
-            .is_some_and(|bounds| self.marks.echoes(id, plain, |value| bounds.word(value)))
+            .is_some_and(|bounds| self.marks.echoes(id, |value| bounds.word(value) == plain))
     }
 
     /// Every declared id, ascending.

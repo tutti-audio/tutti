@@ -90,18 +90,13 @@ impl Marks {
         self.written.record(slot.0.get(), value);
     }
 
-    /// Whether `report`, a value the unit gave back for `id`, is `narrow` of the
-    /// position last written there. `false` for an id these marks were not
-    /// sized for.
-    pub(crate) fn echoes(
-        &self,
-        id: u32,
-        report: f32,
-        narrow: impl FnOnce(Normalized) -> f32,
-    ) -> bool {
+    /// Whether the position last written to `id` satisfies `repeats` (its
+    /// narrowing equals what the unit reported). `false` for an id these marks
+    /// were not sized for.
+    pub(crate) fn echoes(&self, id: u32, repeats: impl FnOnce(Normalized) -> bool) -> bool {
         self.ids
             .binary_search(&id)
-            .is_ok_and(|at| self.written.echoes(at, report, narrow))
+            .is_ok_and(|at| self.written.echoes(at, repeats))
     }
 
     /// The render's call: the unit applied an automated value of this parameter.
