@@ -1637,12 +1637,13 @@ fn a_state_larger_than_one_frame_arrives_whole() {
     assert!(got == expected, "the state does not match what was sent");
 }
 
-/// **A state object of another length than its frame declared is rejected, by
-/// the plugin's fault and not the connection's**: the typed refusal reaches the
-/// caller, and the session still completes a round trip.
+/// **A state object shorter than its frame declared is rejected, by the plugin's
+/// fault and not the connection's**: the typed refusal reaches the caller, and
+/// the session still completes a round trip. (The declared length is past a
+/// page, so the platform that rounds objects up refuses it too.)
 #[test]
 fn a_state_object_of_another_length_than_declared_is_rejected() {
-    for (declared, held) in [(100u64, 50usize), (50, 100)] {
+    for (declared, held) in [(1u64 << 20, 50usize), (2 << 20, 0)] {
         let mock = MockServer::start("state-length", move |msg| match msg {
             ControlRequest::SaveState { .. } => Action::State {
                 len: declared,

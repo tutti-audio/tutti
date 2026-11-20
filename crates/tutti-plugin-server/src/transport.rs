@@ -656,13 +656,15 @@ mod state_object_tests {
         assert!(got == bytes, "the state arrived changed");
     }
 
-    /// **An object of another length than its frame declared is refused as a
-    /// refused state, not delivered**, whether the frame claims more or less than
-    /// the object holds, for a load and for a stage; the stream stays in step.
+    /// **An object shorter than its frame declared is refused as a refused
+    /// state, not delivered**, for a load and for a stage; the stream stays in
+    /// step. (The claim is past a page, so the platform that rounds objects up
+    /// refuses it too; the claim of less than the object holds is the ffi
+    /// crate's test.)
     #[test]
     fn a_declared_length_that_is_not_the_objects_is_refused_and_the_stream_goes_on() {
         let (mut host, mut transport) = pair();
-        for declared in [99u64, 101] {
+        for declared in [1u64 << 20, 2 << 20] {
             host_sends(
                 &mut host,
                 load(declared),
@@ -683,7 +685,7 @@ mod state_object_tests {
         host_sends(
             &mut host,
             |len, blob| ControlRequest::StageState { len, blob },
-            7,
+            1 << 20,
             Blob::create(&[1u8; 100]).unwrap(),
         );
         assert!(matches!(

@@ -156,7 +156,6 @@ fn read_front(file: &mut File, len: usize, out: &mut Vec<u8>) -> std::io::Result
 mod tests {
     use super::*;
     use crate::SlabWire;
-    use crate::descriptor;
     use std::os::fd::AsFd;
     use std::os::unix::net::UnixStream;
 
@@ -191,22 +190,24 @@ mod tests {
     }
 
     /// **A declared length that is not the object's is refused by name**, whether
-    /// it claims more or less than the object holds.
+    /// it claims more or less than the object holds. Where the platform rounds an
+    /// object up (macOS) a claim of less than the object holds is not a mismatch
+    /// the receiver can see, and reads that many bytes; a claim past the rounded
+    /// length is refused there as everywhere.
     #[test]
     fn a_declared_length_that_is_not_the_objects_is_refused() {
         let (a, b) = UnixStream::pair().unwrap();
-        for declared in [99u64, 101] {
+        for declared in [99u64, 101, 1 << 20] {
             let blob = Blob::create(&[7u8; 100]).unwrap();
             let wire = blob.wire();
             let _lease = blob.send(a.as_fd()).unwrap();
-            let err = Blob::receive(b.as_fd(), wire)
-                .unwrap()
-                .read(declared, CAP)
-                .expect_err("a mismatched length");
-            // macOS rounds an object up, so only a claim past it is a mismatch there.
-            if platform::ROUNDS_UP && declared < 100 {
+            let read = Blob::receive(b.as_fd(), wire).unwrap().read(declared, CAP);
+            if platform::ROUNDS_UP && declared < 4096 {
+                let bytes = read.expect("a claim inside the rounded object");
+                assert_eq!(bytes.len() as u64, declared);
                 continue;
             }
+            let err = read.expect_err("a mismatched length");
             assert!(
                 matches!(err, SlabError::BlobSize { declared: d, .. } if d == declared),
                 "{err}"
@@ -243,6 +244,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn an_unsealed_memfd_is_refused() {
+        use crate::descriptor;
         use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
         let (a, b) = UnixStream::pair().unwrap();
         let fd = memfd_create("t", MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING).unwrap();

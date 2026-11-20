@@ -228,4 +228,32 @@ mod tests {
         std::fs::remove_file(path(&name)).unwrap();
         assert!(matches!(err, SlabError::BadMagic { .. }), "{err}");
     }
+
+    /// **A blob is readable by its name while its lease is held, and gone once the
+    /// lease is dropped**: nothing travels on this platform, the name in the
+    /// frame is the whole of it, so the lease is what keeps the file for the
+    /// reader, and the file does not outlive it.
+    #[test]
+    fn a_blob_is_readable_by_name_while_its_lease_is_held_and_gone_after() {
+        use crate::Blob;
+        let blob = Blob::create(&[5u8; 100]).unwrap();
+        let wire = blob.wire();
+        let lease = blob.send(Connection::detached()).unwrap();
+        let got = Blob::receive(Connection::detached(), wire.clone())
+            .unwrap()
+            .read(100, 1000)
+            .unwrap();
+        assert_eq!(got, vec![5u8; 100]);
+        let wrong = Blob::receive(Connection::detached(), wire.clone())
+            .unwrap()
+            .read(99, 1000)
+            .expect_err("another length than the file's");
+        assert!(matches!(wrong, SlabError::BlobSize { .. }), "{wrong}");
+        drop(lease);
+        let gone = Blob::receive(Connection::detached(), wire)
+            .unwrap()
+            .read(100, 1000)
+            .expect_err("the file outlived its lease");
+        assert!(matches!(gone, SlabError::File { .. }), "{gone}");
+    }
 }
