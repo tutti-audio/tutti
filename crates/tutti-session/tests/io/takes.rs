@@ -341,9 +341,9 @@ fn placement_is_the_formula_with_each_term_stated() {
     rig.run_until(finished);
     let done = recorded(&rig.events);
     let latency = *done.latency();
-    assert_eq!(latency.in_latency, Some(Samples::new(240)));
-    assert_eq!(latency.out_latency, Some(Samples::new(480)));
-    assert_eq!(latency.inlet_lead, Samples::new(7));
+    assert_eq!(latency.input, Some(Samples::new(240)));
+    assert_eq!(latency.output, Some(Samples::new(480)));
+    assert_eq!(latency.lead, Samples::new(7));
     assert_eq!(latency.offset, Trim::Earlier(Samples::new(3)));
     assert!(latency.is_complete());
     assert_eq!(done.placement().first_frame(), Frame::new(10_000));
@@ -372,7 +372,7 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
     rig.run_until(finished);
     let done = recorded(&rig.events);
     let latency = *done.latency();
-    assert_eq!((latency.in_latency, latency.out_latency), (None, None));
+    assert_eq!((latency.input, latency.output), (None, None));
     assert!(!latency.is_complete());
     assert_eq!(
         done.start(),

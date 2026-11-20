@@ -182,6 +182,8 @@ pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, St
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::PluginParams;
+#[cfg(all(feature = "session", any(feature = "capture", feature = "midi")))]
+pub use tutti_session::Trim;
 #[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -222,7 +224,7 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
-    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
+    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget,
 };
 #[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
 pub use tutti_session::{
@@ -498,9 +500,11 @@ pub mod session {
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
-        Armed, InFlight, InputOpener, OpenedInput, Placement as RecordedPlacement, PunchError,
-        Rolling, Start, TakeEnd, TakeId, TakeLatency, Window,
+        Armed, InFlight, InputOpener, OpenedInput, PunchError, Rolling, TakeEnd, TakeId,
+        TakePlacement, Window,
     };
+    #[cfg(any(feature = "capture", feature = "midi"))]
+    pub use tutti_session::{Start, TakeLatency};
     // The `audio_file` entry decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
@@ -835,8 +839,8 @@ pub mod midi {
         AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
         InstrumentHandle, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, Midi,
         MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo,
-        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement,
-        TrackError, midi_sink,
+        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TrackError,
+        midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

@@ -20,12 +20,13 @@
 use tutti::midi::{
     self, AddedInstrument, FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup,
     MidiHardwareConfig, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
-    PitchBendSensitivity, SmfDivision, TakePlacement, Tick, TicksPerQuarterNote, Track, U7, Voice1,
+    PitchBendSensitivity, SmfDivision, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
+use tutti::session::{Start, TakeLatency};
 use tutti::{
     ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate, Samples,
-    Session, SessionEvent, Stamp,
+    Session, SessionEvent, Stamp, Trim,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -194,13 +195,16 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // The take: what was played, each event on its frame of the graph, placed
     // where the performer meant it for this device's latencies (figures a host
     // reads off its devices; here zero, and a 10 ms trim).
-    let placement = TakePlacement {
-        trim: Samples::new(480),
-        ..TakePlacement::default()
-    };
+    let latency = TakeLatency::new(None, None, Samples::ZERO, Trim::Later(Samples::new(480)));
     let take = take
         .drain()
-        .map(|e| (e.frame, placement.place(e.frame)))
+        .map(|e| {
+            let placed = match latency.place(e.frame) {
+                Start::At(frame) => frame,
+                Start::BeforeOrigin(_) => Frame::new(0),
+            };
+            (e.frame, placed)
+        })
         .collect();
     Ok(Outcome {
         peak,

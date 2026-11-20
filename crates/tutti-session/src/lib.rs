@@ -88,6 +88,8 @@ mod instrument;
 mod job;
 mod jobs;
 mod key;
+#[cfg(any(feature = "capture", feature = "midi"))]
+mod latency;
 #[cfg(feature = "midi")]
 mod midi;
 #[cfg(feature = "midi-hardware")]
@@ -196,8 +198,10 @@ pub use key::{
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
     RootDeclaration, Weighted, Wire,
 };
+#[cfg(any(feature = "capture", feature = "midi"))]
+pub use latency::{Start, TakeLatency, Trim};
 #[cfg(feature = "midi")]
-pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
+pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
@@ -287,8 +291,8 @@ pub use signal_windows::windows_from_signal;
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
-    Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
-    TakeError, TakeEvent, TakeId, TakeLatency, TakeTarget, Window,
+    Armed, InFlight, Punch, PunchError, Recorded, Rolling, Take, TakeEnd, TakeError, TakeEvent,
+    TakeId, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
