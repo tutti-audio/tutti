@@ -28,7 +28,8 @@ use tutti_nodes::{
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    EnvelopeFilterConfig, EnvelopeFilterNode, TransientShaperConfig, TransientShaperNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TransientShaperConfig,
+    TransientShaperNode,
 };
 use tutti_nodes::{
     PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
@@ -332,6 +333,62 @@ fn transient_shaper() {
         assert!(d.param_set().set(UnitAddr::new(UnitParam::GainDb, 1), 9.0))
     })
     .check();
+}
+
+/// A leveller at `target` with a 40 dB cut and a 9 dB boost, 50 ms times and no gate. The window
+/// reads from its first 100 ms hop, so each row renders long enough for the gain to move.
+fn leveller_at(target: f64) -> LevellerNode<f32> {
+    LevellerNode::<f32>::try_from(
+        LevellerConfig::new(BusTopology::STEREO)
+            .target(Db::new(target))
+            .max_boost(Db::new(9.0))
+            .max_cut(Db::new(40.0))
+            .gate(Db::new(-100.0))
+            .attack(Seconds::new(0.05))
+            .release(Seconds::new(0.05)),
+    )
+    .unwrap()
+}
+
+/// The stimulus is loud, so a target of -20 LUFS cuts: the target, the cut and both times show.
+#[test]
+fn leveller_cutting() {
+    IsolateRow::new("LevellerNode<f32> (stereo, cutting)", || leveller_at(-20.0))
+        .frames(65_536)
+        .control("target", |d| {
+            assert!(
+                d.param_set()
+                    .set(UnitAddr::new(UnitParam::Threshold, 0), -30.0)
+            )
+        })
+        .control("max cut", |d| {
+            assert!(d.param_set().set(UnitAddr::new(UnitParam::Range, 1), 3.0))
+        })
+        .control("attack", |d| {
+            assert!(d.param_set().set(UnitParam::Attack, 0.01))
+        })
+        .control("release", |d| {
+            assert!(d.param_set().set(UnitParam::Release, 0.01))
+        })
+        .check();
+}
+
+/// A target of 0 LUFS is above the stimulus, so the gain rises: the boost and the gate show
+/// (a gate at 0 LUFS holds the gain).
+#[test]
+fn leveller_boosting() {
+    IsolateRow::new("LevellerNode<f32> (stereo, boosting)", || leveller_at(0.0))
+        .frames(65_536)
+        .control("max boost", |d| {
+            assert!(d.param_set().set(UnitAddr::new(UnitParam::Range, 0), 3.0))
+        })
+        .control("gate", |d| {
+            assert!(
+                d.param_set()
+                    .set(UnitAddr::new(UnitParam::Threshold, 1), 0.0)
+            )
+        })
+        .check();
 }
 
 #[test]

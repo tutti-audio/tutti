@@ -3,4 +3,5 @@
 mod dynamic_eq;
 mod dynamics_nodes;
 mod key_filter;
+mod leveller;
 mod transient_shaper;
