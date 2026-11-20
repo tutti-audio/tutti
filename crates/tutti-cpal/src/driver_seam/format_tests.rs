@@ -6,7 +6,7 @@ use super::*;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES};
-use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source};
+use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare};
 use tutti_nodes::testing::Const;
 use tutti_timeline::Transport;
 
@@ -17,7 +17,7 @@ fn block(level: f32) -> OutputBlock<f32> {
     let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(512))));
     ed.insert(NodeKey(1), "dc", Const::mono(level));
     ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0
         });

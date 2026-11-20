@@ -6,7 +6,7 @@ use tutti_units::Samples;
 
 use super::outlets::Closed;
 use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpened};
-use crate::Source;
+use crate::PortSource;
 use crate::event_tap::EventTapReader;
 use crate::meter::MeterReader;
 use crate::spec::{EventIn, EventOut};
@@ -52,7 +52,7 @@ impl<F: Float> Editor<F> {
     pub fn open_tap(
         &mut self,
         id: TapId,
-        sources: Vec<Source>,
+        sources: Vec<PortSource>,
         options: TapOptions,
     ) -> Result<TapReader<F>, MissingSource> {
         let (capacity, align, bell) = options.into_parts();
@@ -92,7 +92,7 @@ impl<F: Float> Editor<F> {
         width: usize,
         capacity: Samples,
     ) -> Result<TapReader<F>, MissingSource> {
-        let named: Vec<Source> = self
+        let named: Vec<PortSource> = self
             .spec
             .topology
             .outputs
@@ -158,11 +158,11 @@ impl<F: Float> Editor<F> {
     /// Refuses a source that is not in the spec now, uncommitted edits
     /// included: a typo'd key or a port past a node's width would otherwise
     /// record silence for good.
-    fn check_sources(&self, sources: &[Source]) -> Result<(), MissingSource> {
+    fn check_sources(&self, sources: &[PortSource]) -> Result<(), MissingSource> {
         let t = &self.spec.topology;
         for &source in sources {
             match source {
-                Source::Node(p) => {
+                PortSource::Node(p) => {
                     let node = t
                         .nodes
                         .get(&p.node)
@@ -175,13 +175,13 @@ impl<F: Float> Editor<F> {
                         });
                     }
                 }
-                Source::Global(channel) if channel >= t.inputs.count() => {
+                PortSource::Global(channel) if channel >= t.inputs.count() => {
                     return Err(MissingSource::Global {
                         channel,
                         width: t.inputs.count() as usize,
                     });
                 }
-                Source::Global(_) | Source::Zero => {}
+                PortSource::Global(_) | PortSource::Zero => {}
             }
         }
         Ok(())

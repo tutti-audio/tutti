@@ -49,7 +49,7 @@ use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
@@ -67,7 +67,7 @@ const SR: f64 = 48_000.0;
 fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey, out: u16) {
     ed.spec_mut().topology.edges.insert(
         InPort { node, port },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: from,
             port: out,
         }))],
@@ -105,7 +105,7 @@ fn chain_engine(outputs: usize) -> Engine {
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);
     ed.spec_mut().topology.set_outputs((0..outputs).map(|c| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: strip,
             port: (c % 2) as u16,
         })
@@ -330,7 +330,7 @@ impl tutti_graph::Node for Lowpass {
 /// otherwise the reference pair.
 fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     use tutti_graph::NodeKey;
-    use tutti_graph::{Edge, InPort, OutPort, Source};
+    use tutti_graph::{Edge, InPort, OutPort, PortSource};
     let (mut ed, exec) = tutti_graph::Editor::new(tutti_graph::Prepare::new(
         SampleRate::of(SR),
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
@@ -363,7 +363,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
         ed.insert(k, "lowpass", Unforkable(f));
         ed.spec_mut().topology.edges.insert(
             InPort { node: k, port: 0 },
-            vec![Edge::Direct(Source::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutPort {
                 node: last,
                 port: 0,
             }))],
@@ -372,7 +372,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: last,
             port: 0,
         })]);

@@ -52,7 +52,7 @@ use tutti_graph::{
     Io, Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamSegment, Prepare,
     Reference, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_units::{Hz, Latency, ParamKey, Q, Real, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -409,7 +409,7 @@ fn probe_graph(max: usize, cutoff: &Cell, q: &Cell) -> (Editor, Executor) {
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe::new(cutoff, q)));
     ed.spec_mut()
         .topology
-        .set_outputs((0..3).map(|c| Source::Node(port(PROBE, c))));
+        .set_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))));
     (ed, exec)
 }
 
@@ -605,7 +605,7 @@ fn a_node_without_a_base_is_never_modulated() {
     ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
     ed.spec_mut()
         .topology
-        .set_outputs((0..3).map(|c| Source::Node(port(PROBE, c))));
+        .set_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))));
     ed.insert(NodeKey(1), "one", Unforkable(Hold { value: 1.0 }));
     ed.spec_mut()
         .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
@@ -961,14 +961,14 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
                 node: NodeKey(3),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Node(port(4, 0)))],
+            vec![Edge::Direct(PortSource::Node(port(4, 0)))],
         );
         ed.spec_mut().topology.edges.insert(
             InPort {
                 node: NodeKey(PROBE),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Node(port(3, 0)))],
+            vec![Edge::Direct(PortSource::Node(port(3, 0)))],
         );
         ed.commit().expect("the sibling moves the arrival");
         let delay = ed
@@ -1109,7 +1109,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..3).map(|c| Source::Node(port(PROBE, c))));
+        .set_outputs((0..3).map(|c| PortSource::Node(port(PROBE, c))));
     ed.insert(
         NodeKey(2),
         "lane",
@@ -2387,7 +2387,7 @@ fn run_differential(g: &Gen) {
         ed.insert(k, "probe", Unforkable(probe(i, 0)));
         fresh.insert(k, Box::new(probe(i, 1)));
         for c in 0..4 {
-            outputs.push(Source::Node(OutPort { node: k, port: c }));
+            outputs.push(PortSource::Node(OutPort { node: k, port: c }));
         }
         // Every probe has a sibling (of latency 0 when it adds none), so a
         // later latency change has a node to re-insert.
@@ -2398,14 +2398,14 @@ fn run_differential(g: &Gen) {
             // Fed by the first signal, so the sibling carries something.
             ed.spec_mut().topology.edges.insert(
                 InPort { node: s, port: 0 },
-                vec![Edge::Direct(Source::Node(OutPort {
+                vec![Edge::Direct(PortSource::Node(OutPort {
                     node: NodeKey(100),
                     port: 0,
                 }))],
             );
             ed.spec_mut().topology.edges.insert(
                 InPort { node: k, port: 0 },
-                vec![Edge::Direct(Source::Node(OutPort { node: s, port: 0 }))],
+                vec![Edge::Direct(PortSource::Node(OutPort { node: s, port: 0 }))],
             );
         }
     }
@@ -2627,7 +2627,7 @@ fn corners_skip_a_resend_at_any_block_size() {
         ed.insert(NodeKey(1), "src", Unforkable(source()));
         ed.spec_mut()
             .topology
-            .set_outputs((0..4).map(|c| Source::Node(port(PROBE, c))));
+            .set_outputs((0..4).map(|c| PortSource::Node(port(PROBE, c))));
         ed.spec_mut()
             .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
         ed.commit().expect("commits");

@@ -20,7 +20,7 @@ use tutti_graph::{
     Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
     TransportChanges, TransportPosition, control_in,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_modulation::{
     Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SignalKind,
     SignalSource, SourceId,
@@ -277,8 +277,8 @@ impl Node for Probe {
 
 // ---------------------------------------------------------------- rigs ---
 
-fn out(node: u64, port: u16) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64, port: u16) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(node),
         port,
     })

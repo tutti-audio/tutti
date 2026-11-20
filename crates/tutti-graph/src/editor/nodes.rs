@@ -15,7 +15,7 @@ use crate::gain::{EdgeFade, EdgeGain};
 use crate::node::{IntoNode, Node, NodeParts, Shape};
 use crate::spec::EventEdge;
 use crate::wake::Wake;
-use crate::{Edge, EdgeId, FeedbackFrom, NodeSpec, Sink, Source};
+use crate::{Edge, EdgeId, FeedbackFrom, NodeSpec, PortSink, PortSource};
 use crate::{MAX_NODE_LATENCY, MAX_NODE_TAIL};
 use crate::{MeterSpec, NodeKey, TapSpec};
 
@@ -441,9 +441,9 @@ impl<F: Float> Editor<F> {
         let mut edges: BTreeSet<EdgeId> = BTreeSet::new();
         for (&at, list) in &t.edges {
             for &e in list {
-                if matches!(e, Edge::Direct(Source::Node(p)) if p.node == key) {
+                if matches!(e, Edge::Direct(PortSource::Node(p)) if p.node == key) {
                     let id = EdgeId {
-                        sink: Sink::Port(at),
+                        sink: PortSink::Port(at),
                         from: e,
                     };
                     if at.node != key && self.edge_is_live(id) {
@@ -454,9 +454,9 @@ impl<F: Float> Editor<F> {
         }
         for (c, list) in t.outputs.iter().enumerate() {
             for &s in list {
-                if matches!(s, Source::Node(p) if p.node == key) {
+                if matches!(s, PortSource::Node(p) if p.node == key) {
                     let id = EdgeId {
-                        sink: Sink::Output(c as u16),
+                        sink: PortSink::Output(c as u16),
                         from: Edge::Direct(s),
                     };
                     if self.edge_is_live(id) {
@@ -505,7 +505,7 @@ impl<F: Float> Editor<F> {
     /// Whether any audio edge, direct or bus, leaves `key`.
     pub(super) fn feeds_anything(&self, key: NodeKey) -> bool {
         let spec = &self.spec;
-        let from_key = |s: &Source| matches!(s, Source::Node(p) if p.node == key);
+        let from_key = |s: &PortSource| matches!(s, PortSource::Node(p) if p.node == key);
         spec.topology
             .edges
             .values()
@@ -561,13 +561,13 @@ impl<F: Float> Editor<F> {
             }
             edges.retain(|e| {
                 let from = match *e {
-                    Edge::Direct(Source::Node(p))
+                    Edge::Direct(PortSource::Node(p))
                     | Edge::Feedback(FeedbackFrom { from: p, .. }) => Some(p.node),
                     Edge::Direct(_) => None,
                 };
                 from != Some(key)
                     || kept_edges.contains(&EdgeId {
-                        sink: Sink::Port(*at),
+                        sink: PortSink::Port(*at),
                         from: *e,
                     })
             });
@@ -577,9 +577,9 @@ impl<F: Float> Editor<F> {
         for (c, sources) in t.outputs.iter_mut().enumerate() {
             // A channel that lost its only source is empty: silence.
             sources.retain(|s| {
-                !matches!(s, Source::Node(p) if p.node == key)
+                !matches!(s, PortSource::Node(p) if p.node == key)
                     || kept_edges.contains(&EdgeId {
-                        sink: Sink::Output(c as u16),
+                        sink: PortSink::Output(c as u16),
                         from: Edge::Direct(*s),
                     })
             });
@@ -592,12 +592,12 @@ impl<F: Float> Editor<F> {
                 if let TapSpec::Ports { sources, .. } = spec {
                     let mut rewrote = false;
                     for s in sources.iter_mut() {
-                        if matches!(s, Source::Node(p) if p.node == key) {
-                            *s = Source::Zero;
+                        if matches!(s, PortSource::Node(p) if p.node == key) {
+                            *s = PortSource::Zero;
                             rewrote = true;
                         }
                     }
-                    if rewrote && sources.iter().all(|s| matches!(s, Source::Zero)) {
+                    if rewrote && sources.iter().all(|s| matches!(s, PortSource::Zero)) {
                         over.push(id);
                     }
                 }
@@ -628,8 +628,8 @@ impl<F: Float> Editor<F> {
             for spec in t.meters.values_mut() {
                 if let MeterSpec::Ports { sources, .. } = spec {
                     for s in sources {
-                        if matches!(s, Source::Node(p) if p.node == key) {
-                            *s = Source::Zero;
+                        if matches!(s, PortSource::Node(p) if p.node == key) {
+                            *s = PortSource::Zero;
                         }
                     }
                 }

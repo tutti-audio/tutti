@@ -414,8 +414,8 @@ pub mod graph {
         ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
         HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
         ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
-        ParamSegment, Pass, PlayClock, RenderMode, Resolution, SilenceMask, Sink, SortedEvents,
-        Source, SubBlocks, TransportChange, TransportChangeRejected, TransportChanges,
+        ParamSegment, Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask,
+        SortedEvents, SubBlocks, TransportChange, TransportChangeRejected, TransportChanges,
         TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};

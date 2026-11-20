@@ -24,7 +24,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CompileError, CycleEdge, Edge, Editor, EventOut, ForkMode, ForkTarget, GraphInvalid, GraphSpec,
     InPort, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, ParamPorts, ParamPortsError, ParamRange,
-    Source, Topology, TransportPosition, ValidGraph, compile,
+    PortSource, Topology, TransportPosition, ValidGraph, compile,
 };
 use tutti_units::{Mix, Tail, UnitAddr, UnitParam};
 
@@ -44,8 +44,8 @@ fn at(node: u64) -> InPort {
     }
 }
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: key(node),
         port: 0,
     })
@@ -138,7 +138,7 @@ impl Rig {
                 t.nodes.insert(key(3), spec_of(&kinds[&key(3)]));
                 t.connect(at(2), Edge::Direct(out(3)));
             }
-            None => t.connect(at(2), Edge::Direct(Source::Global(0))),
+            None => t.connect(at(2), Edge::Direct(PortSource::Global(0))),
         }
         for (&k, kind) in &kinds {
             t.nodes.insert(k, spec_of(kind));
@@ -442,7 +442,7 @@ fn a_late_lane_delays_the_audio_to_the_node() {
             &plan,
             tutti_graph::DelayKey::Audio {
                 at: at(2),
-                from: Source::Global(0)
+                from: PortSource::Global(0)
             }
         ),
         Some(32)
@@ -637,7 +637,7 @@ fn solo() -> (Editor, tutti_graph::Executor) {
     ed.insert(key(1), "triple", tutti_graph::ForkByClone(Triple));
     ed.spec_mut()
         .topology
-        .connect(at(1), Edge::Direct(Source::Global(0)));
+        .connect(at(1), Edge::Direct(PortSource::Global(0)));
     ed.spec_mut().topology.set_outputs(vec![out(1)]);
     ed.set_mix(key(1), Mix::new(0.25)).expect("a node");
     ed.commit().expect("commits");

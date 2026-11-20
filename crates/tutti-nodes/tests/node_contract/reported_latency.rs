@@ -287,7 +287,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
 #[test]
 fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     use tutti_buffers::ChannelLayout;
-    use tutti_graph::Source;
+    use tutti_graph::PortSource;
     use tutti_graph::{GraphBuilder, Prepare};
     use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
     use tutti_units::Latency;
@@ -303,7 +303,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     ));
     g.connect_input(0, lim, 0);
     g.connect_output(lim, 0, 0);
-    g.add_output(0, Source::Global(0));
+    g.add_output(0, PortSource::Global(0));
     let mut r = g
         .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("builds");

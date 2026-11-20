@@ -1653,7 +1653,7 @@ fn open_stem_taps<F: Float>(
                 .ports
                 .iter()
                 .map(|&port| {
-                    tutti_graph::Source::Node(OutPort {
+                    tutti_graph::PortSource::Node(OutPort {
                         node: stem.node,
                         port,
                     })

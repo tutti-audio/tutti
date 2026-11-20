@@ -19,7 +19,7 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Prepare, TransportPosition, Unforkable};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_plugin_host::load_client;
 use tutti_units::{SampleRate, Samples};
 
@@ -71,7 +71,7 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
     editor
         .spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| Source::Node(OutPort { node: key, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: key, port })));
     editor.commit().expect("commits");
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];
@@ -88,7 +88,7 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
     editor
         .spec_mut()
         .topology
-        .set_outputs(vec![Source::Zero, Source::Zero]);
+        .set_outputs(vec![PortSource::Zero, PortSource::Zero]);
     editor.commit().expect("the removal commits");
     // The executor applies the removal: the unit moves into the commit box (a drop here would
     // panic in a debug build, inside the audio scope). Applying may allocate, so it is outside
