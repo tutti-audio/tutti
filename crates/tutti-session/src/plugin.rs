@@ -243,11 +243,7 @@ impl PluginLoad {
     /// The session's executor while it lives: a load that runs once the
     /// session is dropping is refused.
     fn executor(&self) -> Result<tutti_platform::Executor, IpcError> {
-        self.executor.upgrade().ok_or_else(|| IpcError::LoadFailed {
-            path: Some(self.loadable.plugin().path().to_path_buf()),
-            stage: tutti_plugin_types::LoadStage::Opening,
-            reason: "the session is shutting down".into(),
-        })
+        self.executor.upgrade().ok_or(IpcError::ShutDown)
     }
 
     /// [`run`](Self::run)'s open, on this thread.

@@ -764,7 +764,7 @@ mod tests {
             Path::new("/nonexistent.vst3"),
             PluginFormat::Vst3,
             SampleRate::SR_48K,
-            &Executor::new(),
+            tutti_fixtures::executor(),
         ) {
             Err(e) => e,
             // Cannot happen (`sleep` never sends `Ready`), but reap rather than
@@ -838,7 +838,7 @@ mod tests {
                     state_use: StateUse::Project,
                 }),
             },
-            &Executor::new(),
+            tutti_fixtures::executor(),
         )
     }
 
@@ -1172,7 +1172,7 @@ mod tests {
             &not_a_plugin,
             PluginFormat::Vst3,
             SampleRate::SR_48K,
-            &Executor::new(),
+            tutti_fixtures::executor(),
         ) {
             Err(e) => e,
             Ok(server) => {
@@ -1392,7 +1392,7 @@ mod tests {
         let stand_in = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Lingers)),
             &config,
-            &Executor::new(),
+            tutti_fixtures::executor(),
         )
         .expect("the exit thread starts");
         let err = handshake(&config, &stand_in)
@@ -1515,7 +1515,7 @@ mod tests {
         let stand_in = ProcessGuard::launched(
             Reaped::new(child),
             &IpcConfig::at(path.clone()),
-            &Executor::new(),
+            tutti_fixtures::executor(),
         )
         .expect("the exit thread starts");
 
@@ -1558,7 +1558,7 @@ mod tests {
         let dead = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Exits)),
             &IpcConfig::at(path.clone()),
-            &Executor::new(),
+            tutti_fixtures::executor(),
         )
         .expect("the exit thread starts");
 
@@ -1694,7 +1694,7 @@ mod tests {
                 rate: SampleRate::SR_48K,
                 restore: None,
             },
-            &Executor::new(),
+            tutti_fixtures::executor(),
         )
         .expect("the reference plugin launches");
         let guard = &launched.server;

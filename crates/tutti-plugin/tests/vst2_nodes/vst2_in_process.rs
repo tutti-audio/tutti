@@ -236,7 +236,7 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     unsafe { std::env::set_var("TUTTI_VST2_PROBE_EDITOR", "1") };
     let plugin = tutti_plugin::catalog::Plugin::open(
         main_thread(),
-        &tutti_platform::Executor::new(),
+        tutti_fixtures::executor(),
         &tutti_fixtures::pumped_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             staged.clone(),
@@ -335,7 +335,7 @@ fn the_node_carries_midi_on_its_event_ports() {
         }
         let plugin = tutti_plugin::catalog::Plugin::open(
             main_thread(),
-            &tutti_platform::Executor::new(),
+            tutti_fixtures::executor(),
             &tutti_fixtures::pumped_work(),
             &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
                 staged.clone(),

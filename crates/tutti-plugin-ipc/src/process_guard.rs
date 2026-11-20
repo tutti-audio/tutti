@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tutti_platform::{Executor, Task, monotonic_ns, sleep_until_ns};
+use tutti_platform::{Executor, Task, WeakExecutor, monotonic_ns, sleep_until_ns};
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::PluginFailure;
 use tutti_rt::LockExt;
@@ -77,9 +77,9 @@ struct Launched {
     flow: Arc<ExitFlow>,
     /// The exit task. Dropped last: it has ended by then.
     exit: Task<()>,
-    /// Where a server that outlasts its kill is reaped. The task never holds a
-    /// clone: it would keep the executor alive for good.
-    executor: Executor,
+    /// Where a server that outlasts its kill is reaped, reached while the
+    /// executor lives. No task holds even this: it is upgraded for one call.
+    executor: WeakExecutor,
 }
 
 /// The `plugin-server` child process and its bridge thread, owned as one.
@@ -105,7 +105,7 @@ impl ProcessGuard {
     /// Own the launched `process`; it is killed and reaped when the guard
     /// drops ([`Reaped`]). Its end, however it comes, is declared to
     /// [`watch`](Self::watch) by a task the OS wakes, on a thread of the
-    /// `executor`'s of its own. The guard keeps a clone of `executor` to hand
+    /// `executor`'s of its own. The guard keeps a weak handle to `executor` to hand
     /// a server that outlasts its kill to its blocking pool.
     ///
     /// # Errors
@@ -136,7 +136,7 @@ impl ProcessGuard {
                 process,
                 flow,
                 exit,
-                executor: executor.clone(),
+                executor: executor.downgrade(),
             }),
             watch,
             _bridge_thread: None,
@@ -277,8 +277,12 @@ fn reaped_by(flow: &ExitFlow, process: &Mutex<Option<Reaped>>, timeout: Duration
 /// Reaps a killed `process` on the `executor`'s blocking pool, which ends with
 /// it: the reap is a `wait`, which a process in uninterruptible sleep never
 /// returns from.
-fn reap_elsewhere(process: Reaped, executor: &Executor) {
-    reap_started_by(process, |reap| executor.unblock(reap));
+fn reap_elsewhere(process: Reaped, executor: &WeakExecutor) {
+    reap_started_by(process, |reap| match executor.upgrade() {
+        Some(executor) => executor.unblock(reap),
+        // An executor that has shut down starts nothing, as one that refuses.
+        None => Err(std::io::Error::other("the executor has shut down")),
+    });
 }
 
 /// [`reap_elsewhere`] over how the reap is started. Work that is refused
@@ -311,53 +315,63 @@ fn pause(slice: Duration) {
     sleep_until_ns(monotonic_ns().saturating_add(nanos));
 }
 
-/// The exit task's future. `finish` is held by the future from its creation,
-/// so a future dropped before its first poll raises the latch as well.
+/// The exit task: declares the process's end to `watch`. It waits on the OS in
+/// slices until the process has ended (and then reads its status), or `finish`'s
+/// flow says stop, and sets the flow's `done` as it ends.
+///
+/// `finish` is held by the future from its creation, so a future dropped before
+/// its first poll raises the latch as well. The task returns to the executor
+/// between slices, so an executor that shuts down drops it within one slice
+/// (`EXIT_SLICE`) rather than waiting for the process to end.
 async fn exit_task(
     process: Arc<Mutex<Option<Reaped>>>,
     wait: ExitWait,
     watch: Arc<ServerWatch>,
     finish: Finish,
 ) {
-    declare_exit(&process, &wait, &watch, finish);
-}
-
-/// The exit task: declares the process's end to `watch`. It waits on the OS in
-/// slices until the process has ended (and then reads its status), or `flow`
-/// says stop, and sets `flow`'s `done` as it ends.
-fn declare_exit(
-    process: &Mutex<Option<Reaped>>,
-    wait: &ExitWait,
-    watch: &ServerWatch,
-    finish: Finish,
-) {
     let flow = Arc::clone(&finish.0);
     while !flow.stop.load(Ordering::Acquire) {
-        if !wait.wait(EXIT_SLICE, pause) {
-            continue;
-        }
-        let status = match process.lock_recover().as_mut() {
-            Some(process) => process.try_reap(),
-            None => return,
-        };
-        match status {
-            Ok(Some(status)) => {
-                // Not a death the guard caused: its drop sets `ending` first.
-                fence(Ordering::SeqCst);
-                if !flow.ending.load(Ordering::Acquire) {
-                    watch.declare(PluginFailure::ServerExited { status });
+        if wait.wait(EXIT_SLICE, pause) {
+            let status = match process.lock_recover().as_mut() {
+                Some(process) => process.try_reap(),
+                None => return,
+            };
+            match status {
+                Ok(Some(status)) => {
+                    // Not a death the guard caused: its drop sets `ending` first.
+                    fence(Ordering::SeqCst);
+                    if !flow.ending.load(Ordering::Acquire) {
+                        watch.declare(PluginFailure::ServerExited { status });
+                    }
+                    return;
                 }
-                return;
-            }
-            // Woken and not ended: a platform that wakes by sleeping, or a
-            // wake that raced the status. Ask again.
-            Ok(None) => pause(Duration::from_millis(2)),
-            Err(e) => {
-                tracing::warn!("the server's exit status cannot be read: {e}");
-                return;
+                // Woken and not ended: a platform that wakes by sleeping, or a
+                // wake that raced the status. Ask again.
+                Ok(None) => pause(Duration::from_millis(2)),
+                Err(e) => {
+                    tracing::warn!("the server's exit status cannot be read: {e}");
+                    return;
+                }
             }
         }
+        yield_now().await;
     }
+}
+
+/// Returns to the executor once, which sees a dropped task or a shut-down
+/// executor between two slices.
+async fn yield_now() {
+    let mut yielded = false;
+    std::future::poll_fn(|cx| {
+        if yielded {
+            std::task::Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            std::task::Poll::Pending
+        }
+    })
+    .await;
 }
 
 #[cfg(all(test, unix))]
@@ -374,7 +388,7 @@ mod tests {
         ProcessGuard::launched(
             Reaped::new(child),
             &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
-            &Executor::new(),
+            tutti_fixtures::executor(),
         )
         .expect("the exit task starts")
     }
@@ -519,6 +533,62 @@ mod tests {
         assert!(flow.wait_done(HANG_GUARD), "the latch was never raised");
         child.kill().expect("the sleeper is killed");
         child.wait().expect("reaped");
+    }
+
+    /// **A guard keeps no executor alive**: with every strong handle dropped
+    /// while a guard is alive, the executor has shut down (its exit task ends
+    /// with it, not with the process), and the guard's drop still kills its
+    /// server.
+    #[test]
+    fn a_live_guard_does_not_keep_the_executor_alive() {
+        let executor = Executor::new();
+        let weak = executor.downgrade();
+        let child = sleeper().spawn().expect("sleep spawns");
+        let pid = child.id();
+        let guard = ProcessGuard::launched(
+            Reaped::new(child),
+            &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
+            &executor,
+        )
+        .expect("the exit task starts");
+
+        drop(executor);
+
+        assert!(
+            weak.upgrade().is_none(),
+            "the guard kept the executor alive"
+        );
+        drop(guard);
+        // Killed: gone, or an unreaped zombie when nothing could reap it.
+        let stat = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .expect("ps runs");
+        let stat = String::from_utf8_lossy(&stat.stdout);
+        assert!(
+            stat.trim().is_empty() || stat.trim_start().starts_with('Z'),
+            "the child {pid} outlived its guard: {stat}"
+        );
+    }
+
+    /// **A reap after the executor has shut down abandons the child**, as a
+    /// reap the executor refuses does: killed, unreaped, nothing waited for.
+    #[test]
+    fn a_reap_on_a_dead_executor_abandons_the_child() {
+        let child = sleeper().spawn().expect("sleep spawns");
+        let pid = child.id();
+        let process = Reaped::new(child);
+        let wait = process.exit_wait();
+        let executor = Executor::new();
+        let weak = executor.downgrade();
+        drop(executor);
+
+        reap_elsewhere(process, &weak);
+
+        for _ in 0..2 {
+            assert!(wait.wait(HANG_GUARD, |_| ()));
+        }
+        assert!(exists(pid), "the abandoned child was reaped");
     }
 
     /// **A reap that cannot be started leaves the child**: the child is killed
