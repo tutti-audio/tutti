@@ -330,13 +330,28 @@ fn offered_bits(offered: &EndpointInfoNotification) -> u32 {
     .fold(0, |bits, (_, bit)| bits | bit)
 }
 
-/// A C string alsa-lib owns, copied; `None` for NULL or an empty name.
+/// The size of a record's `product_id` field (`unsigned char product_id[128]`
+/// in `struct snd_ump_endpoint_info`, `sound/asound.h`).
+const PRODUCT_ID_BYTES: usize = 128;
+
+/// The text of a `product_id` field: up to its first NUL, `None` when empty,
+/// when there is no NUL within the field, or when it is not UTF-8. Another
+/// process sets the field through the raw ioctl and the kernel NUL-terminates
+/// only the endpoint and block names, so the read never goes past the array.
+fn product_id_text(field: &[u8; PRODUCT_ID_BYTES]) -> Option<String> {
+    let text = CStr::from_bytes_until_nul(field).ok()?.to_str().ok()?;
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// A name alsa-lib owns, copied; `None` for NULL or an empty name. Only for the
+/// endpoint and block names, which the kernel NUL-terminates when a client sets
+/// them (`terminate_ump_info_strings`).
 fn name(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
-    // SAFETY: non-NULL, and alsa-lib's info getters return NUL-terminated
-    // strings valid until the owning record is freed or changed; copied at once.
+    // SAFETY: non-NULL, and the kernel NUL-terminates the name getters' strings
+    // (valid until the owning record is freed or changed); copied at once.
     let text = unsafe { CStr::from_ptr(ptr) }
         .to_string_lossy()
         .into_owned();
@@ -380,24 +395,26 @@ impl Client {
                 name(sys::snd_ump_endpoint_info_get_name(ptr)),
             )
         };
-        // SAFETY: as above; `sw_revision` points at the record's four bytes and
-        // is copied at once, the product id is copied before the record is used again.
+        // SAFETY: as above; alsa-lib returns the record's own `sw_revision` array
+        // (four bytes, never NULL) and `product_id` array (128 bytes, not
+        // necessarily NUL-terminated), each valid while `info` lives and copied at
+        // once.
         let (words, instance) = unsafe {
             let revision = sys::snd_ump_endpoint_info_get_sw_revision(ptr);
+            let product_id = sys::snd_ump_endpoint_info_get_product_id(ptr);
             (
                 IdentityWords {
                     manufacturer: sys::snd_ump_endpoint_info_get_manufacturer_id(ptr),
+                    // The kernel's family and model are 16-bit (`unsigned short`
+                    // in asound.h), so the conversion always holds; `device()`
+                    // refuses 0xFFFF, a byte past 7 bits, should it not.
                     family: u16::try_from(sys::snd_ump_endpoint_info_get_family_id(ptr))
                         .unwrap_or(u16::MAX),
                     model: u16::try_from(sys::snd_ump_endpoint_info_get_model_id(ptr))
                         .unwrap_or(u16::MAX),
-                    revision: if revision.is_null() {
-                        [u8::MAX; 4]
-                    } else {
-                        revision.cast::<[u8; 4]>().read()
-                    },
+                    revision: revision.cast::<[u8; 4]>().read(),
                 },
-                name(sys::snd_ump_endpoint_info_get_product_id(ptr)),
+                product_id_text(&*product_id.cast::<[u8; PRODUCT_ID_BYTES]>()),
             )
         };
         // The UMP limit: blocks are numbered 0 to 31.
@@ -613,7 +630,7 @@ mod tests {
     }
 
     /// The record's numbers are the Device Identity Notification's bytes (M2-104
-    /// §7.1.3, Table "Device Identity Notification"): word 1 holds the three
+    /// §7.1.3): word 1 holds the three
     /// manufacturer id bytes (`00 21 09` for a 21-bit id), word 2 the family
     /// then model, each least significant byte first, and word 3 the revision in
     /// order. Family and model are 16-bit numbers with the second byte high.
@@ -661,6 +678,28 @@ mod tests {
         assert_eq!(wide(|w| w.model = 0x8033), None);
         assert_eq!(wide(|w| w.revision[2] = 0x80), None);
         assert_eq!(wide(|w| w.manufacturer = 0x01_00_21_09), None);
+        // A byte past 7 bits in the manufacturer word.
+        assert_eq!(wide(|w| w.manufacturer = 0x00_80_00_00), None);
+        // A one-byte id followed by a non-zero byte is no id.
+        assert_eq!(wide(|w| w.manufacturer = 0x7D_00_21), None);
+    }
+
+    /// The product id is read from the 128-byte field and never past it: a field
+    /// with no NUL is no id, and one with a NUL is the text before it.
+    #[test]
+    fn a_product_id_field_without_a_nul_is_none_and_with_one_is_its_text() {
+        assert_eq!(product_id_text(&[b'a'; PRODUCT_ID_BYTES]), None);
+        let mut field = [0; PRODUCT_ID_BYTES];
+        assert_eq!(product_id_text(&field), None);
+        field[..3].copy_from_slice(b"abc");
+        field[3 + 1..3 + 4].copy_from_slice(b"zzz");
+        assert_eq!(product_id_text(&field).as_deref(), Some("abc"));
+        let mut full = [b'x'; PRODUCT_ID_BYTES];
+        full[PRODUCT_ID_BYTES - 1] = 0;
+        assert_eq!(
+            product_id_text(&full).map(|t| t.len()),
+            Some(PRODUCT_ID_BYTES - 1)
+        );
     }
 
     /// A record the spec can hold reads as the Function Block Info it says, and
