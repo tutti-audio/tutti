@@ -97,8 +97,8 @@ impl core::fmt::Debug for UmpEndpoint {
 /// `u32` handle into CoreMIDI, whose objects are internally synchronised, and the
 /// rest is atomics. A send after the endpoint is dropped is
 /// [`Error::EndpointGone`]; one that races the drop reaches CoreMIDI with the
-/// reference of a disposed endpoint, which returns an error status and touches
-/// nothing.
+/// reference of a disposed endpoint, which looks it up, finds nothing and returns
+/// status 0, so such a send is accepted and delivered nowhere (never undefined).
 #[derive(Clone, Debug)]
 pub struct UmpSender {
     source: MIDIEndpointRef,

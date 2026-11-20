@@ -153,23 +153,20 @@ mod tests {
         ));
     }
 
-    /// A send on the reference of a disposed endpoint is an error status, never a
-    /// delivery: CoreMIDI looks the reference up and finds nothing.
+    /// A send on the reference of a disposed endpoint is accepted: CoreMIDI looks
+    /// the reference up, finds no endpoint and returns status 0, so a racing send
+    /// is harmless but silent. This is what `UmpSender` guards against with its own
+    /// flag; it is observed behaviour of macOS, which this test notices changing.
     #[test]
-    fn a_send_on_a_disposed_endpoint_is_an_error_status() {
+    fn a_send_on_a_disposed_endpoints_reference_is_accepted_without_error() {
         let source =
             UmpSource::new(test_client(), "tutti-ffi-test", Protocol::Midi2).expect("CoreMIDI");
         let (reference, protocol) = (source.source, source.protocol);
         drop(source);
-        let sent = publish(reference, protocol, &Ump([0x0020_1234, 0, 0, 0]));
-        eprintln!("DIAG stale {sent:?}");
-        assert!(matches!(
-            sent,
-            Err(Error::Call {
-                operation: Operation::ReceivedEventList,
-                ..
-            })
-        ));
+        assert_eq!(
+            publish(reference, protocol, &Ump([0x0020_1234, 0, 0, 0])),
+            Ok(())
+        );
     }
 
     /// A message of every length reaches the endpoint: a 1-word JR Timestamp, a
