@@ -9,9 +9,7 @@
 use thiserror::Error;
 use tutti_buffers::{ChannelTopology, Speaker, Speakers};
 use tutti_plugin_types::MainThreadMarker;
-use tutti_vst2_ffi::speaker::{
-    MAX_ARRANGEMENT_CHANNELS, Speaker as Vst2Speaker, SpeakerArrangement,
-};
+use tutti_vst2_ffi::{MAX_ARRANGEMENT_CHANNELS, Speaker as Vst2Speaker, SpeakerArrangement};
 
 use crate::loaded::Vst2Loaded;
 
@@ -222,7 +220,7 @@ pub(crate) fn topology_of(arrangement: &SpeakerArrangement) -> Option<ChannelTop
 mod tests {
     use super::*;
     use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout};
-    use tutti_vst2_ffi::api::SpeakerArrangementType as Kind;
+    use tutti_vst2_ffi::SpeakerArrangementType as Kind;
 
     /// The engine's own beds map to the SDK's named arrangements: `kSpeakerArrMono`,
     /// `Stereo`, `51`, `Music71`, and a user-defined one for 7.1.4, which no `kSpeakerArr*`

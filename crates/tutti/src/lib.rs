@@ -181,7 +181,7 @@ pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, St
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::Params as PluginParams;
+pub use tutti_session::PluginParams;
 #[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -293,27 +293,29 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
-        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
-        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings, ClickState,
-        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
-        CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayConfig,
-        DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayNode,
-        DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode, DynamicMode,
-        EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode,
-        EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode, FeedbackRouting,
-        FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FreeverbConfig,
-        FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode,
-        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
-        LadderType, LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode,
+        BitCrusherControls, BitCrusherNode, BrickwallLimiterConfig, BrickwallLimiterNode,
+        BusStripNode, ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError,
+        ClickSettings, ClickState, CompressorConfig, CompressorControls, CompressorNode,
+        ConvolverError, ConvolverNode, CrossoverControls, CrossoverError, CrossoverNode,
+        CutAlignment, CutFilterConfig, CutFilterControls, CutFilterNode, DcBlockerConfig,
+        DcBlockerControls, DcBlockerNode, DelayConfig, DelayControls, DelayLayout,
+        DelayLayoutBuilder, DelayLayoutError, DelayNode, DistortionNode, DynamicEqConfig,
+        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
+        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnConfig,
+        FdnControls, FdnLayout, FdnNode, FeedbackRouting, FeedbackRoutingBuilder,
+        FeedbackRoutingError, FirConvolverConfig, FreeverbConfig, FreeverbControls, FreeverbNode,
+        FreezeMode, GateConfig, GateControls, GateNode, HrtfBinauralNode, InterpolationMode,
+        IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType,
+        LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode, LimiterConfig,
         LimiterControls, LimiterNode, MetronomeMode, ModDelayConfig, ModDelayControls,
-        ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandCompressorNode,
-        MultibandControls, NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserConfig,
-        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode, PortSide,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError,
-        SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode,
-        TransientControls, TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerNode,
+        ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandBands,
+        MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoteEnvelopeNode,
+        OscillatorNode, OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, SOURCE_EVENT_CAPACITY,
+        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
+        SvfControls, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
+        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
+        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -720,10 +722,10 @@ pub mod plugin {
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
-/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `midi::Error`), its
+/// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
 /// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`midi_sink`, `MidiSink`,
-/// `SinkLoaded`), and under `midi-hardware` a device (`MidiDeviceId`,
+/// `SinkLoaded`), and under `midi-hardware` a device (`DeviceId`,
 /// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
 /// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
@@ -758,9 +760,9 @@ pub mod midi {
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, Normalized, OtherMetaKind,
         OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
         Pattern, Placement, RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame,
-        SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange,
+        SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmfTimeline,
         SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
-        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, Timeline, TimelineDrop,
+        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, TimelineDrop,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
@@ -821,10 +823,10 @@ pub mod midi {
         LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
     };
 
-    /// The session's one MIDI error (`tutti_session::MidiError`): each cause
-    /// (hardware, send, route) is its source.
+    /// The session's one MIDI error: each cause (hardware, send, route) is its
+    /// source.
     #[cfg(feature = "session")]
-    pub use tutti_session::MidiError as Error;
+    pub use tutti_session::MidiError;
     #[cfg(feature = "session")]
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
@@ -843,13 +845,11 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{
-        DeviceId as MidiDeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice,
-    };
+    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
-        InputFault, MidiHardwareOptions, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError,
+        InputFault, MidiHardwareConfig, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError,
         ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]

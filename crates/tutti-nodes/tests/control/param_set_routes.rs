@@ -29,9 +29,9 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{
-    CompressorControls, CompressorNode, KeySource, LadderFilterNode, LadderType, LfoNode,
-    LimiterControls, LimiterNode, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages,
-    SvfFilterNode, SvfType,
+    CompressorConfig, CompressorControls, CompressorNode, KeySource, LadderFilterNode, LadderType,
+    LfoNode, LimiterConfig, LimiterControls, LimiterNode, ModDelayConfig, ModDelayNode,
+    PhaserConfig, PhaserNode, Stages, SvfFilterNode, SvfType,
 };
 use tutti_units::UnitParam;
 use tutti_units::{
@@ -340,16 +340,16 @@ fn chorus_rate_write_moves_the_nodes_own_cell() {
 /// its set.
 #[test]
 fn compressor_makeup_is_addressed_as_gain_db() {
-    let node = CompressorNode::<f32>::new(
-        BusTopology::STEREO,
-        KeySource::Sidechain,
-        CompressorControls {
-            threshold: tutti_units::Db::new(-12.0),
-            ratio: tutti_units::CompressionRatio::new(4.0),
-            attack: tutti_units::Seconds::new(0.01),
-            release: tutti_units::Seconds::new(0.1),
-            ..CompressorControls::DEFAULT
-        },
+    let node = CompressorNode::<f32>::from(
+        CompressorConfig::new(BusTopology::STEREO)
+            .key(KeySource::Sidechain)
+            .controls(CompressorControls {
+                threshold: tutti_units::Db::new(-12.0),
+                ratio: tutti_units::CompressionRatio::new(4.0),
+                attack: tutti_units::Seconds::new(0.01),
+                release: tutti_units::Seconds::new(0.1),
+                ..CompressorControls::DEFAULT
+            }),
     );
     let makeup = node
         .param_set()
@@ -557,11 +557,13 @@ fn a_limiter_driven_below_its_release_floor_still_releases() {
     let mut input = tone(1.0, BURST);
     input.extend(tone(0.05, 36_000));
     let out = render_driven(
-        LimiterNode::<f32>::mono(LimiterControls {
-            threshold: Db::new(-12.0),
-            ceiling: Db::new(-12.0),
-            ..LimiterControls::DEFAULT
-        }),
+        LimiterNode::<f32>::from(
+            LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+                threshold: Db::new(-12.0),
+                ceiling: Db::new(-12.0),
+                ..LimiterControls::DEFAULT
+            }),
+        ),
         UnitParam::Release,
         ParamRange::new(-1.0, 1.0),
         -0.25,

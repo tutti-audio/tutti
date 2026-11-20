@@ -123,7 +123,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! A clip plays a file's messages as they are: [`MetricalView::timeline`] is a [`Timeline`]
+//! A clip plays a file's messages as they are: [`MetricalView::timeline`] is a [`SmfTimeline`]
 //! whose `packets` are `(Beat, Ump)` pairs (channel messages as their packets, SysEx
 //! as SysEx7 packets, a divided SysEx as a Start, Continues and an End each at its
 //! own event's beat, meta events left out: the tempo is [`MetricalView::tempo_map`]) and
@@ -170,9 +170,9 @@ pub use file::{
     MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
     MicrosPerQuarterOutOfRange, MidiFile, Moved, Normalized, OtherMetaKind,
     OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Pattern,
-    Placement, RefusedTimeSignature, SmfFormat, SmfPart, SmpteFractionalFrames,
+    Placement, RefusedTimeSignature, SmfFormat, SmfPart, SmfTimeline, SmpteFractionalFrames,
     SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView, SysEx,
-    TextKind, Tick, Timebase, Timeline, TimelineDrop, ToClipError, Track,
+    TextKind, Tick, Timebase, TimelineDrop, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{

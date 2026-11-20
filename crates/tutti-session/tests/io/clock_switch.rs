@@ -765,7 +765,7 @@ mod midi_ports {
         let (backend, fake) =
             FakeBackend::build_with(vec![endpoint(1, "Keys")], vec![], usize::MAX);
         let mut s = system_builder()
-            .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+            .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
             .build()
             .expect("builds");
         let _ = s.update();

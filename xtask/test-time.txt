@@ -51,7 +51,7 @@
 0 2 crates/tutti-session/tests/plugin/plugin_presets.rs
 0 2 crates/tutti-session/tests/support/pooled.rs
 0 4 crates/tutti-session/tests/wiring/system_clock.rs
-0 1 crates/tutti-vst2-ffi/src/host.rs
+0 1 crates/tutti-vst2-ffi/src/host/tests.rs
 0 3 crates/tutti-vst3-ffi/src/com/run_loop.rs
 1 1 testing/tutti-fixtures/src/wait.rs
 0 1 testing/tutti-plugin-contract/tests/probe.rs

@@ -74,7 +74,6 @@ tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with
 tutti-dsp  with-prefix  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::with_window_fn
 tutti-dsp  setter  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::set_sample_rate
 tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolver::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::ordered
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::designed
@@ -184,18 +183,6 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNod
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir
 tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::with_bus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/eq_band.rs::EqBandNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::new
@@ -228,7 +215,6 @@ tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverN
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  ctor-result  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new

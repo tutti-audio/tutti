@@ -101,7 +101,7 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use tutti_midi_runtime::InputInlets;
-//! use tutti_midi_hardware::{MidiHardwareOptions, MidiSession};
+//! use tutti_midi_hardware::{MidiHardwareConfig, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -109,7 +109,7 @@
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
-//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareOptions::new())?;
+//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareConfig::new())?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -184,7 +184,7 @@
 //!
 //! ## Features
 //!
-//! - `serde`: `Serialize` and `Deserialize` for [`MidiHardwareOptions`] and
+//! - `serde`: `Serialize` and `Deserialize` for [`MidiHardwareConfig`] and
 //!   [`InputTiming`], so an app stores the options it opens with. Off by default.
 //! - `testing`: exports `test_support::FakeBackend`, a device list with no OS
 //!   behind it, for [`MidiSession::open_over`] in headless tests; its `plug` and
@@ -289,7 +289,7 @@ pub use profiles::{
     ProfilesChange, Switcher, WholeSwitcher,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
-pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};
+pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
 
