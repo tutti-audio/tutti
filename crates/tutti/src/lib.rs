@@ -728,7 +728,7 @@ pub mod midi {
         Pattern, Placement, RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame,
         SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange,
         SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
-        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,
+        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, Timeline, TimelineDrop,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,

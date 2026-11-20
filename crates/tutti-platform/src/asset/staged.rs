@@ -193,6 +193,12 @@ impl StagedCommitError {
         &self.kept
     }
 
+    /// The kind of the file system's error: [`io::ErrorKind::AlreadyExists`]
+    /// when [`create_new`](Staged::create_new) refused an existing target.
+    pub fn kind(&self) -> io::ErrorKind {
+        self.source.kind()
+    }
+
     /// The file system's error.
     pub fn into_source(self) -> io::Error {
         self.source
