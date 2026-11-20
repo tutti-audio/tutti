@@ -1,6 +1,7 @@
 //! An SMF's division word and format word (SMF 1.0 section 2.1): SMPTE time,
 //! a metrical division, and a format the specification leaves undefined.
 
+use crate::common::{encoded, read_bytes};
 use crate::common::{metrical, sequences};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
@@ -12,7 +13,7 @@ use tutti_midi_protocol::MtcRate;
 use tutti_units::Seconds;
 
 fn read(bytes: &[u8]) -> MidiFile {
-    MidiFile::from_bytes(bytes).expect("reads")
+    read_bytes(bytes).expect("reads")
 }
 
 /// The SMPTE view of one timeline of `file`.
@@ -60,8 +61,8 @@ fn a_division_word_with_its_top_bit_set_is_a_frame_rate_and_ticks_per_frame() {
         assert_eq!(file.division(), Some(division), "{word:02X?}");
         assert_eq!(division.word(), u16::from_be_bytes(word));
         // A write gives the division word back.
-        assert_eq!(division_bytes(&file.to_bytes()), word);
-        assert_eq!(read(&file.to_bytes()), file);
+        assert_eq!(division_bytes(&encoded(&file)), word);
+        assert_eq!(read(&encoded(&file)), file);
     }
 }
 
@@ -72,7 +73,7 @@ fn a_division_word_with_its_top_bit_clear_is_ticks_per_quarter() {
     for tpq in [1u16, 96, 480, 0x7FFF] {
         let file = read(&one_note(Division::Metrical(tpq)));
         assert_eq!(file.division(), Some(SmfDivision::per_quarter(tpq)));
-        assert_eq!(division_bytes(&file.to_bytes()), tpq.to_be_bytes());
+        assert_eq!(division_bytes(&encoded(&file)), tpq.to_be_bytes());
     }
 }
 
@@ -95,7 +96,7 @@ fn a_division_with_a_foreign_frame_rate_or_no_resolution_is_refused() {
         });
         assert!(
             matches!(
-                MidiFile::from_bytes(&bytes),
+                read_bytes(&bytes),
                 Err(ReadError::Smf { track: None, offset: 0, cause: c }) if c == cause
             ),
             "{fps} x {ticks_per_frame}"
@@ -204,7 +205,7 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
             ..
         }) if micros_per_quarter == MicrosPerQuarter::of(1_000_000)
     ));
-    assert_eq!(file.to_bytes(), bytes);
+    assert_eq!(encoded(&file), bytes);
 }
 
 /// A format 2 file in SMPTE time keeps its sequences apart as a metrical one's
@@ -271,7 +272,7 @@ fn a_format_3_file_reads_as_its_tracks_and_writes_back_exactly() {
     assert_eq!(file.format(), Some(SmfFormat::Other(OtherSmfFormat::of(3))));
     assert_eq!(file.tracks().len(), 2);
     assert_eq!(file.tracks()[1].events()[2].0, Tick(48));
-    assert_eq!(file.to_bytes(), bytes);
+    assert_eq!(encoded(&file), bytes);
     // Nothing says the tracks share a timeline, so they are kept apart as a
     // format 2 file's are: one sequence a track, no one-timeline view.
     assert!(file.timebase().metrical().is_none());
@@ -284,7 +285,7 @@ fn a_format_word_is_kept_whatever_it_is() {
     for word in [0u16, 1, 2, 3, 4, 0x0100, u16::MAX] {
         let bytes = build_smf(word, Division::Metrical(96), &[vec![]]);
         let file = read(&bytes);
-        assert_eq!(file.to_bytes()[8..10], word.to_be_bytes());
+        assert_eq!(encoded(&file)[8..10], word.to_be_bytes());
         assert_eq!(
             matches!(file.format(), Some(SmfFormat::Other(_))),
             word > 2,

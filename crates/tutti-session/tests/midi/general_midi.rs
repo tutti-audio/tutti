@@ -24,8 +24,7 @@ fn offline_session() -> Session {
 
 fn unit() -> SoundFontUnit<f32> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
-    let mut file = std::fs::File::open(&path).expect("the test font is in the checkout");
-    let font = Arc::new(SoundFont::from_reader(&mut file).expect("the test font parses"));
+    let font = Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
     SoundFontUnit::new(font, Settings::new()).expect("builds")
 }
 
@@ -178,7 +177,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
     };
 
     let font = Arc::new(
-        SoundFont::from_reader(&mut std::io::Cursor::new(bytes(
+        SoundFont::open(bytes(
             &[Preset {
                 name: "p",
                 bank: 0,
@@ -189,7 +188,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
                 name: "i",
                 zones: vec![vec![(generator::RELEASE_VOL_ENV, -2400)]],
             }],
-        )))
+        ))
         .expect("the built font parses"),
     );
     let unit = SoundFontUnit::new(font, Settings::new()).expect("builds");
@@ -276,7 +275,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
 fn short_release_setup() -> (Session, GeneralMidi<f32>) {
     use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
     let font = Arc::new(
-        SoundFont::from_reader(&mut std::io::Cursor::new(bytes(
+        SoundFont::open(bytes(
             &[Preset {
                 name: "p",
                 bank: 0,
@@ -287,7 +286,7 @@ fn short_release_setup() -> (Session, GeneralMidi<f32>) {
                 name: "i",
                 zones: vec![vec![(generator::RELEASE_VOL_ENV, -2400)]],
             }],
-        )))
+        ))
         .expect("the built font parses"),
     );
     let unit = SoundFontUnit::new(font, Settings::new()).expect("builds");

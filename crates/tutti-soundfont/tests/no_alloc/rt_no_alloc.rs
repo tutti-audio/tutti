@@ -42,11 +42,9 @@ use tutti_units::Samples;
 /// Load the committed test SoundFont, failing loudly if the checkout lacks it.
 fn load_test_soundfont() -> Arc<SoundFont> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
-    let mut file = std::fs::File::open(&path)
-        .unwrap_or_else(|e| panic!("test soundfont missing at {}: {e}", path.display()));
     Arc::new(
-        SoundFont::from_reader(&mut file)
-            .unwrap_or_else(|e| panic!("test soundfont at {} is malformed: {e}", path.display())),
+        SoundFont::open(path.as_path())
+            .unwrap_or_else(|e| panic!("test soundfont at {} does not load: {e}", path.display())),
     )
 }
 

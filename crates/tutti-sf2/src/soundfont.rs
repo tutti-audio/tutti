@@ -1,5 +1,7 @@
 use std::io::Read;
 
+use tutti_platform::Asset;
+
 use crate::LoopMode;
 use crate::binary_reader::ReadExt;
 use crate::error::Error;
@@ -22,26 +24,23 @@ pub struct SoundFont {
 }
 
 impl SoundFont {
-    /// Reads the SoundFont at `path`.
+    /// Reads the SoundFont `src` opens: a path, bytes in memory, or an app's own
+    /// [`Open`](tutti_platform::Open) source.
     ///
-    /// The file is read through a buffer; there is nothing to flush or close.
+    /// The source is read once, through a buffer; there is nothing to flush or
+    /// close.
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] if the file cannot be opened, and everything
-    /// [`from_reader`](Self::from_reader) returns.
-    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, Error> {
-        Self::from_reader(std::io::BufReader::new(std::fs::File::open(path)?))
+    /// [`Error::Io`] if the source cannot be opened or read, and an [`Error`]
+    /// if it is not a SoundFont 2 file, has compressed samples, or has a region
+    /// that reaches outside the sample data.
+    pub fn open(src: impl Into<Asset>) -> Result<Self, Error> {
+        Self::read(std::io::BufReader::new(src.into().open()?))
     }
 
-    /// Reads a SoundFont from `reader`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the stream cannot be read, is not a
-    /// SoundFont 2 file, has compressed samples, or has a region that reaches
-    /// outside the sample data.
-    pub fn from_reader<R: Read>(mut reader: R) -> Result<Self, Error> {
+    /// Parses a SoundFont from `reader`.
+    fn read<R: Read>(mut reader: R) -> Result<Self, Error> {
         let reader = &mut reader;
         let chunk_id = reader.read_four_cc()?;
         if chunk_id != b"RIFF" {
@@ -159,7 +158,7 @@ impl SoundFont {
 mod tests {
     use super::*;
 
-    use std::{fs::File, path::PathBuf};
+    use std::path::PathBuf;
 
     fn samples_dir_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples")
@@ -168,9 +167,8 @@ mod tests {
     #[test]
     fn test_load_reject_sf3() {
         let path = samples_dir_path().join("dummy.sf3");
-        let mut file = File::open(&path).unwrap();
         assert!(matches!(
-            SoundFont::from_reader(&mut file),
+            SoundFont::open(path),
             Err(Error::UnsupportedSampleFormat)
         ));
     }
