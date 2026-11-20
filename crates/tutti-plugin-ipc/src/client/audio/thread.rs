@@ -1,14 +1,20 @@
-//! The bridge's threads: one per lane. The audio lane's thread connects, then
-//! starts the control lane's, and pumps [`AudioCommand`]s through
-//! [`handle_audio`]; the control lane's thread pumps `ControlCommand`s through
+//! The bridge's lanes: one task per lane, each on a thread of its own that the
+//! executor starts. The audio lane's task connects, hands the control lane's
+//! stream to the control lane's task, and pumps [`AudioCommand`]s through
+//! [`handle_audio`]; the control lane's task pumps `ControlCommand`s through
 //! [`handle_control`] and reads what the server says unprompted. Each owns its
 //! connection, its queue and its wake-up, so a block never waits behind a
 //! control request and all IPC calls on a lane are blocking.
 //!
-//! The audio-response ring has one producer, the audio lane's thread. The control
-//! lane's thread never pushes to it: a failure it sees is latched (which wakes
-//! both threads, [`Channels::waker`]) and the audio lane's thread, woken,
+//! The audio-response ring has one producer, the audio lane's task. The control
+//! lane's task never pushes to it: a failure it sees is latched (which wakes
+//! both lanes, [`Channels::waker`]) and the audio lane's task, woken,
 //! answers the queued blocks.
+//!
+//! A lane's task blocks in slices of work and returns to the executor between
+//! them ([`yield_now`]), so an executor that shuts down drops it at the next
+//! slice and not when the server next speaks. Each task holds a [`Finish`] from
+//! its creation: its [`Latch`] is raised by every way out of the task.
 
 use super::ListenerSlot;
 #[cfg(test)]
@@ -21,34 +27,57 @@ use super::dispatch::{
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioCommand, AudioResponse, ControlCommand, IpcEvent, Unsolicited};
 use super::payload_pool::PayloadPool;
+use crate::latch::{Finish, Latch, yield_now};
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
 use crate::{AudioReply, ControlFrame, ControlRequest};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
-use tutti_platform::ThreadHandle;
+use tutti_platform::{Executor, PriorityRequest, Task};
 use tutti_plugin_types::{IpcError, IpcResult, PluginFailure};
 use tutti_rt::Parker;
 
-/// The bridge's audio lane thread of an `AudioBridge`, which owns the control
-/// lane's: it speaks to the server for the queues. Dropping it shuts both down
-/// and joins them.
+/// How long the control lane waits on its connection, its bell and the stream it
+/// is handed before it returns to the executor: only what bounds how long an
+/// executor that shuts down waits for an idle lane, since every event the lane
+/// serves ends its wait at once.
+const LANE_SLICE: Duration = Duration::from_millis(100);
+
+/// The two lanes of an `AudioBridge`'s connection, which speak to the server for
+/// the queues. Dropping it shuts both down and waits for both.
 pub struct IpcThread {
     channels: Channels,
     lifecycle: Lifecycle,
-    handle: Option<ThreadHandle<()>>,
+    lanes: Option<Lanes>,
+}
+
+/// The tasks of the two lanes and the latches they raise.
+struct Lanes {
+    audio: Task<()>,
+    control: Task<()>,
+    audio_ended: Arc<Latch>,
+    control_ended: Arc<Latch>,
 }
 
 impl std::fmt::Debug for IpcThread {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcThread")
-            .field("running", &self.handle.is_some())
+            .field("running", &self.lanes.is_some())
             .finish_non_exhaustive()
     }
 }
 
 impl IpcThread {
+    /// Starts both lanes on `executor`: the control lane waits for the stream the
+    /// audio lane hands it once it has connected, so neither lane's future holds
+    /// the executor, and neither starts the other.
+    ///
+    /// # Errors
+    ///
+    /// The OS refused a lane's thread; the lane already started is cancelled.
     pub(super) fn spawn(
+        executor: &Executor,
         channels: Channels,
         responses: ResponseWriter,
         waits: Waits,
@@ -57,53 +86,87 @@ impl IpcThread {
         listener: ListenerSlot,
         socket_path: PathBuf,
     ) -> std::io::Result<Self> {
-        let thread_channels = channels.clone();
-        let thread_payloads = payloads.clone();
-        let thread_lifecycle = lifecycle.clone();
-        // Every block passes through this thread (callback, unpark, bridge,
+        let Waits {
+            audio: parker,
+            control: control_wait,
+        } = waits;
+        let orphans = (
+            Orphaned::new(&channels, &lifecycle, &listener),
+            Orphaned::new(&channels, &lifecycle, &listener),
+        );
+        let (stream_tx, stream_rx) = mpsc::channel();
+        let (audio_ended, control_ended) = (Arc::new(Latch::default()), Arc::new(Latch::default()));
+        let control = executor.spawn_dedicated(
+            "plugin-control",
+            None,
+            control_lane(
+                ControlLaneParts {
+                    channels: channels.clone(),
+                    wait: control_wait,
+                    lifecycle: lifecycle.clone(),
+                    listener: Arc::clone(&listener),
+                    stream: stream_rx,
+                },
+                orphans.0,
+                Finish::new(&control_ended),
+            ),
+        )?;
+        // Every block passes through this lane (callback, unpark, bridge,
         // server, bridge, next callback), and the OS elevates only the audio
         // callback's own thread, so a default-priority bridge delays the
-        // reply. A refusal is an outcome on the handle, not an error.
-        let handle = tutti_platform::spawn_named(
+        // reply. A refusal is an outcome the executor logs, not an error.
+        // A refused start drops `control`, which cancels it.
+        let audio = executor.spawn_dedicated(
             "plugin-bridge",
-            Some(tutti_platform::PriorityRequest::Highest),
-            move |_| {
-                run_thread(
-                    thread_channels,
+            Some(PriorityRequest::Highest),
+            audio_lane(
+                AudioLaneParts {
+                    channels: channels.clone(),
                     responses,
-                    waits,
-                    thread_payloads,
-                    thread_lifecycle,
+                    parker,
+                    payloads,
+                    lifecycle: lifecycle.clone(),
                     listener,
                     socket_path,
-                )
-            },
+                    control_stream: stream_tx,
+                },
+                orphans.1,
+                Finish::new(&audio_ended),
+            ),
         )?;
-
         Ok(Self {
             channels,
             lifecycle,
-            handle: Some(handle),
+            lanes: Some(Lanes {
+                audio,
+                control,
+                audio_ended,
+                control_ended,
+            }),
         })
     }
 
-    /// Asks the threads to stop, without waiting for them: from here on a
-    /// failure they read (the server's end, say) is not declared a death. The
-    /// control thread says `Shutdown` to the server on its way out.
+    /// Asks the lanes to stop, without waiting for them: from here on a failure
+    /// they read (the server's end, say) is not declared a death. The control
+    /// lane says `Shutdown` to the server on its way out.
     pub fn request_stop(&self) {
         self.lifecycle.request_shutdown();
         self.channels.wake();
     }
 
-    /// Asks the threads to stop and joins them. Idempotent.
+    /// Asks the lanes to stop and waits for both to end. Idempotent.
+    ///
+    /// Each lane ends on the stop flag at its next look: after the call it is
+    /// in (a block's reply, a request's answer; each bound by its own deadline
+    /// in the bridge's timeouts) and, when idle, at once. A lane the executor
+    /// dropped has ended already.
     pub fn shutdown(&mut self) {
         self.lifecycle.request_shutdown();
         self.channels.wake();
-        if let Some(handle) = self.handle.take() {
-            // The thread ends on the stop flag and joins the control lane's
-            // thread, so this waits for those and asks for nothing more. A
-            // panic in it is not reported: the bridge is gone either way.
-            let _ = handle.join();
+        if let Some(lanes) = self.lanes.take() {
+            lanes.audio_ended.wait(Duration::MAX);
+            lanes.control_ended.wait(Duration::MAX);
+            drop((lanes.audio, lanes.control));
         }
     }
 }
@@ -114,26 +177,77 @@ impl Drop for IpcThread {
     }
 }
 
-/// Whether a lane's thread goes on: the bridge was not asked to stop, and the
-/// server is not declared gone (by this bridge, the process guard or the host).
+/// Whether a lane goes on: the bridge was not asked to stop, and the server is
+/// not declared gone (by this bridge, the process guard or the host).
 fn live(lifecycle: &Lifecycle) -> bool {
     lifecycle.is_running() && !lifecycle.is_crashed()
 }
 
-fn run_thread(
+/// What the audio lane's task owns.
+struct AudioLaneParts {
     channels: Channels,
     responses: ResponseWriter,
-    waits: Waits,
+    parker: Parker,
     payloads: PayloadPool,
     lifecycle: Lifecycle,
     listener: ListenerSlot,
     socket_path: PathBuf,
-) {
-    let Waits {
-        audio: mut parker,
-        control: control_wait,
-    } = waits;
-    // The response ring's writer is this thread's alone: it lives in the audio
+    /// Where the control lane's connection goes once it is made.
+    control_stream: mpsc::Sender<ControlStream>,
+}
+
+/// What the control lane's task owns.
+struct ControlLaneParts {
+    channels: Channels,
+    wait: ControlWait,
+    lifecycle: Lifecycle,
+    listener: ListenerSlot,
+    /// The control connection, from the audio lane.
+    stream: mpsc::Receiver<ControlStream>,
+}
+
+/// Declares the bridge dead when a lane's task is dropped before it ended: the
+/// executor shut down under it, or never ran it. A lane that ended itself
+/// disarms it. The task holds one from its creation, as it holds its [`Finish`].
+struct Orphaned {
+    channels: Channels,
+    lifecycle: Lifecycle,
+    listener: ListenerSlot,
+    ended: bool,
+}
+
+impl Orphaned {
+    fn new(channels: &Channels, lifecycle: &Lifecycle, listener: &ListenerSlot) -> Self {
+        Self {
+            channels: channels.clone(),
+            lifecycle: lifecycle.clone(),
+            listener: Arc::clone(listener),
+            ended: false,
+        }
+    }
+}
+
+impl Drop for Orphaned {
+    fn drop(&mut self) {
+        if !self.ended {
+            crash(&self.lifecycle, &self.listener, PluginFailure::StreamClosed);
+            drop_controls(&self.channels);
+        }
+    }
+}
+
+async fn audio_lane(parts: AudioLaneParts, mut orphaned: Orphaned, _finish: Finish) {
+    let AudioLaneParts {
+        channels,
+        responses,
+        mut parker,
+        payloads,
+        lifecycle,
+        listener,
+        socket_path,
+        control_stream,
+    } = parts;
+    // The response ring's writer is this lane's alone: it lives in the audio
     // lane's state.
     let mut state = AudioState::new(lifecycle.timeouts().drain, responses);
     // A bridge that never connects is as dead as one whose socket drops later,
@@ -149,35 +263,26 @@ fn run_thread(
             // A block queued before the crash was marked is never sent.
             drain_with_errors(&channels, &mut state);
             drop_controls(&channels);
+            orphaned.ended = true;
             return;
         }
     };
-    let control_thread = {
-        let (channels, lifecycle, listener) =
-            (channels.clone(), lifecycle.clone(), Arc::clone(&listener));
-        let lane = Lane {
-            stream: control,
-            state: ControlState::new(lifecycle.timeouts().drain),
-        };
-        tutti_platform::spawn_named("plugin-control", None, move |_| {
-            control_loop(&channels, &control_wait, &lifecycle, &listener, lane);
-        })
-    };
-    let control_thread = match control_thread {
-        Ok(handle) => handle,
-        Err(e) => {
-            crash(
-                &lifecycle,
-                &listener,
-                PluginFailure::Connect {
-                    source: Arc::new(IpcError::Io(e)),
-                },
-            );
-            drain_with_errors(&channels, &mut state);
-            drop_controls(&channels);
-            return;
-        }
-    };
+    if control_stream.send(control).is_err() {
+        // The control lane's task is gone: the executor shut down under it.
+        crash(
+            &lifecycle,
+            &listener,
+            PluginFailure::Connect {
+                source: Arc::new(IpcError::Io(std::io::Error::other(
+                    "the control lane ended before it was handed its connection",
+                ))),
+            },
+        );
+        drain_with_errors(&channels, &mut state);
+        drop_controls(&channels);
+        orphaned.ended = true;
+        return;
+    }
     audio_loop(
         &channels,
         &mut parker,
@@ -188,11 +293,42 @@ fn run_thread(
             stream: audio,
             state,
         },
-    );
-    // The control lane's thread ends on the same condition, rung awake by
-    // whatever ended this one.
+    )
+    .await;
+    // The control lane ends on the same condition, rung awake by whatever ended
+    // this one.
     channels.wake();
-    let _ = control_thread.join();
+    orphaned.ended = true;
+}
+
+async fn control_lane(parts: ControlLaneParts, mut orphaned: Orphaned, _finish: Finish) {
+    let ControlLaneParts {
+        channels,
+        wait,
+        lifecycle,
+        listener,
+        stream,
+    } = parts;
+    let stream = loop {
+        match stream.recv_timeout(LANE_SLICE) {
+            Ok(stream) => break Some(stream),
+            // The audio lane ended without connecting, and told the bridge.
+            Err(RecvTimeoutError::Disconnected) => break None,
+            Err(RecvTimeoutError::Timeout) if !lifecycle.is_running() => break None,
+            Err(RecvTimeoutError::Timeout) => yield_now().await,
+        }
+    };
+    match stream {
+        Some(stream) => {
+            let lane = Lane {
+                stream,
+                state: ControlState::new(lifecycle.timeouts().drain),
+            };
+            control_loop(&channels, &wait, &lifecycle, &listener, lane).await;
+        }
+        None => drop_controls(&channels),
+    }
+    orphaned.ended = true;
 }
 
 /// The two connections, audio first and control second as the server accepts
@@ -228,8 +364,9 @@ fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), P
 ///
 /// **Idle, the thread parks on its [`Parker`]**, unparked by a push, by
 /// `shutdown` and by a crash anyone declares. It does not read the control
-/// connection. There is no timeout in the park: a spurious return loops.
-fn audio_loop(
+/// connection. There is no timeout in the park: a spurious return (the executor's
+/// stop unparks the thread) loops, and the loop returns to the executor first.
+async fn audio_loop(
     channels: &Channels,
     parker: &mut Parker,
     payloads: &PayloadPool,
@@ -239,6 +376,9 @@ fn audio_loop(
 ) {
     let mut failed = false;
     while live(lifecycle) {
+        // The executor looks at the task between two commands and two idle
+        // wake-ups: a block's turn costs one return to it.
+        yield_now().await;
         // Read before the pop: a block pushed after this read is not counted,
         // and one counted was queued, so an empty queue means it was dealt with.
         let pushed = channels.pushed();
@@ -256,7 +396,8 @@ fn audio_loop(
             // Park: `push_block` unparks the thread the instant a block
             // arrives, so the socket round-trip starts immediately. The
             // unpark cannot be lost and `shutdown` unparks too, so there is
-            // no timeout.
+            // no timeout; the executor's stop unparks the thread as well, and
+            // the loop's next turn returns to the executor.
             channels.wait_for_block(parker, || !live(lifecycle));
             continue;
         };
@@ -301,9 +442,9 @@ fn audio_loop(
 /// arrives, and a request is sent as it is queued. While a request waits for
 /// its reply, `handle_control` reads the same lane and the unsolicited events
 /// ride in on that read; either way they go to the listener after the request.
-/// There is no timeout in the wait: a request, the server's end, a crash and
-/// `shutdown` each wake it.
-fn control_loop(
+/// The wait ends at once for a request, the server's end, a crash and `shutdown`,
+/// and after [`LANE_SLICE`] for the executor to look at the task.
+async fn control_loop(
     channels: &Channels,
     wait: &ControlWait,
     lifecycle: &Lifecycle,
@@ -321,6 +462,7 @@ fn control_loop(
     // its wait for the blocks before it.
     let mut held: Option<(Sequenced<ControlCommand>, tutti_platform::Instant)> = None;
     while live(lifecycle) {
+        yield_now().await;
         if held.is_none() {
             held = channels.pop_control().map(|cmd| {
                 let wait = crate::Wake::deadline_in(lifecycle.timeouts().settle_wait());
@@ -347,7 +489,9 @@ fn control_loop(
             // command the blocks never let through is failed, never sent out of
             // order: its caller is told, by the reply's drop, that none comes.
             let after = stamped.after;
-            channels.progress().wait_until(*deadline, || {
+            // At most a slice, so the executor can look at the task.
+            let slice = crate::Wake::deadline_in(LANE_SLICE).min(*deadline);
+            channels.progress().wait_until(slice, || {
                 channels.handled() >= after || channels.setting_waiting() || !live(lifecycle)
             });
             if crate::Wake::deadline_in(Duration::ZERO) >= *deadline && channels.handled() < after {
@@ -363,7 +507,7 @@ fn control_loop(
             }
             continue;
         } else {
-            match wait.wait(&lane.stream, None) {
+            match wait.wait(&lane.stream, Some(LANE_SLICE)) {
                 Ok(woken) if woken.stream => {
                     channels.set_news();
                     read_news(&mut lane, &mut inbox)
@@ -508,7 +652,9 @@ fn drop_controls(channels: &Channels) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AudioRequest;
     use crate::client::audio::messages::{ProcessPayload, UNSOLICITED_PARAMS};
+    use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _};
     use std::sync::Arc;
     use tutti_fixtures::midi;
     use tutti_plugin_types::ResyncKind;
@@ -544,45 +690,340 @@ mod tests {
         assert_eq!(channels.dropped_midi_cell().get(), 5);
     }
 
-    /// **A bridge that never connects counts the MIDI queued before it
-    /// failed.** `run_thread` runs here on the test thread, so the chunk is
-    /// queued before the connect fails, deterministically.
-    #[test]
-    fn a_failed_connect_counts_the_queued_midi() {
-        use tutti_plugin_types::WireMidi;
+    /// A hang guard for a wait on an event: far past anything the OS takes.
+    const HANG_GUARD: Duration = Duration::from_secs(60);
 
+    /// A bridge's lanes started on an executor, against a peer that has said
+    /// `Ready` on both connections and answers nothing.
+    struct Rig {
+        thread: IpcThread,
+        channels: Channels,
+        lifecycle: Lifecycle,
+        /// Held so the connections stay open: a peer that drops them is a crash.
+        audio_peer: Stream,
+        control_peer: Stream,
+        replies: crate::Replies,
+    }
+
+    fn timeouts() -> tutti_plugin_types::Timeouts {
+        tutti_plugin_types::Timeouts::default()
+    }
+
+    fn payloads_of(channels: &Channels) -> PayloadPool {
+        PayloadPool::new(
+            SampleRate::SR_48K,
+            channels.refusal_writer(),
+            channels.leak_writer(),
+        )
+    }
+
+    fn silent_listener() -> ListenerSlot {
+        Arc::new(parking_lot::Mutex::new(None))
+    }
+
+    fn rig(executor: &Executor) -> Rig {
         let (channels, waits) =
             Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
-        let lifecycle = Lifecycle::new(
-            Arc::new(crate::ServerWatch::new()),
-            tutti_plugin_types::Timeouts::default(),
-        );
+        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
+        let socket = crate::unique_socket_path().expect("the OS has a random source");
+        let _ = std::fs::remove_file(&socket);
+        let listener = ListenerOptions::new()
+            .name(ipc::socket_name(&socket).expect("socket name"))
+            .create_sync()
+            .expect("listen");
+        let (responses, replies, _lost) = response_ring();
+        let thread = IpcThread::spawn(
+            executor,
+            channels.clone(),
+            responses,
+            waits,
+            payloads_of(&channels),
+            lifecycle.clone(),
+            silent_listener(),
+            socket,
+        )
+        .expect("the lanes start");
+        let audio_peer = listener.accept().expect("the audio connection");
+        crate::write_frame(
+            &mut &audio_peer,
+            &AudioReply::Ready {
+                protocol_version: crate::PROTOCOL_VERSION,
+            },
+        )
+        .expect("ready");
+        let control_peer = listener.accept().expect("the control connection");
+        crate::write_frame(
+            &mut &control_peer,
+            &ControlFrame::Ready {
+                protocol_version: crate::PROTOCOL_VERSION,
+            },
+        )
+        .expect("ready");
+        Rig {
+            thread,
+            channels,
+            lifecycle,
+            audio_peer,
+            control_peer,
+            replies,
+        }
+    }
+
+    impl Rig {
+        fn ended(&self) -> (Arc<Latch>, Arc<Latch>) {
+            let lanes = self.thread.lanes.as_ref().expect("the lanes run");
+            (
+                Arc::clone(&lanes.audio_ended),
+                Arc::clone(&lanes.control_ended),
+            )
+        }
+    }
+
+    fn payload_with_midi(n: usize) -> AudioCommand {
+        use tutti_plugin_types::WireMidi;
+
         let mut payload = Box::new(ProcessPayload::empty(SampleRate::SR_48K));
-        for _ in 0..4 {
+        for _ in 0..n {
             payload.midi_events.push(WireMidi {
                 offset: 0,
                 ump: midi::note_on(MidiChannel::FIRST, 60, 1),
             });
         }
-        assert!(channels.push_block(AudioCommand::Process(payload)));
+        AudioCommand::Process(payload)
+    }
+
+    /// **A bridge that never connects counts the MIDI queued before it
+    /// failed.** The chunk is queued before the lanes start, so it is there when
+    /// the connect fails, deterministically.
+    #[test]
+    fn a_failed_connect_counts_the_queued_midi() {
+        let (channels, waits) =
+            Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
+        assert!(channels.push_block(payload_with_midi(4)));
         let socket =
             std::env::temp_dir().join(format!("tutti-no-such-bridge-{}.sock", std::process::id()));
-        run_thread(
+        let thread = IpcThread::spawn(
+            tutti_fixtures::executor(),
             channels.clone(),
             response_ring().0,
             waits,
-            PayloadPool::new(
-                SampleRate::SR_48K,
-                channels.refusal_writer(),
-                channels.leak_writer(),
-            ),
+            payloads_of(&channels),
             lifecycle.clone(),
-            Arc::new(parking_lot::Mutex::new(None)),
+            silent_listener(),
             socket,
-        );
+        )
+        .expect("the lanes start");
+        let lanes = thread.lanes.as_ref().expect("the lanes run");
+        assert!(lanes.audio_ended.wait(HANG_GUARD), "the audio lane ended");
         assert!(lifecycle.is_crashed());
         assert!(channels.pop_block().is_none());
         assert_eq!(channels.dropped_midi_cell().get(), 4);
+    }
+
+    /// **A crash drains the queued blocks**: the server's end, read while a block
+    /// is in flight, answers the blocks queued behind it with errors and counts
+    /// their MIDI dropped, and nothing stays in the queue.
+    #[test]
+    fn a_crash_drains_the_queued_blocks() {
+        let mut rig = rig(tutti_fixtures::executor());
+        assert!(rig.channels.push_block(payload_with_midi(0)));
+        // The lane has sent the first block, so it is waiting on it: the next two
+        // queue behind it.
+        let _sent: AudioRequest = crate::read_frame(&mut &rig.audio_peer).expect("the block");
+        assert!(rig.channels.push_block(payload_with_midi(3)));
+        assert!(rig.channels.push_block(payload_with_midi(2)));
+        let (audio_ended, _) = rig.ended();
+
+        // The server's end: both connections close.
+        let channels = rig.channels.clone();
+        drop(rig.audio_peer);
+        drop(rig.control_peer);
+
+        assert!(audio_ended.wait(HANG_GUARD), "the audio lane ended");
+        assert!(rig.lifecycle.is_crashed());
+        assert!(channels.pop_block().is_none(), "the queue is drained");
+        assert_eq!(channels.dropped_midi_cell().get(), 5);
+        let mut answered = 0;
+        while rig.replies.pop().is_some() {
+            answered += 1;
+        }
+        assert!(answered >= 3, "each of the three blocks was answered");
+        rig.thread.shutdown();
+    }
+
+    /// **Shutdown joins both lanes**: when it returns each lane's latch is
+    /// raised, so neither is still running with the bridge's queues.
+    #[test]
+    fn shutdown_joins_both_lanes() {
+        let mut rig = rig(tutti_fixtures::executor());
+        let (audio_ended, control_ended) = rig.ended();
+        assert!(!audio_ended.is_raised() && !control_ended.is_raised());
+
+        rig.thread.shutdown();
+
+        assert!(audio_ended.is_raised(), "the audio lane is joined");
+        assert!(control_ended.is_raised(), "the control lane is joined");
+    }
+
+    /// **A lane dropped unpolled raises its latch**, and declares the bridge dead:
+    /// the executor that took the task shut down before it ran.
+    #[test]
+    fn a_lane_dropped_unpolled_raises_its_latch() {
+        let (channels, waits) =
+            Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
+        let listener = silent_listener();
+        let (audio_ended, control_ended) = (Arc::new(Latch::default()), Arc::new(Latch::default()));
+        let (stream_tx, stream_rx) = mpsc::channel();
+        let audio = audio_lane(
+            AudioLaneParts {
+                channels: channels.clone(),
+                responses: response_ring().0,
+                parker: waits.audio,
+                payloads: payloads_of(&channels),
+                lifecycle: lifecycle.clone(),
+                listener: Arc::clone(&listener),
+                socket_path: PathBuf::new(),
+                control_stream: stream_tx,
+            },
+            Orphaned::new(&channels, &lifecycle, &listener),
+            Finish::new(&audio_ended),
+        );
+        let control = control_lane(
+            ControlLaneParts {
+                channels: channels.clone(),
+                wait: waits.control,
+                lifecycle: lifecycle.clone(),
+                listener: Arc::clone(&listener),
+                stream: stream_rx,
+            },
+            Orphaned::new(&channels, &lifecycle, &listener),
+            Finish::new(&control_ended),
+        );
+        assert!(!audio_ended.is_raised() && !control_ended.is_raised());
+        assert!(!lifecycle.is_crashed());
+
+        drop(audio);
+        assert!(audio_ended.is_raised(), "the audio lane's latch");
+        assert!(
+            lifecycle.is_crashed(),
+            "a bridge whose lane is gone is dead"
+        );
+        drop(control);
+        assert!(control_ended.is_raised(), "the control lane's latch");
+    }
+
+    /// **A live bridge does not keep the executor alive**: with every strong
+    /// handle dropped while the lanes run, the executor has shut down, and
+    /// dropping it ended both lanes (it drops an idle lane at its next slice).
+    #[test]
+    fn a_live_bridge_does_not_keep_the_executor_alive() {
+        let executor = Executor::new();
+        let weak = executor.downgrade();
+        let mut rig = rig(&executor);
+        let (audio_ended, control_ended) = rig.ended();
+
+        drop(executor);
+
+        assert!(weak.upgrade().is_none(), "the bridge kept the executor");
+        assert!(audio_ended.is_raised(), "the audio lane outlived it");
+        assert!(control_ended.is_raised(), "the control lane outlived it");
+        assert!(rig.lifecycle.is_crashed(), "the bridge's lanes are gone");
+        // Joining lanes that have ended is immediate.
+        rig.thread.shutdown();
+    }
+
+    /// Records the threads that wake it.
+    struct Recorder(std::sync::Mutex<Vec<std::thread::ThreadId>>);
+
+    impl std::task::Wake for Recorder {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.lock().unwrap().push(std::thread::current().id());
+        }
+    }
+
+    /// **The audio side never touches a `Waker`**: the audio lane's future is
+    /// polled on one thread with a waker that records who wakes it, while the
+    /// other thread queues blocks and rings the lane (what the audio callback
+    /// does). Only the polling thread's own yields wake it.
+    #[test]
+    fn the_audio_side_never_touches_a_waker() {
+        use std::task::{Context, Poll, Waker};
+
+        let (channels, waits) =
+            Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
+        let listener = silent_listener();
+        let socket = crate::unique_socket_path().expect("the OS has a random source");
+        let _ = std::fs::remove_file(&socket);
+        let served = ListenerOptions::new()
+            .name(ipc::socket_name(&socket).expect("socket name"))
+            .create_sync()
+            .expect("listen");
+        let (stream_tx, _stream_rx) = mpsc::channel();
+        let audio_ended = Arc::new(Latch::default());
+        let lane = audio_lane(
+            AudioLaneParts {
+                channels: channels.clone(),
+                responses: response_ring().0,
+                parker: waits.audio,
+                payloads: payloads_of(&channels),
+                lifecycle: lifecycle.clone(),
+                listener: Arc::clone(&listener),
+                socket_path: socket,
+                control_stream: stream_tx,
+            },
+            Orphaned::new(&channels, &lifecycle, &listener),
+            Finish::new(&audio_ended),
+        );
+        let recorder = Arc::new(Recorder(std::sync::Mutex::new(Vec::new())));
+        let (polling_tx, polling_rx) = mpsc::channel();
+        let poller = {
+            let recorder = Arc::clone(&recorder);
+            std::thread::spawn(move || {
+                polling_tx.send(std::thread::current().id()).expect("sent");
+                let waker = Waker::from(recorder);
+                let mut cx = Context::from_waker(&waker);
+                let mut lane = std::pin::pin!(lane);
+                while lane.as_mut().poll(&mut cx) == Poll::Pending {}
+            })
+        };
+        let polling = polling_rx.recv().expect("the poller's id");
+
+        // The lane connects; the audio callback's side then queues a block and
+        // rings the lane, and the peer ends the connection once the block is read.
+        let audio_peer = served.accept().expect("the audio connection");
+        crate::write_frame(
+            &mut &audio_peer,
+            &AudioReply::Ready {
+                protocol_version: crate::PROTOCOL_VERSION,
+            },
+        )
+        .expect("ready");
+        let _control_peer = served.accept().expect("the control connection");
+        crate::write_frame(
+            &mut &_control_peer,
+            &ControlFrame::Ready {
+                protocol_version: crate::PROTOCOL_VERSION,
+            },
+        )
+        .expect("ready");
+        assert!(channels.push_block(payload_with_midi(1)));
+        channels.wake();
+        let _sent: AudioRequest = crate::read_frame(&mut &audio_peer).expect("the block");
+        drop(audio_peer);
+        poller.join().expect("the lane ended");
+
+        let woken_by = recorder.0.lock().unwrap().clone();
+        assert!(
+            woken_by.iter().all(|thread| *thread == polling),
+            "a thread other than the lane's own woke it"
+        );
     }
 
     /// **A drain hands every held event to the listener and publishes the

@@ -13,7 +13,8 @@
 //! exit task. The guard's drop does not poll the process: it waits for an
 //! event, the exit task having ended (the process reaped, or told to stop).
 
-use crate::{IpcConfig, IpcThread, ServerWatch, Wake};
+use crate::latch::{Finish, Latch, yield_now};
+use crate::{IpcConfig, IpcThread, ServerWatch};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
@@ -47,29 +48,14 @@ struct ExitFlow {
     ending: AtomicBool,
     /// The task ends at its next look, whether or not the process has.
     stop: AtomicBool,
-    /// The task has ended: set last, by every way out of it.
-    done: AtomicBool,
-    /// Notified when `done` is set.
-    gate: Wake,
+    /// Raised when the task has ended, by every way out of it.
+    done: Arc<Latch>,
 }
 
 impl ExitFlow {
     /// Waits up to `timeout` for the task to end: `true` when it has.
     fn wait_done(&self, timeout: Duration) -> bool {
-        self.gate.wait_until(Wake::deadline_in(timeout), || {
-            self.done.load(Ordering::Acquire)
-        })
-    }
-}
-
-/// Sets [`ExitFlow::done`] when the task ends, however it ends (a panic
-/// included), so the guard's wait for it always comes.
-struct Finish(Arc<ExitFlow>);
-
-impl Drop for Finish {
-    fn drop(&mut self) {
-        self.0.done.store(true, Ordering::Release);
-        self.0.gate.notify();
+        self.done.wait(timeout)
     }
 }
 
@@ -136,7 +122,8 @@ impl ProcessGuard {
                 Arc::clone(&process),
                 Arc::clone(&wait),
                 Arc::clone(&watch),
-                Finish(Arc::clone(&flow)),
+                Arc::clone(&flow),
+                Finish::new(&flow.done),
             ),
         )?;
         Ok(Self {
@@ -296,7 +283,7 @@ fn reaped_within(
     timeout: Duration,
 ) -> bool {
     let deadline = Deadline::after(Instant::now(), timeout);
-    if !flow.done.load(Ordering::Acquire) && reaped_by(flow, process, timeout) {
+    if !flow.done.is_raised() && reaped_by(flow, process, timeout) {
         return true;
     }
     await_end(process, wait, deadline, Instant::now)
@@ -368,10 +355,10 @@ fn pause(slice: Duration) {
 }
 
 /// The exit task: declares the process's end to `watch`. It waits on the OS in
-/// slices until the process has ended (and then reads its status), or `finish`'s
-/// flow says stop, and sets the flow's `done` as it ends.
+/// slices until the process has ended (and then reads its status), or the
+/// `flow` says stop, and raises the flow's `done` as it ends.
 ///
-/// `finish` is held by the future from its creation, so a future dropped before
+/// `_finish` is held by the future from its creation, so a future dropped before
 /// its first poll raises the latch as well. The task returns to the executor
 /// between slices, so an executor that shuts down drops it within one slice
 /// (`EXIT_SLICE`) rather than waiting for the process to end.
@@ -379,9 +366,9 @@ async fn exit_task(
     process: Arc<Mutex<Option<Reaped>>>,
     wait: Arc<ExitWait>,
     watch: Arc<ServerWatch>,
-    finish: Finish,
+    flow: Arc<ExitFlow>,
+    _finish: Finish,
 ) {
-    let flow = Arc::clone(&finish.0);
     while !flow.stop.load(Ordering::Acquire) {
         if wait.wait(EXIT_SLICE, pause) {
             let status = match process.lock_recover().as_mut() {
@@ -408,22 +395,6 @@ async fn exit_task(
         }
         yield_now().await;
     }
-}
-
-/// Returns to the executor once, which sees a dropped task or a shut-down
-/// executor between two slices.
-async fn yield_now() {
-    let mut yielded = false;
-    std::future::poll_fn(|cx| {
-        if yielded {
-            std::task::Poll::Ready(())
-        } else {
-            yielded = true;
-            cx.waker().wake_by_ref();
-            std::task::Poll::Pending
-        }
-    })
-    .await;
 }
 
 #[cfg(all(test, unix))]
@@ -538,10 +509,10 @@ mod tests {
         let guard = guard_over(sleeper());
         let pid = guard.pid().expect("a launched guard has a pid");
         let flow = flow_of(&guard);
-        assert!(!flow.done.load(Ordering::Acquire), "the task is watching");
+        assert!(!flow.done.is_raised(), "the task is watching");
         drop(guard);
         assert!(
-            flow.done.load(Ordering::Acquire),
+            flow.done.is_raised(),
             "the drop returned before the task ended"
         );
         assert!(!exists(pid), "the child {pid} was not reaped");
@@ -576,9 +547,10 @@ mod tests {
             Arc::new(Mutex::new(None)),
             wait,
             Arc::new(ServerWatch::new()),
-            Finish(Arc::clone(&flow)),
+            Arc::clone(&flow),
+            Finish::new(&flow.done),
         );
-        assert!(!flow.done.load(Ordering::Acquire));
+        assert!(!flow.done.is_raised());
 
         drop(task);
 

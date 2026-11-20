@@ -441,6 +441,7 @@ impl MockServer {
             .expect("listen");
 
         let (bridge, thread, replies) = PluginBridge::new(
+            tutti_fixtures::executor(),
             path.clone(),
             tutti_plugin_types::PluginRef::file("test.vst3"),
             tutti_plugin_types::PluginFormat::Vst3,
@@ -1248,6 +1249,11 @@ fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
         |_| Action::Silent,
     );
 
+    // The lane waits for the block's reply as an offline render does. Under the
+    // live budget (a few block periods, 2 ms at the least) a reply the mock's
+    // thread is slow to send arrives after the lane gave the block up, and an
+    // idle lane never reads it: no protocol error, so no crash to wait for.
+    mock.bridge.audio().set_reply_wait(Some(NOTICE_TIMEOUT));
     submit_block(&mock.bridge, 1);
     mock.wait_for_crash("the junk reply to end the connection");
     assert_eq!(
@@ -1277,6 +1283,11 @@ fn a_reply_to_a_block_never_sent_is_a_protocol_error() {
         |_| Action::Silent,
     );
 
+    // The lane waits for the block's reply as an offline render does. Under the
+    // live budget (a few block periods, 2 ms at the least) a reply the mock's
+    // thread is slow to send arrives after the lane gave the block up, and an
+    // idle lane never reads it: no protocol error, so no crash to wait for.
+    mock.bridge.audio().set_reply_wait(Some(NOTICE_TIMEOUT));
     submit_block(&mock.bridge, 1);
     mock.wait_for_crash("the reply to a block never sent to end the connection");
     assert_eq!(mock.bridge.audio().block_counts().replies, 0);

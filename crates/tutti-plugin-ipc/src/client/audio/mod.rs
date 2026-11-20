@@ -30,6 +30,7 @@ use crate::ServerWatch;
 use crate::SlabHandle;
 use crate::SlabLayout;
 use dpi::Size;
+use tutti_platform::Executor;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
     StateError, StateUse, UnknownParam, edit_slots,
@@ -207,13 +208,15 @@ impl Replies {
 }
 
 impl AudioBridge {
-    /// Connects to the server at `socket_path` and spawns the bridge thread,
-    /// which speaks for the queues; dropping the [`IpcThread`] stops it.
+    /// Starts the bridge's lanes on `executor`, which connect to the server at
+    /// `socket_path` and speak for the queues; dropping the [`IpcThread`] stops
+    /// them. The bridge keeps no handle to `executor`.
     ///
     /// # Errors
     ///
     /// The bridge thread cannot be spawned.
     pub(crate) fn new(
+        executor: &Executor,
         socket_path: PathBuf,
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
@@ -236,6 +239,7 @@ impl AudioBridge {
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
         let (responses, replies, responses_lost) = response_ring();
         let thread = IpcThread::spawn(
+            executor,
             channels.clone(),
             responses,
             waits,

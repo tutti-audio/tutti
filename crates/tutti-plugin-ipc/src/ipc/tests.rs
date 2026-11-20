@@ -203,6 +203,7 @@ fn mock_with(
         .unwrap();
     let (slab, _handle) = AudioSlab::create(layout).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path.clone(),
         origin,
         format,

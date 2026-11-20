@@ -282,6 +282,7 @@ fn bridge_with_server_mode(
     let mut server_slab = AudioSlab::open(&handle, layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path.clone(),
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -823,6 +824,7 @@ fn bridge_with_no_server() -> (
     let (host_slab, handle) = AudioSlab::create(layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -1558,6 +1560,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     let mut server_slab = AudioSlab::open(&handle, layout).unwrap();
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path.clone(),
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -1825,6 +1828,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
     let _ = std::fs::remove_file(&path);
     let (slab, _handle) = AudioSlab::create(stereo_layout()).unwrap();
     let (bridge, _thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -1963,6 +1967,7 @@ fn two_stale_blocks(
     let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
     let (bridge, thread, _replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path.clone(),
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
