@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_engine::BlockClockReader;
-use tutti_timeline::{AfterLocate, FadeOut, LoopRegion, MotionEvent, TimedError, Transport};
+use tutti_timeline::{AfterLocate, FadeOut, LoopRegion, MotionCommand, TimedError, Transport};
 use tutti_units::{At, Beat};
 
 use crate::Playhead;
@@ -84,8 +84,8 @@ impl TransportHandle {
     ///
     /// [`TimedError::Full`] when the transport's command queue is full; the
     /// event is handed back in it.
-    pub fn play(&self) -> Result<(), TimedError<MotionEvent>> {
-        self.transport.motion().try_send(MotionEvent::Play)?;
+    pub fn play(&self) -> Result<(), TimedError<MotionCommand>> {
+        self.transport.motion().try_send(MotionCommand::Play)?;
         self.record(true);
         Ok(())
     }
@@ -96,10 +96,10 @@ impl TransportHandle {
     /// # Errors
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
-    pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionEvent>> {
+    pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionCommand>> {
         self.transport
             .motion()
-            .try_send(MotionEvent::Stop { fade })?;
+            .try_send(MotionCommand::Stop { fade })?;
         self.record(false);
         Ok(())
     }
@@ -110,21 +110,21 @@ impl TransportHandle {
     /// # Errors
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
-    pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionEvent>> {
+    pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionCommand>> {
         self.transport
             .motion()
-            .try_send(MotionEvent::locate(beat))?;
+            .try_send(MotionCommand::locate(beat))?;
         Ok(())
     }
 
     /// Sends a motion `event` to take effect at `at`: a frame, a beat, or the
     /// next block (`At`, or a `Beat` or `Frame` as it stands). The one timed
-    /// verb: `schedule(b, MotionEvent::Play)` is play at beat `b`, and every
-    /// [`MotionEvent`] (a locate that then rolls, a stop that returns to a
+    /// verb: `schedule(b, MotionCommand::Play)` is play at beat `b`, and every
+    /// [`MotionCommand`] (a locate that then rolls, a stop that returns to a
     /// beat) is timed the same way. The untimed verbs are `At::NextBlock`.
     ///
     /// A beat is reached by playback: it has a frame only while the transport
-    /// rolls. A command that starts the transport rolling ([`MotionEvent::Play`],
+    /// rolls. A command that starts the transport rolling ([`MotionCommand::Play`],
     /// or a locate that then rolls) timed at a beat while the transport is
     /// stopped could only fire after the playback it starts, so it is refused
     /// where it is made. Stopped is the control side's word: the last start or
@@ -141,13 +141,13 @@ impl TransportHandle {
     pub fn schedule(
         &self,
         at: impl Into<At>,
-        event: MotionEvent,
-    ) -> Result<(), TimedError<MotionEvent>> {
+        event: MotionCommand,
+    ) -> Result<(), TimedError<MotionCommand>> {
         let at = at.into();
         let starts = matches!(
             event,
-            MotionEvent::Play
-                | MotionEvent::Locate {
+            MotionCommand::Play
+                | MotionCommand::Locate {
                     then: AfterLocate::Play,
                     ..
                 }
@@ -162,12 +162,12 @@ impl TransportHandle {
         self.transport.motion().schedule(at, event)?;
         if at == At::NextBlock {
             match event {
-                MotionEvent::Play
-                | MotionEvent::Locate {
+                MotionCommand::Play
+                | MotionCommand::Locate {
                     then: AfterLocate::Play,
                     ..
                 } => self.record(true),
-                MotionEvent::Stop { .. } => self.record(false),
+                MotionCommand::Stop { .. } => self.record(false),
                 _ => {}
             }
         }

@@ -7,7 +7,7 @@
 
 use tutti::graph::Node;
 use tutti::{
-    At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Frame, Meter, MeterMap, MotionEvent,
+    At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Frame, Meter, MeterMap, MotionCommand,
     SampleRate, Seconds, TransportCommand,
 };
 use tutti_nodes::testing::Const;
@@ -102,13 +102,13 @@ fn a_timed_transport_program_needs_only_the_root() {
     let transport = Transport::new(SampleRate::SR_48K);
     transport
         .motion()
-        .schedule(At::Frame(Frame::new(128)), MotionEvent::Play)
+        .schedule(At::Frame(Frame::new(128)), MotionCommand::Play)
         .expect("room");
     transport
         .motion()
         .schedule(
             At::Beat(Beat::new(16.0)),
-            TransportCommand::Motion(MotionEvent::stop()),
+            TransportCommand::Motion(MotionCommand::stop()),
         )
         .expect("room");
     assert_eq!(transport.motion().scheduled_outstanding(), 2);

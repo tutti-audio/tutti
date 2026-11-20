@@ -18,8 +18,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Bed, ChannelTopology};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
-    BufferTarget, Control, Error, FileTarget, Job, Normalize, NormalizeSpec, Output, Placement,
-    Produced, RenderGraph, Setup, TargetError, render,
+    BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Placement, Produced,
+    RenderError, RenderGraph, Setup, TargetError, render,
 };
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutPort, Prepare, Shape,
@@ -418,7 +418,7 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
     assert!(
         matches!(
             err,
-            Error::Target {
+            RenderError::Target {
                 output: 0,
                 why: TargetError::Lanes { lanes, placement }
             } if lanes == ChannelLayout::STEREO && placement == ChannelLayout::MONO
@@ -445,7 +445,7 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
     .expect_err("two lanes are not three");
     assert!(matches!(
         err,
-        Error::Target {
+        RenderError::Target {
             output: 1,
             why: TargetError::Lanes { .. }
         }
@@ -486,7 +486,7 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
     assert!(
         matches!(
             err,
-            Error::Target {
+            RenderError::Target {
                 output: 1,
                 why: TargetError::Placement(_)
             }
@@ -616,7 +616,7 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
     )
     .expect_err("a file cannot replace a directory");
     match err {
-        Error::NotCommitted { landed, cause } => {
+        RenderError::NotCommitted { landed, cause } => {
             assert_eq!(landed, std::slice::from_ref(&first));
             let tutti_codec::Error::Commit(commit) = &cause else {
                 panic!("a failed rename is a commit error, got {cause:?}");
@@ -659,7 +659,7 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &mut Control::none(),
     )
     .expect_err("a file cannot replace a directory");
-    let Error::Encode(tutti_codec::Error::Commit(commit)) = &err else {
+    let RenderError::Encode(tutti_codec::Error::Commit(commit)) = &err else {
         panic!("a failed first rename is a commit error, got {err:?}");
     };
     std::fs::remove_file(commit.kept()).unwrap();
@@ -698,7 +698,7 @@ fn outputs_that_contradict_each_other_are_named_errors() {
 
     assert!(matches!(
         run(vec![]).expect_err("nothing to render"),
-        Error::NoOutputs
+        RenderError::NoOutputs
     ));
     for (outputs, bad) in [
         (
@@ -721,7 +721,7 @@ fn outputs_that_contradict_each_other_are_named_errors() {
         assert!(
             matches!(
                 err,
-                Error::Target { why: TargetError::GainSource { index }, .. } if index == bad
+                RenderError::Target { why: TargetError::GainSource { index }, .. } if index == bad
             ),
             "{err:?}"
         );
@@ -730,7 +730,7 @@ fn outputs_that_contradict_each_other_are_named_errors() {
     assert!(
         matches!(
             err,
-            Error::Target {
+            RenderError::Target {
                 output: 1,
                 why: TargetError::SamePath { other: 0 }
             }
@@ -784,7 +784,7 @@ fn an_unmeasurable_output_names_its_index() {
     assert!(
         matches!(
             err,
-            Error::Unmeasurable {
+            RenderError::Unmeasurable {
                 output: Some(1),
                 ..
             }
@@ -863,7 +863,7 @@ fn a_lufs_output_with_no_placement_is_refused_before_the_render() {
     assert!(
         matches!(
             err,
-            Error::Target {
+            RenderError::Target {
                 output: 0,
                 why: TargetError::UnplacedLoudness { channels }
             } if channels == ChannelLayout::from(3u16)

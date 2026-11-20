@@ -28,7 +28,7 @@ use tutti_rt::Mint;
 use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::graph::CrossfadeRefused;
-use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent, SessionFloat};
+use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent, SessionFloat, Trim};
 
 /// What [`Session::add_input`] opens: the capture device, which of its inputs,
 /// and how deep the ring that carries them into the graph is.
@@ -60,7 +60,7 @@ pub struct InputConfig {
     /// The sample format to open the device at, at the graph's rate
     /// ([`MicConfig::sample_format`]): `None` is `F32` when the device offers
     /// it. A format the device lacks fails the open with
-    /// [`tutti_cpal::Error::InputFormatUnavailable`].
+    /// [`tutti_cpal::DeviceError::InputFormatUnavailable`].
     pub sample_format: Option<SampleFormat>,
     /// The depth of the ring into the graph, in time at the input's rate:
     /// shallow on purpose, so a monitored input is heard now and not late. A
@@ -83,44 +83,6 @@ impl Default for InputConfig {
             capacity: MONITOR_RING,
             offset: Trim::NONE,
         }
-    }
-}
-
-/// A manual shift of where a take is placed, either way: a trim that can only
-/// move later could not undo a device that reports too much latency.
-///
-/// ```
-/// use tutti_session::Trim;
-/// use tutti_units::Samples;
-///
-/// assert_eq!(Trim::default(), Trim::NONE);
-/// assert_eq!(Trim::Earlier(Samples::new(64)).frames(), -64);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Trim {
-    /// Place the take this many frames later than the reported latencies say.
-    Later(Samples),
-    /// Place it this many frames earlier.
-    Earlier(Samples),
-}
-
-impl Trim {
-    /// No trim.
-    pub const NONE: Trim = Trim::Later(Samples::ZERO);
-
-    /// The trim as a signed frame count, positive for later.
-    #[must_use]
-    pub fn frames(self) -> i128 {
-        match self {
-            Self::Later(n) => n.get() as i128,
-            Self::Earlier(n) => -(n.get() as i128),
-        }
-    }
-}
-
-impl Default for Trim {
-    fn default() -> Self {
-        Self::NONE
     }
 }
 
@@ -215,7 +177,7 @@ pub struct OpenedInput<F: Float = f32> {
     /// the producer prefills). A ring that is not prefilled has none: `0` is
     /// that statement, not a missing figure; the capture's own delay is
     /// [`Device::latency`](crate::Device::latency)'s `input`. A take states it
-    /// as [`TakeLatency::inlet_lead`](crate::TakeLatency::inlet_lead).
+    /// as [`TakeLatency::lead`](crate::TakeLatency::lead).
     pub lead: Samples,
 }
 

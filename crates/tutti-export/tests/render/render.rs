@@ -809,7 +809,7 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
     assert!(
         matches!(
             err,
-            tutti_export::Error::Unmeasurable {
+            tutti_export::RenderError::Unmeasurable {
                 reason: Unmeasured::BelowGate,
                 output: Some(0),
                 channels,
@@ -931,7 +931,7 @@ fn normalizing_silence_is_refused() {
         let err = render_normalized_to_file(silence(), &cfg, &FrozenClock, normalize, &path)
             .expect_err("silence has no reading");
         assert!(
-            matches!(&err, tutti_export::Error::Unmeasurable { reason, .. } if *reason == want),
+            matches!(&err, tutti_export::RenderError::Unmeasurable { reason, .. } if *reason == want),
             "{err:?}"
         );
         assert!(!path.exists());
@@ -1050,7 +1050,7 @@ fn an_unmeasurable_rate_fails_rather_than_writing_un_normalized_audio() {
     .expect_err("an unmeasurable rate must not report success");
 
     assert!(
-        matches!(err, tutti_export::Error::Unmeasurable { .. }),
+        matches!(err, tutti_export::RenderError::Unmeasurable { .. }),
         "expected Unmeasurable, got {err:?}"
     );
 }
@@ -1206,7 +1206,7 @@ fn a_zero_width_export_is_rejected_not_a_divide_by_zero() {
     )
     .expect_err("a zero-channel render must not report success");
     assert!(
-        matches!(err, tutti_export::Error::UnsupportedChannels),
+        matches!(err, tutti_export::RenderError::UnsupportedChannels),
         "expected UnsupportedChannels, got {err:?}"
     );
 }
@@ -1217,7 +1217,7 @@ fn a_zero_width_export_is_rejected_not_a_divide_by_zero() {
 /// renders.
 #[test]
 fn a_graph_with_no_place_in_the_file_is_refused() {
-    use tutti_export::{ConfigError, Error};
+    use tutti_export::{ConfigError, RenderError};
     let five = || {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from(5u16));
         let id = g.add(Const::new(0.25, ChannelLayout::from(5u16)));
@@ -1233,7 +1233,7 @@ fn a_graph_with_no_place_in_the_file_is_refused() {
         assert!(
             matches!(
                 err,
-                Err(Error::InvalidConfig(ConfigError::Placement(
+                Err(RenderError::InvalidConfig(ConfigError::Placement(
                     tutti_buffers::FoldError::Unplaced { channel, .. }
                 ))) if channel == usize::from(width)
             ),
@@ -1264,7 +1264,7 @@ fn four_buses(root: Option<ChannelTopology>) -> RenderGraph {
 }
 
 /// The first frame of every plane of a render.
-fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_export::Error> {
+fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_export::RenderError> {
     let cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::from(width));
     let out = render_to_buffers(graph, &cfg, &FrozenClock)?;
     Ok(out.planes().iter().map(|p| p[0]).collect())
@@ -1294,15 +1294,15 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
     // Four buses cannot be placed in a stereo file.
     assert!(matches!(
         first_frame(&mut graph, 2),
-        Err(tutti_export::Error::InvalidConfig(ConfigError::Placement(
-            FoldError::Unplaced { channel: 2, .. }
-        )))
+        Err(tutti_export::RenderError::InvalidConfig(
+            ConfigError::Placement(FoldError::Unplaced { channel: 2, .. })
+        ))
     ));
     // A declaration of another width than the graph is refused.
     let mut graph = four_buses(Some(ChannelTopology::unassigned(ChannelLayout::from(6u16))));
     assert!(matches!(
         first_frame(&mut graph, 6),
-        Err(tutti_export::Error::InvalidConfig(ConfigError::Root(
+        Err(tutti_export::RenderError::InvalidConfig(ConfigError::Root(
             tutti_graph::RootError::Width { .. }
         )))
     ));

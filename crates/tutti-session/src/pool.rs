@@ -38,10 +38,10 @@
 //!
 //! # Stages
 //!
-//! A [`Load`] has one to two stages, each on a named thread: a worker of the
-//! session's executor ([`Load::on_worker`]), a worker and then the main thread
-//! ([`Load::on_worker_then_main`]), the session's own thread
-//! ([`Load::on_session`]), or none ([`Load::ready`]). At most
+//! A [`PoolLoad`] has one to two stages, each on a named thread: a worker of the
+//! session's executor ([`PoolLoad::on_worker`]), a worker and then the main thread
+//! ([`PoolLoad::on_worker_then_main`]), the session's own thread
+//! ([`PoolLoad::on_session`]), or none ([`PoolLoad::ready`]). At most
 //! [`PoolConfig::parallel_loads`] worker stages run at once; the rest wait in
 //! declaration order. A stage on the main thread or the session's thread runs
 //! in an [`update`](Session::update) on it.
@@ -77,7 +77,7 @@ pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
 pub use entry::{
-    Declared, IntoPool, Life, Load, LoadError, Owned, PoolEntry, PoolSet, Retention, Sharing,
+    Declared, IntoPool, Life, LoadError, Owned, PoolEntry, PoolLoad, PoolSet, Retention, Sharing,
     stranded_loads,
 };
 pub(crate) use entry::{Defer, Staged};
@@ -122,9 +122,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     ///
     /// [`PoolError::DuplicateKey`] for a key the set names twice;
     /// [`PoolError::NeedsMainThread`] for a key whose own load has a stage on
-    /// the main thread ([`Load::on_worker_then_main`]) when no update has run
+    /// the main thread ([`PoolLoad::on_worker_then_main`]) when no update has run
     /// on the main thread and this call is not on it. A key of the same kind
-    /// whose load is [`Load::on_worker`] is not refused. The call refuses the
+    /// whose load is [`PoolLoad::on_worker`] is not refused. The call refuses the
     /// set whole: nothing of it is applied.
     pub fn pool<P>(&mut self, parts: impl IntoPool<P, C::Float>) -> Result<(), PoolError<P>>
     where

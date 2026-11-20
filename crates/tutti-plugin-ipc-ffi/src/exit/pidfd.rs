@@ -6,6 +6,8 @@ use std::os::fd::OwnedFd;
 use std::process::Child;
 use std::time::Duration;
 
+use super::Waited;
+
 #[derive(Debug)]
 pub(super) struct Imp {
     pidfd: OwnedFd,
@@ -22,6 +24,7 @@ impl Imp {
 
     /// A watch on the process `pid` of any parent. `None` when it has ended
     /// already or the kernel refused a pidfd.
+    #[cfg(not(loom))]
     pub(super) fn of_pid(pid: u32) -> Option<Self> {
         let pid = Pid::from_raw(i32::try_from(pid).ok()?)?;
         rustix::process::pidfd_open(pid, PidfdFlags::empty())
@@ -29,27 +32,18 @@ impl Imp {
             .map(|pidfd| Self { pidfd })
     }
 
-    /// Blocks until the process has ended: `true`. `false` when the wait
-    /// itself failed.
-    pub(super) fn wait_ended(&self) -> bool {
-        loop {
-            let mut polls = [PollFd::new(&self.pidfd, PollFlags::IN)];
-            match rustix::event::poll(&mut polls, None) {
-                Ok(ready) if ready > 0 => return true,
-                Ok(_) | Err(rustix::io::Errno::INTR) => {}
-                Err(_) => return false,
-            }
-        }
-    }
-
-    pub(super) fn wait(&self, timeout: Duration) -> bool {
+    /// Waits up to `timeout` for the process to end.
+    pub(super) fn wait(&self, timeout: Duration) -> Waited {
         let timeout = Timespec {
             tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
             tv_nsec: timeout.subsec_nanos().into(),
         };
         let mut polls = [PollFd::new(&self.pidfd, PollFlags::IN)];
-        // A signal that interrupts the poll, or any failure to ask, reads as
-        // "may have ended": the owner's `try_wait` is the authority.
-        rustix::event::poll(&mut polls, Some(&timeout)).map_or(true, |ready| ready > 0)
+        match rustix::event::poll(&mut polls, Some(&timeout)) {
+            Ok(ready) if ready > 0 => Waited::Ended,
+            // A signal ends the poll early: the process still runs.
+            Ok(_) | Err(rustix::io::Errno::INTR) => Waited::Running,
+            Err(_) => Waited::Failed,
+        }
     }
 }

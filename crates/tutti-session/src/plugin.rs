@@ -160,8 +160,8 @@ pub(crate) use lost::Lost;
 
 use entry::PooledLink;
 pub use entry::{
-    AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginEntry, PluginInfo,
-    PluginPorts, PooledPlugin,
+    AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginInfo, PluginPorts,
+    PoolPluginEntry, PooledPlugin,
 };
 pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
 pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
@@ -1362,7 +1362,7 @@ pub enum AnyPlugin {}
 impl Key<AnyPlugin> {
     /// Parameter `id` of the plugin, as the target `session.set` writes and a
     /// modulation route or an automation lane targets: the same one
-    /// [`Param::target`](crate::Param::target) gives, and it converts into the
+    /// [`PluginParam::target`](crate::PluginParam::target) gives, and it converts into the
     /// [`ParamRef`](crate::ParamRef) a native node's param does, so a route
     /// names a plugin's parameter and a native one alike.
     ///

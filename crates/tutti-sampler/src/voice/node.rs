@@ -736,7 +736,7 @@ mod tests {
         let mut streamer =
             crate::DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default())
                 .expect("streamer builds");
-        let opening = streamer.open(&path, crate::Placement::HEAD);
+        let opening = streamer.open(&path, crate::StreamStart::HEAD);
         let (stream, reader) =
             crate::testing::wait_for_open(&mut streamer, opening).expect("opens");
         let served = Arc::clone(&reader.status);

@@ -208,7 +208,7 @@ impl<F: SamplerFloat> VoiceSource<F> {
 ///
 /// # There is deliberately no `placement` field
 ///
-/// Placement is the source's alone. Carrying a second copy here makes two clocks
+/// StreamStart is the source's alone. Carrying a second copy here makes two clocks
 /// kept in sync by hand, and the record drifting from the source renders
 /// silence with nothing to point at. Ask the source for its placement.
 #[derive(Debug, Clone, Copy, PartialEq)]

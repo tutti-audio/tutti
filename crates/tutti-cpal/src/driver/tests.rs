@@ -47,7 +47,7 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
         assert!(
             matches!(
                 err,
-                crate::Error::RateChanged { device, graph: g }
+                crate::DeviceError::RateChanged { device, graph: g }
                     if device == SampleRate::SR_48K && g == graph
             ),
             "attempt {attempt}: {err}"

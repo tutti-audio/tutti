@@ -56,10 +56,10 @@ use tutti_units::{SampleRate, Seconds};
 
 use crate::driver_seam::{Fit, device_rate, fit};
 use crate::edge;
-use crate::error::{Error, Result};
+use crate::error::{DeviceError, Result};
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
 use crate::owner::Owned;
-use crate::roster::Direction;
+use crate::roster::DeviceDirection;
 use tutti_engine::{StreamFaults, StreamLatency};
 
 /// Capture-ring capacity: one second, held whole at the stream's rate. Large
@@ -169,7 +169,7 @@ pub struct MicConfig {
     pub inputs: Option<Vec<usize>>,
     /// The sample format to open the device at, at the graph's rate. `None`:
     /// `F32` when the device offers it, else its first format. A format the
-    /// device does not offer is [`Error::InputFormatUnavailable`], never
+    /// device does not offer is [`DeviceError::InputFormatUnavailable`], never
     /// another format. An unsigned device format opens as the signed format of
     /// its width (a `U16` device offers `I16`).
     pub sample_format: Option<SampleFormat>,
@@ -221,14 +221,14 @@ impl<F: Float> MicIn<F> {
     /// plug devices, for one, advertise wide ranges and resample internally.
     ///
     /// # Errors
-    /// [`Error::HostUnavailable`] if the host cannot be opened;
-    /// [`Error::SampleRateMismatch`] if the device cannot run at
-    /// `graph_rate`; [`Error::InputFormatUnavailable`] if it runs at
-    /// `graph_rate` but not at the chosen format; [`Error::InvalidDevice`] if the device does not resolve or
-    /// its configs cannot be queried; [`Error::DeviceNotAvailable`] if it has
-    /// no default input config; [`Error::InvalidConfig`] for an unsupported
-    /// sample format; [`Error::BuildStream`] / [`Error::PlayStream`] from
-    /// CPAL; [`Error::Inputs`] for an empty list of inputs or one the device
+    /// [`DeviceError::HostUnavailable`] if the host cannot be opened;
+    /// [`DeviceError::SampleRateMismatch`] if the device cannot run at
+    /// `graph_rate`; [`DeviceError::InputFormatUnavailable`] if it runs at
+    /// `graph_rate` but not at the chosen format; [`DeviceError::InvalidDevice`] if the device does not resolve or
+    /// its configs cannot be queried; [`DeviceError::DeviceNotAvailable`] if it has
+    /// no default input config; [`DeviceError::InvalidConfig`] for an unsupported
+    /// sample format; [`DeviceError::BuildStream`] / [`DeviceError::PlayStream`] from
+    /// CPAL; [`DeviceError::Inputs`] for an empty list of inputs or one the device
     /// does not have.
     pub fn open(config: &MicConfig, graph_rate: SampleRate) -> Result<Self> {
         Self::open_inner(config, graph_rate, false).map(|(mic, _)| mic)
@@ -265,17 +265,17 @@ impl<F: Float> MicIn<F> {
         monitor: bool,
     ) -> Result<(Self, Option<InletRing<F>>)> {
         let host = DeviceHost::open(mic.host)?;
-        let device = host.device(Direction::Input, &mic.device)?;
+        let device = host.device(DeviceDirection::Input, &mic.device)?;
         let inputs = mic.inputs.as_deref();
         let latency = mic.latency.clone().unwrap_or_default();
         let name = device_name(&device).unwrap_or_default();
         let config = choose_input_config(
             device.supported_input_configs().map_err(|e| {
-                Error::InvalidDevice(format!("cannot query {name:?} input configs: {e}"))
+                DeviceError::InvalidDevice(format!("cannot query {name:?} input configs: {e}"))
             })?,
             device
                 .default_input_config()
-                .map_err(Error::DeviceNotAvailable)?,
+                .map_err(DeviceError::DeviceNotAvailable)?,
             graph_rate,
             mic.sample_format,
             &name,
@@ -323,7 +323,7 @@ impl<F: Float> MicIn<F> {
                 | cpal::SampleFormat::F32
                 | cpal::SampleFormat::F64
         ) {
-            return Err(Error::InvalidConfig(format!(
+            return Err(DeviceError::InvalidConfig(format!(
                 "Unsupported input sample format: {sample_format:?}"
             )));
         }
@@ -399,7 +399,7 @@ impl<F: Float> MicIn<F> {
                 // Checked above, before the thread is spawned.
                 _ => unreachable!("sample format checked before spawn"),
             };
-            stream.play().map_err(Error::PlayStream)?;
+            stream.play().map_err(DeviceError::PlayStream)?;
             Ok(stream)
         })?;
 
@@ -658,7 +658,7 @@ fn build_input<T: cpal::SizedSample + 'static, F: Float>(
             move |err| edge::record(&faults, &err),
             None,
         )
-        .map_err(Error::BuildStream)?;
+        .map_err(DeviceError::BuildStream)?;
     Ok(stream)
 }
 
@@ -676,8 +676,8 @@ fn build_input<T: cpal::SizedSample + 'static, F: Float>(
 ///    scaling, else the first such range;
 /// 2. otherwise the device's own default, if it matches the rate and the
 ///    format;
-/// 3. otherwise [`Error::InputFormatUnavailable`] when a range covers the rate
-///    but none offers `wanted`, else [`Error::SampleRateMismatch`], naming
+/// 3. otherwise [`DeviceError::InputFormatUnavailable`] when a range covers the rate
+///    but none offers `wanted`, else [`DeviceError::SampleRateMismatch`], naming
 ///    both rates.
 pub(crate) fn choose_input_config(
     supported: impl Iterator<Item = cpal::SupportedStreamConfigRange>,
@@ -723,13 +723,13 @@ pub(crate) fn choose_input_config(
 
     match wanted {
         Some(format) if covered || fallback.sample_rate() == rate => {
-            Err(Error::InputFormatUnavailable {
+            Err(DeviceError::InputFormatUnavailable {
                 device_name: device_name.to_string(),
                 format,
                 rate: graph_rate,
             })
         }
-        _ => Err(Error::SampleRateMismatch {
+        _ => Err(DeviceError::SampleRateMismatch {
             device_name: device_name.to_string(),
             device: device_rate(fallback.sample_rate())?,
             graph: graph_rate,

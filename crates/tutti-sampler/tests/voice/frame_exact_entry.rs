@@ -45,7 +45,7 @@ use tutti_music::FrameClock;
 use tutti_sampler::{MemorySource, SlotId, VoicePool};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{
-    MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
+    MotionCommand, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
 };
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
@@ -112,7 +112,7 @@ fn transport() -> Transport {
 /// Render `FRAMES` of `engine` in [`DEVICE`]-frame device blocks, playing; the
 /// left channel.
 fn play(engine: &Engine, t: &Transport) -> Vec<f32> {
-    t.motion().try_send(MotionEvent::Play).expect("room");
+    t.motion().try_send(MotionCommand::Play).expect("room");
     let mut left = Vec::with_capacity(FRAMES);
     let mut buf = vec![0.0f32; DEVICE * 2];
     while left.len() < FRAMES {

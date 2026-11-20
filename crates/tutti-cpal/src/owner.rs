@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use tutti_platform::{ThreadHandle, spawn_named};
 
-use crate::error::{Error, Result};
+use crate::error::{DeviceError, Result};
 
 /// The handle to a value owned by its own thread. Dropping it asks that
 /// thread to drop the value and waits for it, so the stream is stopped when the drop
@@ -30,7 +30,7 @@ impl Owned {
     /// dropped on that one thread.
     ///
     /// # Errors
-    /// Whatever `build` returns, or [`Error::Io`] if the thread cannot be
+    /// Whatever `build` returns, or [`DeviceError::Io`] if the thread cannot be
     /// spawned or `build` panics.
     pub(crate) fn spawn<S: 'static>(
         name: &str,
@@ -53,7 +53,7 @@ impl Owned {
             Ok(Ok(())) => Ok(Self { _thread: thread }),
             Ok(Err(e)) => Err(e),
             // The sender dropped without a result: `build` panicked.
-            Err(_) => Err(Error::Io(std::io::Error::other(
+            Err(_) => Err(DeviceError::Io(std::io::Error::other(
                 "the stream thread panicked while opening",
             ))),
         }

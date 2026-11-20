@@ -301,7 +301,7 @@ mod measurer {
         assert!(
             matches!(
                 err,
-                crate::Error::TopologyWidth { topology, rendered: r }
+                crate::RenderError::TopologyWidth { topology, rendered: r }
                     if topology == Bed::Surround51.width() && r == rendered.layout()
             ),
             "{err:?}"
@@ -319,7 +319,7 @@ mod measurer {
         assert!(
             matches!(
                 err,
-                crate::Error::Unmeasurable {
+                crate::RenderError::Unmeasurable {
                     reason: Unmeasured::Placement,
                     ..
                 }

@@ -10,7 +10,7 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
-use tutti_timeline::{MotionEvent, Timeline, Transport};
+use tutti_timeline::{MotionCommand, Timeline, Transport};
 use tutti_units::{Beat, BeatDuration};
 use tutti_units::{Hz, Q};
 use tutti_units::{SampleRate, Samples};
@@ -72,7 +72,7 @@ fn test_transport_advances_with_graph() {
     let (transport, state) = build_callback_state(sample_rate);
 
     transport.settings().set_tempo(tutti_units::Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
 
     let frames = 256;
     let mut output = vec![0.0f32; frames * 2];
@@ -104,10 +104,10 @@ fn test_transport_loop_wrapping() {
             ),
         )
         .expect("room");
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     let _ = transport
         .motion()
-        .try_send(MotionEvent::locate(Beat::new(3.99)));
+        .try_send(MotionCommand::locate(Beat::new(3.99)));
 
     let frames = 1024;
     let mut output = vec![0.0f32; frames * 2];

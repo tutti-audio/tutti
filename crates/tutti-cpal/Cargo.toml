@@ -32,7 +32,7 @@ testing = []
 # compiles cleanly and reaches nothing.
 #
 # Left enableable on every target deliberately: `AudioHost::Jack` exists on
-# every platform and answers `Error::HostUnavailable` where it cannot be
+# every platform and answers `DeviceError::HostUnavailable` where it cannot be
 # served, so a host's config type does not change shape per OS.
 #
 # Needs libjack at BUILD time on Linux (`libjack-jackd2-dev` /
