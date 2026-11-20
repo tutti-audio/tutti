@@ -1,6 +1,7 @@
 //! [`Sos`]: a cascade of second-order sections, the design and analysis form of an IIR
 //! filter of any order, and the [`Butterworth`], [`ChebyshevI`], [`ChebyshevII`], [`Elliptic`],
-//! [`LinkwitzRiley`], [`MatchedBell`], [`Tilt`] and [`KWeighting`] designs that make one.
+//! [`LinkwitzRiley`], [`MatchedBell`], [`Tilt`], [`Cookbook`], [`GraphicBands`] and
+//! [`KWeighting`] designs that make one.
 //!
 //! A [`Sos`] is plain data: a list of [`Biquad`]s whose product is the response. A first-order section is a [`Biquad`] with `b2 = a2 = 0`.
 //! [`SosBank`] runs one as a cascade of trapezoidal state-variable sections (each section's
@@ -12,7 +13,9 @@ mod bank;
 mod bell;
 mod butterworth;
 mod chebyshev;
+mod cookbook;
 mod elliptic;
+mod graphic;
 mod jacobi;
 mod k_weighting;
 mod tilt;
@@ -32,7 +35,9 @@ pub use butterworth::{
     MAX_GAIN_MAGNITUDE, SosError,
 };
 pub use chebyshev::{ChebyshevI, ChebyshevII};
+pub use cookbook::Cookbook;
 pub use elliptic::{Elliptic, EllipticTolerances};
+pub use graphic::GraphicBands;
 pub use k_weighting::KWeighting;
 pub use tilt::Tilt;
 
@@ -227,6 +232,9 @@ mod tests;
 
 #[cfg(test)]
 mod eq_tests;
+
+#[cfg(test)]
+mod cookbook_tests;
 
 #[cfg(test)]
 mod ripple_tests;
