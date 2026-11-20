@@ -24,6 +24,7 @@ impl Imp {
 
     /// A watch on the process `pid` of any parent. `None` when it has ended
     /// already or cannot be opened.
+    #[cfg(not(loom))]
     pub(super) fn of_pid(pid: u32) -> Option<Self> {
         use std::os::windows::io::FromRawHandle;
         use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};

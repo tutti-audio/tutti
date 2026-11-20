@@ -48,7 +48,8 @@ pub fn has_ended(leader: u32) -> bool {
     )
 }
 
-#[cfg(test)]
+// A loom build leaves the executor out (see `tutti-platform`), and this test with it.
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
     use std::process::Stdio;

@@ -26,6 +26,7 @@ mod platform {
             None
         }
 
+        #[cfg(not(loom))]
         pub(super) fn of_pid(_pid: u32) -> Option<Self> {
             None
         }
@@ -36,6 +37,8 @@ mod platform {
     }
 }
 
+// A loom build leaves the executor out (see `tutti-platform`), and the host watch with it.
+#[cfg(not(loom))]
 mod host_watch;
 
 /// What one OS wait on a process found. A failure to ask is its own case: it
@@ -50,6 +53,7 @@ pub(super) enum Waited {
     Failed,
 }
 
+#[cfg(not(loom))]
 pub use host_watch::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 
 use std::process::Child;

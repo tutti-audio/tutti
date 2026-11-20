@@ -31,6 +31,7 @@ impl Imp {
 
     /// A watch on the process `pid` of any parent. `None` when it has ended
     /// already or the queue was refused.
+    #[cfg(not(loom))]
     pub(super) fn of_pid(pid: u32) -> Option<Self> {
         Self::watching(Pid::from_raw(i32::try_from(pid).ok()?)?)
     }
