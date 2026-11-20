@@ -23,7 +23,11 @@ fn write<F: tutti_dsp::FftFloat>(
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("out.wav");
     let rendered = Rendered::new(planes, RATE, 0).unwrap();
-    let target = FileTarget::new(&path, format, ChannelLayout::STEREO).dither(dither);
+    let target = FileTarget::new(&path, format, ChannelLayout::STEREO);
+    let target = match dither {
+        Some(shape) => target.dither(shape),
+        None => target.no_dither(),
+    };
     let written = write_buffers(&rendered, &target, EventLossPolicy::Fail).unwrap();
     (std::fs::read(&path).unwrap(), written)
 }
@@ -182,7 +186,7 @@ fn an_f64_resample_holds_f64_precision_against_the_analytic_sine() {
     let path = dir.path().join("out.wav");
     let rendered = Rendered::new(vec![plane.clone(), plane], RATE, 0).unwrap();
     let target = FileTarget::new(&path, Format::Wav(Pcm::Float64), ChannelLayout::STEREO)
-        .resample(Some(Resample::to(OUT)));
+        .resample(Resample::to(OUT));
     write_buffers(&rendered, &target, EventLossPolicy::Fail).unwrap();
 
     let bytes = std::fs::read(&path).unwrap();

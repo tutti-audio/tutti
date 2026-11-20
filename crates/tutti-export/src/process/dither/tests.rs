@@ -3,7 +3,11 @@ use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm, Quality};
 
 fn config(dither: Option<DitherShape>, format: Format) -> FileTarget {
-    FileTarget::new("unused.wav", format, ChannelLayout::STEREO).dither(dither)
+    let target = FileTarget::new("unused.wav", format, ChannelLayout::STEREO);
+    match dither {
+        Some(shape) => target.dither(shape),
+        None => target.no_dither(),
+    }
 }
 
 fn wav(pcm: Pcm) -> Format {

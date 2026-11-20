@@ -91,10 +91,19 @@ impl Case {
         path: impl Into<std::path::PathBuf>,
         normalize: Option<Normalize>,
     ) -> FileTarget {
-        FileTarget::new(path, self.format, self.channels)
-            .resample(self.resample)
-            .dither(self.dither)
-            .normalize(normalize.map(NormalizeSpec::own))
+        let target = FileTarget::new(path, self.format, self.channels);
+        let target = match self.resample {
+            Some(resample) => target.resample(resample),
+            None => target,
+        };
+        let target = match self.dither {
+            Some(shape) => target.dither(shape),
+            None => target.no_dither(),
+        };
+        match normalize {
+            Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
+            None => target,
+        }
     }
 
     fn buffer_target(&self) -> BufferTarget {

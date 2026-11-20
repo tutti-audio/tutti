@@ -146,20 +146,30 @@ impl FileTarget {
 
     /// Writes at another rate than the render's.
     #[must_use]
-    pub fn resample(mut self, resample: Option<Resample>) -> Self {
-        self.resample = resample;
+    pub fn resample(mut self, resample: Resample) -> Self {
+        self.resample = Some(resample);
         self
     }
 
-    /// The noise added when an integer width is quantized; `None` adds none.
-    /// A format with no integer width (`Pcm::Float32`, Ogg Vorbis) ignores it.
+    /// The noise added when an integer width is quantized: triangular unless
+    /// this or [`no_dither`](Self::no_dither) says otherwise. A format with no
+    /// integer width (`Pcm::Float32`, Ogg Vorbis) ignores it.
     #[must_use]
-    pub fn dither(mut self, dither: Option<DitherShape>) -> Self {
-        self.dither = dither;
+    pub fn dither(mut self, shape: DitherShape) -> Self {
+        self.dither = Some(shape);
         self
     }
 
-    /// Normalizes this output ([`NormalizeSpec`]); `None` writes it as rendered.
+    /// No dither when an integer width is quantized: the rounding error is
+    /// left as it falls. A format with no integer width ignores it.
+    #[must_use]
+    pub fn no_dither(mut self) -> Self {
+        self.dither = None;
+        self
+    }
+
+    /// Normalizes this output ([`NormalizeSpec`]); without it the output is
+    /// written as rendered.
     ///
     /// [`Normalize::Lufs`] weights loudness by where each channel's speaker
     /// stands, so it needs a placement: the topology stated by
@@ -170,8 +180,8 @@ impl FileTarget {
     /// starts ([`TargetError::UnplacedLoudness`]), before any frame is
     /// rendered.
     #[must_use]
-    pub fn normalize(mut self, normalize: Option<NormalizeSpec>) -> Self {
-        self.normalize = normalize;
+    pub fn normalize(mut self, normalize: NormalizeSpec) -> Self {
+        self.normalize = Some(normalize);
         self
     }
 

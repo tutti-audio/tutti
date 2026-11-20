@@ -18,11 +18,11 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     // The copy is probed before the session's variables are set.
     crate::pooled::prime(&PluginRef::file(&copy));
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "40")], |b| {
-        b.plugin_recovery(Some(tutti_session::RecoveryPolicy {
+        b.plugin_recovery(tutti_session::RecoveryPolicy {
             max_failures: 2,
             backoff: Duration::from_millis(1),
             ..Default::default()
-        }))
+        })
     });
     let node = s
         .load_plugin_blocking(
@@ -146,7 +146,7 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
         ],
         |b| {
             b.plugin_hang(quick_hang_policy())
-                .plugin_recovery(Some(quick_reload_policy()))
+                .plugin_recovery(quick_reload_policy())
                 .executor(tutti_platform::Executor::new(move |job| {
                     if seen.load(Ordering::SeqCst) {
                         let pid = pid_cell.load(Ordering::SeqCst);
