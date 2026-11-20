@@ -8,7 +8,7 @@
 #       chain-result  a chained option (`self` in, `Self` out) that returns a `Result`
 #       setter        a `pub fn set_*` taking `&self` or `&mut self`
 #       node-ctor     a public constructor on a `*Node`
-#       config-width  a `*Config` constructor whose first parameter is not a width
+#       config-width  a node config's (a `*Config` converted into a `*Node`) constructor whose first parameter is not a width
 #       ctor-result   a receiverless `pub fn` returning its type in a `Result`
 #       range-macro   a `macro_rules!` writing a range type outside tutti-units and tutti-rt's id.rs
 #       option-arg    a chained option (`self` in, `Self` out) that takes an `Option`
@@ -158,7 +158,6 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProces
 tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc
-tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::IpcConfig::at
 tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/batcher.rs::Batcher::set_offline_wait
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_listener
