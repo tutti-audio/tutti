@@ -75,6 +75,7 @@ macro_rules! contract {
             note_at_offset,
             arrival_is_ordered_and_sized,
             transport_reaches_the_plugin,
+            the_automation_mode_reaches_the_plugin,
             transport_change_is_told_at_its_frame,
             state_round_trip,
             loaded_write_reaches_the_audio,

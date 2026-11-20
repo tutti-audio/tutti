@@ -309,10 +309,13 @@ macro_rules! served_control {
                 self.link.bridge.audio().current_preset()
             }
 
-            /// Advisory only: the outcome `AnyThread::set_automation_mode`
-            /// reports has no `Control` form.
-            fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) {
-                let _ = AnyThread::set_automation_mode(self, mode);
+            /// Whether `AnyThread::set_automation_mode` delivered the mode.
+            fn set_automation_state(
+                &mut self,
+                _main: MainThreadMarker,
+                mode: AutomationMode,
+            ) -> bool {
+                AnyThread::set_automation_mode(self, mode).is_ok()
             }
 
             /// What the plugin re-reported since the last call (a latency or

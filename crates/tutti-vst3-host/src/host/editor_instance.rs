@@ -113,7 +113,7 @@ impl Editor for Vst3Editor {
         // is the instance whose editor shows the knob-glow feedback. The host
         // crate encodes the format-neutral mode onto the VST3 `IAutomationState`
         // bitmask.
-        Control::set_automation_state(&mut self.inner, main, mode);
+        let _ = Control::set_automation_state(&mut self.inner, main, mode);
     }
 
     fn set_state(&mut self, main: MainThreadMarker, data: &[u8]) -> PluginResult<()> {

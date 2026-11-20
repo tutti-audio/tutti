@@ -15,12 +15,12 @@ use dpi::{LogicalSize, Size};
 use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
-    AuComponentType, AutomationMode, BypassWrite, ContentScale, Control, EditorCapabilities,
-    EditorError, EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker,
-    OwnBypass, ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamWriteError,
-    ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId,
-    PluginResult, PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport, Request,
-    RescanScope, StateUse, WindowHandle, Wraps, taken,
+    AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
+    EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker, OwnBypass,
+    ParamEdit, ParamFlags, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
+    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginResult,
+    PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse,
+    WindowHandle, Wraps, taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -523,10 +523,6 @@ impl Control for AuLoaded {
     /// there is no honest value to fabricate.
     fn current_preset(&mut self, _main: MainThreadMarker) -> Option<PresetId> {
         self.current_preset_figure()
-    }
-
-    fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) {
-        let _ = mode;
     }
 
     fn rescan_parameters(&mut self, _main: MainThreadMarker, scope: RescanScope) {

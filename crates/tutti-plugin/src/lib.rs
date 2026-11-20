@@ -203,10 +203,14 @@
 //! | `SEQUENCER_CONTEXT` | Best-effort | ◐ | ✕ | ✕ | ✕ |
 //! | `PRESET_LIST` | Reaction | ◐ | ○ | ◐ | ◐ |
 //! | `PRESET_LOAD` | Reaction | ◐ | ◐ | ◐ | ◐ |
+//! | `AUTOMATION_STATE` | Reaction | ◐ | ◐ | ✕ | ● |
 //! | `RENDER_MODE` | Reaction | ● | ◐ | ◐ | ● |
 //! | `EDITOR_FLOATING` | Negotiated | ✕ | ◐ | ✕ | ✕ |
 //!
-//! Notes: the AU loader reports `MIDI_IN`, `EDITOR`, `TRANSPORT`, `RENDER_MODE`
+//! Notes: `AUTOMATION_STATE` is probed where the plugin may lack the channel (VST3
+//! `IAutomationState`, CLAP `param-indication`); the AU specification has no
+//! host-to-plugin automation state, and VST2's is the host's answer to
+//! `audioMasterGetAutomationState`. The AU loader reports `MIDI_IN`, `EDITOR`, `TRANSPORT`, `RENDER_MODE`
 //! and the two preset bits; its f64 path is unimplemented (`○`), not spec-impossible,
 //! and it never reports `MIDI_OUT`. AU's `TRANSPORT` is `◐` because it reports whether the unit
 //! accepted `kAudioUnitProperty_HostCallbacks`; the loader feeds it every block. AU's `MIDI_IN` is `◐` off the component type (`aumu` /

@@ -198,6 +198,9 @@ mod tests {
         }
         b.extend_from_slice(&132f64.to_bits().to_le_bytes());
         b.extend_from_slice(&6.5f64.to_bits().to_le_bytes());
+        // The automation state: told 3 times, the last raw value 2.
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&2u32.to_le_bytes());
         b
     }
 
@@ -220,6 +223,7 @@ mod tests {
                 ramp: None,
             }]
         );
+        assert_eq!((t.automation_sent, t.automation_last), (3, 2));
         assert_eq!(t.transports_sent, 1);
         assert_eq!(
             t.transports,

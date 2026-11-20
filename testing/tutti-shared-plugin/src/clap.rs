@@ -26,6 +26,9 @@ use clap_sys::ext::note_ports::{
     CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, clap_note_port_info,
     clap_plugin_note_ports,
 };
+use clap_sys::ext::param_indication::{
+    CLAP_EXT_PARAM_INDICATION, CLAP_EXT_PARAM_INDICATION_COMPAT, clap_plugin_param_indication,
+};
 use clap_sys::ext::params::{
     CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_READONLY,
     CLAP_PARAM_IS_STEPPED, clap_param_info, clap_plugin_params,
@@ -229,6 +232,22 @@ fn to_normalized(id: u32, plain: f64) -> f64 {
         core::MODE => plain / f64::from(core::MODES - 1),
         _ => plain,
     }
+}
+
+static PARAM_INDICATION: clap_plugin_param_indication = clap_plugin_param_indication {
+    set_mapping: None,
+    set_automation: Some(indication_automation),
+};
+
+/// The host's automation state for one parameter, recorded as it came.
+unsafe extern "C" fn indication_automation(
+    p: *const clap_plugin,
+    _param_id: u32,
+    automation_state: u32,
+    _color: *const clap_sys::color::clap_color,
+) {
+    // SAFETY: the host passes the plugin it was given.
+    unsafe { inst(p) }.core.log_automation(automation_state);
 }
 
 static PARAMS: clap_plugin_params = clap_plugin_params {
@@ -678,6 +697,8 @@ unsafe extern "C" fn get_extension(_p: *const clap_plugin, id: *const c_char) ->
         &|| &PARAMS as *const _ as *const c_void
     } else if id == CLAP_EXT_STATE {
         &|| &STATE as *const _ as *const c_void
+    } else if id == CLAP_EXT_PARAM_INDICATION || id == CLAP_EXT_PARAM_INDICATION_COMPAT {
+        &|| &PARAM_INDICATION as *const _ as *const c_void
     } else {
         return ptr::null();
     };
