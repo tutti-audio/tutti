@@ -189,7 +189,7 @@ pub use graph::{
     NotReopened, Reopened, ReplaceRefused, RootReader, Taps,
 };
 #[cfg(feature = "capture")]
-pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
+pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use job::{Job, JobId, JobKind, JobOutput, JobStatus, WaitError, WorkerError};
@@ -237,7 +237,7 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange,
-    PluginDeclaration, PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginPorts,
+    PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginPorts, PoolPluginEntry,
     PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
     SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
 };
@@ -245,10 +245,10 @@ pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
-    PoolState, RefreshPool, RefreshReport, Retention, RetryError, Sharing, WhenLoadedError,
-    stranded_loads,
+    Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
+    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
+    PoolSet, PoolState, RefreshPool, RefreshReport, Retention, RetryError, Sharing,
+    WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::{Hold, HoldKind};
@@ -264,7 +264,7 @@ pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
-pub use plugin_params::{Param, ParamGesture, PluginParams};
+pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};

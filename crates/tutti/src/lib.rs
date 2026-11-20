@@ -458,25 +458,22 @@ pub mod session {
     pub use tutti_modulation::PeriodPoint;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
-    #[cfg(feature = "plugin")]
-    pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{
-        BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
-        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
-        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, Inlet, InletError,
-        LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened, Outlet, OutputPlacement,
-        OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer, PeerError,
-        Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, RemoveError,
-        Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration, RootReader,
-        RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError, Weighted, Wire,
-        root_width,
+        BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade, CrossfadeId,
+        CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
+        RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError,
+        Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
         Timeline,
     };
     // The pool.
-    pub use tutti_session::Load as PoolLoad;
+    pub use tutti_session::PoolLoad;
     pub use tutti_session::WorkerError;
     pub use tutti_session::{
         Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
@@ -495,8 +492,7 @@ pub mod session {
     pub use tutti_session::{
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, BufferMaster,
         BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master, NoMaster,
-        Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
-        Stage as BounceStage,
+        Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample, Stage,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
@@ -536,7 +532,7 @@ pub mod session {
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, LoadedPlugin, ParamGesture, PluginCause,
-        PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal, Recovery, RecoveryAction,
+        PluginParam, PluginPorts, PoolPluginEntry, PortsRefusal, Recovery, RecoveryAction,
         RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateJobFailed,
         StateRestore, StateView,
     };

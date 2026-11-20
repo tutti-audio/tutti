@@ -29,7 +29,7 @@ use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::StateError;
 use tutti_plugin_types::{PluginRefresh, StateUse};
 
-use super::entry::{Hosted, PluginEntry};
+use super::entry::{Hosted, PoolPluginEntry};
 use super::{PluginRef, PluginSignal, queue};
 use crate::job::job_kind;
 use crate::{HandleError, Job, PoolKey, Session, WaitError, WorkerError};
@@ -198,7 +198,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.entries.loaded::<P, PluginEntry>(key)?;
+        self.pool.entries.loaded::<P, PoolPluginEntry>(key)?;
         let pool_key = PoolKey::new(key);
         // At most one node links a key: `add_pooled_plugin` refuses a key a
         // node already holds (`AddPluginError::Installed`) and a swap keeps
