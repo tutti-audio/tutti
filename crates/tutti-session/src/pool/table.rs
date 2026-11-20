@@ -110,8 +110,7 @@ pub enum RetryError<K: fmt::Debug> {
     NeedsMainThread(K),
 }
 
-/// Why a key's reader (`Session::midi_input`, `midi_output`, `midi_sink`) found
-/// nothing.
+/// Why a key's reader (`Session::plugin`) found nothing.
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HandleError<K: fmt::Debug> {
