@@ -8,7 +8,8 @@ use tutti_platform::Instant;
 
 use super::listener::Listener;
 
-use tutti_fixtures::midi::note_on;
+use tutti_fixtures::main_thread;
+use tutti_fixtures::midi::{device_identity, note_on};
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::{
@@ -16,14 +17,22 @@ use tutti_midi_hardware::{
     VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
+use tutti_platform::MainThreadMarker;
 use tutti_ump::EndpointName;
 use tutti_ump::{MidiChannel, Ump};
 
 const PATIENCE: Duration = Duration::from_secs(30);
 
+/// The main-thread proof for an endpoint that declares no Function Blocks: such an
+/// endpoint is no main-thread object on any backend, so the fixture's stand-in is
+/// enough. Never use it for one with blocks (`tests/virtual_blocks`).
+fn plain_endpoint_main() -> MainThreadMarker {
+    main_thread()
+}
+
 fn spec(tag: &str) -> VirtualSpec {
     let name = format!("tutti-loop-{}-{tag}", std::process::id());
-    VirtualSpec::new(EndpointName::new(&name).unwrap())
+    VirtualSpec::new(EndpointName::new(&name).unwrap(), device_identity(), None)
 }
 
 /// A session over four inlet slots, and the graph that plays them.
@@ -66,7 +75,7 @@ fn notes() -> Vec<Ump> {
 #[test]
 fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
     let spec = spec("source");
-    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
     let (mut io, mut graph) = session();
     let device = listed(|| io.inputs(), &spec);
     let tutti_midi_hardware::Connected::Opened(inlet) =
@@ -94,7 +103,8 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
     let (io, mut graph) = session();
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
+    let destination = VirtualDestination::open(&spec, producer, plain_endpoint_main())
+        .expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
     graph.ready(
@@ -125,7 +135,8 @@ fn a_midi1_destination_delivers_what_the_input_node_widens() {
     let io = MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
+    let _destination = VirtualDestination::open(&spec, producer, plain_endpoint_main())
+        .expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
     graph.ready(

@@ -75,13 +75,19 @@
 //!
 //! A [`VirtualSource`] is an endpoint this process publishes for other
 //! applications to read from, and a [`VirtualDestination`] one they write to; a
-//! [`VirtualSpec`] gives the name, the [`VirtualProtocol`] and the Function
-//! Blocks. A destination delivers into an [`InputProducerHandle`], so its events
+//! [`VirtualSpec`] gives the name, the Device Identity and Product Instance Id,
+//! the [`VirtualProtocol`] and the Function Blocks. Opening one takes a
+//! `MainThreadMarker`, and both types are `!Send` and `!Sync` on every platform
+//! (macOS's UMP Endpoint is a main-thread object); a [`VirtualSender`] sends from
+//! another thread. A destination delivers into an [`InputProducerHandle`], so its events
 //! take the path a device input's do. Where the platform cannot publish what the
 //! spec asks, opening says so: [`MidiHardwareError::Unsupported`] where there is no backend
 //! or the API has no virtual ports (Windows Multimedia),
-//! [`MidiHardwareError::VirtualBlocksUnsupported`] for Function Blocks on macOS, where an
-//! endpoint carries a name and a protocol only. On Linux the sequencer is
+//! [`MidiHardwareError::VirtualBlocksUnsupported`] for Function Blocks on macOS before 15,
+//! where an endpoint carries a name and a protocol only (from macOS 15 the endpoint is
+//! a UMP Endpoint that declares its blocks and its identity; CoreMIDI numbers the blocks
+//! itself in registration order and has no MIDI-CI version, so a block that needs either is [`MidiHardwareError::Os`] with the
+//! refusal named). On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
 //! client otherwise; the endpoint reports the protocol it got.
 //!
@@ -291,7 +297,9 @@ pub use profiles::{
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
-pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
+pub use virtual_endpoint::{
+    VirtualDestination, VirtualProtocol, VirtualSender, VirtualSource, VirtualSpec,
+};
 
 // --- Standard MIDI File codec: NOT here ---
 //
