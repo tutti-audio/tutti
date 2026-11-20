@@ -228,3 +228,25 @@ fn the_wraps_hold_their_half_open_range_at_the_seam() {
             .is_nan()
     );
 }
+
+/// **A float unit serializes and deserializes refusing NaN, keeping an infinity and a finite raw
+/// exactly.**
+/// Read through serde's own `f64` deserializer, which carries every IEEE value (JSON
+/// carries no NaN).
+#[cfg(feature = "serde")]
+#[test]
+fn a_float_unit_serializes_and_deserializes_refusing_nan_and_keeping_an_infinity() {
+    use serde::Deserialize;
+    use serde::de::IntoDeserializer;
+    use serde::de::value::{Error, F64Deserializer};
+    let read = |raw: f64| Db::deserialize::<F64Deserializer<Error>>(raw.into_deserializer());
+    assert!(read(f64::NAN).is_err());
+    assert!(serde_json::to_string(&Db::new(f64::NAN)).is_err());
+    assert_eq!(read(f64::NEG_INFINITY).unwrap().get(), f64::NEG_INFINITY);
+    assert_eq!(read(-6.0).unwrap(), Db::new(-6.0));
+    assert_eq!(
+        serde_json::from_str::<Seconds>(&serde_json::to_string(&Seconds::new(1.5)).unwrap())
+            .unwrap(),
+        Seconds::new(1.5)
+    );
+}
