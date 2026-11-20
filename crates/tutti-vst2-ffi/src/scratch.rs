@@ -35,7 +35,7 @@ use crate::host::RenderHandle;
 /// block that was not staged:
 ///
 /// ```compile_fail,E0616
-/// # use tutti_vst2_ffi::scratch::RenderScratch;
+/// # use tutti_vst2_ffi::RenderScratch;
 /// # use tutti_buffers::FloatWidth;
 /// # use tutti_plugin_types::ChannelLayout;
 /// let scratch = RenderScratch::new(
@@ -48,7 +48,7 @@ use crate::host::RenderHandle;
 /// ```
 ///
 /// ```compile_fail,E0603
-/// use tutti_vst2_ffi::scratch::Rows;
+/// use tutti_vst2_ffi::Rows;
 /// ```
 pub struct RenderScratch {
     rows: Format,

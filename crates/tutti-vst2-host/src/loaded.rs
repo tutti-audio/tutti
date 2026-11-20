@@ -11,18 +11,20 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginError};
+use tutti_plugin_types::{
+    ChannelLayout, MainThreadMarker, MainWorkHandle, PluginError, PluginTail, Samples, Vst2Category,
+};
 
-use vst::host::{PluginInstance, PluginLoadError, PluginLoader};
-use vst::plugin::Category;
+use vst::Category;
+use vst::{PluginInstance, PluginLoadError, PluginLoader};
 
 use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef, PluginVersion};
 
 use crate::error::{LoadStage, Result, Vst2Error};
 use crate::host::{HostState, MIDI_OUT_QUEUE_CAPACITY, PARAM_QUEUE_CAPACITY, ParameterChange};
-use crate::midi::MidiIo;
 use crate::transport_cell::TransportWriter;
-use crate::types::{ChannelLayout, PluginInfo, PluginTail, Samples, Vst2Category};
+use crate::types::PluginInfo;
+use vst::MidiIo;
 
 /// The rate and block size the plugin is told nothing of before its first
 /// activation, and answers `audioMasterGetSampleRate` / `GetBlockSize` with
@@ -58,33 +60,32 @@ pub(crate) fn decode_tail(raw: isize) -> PluginTail {
     }
 }
 
-/// Maps the `vst` crate's `Category` to the shared [`Vst2Category`] mirror.
-/// A free fn rather than a `From` impl: both `Category` (from `vst`) and
+/// Maps the plugin's `effGetPlugCategory` answer to the shared [`Vst2Category`] mirror.
+/// A free fn rather than a `From` impl: [`Category`] (from `tutti-vst2-ffi`) and
 /// `Vst2Category` (from `tutti-plugin-types`) are foreign here, so the orphan
 /// rule forbids the impl.
 ///
-/// Takes `raw` alongside the decoded enum because `Category::Unknown` is where
-/// the `vst` crate puts every code it does not name, including
-/// `kPlugCategUnknown` itself. Only the number tells those apart, so it is
-/// carried into [`Vst2Category::Unrecognized`] rather than discarded.
+/// A code VST 2.4 gives no meaning (`Err`), and `kPlugCategUnknown` itself, carry their
+/// number into [`Vst2Category::Unrecognized`] rather than discarding it.
 ///
 /// This function is never reached without a plugin having answered, so it never
-/// produces [`Vst2Category::Unasked`] — that variant belongs to paths that did
+/// produces [`Vst2Category::Unasked`]: that variant belongs to paths that did
 /// not query at all.
-fn map_category(c: Category, raw: i32) -> Vst2Category {
-    match c {
-        Category::Unknown => Vst2Category::Unrecognized(raw),
-        Category::Effect => Vst2Category::Effect,
-        Category::Synth => Vst2Category::Synth,
-        Category::Analysis => Vst2Category::Analysis,
-        Category::Mastering => Vst2Category::Mastering,
-        Category::Spacializer => Vst2Category::Spacializer,
-        Category::RoomFx => Vst2Category::RoomFx,
-        Category::SurroundFx => Vst2Category::SurroundFx,
-        Category::Restoration => Vst2Category::Restoration,
-        Category::OfflineProcess => Vst2Category::OfflineProcess,
-        Category::Shell => Vst2Category::Shell,
-        Category::Generator => Vst2Category::Generator,
+fn map_category(answer: std::result::Result<Category, vst::UnknownPrimitive>) -> Vst2Category {
+    match answer {
+        Err(code) => Vst2Category::Unrecognized(i32::try_from(code.get()).unwrap_or(i32::MAX)),
+        Ok(Category::Unknown) => Vst2Category::Unrecognized(0),
+        Ok(Category::Effect) => Vst2Category::Effect,
+        Ok(Category::Synth) => Vst2Category::Synth,
+        Ok(Category::Analysis) => Vst2Category::Analysis,
+        Ok(Category::Mastering) => Vst2Category::Mastering,
+        Ok(Category::Spacializer) => Vst2Category::Spacializer,
+        Ok(Category::RoomFx) => Vst2Category::RoomFx,
+        Ok(Category::SurroundFx) => Vst2Category::SurroundFx,
+        Ok(Category::Restoration) => Vst2Category::Restoration,
+        Ok(Category::OfflineProcess) => Vst2Category::OfflineProcess,
+        Ok(Category::Shell) => Vst2Category::Shell,
+        Ok(Category::Generator) => Vst2Category::Generator,
     }
 }
 
@@ -418,8 +419,8 @@ impl Vst2Loaded {
         // MIDI classification. Pin count / category is the primary signal, but
         // MIDI-effect plugins routinely declare 0 MIDI pins and advertise
         // capability only via `canDo`, so those weaker signals are OR-ed in.
-        use vst::api::Supported;
-        use vst::plugin::CanDo;
+        use vst::CanDo;
+        use vst::Supported;
 
         // `effCanDo` has three answers and they are not interchangeable: `1` =
         // yes, `0` = "don't know", `-1` = explicitly no. Folding `No` in with
@@ -436,12 +437,9 @@ impl Vst2Loaded {
             }
         }
 
-        // Pin counts come from the live opcodes, not from `info`: `get_info()`
-        // hardcodes both to 0 (its snapshot predates `effOpen`, and the fork
-        // does not fill them), so reading them there would make every pin term
-        // a dead `false`. For `emits_midi` that would be its *only* inferred
-        // term, so a plugin answering `Maybe` to `sendVstMidiEvent` would
-        // resolve to `false` and have its MIDI output dropped.
+        // MIDI pin counts come from the live opcodes: the snapshot in `info` predates
+        // `effOpen` and holds none. For `emits_midi` the pin term is its *only* inferred
+        // term, so a plugin answering `Maybe` to `sendVstMidiEvent` resolves on it.
         //
         // A declined opcode is `None`, which is distinct from `Some(0)` and
         // from a declared pin. Absence must not read as a denial: it leaves the
@@ -453,7 +451,7 @@ impl Vst2Loaded {
 
         let receives_midi = resolve(
             instance.can_do(main, CanDo::ReceiveMidiEvent),
-            midi_in_pins || midi_out_pins || matches!(info.category, Category::Synth),
+            midi_in_pins || midi_out_pins || matches!(info.category, Ok(Category::Synth)),
         );
         // A plugin that declares MIDI output pins but only answers `Maybe` to
         // `sendVstMidiEvent` is emitting MIDI; a plugin that declares none and
@@ -467,7 +465,7 @@ impl Vst2Loaded {
             name: info.name.clone(),
             vendor: info.vendor.clone(),
             version: PluginVersion::Integer(info.version),
-            category: map_category(info.category, info.category_code),
+            category: map_category(info.category),
             receives_midi,
             emits_midi,
             has_editor: false, // overwritten below, once the handle is asked
@@ -644,11 +642,11 @@ impl Vst2Loaded {
     ///
     /// `None` on a field means the plugin declined the opcode, which is
     /// **not** the same as answering zero — see
-    /// [`MidiChannelCounts`](vst::host::MidiChannelCounts). The load-time read
+    /// [`MidiChannelCounts`](vst::MidiChannelCounts). The load-time read
     /// of these is what [`metadata`](Self::metadata)'s `receives_midi` /
     /// `emits_midi` are inferred from; this exposes the raw answer for a caller
     /// that needs the distinction rather than the verdict.
-    pub fn midi_channel_counts(&self, main: MainThreadMarker) -> vst::host::MidiChannelCounts {
+    pub fn midi_channel_counts(&self, main: MainThreadMarker) -> vst::MidiChannelCounts {
         self.instance.read_midi_channels(main)
     }
 
@@ -660,8 +658,8 @@ impl Vst2Loaded {
     /// bypassed by the host instead, by not routing audio through it.
     #[must_use]
     pub fn supports_soft_bypass(&self, main: MainThreadMarker) -> bool {
-        use vst::api::Supported;
-        use vst::plugin::CanDo;
+        use vst::CanDo;
+        use vst::Supported;
         matches!(self.instance.can_do(main, CanDo::Bypass), Supported::Yes)
     }
 

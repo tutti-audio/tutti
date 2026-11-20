@@ -16,6 +16,31 @@ use crate::{
     host::Host,
 };
 
+/// The vendor string `audioMasterGetVendorString` answers.
+const VENDOR: &str = "Tutti";
+
+/// The product string `audioMasterGetProductString` answers.
+const PRODUCT: &str = "Tutti VST2 Host";
+
+/// The vendor version `audioMasterGetVendorVersion` answers: this crate's own version as
+/// `major * 10000 + minor * 100 + patch`.
+const VENDOR_VERSION: isize = version_part(env!("CARGO_PKG_VERSION_MAJOR")) * 10_000
+    + version_part(env!("CARGO_PKG_VERSION_MINOR")) * 100
+    + version_part(env!("CARGO_PKG_VERSION_PATCH"));
+
+/// One decimal component of the package version.
+const fn version_part(digits: &str) -> isize {
+    let bytes = digits.as_bytes();
+    let mut value = 0isize;
+    let mut i = 0;
+    while i < bytes.len() {
+        assert!(bytes[i].is_ascii_digit(), "a version component is decimal");
+        value = value * 10 + (bytes[i] - b'0') as isize;
+        i += 1;
+    }
+    value
+}
+
 /// `kVstLangEnglish`, the host's one language: the values are 1-based, so `0` names none.
 const LANGUAGE_ENGLISH: isize = 1;
 
@@ -67,22 +92,22 @@ pub(crate) unsafe fn host_dispatch(
     ptr: *mut c_void,
     opt: f32,
 ) -> isize {
-    use crate::host::OpCode;
+    use crate::host::AudioMasterOpCode;
 
     let opcode_number = opcode;
-    let opcode = OpCode::try_from(opcode);
+    let opcode = AudioMasterOpCode::try_from(opcode);
     match opcode {
-        Ok(OpCode::Version) => return 2400,
-        Ok(OpCode::Automate) => host.automate(index, opt),
-        Ok(OpCode::BeginEdit) => host.begin_edit(index),
-        Ok(OpCode::EndEdit) => host.end_edit(index),
+        Ok(AudioMasterOpCode::Version) => return 2400,
+        Ok(AudioMasterOpCode::Automate) => host.automate(index, opt),
+        Ok(AudioMasterOpCode::BeginEdit) => host.begin_edit(index),
+        Ok(AudioMasterOpCode::EndEdit) => host.end_edit(index),
 
-        Ok(OpCode::Idle) => host.idle(),
+        Ok(AudioMasterOpCode::Idle) => host.idle(),
 
         // ...
         // `audioMasterCanDo`: 1 = yes, -1 = no, 0 = don't know. A null string
         // is a malformed query and answers "don't know".
-        Ok(OpCode::CanDo) => {
+        Ok(AudioMasterOpCode::CanDo) => {
             if ptr.is_null() {
                 host.refused_callback(opcode_number);
                 return 0;
@@ -101,16 +126,16 @@ pub(crate) unsafe fn host_dispatch(
             };
         }
 
-        Ok(OpCode::GetVendorVersion) => return host.get_info().0,
-        Ok(OpCode::GetVendorString) => {
+        Ok(AudioMasterOpCode::GetVendorVersion) => return VENDOR_VERSION,
+        Ok(AudioMasterOpCode::GetVendorString) => {
             // SAFETY: the plugin's buffer for the string, of the SDK's size for the opcode.
-            return unsafe { copy_string(ptr, host.get_info().1, MAX_VENDOR_STR_LEN) };
+            return unsafe { copy_string(ptr, VENDOR, MAX_VENDOR_STR_LEN) };
         }
-        Ok(OpCode::GetProductString) => {
+        Ok(AudioMasterOpCode::GetProductString) => {
             // SAFETY: as above.
-            return unsafe { copy_string(ptr, host.get_info().2, MAX_PRODUCT_STR_LEN) };
+            return unsafe { copy_string(ptr, PRODUCT, MAX_PRODUCT_STR_LEN) };
         }
-        Ok(OpCode::ProcessEvents) => {
+        Ok(AudioMasterOpCode::ProcessEvents) => {
             // A null or misaligned `VstEvents` is a malformed call: not handled.
             let events = NonNull::new(ptr.cast::<api::Events>()).filter(|e| e.is_aligned());
             let Some(events) = events else {
@@ -125,7 +150,7 @@ pub(crate) unsafe fn host_dispatch(
             host.process_plugin_events(unsafe { api::PluginEvents::new(events) });
         }
 
-        Ok(OpCode::GetTime) => {
+        Ok(AudioMasterOpCode::GetTime) => {
             return match host.get_time_info(value as i32) {
                 None => 0,
                 Some(result) => {
@@ -140,30 +165,28 @@ pub(crate) unsafe fn host_dispatch(
                 }
             };
         }
-        Ok(OpCode::GetBlockSize) => return host.get_block_size(),
+        Ok(AudioMasterOpCode::GetBlockSize) => return host.get_block_size(),
 
         // `audioMasterGetSampleRate` returns the rate via the intptr result
         // (same channel as `GetBlockSize`), truncated from f32 to isize.
-        Ok(OpCode::GetSampleRate) => return host.get_sample_rate() as isize,
-        Ok(OpCode::SizeWindow) => return host.size_window(index, value) as isize,
-        Ok(OpCode::IOChanged) => return host.io_changed() as isize,
-        Ok(OpCode::GetInputLatency) => return host.get_input_latency(),
-        Ok(OpCode::GetOutputLatency) => return host.get_output_latency(),
-        Ok(OpCode::GetCurrentProcessLevel) => {
+        Ok(AudioMasterOpCode::GetSampleRate) => return host.get_sample_rate() as isize,
+        Ok(AudioMasterOpCode::SizeWindow) => return host.size_window(index, value) as isize,
+        Ok(AudioMasterOpCode::IOChanged) => return host.io_changed() as isize,
+        Ok(AudioMasterOpCode::GetInputLatency) => return host.get_input_latency(),
+        Ok(AudioMasterOpCode::GetOutputLatency) => return host.get_output_latency(),
+        Ok(AudioMasterOpCode::GetCurrentProcessLevel) => {
             // The ABI carries the level as an integer: the typed `ProcessLevel` stops here.
             return host.get_process_level() as isize;
         }
-        Ok(OpCode::GetAutomationState) => {
+        Ok(AudioMasterOpCode::GetAutomationState) => {
             // The ABI carries the state as an integer: the typed `AutomationState` stops here.
             return host.get_automation_state() as isize;
         }
 
         // `audioMasterUpdateDisplay`. A plugin fires this after changing preset
         // or program from its own editor: the parameter set the host is showing
-        // is now stale and must be re-read. `Host::update_display` was declared
-        // with nothing routing to it, so the plugin got the fall-through's `0`
-        // and the host's parameter list silently drifted from the plugin's.
-        Ok(OpCode::UpdateDisplay) => {
+        // is stale and must be re-read: `Host::update_display` tells the host so.
+        Ok(AudioMasterOpCode::UpdateDisplay) => {
             host.update_display();
             // 1 = handled. A plugin that reads this as "host will not refresh"
             // may fall back to forcing its own repaint.
@@ -176,17 +199,17 @@ pub(crate) unsafe fn host_dispatch(
         // particular id", so every shell loaded its default effect — and
         // `Host::get_plugin_id` was overridden to a real value that nothing
         // ever asked for.
-        Ok(OpCode::CurrentId) => return host.get_plugin_id() as isize,
+        Ok(AudioMasterOpCode::CurrentId) => return host.get_plugin_id() as isize,
 
         // `audioMasterGetLanguage`. `kVstLangEnglish` is 1 and the values are
         // 1-based, so a `0` is not a language: a plugin indexing a string table
         // by it reads slot 0. English is the honest answer for a host with no
         // localization.
-        Ok(OpCode::GetLanguage) => return LANGUAGE_ENGLISH,
+        Ok(AudioMasterOpCode::GetLanguage) => return LANGUAGE_ENGLISH,
 
         // `audioMasterOpenFileSelector` / `audioMasterCloseFileSelector`. The
         // host has no file dialog; `0` declines, and `canDo` answers No.
-        Ok(OpCode::OpenFileSelector | OpCode::CloseFileSelector) => return 0,
+        Ok(AudioMasterOpCode::OpenFileSelector | AudioMasterOpCode::CloseFileSelector) => return 0,
 
         // An opcode the host does not answer: counted by the host, never logged (this runs
         // on the plugin's audio thread).
@@ -317,7 +340,7 @@ mod tests {
     #[test]
     fn malformed_host_calls_are_not_followed() {
         let host = Counting(AtomicUsize::new(0));
-        let process_events = crate::host::OpCode::ProcessEvents as i32;
+        let process_events = crate::host::AudioMasterOpCode::ProcessEvents as i32;
         let null: *mut c_void = std::ptr::null_mut();
         let no_effect: *mut AEffect = std::ptr::null_mut();
 
@@ -337,8 +360,8 @@ mod tests {
         );
 
         for opcode in [
-            crate::host::OpCode::GetVendorString as i32,
-            crate::host::OpCode::GetProductString as i32,
+            crate::host::AudioMasterOpCode::GetVendorString as i32,
+            crate::host::AudioMasterOpCode::GetProductString as i32,
         ] {
             assert_eq!(host_dispatch(&host, no_effect, opcode, 0, 0, null, 0.0), 0);
         }
@@ -360,19 +383,19 @@ mod tests {
         let host = Refusing(AtomicUsize::new(0));
         let null: *mut c_void = std::ptr::null_mut();
         let no_effect: *mut AEffect = std::ptr::null_mut();
-        let opcode = |op: crate::host::OpCode| op as i32;
+        let opcode = |op: crate::host::AudioMasterOpCode| op as i32;
 
         assert_eq!(host_dispatch(&host, no_effect, 9999, 0, 0, null, 0.0), 0);
         assert_eq!(host.0.load(Ordering::SeqCst), 1, "an unknown opcode");
-        let process_events = opcode(crate::host::OpCode::ProcessEvents);
+        let process_events = opcode(crate::host::AudioMasterOpCode::ProcessEvents);
         host_dispatch(&host, no_effect, process_events, 0, 0, null, 0.0);
         assert_eq!(host.0.load(Ordering::SeqCst), 2, "a null event list");
-        let can_do = opcode(crate::host::OpCode::CanDo);
+        let can_do = opcode(crate::host::AudioMasterOpCode::CanDo);
         host_dispatch(&host, no_effect, can_do, 0, 0, null, 0.0);
         assert_eq!(host.0.load(Ordering::SeqCst), 3, "a null canDo string");
 
         // An answered callback is not counted.
-        let version = opcode(crate::host::OpCode::Version);
+        let version = opcode(crate::host::AudioMasterOpCode::Version);
         assert_eq!(
             host_dispatch(&host, no_effect, version, 0, 0, null, 0.0),
             2400
@@ -399,11 +422,10 @@ mod tests {
     }
 
     /// **The callbacks a plugin makes from its audio thread allocate nothing**: the `canDo`
-    /// query is read into the stack, the vendor and product strings are the host's own
-    /// `&str`s, and the event list and time info are views.
+    /// query is read into the stack, the vendor and product strings are constants, and the event list and time info are views.
     #[test]
     fn the_audio_thread_callbacks_allocate_nothing() {
-        use crate::host::OpCode;
+        use crate::host::AudioMasterOpCode;
         let no_effect: *mut AEffect = std::ptr::null_mut();
         let null: *mut c_void = std::ptr::null_mut();
         let mut query = *b"sendVstEvents\0";
@@ -416,27 +438,27 @@ mod tests {
         let events_ptr: *mut c_void = (&raw mut events).cast();
         let query_ptr: *mut c_void = query.as_mut_ptr().cast();
         let strings_ptr: *mut c_void = strings.as_mut_ptr().cast();
-        let calls: [(OpCode, *mut c_void); 20] = [
-            (OpCode::Automate, null),
-            (OpCode::Version, null),
-            (OpCode::CurrentId, null),
-            (OpCode::Idle, null),
-            (OpCode::GetTime, null),
-            (OpCode::ProcessEvents, events_ptr),
-            (OpCode::IOChanged, null),
-            (OpCode::SizeWindow, null),
-            (OpCode::GetSampleRate, null),
-            (OpCode::GetBlockSize, null),
-            (OpCode::GetInputLatency, null),
-            (OpCode::GetOutputLatency, null),
-            (OpCode::GetCurrentProcessLevel, null),
-            (OpCode::GetAutomationState, null),
-            (OpCode::UpdateDisplay, null),
-            (OpCode::GetLanguage, null),
-            (OpCode::CanDo, query_ptr),
-            (OpCode::GetVendorString, strings_ptr),
-            (OpCode::GetProductString, strings_ptr),
-            (OpCode::GetVendorVersion, null),
+        let calls: [(AudioMasterOpCode, *mut c_void); 20] = [
+            (AudioMasterOpCode::Automate, null),
+            (AudioMasterOpCode::Version, null),
+            (AudioMasterOpCode::CurrentId, null),
+            (AudioMasterOpCode::Idle, null),
+            (AudioMasterOpCode::GetTime, null),
+            (AudioMasterOpCode::ProcessEvents, events_ptr),
+            (AudioMasterOpCode::IOChanged, null),
+            (AudioMasterOpCode::SizeWindow, null),
+            (AudioMasterOpCode::GetSampleRate, null),
+            (AudioMasterOpCode::GetBlockSize, null),
+            (AudioMasterOpCode::GetInputLatency, null),
+            (AudioMasterOpCode::GetOutputLatency, null),
+            (AudioMasterOpCode::GetCurrentProcessLevel, null),
+            (AudioMasterOpCode::GetAutomationState, null),
+            (AudioMasterOpCode::UpdateDisplay, null),
+            (AudioMasterOpCode::GetLanguage, null),
+            (AudioMasterOpCode::CanDo, query_ptr),
+            (AudioMasterOpCode::GetVendorString, strings_ptr),
+            (AudioMasterOpCode::GetProductString, strings_ptr),
+            (AudioMasterOpCode::GetVendorVersion, null),
         ];
         let answered = std::cell::Cell::new(0);
         assert_no_alloc::assert_no_alloc(|| {
@@ -456,7 +478,7 @@ mod tests {
             host_dispatch(
                 &Answering,
                 no_effect,
-                OpCode::CanDo as i32,
+                AudioMasterOpCode::CanDo as i32,
                 0,
                 0,
                 query_ptr,
@@ -465,6 +487,50 @@ mod tests {
             1,
             "the query read off the stack is answered"
         );
-        assert_eq!(&strings[..8], b"product ", "the last string copied");
+        assert_eq!(&strings[..15], b"Tutti VST2 Host", "the last string copied");
+    }
+
+    /// **The host identifies itself as Tutti at this crate's version**: the vendor version
+    /// is `major * 10000 + minor * 100 + patch` of the package version.
+    #[test]
+    fn the_host_answers_its_own_name_and_package_version() {
+        use crate::host::AudioMasterOpCode;
+        let no_effect: *mut AEffect = std::ptr::null_mut();
+        let mut vendor = [0u8; 64];
+        let vendor_ptr: *mut c_void = vendor.as_mut_ptr().cast();
+        assert_eq!(
+            host_dispatch(
+                &Answering,
+                no_effect,
+                AudioMasterOpCode::GetVendorString as i32,
+                0,
+                0,
+                vendor_ptr,
+                0.0
+            ),
+            1
+        );
+        assert_eq!(&vendor[..6], b"Tutti\0");
+
+        let mut parts = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .map(|part| part.parse::<isize>().unwrap());
+        let (major, minor, patch) = (
+            parts.next().unwrap(),
+            parts.next().unwrap(),
+            parts.next().unwrap(),
+        );
+        assert_eq!(
+            host_dispatch(
+                &Answering,
+                no_effect,
+                AudioMasterOpCode::GetVendorVersion as i32,
+                0,
+                0,
+                std::ptr::null_mut(),
+                0.0
+            ),
+            major * 10_000 + minor * 100 + patch
+        );
     }
 }

@@ -1,11 +1,11 @@
-//! Build a `vst::api::TimeInfo` snapshot from [`TransportInfo`].
+//! Build a `vst::TimeInfo` snapshot from [`TransportInfo`].
 //!
 //! The snapshot is stored into the host-state `time_info` seqlock
 //! ([`TransportWriter`](crate::transport_cell::TransportWriter)) before each
 //! process call and served back to the plugin via the
 //! `audioMasterGetTime` callback in [`crate::host::HostState`].
 //!
-//! Flag bits come straight from `vst::api::TimeInfoFlags` (the vst-rs
+//! Flag bits come straight from `vst::TimeInfoFlags` (the vst-rs
 //! transcription of the VST2.4 SDK); the bit positions are never hand-rolled.
 //! VST2.4 clusters four `*_VALID` bits at non-adjacent positions
 //! (`PPQ=9, TEMPO=10, BARS=11, CYCLE=12, TIME_SIG=13`) and
@@ -34,7 +34,7 @@
 //! 64 samples and never advance. It is a strict edge, computed against the
 //! previously served snapshot exactly as JUCE and Ardour do.
 
-use crate::types::TransportInfo;
+use tutti_plugin_types::TransportInfo;
 // Shared with the VST3 path so the two cannot drift apart.
 use tutti_plugin_types::{AutomationMode, SampleRate};
 use tutti_units::{Beat, Bpm};
@@ -45,8 +45,8 @@ use tutti_units::{Beat, Bpm};
 /// The wider set wins here — a cycle being switched on or off is a transport
 /// state change by any reading of the SDK, and a plugin that resets on it is
 /// resetting for a real reason.
-fn transport_bits(flags: vst::api::TimeInfoFlags) -> i32 {
-    use vst::api::TimeInfoFlags as F;
+fn transport_bits(flags: vst::TimeInfoFlags) -> i32 {
+    use vst::TimeInfoFlags as F;
     (flags & (F::TRANSPORT_PLAYING | F::TRANSPORT_RECORDING | F::TRANSPORT_CYCLE_ACTIVE)).bits()
 }
 
@@ -58,10 +58,10 @@ fn transport_bits(flags: vst::api::TimeInfoFlags) -> i32 {
 pub(crate) fn build_vst2_time_info(
     transport: &TransportInfo,
     sample_rate: SampleRate,
-    previous: Option<&vst::api::TimeInfo>,
+    previous: Option<&vst::TimeInfo>,
     automation: AutomationMode,
-) -> vst::api::TimeInfo {
-    use vst::api::TimeInfoFlags as F;
+) -> vst::TimeInfo {
+    use vst::TimeInfoFlags as F;
 
     // TIME_SIG_VALID and TEMPO_VALID are unconditional. Not because the fields
     // are non-`Option` — that argument shipped `tempo = 0, kVstTempoValid` to
@@ -129,7 +129,7 @@ pub(crate) fn build_vst2_time_info(
         }
     }
 
-    vst::api::TimeInfo {
+    vst::TimeInfo {
         sample_rate: sample_rate.get(),
         // VST2.4 has no `*_VALID` bit for `sample_pos` — the plugin always reads
         // it as fact — so a snapshot without a project-time position can only
@@ -161,11 +161,11 @@ pub(crate) fn build_vst2_time_info(
 /// new position (or `kVstClockValid` is cleared when it cannot be); `kVstTransportChanged`
 /// was an edge of the block's first piece and does not repeat.
 pub(crate) fn advance_time_info(
-    mut t: vst::api::TimeInfo,
+    mut t: vst::TimeInfo,
     frames: usize,
     sample_rate: SampleRate,
-) -> vst::api::TimeInfo {
-    use vst::api::TimeInfoFlags as F;
+) -> vst::TimeInfo {
+    use vst::TimeInfoFlags as F;
     let flags = F::from_bits_truncate(t.flags);
     let secs = frames as f64 / sample_rate.get();
     t.sample_pos += frames as f64;
@@ -210,7 +210,7 @@ mod tests {
     use tutti_music::LoopRange;
     use tutti_plugin_types::LoopRegion;
     use tutti_units::{Beat, Bpm};
-    use vst::api::TimeInfoFlags as F;
+    use vst::TimeInfoFlags as F;
 
     fn base() -> TransportInfo {
         TransportInfo::new(SampleRate::SR_48K)
@@ -270,7 +270,7 @@ mod tests {
     /// Spec: vst2.timeinfo.kVstAutomationReading, vst2.timeinfo.kVstAutomationWriting
     #[test]
     fn automation_mode_sets_exactly_its_flags() {
-        use vst::api::TimeInfoFlags as F;
+        use vst::TimeInfoFlags as F;
         let transport = playing_transport();
         let off = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
         for (mode, reading, writing) in [
@@ -517,7 +517,7 @@ mod tests {
     fn advancing_measures_the_clock_again_or_stops_claiming_it() {
         let flags =
             (F::TRANSPORT_PLAYING | F::PPQ_POS_VALID | F::TEMPO_VALID | F::VST_CLOCK_VALID).bits();
-        let at = |tempo: f64| vst::api::TimeInfo {
+        let at = |tempo: f64| vst::TimeInfo {
             sample_rate: 48_000.0,
             ppq_pos: 4.0 + 100.0 / 24_000.0,
             tempo,

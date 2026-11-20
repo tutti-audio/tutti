@@ -50,7 +50,6 @@
 //!   would need (see each method's note). The fork owns the answer rather than
 //!   falling through to vst-rs's swallowed 0.
 
-use crate::midi::to_midi;
 use crate::transport_cell::TransportReader;
 use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
@@ -62,8 +61,9 @@ use tutti_rt::AtomicSampleRate;
 use tutti_rt::{AtomicRequestFlags, Tally, TallyWriter, tally};
 use tutti_ump::MidiGroup;
 use tutti_units::SampleRate;
-use vst::api::{AutomationState, ProcessLevel, Supported};
-use vst::host::Host;
+use vst::Host;
+use vst::to_midi;
+use vst::{AutomationState, ProcessLevel, Supported};
 
 /// What the plugin reported of a parameter edit: `audioMasterBeginEdit`,
 /// `audioMasterAutomate` (the value, as the `f32` the callback carries) and
@@ -129,7 +129,7 @@ impl Drop for ProcessScope<'_> {
     }
 }
 
-/// Implements `vst::host::Host`. Owns the producer end of the queues the
+/// Implements `vst::Host`. Owns the producer end of the queues the
 /// plugin writes into.
 pub(crate) struct HostState {
     param_tx: Arc<ArrayQueue<ParameterChange>>,
@@ -432,8 +432,8 @@ impl Host for HostState {
 
     /// Called from inside the plugin's `processReplacing` — the audio thread.
     /// See [`automate`](Self::automate) for the drop policy.
-    fn process_plugin_events(&self, events: vst::api::PluginEvents<'_>) {
-        use vst::api::PluginEvent;
+    fn process_plugin_events(&self, events: vst::PluginEvents<'_>) {
+        use vst::PluginEvent;
 
         for event in events.iter() {
             match event {
@@ -480,14 +480,8 @@ impl Host for HostState {
     /// thread, so the read must be wait-free. Returning by value is enough:
     /// `host_dispatch` copies the `TimeInfo` into a thread-local `Cell` and
     /// hands the plugin a pointer to that copy, retaining nothing from here.
-    fn get_time_info(&self, _mask: i32) -> Option<vst::api::TimeInfo> {
+    fn get_time_info(&self, _mask: i32) -> Option<vst::TimeInfo> {
         self.time_info.read()
-    }
-
-    /// Host identification, as `(version, vendor, product)`: Tutti's identity, answered
-    /// from `'static` strings so the audio thread's query allocates nothing.
-    fn get_info(&self) -> (isize, &str, &str) {
-        (1, "Tutti", "Tutti VST2 Host")
     }
 
     /// Maximum render block size, in samples. vst-rs's default returns 0,
@@ -642,7 +636,7 @@ impl Host for HostState {
 mod tests {
     use super::*;
     use crate::transport_cell::TransportWriter;
-    use vst::api::PluginEvents;
+    use vst::PluginEvents;
 
     /// The note-on a plugin emits, at frame 0.
     fn a_note_on() -> WireMidi {
@@ -652,7 +646,7 @@ mod tests {
         }
     }
 
-    use vst::host::Host;
+    use vst::Host;
 
     fn make_host(time_info: TransportReader, default_sample_rate: SampleRate) -> HostState {
         HostState::new(
@@ -678,7 +672,7 @@ mod tests {
         assert_eq!(host.get_sample_rate(), 44_100.0, "the load-time rate");
 
         // A block's snapshot at another rate does not move the answer.
-        time_info.write(vst::api::TimeInfo {
+        time_info.write(vst::TimeInfo {
             sample_rate: 96_000.0,
             ..Default::default()
         });
@@ -977,14 +971,11 @@ mod tests {
 
         // `process_events` is the only path that pushes; drive it through a
         // real `api::Events` so the count reflects the callback, not the queue.
-        let mut api_ev = crate::midi::from_midi(&ev).expect("note-on has a MIDI-1 form");
-        let events = vst::api::Events {
+        let mut api_ev = vst::from_midi(&ev).expect("note-on has a MIDI-1 form");
+        let events = vst::Events {
             num_events: 1,
             _reserved: 0,
-            events: [
-                &raw mut api_ev as *mut vst::api::Event,
-                std::ptr::null_mut(),
-            ],
+            events: [&raw mut api_ev as *mut vst::Event, std::ptr::null_mut()],
         };
         host.process_plugin_events(PluginEvents::for_test(&events));
 
@@ -1000,11 +991,11 @@ mod tests {
         );
     }
 
-    /// A `vst::api::SysExEvent` over `bytes`, as a plugin passes it.
-    fn sysex_event(delta_frames: i32, bytes: &mut [u8]) -> vst::api::SysExEvent {
-        vst::api::SysExEvent {
-            event_type: vst::api::EventType::SysEx,
-            byte_size: std::mem::size_of::<vst::api::SysExEvent>() as i32,
+    /// A `vst::SysExEvent` over `bytes`, as a plugin passes it.
+    fn sysex_event(delta_frames: i32, bytes: &mut [u8]) -> vst::SysExEvent {
+        vst::SysExEvent {
+            event_type: vst::EventType::SysEx,
+            byte_size: std::mem::size_of::<vst::SysExEvent>() as i32,
             delta_frames,
             _flags: 0,
             data_size: bytes.len() as i32,
@@ -1014,12 +1005,12 @@ mod tests {
         }
     }
 
-    fn deliver(host: &HostState, event: &mut vst::api::SysExEvent) {
-        let events = vst::api::Events {
+    fn deliver(host: &HostState, event: &mut vst::SysExEvent) {
+        let events = vst::Events {
             num_events: 1,
             _reserved: 0,
             events: [
-                event as *mut vst::api::SysExEvent as *mut vst::api::Event,
+                event as *mut vst::SysExEvent as *mut vst::Event,
                 std::ptr::null_mut(),
             ],
         };
@@ -1064,18 +1055,18 @@ mod tests {
         deliver(&host, &mut sysex);
 
         let note = a_note_on();
-        let mut midi = crate::midi::from_midi(&note).expect("MIDI-1 form");
+        let mut midi = vst::from_midi(&note).expect("MIDI-1 form");
         midi.byte_size = 8;
-        let events = vst::api::Events {
+        let events = vst::Events {
             num_events: 1,
             _reserved: 0,
-            events: [&raw mut midi as *mut vst::api::Event, std::ptr::null_mut()],
+            events: [&raw mut midi as *mut vst::Event, std::ptr::null_mut()],
         };
         host.process_plugin_events(PluginEvents::for_test(&events));
         assert!(host.midi_out_tx.is_empty());
 
         // The same events with their true sizes are delivered.
-        sysex.byte_size = std::mem::size_of::<vst::api::SysExEvent>() as i32;
+        sysex.byte_size = std::mem::size_of::<vst::SysExEvent>() as i32;
         deliver(&host, &mut sysex);
         assert!(!host.midi_out_tx.is_empty());
     }
@@ -1089,20 +1080,20 @@ mod tests {
     fn a_malformed_event_list_is_ignored() {
         let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
 
-        let negative = vst::api::Events {
+        let negative = vst::Events {
             num_events: -1,
             _reserved: 0,
             events: [std::ptr::null_mut(); 2],
         };
         host.process_plugin_events(PluginEvents::for_test(&negative));
-        let negative_max = vst::api::Events {
+        let negative_max = vst::Events {
             num_events: i32::MIN,
             ..negative
         };
         host.process_plugin_events(PluginEvents::for_test(&negative_max));
 
         // Both entries null: skipped, not dereferenced.
-        let nulls = vst::api::Events {
+        let nulls = vst::Events {
             num_events: 2,
             _reserved: 0,
             events: [std::ptr::null_mut(); 2],
@@ -1112,7 +1103,7 @@ mod tests {
         // A valid note-on, but with a type word (77) that is no variant: it must not
         // be read as a `Midi` event, nor as the enum at all.
         let note = a_note_on();
-        let valid = crate::midi::from_midi(&note).expect("MIDI-1 form");
+        let valid = vst::from_midi(&note).expect("MIDI-1 form");
         // The note-on as plain words (the layout `MidiEvent` is `repr(C)` in), then the
         // type word set to the bogus one.
         let [d0, d1, d2] = valid.midi_data;
@@ -1132,7 +1123,7 @@ mod tests {
             ]),
         ];
         bogus[0] = 77;
-        let events = vst::api::Events {
+        let events = vst::Events {
             num_events: 1,
             _reserved: 0,
             events: [bogus.as_mut_ptr().cast(), std::ptr::null_mut()],
@@ -1192,13 +1183,13 @@ mod tests {
     fn a_stray_status_from_a_plugin_allocates_nothing() {
         let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let note = a_note_on();
-        let mut api_ev = crate::midi::from_midi(&note).expect("note-on has a MIDI-1 form");
+        let mut api_ev = vst::from_midi(&note).expect("note-on has a MIDI-1 form");
         let good = api_ev.midi_data;
-        let events = |ev: &mut vst::api::MidiEvent| vst::api::Events {
+        let events = |ev: &mut vst::MidiEvent| vst::Events {
             num_events: 1,
             _reserved: 0,
             events: [
-                std::ptr::from_mut(ev).cast::<vst::api::Event>(),
+                std::ptr::from_mut(ev).cast::<vst::Event>(),
                 std::ptr::null_mut(),
             ],
         };
@@ -1243,14 +1234,11 @@ mod tests {
     fn both_audio_thread_callbacks_are_allocation_free() {
         let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let ev = a_note_on();
-        let mut api_ev = crate::midi::from_midi(&ev).expect("note-on has a MIDI-1 form");
-        let events = vst::api::Events {
+        let mut api_ev = vst::from_midi(&ev).expect("note-on has a MIDI-1 form");
+        let events = vst::Events {
             num_events: 1,
             _reserved: 0,
-            events: [
-                &raw mut api_ev as *mut vst::api::Event,
-                std::ptr::null_mut(),
-            ],
+            events: [&raw mut api_ev as *mut vst::Event, std::ptr::null_mut()],
         };
 
         assert_no_alloc::assert_no_alloc(|| {
@@ -1283,7 +1271,6 @@ mod tests {
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..4 {
                 let _ = host.get_time_info(0);
-                let _ = host.get_info();
                 let _ = host.get_block_size();
                 let _ = host.get_sample_rate();
                 let _ = host.get_process_level();

@@ -370,7 +370,6 @@ pub(crate) fn index_of(id: ParamId, count: usize) -> Option<i32> {
 mod steps_tests {
     use super::*;
     use crate::param_properties::ParameterProperties;
-    use tutti_vst2_ffi::api;
 
     fn decode(
         flags: i32,
@@ -378,7 +377,7 @@ mod steps_tests {
         max: i32,
         step: i32,
     ) -> (bool, Option<IntegerRange>, Option<IntegerSteps>) {
-        let raw = api::ParameterProperties {
+        let raw = vst::ParameterProperties {
             step_float: 0.0,
             small_step_float: 0.0,
             large_step_float: 0.0,
@@ -393,7 +392,7 @@ mod steps_tests {
             category: 0,
             num_parameters_in_category: 0,
             reserved: 0,
-            category_label: [0; api::consts::MAX_CATEGORY_LABEL],
+            category_label: [0; vst::MAX_CATEGORY_LABEL],
             future: [0; 16],
         };
         let p = ParameterProperties::decode(0, &raw);

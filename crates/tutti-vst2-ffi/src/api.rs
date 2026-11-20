@@ -1,5 +1,7 @@
 //! Structures and types for interfacing with the VST 2.4 API.
 
+use crate::primitive_enum::primitive_enum;
+use bitflags::bitflags;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
 use std::ptr::NonNull;
@@ -17,21 +19,31 @@ pub enum GetChunkError {
     /// no buffer to copy however much it claims to have written.
     #[error("plugin reported {0} bytes of chunk data but left the pointer null")]
     NullBuffer(isize),
+    /// The plugin reported more chunk data than a saved state may hold
+    /// ([`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES)), which no plugin
+    /// writes: the length is not believed, and nothing is read.
+    #[error("plugin reported {0} bytes of chunk data, past the most a state may hold")]
+    TooLarge(isize),
 }
 
 use self::consts::*;
 /// Constant values
-#[allow(missing_docs)] // For obvious constants
-pub mod consts {
-
+pub(crate) mod consts {
+    /// `kVstMaxProgNameLen`: the room for a preset name, with its NUL.
     pub const MAX_PRESET_NAME_LEN: usize = 24;
+    /// The room for a parameter's name, label or display text, with its NUL: wider than the
+    /// SDK's `kVstMaxParamStrLen` (8), which plugins routinely exceed.
     pub const MAX_PARAM_STR_LEN: usize = 32;
+    /// `kVstMaxLabelLen`: the room for a label, with its NUL.
     pub const MAX_LABEL: usize = 64;
+    /// `kVstMaxShortLabelLen`: the room for a short label, with its NUL.
     pub const MAX_SHORT_LABEL: usize = 8;
     /// `kVstMaxCategLabelLen` (`aeffectx.h`): the width of
     /// `VstParameterProperties::categoryLabel`.
     pub const MAX_CATEGORY_LABEL: usize = 24;
+    /// `kVstMaxProductStrLen`: the room for a product string, with its NUL.
     pub const MAX_PRODUCT_STR_LEN: usize = 64;
+    /// `kVstMaxVendorStrLen`: the room for a vendor string, with its NUL.
     pub const MAX_VENDOR_STR_LEN: usize = 64;
 
     /// Buffer handed to `effGetEffectName` (45).
@@ -54,7 +66,7 @@ pub mod consts {
 /// undefined behaviour (it agrees with the C one only by coincidence on x86-64).
 ///
 /// ```compile_fail
-/// # use tutti_vst2_ffi::api::{AEffect, HostCallbackProc, PluginMain};
+/// # use tutti_vst2_ffi::{AEffect, HostCallbackProc, PluginMain};
 /// fn rust_abi_main(_: HostCallbackProc) -> *mut AEffect {
 ///     std::ptr::null_mut()
 /// }
@@ -157,7 +169,7 @@ pub struct AEffect {
     /// Bitmask made of values from `api::PluginFlags`.
     ///
     /// ```no_run
-    /// use tutti_vst2_ffi::api::PluginFlags;
+    /// use tutti_vst2_ffi::PluginFlags;
     /// let flags = PluginFlags::CAN_REPLACING | PluginFlags::CAN_DOUBLE_REPLACING;
     /// // ...
     /// ```
@@ -483,16 +495,19 @@ impl SpeakerArrangementType {
 }
 
 /// Used to specify whether functionality is supported.
-#[allow(missing_docs)]
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum Supported {
+    /// `1`: supported.
     Yes,
+    /// `0`: the plugin or host does not know.
     Maybe,
+    /// `-1`: not supported.
     No,
+    /// Any other answer, verbatim.
     Custom(isize),
 }
 
-impl Supported {
+impl From<isize> for Supported {
     /// Interpret an `effCanDo` return value.
     ///
     /// Total by construction. The VST2.4 SDK only *documents* `1` (yes), `0`
@@ -504,7 +519,7 @@ impl Supported {
     /// case) rather than discarded: a host must not panic on a value a plugin
     /// is free to invent, and folding an unknown answer into `Yes` would
     /// misclassify the plugin.
-    pub fn from(val: isize) -> Supported {
+    fn from(val: isize) -> Supported {
         use self::Supported::*;
 
         match val {
@@ -595,19 +610,19 @@ pub struct Events {
 /// Safe code cannot construct a view, nor read a list through the raw struct:
 ///
 /// ```compile_fail,E0624
-/// # use tutti_vst2_ffi::api::{Events, PluginEvents};
+/// # use tutti_vst2_ffi::{Events, PluginEvents};
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
 /// let _ = unsafe { PluginEvents::new(std::ptr::NonNull::from(&raw)) };
 /// ```
 ///
 /// ```compile_fail,E0451
-/// # use tutti_vst2_ffi::api::{Events, PluginEvents};
+/// # use tutti_vst2_ffi::{Events, PluginEvents};
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
 /// let _ = PluginEvents { events: std::ptr::NonNull::from(&raw), list: std::marker::PhantomData };
 /// ```
 ///
 /// ```compile_fail,E0599
-/// # use tutti_vst2_ffi::api::Events;
+/// # use tutti_vst2_ffi::Events;
 /// let raw = Events { num_events: i32::MAX, _reserved: 0, events: [std::ptr::null_mut(); 2] };
 /// let _ = raw.plugin_events();
 /// ```
@@ -636,12 +651,12 @@ pub enum PluginEvent<'a> {
 /// pointer):
 ///
 /// ```compile_fail,E0451
-/// # use tutti_vst2_ffi::api::SysExMessage;
+/// # use tutti_vst2_ffi::SysExMessage;
 /// let _ = SysExMessage { delta_frames: 0, payload: &[] };
 /// ```
 ///
 /// ```compile_fail,E0599
-/// # use tutti_vst2_ffi::api::SysExEvent;
+/// # use tutti_vst2_ffi::SysExEvent;
 /// fn go(e: &SysExEvent) { let _ = e.payload(); }
 /// ```
 #[derive(Debug)]
@@ -795,7 +810,7 @@ pub enum EventType {
 /// via `mem::transmute()` while leveraging pointers, e.g.
 ///
 /// ```
-/// # use tutti_vst2_ffi::api::{Event, EventType, MidiEvent, SysExEvent};
+/// # use tutti_vst2_ffi::{Event, EventType, MidiEvent, SysExEvent};
 /// # let mut event: *mut Event = &mut unsafe { std::mem::zeroed() };
 /// // let event: *const Event = ...;
 /// let midi_event: &MidiEvent = unsafe { std::mem::transmute(event) };
@@ -808,7 +823,7 @@ pub struct Event {
     /// # Example
     ///
     /// ```
-    /// # use tutti_vst2_ffi::api::{Event, EventType, MidiEvent, SysExEvent};
+    /// # use tutti_vst2_ffi::{Event, EventType, MidiEvent, SysExEvent};
     /// #
     /// # // Valid for test
     /// # let mut event: *mut Event = &mut unsafe { std::mem::zeroed() };
@@ -1177,10 +1192,9 @@ mod tests {
     /// These are host-allocated buffers a plugin writes through a raw pointer,
     /// so the size and field order are the contract. The numbers are the
     /// header's: `sizeof`/`offsetof` of the `aeffectx.h` structs compiled by a C
-    /// compiler, never the Rust structs measuring themselves (that is how
-    /// `categoryLabel` sat at 8 bytes instead of `kVstMaxCategLabelLen` = 24,
-    /// and a plugin wrote 16 bytes past the host's buffer). A field inserted,
-    /// widened or reordered changes one of them
+    /// compiler, never the Rust structs measuring themselves (a `categoryLabel` of 8
+    /// bytes instead of `kVstMaxCategLabelLen` = 24 has a plugin write 16 bytes past the
+    /// host's buffer). A field inserted, widened or reordered changes one of them
     /// and the plugin then writes past, or into the middle of, what we read.
     /// Nothing else in the process can detect that: the dispatch still returns
     /// 1 and the garbage looks like data.

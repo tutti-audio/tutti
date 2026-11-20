@@ -507,10 +507,6 @@ impl Plugin for ProbePlugin {
             midi_inputs: self.config.midi_inputs,
             midi_outputs: self.config.midi_outputs,
             category: self.config.category,
-            // `get_info` is the in-process path, where the host reads this
-            // struct directly rather than dispatching `effGetPlugCategory`, so
-            // the code must agree with the enum beside it.
-            category_code: self.config.category as i32,
             // The construction-time figure, plus any latency the probe only
             // declares once it knows its rate. A host that copies this before
             // `effSetSampleRate` sees the former and misses the latter, which

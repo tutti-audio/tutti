@@ -132,7 +132,6 @@ impl Plugin for Shared {
             midi_inputs: 1,
             midi_outputs: 0,
             category: Category::Effect,
-            category_code: Category::Effect as i32,
             initial_delay: self.core.latency() as i32,
             preset_chunks: true,
             f64_precision: true,
