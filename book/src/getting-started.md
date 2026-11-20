@@ -60,9 +60,9 @@ an oscillator: a source that repeats one smooth wave forever.
 
 ```rust,ignore
 // An A at 440 Hz, a quarter of full scale.
-let (sine, _) = session
-    .graph()
-    .add(OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.25)));
+let (sine, _) = session.graph().add(OscillatorNode::from(
+    OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)).level(Amplitude::new(0.25)),
+));
 ```
 
 Here we add an [`OscillatorNode`](../api/tutti/nodes/struct.OscillatorNode.html)
@@ -159,7 +159,7 @@ The best way to get a feel for it is to change one thing, run it again, and
 listen:
 
 - Change `Hz::new(440.0)` to `Hz::new(220.0)`, and the tone drops an octave.
-- Change `OscillatorNode::sine` to `OscillatorNode::saw`. The pitch stays the
+- Change `OscillatorWave::Sine` to `OscillatorWave::Saw`. The pitch stays the
   same, but the sound turns bright and buzzy, because a saw wave carries
   every harmonic of the note.
 - Remove the line that wires `Root::output(1)`, and the tone moves to your

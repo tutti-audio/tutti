@@ -1,7 +1,7 @@
 //! Automation *recording* — the capture side, companion to the playback-side
 //! [`AutomationLaneNode`](crate::automation::AutomationLaneNode).
 //!
-//! [`Recorder`] is the **write** side of a [`Curve`]: where a curve is
+//! [`AutomationRecorder`] is the **write** side of a [`Curve`]: where a curve is
 //! `beat -> value`, a recorder is fed `(beat, value)` samples by whoever watches
 //! the param and hands back an [`Trajectory`] — itself a `Curve` — when
 //! the take ends. Like every other curve in the engine it holds no clock and
@@ -18,7 +18,7 @@
 //!
 //! One recorder is one lane under capture. The *map* from whatever a host calls a
 //! target to its recorder is the host's business, not the engine's — a
-//! `HashMap<YourTarget, Recorder>` in whatever the host already owns. The engine
+//! `HashMap<YourTarget, AutomationRecorder>` in whatever the host already owns. The engine
 //! has no opinion on how targets are addressed, so it holds no registry and
 //! carries no target trait.
 
@@ -28,7 +28,7 @@ use tutti_units::{Beat, BeatDuration, Unit};
 
 // ───────────────────────────── mode ──────────────────────────────
 
-/// How a [`Recorder`] captures — the three recording disciplines every DAW
+/// How a [`AutomationRecorder`] captures — the three recording disciplines every DAW
 /// spells the same way.
 ///
 /// There is no `Off` and no `Play`: not recording is the absence of a recorder
@@ -48,15 +48,15 @@ pub enum RecordMode {
 }
 
 impl RecordMode {
-    /// Whether a take begins on [`touch`](Recorder::touch) rather than on the
-    /// first [`record`](Recorder::record).
+    /// Whether a take begins on [`touch`](AutomationRecorder::touch) rather than on the
+    /// first [`record`](AutomationRecorder::record).
     #[inline]
     #[must_use]
     fn starts_on_touch(self) -> bool {
         matches!(self, Self::Touch | Self::Latch)
     }
 
-    /// Whether [`release`](Recorder::release) ends the take outright (`Touch`)
+    /// Whether [`release`](AutomationRecorder::release) ends the take outright (`Touch`)
     /// rather than holding the released value (`Latch`).
     #[inline]
     #[must_use]
@@ -75,11 +75,11 @@ pub struct RecordingConfig {
     /// the previous point is dropped, so a control dragged at frame rate does
     /// not write one point per frame.
     pub min_point_interval: BeatDuration,
-    /// Douglas-Peucker tolerance applied by [`Recorder::finish`] when
+    /// Douglas-Peucker tolerance applied by [`AutomationRecorder::finish`] when
     /// [`auto_simplify`](Self::auto_simplify) is set. A distance in the
     /// unit's raw value, not beats.
     pub simplify_tolerance: f64,
-    /// Whether [`Recorder::finish`] thins the take before handing it back.
+    /// Whether [`AutomationRecorder::finish`] thins the take before handing it back.
     pub auto_simplify: bool,
     /// Curve type stamped on each recorded point.
     pub default_curve: Law,
@@ -122,14 +122,14 @@ enum Take<U> {
 /// checker does the job for free. A recorder has no concurrent reader to
 /// share it with.
 #[derive(Debug, Clone)]
-pub struct Recorder<U: Unit<Raw = f64>> {
+pub struct AutomationRecorder<U: Unit<Raw = f64>> {
     trajectory: Trajectory<U>,
     mode: RecordMode,
     take: Option<Take<U>>,
     config: RecordingConfig,
 }
 
-impl<U: Unit<Raw = f64>> Recorder<U> {
+impl<U: Unit<Raw = f64>> AutomationRecorder<U> {
     /// A recorder over an empty trajectory clamped to `[min, max]`.
     #[must_use]
     pub fn new(mode: RecordMode, min: U, max: U) -> Self {
@@ -163,28 +163,9 @@ impl<U: Unit<Raw = f64>> Recorder<U> {
         self.mode
     }
 
-    /// Switch capture discipline. Changing mode mid-take ends the take (the new
-    /// discipline's release semantics never applied to it), keeping whatever was
-    /// already captured.
-    pub fn set_mode(&mut self, mode: RecordMode) {
-        if self.mode != mode {
-            self.take = None;
-            self.mode = mode;
-        }
-    }
-
     /// The capture tuning currently in force — thinning tolerance and the like.
     pub fn config(&self) -> &RecordingConfig {
         &self.config
-    }
-
-    /// Replaces the capture tuning.
-    ///
-    /// Unlike [`set_mode`](Self::set_mode) this does **not** end a take in
-    /// progress: the new settings apply to points captured from here on, and
-    /// what is already recorded stays as it was.
-    pub fn set_config(&mut self, config: RecordingConfig) {
-        self.config = config;
     }
 
     /// Whether a take is currently open (capturing, or latch-held).
@@ -288,7 +269,7 @@ impl<U: Unit<Raw = f64>> Recorder<U> {
 /// `None` when no take is open, preserving the empty-vs-zero distinction
 /// [`Curve`] requires: between takes the recorder contributes *nothing* and the
 /// saved trajectory shows through, rather than pinning the param to `0.0`.
-impl<U: tutti_graph::Scalar> Curve for Recorder<U> {
+impl<U: tutti_graph::Scalar> Curve for AutomationRecorder<U> {
     fn value_at(&self, beat: Beat) -> Option<f64> {
         let lane = |u: U| u.to_raw();
         match self.take {
@@ -304,8 +285,8 @@ mod tests {
     use super::*;
     use tutti_units::Db;
 
-    fn recorder(mode: RecordMode) -> Recorder<Db> {
-        let mut r = Recorder::new(mode, Db::new(0.0), Db::new(1.0));
+    fn recorder(mode: RecordMode) -> AutomationRecorder<Db> {
+        let mut r = AutomationRecorder::new(mode, Db::new(0.0), Db::new(1.0));
         // Point-count assertions below are about capture, not thinning.
         r.config.auto_simplify = false;
         r
@@ -458,7 +439,7 @@ mod tests {
 
     #[test]
     fn min_interval_drops_dense_samples() {
-        let mut r = Recorder::with_config(
+        let mut r = AutomationRecorder::with_config(
             RecordMode::Write,
             Db::new(0.0),
             Db::new(1.0),
@@ -480,7 +461,7 @@ mod tests {
     fn a_backwards_jump_always_writes() {
         // A seek during a take is not "too soon" — the gap is negative, so the
         // density check must not swallow it.
-        let mut r = Recorder::with_config(
+        let mut r = AutomationRecorder::with_config(
             RecordMode::Write,
             Db::new(0.0),
             Db::new(1.0),
@@ -497,7 +478,7 @@ mod tests {
 
     #[test]
     fn finish_simplifies_when_configured() {
-        let mut r = Recorder::new(RecordMode::Write, Db::new(0.0), Db::new(1.0));
+        let mut r = AutomationRecorder::new(RecordMode::Write, Db::new(0.0), Db::new(1.0));
         r.config.auto_simplify = true;
         // A dead-straight ramp: every interior point is redundant.
         r.config.min_point_interval = BeatDuration::new(0.0);
@@ -523,31 +504,6 @@ mod tests {
         assert_eq!(env.len(), 3);
     }
 
-    // ── mode switch ──
-
-    #[test]
-    fn changing_mode_ends_the_take_but_keeps_points() {
-        let mut r = recorder(RecordMode::Latch);
-        r.touch(Beat::new(0.0), Db::new(0.5));
-        r.record(Beat::new(1.0), Db::new(0.6));
-        let captured = r.trajectory.len();
-
-        r.set_mode(RecordMode::Write);
-        assert!(
-            !r.is_taking(),
-            "the old discipline's take does not carry over"
-        );
-        assert_eq!(r.trajectory.len(), captured, "captured points survive");
-    }
-
-    #[test]
-    fn setting_the_same_mode_leaves_the_take_alone() {
-        let mut r = recorder(RecordMode::Latch);
-        r.touch(Beat::new(0.0), Db::new(0.5));
-        r.set_mode(RecordMode::Latch);
-        assert!(r.is_taking());
-    }
-
     // ── overdub ──
 
     #[test]
@@ -556,7 +512,7 @@ mod tests {
         env.add_breakpoint(Breakpoint::new(Beat::new(0.0), Db::new(0.2)));
         env.add_breakpoint(Breakpoint::new(Beat::new(8.0), Db::new(0.4)));
 
-        let mut r = Recorder::overdub(RecordMode::Touch, env);
+        let mut r = AutomationRecorder::overdub(RecordMode::Touch, env);
         assert_eq!(r.trajectory.len(), 2);
         assert!(!r.is_taking());
 

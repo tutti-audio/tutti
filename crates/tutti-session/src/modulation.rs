@@ -41,7 +41,7 @@ use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
-use tutti_nodes::automation::{LaneControls, RecordMode, Recorder, Trajectory};
+use tutti_nodes::automation::{AutomationRecorder, LaneControls, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_rt::Param;
 use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
@@ -479,16 +479,16 @@ fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
 /// of the target it is opened on.
 #[derive(Debug)]
 pub struct AutomationTake<U: crate::Scalar> {
-    recorder: Recorder<U>,
+    recorder: AutomationRecorder<U>,
     touched: bool,
     closed: bool,
 }
 
 impl<U: crate::Scalar> AutomationTake<U> {
     /// A take recording into `recorder` (a fresh one, or
-    /// `Recorder::overdub` over the lane's trajectory).
+    /// `AutomationRecorder::overdub` over the lane's trajectory).
     #[must_use]
-    pub fn new(recorder: Recorder<U>) -> Self {
+    pub fn new(recorder: AutomationRecorder<U>) -> Self {
         Self {
             recorder,
             touched: false,
@@ -498,16 +498,16 @@ impl<U: crate::Scalar> AutomationTake<U> {
 
     /// A fresh `mode` take over `min..=max`.
     pub fn record(mode: RecordMode, min: U, max: U) -> Self {
-        Self::new(Recorder::new(mode, min, max))
+        Self::new(AutomationRecorder::new(mode, min, max))
     }
 
     /// The recorder.
-    pub fn recorder(&self) -> &Recorder<U> {
+    pub fn recorder(&self) -> &AutomationRecorder<U> {
         &self.recorder
     }
 
     /// The recorder, to touch, record and release.
-    pub fn recorder_mut(&mut self) -> &mut Recorder<U> {
+    pub fn recorder_mut(&mut self) -> &mut AutomationRecorder<U> {
         &mut self.recorder
     }
 

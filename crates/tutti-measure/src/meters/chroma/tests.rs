@@ -1,10 +1,15 @@
 use super::*;
 use crate::fold_uneven;
+use tutti_dsp::{HopSize, WindowLength};
 
 const RATE: SampleRate = SampleRate::SR_22K05;
 
 fn geometry(window: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(RATE, Samples::new(window), Samples::new(hop)).unwrap()
+    StftGeometry::new(
+        RATE,
+        WindowLength::new(Samples::new(window)).unwrap(),
+        HopSize::new(Samples::new(hop)).unwrap(),
+    )
 }
 
 fn framing(window: usize, hop: usize) -> Framing {

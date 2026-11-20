@@ -317,7 +317,7 @@ impl SynthVoice {
 
     /// Re-rates the glide.
     pub(crate) fn set_rate(&mut self, sample_rate: SampleRate) {
-        self.glide.set_sample_rate(sample_rate);
+        self.glide.prepare(sample_rate);
     }
 
     /// Starts a glide from `from` to `to` over `time`: what the MIDI stream
@@ -333,7 +333,7 @@ impl SynthVoice {
         if !legato {
             self.glide.reset(last);
         }
-        self.glide.set_target(to, legato);
+        self.glide.retarget(to, legato);
     }
 
     /// The factor the glide puts on the voice's pitch: 1 when it is not

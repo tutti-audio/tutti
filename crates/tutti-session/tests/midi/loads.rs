@@ -250,7 +250,7 @@ fn a_missing_file_is_an_io_read_error() {
 mod soundfont {
     use super::*;
     use tutti_session::{LoadError, PoolState, soundfont};
-    use tutti_soundfont::{Settings, SoundFontUnit};
+    use tutti_soundfont::Settings;
 
     /// Updates until the entry under `key` is no longer pending.
     fn settled(s: &mut DetachedSession, key: &'static str) -> PoolState {
@@ -280,7 +280,7 @@ mod soundfont {
         .unwrap();
         assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
         let font = s.soundfont(&"gm").unwrap();
-        let unit = SoundFontUnit::<f32>::new(font, Settings::new());
+        let unit = Settings::new().build::<f32>(font);
         assert!(unit.is_ok(), "{:?}", unit.err());
     }
 

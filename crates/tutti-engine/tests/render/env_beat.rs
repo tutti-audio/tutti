@@ -36,7 +36,7 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
-use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
+use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
 use tutti_timeline::{
     AfterLocate, FadeOut, LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig,
     Timeline, Transport, TransportCommand, render_graph,
@@ -335,7 +335,7 @@ fn click_clicks_on_the_model_beats() {
     settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));
-    let click = ClickNode::new(&transport, settings);
+    let click = ClickNode::from(ClickNodeConfig::new(&transport, settings));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(512)),

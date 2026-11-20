@@ -24,8 +24,8 @@ use crate::{Error, Region, Result};
 use tutti_dsp::Complex64;
 use tutti_dsp::CosineWindow;
 use tutti_dsp::FftScratch;
-use tutti_dsp::StftGeometry;
 use tutti_dsp::{BinIndex, FrameCount, FrameIndex, Grid};
+use tutti_dsp::{ColaGeometry, HopSize, StftGeometry, WindowLength};
 
 /// Linear magnitudes, in the units the transform produced. **The invertible
 /// form.**
@@ -358,7 +358,7 @@ impl StftConfig {
     /// Analyses with a different window shape.
     ///
     /// A builder rather than a fourth argument to `new`, for the reason
-    /// [`StftGeometry::with_window_fn`] gives: three `Samples`-adjacent
+    /// [`StftGeometry::shape`] gives: three `Samples`-adjacent
     /// positional parameters are already the transposition limit.
     ///
     /// Note this can make a config that [`resolve_cola`](Self::resolve_cola)
@@ -389,7 +389,7 @@ impl StftConfig {
     /// the window, or a non-positive sample rate.
     pub fn resolve(&self, rate: impl Into<SampleRate>, len: Samples) -> Result<StftGeometry> {
         let hop = self.effective_hop(len.get());
-        Ok(StftGeometry::new(rate, self.window, hop)?.with_window_fn(self.window_fn))
+        self.geometry_at(rate.into(), hop)
     }
 
     /// The geometry, additionally required to be invertible.
@@ -401,12 +401,14 @@ impl StftConfig {
     /// Hann and Hamming, 8x for Blackman.
     pub fn resolve_cola(&self, rate: impl Into<SampleRate>, len: Samples) -> Result<StftGeometry> {
         let hop = self.effective_hop(len.get());
-        Ok(StftGeometry::cola_with(
-            rate.into(),
-            self.window,
-            hop,
-            self.window_fn,
-        )?)
+        Ok(ColaGeometry::try_from(self.geometry_at(rate.into(), hop)?)?.into())
+    }
+
+    /// The geometry of this config's window and shape at `hop` and `rate`.
+    fn geometry_at(&self, rate: SampleRate, hop: Samples) -> Result<StftGeometry> {
+        let window = WindowLength::new(self.window).ok_or(Error::ZeroWindow)?;
+        let hop = HopSize::new(hop).ok_or(Error::ZeroHop)?;
+        Ok(StftGeometry::new(rate, window, hop).shape(self.window_fn))
     }
 
     fn effective_hop(&self, len: usize) -> Samples {
@@ -537,7 +539,7 @@ fn compute(samples: &[f64], geometry: StftGeometry, fft: &mut FftScratch<f64>) -
     }
 
     Stft {
-        bins: Grid::new(bins, frames, bins_per_frame).expect("shape built to match"),
+        bins: Grid::try_from((bins, frames, bins_per_frame)).expect("shape built to match"),
         geometry,
     }
 }

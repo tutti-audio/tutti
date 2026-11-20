@@ -399,7 +399,7 @@ fn mono_mode_holds_one_voice() {
 
 /// The master volume must scale the output.
 ///
-/// `set_volume` is the gain a synth is inserted with; this is its effect on
+/// `SynthConfig::volume` is the gain a synth is inserted with; this is its effect on
 /// the signal.
 #[test]
 fn master_volume_scales_the_output() {
@@ -407,8 +407,10 @@ fn master_volume_scales_the_output() {
     full.queue_midi(&[note_on(69, 100)]);
     let loud = render(&mut full, 100);
 
-    let mut half = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine)));
-    half.set_volume(tutti_units::Amplitude::new(0.5));
+    let mut half = Hand::new(PolySynth::<f32>::new(SynthConfig {
+        volume: tutti_units::Amplitude::new(0.5),
+        ..config(OscillatorType::Sine)
+    }));
     half.queue_midi(&[note_on(69, 100)]);
     let quiet = render(&mut half, 100);
 
@@ -420,8 +422,10 @@ fn master_volume_scales_the_output() {
     );
 
     // Zero must be silence, not merely quiet.
-    let mut muted = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine)));
-    muted.set_volume(tutti_units::Amplitude::new(0.0));
+    let mut muted = Hand::new(PolySynth::<f32>::new(SynthConfig {
+        volume: tutti_units::Amplitude::SILENT,
+        ..config(OscillatorType::Sine)
+    }));
     muted.queue_midi(&[note_on(69, 100)]);
     let silent = render(&mut muted, 100);
     assert!(
@@ -437,8 +441,10 @@ fn master_volume_scales_the_output() {
 #[test]
 fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let mut synth = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine)));
-        synth.set_volume(tutti_units::Amplitude::new(0.5));
+        let mut synth = Hand::new(PolySynth::<f32>::new(SynthConfig {
+            volume: tutti_units::Amplitude::new(0.5),
+            ..config(OscillatorType::Sine)
+        }));
         synth.queue_midi(&[note_on(69, 100)]);
         let before = render(&mut synth, 40);
         // A host writes the cell through the synth's `ParamSet`, which stores
@@ -456,7 +462,9 @@ fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
             (ratio - 1.0).abs() < 0.05,
             "volume = {bad} moved the level by {ratio}"
         );
-        synth.set_volume(tutti_units::Amplitude::new(0.25));
+        assert!(
+            tutti_graph::ParamNode::param_set(&*synth).set(tutti_units::UnitParam::Volume, 0.25)
+        );
         let after = render(&mut synth, 40);
         assert!(
             rms(&after[2048..]) < 0.7 * rms(&held[2048..]),

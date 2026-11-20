@@ -25,13 +25,14 @@ use tutti_fixtures::machine_lock;
 use std::sync::Arc;
 
 use tutti_fixtures::midi;
-use tutti_graph::{Offset, TransportChanges, TransportPosition};
+use tutti_graph::{Offset, ParamRange, TransportChanges, TransportPosition};
 
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, Layer, LayerId, LfoShape, Polarity, Waveform,
+    Amount, Clock, ControlProgram, ControlProgramBuilder, Layer, LayerId, LfoShape, Polarity,
+    Waveform,
 };
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Law, Trajectory};
+use tutti_nodes::automation::{Breakpoint, ControlLaneNode, ForeignLaneConfig, Law, Trajectory};
 use tutti_ump::{MidiChannel, NoteVelocity, U7};
 use tutti_units::{Beat, BeatsPerCycle, Bpm, Samples};
 use tutti_units::{Depth, ParamId, PhaseIncrement};
@@ -100,8 +101,13 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![lfo], vec![]).expect("a valid program");
-    let lfo = ControlLaneNode::by_id(ParamId::new(77), program, Some(0.5), (0.0, 1.0));
+    let program = ControlProgramBuilder::new()
+        .layers(vec![lfo])
+        .build()
+        .expect("a valid program");
+    let lfo = ControlLaneNode::from(
+        ForeignLaneConfig::new(ParamId::new(77), program, ParamRange::new(0.0, 1.0)).knob(0.5),
+    );
     let prepare = tutti_graph::Prepare::new(
         tutti_units::SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
@@ -118,12 +124,11 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
             Law::PowerIn(Exponent::of(2.0)),
         ));
     }
-    let lane = ControlLaneNode::by_id(
+    let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(78),
         ControlProgram::from_curve(Arc::new(env)),
-        None,
-        (0.0, 1.0),
-    );
+        ParamRange::new(0.0, 1.0),
+    ));
     let (mut rig, mut sender) = Rig::prepared_with_keys(
         probe
             .client

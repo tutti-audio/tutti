@@ -12,7 +12,7 @@ use crate::support;
 
 use support::Hand;
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::Settings;
 use tutti_ump::{
     Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     RegisteredPerNoteController, U7, U14, Ump, Voice1, Voice2,
@@ -30,17 +30,14 @@ fn load_test_soundfont() -> Arc<SoundFont> {
 /// The unit's dry pair, which is linear in the channel gain.
 fn unit() -> Hand {
     let settings = Settings::new();
-    Hand::new(SoundFontUnit::new(load_test_soundfont(), settings).unwrap())
+    Hand::new(settings.build(load_test_soundfont()).unwrap())
 }
 
 const BLOCK_FRAMES: usize = support::BLOCK;
 
 /// A unit on GM program 16 at `rate`.
 fn unit_at(rate: SampleRate) -> Hand {
-    let mut unit = Hand::at(
-        SoundFontUnit::new(load_test_soundfont(), Settings::new()).unwrap(),
-        rate,
-    );
+    let mut unit = Hand::at(Settings::new().build(load_test_soundfont()).unwrap(), rate);
     unit.program_change(MidiChannel::FIRST, U7::of(16));
     unit
 }
@@ -479,7 +476,7 @@ fn a_unit_plays_its_own_groups_channels_only() {
     };
     let group2 = MidiGroup::of(1);
     let heard = |settings: Settings, group: MidiGroup| {
-        let mut unit = Hand::new(SoundFontUnit::new(load_test_soundfont(), settings).unwrap());
+        let mut unit = Hand::new(settings.build(load_test_soundfont()).unwrap());
         unit.program_change(MidiChannel::FIRST, U7::of(16));
         rms(&render(&mut unit, &[note(group)], 11_025))
     };
@@ -489,7 +486,7 @@ fn a_unit_plays_its_own_groups_channels_only() {
         0.0,
         "Group 2 is not Group 1's"
     );
-    let second = Settings::new().with_group(group2);
+    let second = Settings::new().group(group2);
     assert!(heard(second, group2) > 0.001);
     assert_eq!(
         heard(second, MidiGroup::FIRST),

@@ -31,7 +31,7 @@ use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_modulation::Curve;
 use tutti_music::{FrameClock, LoopRange};
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_units::{Beat, Bpm, Hz, ParamKey, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;
@@ -39,12 +39,10 @@ const RATE: f64 = 48_000.0;
 /// A lane sending `curve` to the cutoff, with no knob and no range: the
 /// automation-only lane every test here drives.
 fn automation(curve: impl Curve + 'static) -> ControlLaneNode {
-    ControlLaneNode::for_unit(
+    ControlLaneNode::from(UnitLaneConfig::new(
         ParamKey::<Hz>::CUTOFF.addr(),
         ControlProgram::from_curve(Arc::new(curve)),
-        None,
-        None,
-    )
+    ))
 }
 /// A tempo whose beat is not a whole number of frames, so breakpoints fall
 /// between frames.
