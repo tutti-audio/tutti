@@ -4,7 +4,7 @@
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
-use super::butterworth::{check_cutoff, check_gain, gain_root};
+use super::butterworth::{check_cutoff, check_gain, check_q, gain_root};
 use super::{Sos, SosError};
 use crate::{Biquad, DecayTime};
 
@@ -108,7 +108,7 @@ impl MatchedBell {
     /// The matched section at `center` and `rate`.
     fn section(&self, center: Hz, rate: SampleRate) -> Result<Biquad, SosError> {
         let fc = check_cutoff(center, rate)?;
-        let q = self.checked_q()?;
+        let q = check_q(self.q)?;
         let db = check_gain(self.gain)?;
         let boost = matched(fc, q, Db::new(db.get().abs()), rate);
         Ok(if db.get() < 0.0 {
@@ -116,16 +116,6 @@ impl MatchedBell {
         } else {
             boost
         })
-    }
-
-    /// The quality factor as a number above 0.
-    fn checked_q(&self) -> Result<Q, SosError> {
-        let q = self.q.get();
-        if q.is_finite() && q > 0.0 {
-            Ok(self.q)
-        } else {
-            Err(SosError::QOutOfRange { q: self.q })
-        }
     }
 }
 
