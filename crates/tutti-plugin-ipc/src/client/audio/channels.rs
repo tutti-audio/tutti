@@ -434,9 +434,8 @@ impl Channels {
     /// return with neither (a spurious wake-up): the caller rechecks. `stop`
     /// reads what whoever ends the loop publishes before calling
     /// [`wake`](Self::wake). `parker` is the one [`new`](Self::new) made.
-    pub(super) fn wait_for_block(&self, parker: &mut Parker, stop: impl FnOnce() -> bool) -> bool {
+    pub(super) fn wait_for_block(&self, parker: &mut Parker, stop: impl FnOnce() -> bool) {
         parker.park(|| !self.blocks.is_empty() || self.requested() || stop());
-        !self.blocks.is_empty() || self.requested()
     }
 
     /// Asks for `setting` to be applied, ordered against the blocks: the blocks
@@ -990,9 +989,7 @@ mod tests {
             while !stop.load(Ordering::Acquire) {
                 match c.pop_block() {
                     Some(cmd) => tx.send(cmd).unwrap(),
-                    None => {
-                        c.wait_for_block(&mut parker, || stop.load(Ordering::Acquire));
-                    }
+                    None => c.wait_for_block(&mut parker, || stop.load(Ordering::Acquire)),
                 }
             }
         });

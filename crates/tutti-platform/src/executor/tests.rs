@@ -494,6 +494,7 @@ fn a_weak_executor_keeps_no_executor_alive_and_upgrades_while_one_lives() {
         })
         .detach();
     armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    assert!(weak.is_alive(), "a clone lives");
     let upgraded = weak.upgrade().expect("a clone lives, so it upgrades");
     assert_eq!(
         wait(upgraded.spawn(async { 6 * 7 })),
@@ -503,6 +504,7 @@ fn a_weak_executor_keeps_no_executor_alive_and_upgrades_while_one_lives() {
     drop(upgraded);
     drop(threads);
     drop(executor);
+    assert!(!weak.is_alive(), "no clone lives");
     assert_eq!(
         Arc::strong_count(&marker),
         1,
