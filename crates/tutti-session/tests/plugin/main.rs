@@ -30,6 +30,10 @@ mod plugin_own_bypass;
 // the reference CLAP bundle exports two, in a real `plugin-server`.
 #[cfg(feature = "clap")]
 mod plugin_identity;
+// A session's drop ends a served plugin's lanes while a render feeds them:
+// the reference CLAP plugin in a real `plugin-server`.
+#[cfg(feature = "clap")]
+mod plugin_executor_drop;
 // A plugin as a pool entry, served: lands, swaps, is lost and retried, and held by its node:
 // the reference CLAP bundle in a real `plugin-server`.
 #[cfg(feature = "clap")]
