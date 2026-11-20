@@ -195,12 +195,6 @@ impl Hosted {
     pub(crate) fn instance(&self) -> ResourceId {
         self.0.instance
     }
-
-    /// Whether a node still hosts the instance: not once the node is removed,
-    /// or a swap replaced the plugin.
-    pub(crate) fn is_hosted(&self) -> bool {
-        self.0.hosted.load(Ordering::Acquire)
-    }
 }
 
 impl PooledLink {

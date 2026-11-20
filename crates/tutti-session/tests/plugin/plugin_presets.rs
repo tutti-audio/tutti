@@ -9,16 +9,15 @@
 
 #[cfg(feature = "clap")]
 mod clap {
-    use crate::pooled::{LandOn as _, LoadPlugin, Spec};
+    use crate::pooled::{LoadPlugin, Spec};
     use crate::support::clap_probe;
     use tutti_buffers::MaxBlock;
-    use tutti_graph::NodeKey;
     use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::{PresetError, PresetSupport};
-    use tutti_session::{Peer as _, PresetJobFailed, Session};
+    use tutti_session::{AnyPlugin, Key, Peer as _, Session};
     use tutti_units::Samples;
 
-    fn loaded() -> (Session, u64, NodeKey) {
+    fn loaded() -> (Session, u64, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
         crate::pooled::prime(&PluginRef::file(clap_probe()));
         // SAFETY: nextest runs each test in its own process, and this is set
@@ -38,17 +37,16 @@ mod clap {
                 Spec::new(PluginRef::file(clap_probe())),
             )
             .expect("the reference CLAP plugin loads");
-        (s, entry, node.erase())
+        (s, entry, node)
     }
 
     fn saved<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
         s: &Session<K, C>,
-        node: NodeKey,
+        node: Key<AnyPlugin>,
     ) -> Vec<u8> {
-        s.plugin_view(node)
+        s.save_state(&node, tutti_plugin_types::StateUse::Project)
             .unwrap()
-            .state()
-            .save(tutti_plugin_types::StateUse::Project)
+            .run(tutti_fixtures::main_thread())
             .expect("the plugin saves")
             .bytes()
             .to_vec()
@@ -56,12 +54,12 @@ mod clap {
 
     /// **CLAP loads a preset from a file and lists none.** Its support is
     /// `LoadByPath` with an empty list that needs no read; a file it accepts
-    /// changes its state, and one it declines lands `Refused` and leaves the
+    /// changes its state, and one it declines ends `Refused` and leaves the
     /// state alone, so the load reached the plugin and the plugin's answer
-    /// reached the job.
+    /// reached the run.
     #[test]
     fn clap_loads_a_preset_file_and_lists_nothing() {
-        let (mut s, entry, node) = loaded();
+        let (s, entry, node) = loaded();
         let info = s.plugin(&entry).unwrap().info();
         let presets = info.presets();
         assert_eq!(presets.support(), PresetSupport::LoadByPath);
@@ -70,26 +68,27 @@ mod clap {
             "CLAP enumerates nothing"
         );
         assert_eq!(
-            s.current_preset(&entry, tutti_fixtures::main_thread()),
+            s.current_preset(&node, tutti_fixtures::main_thread()),
             None,
             "and has no current-preset query"
         );
 
         let before = saved(&s, node);
+        let main = tutti_fixtures::main_thread();
         let refused = s
-            .load_preset_file(&entry, "/nowhere/not-a-preset.txt")
+            .load_preset_file(&node, "/nowhere/not-a-preset.txt")
             .unwrap()
-            .land_on(&mut s);
+            .run(main);
         assert!(
-            matches!(refused, Err(PresetJobFailed::Preset(PresetError::Refused))),
+            matches!(refused, Err(PresetError::Refused)),
             "the plugin declined a file of the wrong kind: {refused:?}"
         );
         assert_eq!(saved(&s, node), before, "a refused load changes nothing");
 
         let taken = s
-            .load_preset_file(&entry, "/nowhere/bright.tutti-preset")
+            .load_preset_file(&node, "/nowhere/bright.tutti-preset")
             .unwrap()
-            .land_on(&mut s);
+            .run(main);
         assert!(taken.is_ok(), "{taken:?}");
         assert_ne!(
             saved(&s, node),
@@ -101,7 +100,7 @@ mod clap {
     /// The mirror's value of the plugin's first parameter (Cutoff).
     fn cutoff<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
         s: &Session<K, C>,
-        node: NodeKey,
+        node: Key<AnyPlugin>,
     ) -> Option<f64> {
         let plugin = s.plugin_view(node).unwrap();
         let params = plugin.params();
@@ -116,7 +115,7 @@ mod clap {
     /// Cutoff.
     #[test]
     fn a_loaded_preset_file_moves_the_mirror() {
-        let (mut s, entry, node) = loaded();
+        let (mut s, _entry, node) = loaded();
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
         while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
             assert!(
@@ -129,10 +128,12 @@ mod clap {
         let before = cutoff(&s, node).expect("Cutoff is read");
 
         let main = tutti_fixtures::main_thread();
-        s.load_preset_file(&entry, "/nowhere/bright.tutti-preset")
+        let loaded = s
+            .load_preset_file(&node, "/nowhere/bright.tutti-preset")
             .unwrap()
-            .land_on(&mut s)
+            .run(main)
             .expect("the plugin takes the preset");
+        s.apply(loaded).expect("the node hosts the plugin");
 
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(5);
         while cutoff(&s, node) == Some(before) {
@@ -241,7 +242,7 @@ mod vst3 {
 
 #[cfg(feature = "vst2")]
 mod vst2 {
-    use crate::pooled::{LandOn as _, LoadEntry as _, LoadPlugin, Spec};
+    use crate::pooled::{LoadEntry as _, LoadPlugin, Spec};
     use tutti_buffers::ChannelLayout;
     use tutti_fixtures::ScopedEnv;
     use tutti_plugin_db::Hosting;
@@ -250,24 +251,25 @@ mod vst2 {
     use tutti_plugin_types::{PresetError, PresetSupport};
     use tutti_session::DetachedSession;
     use tutti_session::{
-        Peer as _, PoolEvent, PresetJobError, PresetJobFailed, Session, SessionEvent,
+        AnyPlugin, Key, Peer as _, PluginApplyError, PoolEvent, PresetStartError, Session,
+        SessionEvent,
     };
     use tutti_units::SampleRate;
 
-    fn probe_with(programs: &str) -> (DetachedSession, u64, ScopedEnv) {
+    fn probe_with(programs: &str) -> (DetachedSession, u64, Key<AnyPlugin>, ScopedEnv) {
         let mut env = ScopedEnv::new();
         env.set("TUTTI_VST2_PROBE_PROGRAMS", programs);
         let mut s = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
-        let (entry, _) = s
+        let (entry, node) = s
             .load_plugin_keyed(
                 tutti_fixtures::main_thread(),
                 Spec::new(PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())),
             )
             .expect("the in-process VST2 loads");
-        (s, entry, env)
+        (s, entry, node, env)
     }
 
     /// **A listed preset loads by the id it was listed with.** A list of the
@@ -277,7 +279,7 @@ mod vst2 {
     /// `Unsupported`.
     #[test]
     fn a_listed_preset_loads_by_its_id() {
-        let (mut s, entry, _env) = probe_with("3");
+        let (mut s, entry, node, _env) = probe_with("3");
         let main = tutti_fixtures::main_thread();
         let info = s.plugin(&entry).unwrap().info();
         let presets = info.presets();
@@ -287,12 +289,14 @@ mod vst2 {
 
         let third = presets.iter().nth(2).expect("three entries");
         let id = third.id().clone();
-        s.load_preset(&entry, &third)
+        let loaded = s
+            .load_preset(&node, &third)
             .unwrap()
-            .land_on(&mut s)
+            .run(main)
             .expect("the plugin takes it");
+        s.apply(loaded).expect("the node hosts the plugin");
         assert_eq!(
-            s.current_preset(&entry, main),
+            s.current_preset(&node, main),
             Some(id.clone()),
             "the plugin took it"
         );
@@ -300,11 +304,11 @@ mod vst2 {
         assert!(presets.get(&id).is_some());
         assert!(presets.get(&PresetId::Number(77)).is_none());
         let file = s
-            .load_preset_file(&entry, "/x.tutti-preset")
+            .load_preset_file(&node, "/x.tutti-preset")
             .unwrap()
-            .land_on(&mut s);
+            .run(main);
         assert!(
-            matches!(file, Err(PresetJobFailed::Preset(PresetError::Unsupported))),
+            matches!(file, Err(PresetError::Unsupported)),
             "a list-and-load format takes no file: {file:?}"
         );
     }
@@ -314,25 +318,22 @@ mod vst2 {
     /// `Unsupported` too.
     #[test]
     fn a_plugin_with_no_programs_has_no_presets() {
-        let (mut s, entry, _env) = probe_with("0");
+        let (s, entry, node, _env) = probe_with("0");
         let info = s.plugin(&entry).unwrap().info();
         assert_eq!(info.presets().support(), PresetSupport::None);
         assert!(info.presets().is_empty());
         let file = s
-            .load_preset_file(&entry, "/x.tutti-preset")
+            .load_preset_file(&node, "/x.tutti-preset")
             .unwrap()
-            .land_on(&mut s);
-        assert!(matches!(
-            file,
-            Err(PresetJobFailed::Preset(PresetError::Unsupported))
-        ));
+            .run(tutti_fixtures::main_thread());
+        assert!(matches!(file, Err(PresetError::Unsupported)));
     }
 
-    /// **A preset listed by one plugin is not loaded into another**: the job
+    /// **A preset listed by one plugin is not loaded into another**: the load
     /// is refused at the call and nothing is sent.
     #[test]
     fn a_preset_of_another_plugin_is_refused_at_the_call() {
-        let (mut s, entry, _env) = probe_with("3");
+        let (mut s, entry, _node, _env) = probe_with("3");
         let foreign = s
             .plugin(&entry)
             .unwrap()
@@ -342,7 +343,7 @@ mod vst2 {
             .next()
             .expect("a listed preset");
         // Listed before the second plugin loads.
-        let (other, _) = s
+        let (_, other) = s
             .load_plugin_keyed(
                 tutti_fixtures::main_thread(),
                 Spec::new(PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())),
@@ -350,7 +351,7 @@ mod vst2 {
             .expect("a second VST2 loads");
         let refused = s.load_preset(&other, &foreign);
         assert!(
-            matches!(refused, Err(PresetJobError::OtherPlugin)),
+            matches!(refused, Err(PresetStartError::OtherPlugin)),
             "{:?}",
             refused.map(|_| ())
         );
@@ -364,7 +365,7 @@ mod vst2 {
         tutti_plugin_db::Catalog,
         tutti_plugin_types::PluginId,
         u64,
-        tutti_graph::NodeKey,
+        Key<AnyPlugin>,
         ScopedEnv,
         tempfile::TempDir,
     ) {
@@ -378,7 +379,7 @@ mod vst2 {
         let (catalog, id, dir) = crate::pooled::catalog_of(&plugin);
         let main = tutti_fixtures::main_thread();
         let key = s.declare_entry(main, &catalog, &id, Hosting::Auto, None);
-        let node = s.await_entry(main, key).expect("the VST2 loads").erase();
+        let node = s.await_entry(main, key).expect("the VST2 loads");
         (s, catalog, id, key, node, env, dir)
     }
 
@@ -390,7 +391,7 @@ mod vst2 {
     /// listed still loads.
     #[test]
     fn a_preset_of_a_landed_reload_is_refused_until_the_swap() {
-        let (mut s, catalog, id, key, _node, _env, _dir) = declared();
+        let (mut s, catalog, id, key, node, _env, _dir) = declared();
         let main = tutti_fixtures::main_thread();
         let old = s
             .plugin(&key)
@@ -431,26 +432,28 @@ mod vst2 {
             .unwrap();
         assert_ne!(new, old, "another plugin instance listed it");
 
-        let before = s.current_preset(&key, main);
-        let refused = s.load_preset(&key, &new);
+        let before = s.current_preset(&node, main);
+        let refused = s.load_preset(&node, &new);
         assert!(
-            matches!(refused, Err(PresetJobError::OtherPlugin)),
+            matches!(refused, Err(PresetStartError::OtherPlugin)),
             "{:?}",
             refused.map(|_| ())
         );
         let _ = s.update_on(main);
-        assert_eq!(s.current_preset(&key, main), before, "nothing was sent");
+        assert_eq!(s.current_preset(&node, main), before, "nothing was sent");
 
-        s.load_preset(&key, &old)
+        let loaded = s
+            .load_preset(&node, &old)
             .unwrap()
-            .land_on(&mut s)
+            .run(main)
             .expect("the node's own plugin lists it");
+        s.apply(loaded).expect("the node hosts the plugin");
     }
 
-    /// **A load for a node removed before the update lands `Lost`**: the plugin
+    /// **A load for a node removed before it runs ends `Lost`**: the plugin
     /// is gone, so nothing is asked.
     #[test]
-    fn a_load_for_a_removed_node_lands_lost() {
+    fn a_load_for_a_removed_node_is_lost() {
         let (mut s, _catalog, _id, key, node, _env, _dir) = declared();
         let third = s
             .plugin(&key)
@@ -460,20 +463,18 @@ mod vst2 {
             .iter()
             .nth(2)
             .unwrap();
-        let job = s.load_preset(&key, &third).unwrap();
+        let load = s.load_preset(&node, &third).unwrap();
         s.graph().remove(node).expect("the node is removed");
-        let landed = job.land_on(&mut s);
-        assert!(
-            matches!(landed, Err(PresetJobFailed::Preset(PresetError::Lost))),
-            "{landed:?}"
-        );
+        let run = load.run(tutti_fixtures::main_thread());
+        assert!(matches!(run, Err(PresetError::Lost)), "{run:?}");
     }
 
-    /// **Dropping a load's job before the update cancels it**: the plugin is
-    /// never asked, so its own current program is where it was.
+    /// **A preset loaded and then applied to a node removed since is refused
+    /// `Gone`**: the plugin took the load, and the session has no node to read
+    /// the parameters of.
     #[test]
-    fn a_dropped_load_is_not_run() {
-        let (mut s, _catalog, _id, key, _node, _env, _dir) = declared();
+    fn a_loaded_preset_applied_after_its_node_was_removed_is_gone() {
+        let (mut s, _catalog, _id, key, node, _env, _dir) = declared();
         let main = tutti_fixtures::main_thread();
         let third = s
             .plugin(&key)
@@ -483,16 +484,8 @@ mod vst2 {
             .iter()
             .nth(2)
             .unwrap();
-        let before = s.current_preset(&key, main);
-        drop(s.load_preset(&key, &third).unwrap());
-        let _ = s.update_on(main);
-        assert_eq!(s.current_preset(&key, main), before);
-        assert_ne!(Some(third.id().clone()), before);
-        // The same load, kept, does move it.
-        s.load_preset(&key, &third)
-            .unwrap()
-            .land_on(&mut s)
-            .unwrap();
-        assert_eq!(s.current_preset(&key, main), Some(third.id().clone()));
+        let loaded = s.load_preset(&node, &third).unwrap().run(main).unwrap();
+        s.graph().remove(node).expect("the node is removed");
+        assert_eq!(s.apply(loaded).unwrap_err(), PluginApplyError::Gone);
     }
 }

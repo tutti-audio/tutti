@@ -6,7 +6,7 @@
 //! answers it where the load lands, and a served plugin's list is a round trip,
 //! so it is read by the first [`update`](crate::Session::update) on the main
 //! thread after the load ([`PluginPresets::is_read`]). No host reports a change
-//! of a plugin's list, so nothing refreshes it later. Loading is a job
+//! of a plugin's list, so nothing refreshes it later. Loading is work the app runs
 //! ([`Session::load_preset`](crate::Session::load_preset),
 //! [`Session::load_preset_file`](crate::Session::load_preset_file)).
 

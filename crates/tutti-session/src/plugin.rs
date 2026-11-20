@@ -154,8 +154,8 @@ mod fake_hosting;
 mod lost;
 mod rebind;
 pub use rebind::PortsRefusal;
-mod preset_job;
-mod state_job;
+mod preset;
+mod state;
 pub(crate) use lost::Lost;
 
 use entry::PooledLink;
@@ -163,8 +163,8 @@ pub use entry::{
     AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginInfo, PluginPorts,
     PoolPluginEntry, PooledPlugin,
 };
-pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
-pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
+pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
+pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
 use crate::jobs::{Landing, PluginLanding};
 use crate::plugin_diagnostics::Figures;
@@ -964,6 +964,17 @@ impl Gate {
         self.0.lock_recover().ended = true;
     }
 
+    /// Whether the plugin is gone: removed or replaced.
+    pub(crate) fn is_ended(&self) -> bool {
+        self.0.lock_recover().ended
+    }
+
+    /// Whether `other` is this same plugin instance's gate: a replaced plugin
+    /// has a gate of its own.
+    pub(crate) fn is(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// The ids the mirror declares now (a read landed).
     pub(crate) fn declare(&self, mirror: &tutti_plugin_host::PluginParamValues) {
         self.0.lock_recover().declared = mirror.descriptors().iter().map(|p| p.id()).collect();
@@ -1577,8 +1588,8 @@ impl<'a> StateView<'a> {
 
     /// Saves the plugin's state for `state_use` now, as a blocking round trip
     /// to it (ten seconds at worst; an in-process plugin's is run by the main
-    /// thread's next tick, see the module docs). A pooled plugin's state goes through
-    /// [`Session::save_state`], a job that lands in an update.
+    /// thread's next tick, see the module docs). [`Session::save_state`] is the
+    /// work the app runs on the main thread, which waits for no tick.
     ///
     /// # Errors
     ///
@@ -1590,8 +1601,8 @@ impl<'a> StateView<'a> {
     }
 
     /// Restores `state` into the plugin. The parameter mirror is read again by
-    /// the next `Phase::Plugins`, whatever values the state moved. A pooled
-    /// plugin's state goes through [`Session::restore_state`], a job.
+    /// the next `Phase::Plugins`, whatever values the state moved.
+    /// [`Session::restore_state`] is the work the app runs, then applies.
     ///
     /// # Errors
     ///

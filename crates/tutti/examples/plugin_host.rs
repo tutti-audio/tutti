@@ -177,10 +177,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 7. Save its state: now, from the plugin (`last_good` is the session's
-    //    crash-recovery copy, up to a snapshot interval old). The state names
+    //    crash-recovery copy, up to a snapshot interval old). `save_state`
+    //    makes the work and `run` does it, on the main thread. The state names
     //    the plugin it came from, so a project that keeps it restores it into
-    //    that plugin and no other.
-    let state = hosted.state().save(StateUse::Project)?;
+    //    that plugin and no other (`restore_state`, run, then `apply`).
+    let state = session.save_state(&node, StateUse::Project)?.run(main)?;
     let state_path = out.with_extension("state");
     std::fs::write(&state_path, state.bytes())?;
     eprintln!(
@@ -195,8 +196,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    reloaded). Presets are part of the plugin's info, read when it loaded:
     //    `support()` says whether the plugin lists them (load a handle with
     //    `load_preset`), loads them from files (`LoadByPath`, CLAP:
-    //    `load_preset_file`) or has none. A load is a job, run by an update on
-    //    the main thread.
+    //    `load_preset_file`) or has none. A load is work the app runs on the
+    //    main thread, then applies.
     {
         let info = session.plugin(&"plugin")?.info();
         let presets = info.presets();
@@ -205,11 +206,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             support if support.can_list() => {
                 eprintln!("{} preset(s)", presets.len());
                 if let Some(first) = presets.iter().next() {
-                    session.load_preset(&"plugin", &first)?.wait(&mut session)?;
+                    let loaded = session.load_preset(&node, &first)?.run(main)?;
+                    session.apply(loaded)?;
                     eprintln!(
                         "loaded {:?}, current {:?}",
                         first.name(),
-                        session.current_preset(&"plugin", main)
+                        session.current_preset(&node, main)
                     );
                 }
             }
