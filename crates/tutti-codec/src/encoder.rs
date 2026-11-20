@@ -330,36 +330,6 @@ impl FileEncoder {
         self
     }
 
-    /// Leaves the file beside its path as an **unfinished** file, and says
-    /// where: for a take whose write failed (a full disk), whose frames so far
-    /// are worth more than a clean file. The target is untouched, nothing
-    /// removes the file, and it is the caller's to move or delete.
-    ///
-    /// What was buffered is flushed on a best effort, and a failure to flush or
-    /// to sync is not reported. A header that states lengths is then patched
-    /// from what is on disk, as [`finish`](Self::finish) patches it from what
-    /// was written: the sizes are the whole frames in the file, and a torn last
-    /// frame is cut off. This holds for WAV (the RIFF and `data` sizes) and
-    /// AIFF (the COMM frame count, the SSND and FORM sizes). FLAC states no
-    /// length it needs (a zero STREAMINFO total and MD5 mean unknown), and Ogg
-    /// Vorbis is a stream of pages, so neither is patched; the last FLAC frame
-    /// or Vorbis page may be cut short. [`Unfinished::header_patched`] is
-    /// `false` when a WAV's or AIFF's patch failed, and the file is kept all
-    /// the same: its header then states no frames.
-    pub fn keep_unfinished(self) -> Unfinished {
-        self.keep.keep();
-        let Self {
-            encoder,
-            temp,
-            spec,
-            ..
-        } = self;
-        // Closes the file and flushes the buffer; the keeper has the drop
-        // leave it.
-        drop(encoder);
-        patched(temp, &spec)
-    }
-
     /// As [`Encoder::write`].
     ///
     /// # Errors
@@ -399,10 +369,22 @@ impl FileEncoder {
 
     /// As [`finish`](Self::finish), for a recording that must never be lost:
     /// when the file cannot be closed whole (a failed `write`, the header, the
-    /// close) it is **kept** beside its path as an [`Unfinished`], patched as
-    /// [`keep_unfinished`](Self::keep_unfinished) does, instead of removed. A
-    /// commit that fails keeps the complete file as [`finish`](Self::finish)
-    /// does, and carries no `unfinished`.
+    /// close) it is **kept** beside its path as an [`Unfinished`] instead of
+    /// removed: the target is untouched, nothing removes the file, and it is
+    /// the caller's to move or delete. A commit that fails keeps the complete
+    /// file as [`finish`](Self::finish) does ([`Kept::Commit`]).
+    ///
+    /// What was buffered is flushed on a best effort, and a failure to flush or
+    /// to sync is not reported. A header that states lengths is then patched
+    /// from what is on disk, as a finished file's is from what was written: the
+    /// sizes are the whole frames in the file, and a torn last frame is cut
+    /// off. This holds for WAV (the RIFF and `data` sizes) and AIFF (the COMM
+    /// frame count, the SSND and FORM sizes). FLAC states no length it needs (a
+    /// zero STREAMINFO total and MD5 mean unknown), and Ogg Vorbis is a stream
+    /// of pages, so neither is patched; the last FLAC frame or Vorbis page may
+    /// be cut short. [`Unfinished::header_patched`] is `false` when a WAV's or
+    /// AIFF's patch failed, and the file is kept all the same: its header then
+    /// states no frames.
     ///
     /// # Errors
     ///
@@ -481,7 +463,7 @@ pub enum Kept {
     },
 }
 
-/// What [`FileEncoder::keep_unfinished`] kept.
+/// The unfinished file [`FileEncoder::finish_keeping`] kept.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unfinished {
     /// Where the file is, beside the path it was meant for.

@@ -464,9 +464,9 @@ fn a_commit_that_cannot_rename_keeps_the_file() {
     }
 }
 
-/// Writes `frames` frames of the sawtooth as 32-bit float in `format`, keeps
-/// the encoder unfinished and returns the kept file and what it kept, with the
-/// directory that holds it.
+/// Writes `frames` frames of the sawtooth as 32-bit float in `format`, then a
+/// block of the wrong width, which fails the encoder, and finishes keeping:
+/// returns the directory, what was kept, the samples written and the path.
 #[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
 fn kept_unfinished(
     format: Format,
@@ -480,8 +480,16 @@ fn kept_unfinished(
     encoder
         .write(Interleaved::new(&samples, spec.layout()).unwrap())
         .unwrap();
-    let kept = encoder.keep_unfinished();
-    (dir, kept, samples, path)
+    let wrong = [0.0f32; 3];
+    assert!(
+        encoder
+            .write(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+            .is_err()
+    );
+    let Err(Kept::Unfinished { unfinished, .. }) = encoder.finish_keeping() else {
+        panic!("not kept unfinished");
+    };
+    (dir, unfinished, samples, path)
 }
 
 /// **A WAV kept unfinished decodes to exactly the frames written**, with their
