@@ -51,7 +51,7 @@ pub struct Info {
     /// Plugin version (e.g. 0001 = `v0.0.0.1`, 1283 = `v1.2.8.3`).
     pub version: i32,
 
-    /// Plugin category. Possible values are found in `enums::PluginCategory`.
+    /// Plugin category: one of the [`Category`] values.
     pub category: Category,
 
     /// Latency of the plugin in samples.

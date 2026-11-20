@@ -752,7 +752,7 @@ static mut INNER_DISPATCHER: Option<api::DispatcherProc> = None;
 static mut RAW_TAIL_SIZE: Option<isize> = None;
 
 /// `effGetTailSize`. Mirrored here rather than imported because vst-rs's
-/// `plugin::OpCode` is `#[doc(hidden)]` and its discriminants are the wire
+/// `EffectOpCode` is `#[doc(hidden)]` and its discriminants are the wire
 /// contract regardless.
 /// `effClose` — the host telling the plugin to release *this instance*.
 ///

@@ -1131,7 +1131,7 @@ fn declining_the_effect_name_falls_back_to_the_product_string() {
 
 /// `default_value` reports the plugin's load-time state, not its live value.
 ///
-/// VST2 has no default-value opcode — none of the 61 in `OpCode` returns one,
+/// VST2 has no default-value opcode — none of the 61 in `EffectOpCode` returns one,
 /// and `effGetParameterProperties` carries a range but no default. So the only
 /// observable default is the plugin's initial state, snapshotted at load.
 ///

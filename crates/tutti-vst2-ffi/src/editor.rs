@@ -34,119 +34,119 @@ primitive_enum! {
     pub enum Key: isize {
         /// No key.
         None = 0,
-        /// `VKEY_BACK`.
+        /// The SDK's VKEY_BACK.
         Back,
-        /// `VKEY_TAB`.
+        /// The SDK's VKEY_TAB.
         Tab,
-        /// `VKEY_CLEAR`.
+        /// The SDK's VKEY_CLEAR.
         Clear,
-        /// `VKEY_RETURN`.
+        /// The SDK's VKEY_RETURN.
         Return,
-        /// `VKEY_PAUSE`.
+        /// The SDK's VKEY_PAUSE.
         Pause,
-        /// `VKEY_ESCAPE`.
+        /// The SDK's VKEY_ESCAPE.
         Escape,
-        /// `VKEY_SPACE`.
+        /// The SDK's VKEY_SPACE.
         Space,
-        /// `VKEY_NEXT`.
+        /// The SDK's VKEY_NEXT.
         Next,
-        /// `VKEY_END`.
+        /// The SDK's VKEY_END.
         End,
-        /// `VKEY_HOME`.
+        /// The SDK's VKEY_HOME.
         Home,
-        /// `VKEY_LEFT`.
+        /// The SDK's VKEY_LEFT.
         Left,
-        /// `VKEY_UP`.
+        /// The SDK's VKEY_UP.
         Up,
-        /// `VKEY_RIGHT`.
+        /// The SDK's VKEY_RIGHT.
         Right,
-        /// `VKEY_DOWN`.
+        /// The SDK's VKEY_DOWN.
         Down,
-        /// `VKEY_PAGEUP`.
+        /// The SDK's VKEY_PAGEUP.
         PageUp,
-        /// `VKEY_PAGEDOWN`.
+        /// The SDK's VKEY_PAGEDOWN.
         PageDown,
-        /// `VKEY_SELECT`.
+        /// The SDK's VKEY_SELECT.
         Select,
-        /// `VKEY_PRINT`.
+        /// The SDK's VKEY_PRINT.
         Print,
-        /// `VKEY_ENTER`.
+        /// The SDK's VKEY_ENTER.
         Enter,
-        /// `VKEY_SNAPSHOT`.
+        /// The SDK's VKEY_SNAPSHOT.
         Snapshot,
-        /// `VKEY_INSERT`.
+        /// The SDK's VKEY_INSERT.
         Insert,
-        /// `VKEY_DELETE`.
+        /// The SDK's VKEY_DELETE.
         Delete,
-        /// `VKEY_HELP`.
+        /// The SDK's VKEY_HELP.
         Help,
-        /// `VKEY_NUMPAD0`.
+        /// The SDK's VKEY_NUMPAD0.
         Numpad0,
-        /// `VKEY_NUMPAD1`.
+        /// The SDK's VKEY_NUMPAD1.
         Numpad1,
-        /// `VKEY_NUMPAD2`.
+        /// The SDK's VKEY_NUMPAD2.
         Numpad2,
-        /// `VKEY_NUMPAD3`.
+        /// The SDK's VKEY_NUMPAD3.
         Numpad3,
-        /// `VKEY_NUMPAD4`.
+        /// The SDK's VKEY_NUMPAD4.
         Numpad4,
-        /// `VKEY_NUMPAD5`.
+        /// The SDK's VKEY_NUMPAD5.
         Numpad5,
-        /// `VKEY_NUMPAD6`.
+        /// The SDK's VKEY_NUMPAD6.
         Numpad6,
-        /// `VKEY_NUMPAD7`.
+        /// The SDK's VKEY_NUMPAD7.
         Numpad7,
-        /// `VKEY_NUMPAD8`.
+        /// The SDK's VKEY_NUMPAD8.
         Numpad8,
-        /// `VKEY_NUMPAD9`.
+        /// The SDK's VKEY_NUMPAD9.
         Numpad9,
-        /// `VKEY_MULTIPLY`.
+        /// The SDK's VKEY_MULTIPLY.
         Multiply,
-        /// `VKEY_ADD`.
+        /// The SDK's VKEY_ADD.
         Add,
-        /// `VKEY_SEPARATOR`.
+        /// The SDK's VKEY_SEPARATOR.
         Separator,
-        /// `VKEY_SUBTRACT`.
+        /// The SDK's VKEY_SUBTRACT.
         Subtract,
-        /// `VKEY_DECIMAL`.
+        /// The SDK's VKEY_DECIMAL.
         Decimal,
-        /// `VKEY_DIVIDE`.
+        /// The SDK's VKEY_DIVIDE.
         Divide,
-        /// `VKEY_F1`.
+        /// The SDK's VKEY_F1.
         F1,
-        /// `VKEY_F2`.
+        /// The SDK's VKEY_F2.
         F2,
-        /// `VKEY_F3`.
+        /// The SDK's VKEY_F3.
         F3,
-        /// `VKEY_F4`.
+        /// The SDK's VKEY_F4.
         F4,
-        /// `VKEY_F5`.
+        /// The SDK's VKEY_F5.
         F5,
-        /// `VKEY_F6`.
+        /// The SDK's VKEY_F6.
         F6,
-        /// `VKEY_F7`.
+        /// The SDK's VKEY_F7.
         F7,
-        /// `VKEY_F8`.
+        /// The SDK's VKEY_F8.
         F8,
-        /// `VKEY_F9`.
+        /// The SDK's VKEY_F9.
         F9,
-        /// `VKEY_F10`.
+        /// The SDK's VKEY_F10.
         F10,
-        /// `VKEY_F11`.
+        /// The SDK's VKEY_F11.
         F11,
-        /// `VKEY_F12`.
+        /// The SDK's VKEY_F12.
         F12,
-        /// `VKEY_NUMLOCK`.
+        /// The SDK's VKEY_NUMLOCK.
         Numlock,
-        /// `VKEY_SCROLL`.
+        /// The SDK's VKEY_SCROLL.
         Scroll,
-        /// `VKEY_SHIFT`.
+        /// The SDK's VKEY_SHIFT.
         Shift,
-        /// `VKEY_CONTROL`.
+        /// The SDK's VKEY_CONTROL.
         Control,
-        /// `VKEY_ALT`.
+        /// The SDK's VKEY_ALT.
         Alt,
-        /// `VKEY_EQUALS`.
+        /// The SDK's VKEY_EQUALS.
         Equals,
     }
 }

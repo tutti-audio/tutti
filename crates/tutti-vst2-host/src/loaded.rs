@@ -175,7 +175,7 @@ pub struct Vst2Loaded {
     /// Each parameter's value as read once at load, indexed by parameter id.
     ///
     /// VST 2.4 has **no** opcode that reports a default — none of the 61 in
-    /// `OpCode` returns one, and `effGetParameterProperties` (56) carries a
+    /// `EffectOpCode` returns one, and `effGetParameterProperties` (56) carries a
     /// range and step granularity but no default either. What a plugin *does*
     /// have is its own initial state: a freshly instantiated plugin sits at its
     /// defaults, so reading each parameter once before anything writes to it is
