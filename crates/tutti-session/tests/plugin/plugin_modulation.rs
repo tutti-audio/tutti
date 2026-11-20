@@ -55,7 +55,7 @@ fn detached() -> DetachedSession {
     // The executor is polled: a job runs in the `Collect` that polls it, and lands
     // there.
     Session::builder()
-        .executor(tutti_platform::Executor::polled())
+        .executor(tutti_platform::Executor::new())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds")

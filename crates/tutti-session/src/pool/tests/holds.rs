@@ -72,7 +72,7 @@ impl PoolEntry for Shared {
 }
 
 fn session(config: PoolConfig) -> (crate::DetachedSession, Spawned) {
-    let spawned = Spawned::polled();
+    let spawned = Spawned::new();
     let session = Session::builder()
         .pool_config(config)
         .executor(spawned.clone())
@@ -110,7 +110,7 @@ fn held(
     )
     .unwrap();
     // The parallel cap starts the rest as running loads land.
-    while spawned.poll(usize::MAX) > 0 {
+    while spawned.run_until_stalled() > 0 {
         let _ = events(s);
     }
     let lives = keys.iter().map(|key| life(s, key)).collect();
@@ -180,7 +180,7 @@ fn recalling_a_parked_entry_loads_it_again_and_a_live_one_adopts_with_no_load() 
         Some("loading"),
         "reloading from the park"
     );
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("old", "loaded".to_owned())]);
     assert_eq!(
         loads.load(Ordering::SeqCst),
@@ -200,7 +200,7 @@ fn a_node_hold_never_parks_however_old() {
     let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
     s.pool(device("a", &loads)).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let handle = life(&s, "a");
     let _hold = s
@@ -224,7 +224,7 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
         },
     ))
     .unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let handle = s.pool.entries.handle::<_, Shared>(&"a").unwrap();
     let _hold = s
@@ -242,7 +242,7 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
         },
     ))
     .unwrap();
-    assert!(spawned.poll(usize::MAX) == 0, "adopted with no load");
+    assert!(spawned.run_until_stalled() == 0, "adopted with no load");
     assert_eq!(loads.load(Ordering::SeqCst), 1);
 }
 
