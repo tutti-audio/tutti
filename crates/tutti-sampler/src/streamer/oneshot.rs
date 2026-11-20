@@ -1,5 +1,5 @@
-//! The reply of an open: a one-shot the streamer sends once and the open's owner
-//! reads once, by [`try_recv`](ReplyReceiver::try_recv) or by awaiting.
+//! A one-shot channel, used for the reply of an open: the streamer sends once and the open's owner
+//! reads once, by [`try_recv`](Receiver::try_recv) or by awaiting.
 //!
 //! A send wakes the receiver's [`Waker`]; the streamer is a control-side future,
 //! never the audio thread, so the wake may do what a `Waker` does.
@@ -21,12 +21,12 @@ fn lock<T>(shared: &Shared<T>) -> MutexGuard<'_, State<T>> {
 }
 
 /// The sending end: answers once.
-pub(crate) struct ReplySender<T> {
+pub(crate) struct Sender<T> {
     shared: Shared<T>,
 }
 
 /// The receiving end: reads the answer once.
-pub(crate) struct ReplyReceiver<T> {
+pub(crate) struct Receiver<T> {
     shared: Shared<T>,
 }
 
@@ -40,7 +40,7 @@ pub(crate) enum Unanswered {
 }
 
 /// A sender and its receiver.
-pub(crate) fn reply<T>() -> (ReplySender<T>, ReplyReceiver<T>) {
+pub(crate) fn oneshot<T>() -> (Sender<T>, Receiver<T>) {
     let shared = Arc::new(Mutex::new(State {
         value: None,
         waker: None,
@@ -48,20 +48,20 @@ pub(crate) fn reply<T>() -> (ReplySender<T>, ReplyReceiver<T>) {
         receiver_gone: false,
     }));
     (
-        ReplySender {
+        Sender {
             shared: Arc::clone(&shared),
         },
-        ReplyReceiver { shared },
+        Receiver { shared },
     )
 }
 
-impl<T> ReplySender<T> {
+impl<T> Sender<T> {
     /// Answers, and wakes the receiver's task.
     ///
     /// # Errors
     ///
     /// `value` back when the receiver is gone.
-    pub(crate) fn send(&self, value: T) -> Result<(), T> {
+    pub(crate) fn send(self, value: T) -> Result<(), T> {
         let waker = {
             let mut state = lock(&self.shared);
             if state.receiver_gone {
@@ -77,7 +77,7 @@ impl<T> ReplySender<T> {
     }
 }
 
-impl<T> Drop for ReplySender<T> {
+impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
         let waker = {
             let mut state = lock(&self.shared);
@@ -90,7 +90,7 @@ impl<T> Drop for ReplySender<T> {
     }
 }
 
-impl<T> ReplyReceiver<T> {
+impl<T> Receiver<T> {
     /// The answer if it came.
     ///
     /// # Errors
@@ -119,21 +119,21 @@ impl<T> ReplyReceiver<T> {
     }
 }
 
-impl<T> Drop for ReplyReceiver<T> {
+impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
         lock(&self.shared).receiver_gone = true;
     }
 }
 
-impl<T> std::fmt::Debug for ReplyReceiver<T> {
+impl<T> std::fmt::Debug for Receiver<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReplyReceiver").finish_non_exhaustive()
+        f.debug_struct("Receiver").finish_non_exhaustive()
     }
 }
 
-impl<T> std::fmt::Debug for ReplySender<T> {
+impl<T> std::fmt::Debug for Sender<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReplySender").finish_non_exhaustive()
+        f.debug_struct("Sender").finish_non_exhaustive()
     }
 }
 
@@ -155,7 +155,7 @@ mod tests {
     /// after it reads the value.
     #[test]
     fn a_send_wakes_the_pending_task_and_the_next_poll_reads_it() {
-        let (tx, rx) = reply::<u8>();
+        let (tx, rx) = oneshot::<u8>();
         let count = Arc::new(Count(AtomicUsize::new(0)));
         let waker = Waker::from(Arc::clone(&count));
         let mut cx = Context::from_waker(&waker);
@@ -168,7 +168,7 @@ mod tests {
     /// A sender dropped unanswered disconnects the receiver, and wakes its task.
     #[test]
     fn a_dropped_sender_disconnects_and_wakes() {
-        let (tx, rx) = reply::<u8>();
+        let (tx, rx) = oneshot::<u8>();
         let count = Arc::new(Count(AtomicUsize::new(0)));
         let waker = Waker::from(Arc::clone(&count));
         let mut cx = Context::from_waker(&waker);
@@ -181,7 +181,7 @@ mod tests {
     /// A send to a dropped receiver hands the value back.
     #[test]
     fn a_send_to_a_dropped_receiver_returns_the_value() {
-        let (tx, rx) = reply::<u8>();
+        let (tx, rx) = oneshot::<u8>();
         drop(rx);
         assert_eq!(tx.send(3), Err(3));
     }

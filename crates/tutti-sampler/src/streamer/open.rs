@@ -29,8 +29,8 @@ use super::command::StreamId;
 use super::control::StreamFile;
 use super::control_cell::ControlCell;
 use super::loops::RingControl;
+use super::oneshot::{Receiver, Unanswered};
 use super::prefetch::SharedReader;
-use super::reply::{ReplyReceiver, Unanswered};
 use super::status::StatusCell;
 use super::stream::{Stream, StreamerPort};
 use crate::voice::Direction;
@@ -182,7 +182,7 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 #[must_use = "an open nobody polls is abandoned"]
 pub struct PendingOpen<F: RingFloat> {
     id: StreamId,
-    reply: ReplyReceiver<Result<Opened<F>, OpenError>>,
+    reply: Receiver<Result<Opened<F>, OpenError>>,
     /// The streamer's command queue, which the stream it answers with sends
     /// on.
     port: StreamerPort<F>,
@@ -191,7 +191,7 @@ pub struct PendingOpen<F: RingFloat> {
 impl<F: RingFloat> PendingOpen<F> {
     pub(crate) fn new(
         id: StreamId,
-        reply: ReplyReceiver<Result<Opened<F>, OpenError>>,
+        reply: Receiver<Result<Opened<F>, OpenError>>,
         port: StreamerPort<F>,
     ) -> Self {
         Self { id, reply, port }
