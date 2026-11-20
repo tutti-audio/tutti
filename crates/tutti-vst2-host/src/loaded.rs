@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginError};
+use tutti_units::Normalized;
 
 use vst::host::{PluginInstance, PluginLoadError, PluginLoader};
 use vst::plugin::Category;
@@ -184,7 +185,7 @@ pub struct Vst2Loaded {
     /// taken immediately after the instance is made, before any preset load or
     /// session restore. Sampling later reports the *live* value as the default,
     /// which makes "default" follow the user's last knob move.
-    pub(crate) initial_values: Vec<f32>,
+    pub(crate) initial_values: Vec<Normalized>,
     /// The host's end of the plugin's callbacks, shared with the plugin through
     /// the `Host` it was loaded with.
     pub(crate) host: Arc<HostState>,
@@ -479,9 +480,10 @@ impl Vst2Loaded {
         // `initial_values` for why this is the only observable default in
         // VST 2.4. A plugin exposing no `getParameter` yields 0.0, the same
         // neutral the listing path already uses.
-        let initial_values: Vec<f32> = (0..instance.read_num_params().max(0))
-            .map(|i| instance.get_parameter(i).unwrap_or(0.0))
+        let initial_values: Vec<Normalized> = (0..instance.read_num_params().max(0))
+            .map(|i| Normalized::clamped(f64::from(instance.get_parameter(i).unwrap_or(0.0))))
             .collect();
+        host.size_written(initial_values.len());
         metadata.has_editor = instance.has_editor();
         let descriptor = crate::control::descriptor_of(&metadata);
         if let Some(id) = chosen

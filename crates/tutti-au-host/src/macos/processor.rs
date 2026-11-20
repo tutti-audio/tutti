@@ -713,7 +713,8 @@ impl AuProcessor {
                 else {
                     continue;
                 };
-                let plain = bounds.plain(last.value) as f32;
+                let plain = bounds.word(last.value);
+                table.marks().record(slot, last.value);
                 if table.is_non_realtime(id) {
                     // The latest value, marked for the tick: a parameter moved
                     // in many blocks is written once, and nothing is dropped.
@@ -829,7 +830,8 @@ impl Processor for AuProcessor {
             else {
                 continue;
             };
-            let plain = bounds.plain(last.value) as f32;
+            let plain = bounds.word(last.value);
+            table.marks().record(slot, last.value);
             if table.is_non_realtime(id) {
                 table.marks().defer(slot, plain);
             } else {

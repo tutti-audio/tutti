@@ -23,7 +23,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use tutti_plugin_types::WrittenValues;
 use tutti_rt::{DirtyIndex, DirtySet};
+use tutti_units::Normalized;
 
 /// A parameter's place in a [`Marks`]: only the marks that made it can.
 #[derive(Debug, Clone, Copy)]
@@ -41,6 +43,9 @@ pub(crate) struct Marks {
     deferred: DirtySet,
     /// The latest value (`f32` bits) of each parameter, read for a bit of `deferred`.
     values: Box<[AtomicU32]>,
+    /// The position last written to each parameter, by slot: what a value the
+    /// unit reports back is compared with ([`echoes`](Self::echoes)).
+    written: WrittenValues,
 }
 
 impl Default for Marks {
@@ -59,6 +64,7 @@ impl Marks {
             told: DirtySet::new(ids.len()),
             deferred: DirtySet::new(ids.len()),
             values: ids.iter().map(|_| AtomicU32::new(0)).collect(),
+            written: WrittenValues::new(ids.len()),
             ids: ids.into(),
         }
     }
@@ -76,6 +82,26 @@ impl Marks {
     pub(crate) fn slot(&self, id: u32) -> Option<Slot> {
         let at = self.ids.binary_search(&id).ok()?;
         self.told.index(at).map(Slot)
+    }
+
+    /// Records `value` as the position last written to `slot`, by the control
+    /// side or the render (lock-free, so the render may call).
+    pub(crate) fn record(&self, slot: Slot, value: Normalized) {
+        self.written.record(slot.0.get(), value);
+    }
+
+    /// Whether `report`, a value the unit gave back for `id`, is `narrow` of the
+    /// position last written there. `false` for an id these marks were not
+    /// sized for.
+    pub(crate) fn echoes(
+        &self,
+        id: u32,
+        report: f32,
+        narrow: impl FnOnce(Normalized) -> f32,
+    ) -> bool {
+        self.ids
+            .binary_search(&id)
+            .is_ok_and(|at| self.written.echoes(at, report, narrow))
     }
 
     /// The render's call: the unit applied an automated value of this parameter.

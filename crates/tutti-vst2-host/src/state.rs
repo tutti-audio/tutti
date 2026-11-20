@@ -30,7 +30,6 @@ use tutti_plugin_types::{MainThreadMarker, StateFrame};
 use tutti_units::Normalized;
 
 use crate::error::{Result, Vst2Error};
-use crate::host::host_write;
 use crate::loaded::Vst2Loaded;
 
 /// State format tags:
@@ -275,9 +274,10 @@ impl Vst2Loaded {
                 Ok(())
             }
             StateHeader::Params { count, values, .. } => (0..count).try_for_each(|index| {
-                if host_write(|| {
-                    self.instance
-                        .set_parameter(index, saved_value(values, index))
+                // A saved word widens exactly, so its narrowing is the word itself.
+                let saved = Normalized::clamped(f64::from(saved_value(values, index)));
+                if self.host.write(index, saved, |word| {
+                    self.instance.set_parameter(index, word)
                 }) {
                     Ok(())
                 } else {

@@ -202,11 +202,10 @@ impl Control for Vst2Loaded {
     /// is the wrong answer, presented as the right one, and a caller comparing
     /// two values would see the same label for both.
     ///
-    /// The comparison is exact rather than epsilon'd. Both sides come from the
-    /// same `f32` the plugin holds — `parameter` reads it back and
-    /// `Normalized::get` did not rescale it — so a value that round-tripped
-    /// through this seam compares bit-equal, and one that did not is not a value
-    /// the plugin can describe anyway.
+    /// The comparison is on the `f32` word: the plugin holds the narrowing of the
+    /// `f64` written, so `value` is current when it narrows to the word that
+    /// `parameter` reads back, and a value a whole `f32` step away is not one the
+    /// plugin can describe.
     fn parameter_text(
         &self,
         _main: MainThreadMarker,
@@ -330,9 +329,7 @@ impl Control for Vst2Loaded {
             let edit = match report {
                 ParameterChange::Begin(i) => id(i).map(ParamEdit::Begin),
                 ParameterChange::End(i) => id(i).map(ParamEdit::End),
-                ParameterChange::Automate(i, value) => {
-                    id(i).map(|id| ParamEdit::change(id, Normalized::clamped(f64::from(value))))
-                }
+                ParameterChange::Automate(i, value) => id(i).map(|id| ParamEdit::change(id, value)),
             };
             out.extend(edit);
         }

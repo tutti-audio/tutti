@@ -21,14 +21,13 @@ use crate::parameters;
 /// Declared plain-unit bounds for one AU parameter, as reported by
 /// `kAudioUnitProperty_ParameterInfo`.
 ///
-/// Raw `f32` Hz/dB/percent/seconds, not `tutti_units` unit newtypes: which
+/// Raw `f64` Hz/dB/percent/seconds, not `tutti_units` unit newtypes: which
 /// physical unit these bounds are in is per-parameter and only known at runtime
-/// from `AudioUnitParameterInfo::unit`, and the values cross the AudioToolbox C
-/// ABI verbatim.
+/// from `AudioUnitParameterInfo::unit`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ParamBounds {
-    pub(crate) min: f32,
-    pub(crate) max: f32,
+    pub(crate) min: f64,
+    pub(crate) max: f64,
 }
 
 impl ParamBounds {
@@ -37,7 +36,12 @@ impl ParamBounds {
     /// range table and the shared [`ParameterInfo`](tutti_plugin_types::ParameterInfo)
     /// both come from.
     pub(crate) fn of(min: f32, max: f32) -> Self {
-        Self { min, max }
+        // `AudioUnitParameterInfo` carries the bounds as `Float32`; they widen
+        // here, once, into the quantity the rest of the host works in.
+        Self {
+            min: f64::from(min),
+            max: f64::from(max),
+        }
     }
 
     /// The plain-value map of the bounds, in `f64`: the line between them. The
@@ -45,7 +49,16 @@ impl ParamBounds {
     /// to the `f32` the unit takes), and the parameter's
     /// [`plain_map`](tutti_plugin_types::ParameterInfo::plain_map) is it.
     pub(crate) fn plain_map(self) -> PlainMap {
-        PlainMap::Linear(LinearRange::new(f64::from(self.min), f64::from(self.max)))
+        PlainMap::Linear(LinearRange::new(self.min, self.max))
+    }
+}
+
+impl ParamBounds {
+    /// The `Float32` word `AudioUnitSetParameter` takes for the position
+    /// `value`: AU's parameter word is `f32`, so this is the one place a value
+    /// narrows on its way to the unit.
+    pub(crate) fn word(self, value: Normalized) -> f32 {
+        self.plain_map().plain(value) as f32
     }
 }
 
@@ -58,13 +71,13 @@ impl ParamBounds {
 /// platform defines is `AUParameterValueFromLinear` (`AudioUnitUtilities.h`),
 /// keyed on the unit, which this crate does not call.
 impl ParamMapping for ParamBounds {
-    /// Maps a position onto `[min, max]`, narrowed to the `f32` that
+    /// Maps a position onto `[min, max]`, narrowed to the `Float32` that
     /// `AudioUnitSetParameter` takes (and widened back, so the value is the one
-    /// the unit is given). A range with no span yields `min` when finite and
+    /// the unit is given: [`Self::word`] is the same narrowing). A range with no span yields `min` when finite and
     /// `0.0` otherwise ([`LinearRange`]), so the result is always finite and
     /// inside `[min, max]` (both came from an `f32`).
     fn plain(&self, value: Normalized) -> f64 {
-        f64::from(self.plain_map().plain(value) as f32)
+        f64::from(self.word(value))
     }
 
     /// The AU's plain value back onto `0..=1`, the read direction of the same
@@ -153,6 +166,15 @@ impl RangeTable {
             .map(|_| tutti_plugin_types::ParamAccess::reported(self.is_read_only(id)))
     }
 
+    /// Whether `plain`, a value the unit reported for `id`, is the narrowing of
+    /// the position the host last wrote there ([`tutti_plugin_types::WrittenValues`]): the unit
+    /// repeating the host's own write, not an edit of its own. `false` for a
+    /// parameter off the table or never written.
+    pub(crate) fn is_echo(&self, id: u32, plain: f32) -> bool {
+        self.bounds(id)
+            .is_some_and(|bounds| self.marks.echoes(id, plain, |value| bounds.word(value)))
+    }
+
     /// Every declared id, ascending.
     pub(crate) fn ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.ranges.iter().map(|&(id, _)| id)
@@ -211,10 +233,10 @@ mod tests {
     #[test]
     fn a_malformed_range_never_reaches_a_live_au_parameter_as_non_finite() {
         for (min, max) in [
-            (f32::NAN, 1.0),
-            (0.0, f32::NAN),
-            (f32::NEG_INFINITY, 1.0),
-            (0.0, f32::INFINITY),
+            (f64::NAN, 1.0),
+            (0.0, f64::NAN),
+            (f64::NEG_INFINITY, 1.0),
+            (0.0, f64::INFINITY),
         ] {
             let broken = ParamBounds { min, max };
             for v in [0.0, 0.5, 1.0] {
@@ -288,5 +310,47 @@ mod tests {
         // against, so it must be reported missing (and skipped), not guessed.
         assert!(table.bounds(3).is_none());
         assert!(table.slot(7).is_some() && table.slot(3).is_none());
+    }
+
+    fn written_table() -> RangeTable {
+        RangeTable {
+            ranges: vec![(
+                7u32,
+                ParamBounds {
+                    min: 10.0,
+                    max: 22_050.0,
+                },
+            )],
+            non_realtime: Vec::new(),
+            read_only: Vec::new(),
+            marks: Arc::new(Marks::new(vec![7])),
+        }
+    }
+
+    /// The unit reporting the `Float32` narrowing of a position the host wrote
+    /// (one that differs from it only below `f32` precision) is an echo, so the
+    /// control side drops it and the `f64` written stays the value.
+    #[test]
+    fn a_report_equal_to_the_narrowing_of_a_write_is_an_echo() {
+        let table = written_table();
+        let bounds = table.bounds(7).unwrap();
+        let written = n(0.1 + 1e-12);
+        table.marks().record(table.slot(7).unwrap(), written);
+        let word = bounds.word(written);
+        assert_ne!(f64::from(word), bounds.plain_map().plain(written));
+        assert!(table.is_echo(7, word));
+    }
+
+    /// A report one `f32` step from the narrowing is the unit's own change, and
+    /// a parameter never written has nothing to echo.
+    #[test]
+    fn a_report_off_the_narrowing_is_the_units_own_change() {
+        let table = written_table();
+        let bounds = table.bounds(7).unwrap();
+        assert!(!table.is_echo(7, 100.0), "nothing was written");
+        let written = n(0.1 + 1e-12);
+        table.marks().record(table.slot(7).unwrap(), written);
+        assert!(!table.is_echo(7, bounds.word(written).next_up()));
+        assert!(!table.is_echo(3, 100.0), "an undeclared id echoes nothing");
     }
 }

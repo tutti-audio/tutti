@@ -1101,3 +1101,25 @@ fn a_plugins_echo_of_a_host_write_is_not_reported() {
         "nor a dropped one"
     );
 }
+
+/// **The plugin's text answers for the `f64` the host wrote**, though the plugin holds
+/// only its `f32` narrowing: a value that differs from the write below `f32` precision
+/// is current, and one a whole `f32` step away is not.
+#[test]
+fn parameter_text_answers_for_the_f64_written_and_not_for_one_an_f32_step_away() {
+    let _guard = lock_probe();
+    let (mut instance, _path) = load_probe();
+    let written = Normalized::of(0.1 + 1e-12);
+    assert!(instance.loaded().write_parameter(pid(0), written));
+    let word = written.get() as f32;
+    assert_ne!(f64::from(word), written.get(), "the write must narrow");
+
+    let at_write = instance.parameter_text(main_thread(), pid(0), written);
+    let a_step_away = Normalized::of(f64::from(word.next_up()));
+
+    assert!(at_write.is_some(), "the write is the current value");
+    assert_eq!(
+        instance.parameter_text(main_thread(), pid(0), a_step_away),
+        None
+    );
+}
