@@ -6,7 +6,7 @@
 //! ([`Env::for_each_beat`](tutti_graph::Env::for_each_beat)) — the play and record state from
 //! the same pieces, the count-in flag off the same transport
 //! ([`TransportPosition::count_in`](tutti_graph::TransportPosition::count_in)), the
-//! project's meter from [`Cx::meter`], and its own settings (volume, mode) from
+//! project's meter from [`Cx::meter`](tutti_graph::Cx#structfield.meter), and its own settings (volume, mode) from
 //! [`ClickSettings`].
 //!
 //! # Why the beat comes from `Env`, not the transport's atomic
@@ -25,7 +25,7 @@
 //! # The meter is lent by the block
 //!
 //! The host lends the project's [`MeterMap`] once per block through
-//! [`Cx::meter`]. The node reads it at every beat it walks, so a loop wrap and
+//! [`Cx::meter`](tutti_graph::Cx#structfield.meter). The node reads it at every beat it walks, so a loop wrap and
 //! any number of meter changes inside a block count bars exactly, and the
 //! accent is the bar's downbeat under the meter the host played. A block with
 //! no meter counts 4/4 from beat 0.
@@ -543,7 +543,7 @@ impl<F: Float> Node<F> for ClickNode<F> {
         let (Some(left), Some(right)) = (channels.next(), channels.next()) else {
             return Status::Modified;
         };
-        self.render(cx.env, cx.meter(), left, right);
+        self.render(cx.env, cx.meter, left, right);
         Status::Modified
     }
 

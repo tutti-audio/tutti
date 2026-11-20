@@ -1425,20 +1425,11 @@ pub struct Cx<'a> {
     /// kept.
     pub history: &'a TransportHistory,
     /// The project's meter for this block, lent once per block by the host
-    /// that renders it. `None` where the host has no meter (a hand-built
-    /// `Cx`), which a node counting bars reads as 4/4 from beat 0 (see
-    /// [`meter`](Self::meter)).
+    /// that renders it, or `None` where the host has none (a hand-built
+    /// `Cx`): a node counting bars then counts 4/4 from beat 0. One map per
+    /// block, read at any beat the block visits, so a loop wrap and any
+    /// number of meter changes inside the block are exact.
     pub meter: Option<&'a MeterMap>,
-}
-
-impl<'a> Cx<'a> {
-    /// The project's meter for this block, or `None` when the host has none:
-    /// a node counting bars then counts 4/4 from beat 0. One map per block,
-    /// read at any beat the block visits, so a loop wrap and any number of
-    /// meter changes inside the block are exact.
-    pub const fn meter(&self) -> Option<&'a MeterMap> {
-        self.meter
-    }
 }
 
 impl Cx<'_> {

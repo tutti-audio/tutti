@@ -27,7 +27,7 @@ impl Node for Probe {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let seen = cx
-            .meter()
+            .meter
             .map_or(-1.0, |m| m.at(Beat::new(9.0)).beats_per_bar().get() as f32);
         io.output(0).fill(seen);
         Status::Modified
