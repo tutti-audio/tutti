@@ -9,11 +9,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
 
+use super::project_meter::stamp_meter;
 use super::walk::TempoWalk;
 use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_music::FrameClock;
 use tutti_music::LoopRange;
+use tutti_music::{FrameClock, MeterMap};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// Configuration for constructing an [`OfflineTimeline`].
@@ -121,6 +122,9 @@ pub struct OfflineTimeline {
     /// The active loop region, validated at construction — so `advance()` needs
     /// no `end > start` guard of its own.
     loop_range: Option<LoopRange>,
+    /// The meter every position this timeline reports carries, or `None`
+    /// for a render with no meter (a node then counts 4/4 bars).
+    meter: Option<Arc<MeterMap>>,
 }
 
 /// The playhead, and where it is on a map that changes tempo.
@@ -155,6 +159,19 @@ impl OfflineTimeline {
             stepped,
             sample_rate: config.sample_rate,
             loop_range: config.loop_range,
+            meter: None,
+        }
+    }
+
+    /// This timeline reporting `meter` in every position it hands a graph
+    /// ([`TransportPosition::meter`](tutti_graph::TransportPosition::meter)),
+    /// so a metronome in the render counts the project's bars. It keeps the
+    /// map it is given: a later edit to the project's meter does not reach it.
+    #[must_use]
+    pub fn meter(self, meter: Arc<MeterMap>) -> Self {
+        Self {
+            meter: Some(meter),
+            ..self
         }
     }
 
@@ -246,12 +263,16 @@ impl OfflineTimeline {
     /// The transport of `clock`'s frame: rolling, at the tempo and segment the
     /// clock stands on, looping over this timeline's region.
     fn transport(&self, clock: &FrameClock) -> tutti_graph::TransportPosition {
-        tutti_graph::TransportPosition::counted(
+        let at = tutti_graph::TransportPosition::counted(
             true,
             clock.tempo(),
             clock.origin(),
             self.loop_range,
-        )
+        );
+        match &self.meter {
+            Some(meter) => stamp_meter(at, meter),
+            None => at,
+        }
     }
 
     /// The next block of at most `frames` frames as the graph takes it: its

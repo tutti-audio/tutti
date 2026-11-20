@@ -21,7 +21,9 @@ use std::num::NonZeroU32;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
-use tutti_music::{FrameClock, LoopRange, SegmentOrigin};
+use tutti_music::{
+    FrameClock, LoopRange, Meter, MeterChange, MeterMap, SegmentOrigin, TimeSignature,
+};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, PortSpan};
@@ -1067,11 +1069,92 @@ pub struct TransportPosition {
     /// [`recording`](Self::recording). Private, like the position, so a
     /// transport is only ever built through its constructors.
     recording: bool,
+    /// Whether the transport is in its count-in: session state like
+    /// `recording`, carried because the metronome sounds under it
+    /// (`PrerollOnly`, `RecordingOnly`). `false` from every constructor; set
+    /// it with [`counting_in`](Self::counting_in), read it with
+    /// [`count_in`](Self::count_in).
+    count_in: bool,
+    /// The meter in force at the block's first frame, or `None` when the
+    /// host has none. Set with [`metered`](Self::metered), read with
+    /// [`meter`](Self::meter).
+    meter: Option<BlockMeter>,
     /// Where the block's first frame is: a bare beat, a frame count on the
     /// host's segment, or one walked on from a bare beat. Private, so the
     /// beat and the frame count it is derived from cannot disagree:
     /// [`beat`](Self::beat) *computes* the beat of a counted position.
     position: Position,
+}
+
+/// The meter a block's transport is under: what the metronome (or any node
+/// that counts bars) needs to place a bar line without the project's whole
+/// meter map.
+///
+/// `Copy` and allocation-free, so the host stamps it on the audio thread
+/// ([`BlockMeter::of`]). It describes the position it rides on, from that
+/// position's first frame: the signature in force there, a bar line its bars
+/// are counted from, and the next meter change after it. Only the **first**
+/// change is carried; a second change that falls inside the same block is
+/// carried by the next block, which is stamped from its own first frame.
+/// A loop wrap inside a block is not a change here: a block that wraps into
+/// a different meter reads that meter from the next block.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockMeter {
+    signature: TimeSignature,
+    bar_start: Beat,
+    next_change: Option<MeterChange>,
+}
+
+impl BlockMeter {
+    /// The meter `signature`, its bars counted from the downbeat at
+    /// `bar_start` (any bar line of that signature), changing at
+    /// `next_change` if the host has one ahead (a change always begins a
+    /// bar).
+    #[must_use]
+    pub const fn new(
+        signature: TimeSignature,
+        bar_start: Beat,
+        next_change: Option<MeterChange>,
+    ) -> Self {
+        Self {
+            signature,
+            bar_start,
+            next_change,
+        }
+    }
+
+    /// The meter `map` has in force at `beat`, and the first change after
+    /// it. Allocation-free: two binary searches.
+    #[must_use]
+    pub fn of(map: &MeterMap, beat: Beat) -> Self {
+        let here = map.bar_at(beat);
+        let changes = map.changes();
+        Self {
+            signature: here.signature,
+            bar_start: here.bar_start,
+            next_change: changes
+                .get(changes.partition_point(|c| c.beat <= beat))
+                .copied(),
+        }
+    }
+
+    /// The signature in force at the first frame.
+    pub const fn signature(&self) -> TimeSignature {
+        self.signature
+    }
+
+    /// A bar line of [`signature`](Self::signature): the bars are counted
+    /// from here.
+    pub const fn bar_start(&self) -> Beat {
+        self.bar_start
+    }
+
+    /// The first meter change after the first frame, wherever it falls: a
+    /// node that reaches its beat switches to it, and counts that signature's
+    /// bars from the change.
+    pub const fn next_change(&self) -> Option<MeterChange> {
+        self.next_change
+    }
 }
 
 /// A transport's position at the block's first frame. See
@@ -1102,6 +1185,8 @@ impl TransportPosition {
             tempo,
             looping,
             recording: false,
+            count_in: false,
+            meter: None,
             position: Position::At(beat),
         }
     }
@@ -1125,6 +1210,8 @@ impl TransportPosition {
             tempo,
             looping,
             recording: false,
+            count_in: false,
+            meter: None,
             position: Position::Counted(origin),
         }
     }
@@ -1141,6 +1228,38 @@ impl TransportPosition {
     /// `kVstTransportRecording`, VST3 `kRecording`, CLAP `IS_RECORDING`).
     pub const fn recording(&self) -> bool {
         self.recording
+    }
+
+    /// This transport, with [`count_in`](Self::count_in) set to `count_in`.
+    #[must_use]
+    pub const fn counting_in(self, count_in: bool) -> Self {
+        Self { count_in, ..self }
+    }
+
+    /// Whether the transport is in its count-in: session state rather than
+    /// motion. The metronome's `PrerollOnly` and `RecordingOnly` modes read
+    /// it.
+    pub const fn count_in(&self) -> bool {
+        self.count_in
+    }
+
+    /// This transport, with the [`meter`](Self::meter) in force at its
+    /// first frame.
+    #[must_use]
+    pub const fn metered(self, meter: BlockMeter) -> Self {
+        Self {
+            meter: Some(meter),
+            ..self
+        }
+    }
+
+    /// The meter in force at the first frame of this position (the block's,
+    /// or the piece's after a [`TransportChange`]), or `None` when the host
+    /// has none. A walked position ([`Env::transport_at`]) keeps the meter
+    /// of the position it was walked from: a meter change further on is
+    /// [`BlockMeter::next_change`].
+    pub const fn meter(&self) -> Option<BlockMeter> {
+        self.meter
     }
 
     /// This transport, at `beat` instead (the block's first frame its own

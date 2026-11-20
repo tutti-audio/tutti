@@ -11,11 +11,14 @@
 use super::clock::{Control, TransportClock};
 use super::handle::Transport;
 use super::motion::{MotionAudio, is_declicking};
+use super::project_meter::stamp_meter;
 use super::settings::TransportSettings;
 use super::tempo_reader::TempoReader;
 use super::timed::{CommandQueueAudio, Scheduled, TransportCommand};
 use super::walk::UpcomingTempo;
 use std::sync::atomic::Ordering;
+use tutti_music::MeterMap;
+use tutti_rt::Reader;
 use tutti_tempo::TempoMap;
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
 
@@ -76,6 +79,10 @@ pub struct TransportAudio {
     tempo_map: TempoReader,
     /// The publisher's count at the last block that took the map.
     seen: u64,
+    /// The project's meter, lent where a position is stamped with the meter
+    /// in force at its beat ([`stamp_meter`]), and no longer. Registered
+    /// here, on the control side, when the audio side is taken.
+    meter: Reader<MeterMap>,
     /// Whether the map in force changes tempo: the clock then follows it,
     /// lending it for each step that needs it and
     /// dropping the loan at the end of the step. A constant map leaves this
@@ -127,6 +134,7 @@ impl TransportAudio {
             control: Control::read(&settings, loop_region, tempo),
             tempo_map,
             seen,
+            meter: settings.project_meter().reader(),
             stepped,
             schedule: CommandQueueAudio::new(transport.motion.timed().clone()),
             motion,
@@ -195,9 +203,12 @@ impl TransportAudio {
         }
     }
 
+    /// The transport at the clock's current frame, stamped with the meter in
+    /// force at its beat: one lend of the project's meter, ended here.
     fn begin(&mut self, take_seek: bool) -> tutti_graph::TransportPosition {
         let control = self.control;
-        self.with_map(|clock, map| clock.begin(&control, take_seek, map))
+        let at = self.with_map(|clock, map| clock.begin(&control, take_seek, map));
+        stamp_meter(at, &self.meter.lend())
     }
 
     /// The tempo changes inside the next `frames` of the block that began
@@ -218,7 +229,11 @@ impl TransportAudio {
         if !self.stepped {
             return UpcomingTempo::NONE;
         }
-        self.with_map(|clock, map| clock.ahead(frames, from, map, free))
+        // Each change's position is stamped with the meter at its own beat,
+        // under the one lend of this look.
+        let (map, meter) = (self.tempo_map.lend(), self.meter.lend());
+        self.clock
+            .ahead(frames, from, Some(&map), free, |at| stamp_meter(at, &meter))
     }
 
     /// The transport at the clock's current frame, after

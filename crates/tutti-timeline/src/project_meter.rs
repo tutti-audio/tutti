@@ -1,11 +1,12 @@
 //! The project meter, and the cells that follow it.
 //!
-//! The metronome and every hosted plugin read the same musical meter, once per
-//! block. Each reader reads **one** cell whose identity is fixed when the node
-//! is built: the metronome the project's own ([`ProjectMeter`]), a plugin node
-//! its own [`TimeSignatureSlot`]. A slot follows at most one project meter, and a
-//! [`ProjectMeter::set_meter`] publishes into the project's cell and into
-//! every following slot before it returns.
+//! The block's transport and every hosted plugin read the same musical meter,
+//! once per block. Each reader reads **one** cell whose identity is fixed when
+//! it is built: the transport's audio side the project's own ([`ProjectMeter`],
+//! stamped on each position as a [`BlockMeter`], which the metronome reads
+//! from its block), a plugin node its own [`TimeSignatureSlot`]. A slot follows
+//! at most one project meter, and a [`ProjectMeter::set_meter`] publishes into
+//! the project's cell and into every following slot before it returns.
 //!
 //! # Why a slot follows rather than holding the project's cell
 //!
@@ -19,13 +20,21 @@
 //!
 //! `set_meter` publishes the project's cell and then each follower's, under
 //! one lock, before it returns. A block that starts after it returned reads
-//! the new meter in the metronome and in every plugin; a block that starts
+//! the new meter in its transport and in every plugin; a block that starts
 //! while it runs can read the old meter in some and the new in others.
 
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
+use tutti_graph::{BlockMeter, TransportPosition};
 use tutti_music::MeterMap;
 use tutti_rt::{Loan, LockExt, Publisher, Reader};
+
+/// `at`, stamped with the meter `map` has in force at its first frame: what
+/// every position a block's walk reports carries
+/// ([`TransportPosition::meter`]). Allocation-free.
+pub(crate) fn stamp_meter(at: TransportPosition, map: &MeterMap) -> TransportPosition {
+    at.metered(BlockMeter::of(map, at.beat()))
+}
 
 /// What a following node reads: the project's meter, or none (the node then
 /// reads 4/4 from bar 0).
@@ -61,17 +70,17 @@ impl Clone for TimeSignatureSlotReader {
     }
 }
 
-/// The project meter: the metronome's cell, and the slots that follow it.
+/// The project meter: the transport's cell, and the slots that follow it.
 ///
 /// A handle; a clone is the same meter. [`set_meter`](Self::set_meter) is a
-/// control-thread call that reaches the metronome and every following slot
+/// control-thread call that reaches the transport and every following slot
 /// (see the module docs).
 #[derive(Clone)]
 pub struct ProjectMeter(Arc<ProjectInner>);
 
 struct ProjectInner {
-    /// What the metronome reads once per block. Its identity is fixed for the
-    /// meter's life, so a node reading it builds its reader once.
+    /// What the transport's audio side reads to stamp each position. Its
+    /// identity is fixed for the meter's life, so a reader is built once.
     cell: Publisher<MeterMap>,
     /// The slots the meter is published to, and the lock that orders every
     /// publish into the cell and the followers. The audio thread never takes
@@ -104,7 +113,7 @@ impl ProjectMeter {
         self.0.state.lock_recover()
     }
 
-    /// Publishes `meter` to the metronome and to every following slot, before
+    /// Publishes `meter` to the transport and to every following slot, before
     /// returning. Control thread: allocates, and frees the values it
     /// replaces here.
     pub fn set_meter(&self, meter: impl Into<Arc<MeterMap>>) {
@@ -120,7 +129,7 @@ impl ProjectMeter {
         });
     }
 
-    /// Frees the meters the metronome and every following slot have let go
+    /// Frees the meters the transport and every following slot have let go
     /// of since the last publish (a meter a block still held when
     /// [`set_meter`](Self::set_meter) replaced it), without publishing.
     /// Returns how many are still held. Control thread: a host calls it
@@ -150,8 +159,8 @@ impl ProjectMeter {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
-    /// A reader of the cell the metronome reads, registered for the node
-    /// built over it. Control thread: registering may allocate.
+    /// A reader of the project's cell, registered for whoever reads it once
+    /// per block. Control thread: registering may allocate.
     pub fn reader(&self) -> Reader<MeterMap> {
         self.0.cell.reader()
     }

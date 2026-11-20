@@ -15,7 +15,6 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{TransportPosition as BlockTransport, Unforkable};
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
-use tutti_timeline::Transport;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -77,10 +76,10 @@ impl Node for Sum {
     fn reset(&mut self) {}
 }
 
-fn click(transport: &Transport) -> ClickNode<f32> {
+fn click() -> ClickNode<f32> {
     let settings = Arc::new(ClickSettings::new());
     settings.mode().store(MetronomeMode::Always);
-    ClickNode::from(ClickNodeConfig::new(transport, settings))
+    ClickNode::from(ClickNodeConfig::new(settings))
 }
 
 /// [`CLICKS`] declared clicks and [`HEAVY`] undeclared ones, summed onto
@@ -88,7 +87,6 @@ fn click(transport: &Transport) -> ClickNode<f32> {
 /// `declared`: the clicks as shipped, or every one wrapped to declare
 /// nothing.
 fn graph(workers: usize, declared: bool) -> Executor {
-    let transport = Transport::new(SampleRate::of(SR));
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(MAX_BLOCK)),
@@ -107,9 +105,9 @@ fn graph(workers: usize, declared: bool) -> Executor {
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if declared && k < CLICKS {
-            ed.insert(key, "click", click(&transport));
+            ed.insert(key, "click", click());
         } else {
-            ed.insert(key, "click", Unforkable(Undeclared(click(&transport))));
+            ed.insert(key, "click", Unforkable(Undeclared(click())));
         }
         for c in 0..2u16 {
             let port = InPort {
@@ -161,10 +159,7 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
 #[test]
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
 fn moderate_clicks_pack_and_render_bit_identically() {
-    assert_eq!(
-        Node::<f32>::shape(&click(&Transport::new(SampleRate::of(SR)))).cost,
-        Cost::Moderate
-    );
+    assert_eq!(Node::<f32>::shape(&click()).cost, Cost::Moderate);
     let declared = graph(4, true);
     let undeclared = graph(4, false);
     let (plan, bare) = (

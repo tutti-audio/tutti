@@ -960,14 +960,13 @@ impl<C: Clock> SessionBuilder<C> {
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
 
-        // The metronome. It reads the beat, play and record state from its
-        // block's `Env`, and the count-in flag off the transport (read only).
+        // The metronome. It reads the beat, the play, record and count-in state
+        // and the meter from its block's `Env`.
         // It is not wired to the output: what it feeds is the host's
         // declaration, like every other node's.
-        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(
-            &transport,
-            Arc::clone(&click_settings),
-        )));
+        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(Arc::clone(
+            &click_settings,
+        ))));
 
         // The engine's MIDI as graph nodes: the sync node (sends nothing until a
         // host sets its messages). An input port's input node and an output's

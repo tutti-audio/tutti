@@ -43,7 +43,7 @@ use tutti_timeline::{
 };
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
-const SR: f64 = 48_000.0;
+pub(crate) const SR: f64 = 48_000.0;
 
 type Log = Arc<Mutex<Vec<(f32, f32)>>>;
 
@@ -153,7 +153,7 @@ fn graph_engine(
     (engine, ed)
 }
 
-fn render(engine: &Engine, layout: ChannelLayout, n: usize) -> Vec<f32> {
+pub(crate) fn render(engine: &Engine, layout: ChannelLayout, n: usize) -> Vec<f32> {
     let mut buf = vec![0.0f32; n * layout.count() as usize];
     engine.process(&mut InterleavedMut::new(&mut buf, layout).unwrap());
     buf
@@ -305,7 +305,7 @@ fn the_env_walk_is_the_env_beat() {
 /// One zero frame is not silence: a click's sine reads an exact zero where its phase
 /// wraps to a whole cycle. A sine below a quarter of the rate never reads two exact
 /// zeros in a row, so two silent frames are silence.
-fn onsets(stereo: &[f32]) -> Vec<usize> {
+pub(crate) fn onsets(stereo: &[f32]) -> Vec<usize> {
     let left: Vec<f32> = stereo.iter().step_by(2).copied().collect();
     (1..left.len())
         .filter(|&f| left[f] != 0.0 && left[f.saturating_sub(2)..f].iter().all(|&x| x == 0.0))
@@ -335,7 +335,7 @@ fn click_clicks_on_the_model_beats() {
     settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));
-    let click = ClickNode::from(ClickNodeConfig::new(&transport, settings));
+    let click = ClickNode::from(ClickNodeConfig::new(settings));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(512)),
@@ -401,7 +401,7 @@ fn click_clicks_on_the_model_beats() {
 // ---- offline ---------------------------------------------------------------
 
 /// Logs every block's `Env`.
-struct EnvLog(Arc<Mutex<Vec<Env>>>);
+pub(crate) struct EnvLog(pub(crate) Arc<Mutex<Vec<Env>>>);
 
 impl Node for EnvLog {
     fn shape(&self) -> Shape {
@@ -417,7 +417,7 @@ impl Node for EnvLog {
 }
 
 /// An `EnvLog` at key 1, on the global output.
-fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor) {
+pub(crate) fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(max_block)),

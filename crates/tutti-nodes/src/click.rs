@@ -4,8 +4,9 @@
 //! **per frame** from its block's [`Env`] — walked piece by piece across the
 //! block's transport changes, with the host's own clock
 //! ([`Env::for_each_beat`](tutti_graph::Env::for_each_beat)) — the play and record state from
-//! the same pieces, the count-in flag off the transport's shared cell, and its
-//! own settings (volume, meter, mode) from [`ClickSettings`].
+//! the same pieces, the count-in flag and the meter off the same transport
+//! ([`TransportPosition::count_in`], [`TransportPosition::meter`]), and its own
+//! settings (volume, mode) from [`ClickSettings`].
 //!
 //! # Why the beat comes from `Env`, not the transport's atomic
 //!
@@ -20,25 +21,30 @@
 //! whose beat first reaches it. A start or a stop inside a block gates the
 //! click on its frame too, not at the block's start.
 //!
-//! # Meter arrives here, not through the transport
+//! # The meter rides on the block's transport
 //!
-//! The metronome is the one audio-thread consumer of musical meter, and it gets
-//! it through its own settings bundle rather than through the transport. That
-//! keeps meter a layer *over* the engine: `TransportSettings`, `Timeline`, and
-//! the graph know nothing about bars.
+//! The host stamps each block's transport (and each piece after a transport
+//! change) with the [`BlockMeter`] in force at its first frame: the signature,
+//! a bar line to count its bars from, and the next meter change. The node
+//! counts bars from that, and from the change once its beat reaches it, so
+//! the accent is the bar's downbeat under the meter the host played. A
+//! transport with no meter counts 4/4 bars from beat 0.
+//!
+//! Only the first change after a piece's first frame is carried, and a loop
+//! wrap inside a block does not carry the meter at the loop's start: the next
+//! block, stamped from its own first frame, reads it.
 
 use atomic_float::AtomicF64;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use tutti_buffers::BusTopology;
 use tutti_buffers::Float;
 use tutti_graph::{
-    Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
-    Shape, Status, declare_params,
+    BlockMeter, Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts,
+    Prepare, Shape, Status, declare_params,
 };
-use tutti_music::{Meter, MeterMap};
-use tutti_rt::{AtomicCell, Loan, Reader, atomic_word};
-use tutti_timeline::{ProjectMeter, Transport};
+use tutti_music::{Meter, TimeSignature};
+use tutti_rt::{AtomicCell, atomic_word};
 use tutti_units::Tail;
 use tutti_units::{
     Amplitude, Beat, Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, Samples, Seconds,
@@ -102,14 +108,13 @@ impl ClickLevel {
 
 /// Click-specific settings (volume, mode).
 ///
-/// Transport state (beat, playing, recording) comes from the node's block
-/// [`Env`]; the count-in flag from the [`Transport`] it was built over.
+/// Transport state (beat, playing, recording, count-in, meter) comes from the
+/// node's block [`Env`].
 ///
 /// **Shared as `Arc<ClickSettings>`, never cloned by value**: it is the
 /// node's controls ([`ClickNode`]'s `IntoNode`), the one cell a host's writes
 /// and the running node both hold. A fork of the node gets a fresh one holding
-/// the values at the fork ([`snapshot`](Self::snapshot)). The meter is not
-/// here: it is the project's, held by the transport.
+/// the values at the fork ([`snapshot`](Self::snapshot)).
 #[repr(align(64))]
 #[derive(Debug)]
 pub struct ClickSettings {
@@ -133,7 +138,7 @@ impl From<ClickConfig> for ClickSettings {
 }
 
 impl ClickSettings {
-    /// Default settings: mode [`MetronomeMode::Off`], half volume, 4/4.
+    /// Default settings: mode [`MetronomeMode::Off`], half volume.
     #[must_use]
     pub fn new() -> Self {
         ClickConfig::new().into()
@@ -181,30 +186,18 @@ pub type ClickState = ClickSettings;
 /// starts on its exact frame and nothing has to be wired into the node.
 ///
 /// Its controls are its [`ClickSettings`] (`IntoNode::Controls`), the cell it
-/// was built with. The count-in flag (`PrerollOnly`, `RecordingOnly`) is read
-/// off the [`Transport`] it was built over, once per block: a live-session
-/// fact the graph's transport does not carry. Playing and recording are the
-/// block's, piece by piece, so an export's metronome follows the export's
-/// transport.
+/// was built with. Playing, recording, the count-in (`PrerollOnly`,
+/// `RecordingOnly`) and the meter are the block's, piece by piece, so an
+/// export's metronome follows the export's transport.
 ///
 /// A fork (an export, a live duplicate) renders the metronome as it was set
-/// at the fork: a [`snapshot`](ClickSettings::snapshot) of the settings and
-/// the count-in flag as it stood, sharing nothing with the live node.
+/// at the fork: a [`snapshot`](ClickSettings::snapshot) of the settings,
+/// sharing nothing with the live node.
 ///
-/// A clone reads the same settings and count-in flag, and its meter through
-/// a reader of its own: cloning registers a new reader on the same
-/// cell, so the clone and the original never share a reader slot.
+/// A clone reads the same settings.
 #[derive(Clone)]
 pub struct ClickNode<F: Float> {
     settings: Arc<ClickSettings>,
-    /// A reader registered on the meter cell of `settings`' project meter
-    /// when the node is built: the one cell the node reads the meter from,
-    /// once per block. Never swapped: a node over other settings is built
-    /// with [`over`](Self::over), which registers on that settings' cell.
-    meter: MeterReader,
-    /// The transport's count-in flag (`TransportSettings::in_preroll`), or a
-    /// fork's own copy of it.
-    preroll: Arc<AtomicBool>,
     /// The rate `click_normal` and `click_accent` were rendered at; `None`
     /// until the node is first prepared.
     sample_rate: Option<tutti_units::SampleRate>,
@@ -236,40 +229,10 @@ pub struct ClickNode<F: Float> {
     latched_until: Beat,
 }
 
-/// A reader of a project meter's cell that clones by registering another
-/// reader on the cell, so a clone of the node never shares a reader slot with
-/// the original. Cloning is a control-side call: it locks and may allocate.
-#[derive(Debug)]
-struct MeterReader {
-    reader: Reader<MeterMap>,
-    meter: ProjectMeter,
-}
-
-impl MeterReader {
-    fn new(meter: ProjectMeter) -> Self {
-        Self {
-            reader: meter.reader(),
-            meter,
-        }
-    }
-
-    fn lend(&mut self) -> Loan<'_, MeterMap> {
-        self.reader.lend()
-    }
-}
-
-impl Clone for MeterReader {
-    fn clone(&self) -> Self {
-        Self::new(self.meter.clone())
-    }
-}
-
 impl<F: Float> std::fmt::Debug for ClickNode<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClickNode")
             .field("settings", &self.settings)
-            .field("meter", &self.meter)
-            .field("preroll", &self.preroll)
             .field("sample_rate", &self.sample_rate)
             .field("click_pos", &self.click_pos)
             .field("is_accent", &self.is_accent)
@@ -279,48 +242,39 @@ impl<F: Float> std::fmt::Debug for ClickNode<F> {
     }
 }
 
-/// What a [`ClickNode`] is made from: the count-in flag and the project meter of a
-/// [`Transport`], and the [`ClickSettings`] its controls are.
+/// What a [`ClickNode`] is made from: the [`ClickSettings`] its controls are.
 #[derive(Clone, Debug)]
 pub struct ClickNodeConfig {
     settings: Arc<ClickSettings>,
-    preroll: Arc<AtomicBool>,
-    meter: ProjectMeter,
 }
 
 impl ClickNodeConfig {
-    /// A click node reading the count-in flag and the project meter of `transport`, and
-    /// `settings`.
+    /// A click node over `settings`.
     ///
     /// `settings` is taken as an `Arc` so a later write to it reaches the running node: they
     /// are its controls.
     #[must_use]
-    pub fn new(transport: &Transport, settings: Arc<ClickSettings>) -> Self {
-        Self {
-            settings,
-            preroll: transport.settings().in_preroll_cell(),
-            meter: transport.settings().project_meter().clone(),
-        }
+    pub fn new(settings: Arc<ClickSettings>) -> Self {
+        Self { settings }
     }
 }
 
 /// The click node of `config`. Its click waveforms are rendered when it is prepared, at the
-/// graph's rate. Control thread: registering the meter reader may allocate.
+/// graph's rate.
 impl<F: Float> From<ClickNodeConfig> for ClickNode<F> {
     fn from(config: ClickNodeConfig) -> Self {
-        Self::over(config.settings, config.preroll, config.meter)
+        Self::over(config.settings)
     }
 }
 
 impl<F: Float> ClickNode<F> {
-    /// A node over `settings`, the count-in flag `preroll` and `meter`,
-    /// reading the meter cell through a reader it registers there. Control
-    /// thread: registering may allocate.
-    fn over(settings: Arc<ClickSettings>, preroll: Arc<AtomicBool>, meter: ProjectMeter) -> Self {
+    /// The meter a block with none is counted under: 4/4 from beat 0.
+    const FOUR_FOUR: BlockMeter = BlockMeter::new(TimeSignature::of(4, 4), Beat::new(0.0), None);
+
+    /// A node over `settings`.
+    fn over(settings: Arc<ClickSettings>) -> Self {
         Self {
-            meter: MeterReader::new(meter),
             settings,
-            preroll,
             sample_rate: None,
             click_normal: Vec::new(),
             click_accent: Vec::new(),
@@ -382,18 +336,14 @@ impl<F: Float> ClickNode<F> {
     }
 
     /// Whether the metronome sounds under `mode`, over a piece of a block
-    /// whose transport is `t`, with the count-in flag at `in_preroll`.
+    /// whose transport is `t`.
     #[inline]
-    fn should_play(
-        mode: MetronomeMode,
-        t: &tutti_graph::TransportPosition,
-        in_preroll: bool,
-    ) -> bool {
+    fn should_play(mode: MetronomeMode, t: &tutti_graph::TransportPosition) -> bool {
         match mode {
             MetronomeMode::Off => false,
             MetronomeMode::Always => t.playing,
-            MetronomeMode::PrerollOnly => in_preroll,
-            MetronomeMode::RecordingOnly => t.recording() && !in_preroll,
+            MetronomeMode::PrerollOnly => t.count_in(),
+            MetronomeMode::RecordingOnly => t.recording() && !t.count_in(),
         }
     }
 
@@ -410,7 +360,8 @@ impl<F: Float> ClickNode<F> {
         self.last_click_onset = None;
     }
 
-    /// Retrigger if `beat` has crossed into a new notated beat under `meter`.
+    /// Retrigger if `beat` has crossed into a new notated beat under `meter`:
+    /// the block's, or the change's once `beat` reaches it.
     ///
     /// The index counts *notated* beats, not quarter notes: in 7/8 that is an
     /// eighth, so the metronome clicks seven times per bar rather than four.
@@ -419,16 +370,15 @@ impl<F: Float> ClickNode<F> {
     /// already latched — returns after two compares; `bar_at` runs only when the
     /// playhead leaves that span, i.e. about once per notated beat.
     ///
-    /// Takes its mutable fields individually rather than `&mut self`: the meter
-    /// arrives as a read lease borrowed from `self.meter`, so a whole-`self`
-    /// mutable borrow would collide with it at every call site.
+    /// Takes its mutable fields individually rather than `&mut self`: the block
+    /// loop holds the playback buffers borrowed alongside it.
     #[inline]
     fn advance_to(
         last_click_onset: &mut Option<Beat>,
         latched_until: &mut Beat,
         click_pos: &mut usize,
         is_accent: &mut bool,
-        meter: &MeterMap,
+        meter: &BlockMeter,
         beat: Beat,
     ) {
         if let Some(onset) = *last_click_onset
@@ -438,13 +388,20 @@ impl<F: Float> ClickNode<F> {
             return;
         }
 
-        let position = meter.bar_at(beat);
+        // The bars are counted from the block's bar line, or from the change
+        // once `beat` has reached it: a change always begins a bar.
+        let (signature, origin) = match meter.next_change() {
+            Some(change) if beat >= change.beat => (change.signature, change.beat),
+            _ => (meter.signature(), meter.bar_start()),
+        };
+        let position = signature.bar_at(Beat::new((beat - origin).get()));
 
         // Identify the beat by the *onset it belongs to*, not by a running
         // count. The onset is unambiguous everywhere
         // and needs no global numbering.
-        let onset = position.bar_start
-            + position.signature.beat_length() * (position.beat.get() - 1) as f64;
+        let onset = origin
+            + (position.bar_start - Beat::new(0.0))
+            + signature.beat_length() * (position.beat.get() - 1) as f64;
 
         // Inequality, not `>`: a backward jump from a loop wrap must retrigger
         // too. The epsilon is for float drift in the accumulated playhead, well
@@ -468,13 +425,9 @@ impl<F: Float> ClickNode<F> {
         // simply short). Measured from the onset actually latched, so a
         // within-epsilon non-change keeps the span it already had.
         let latched = last_click_onset.unwrap_or(onset);
-        let next_onset = latched + position.signature.beat_length();
-        let changes = meter.changes();
-        let next_change = changes
-            .get(changes.partition_point(|c| c.beat <= latched))
-            .map(|c| c.beat);
-        *latched_until = match next_change {
-            Some(change) if change < next_onset => change,
+        let next_onset = latched + signature.beat_length();
+        *latched_until = match meter.next_change() {
+            Some(change) if beat < change.beat && change.beat < next_onset => change.beat,
             _ => next_onset,
         };
     }
@@ -482,9 +435,8 @@ impl<F: Float> ClickNode<F> {
     /// Drop the cached span, so the next onset check consults the meter.
     ///
     /// Called at the top of every block, which is all it takes for a
-    /// republished meter to reach the node: the meter lease is re-read per
-    /// block anyway, and this is the only thing derived from it that outlives
-    /// one.
+    /// changed meter to reach the node: the block's transport carries the
+    /// meter, and this is the only thing derived from it that outlives one.
     #[inline]
     fn forget_latch(&mut self) {
         self.latched_until = Beat::new(f64::NEG_INFINITY);
@@ -493,8 +445,7 @@ impl<F: Float> ClickNode<F> {
     /// One sample of the click envelope, or silence once it has run out.
     ///
     /// Over the playback fields rather than `&mut self`, for the reason
-    /// [`advance_to`](Self::advance_to) gives: the block loop holds the meter
-    /// lease borrowed from `self.meter` while it calls this.
+    /// [`advance_to`](Self::advance_to) gives.
     #[inline]
     fn next_sample(
         click_normal: &[F],
@@ -520,28 +471,25 @@ impl<F: Float> ClickNode<F> {
 
     /// Render `env`'s block into `left` and `right`.
     ///
-    /// The mode, the count-in flag, the volume and the meter are read once
-    /// per block — a UI write lands at the next block, never mid-block, and
-    /// the meter's `Reader::lend` (a slot claim and a fence) is never per frame.
-    /// The beat is per frame, and the play and record state per piece of the
-    /// block ([`Env::segments`]): a stop inside the block silences the click
-    /// from its frame, and a start sounds the beat it lands on, on its frame.
+    /// The mode and the volume are read once per block — a UI write lands at
+    /// the next block, never mid-block. The beat is per frame, and the play,
+    /// record and count-in state and the meter per piece of the block
+    /// ([`Env::segments`]): a stop inside the block silences the click from
+    /// its frame, and a start sounds the beat it lands on, on its frame.
     fn render(&mut self, env: &Env, left: &mut [F], right: &mut [F]) {
         let mode = self.settings.mode().load();
-        let in_preroll = self.preroll.load(Ordering::Acquire);
         // The level narrows to the render's format once per block.
         let volume = F::from_unit(self.settings.volume().get());
         self.forget_latch();
         for (start, piece) in env.segments() {
-            if !Self::should_play(mode, &piece.transport, in_preroll) {
+            if !Self::should_play(mode, &piece.transport) {
                 self.go_silent();
                 let range = start.index()..start.index() + piece.block_len.get();
                 left[range.clone()].fill(F::ZERO);
                 right[range].fill(F::ZERO);
                 continue;
             }
-            // One lease for the piece — `Reader::lend` is never per frame.
-            let meter = self.meter.lend();
+            let meter = piece.transport.meter().unwrap_or(Self::FOUR_FOUR);
             let Self {
                 click_normal,
                 click_accent,
@@ -612,17 +560,13 @@ impl<F: Float> Node<F> for ClickNode<F> {
     }
 }
 
-/// [`ClickNode`]'s fork source: the live node's settings, count-in cell and
-/// project meter, forked into a node that shares none of them.
+/// [`ClickNode`]'s fork source: the live node's settings, forked into a node
+/// that shares none of them.
 ///
-/// It holds the cells, not a node: a fork is a node built over new cells
-/// ([`ClickNode::over`]), never a clone of the live one with its cells
-/// swapped, so the reader the node lends its meter through is registered on
-/// the fork's own cell.
+/// It holds the cell, not a node: a fork is a node built over a new cell
+/// ([`ClickNode::over`]).
 struct ClickFork {
     settings: Arc<ClickSettings>,
-    preroll: Arc<AtomicBool>,
-    meter: ProjectMeter,
 }
 
 impl ClickFork {
@@ -630,21 +574,13 @@ impl ClickFork {
     fn of<F: Float>(node: &ClickNode<F>) -> Self {
         Self {
             settings: Arc::clone(&node.settings),
-            preroll: Arc::clone(&node.preroll),
-            meter: node.meter.meter.clone(),
         }
     }
 
-    /// The fork: the settings, the count-in flag and the meter as they stand
-    /// now, in cells of its own, and nothing sounding (it is unprepared). The
-    /// meter is the project's map at the fork, in a meter of its own that no
-    /// plugin follows.
+    /// The fork: the settings as they stand now, in a cell of its own, and
+    /// nothing sounding (it is unprepared).
     fn node<F: Float>(&self) -> ClickNode<F> {
-        ClickNode::over(
-            Arc::new(self.settings.snapshot()),
-            Arc::new(AtomicBool::new(self.preroll.load(Ordering::Acquire))),
-            ProjectMeter::new((*self.meter.current()).clone()),
-        )
+        ClickNode::over(Arc::new(self.settings.snapshot()))
     }
 }
 
@@ -677,7 +613,7 @@ mod tests {
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Offset, TransportChanges};
     use tutti_music::FrameClock;
-    use tutti_music::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
+    use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
     use tutti_units::Bpm;
     use tutti_units::Frame;
     use tutti_units::SampleRate;
@@ -738,20 +674,24 @@ mod tests {
 
     const SR: f64 = 44_100.0;
 
-    /// The session state a block is rendered under: playing and recording.
+    /// The session state a block is rendered under: playing, recording and
+    /// counting in.
     #[derive(Clone, Copy)]
     struct Deck {
         playing: bool,
         recording: bool,
+        count_in: bool,
     }
 
     const ROLLING: Deck = Deck {
         playing: true,
         recording: false,
+        count_in: false,
     };
     const STOPPED: Deck = Deck {
         playing: false,
         recording: false,
+        count_in: false,
     };
 
     /// A transport at `beat` that holds it for the whole block (the smallest
@@ -765,6 +705,7 @@ mod tests {
             None,
         )
         .with_recording(deck.recording)
+        .counting_in(deck.count_in)
     }
 
     /// A block of `len` frames at `rate` under `transport`, no changes.
@@ -792,15 +733,29 @@ mod tests {
         [l[0], r[0]]
     }
 
-    fn make_click() -> (Transport, Arc<ClickSettings>, ClickNode<f32>) {
-        let transport = Transport::new(SampleRate::of(SR));
+    fn make_click() -> (Arc<ClickSettings>, ClickNode<f32>) {
         let settings = Arc::new(ClickSettings::new());
         let node = prepared(
-            ClickNode::from(ClickNodeConfig::new(&transport, Arc::clone(&settings))),
+            ClickNode::from(ClickNodeConfig::new(Arc::clone(&settings))),
             tutti_units::SampleRate::of(SR),
             64,
         );
-        (transport, settings, node)
+        (settings, node)
+    }
+
+    /// `t` stamped with the meter `map` has in force at its beat, as the host
+    /// stamps a block's transport.
+    fn metered(
+        t: tutti_graph::TransportPosition,
+        map: &MeterMap,
+    ) -> tutti_graph::TransportPosition {
+        t.metered(BlockMeter::of(map, t.beat()))
+    }
+
+    /// One frame at `beat` under the meter `map`, as a `[left, right]` pair.
+    fn frame_under(node: &mut ClickNode<f32>, map: &MeterMap, deck: Deck, beat: f64) -> [f32; 2] {
+        let [l, r] = block(node, &env(SR, 1, metered(held(deck, beat), map)));
+        [l[0], r[0]]
     }
 
     /// Stores a click level, as the session's volume target does after it
@@ -819,7 +774,7 @@ mod tests {
 
     #[test]
     fn test_click_node_silent_when_paused() {
-        let (_, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
 
         let output = frame(&mut node, STOPPED, 0.0);
@@ -829,7 +784,7 @@ mod tests {
 
     #[test]
     fn test_click_node_plays_on_beat() {
-        let (_, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
@@ -845,7 +800,7 @@ mod tests {
 
     #[test]
     fn test_click_plays_after_loop_wrap() {
-        let (_, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
@@ -866,47 +821,51 @@ mod tests {
     /// every-N count, which would ignore the project's time signature.
     #[test]
     fn accent_follows_the_meter_downbeat() {
-        let (transport, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
 
-        let accents_at = |node: &mut ClickNode<f32>, beat: f64| {
+        let accents_at = |node: &mut ClickNode<f32>, map: &MeterMap, beat: f64| {
             Node::<f32>::reset(node);
-            let _ = frame(node, ROLLING, beat);
+            let _ = frame_under(node, map, ROLLING, beat);
             node.is_accent
         };
 
-        // Default 4/4: accent every 4 quarter notes.
-        assert!(accents_at(&mut node, 0.0));
-        assert!(!accents_at(&mut node, 1.0));
-        assert!(accents_at(&mut node, 4.0));
+        // 4/4: accent every 4 quarter notes.
+        let four = MeterMap::default();
+        assert!(accents_at(&mut node, &four, 0.0));
+        assert!(!accents_at(&mut node, &four, 1.0));
+        assert!(accents_at(&mut node, &four, 4.0));
 
         // 3/4: the accent moves to every 3 quarters. A fixed count of 4 would
         // drift against the bar here.
-        transport
-            .settings()
-            .project_meter()
-            .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                Beat::new(0.0),
-                TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
-            )])));
-        assert!(accents_at(&mut node, 3.0));
-        assert!(!accents_at(&mut node, 4.0));
-        assert!(accents_at(&mut node, 6.0));
+        let three = MeterMap::new([MeterChange::new(
+            Beat::new(0.0),
+            TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
+        )]);
+        assert!(accents_at(&mut node, &three, 3.0));
+        assert!(!accents_at(&mut node, &three, 4.0));
+        assert!(accents_at(&mut node, &three, 6.0));
+
+        // No meter on the transport: 4/4 from beat 0.
+        Node::<f32>::reset(&mut node);
+        let _ = frame(&mut node, ROLLING, 4.0);
+        assert!(node.is_accent);
+        Node::<f32>::reset(&mut node);
+        let _ = frame(&mut node, ROLLING, 3.0);
+        assert!(!node.is_accent);
     }
 
     /// In 7/8 the notated beat is an eighth, so a bar holds seven clicks across
     /// 3.5 quarter notes — not four clicks on the quarters.
     #[test]
     fn click_rate_follows_the_notated_beat() {
-        let (transport, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
-        transport
-            .settings()
-            .project_meter()
-            .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                Beat::new(0.0),
-                TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
-            )])));
+        let map = MeterMap::new([MeterChange::new(
+            Beat::new(0.0),
+            TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
+        )]);
+        let frame = |node: &mut ClickNode<f32>, deck, beat| frame_under(node, &map, deck, beat);
 
         // Half a quarter note apart is a full notated beat in 7/8, so these are
         // distinct clicks.
@@ -936,26 +895,23 @@ mod tests {
     /// scale entirely.
     #[test]
     fn clicks_stay_distinct_across_a_meter_change() {
-        let (transport, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
         // 7/8 (eighth-note beats) for three bars, then 4/4 (quarter-note beats).
-        transport
-            .settings()
-            .project_meter()
-            .set_meter(Arc::new(MeterMap::new([
-                MeterChange::new(
-                    Beat::new(0.0),
-                    TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
-                ),
-                MeterChange::new(Beat::new(10.5), TimeSignature::default()),
-            ])));
+        let map = MeterMap::new([
+            MeterChange::new(
+                Beat::new(0.0),
+                TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
+            ),
+            MeterChange::new(Beat::new(10.5), TimeSignature::default()),
+        ]);
 
         // Walk every notated beat across the change and collect the onsets the
         // node actually latched.
         let mut onsets = Vec::new();
         let mut beat = 0.0;
         while beat < 14.5 {
-            let _ = frame(&mut node, ROLLING, beat);
+            let _ = frame_under(&mut node, &map, ROLLING, beat);
             if let Some(onset) = node.last_click_onset
                 && onsets.last() != Some(&onset)
             {
@@ -1002,26 +958,23 @@ mod tests {
     /// the cap.
     #[test]
     fn a_mid_beat_meter_change_clicks_its_downbeat() {
-        let (transport, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
-        transport
-            .settings()
-            .project_meter()
-            .set_meter(Arc::new(MeterMap::new([
-                MeterChange::new(Beat::new(0.0), TimeSignature::default()),
-                MeterChange::new(
-                    Beat::new(2.5),
-                    TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
-                ),
-            ])));
+        let map = MeterMap::new([
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(
+                Beat::new(2.5),
+                TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
+            ),
+        ]);
 
         // Beat 2's click has already played out, so only the change can sound.
         node.last_click_onset = Some(Beat::new(2.0));
         node.click_pos = node.click_normal.len();
 
         // Frame `i` carries beat `2 + i/100`, so the change at 2.5 is frame 50.
-        let [left, _] = block(&mut node, &env(SR, 64, hundredths_from(2.0)));
+        let [left, _] = block(&mut node, &env(SR, 64, metered(hundredths_from(2.0), &map)));
 
         assert_eq!(
             node.last_click_onset,
@@ -1035,27 +988,68 @@ mod tests {
         assert_eq!(first_sound, Some(51), "clicked on the change's frame");
     }
 
-    /// A meter published while a beat is latched is in force from the next
-    /// block, not from whenever the playhead leaves the span the old meter drew.
+    /// A block carries only the first meter change after its first frame: a
+    /// second change inside the same block is counted from the next block's
+    /// first frame, on its own bar line. The first change lands on its frame,
+    /// and after the next block the node counts bars from the second change,
+    /// never from the first's grid.
     #[test]
-    fn a_republished_meter_is_seen_within_one_block() {
-        let (transport, settings, mut node) = make_click();
+    fn a_second_change_in_one_block_is_counted_from_the_next_block() {
+        let (settings, mut node) = make_click();
+        settings.mode().store(MetronomeMode::Always);
+        set_volume(&settings, Amplitude::new(1.0));
+        let map = MeterMap::new([
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(2.5), TimeSignature::of(3, 4)),
+            MeterChange::new(Beat::new(2.55), TimeSignature::of(7, 8)),
+        ]);
+        node.last_click_onset = Some(Beat::new(2.0));
+        node.click_pos = node.click_normal.len();
+
+        // Frame `i` carries beat `2 + i/100`: the changes are frames 50 and 55.
+        let first = metered(hundredths_from(2.0), &map);
+        let [left, _] = block(&mut node, &env(SR, 64, first));
+        assert_eq!(
+            left.iter().position(|&s| s != 0.0),
+            Some(51),
+            "the first change clicks on its frame"
+        );
+        assert_eq!(
+            node.last_click_onset,
+            Some(Beat::new(2.5)),
+            "the second change is not in this block's meter"
+        );
+
+        let second = metered(hundredths_from(2.64), &map);
+        let _ = block(&mut node, &env(SR, 10, second));
+        assert_eq!(
+            node.last_click_onset,
+            Some(Beat::new(2.55)),
+            "the next block counts bars from the second change"
+        );
+    }
+
+    /// A block stamped with another meter is counted under it from its first
+    /// frame, not from whenever the playhead leaves the span the old meter drew.
+    #[test]
+    fn a_new_blocks_meter_is_counted_from_its_first_frame() {
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
 
-        // 4/4 (the default): 2.00..2.10 all belong to the quarter at 2.0.
+        // 4/4: 2.00..2.10 all belong to the quarter at 2.0.
         let _ = block(&mut node, &env(SR, 10, hundredths_from(2.0)));
         assert_eq!(node.last_click_onset, Some(Beat::new(2.0)));
 
         // 3/16: sixteenth-note beats, three to a 0.75-quarter bar. Beat 2.64
         // falls in the sixteenth starting at 2.5 — inside the old span.
-        transport
-            .settings()
-            .project_meter()
-            .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                Beat::new(0.0),
-                TimeSignature::new(BeatsPerBar::of(3), NoteValue::SIXTEENTH),
-            )])));
-        let _ = block(&mut node, &env(SR, 10, hundredths_from(2.64)));
+        let map = MeterMap::new([MeterChange::new(
+            Beat::new(0.0),
+            TimeSignature::new(BeatsPerBar::of(3), NoteValue::SIXTEENTH),
+        )]);
+        let _ = block(
+            &mut node,
+            &env(SR, 10, metered(hundredths_from(2.64), &map)),
+        );
         assert_eq!(
             node.last_click_onset,
             Some(Beat::new(2.5)),
@@ -1068,7 +1062,7 @@ mod tests {
     /// 4294967295 and accents an arbitrary beat.
     #[test]
     fn negative_beats_do_not_wrap() {
-        let (_, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
 
         // One bar before the start: a downbeat, and no panic or wrap.
@@ -1089,7 +1083,7 @@ mod tests {
     /// diverge from the one-frame blocks there.
     #[test]
     fn a_block_matches_its_frames_one_by_one() {
-        let (_, settings, mut block_node) = make_click();
+        let (settings, mut block_node) = make_click();
         settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
@@ -1146,12 +1140,11 @@ mod tests {
         const ONSET: f64 = 1.0;
 
         for len in [64usize, 40] {
-            let transport = Transport::new(SampleRate::of(RATE));
             let settings = Arc::new(ClickSettings::new());
             settings.mode().store(MetronomeMode::Always);
             set_volume(&settings, Amplitude::new(1.0));
             let mut node = prepared(
-                ClickNode::from(ClickNodeConfig::new(&transport, settings)),
+                ClickNode::from(ClickNodeConfig::new(settings)),
                 tutti_units::SampleRate::of(RATE),
                 len,
             );
@@ -1213,7 +1206,7 @@ mod tests {
     /// block's start (the gap `tests/render/env_beat.rs` recorded).
     #[test]
     fn a_start_or_stop_inside_a_block_gates_on_its_frame() {
-        let (_, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
@@ -1248,7 +1241,7 @@ mod tests {
 
     #[test]
     fn test_preroll_only_mode() {
-        let (transport, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::PrerollOnly);
         set_volume(&settings, Amplitude::new(1.0));
 
@@ -1256,23 +1249,27 @@ mod tests {
         let output = frame(&mut node, ROLLING, 0.0);
         assert_eq!(output[0], 0.0);
 
-        // Enable preroll - should play
-        transport.settings().set_in_preroll(true);
+        // The block's transport is in its count-in - should play
         Node::<f32>::reset(&mut node);
+        let counting = Deck {
+            count_in: true,
+            ..ROLLING
+        };
         assert!(
-            sounds_within(&mut node, ROLLING, 0.0, 100),
+            sounds_within(&mut node, counting, 0.0, 100),
             "Click should play during preroll"
         );
     }
 
     #[test]
     fn test_recording_only_mode() {
-        let (transport, settings, mut node) = make_click();
+        let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::RecordingOnly);
         set_volume(&settings, Amplitude::new(1.0));
         let recording = Deck {
             playing: true,
             recording: true,
+            count_in: false,
         };
 
         // Should be silent when not recording
@@ -1287,9 +1284,15 @@ mod tests {
         );
 
         // In preroll while recording - should NOT play
-        transport.settings().set_in_preroll(true);
         Node::<f32>::reset(&mut node);
-        let output = frame(&mut node, recording, 0.0);
+        let output = frame(
+            &mut node,
+            Deck {
+                count_in: true,
+                ..recording
+            },
+            0.0,
+        );
         assert_eq!(
             output[0], 0.0,
             "Click should not play during preroll in RecordingOnly mode"
@@ -1297,38 +1300,26 @@ mod tests {
     }
 
     /// A fork of the click renders the metronome as it was set when it was
-    /// taken: volume, mode, meter and the count-in flag come from cells of
-    /// its own, so none of the four live moves below reaches it — and each
-    /// is heard by a fork taken after it. The play state is the fork's own
-    /// block transport, by construction.
+    /// taken: volume and mode come from a cell of its own, so neither live
+    /// move below reaches it — and each is heard by a fork taken after it.
+    /// The play state, the count-in and the meter are the fork's own block
+    /// transport, by construction.
     #[test]
-    fn a_fork_snapshots_settings_and_the_count_in() {
-        type Move = fn(&Transport, &ClickSettings);
-        let moves: [(&str, Move); 4] = [
-            ("volume", |_, s| set_volume(s, Amplitude::new(1.0))),
-            ("mode", |_, s| s.mode().store(MetronomeMode::Off)),
-            ("meter", |t, _| {
-                t.settings()
-                    .project_meter()
-                    .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                        Beat::new(0.0),
-                        TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
-                    )])))
-            }),
-            ("count-in", |t, _| t.settings().set_in_preroll(true)),
+    fn a_fork_snapshots_the_settings() {
+        type Move = fn(&ClickSettings);
+        let moves: [(&str, Move); 2] = [
+            ("volume", |s| set_volume(s, Amplitude::new(1.0))),
+            ("mode", |s| s.mode().store(MetronomeMode::Off)),
         ];
         let fresh = || {
-            let transport = Transport::new(SampleRate::SR_48K);
             let settings = Arc::new(ClickSettings::new());
             set_volume(&settings, Amplitude::new(0.5));
-            // Recording-only, so the count-in gates it (the render records).
             settings.mode().store(MetronomeMode::RecordingOnly);
-            let node =
-                ClickNode::<f32>::from(ClickNodeConfig::new(&transport, Arc::clone(&settings)));
-            (transport, settings, ClickFork::of(&node))
+            let node = ClickNode::<f32>::from(ClickNodeConfig::new(Arc::clone(&settings)));
+            (settings, ClickFork::of(&node))
         };
         // 10 240 frames rolling (and recording) from beat 0 at 20 beats a
-        // second: four clicks, past beat 3 (a downbeat in 3/4, not in 4/4).
+        // second: four clicks.
         let render = |node: ClickNode<f32>| {
             let mut node = prepared(node, tutti_units::SampleRate::SR_48K, 64);
             let mut host = FrameClock::new(
@@ -1350,13 +1341,13 @@ mod tests {
             }
             left
         };
-        let (_, _, source) = fresh();
+        let (_, source) = fresh();
         let baseline = render(source.node());
         assert!(baseline.iter().any(|&s| s != 0.0), "the fork sounds");
         for (what, apply) in moves {
-            let (transport, settings, source) = fresh();
+            let (settings, source) = fresh();
             let taken = source.node();
-            apply(&transport, &settings);
+            apply(&settings);
             assert_eq!(
                 render(taken),
                 baseline,
