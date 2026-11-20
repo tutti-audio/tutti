@@ -27,7 +27,7 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_dsp::MatrixConvolver;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_nodes::ConvolverNode;
+use tutti_nodes::{ConvolverNode, FirConvolverConfig};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
@@ -203,6 +203,27 @@ fn a_true_stereo_node_parks_after_its_longest_path() {
         Samples::new(64),
     );
     assert_parks_at_the_tail(node, 64, 200);
+}
+
+/// A linear-phase filter of N taps with 64 latency declares `64 + (N - 1) / 2` latency and a
+/// tail of `(N - 1) / 2`, so it rings to frame `64 + N - 1`, the last of its response.
+#[test]
+fn a_linear_phase_node_parks_after_its_response() {
+    use tutti_dsp::{LinearPhaseDesign, Tilt};
+    use tutti_units::{Db, Hz};
+
+    let tilt = Tilt::new(Db::new(6.0))
+        .design(Hz::new(2_000.0), SR)
+        .unwrap();
+    let fir = LinearPhaseDesign::new(Hz::new(2_000.0))
+        .design(SR, &[tilt])
+        .unwrap();
+    let delay = fir.delay().get();
+    let node: ConvolverNode<f32> = FirConvolverConfig::new(ChannelLayout::MONO, &fir)
+        .block_size(Samples::new(64))
+        .build()
+        .unwrap();
+    assert_parks_at_the_tail(node, 64 + delay, delay);
 }
 
 /// First order in and out with sixteen taps at distinct delays, the longest (300 frames)
