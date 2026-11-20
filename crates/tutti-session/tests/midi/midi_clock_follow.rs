@@ -38,7 +38,7 @@ fn rig() -> (Session, FakeCounters) {
 fn rig_hearing(last: MidiGroup) -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut s = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .midi_groups(last)
         .sample_rate(SampleRate::of(RATE))
         .build()

@@ -202,7 +202,7 @@ pub enum ConnectError {
 }
 
 /// Why a MIDI call of the session failed: one error for the area, each cause
-/// carried as its source. `tutti::midi::Error` in the umbrella; the session's
+/// carried as its source. `tutti::midi::MidiError` in the umbrella; the session's
 /// own [`Error::Midi`] holds it, and every cause below converts into both with
 /// `?`.
 #[cfg(feature = "midi")]
@@ -216,7 +216,7 @@ pub enum MidiError {
 
     /// A MIDI call named a target that is not in the graph, or takes no
     /// MIDI (it has no event input): `Midi::play_clip`, `Midi::input`,
-    /// `Midi::retarget`, `Midi::record`.
+    /// `Midi::retarget`, `Midi::tap`.
     #[error("{0:?} takes no MIDI: it is not in the graph, or has no event input")]
     NoEventInput(tutti_graph::NodeKey),
 

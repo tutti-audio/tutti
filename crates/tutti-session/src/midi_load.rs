@@ -94,7 +94,7 @@ pub struct LoadedTrack {
 }
 
 /// An event of a track's timeline that has no packet, and so is not played
-/// ([`Timeline::dropped`](tutti_midi_file::Timeline::dropped)).
+/// ([`SmfTimeline::dropped`](tutti_midi_file::SmfTimeline::dropped)).
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct DroppedEvent {

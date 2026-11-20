@@ -404,8 +404,8 @@ pub(crate) fn hermite_lanes<F: Float>(out: &mut [F], y: [&[F]; 4], t: &[F]) {
 /// - a wave already in the frame's order and width is read channel for
 ///   channel, with no fold.
 #[inline]
-pub fn read_frame<S: Sample, F: Float>(
-    wave: &Arc<Wave<S>>,
+pub fn read_frame<F: Float>(
+    wave: &Arc<Wave<F>>,
     place: &Place<F>,
     position: SamplePosition,
     out: &mut [F],
@@ -423,9 +423,7 @@ pub fn read_frame<S: Sample, F: Float>(
     // Every channel index `interpolate_taps` asks for is `< src_ch`, which is
     // what keeps `Wave::at` — an unchecked `self.vec[channel][index]` — from
     // panicking; `tap_indices` keeps the frame index in bounds.
-    interpolate_taps(src_ch, place, frac, out, |c, t| {
-        wave.at(c, taps[t]).convert_to::<F>()
-    });
+    interpolate_taps(src_ch, place, frac, out, |c, t| wave.at(c, taps[t]));
 }
 
 /// The four frames [`read_frame`] interpolates `position` from, in a source
@@ -501,8 +499,8 @@ pub(crate) fn split_position<F: Float>(position: SamplePosition) -> (usize, F) {
 ///
 /// Silent for an empty wave, as `read_frame` is.
 #[inline]
-pub(crate) fn read_looped_frame<S: Sample, F: Float>(
-    wave: &Arc<Wave<S>>,
+pub(crate) fn read_looped_frame<F: Float>(
+    wave: &Arc<Wave<F>>,
     place: &Place<F>,
     span: &LoopSpan,
     pos: SamplePosition,
@@ -521,9 +519,9 @@ pub(crate) fn read_looped_frame<S: Sample, F: Float>(
     let (taps, frac) = span.taps(len, pos, looped);
     interpolate_taps(src_ch, place, frac, out, |c, t| {
         let tap = taps[t];
-        let tail = wave.at(c, tap.frame).convert_to::<F>();
+        let tail = wave.at(c, tap.frame);
         match tap.fade {
-            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead).convert_to::<F>(), w),
+            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead), w),
             None => tail,
         }
     });
@@ -943,6 +941,29 @@ mod tests {
     #[test]
     fn a_resident_f64_ramp_read_at_a_fraction_is_the_closed_form() {
         a_ramp_read_at_a_fraction_is_the_closed_form::<f64>(2.0_f64.powi(-53));
+    }
+
+    /// A mono `f32` wave of `samples` read at the position `at` into an `f32` voice.
+    fn read_mono_at(samples: &[f32], at: f64) -> f32 {
+        let wave = Arc::new(Wave::from_interleaved(
+            SampleRate::SR_48K,
+            Interleaved::new(samples, ChannelLayout::MONO).unwrap(),
+        ));
+        let place = Place::<f32>::for_wave(&wave, ChannelLayout::MONO).expect("a placeable wave");
+        let mut out = [0.0f32];
+        super::read_frame(&wave, &place, SamplePosition::new(at), &mut out);
+        out[0]
+    }
+
+    /// An `f32` wave in an `f32` voice reads its samples bit for bit at whole
+    /// frames.
+    #[test]
+    fn an_f32_wave_in_an_f32_voice_reads_its_samples_bit_for_bit() {
+        let samples: Vec<f32> = (0..8).map(|i| 0.1 * i as f32 - 0.3).collect();
+        for (i, &want) in samples.iter().enumerate().take(6).skip(1) {
+            let got = read_mono_at(&samples, i as f64);
+            assert_eq!(got.to_bits(), want.to_bits(), "frame {i}");
+        }
     }
 
     /// A position a hair under a whole frame reads that frame exactly.

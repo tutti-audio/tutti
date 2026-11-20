@@ -92,6 +92,20 @@ impl<F: SamplerFloat> Clip<F> {
 
     /// A resident clip of `wave`, at beat 0, at unit gain, playing once.
     ///
+    /// The wave is held at the clip's own float width. Another width is the
+    /// caller's to state, with `Wave::<f64>::from(&wave)` to widen or
+    /// `wave.map(|x| x as f32)` to narrow:
+    ///
+    /// ```compile_fail
+    /// use std::sync::Arc;
+    /// use tutti_buffers::Wave;
+    /// use tutti_sampler::Clip;
+    /// use tutti_units::SampleRate;
+    ///
+    /// let wide = Arc::new(Wave::<f64>::new(1, SampleRate::SR_48K));
+    /// let _clip = Clip::<f32>::new(wide);
+    /// ```
+    ///
     /// # Errors
     ///
     /// [`PlaceError`] for a wave with a channel no speaker names (a second
