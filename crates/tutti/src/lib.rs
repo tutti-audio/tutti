@@ -243,13 +243,36 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 /// dynamics, reverbs, modulation effects, mixing, panners, convolution and
 /// automation lanes, each with its config, controls and enums. A node is
 /// inserted with `Session::graph().add(node)`.
+///
+/// A linear-phase equalizer from bands, reachable from here alone:
+///
+/// ```
+/// use tutti::nodes::{ConvolverNode, FirConvolverConfig, LinearPhaseDesign, MatchedBell, Tilt};
+/// use tutti::{ChannelLayout, Db, Hz, Q, SampleRate, Samples};
+///
+/// let rate = SampleRate::SR_48K;
+/// let bands = [
+///     MatchedBell::new(Q::new(1.0), Db::new(6.0)).design(Hz::new(1_000.0), rate).unwrap(),
+///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
+/// ];
+/// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
+/// let node: ConvolverNode<f32> = FirConvolverConfig::new(ChannelLayout::STEREO, &fir)
+///     .block_size(Samples::new(512))
+///     .build()
+///     .unwrap();
+/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// ```
 pub mod nodes {
     pub use tutti_dsp::{
-        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn,
+        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation,
         LookaheadError, Matrix, MatrixConvolverError, MaxDecayError, Network,
         OutputMap as NetworkOutputMap, ResampleError, SimdLanes, SpeakerGeometryError, Stage, Tap,
         Taps, WaveshaperControls,
+    };
+    pub use tutti_dsp::{
+        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, FirError,
+        LinearPhaseDesign, LinkwitzRiley, Lti, MAX_GRID, MatchedBell, Sos, SosError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -269,18 +292,18 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
-        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ButterworthOrder,
-        ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings,
-        ClickState, CompressorControls, CompressorNode, ConvolverError, ConvolverNode,
-        CrossoverControls, CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig,
-        CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls,
-        DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig,
-        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
-        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
-        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode,
-        HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
-        LadderFilterNode, LadderType, LevellerConfig, LevellerControls, LevellerNode, LfoClock,
-        LfoNode, LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
+        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
+        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings, ClickState,
+        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
+        CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayControls,
+        DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
+        DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FirConvolverConfig,
+        FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode,
+        InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode,
+        LadderType, LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayControls, ModDelayNode,
         MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
         OversamplingFactor, PhaserControls, PhaserNode, PlateControls, PlateReverbConfig,
         PlateReverbNode, PortSide, Routing as FeedbackRouting,
