@@ -150,17 +150,35 @@ pub(crate) fn patch_unfinished(file: &mut std::fs::File, block_align: u64) -> st
             "no COMM and SSND chunks to patch",
         ));
     };
-    // The SSND chunk's offset and block size fields precede its samples.
-    let first = ssnd + 16;
+    // The SSND chunk's offset and block size fields precede its samples, and
+    // `offset` bytes more come before the first frame.
+    let mut offset = [0u8; 4];
+    file.seek(SeekFrom::Start(ssnd + 8))?;
+    file.read_exact(&mut offset)?;
+    let offset = u64::from(u32::from_be_bytes(offset));
+    let first = ssnd + 16 + offset;
     let frames = len.saturating_sub(first) / block_align;
     let end = first + frames * block_align;
+    let size = |value: u64| {
+        u32::try_from(value).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "a size past what AIFF's 32-bit fields hold",
+            )
+        })
+    };
+    let (form, count, chunk) = (
+        size(end - 8)?,
+        size(frames)?,
+        size(8 + offset + frames * block_align)?,
+    );
     let put = |file: &mut std::fs::File, at: u64, value: u32| -> std::io::Result<()> {
         file.seek(SeekFrom::Start(at))?;
         file.write_all(&value.to_be_bytes())
     };
-    put(file, 4, (end - 8) as u32)?;
-    put(file, comm + 2, frames as u32)?;
-    put(file, ssnd + 4, (8 + frames * block_align) as u32)?;
+    put(file, 4, form)?;
+    put(file, comm + 2, count)?;
+    put(file, ssnd + 4, chunk)?;
     file.set_len(end)?;
     file.sync_all()
 }

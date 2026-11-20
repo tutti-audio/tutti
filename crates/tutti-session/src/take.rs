@@ -647,7 +647,7 @@ pub enum TakeError {
     /// there, and the app owns the file, to move or delete. It is unfinished:
     /// a FLAC or Ogg Vorbis file may end in a cut frame or page, and a WAV's or
     /// AIFF's header states the whole frames on disk only if
-    /// [`header_patched`](tutti_codec::Unfinished::header_patched) says so.
+    /// [`header_describes_frames`](tutti_codec::Unfinished::header_describes_frames) says so.
     /// `unfinished` is `None` for a sink of the caller's.
     #[error("the take's sink failed")]
     Sink {

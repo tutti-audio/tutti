@@ -50,13 +50,10 @@ pub(crate) fn max_data_frames(layout: ChannelLayout, pcm: Pcm) -> u64 {
     MAX_DATA_BYTES / frame_bytes(layout, pcm)
 }
 
-/// The header's length: the extensible one past two channels or 16 bits.
-fn header_len(layout: ChannelLayout, pcm: Pcm) -> usize {
-    if layout.count() > 2 || pcm.bits() > 16 {
-        68
-    } else {
-        44
-    }
+/// Whether the header is the extensible one: past two channels or 16 bits, a
+/// plain `PCMWAVEFORMAT` cannot describe the file.
+fn extensible(layout: ChannelLayout, pcm: Pcm) -> bool {
+    layout.count() > 2 || pcm.bits() > 16
 }
 
 /// Bytes per frame: every sample in a whole number of bytes.
@@ -74,7 +71,7 @@ impl Header {
     fn new(spec: &Spec, pcm: Pcm, rate: u32, mask: u32) -> Self {
         let channels = spec.layout().count();
         let sample_bytes = pcm.bits().div_ceil(8);
-        let extensible = header_len(spec.layout(), pcm) == 68;
+        let extensible = extensible(spec.layout(), pcm);
         let float = matches!(pcm, Pcm::Float32 | Pcm::Float64);
         let bytes_per_sec = rate
             .wrapping_mul(u32::from(sample_bytes))
@@ -210,15 +207,19 @@ fn write_sizes<W: Write + Seek>(
 /// frame is cut off.
 pub(crate) fn patch_unfinished(
     file: &mut std::fs::File,
-    layout: ChannelLayout,
+    spec: &Spec,
     pcm: Pcm,
 ) -> std::io::Result<()> {
-    let header = header_len(layout, pcm) as u64;
-    let frame = frame_bytes(layout, pcm);
-    let held = file.metadata()?.len().saturating_sub(header);
+    // The header the writer wrote for this spec: its length and the offset of
+    // its `data` size come from the builder (the rate and the mask do not
+    // change either).
+    let header = Header::new(spec, pcm, 1, 0);
+    let length = header.bytes.len() as u64;
+    let frame = frame_bytes(spec.layout(), pcm);
+    let held = file.metadata()?.len().saturating_sub(length);
     let data = held / frame * frame;
-    write_sizes(file, header - 4, data)?;
-    file.set_len(header + data.min(MAX_DATA_BYTES))?;
+    write_sizes(file, header.data_len_offset as u64, data)?;
+    file.set_len(length + data.min(MAX_DATA_BYTES))?;
     file.sync_all()
 }
 

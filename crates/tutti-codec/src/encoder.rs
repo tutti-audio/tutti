@@ -382,7 +382,7 @@ impl FileEncoder {
     /// frame count, the SSND and FORM sizes). FLAC states no length it needs (a
     /// zero STREAMINFO total and MD5 mean unknown), and Ogg Vorbis is a stream
     /// of pages, so neither is patched; the last FLAC frame or Vorbis page may
-    /// be cut short. [`Unfinished::header_patched`] is `false` when a WAV's or
+    /// be cut short. [`Unfinished::header_describes_frames`] is `false` when a WAV's or
     /// AIFF's patch failed, and the file is kept all the same: its header then
     /// states no frames.
     ///
@@ -419,7 +419,7 @@ impl FileEncoder {
 /// frames on disk where the format has them: the file at `temp`, which the
 /// caller has made outlive the encoder.
 fn patched(temp: PathBuf, spec: &Spec) -> Unfinished {
-    let header_patched = std::fs::OpenOptions::new()
+    let header_describes_frames = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(&temp)
@@ -427,7 +427,7 @@ fn patched(temp: PathBuf, spec: &Spec) -> Unfinished {
         .is_ok();
     Unfinished {
         path: temp,
-        header_patched,
+        header_describes_frames,
     }
 }
 
@@ -468,9 +468,12 @@ pub enum Kept {
 pub struct Unfinished {
     /// Where the file is, beside the path it was meant for.
     pub path: PathBuf,
-    /// Whether a header that states lengths now states those of the frames on
-    /// disk (and `true` for a format that states none).
-    pub header_patched: bool,
+    /// Whether the file's header describes the frames kept: `true` when the
+    /// header now states the lengths of the frames on disk (a WAV or AIFF that
+    /// was patched), or needs none (FLAC, whose STREAMINFO total of 0 means
+    /// unknown; an Ogg Vorbis stream, read up to its last whole page). `false`
+    /// only when a patch the format needs failed.
+    pub header_describes_frames: bool,
 }
 
 /// Writes the lengths of the frames on disk into an unfinished file's header,
@@ -479,7 +482,7 @@ pub struct Unfinished {
 fn patch_header(spec: &Spec, file: &mut std::fs::File) -> std::io::Result<()> {
     match spec.format() {
         #[cfg(feature = "encode-wav")]
-        Format::Wav(pcm) => crate::wav::patch_unfinished(file, spec.layout(), pcm),
+        Format::Wav(pcm) => crate::wav::patch_unfinished(file, spec, pcm),
         #[cfg(feature = "encode-aiff")]
         Format::Aiff(pcm) => {
             let block_align = u64::from(pcm.bits().div_ceil(8)) * u64::from(spec.layout().count());
