@@ -85,6 +85,8 @@ pub enum Call {
     InformController(ParamId, Normalized),
     /// A parameter value a block's context carried: the last point of a queue.
     BlockParam(ParamId, Normalized),
+    /// `Processor::flush_parameters`, with this many parameters' changes.
+    FlushParameters(usize),
 }
 
 const SCOPES: [RescanScope; 4] = [
@@ -125,6 +127,7 @@ impl Call {
             Self::SetEditorScale(bits) => [22, bits, 0],
             Self::InformController(id, value) => [23, u64::from(id.get()), value.get().to_bits()],
             Self::BlockParam(id, value) => [24, u64::from(id.get()), value.get().to_bits()],
+            Self::FlushParameters(count) => [25, count as u64, 0],
         }
     }
 
@@ -164,6 +167,7 @@ impl Call {
                 ParamId::new(a as u32),
                 Normalized::clamped(f64::from_bits(b)),
             ),
+            25 => Self::FlushParameters(a as usize),
             23 => Self::InformController(
                 ParamId::new(a as u32),
                 Normalized::clamped(f64::from_bits(b)),
@@ -1034,6 +1038,14 @@ impl Processor for FakeProcessor {
             );
         }
         log.push(Call::Process(frames));
+        Ok(())
+    }
+
+    fn flush_parameters(&mut self, changes: &crate::ParameterChanges) -> PluginResult<()> {
+        let log = &self.shared.log;
+        self.drain
+            .drain(|id, value| log.push(Call::Edit(id, value)));
+        log.push(Call::FlushParameters(changes.queues.len()));
         Ok(())
     }
 

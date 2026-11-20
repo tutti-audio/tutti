@@ -57,8 +57,6 @@ tutti-clap-host  setter  crates/tutti-clap-host/src/instance/thread_pool.rs::Cla
 # tutti-codec
 tutti-codec  ctor-result  crates/tutti-codec/src/aiff.rs::AiffWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create
-tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file
-tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file_planned
 tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
 tutti-codec  ctor-result  crates/tutti-codec/src/flac.rs::FlacWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
@@ -298,7 +296,7 @@ tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::Audio
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_scale
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_size
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_automation_state_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_parameter_rt
+tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_parameter_value
 
 # tutti-plugin-types
 tutti-plugin-types  ctor-result  crates/tutti-plugin-types/src/format.rs::PluginFormat::from_extension
@@ -310,6 +308,7 @@ tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::Pa
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_group
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_overview
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_map
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_normalized_default
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_range
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_range

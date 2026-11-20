@@ -219,6 +219,28 @@ fn a_served_gesture_arrives_in_order<F: Format>(path: PathBuf) {
     );
 }
 
+/// **What a plugin says while it takes parameters outside a block crosses the
+/// wire as what it says in a block**: CLAP's plugin raises its gesture from
+/// `params.flush` too, and no block runs here. A write and a read of the plugin
+/// send the write as a flush; the gesture it raises arrives in order.
+#[test]
+fn clap_gesture_from_a_flush_crosses_the_process_boundary_in_order() {
+    use tutti_plugin_types::AnyThread;
+    let (mut a, heard) = served::<Clap>(clap_path());
+    select::<Clap, _>(a.controller_mut(), 0, spec::NOTICE_GESTURE_ON_LOAD);
+    let main = tutti_fixtures::main_thread();
+    AnyThread::set_parameter_value(a.controller(), Param::Level.id(), Normalized::of(0.5))
+        .expect("a declared parameter");
+    // The read sends the write ahead of itself, as a flush.
+    let _ = a.controller().parameter(main, Param::Level.id());
+    tutti_fixtures::wait_until(
+        "the gesture the flush raised to arrive",
+        HangGuard::LIMIT,
+        || heard.lock().unwrap().len() >= gesture_edits().len(),
+    );
+    assert_eq!(*heard.lock().unwrap(), gesture_edits());
+}
+
 /// A parameter value keeps its width across the wire: 0.3, which an `f32`
 /// cannot hold, is read back as sent (the wire carried an `f32` before version
 /// 31, which returned 0.30000001192092896).
@@ -263,9 +285,9 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
 }
 
 /// **A write to the read-only parameter on the realtime route is not applied by
-/// the server**: `AnyThread::set_parameter_value` sends it as it is (the client
-/// reads no cache there), and the server's own `Control::set_parameter` refuses
-/// it. The plugin's record of what the host sent has an event for `level`, the
+/// the server**: `AnyThread::set_parameter_value` sends it with the next block
+/// (the client checks only that the plugin declares it), and the server's own
+/// `Control::set_parameter` refuses it. The plugin's record of what the host sent has an event for `level`, the
 /// writable write sent the same way, and none for the meter.
 fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathBuf) {
     use tutti_plugin_contract::Kind;
@@ -285,8 +307,8 @@ fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathB
         Normalized::of(spec::WRITE),
     )
     .expect("a declared parameter");
-    // The writes travel on the control connection and the blocks on the audio
-    // one: blocks run until the writable one has landed.
+    // The writes ride the next block, or a read's flush on the audio
+    // connection: blocks run until the writable one has landed.
     let guard = HangGuard::new();
     let mut level = a.controller().parameter(main, Param::Level.id());
     while level.map(Normalized::get) != Some(spec::WRITE) {

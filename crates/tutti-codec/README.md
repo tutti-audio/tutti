@@ -2,7 +2,7 @@
 
 Reads and writes audio files: WAV, FLAC, MP3 and Ogg can be read, and WAV, AIFF, FLAC and Ogg Vorbis can be written.
 
-Each format is a cargo feature and none is on by default, so you only compile what you need. It depends only on `tutti-units` (units such as hertz and decibels), `tutti-buffers` and `tutti-rt`, so it can be used on its own.
+Each format is a cargo feature and none is on by default, so you only compile what you need. It depends only on `tutti-units` (units such as hertz and decibels), `tutti-buffers` and `tutti-platform`, so it can be used on its own.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

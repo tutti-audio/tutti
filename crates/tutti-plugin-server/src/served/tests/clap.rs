@@ -1401,6 +1401,8 @@ fn test_reference_set_parameter_flush() {
 
     let param_id = params[0].id();
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::of(0.5))
         .expect("a declared, writable parameter");
 }
@@ -1592,6 +1594,8 @@ fn test_clap_param_write_is_settled_for_a_state_save() {
     let new_value = if original < 0.5 { 0.75 } else { 0.25 };
 
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
     assert_eq!(
@@ -1732,6 +1736,8 @@ fn test_clap_param_set_reaches_the_next_block() {
     // Set to a different value
     let new_value = if original < 0.5 { 0.75 } else { 0.25 };
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
     // The bridge also applies the write now (see `set_parameter`), and the
@@ -1804,6 +1810,8 @@ fn test_clap_state_save_load_roundtrip() {
     // Change parameter
     let new_value = if original_value < 0.5 { 0.75 } else { 0.25 };
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
 
@@ -2067,6 +2075,8 @@ fn test_reference_state_save_load() {
     let original_value = instance.normalized(main_thread(), param_id);
     let new_value = if original_value < 0.5 { 0.75 } else { 0.25 };
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
         .expect("a declared, writable parameter");
 

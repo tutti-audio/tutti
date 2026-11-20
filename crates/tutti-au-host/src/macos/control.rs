@@ -35,7 +35,7 @@ use crate::handle::AuHandle;
 use crate::instance::AuLoaded;
 use crate::marks::Marks;
 use crate::parameters;
-use crate::ranges::RangeTable;
+use crate::ranges::{ParamBounds, RangeTable};
 use crate::types::AudioComponentDescription;
 
 /// The wire's mirror of the AU host's component type.
@@ -360,6 +360,7 @@ impl Control for AuLoaded {
                         default: p.range.default as f64,
                     })
                     .with_steps(steps)
+                    .with_plain_map(ParamBounds::of(p.range.min, p.range.max).plain_map())
                     .with_flags(ParamFlags::READ_ONLY, flags)
                     .with_group(group)
                     // The unit code is a closed enumeration, so it types the

@@ -58,6 +58,11 @@ pub trait ParamMapping {
 /// clamps into the range, so a plain value past an end, an infinity included,
 /// reads as that end, and NaN is `0.0` (the [`ParamMapping`] laws).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(try_from = "(f64, f64)", into = "(f64, f64)")
+)]
 pub struct LinearRange {
     min: f64,
     max: f64,
@@ -89,6 +94,27 @@ impl LinearRange {
     }
 }
 
+/// The wire's form of a range: its two ends. Every pair is a range (a malformed
+/// declaration reads as the [`LinearRange`] docs say), so the conversion cannot
+/// fail.
+// `TryFrom`, not `From`, because the range-type gate holds a serde type with a
+// private field to `try_from`; no pair is refused, since a range with no span
+// is a declaration the map reads (`LinearRange`).
+#[allow(clippy::infallible_try_from)]
+impl TryFrom<(f64, f64)> for LinearRange {
+    type Error = std::convert::Infallible;
+
+    fn try_from((min, max): (f64, f64)) -> Result<Self, Self::Error> {
+        Ok(Self::new(min, max))
+    }
+}
+
+impl From<LinearRange> for (f64, f64) {
+    fn from(range: LinearRange) -> Self {
+        (range.min, range.max)
+    }
+}
+
 impl ParamMapping for LinearRange {
     fn plain(&self, value: Normalized) -> f64 {
         match self.span() {
@@ -110,9 +136,73 @@ impl ParamMapping for LinearRange {
     }
 }
 
+/// How a parameter's plain value follows from its normalized position, as the
+/// parameter declares it: the one map a format builds its own [`ParamMapping`]
+/// from, and a consumer reads from [`ParameterInfo::plain_map`] without asking
+/// the plugin.
+///
+/// [`Linear`](Self::Linear) is the line between the declared ends (CLAP's
+/// continuous parameters, AU's, a VST2 parameter with an integer range).
+/// [`Stepped`](Self::Stepped) is the same line with each value rounded to the
+/// nearest integer inside the range, so a plugin that truncates a plain value
+/// reads the step the position names (CLAP's `IS_STEPPED`), and
+/// `plain(normalized(step))` is `step`. A parameter whose map the plugin owns
+/// (every VST3 parameter, a VST2 parameter with no integer range) has no
+/// `PlainMap`: [`ParameterInfo::plain_map`] is `None`, and the plain value is
+/// asked of the plugin
+/// ([`AnyThread::parameter_plain`](crate::AnyThread::parameter_plain)).
+///
+/// [`ParameterInfo::plain_map`]: crate::ParameterInfo::plain_map
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum PlainMap {
+    /// The line between the ends.
+    Linear(LinearRange),
+    /// The line between the ends, each value on its integer.
+    Stepped(LinearRange),
+}
+
+impl ParamMapping for PlainMap {
+    fn plain(&self, value: Normalized) -> f64 {
+        match *self {
+            Self::Linear(line) => line.plain(value),
+            Self::Stepped(line) => {
+                let plain = line.plain(value);
+                if line.min.is_finite() && line.max.is_finite() {
+                    plain
+                        .round()
+                        .clamp(line.min.min(line.max), line.min.max(line.max))
+                } else {
+                    plain
+                }
+            }
+        }
+    }
+
+    fn normalized(&self, plain: f64) -> Normalized {
+        match *self {
+            Self::Linear(line) | Self::Stepped(line) => line.normalized(plain),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The stepped map lands each position on its integer**, so a plugin that
+    /// truncates reads the step the position names.
+    #[test]
+    fn a_stepped_map_rounds_to_the_integer_its_position_names() {
+        let map = PlainMap::Stepped(LinearRange::new(0.0, 7.0));
+        for step in 0..=7 {
+            let position = map.normalized(f64::from(step));
+            assert_eq!(map.plain(position), f64::from(step));
+        }
+        // A position between two steps takes the nearer one, and the ends hold.
+        assert_eq!(map.plain(Normalized::of(0.4)), 3.0);
+        assert_eq!(map.plain(Normalized::of(1.0)), 7.0);
+    }
 
     /// The ends are the positions `0` and `1`, and the middle is the middle.
     #[test]
@@ -164,4 +254,18 @@ mod tests {
             assert_eq!(range.normalized(5.0).get(), 0.0, "{min}..{max}");
         }
     }
+}
+
+/// The laws of [`ParamMapping`] over each variant that has a formula.
+#[cfg(all(test, feature = "contract"))]
+mod plain_map_laws {
+    use super::*;
+
+    crate::mapping_contract!(linear, PlainMap::Linear(LinearRange::new(20.0, 20_000.0)));
+    crate::mapping_contract!(backwards, PlainMap::Linear(LinearRange::new(10.0, -10.0)));
+    crate::mapping_contract!(
+        stepped,
+        PlainMap::Stepped(LinearRange::new(0.0, 7.0)),
+        steps = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    );
 }
