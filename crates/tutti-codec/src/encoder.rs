@@ -7,10 +7,10 @@ use crate::spec::Spec;
 #[cfg(encode)]
 use crate::writer::FormatWriter;
 use std::io::{BufWriter, Seek, Write};
-use std::path::Path;
+use std::path::PathBuf;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sample};
-use tutti_platform::{Staged, StagedFile};
+use tutti_platform::{Staged, StagedCommitError, StagedFile, StagedKeep};
 use tutti_units::Samples;
 
 /// Writes blocks of audio as one file of a [format](crate::Format): the
@@ -268,6 +268,9 @@ impl<W> Finalized<W> {
 /// through it; the new file has the default permissions).
 pub struct FileEncoder {
     encoder: Encoder<BufWriter<StagedFile>>,
+    keep: StagedKeep,
+    temp: PathBuf,
+    spec: Spec,
 }
 
 impl std::fmt::Debug for FileEncoder {
@@ -279,17 +282,31 @@ impl std::fmt::Debug for FileEncoder {
 }
 
 impl FileEncoder {
-    /// Starts a file at `path`.
+    /// Starts a file for `target`: a path (which an existing file there is
+    /// replaced by) or a [`Staged`], whose [`create_new`](Staged::create_new)
+    /// refuses an existing file at the commit with [`Error::Commit`] of kind
+    /// `AlreadyExists`, keeping the finished file.
     ///
     /// # Errors
     ///
     /// As [`Encoder::create`], and [`Error::Io`] when the temporary cannot be
     /// created.
-    pub fn create(spec: &Spec, path: impl AsRef<Path>) -> Result<Self> {
-        Self::create_staged(spec, Staged::new(path.as_ref()))
+    pub fn create(spec: &Spec, target: impl Into<Staged>) -> Result<Self> {
+        // Created before the header is written: a failure from here on drops
+        // the file, which removes the temporary.
+        let file = target.into().open()?;
+        let keep = file.keeper();
+        let temp = file.temp().to_path_buf();
+        let sink = BufWriter::new(file);
+        Ok(Self {
+            encoder: Encoder::create(spec, sink)?,
+            keep,
+            temp,
+            spec: spec.clone(),
+        })
     }
 
-    /// Starts a file at `path` that will hold `frames` frames, refusing a
+    /// Starts a file for `target` that will hold `frames` frames, refusing a
     /// count the format's file cannot hold before the temporary exists.
     ///
     /// For a caller that knows the length up front (an export), so it learns
@@ -301,20 +318,9 @@ impl FileEncoder {
     ///
     /// [`Error::WavTooLarge`] when `frames` is past [`crate::Format::max_frames`] for
     /// the spec's width; otherwise as [`create`](Self::create).
-    pub fn create_planned(spec: &Spec, path: impl AsRef<Path>, frames: Samples) -> Result<Self> {
+    pub fn create_planned(spec: &Spec, target: impl Into<Staged>, frames: Samples) -> Result<Self> {
         check_planned(spec, frames)?;
-        Self::create(spec, path)
-    }
-
-    /// Starts the file `staged` stands for: its temporary is created here and
-    /// `staged` decides at the commit whether an existing target is replaced.
-    pub(crate) fn create_staged(spec: &Spec, staged: Staged) -> Result<Self> {
-        // Created before the header is written: a failure from here on drops
-        // the file, which removes the temporary.
-        let sink = BufWriter::new(staged.open()?);
-        Ok(Self {
-            encoder: Encoder::create(spec, sink)?,
-        })
+        Self::create(spec, target)
     }
 
     /// As [`Encoder::limit_frames`].
@@ -357,19 +363,134 @@ impl FileEncoder {
     ///
     /// [`Error::Io`] or [`Error::Encoding`] when closing fails, or the first
     /// failed `write`: a take must be whole, so the file is removed.
-    pub fn finalize(mut self) -> Result<FinalizedFile> {
-        let first_error = self.encoder.first_error.take();
-        let sink = self.encoder.finalize()?.commit();
-        if let Some(error) = first_error {
-            return Err(error);
+    pub fn finalize(self) -> Result<FinalizedFile> {
+        close(self.encoder)
+    }
+
+    /// As [`finish`](Self::finish), for a recording that must never be lost:
+    /// when the file cannot be closed whole (a failed `write`, the header, the
+    /// close) it is **kept** beside its path as an [`Unfinished`] instead of
+    /// removed: the target is untouched, nothing removes the file, and it is
+    /// the caller's to move or delete. A commit that fails keeps the complete
+    /// file as [`finish`](Self::finish) does ([`Kept::Commit`]).
+    ///
+    /// What was buffered is flushed on a best effort, and a failure to flush or
+    /// to sync is not reported. A header that states lengths is then patched
+    /// from what is on disk, as a finished file's is from what was written: the
+    /// sizes are the whole frames in the file, and a torn last frame is cut
+    /// off. This holds for WAV (the RIFF and `data` sizes) and AIFF (the COMM
+    /// frame count, the SSND and FORM sizes). FLAC states no length it needs (a
+    /// zero STREAMINFO total and MD5 mean unknown), and Ogg Vorbis is a stream
+    /// of pages, so neither is patched; the last FLAC frame or Vorbis page may
+    /// be cut short. [`Unfinished::header_describes_frames`] is `false` when a WAV's or
+    /// AIFF's patch failed, and the file is kept all the same: its header then
+    /// states no frames.
+    ///
+    /// # Errors
+    ///
+    /// [`Kept`], with the error [`finish`](Self::finish) would give.
+    pub fn finish_keeping(self) -> std::result::Result<(), Kept> {
+        let Self {
+            encoder,
+            keep,
+            temp,
+            spec,
+        } = self;
+        // Set before the writer runs: it drops the file on a failure.
+        keep.keep();
+        match close(encoder) {
+            Ok(file) => {
+                keep.release();
+                file.commit_staged().map_err(Kept::from)
+            }
+            Err(source) => Err(Kept::Unfinished {
+                source,
+                unfinished: patched(temp, &spec),
+            }),
         }
-        let file = sink.into_inner().map_err(|e| e.into_error())?;
-        Ok(FinalizedFile { file })
     }
 
     /// Discards the file and leaves what was at its path alone. Dropping the
     /// encoder does the same.
     pub fn abort(self) {}
+}
+
+/// The encoder's file closed, flushed and its header lengths written from the
+/// frames on disk where the format has them: the file at `temp`, which the
+/// caller has made outlive the encoder.
+fn patched(temp: PathBuf, spec: &Spec) -> Unfinished {
+    let header_describes_frames = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&temp)
+        .and_then(|mut file| patch_header(spec, &mut file))
+        .is_ok();
+    Unfinished {
+        path: temp,
+        header_describes_frames,
+    }
+}
+
+/// [`FileEncoder::finalize`]'s body: the encoder closed and its sink taken
+/// back as a [`FinalizedFile`].
+fn close(mut encoder: Encoder<BufWriter<StagedFile>>) -> Result<FinalizedFile> {
+    let first_error = encoder.first_error.take();
+    let sink = encoder.finalize()?.commit();
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    let file = sink.into_inner().map_err(|e| e.into_error())?;
+    Ok(FinalizedFile { file })
+}
+
+/// Why [`FileEncoder::finish_keeping`] did not put the file in place; either
+/// way the file is kept.
+#[derive(Debug, thiserror::Error)]
+pub enum Kept {
+    /// The complete file could not be put in place; it is kept where the error
+    /// says ([`StagedCommitError::kept`]).
+    #[error(transparent)]
+    Commit(#[from] StagedCommitError),
+    /// The file could not be closed whole (a failed `write`, the header, the
+    /// close); it is kept unfinished.
+    #[error("{source}")]
+    Unfinished {
+        /// What failed.
+        #[source]
+        source: Error,
+        /// The file kept.
+        unfinished: Unfinished,
+    },
+}
+
+/// The unfinished file [`FileEncoder::finish_keeping`] kept.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unfinished {
+    /// Where the file is, beside the path it was meant for.
+    pub path: PathBuf,
+    /// Whether the file's header describes the frames kept: `true` when the
+    /// header now states the lengths of the frames on disk (a WAV or AIFF that
+    /// was patched), or needs none (FLAC, whose STREAMINFO total of 0 means
+    /// unknown; an Ogg Vorbis stream, read up to its last whole page). `false`
+    /// only when a patch the format needs failed.
+    pub header_describes_frames: bool,
+}
+
+/// Writes the lengths of the frames on disk into an unfinished file's header,
+/// for a format that states them.
+#[cfg_attr(not(encode), allow(unused_variables, unreachable_code))]
+fn patch_header(spec: &Spec, file: &mut std::fs::File) -> std::io::Result<()> {
+    match spec.format() {
+        #[cfg(feature = "encode-wav")]
+        Format::Wav(pcm) => crate::wav::patch_unfinished(file, spec, pcm),
+        #[cfg(feature = "encode-aiff")]
+        Format::Aiff(pcm) => {
+            let block_align = u64::from(pcm.bits().div_ceil(8)) * u64::from(spec.layout().count());
+            crate::aiff::patch_unfinished(file, block_align.max(1))
+        }
+        #[allow(unreachable_patterns)]
+        _ => Ok(()),
+    }
 }
 
 /// A [`FileEncoder`]'s closed file, not yet put in place
@@ -390,7 +511,11 @@ impl FinalizedFile {
     /// under `create_new`): what was at the path is left alone and the complete
     /// file is kept at the error's `kept` path, the caller's to move or delete.
     pub fn commit(self) -> Result<()> {
-        Ok(self.file.commit()?)
+        Ok(self.commit_staged()?)
+    }
+
+    fn commit_staged(self) -> std::result::Result<(), StagedCommitError> {
+        self.file.commit()
     }
 }
 

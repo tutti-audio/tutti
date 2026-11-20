@@ -65,7 +65,7 @@ pub fn write_wave<'a, S: Sample>(
     match dest.into() {
         Destination::Path(staged) => {
             check_planned(&spec, wave.len())?;
-            write_file(wave, FileEncoder::create_staged(&spec, staged)?)
+            write_file(wave, FileEncoder::create(&spec, staged)?)
         }
         Destination::Writer(writer) => {
             check_planned(&spec, wave.len())?;
