@@ -915,8 +915,11 @@ mod host_watch {
             .expect("the shell prints the probe's pid");
         let probe: u32 = line.trim().parse().expect("the probe's pid");
         let (gone, ended) = std::sync::mpsc::channel();
-        tutti_plugin_ipc_ffi::watch_host(probe, move || gone.send(()).expect("listening"))
-            .expect("the watch starts");
+        let executor = tutti_platform::Executor::new();
+        let _watch = tutti_plugin_ipc_ffi::watch_host(&executor, probe, move || {
+            gone.send(()).expect("listening");
+        })
+        .expect("the watch starts");
 
         drop(host.stdin.take());
         host.wait().expect("the host ends");
