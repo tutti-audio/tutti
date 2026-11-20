@@ -25,7 +25,7 @@ use tutti_session::{
 };
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples, Seconds, UnitParam};
 

@@ -30,7 +30,7 @@ use tutti_engine::Engine;
 use tutti_fixtures::midi;
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
-use tutti_transport::{LoopEdit, Transport};
+use tutti_timeline::{LoopEdit, Transport};
 use tutti_units::SampleRate;
 
 /// A stereo source that reads the transport per frame from its `Env`, so
@@ -78,7 +78,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, EventIn, EventKind, Prepare, Unforkable};
     use tutti_graph::{OutPort, Source};
-    use tutti_transport::{MotionEvent, TransportCommand};
+    use tutti_timeline::{MotionEvent, TransportCommand};
     use tutti_ump::{MidiChannel, U7};
     use tutti_units::{At, Beat, Frame};
 
@@ -225,7 +225,7 @@ fn a_step_map_is_followed_without_allocating() {
     use tutti_graph::{Editor, Prepare, Unforkable};
     use tutti_graph::{OutPort, Source};
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
-    use tutti_transport::MotionEvent;
+    use tutti_timeline::MotionEvent;
     use tutti_units::{At, Beat, Bpm};
 
     let dense = |last: f64| {
@@ -381,7 +381,7 @@ fn the_heard_tap_is_allocation_free() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, Prepare, Unforkable};
     use tutti_graph::{OutPort, Source};
-    use tutti_transport::MotionEvent;
+    use tutti_timeline::MotionEvent;
 
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
@@ -463,7 +463,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
     use tutti_graph::{OutPort, Source};
-    use tutti_transport::{MotionEvent, TransportCommand};
+    use tutti_timeline::{MotionEvent, TransportCommand};
     use tutti_units::Tail;
     use tutti_units::{At, Beat, Frame};
 

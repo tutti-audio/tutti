@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_engine::BlockClockReader;
-use tutti_transport::{AfterLocate, FadeOut, LoopRegion, MotionEvent, TimedError, Transport};
+use tutti_timeline::{AfterLocate, FadeOut, LoopRegion, MotionEvent, TimedError, Transport};
 use tutti_units::{At, Beat};
 
 use crate::Playhead;

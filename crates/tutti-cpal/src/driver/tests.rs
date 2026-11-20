@@ -5,7 +5,7 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{Engine, ManualStreamDriver};
 use tutti_graph::{Editor, Prepare};
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
 fn spec_at(rate: f64) -> OutputSpec {

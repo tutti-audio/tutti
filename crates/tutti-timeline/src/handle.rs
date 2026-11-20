@@ -16,7 +16,7 @@ use tutti_units::{Beat, SampleRate};
 ///
 /// ```
 /// # use tutti_units::{At, Bpm};
-/// # use tutti_transport::{LoopEdit, MotionEvent, Transport};
+/// # use tutti_timeline::{LoopEdit, MotionEvent, Transport};
 /// # let transport = Transport::new(tutti_units::SampleRate::SR_48K);
 /// transport.motion().try_send(MotionEvent::Play)?; // a request; may be refused
 /// transport.settings().set_tempo(Bpm::of(140.0));      // a value; cannot fail

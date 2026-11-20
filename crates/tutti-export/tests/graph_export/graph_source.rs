@@ -31,15 +31,16 @@ use std::sync::Arc;
 use tutti_units::Seconds;
 
 use crate::support::{render_normalized_to_file, render_to_buffers, render_to_file};
-use tutti_buffers::{Bed, ChannelLayout};
+use tutti_buffers::{Bed, BusTopology, ChannelLayout};
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{Error, GRAPH_MAX_BLOCK, Normalize, RenderGraph, Rendered, Resample, Setup};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
+use tutti_nodes::LimiterConfig;
 use tutti_nodes::testing::{Const, Osc, vbap_mix};
 use tutti_tempo::TempoMap;
-use tutti_transport::FrozenClock;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::FrozenClock;
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_units::{Amplitude, Azimuth, Beat, Bpm, Hz, SampleRate};
 use tutti_units::{Db, Samples};
 
@@ -148,12 +149,12 @@ fn limited() -> GraphBuilder {
             .with_amplitude(Amplitude::new(0.9))
             .with_layout(ChannelLayout::STEREO),
     );
-    let (lim, _) = g.add_with_controls(tutti_nodes::LimiterNode::<f32>::stereo(
-        tutti_nodes::LimiterControls {
+    let (lim, _) = g.add_with_controls(tutti_nodes::LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::STEREO).controls(tutti_nodes::LimiterControls {
             threshold: Db::new(-6.0),
             ceiling: Db::new(-1.0),
             ..tutti_nodes::LimiterControls::DEFAULT
-        },
+        }),
     ));
     g.pipe(src, lim).pipe_output(lim);
     g

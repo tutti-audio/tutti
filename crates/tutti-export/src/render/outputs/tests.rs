@@ -4,7 +4,7 @@ use crate::spill::SPILL_MEMORY_BYTES;
 use crate::{BufferTarget, Normalize, NormalizeSpec, Progress};
 use tutti_codec::Pcm;
 use tutti_graph::GraphBuilder;
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::Samples;
 
 const RATE: SampleRate = SampleRate::SR_48K;

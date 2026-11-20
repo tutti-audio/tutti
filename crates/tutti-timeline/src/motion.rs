@@ -301,14 +301,14 @@ impl MotionFsm {
     ///
     /// ```
     /// use tutti_units::{At, Beat, Frame};
-    /// use tutti_transport::{MotionEvent, Transport};
+    /// use tutti_timeline::{MotionEvent, Transport};
     ///
     /// let transport = Transport::new(tutti_units::SampleRate::SR_48K);
     /// // Start rolling one second into the stream, stop at beat 16.
     /// transport.motion().schedule(At::Frame(Frame::new(48_000)), MotionEvent::Play)?;
     /// transport.motion().schedule(At::Beat(Beat::new(16.0)), MotionEvent::stop())?;
     /// assert_eq!(transport.motion().scheduled_outstanding(), 2);
-    /// # Ok::<_, tutti_transport::TimedError<MotionEvent>>(())
+    /// # Ok::<_, tutti_timeline::TimedError<MotionEvent>>(())
     /// ```
     pub fn schedule<C: Into<TransportCommand> + Copy + std::fmt::Debug>(
         &self,

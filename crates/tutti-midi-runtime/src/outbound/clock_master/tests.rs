@@ -8,7 +8,7 @@ use tutti_graph::UmpAt;
 use tutti_midi_protocol::{QuarterFramePiece, SmpteFrameRate};
 use tutti_music::LoopRange;
 use tutti_music::MeterChange;
-use tutti_transport::ProjectMeter;
+use tutti_timeline::ProjectMeter;
 use tutti_ump::{BarAccents, Flex, Message, Metronome, MidiGroup, System};
 use tutti_units::{Bpm, Seconds};
 

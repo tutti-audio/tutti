@@ -2,7 +2,7 @@
 //! [`OfflineTransport`], an offline render's timeline.
 //!
 //! ```compile_fail,E0308
-//! fn render(ctx: &tutti_transport::OfflineTransport) {}
+//! fn render(ctx: &tutti_timeline::OfflineTransport) {}
 //! render(&42u32); // not a timeline: refused
 //! ```
 

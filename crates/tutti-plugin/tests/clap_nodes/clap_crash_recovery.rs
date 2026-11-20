@@ -189,7 +189,7 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
 
     let mut unit = Rig::new(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         SAMPLE_RATE,
         BLOCK,
@@ -323,7 +323,7 @@ fn dropping_a_crashed_plugin_is_clean() {
     {
         let mut unit = Rig::new(
             probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0))
+                tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0))
                     .expect("a tempo"),
             ),
             SAMPLE_RATE,

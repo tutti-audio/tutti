@@ -34,7 +34,7 @@ use super::offline_read::OfflineRead;
 use super::types::Direction;
 use crate::lanes::{Gather, Lanes, UNPREPARED_FRAMES, audible_gain};
 use crate::streamer::{Cells, SharedReader, StatusCell, StreamFile, StreamId, StreamReader};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 
 /// The streaming tier's bare reader: the streamer's ring, its control cell
 /// and its width. A [`DiskVoice`] wraps one and reads the ring by the clock.
@@ -825,7 +825,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
 
 impl<F: SamplerFloat> DiskVoice<F> {
     /// This voice reading the project's tempo map through `tempo`
-    /// ([`TransportSettings::tempo_reader`](tutti_transport::TransportSettings::tempo_reader)).
+    /// ([`TransportSettings::tempo_reader`](tutti_timeline::TransportSettings::tempo_reader)).
     /// Over a map whose tempo changes, how long a placed voice has played is
     /// the map's seconds between its start and the playhead, not the beats
     /// over the tempo of the moment; see

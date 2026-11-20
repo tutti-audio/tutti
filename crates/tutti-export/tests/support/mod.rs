@@ -24,7 +24,7 @@ use tutti_export::{
     Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, Written, render_one,
 };
 use tutti_graph::{Editor, ForkMode, ForkTarget};
-use tutti_transport::RenderClock;
+use tutti_timeline::RenderClock;
 use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The render stage: what to produce, and for how long.

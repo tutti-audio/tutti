@@ -37,7 +37,7 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
-use tutti_transport::{
+use tutti_timeline::{
     AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Timeline,
     Transport, TransportCommand, render_graph,
 };

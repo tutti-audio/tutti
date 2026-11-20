@@ -13,7 +13,7 @@ use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, LockExt};
 use tutti_tempo::TempoMap;
-use tutti_transport::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSettings};
+use tutti_timeline::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSettings};
 use tutti_units::{Amplitude, At};
 
 use super::error::SetRefusal;

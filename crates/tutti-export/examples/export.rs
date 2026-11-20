@@ -20,7 +20,7 @@ use tutti_export::{
 use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::Db;
 use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds};
 

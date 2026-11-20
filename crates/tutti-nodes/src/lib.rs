@@ -214,9 +214,10 @@
 //!   [`CrossoverError`].
 //! - Delay: [`DelayNode`] over `tutti_dsp::DelayBank`, built to a [`DelayLayout`], with
 //!   [`InterpolationMode`] and [`MaxDelay`].
-//! - Dynamics: [`CompressorNode`], [`GateNode`], [`LimiterNode`],
-//!   [`BrickwallLimiterNode`], [`TransientShaperNode`], [`LevellerNode`] (made from a
-//!   [`LevellerConfig`], which can refuse a bus with no placement) and [`MultibandCompressorNode`] (2 to 4
+//! - Dynamics: [`CompressorNode`] ([`CompressorConfig`]), [`GateNode`] ([`GateConfig`]),
+//!   [`LimiterNode`] ([`LimiterConfig`]), [`BrickwallLimiterNode`] ([`BrickwallLimiterConfig`]), [`TransientShaperNode`], [`LevellerNode`] (made from a
+//!   [`LevellerConfig`], which can refuse a bus with no placement) and [`MultibandCompressorNode`] (made from a
+//!   [`MultibandCompressorConfig`], 2 to 4
 //!   bands over a Linkwitz-Riley crossover, every setting an indexed param: see
 //!   [`BAND_PARAMS`]) with its [`MultibandControls`].
 //! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayBank`, its [`Sweep`] and
@@ -239,8 +240,7 @@
 //!
 
 // The fallible constructions are the crossover's (`CrossoverControls::new`,
-// `CrossoverNode::new`, `MultibandCompressorNode::new`), all `CrossoverError`;
-// the rest of this crate has no `Error` type.
+// `CrossoverNode::new`), all `CrossoverError`; the rest of this crate has no `Error` type.
 
 // Per-block control reads and the ramps that keep them from stepping.
 mod buses;
@@ -330,18 +330,19 @@ pub use tutti_dsp::{
 
 mod dynamics;
 pub use dynamics::{
-    BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, BrickwallSet, CompressorKernel,
-    CompressorNode, CompressorSet, DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet,
-    GateKernel, GateNode, GateSet, LevellerConfig, LevellerKernel, LevellerNode, LevellerSet,
-    LimiterKernel, LimiterNode, LimiterSet, MultibandCompressorNode, MultibandControls,
+    BAND_PARAMS, BrickwallKernel, BrickwallLimiterConfig, BrickwallLimiterNode, BrickwallSet,
+    CompressorConfig, CompressorKernel, CompressorNode, CompressorSet, DynamicEqConfig,
+    DynamicEqKernel, DynamicEqNode, DynamicEqSet, GateConfig, GateKernel, GateNode, GateSet,
+    LevellerConfig, LevellerKernel, LevellerNode, LevellerSet, LimiterConfig, LimiterKernel,
+    LimiterNode, LimiterSet, MultibandCompressorConfig, MultibandCompressorNode, MultibandControls,
     TransientShaperConfig, TransientShaperKernel, TransientShaperNode, TransientShaperSet,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
 pub use tutti_dsp::{
     ChannelWeightError, CompressorControls, DynamicEqControls, DynamicMode, GateControls,
-    KeyFilter, KeySource, LevellerControls, LimiterControls, Lookahead, PeakDetection,
-    TransientControls,
+    KeyFilter, KeySource, LevellerControls, LimiterControls, Lookahead, MultibandBands,
+    PeakDetection, TransientControls,
 };
 
 // Utilities: polarity, mid/side and stereo width.

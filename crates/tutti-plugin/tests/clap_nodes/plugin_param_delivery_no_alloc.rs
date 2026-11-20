@@ -48,7 +48,7 @@ fn two_hundred_moving_parameters_do_not_allocate_on_the_audio_thread() {
     .with_quantum(MaxBlock::of(Samples::new(QUANTUM)));
     let mut rig = Rig::prepared_with(
         client.bind(
-            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         prepare,
         lanes,

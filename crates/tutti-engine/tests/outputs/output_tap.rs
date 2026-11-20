@@ -12,7 +12,7 @@ use tutti_engine::{Engine, OutputTapError, OutputTapOpen};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TapReader, Unforkable};
 use tutti_graph::{OutPort, Source};
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;

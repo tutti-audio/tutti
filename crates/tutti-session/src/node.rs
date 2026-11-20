@@ -98,7 +98,7 @@ pub trait SessionNode<F: Float = f32>: IntoNode<F> + Send + 'static {
     /// node overrides it, so a placed voice stays where the map puts it
     /// through a step or a ramp (doc 020, stage 5).
     #[must_use]
-    fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self
+    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self
     where
         Self: Sized,
     {
@@ -429,7 +429,7 @@ fn voice_slots<F: tutti_sampler::SamplerFloat>(
 /// gain as set; the placements it replaced freed by its reclaimer.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
-    fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
+    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 
@@ -450,7 +450,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode
 /// retired voices its reclaimer frees.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
-    fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
+    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 
@@ -462,7 +462,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool
 /// A bare clip reader as a graph node, its gain addressed by its set.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
-    fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
+    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 
@@ -481,7 +481,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySou
 /// in the graph.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
-    fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
+    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 
@@ -502,7 +502,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
 /// `DiskVoiceControls`.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {
-    fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
+    fn bind_tempo(self, tempo: &tutti_timeline::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
 

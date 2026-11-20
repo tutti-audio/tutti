@@ -15,7 +15,7 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{TransportPosition as BlockTransport, Unforkable};
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

@@ -12,7 +12,7 @@ use tutti::{
 };
 use tutti_nodes::LfoConfig;
 use tutti_nodes::testing::Const;
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 
 /// Everything below is reached through `tutti::` and nothing else. If the
 /// umbrella stopped naming something, this stops compiling.

@@ -85,7 +85,7 @@ pub enum SetRefusal {
 }
 
 /// Why a plugin's parameter refused a call ([`SetRefusal::Plugin`], and the
-/// lookups of [`Params`](crate::Params)).
+/// lookups of [`PluginParams`](crate::PluginParams)).
 #[cfg(feature = "plugin")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]

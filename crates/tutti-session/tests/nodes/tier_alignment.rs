@@ -23,11 +23,11 @@ use std::time::Duration;
 use tutti_buffers::Interleaved;
 use tutti_platform::Instant;
 
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_nodes::{LimiterControls, LimiterNode};
+use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_sampler::{DiskVoice, MemorySource, Placement, StreamPhase, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, SamplerEvent, Session, SessionEvent};
 use tutti_units::{Beat, Db, SampleRate, Samples};
@@ -83,11 +83,13 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
 
     // The latent path, on output 2.
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (eff, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db::new(-1.0),
-        ceiling: Db::new(-0.3),
-        ..LimiterControls::DEFAULT
-    }));
+    let (eff, _) = s.graph().add(LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+            threshold: Db::new(-1.0),
+            ceiling: Db::new(-0.3),
+            ..LimiterControls::DEFAULT
+        }),
+    ));
     s.graph()
         .set_sources(InPort::new(eff, 0), [OutPort::new(src, 0)])
         .unwrap();

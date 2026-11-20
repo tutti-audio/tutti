@@ -13,12 +13,14 @@
 use std::f64::consts::{PI, TAU};
 use tutti_buffers::PlanesMut;
 
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_modulation::Lfo;
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{MultibandCompressorNode, MultibandControls};
+use tutti_nodes::{
+    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode, MultibandControls,
+};
 use tutti_session::RouteSpec;
 use tutti_session::{InPort, Key, OutPort, Root, Session};
 use tutti_units::{Amplitude, SampleRate};
@@ -70,8 +72,9 @@ fn rig() -> (
     let (high, _) = g.add(ForkByClone(
         Osc::sine(Hz::new(HIGH)).with_amplitude(Amplitude::new(A)),
     ));
-    let (mb, controls) =
-        g.add(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 2).unwrap());
+    let (mb, controls) = g.add(MultibandCompressorNode::<f32>::from(
+        MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
+    ));
     g.set_sources(InPort::new(mb, 0), [OutPort::new(low, 0)])
         .unwrap();
     g.set_sources(InPort::new(mb, 1), [OutPort::new(high, 0)])
