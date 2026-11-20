@@ -40,7 +40,7 @@ impl Watched {
     }
 
     fn with_backend(backend: Box<dyn crate::MidiEndpoints>) -> Self {
-        Self::of(Devices::open_over(backend).unwrap())
+        Self::of(Devices::open_over(&tutti_platform::Executor::new(), backend).unwrap())
     }
 
     fn of(devices: Devices) -> Self {

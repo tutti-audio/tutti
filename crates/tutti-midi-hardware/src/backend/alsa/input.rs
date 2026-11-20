@@ -25,7 +25,8 @@ use tutti_rt::FaultLatch;
 /// microseconds at most.
 const PAIRING_AGE: Duration = Duration::from_secs(1);
 
-/// An open ALSA input. Dropping it stops the pump and closes the port.
+/// An open ALSA input. Dropping it wakes the pump, which then ends on its thread,
+/// closes the client and unsubscribes the port: the drop does not wait for that.
 pub struct AlsaInput {
     /// One end of a socket pair whose other end is in the pump's `poll` set:
     /// closing this one is the shutdown signal, and wakes the pump at once.

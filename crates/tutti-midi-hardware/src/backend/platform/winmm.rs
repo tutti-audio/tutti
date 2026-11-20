@@ -10,8 +10,8 @@ use tutti_platform::Executor;
 const VIRTUAL_REASON: &str = "Windows Multimedia has no virtual MIDI ports";
 
 /// Returns this platform's MIDI backend.
-pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
-    Box::new(super::winmm::WinMmEndpoints::new())
+pub(crate) fn active(executor: &Executor) -> Box<dyn MidiEndpoints> {
+    Box::new(super::winmm::WinMmEndpoints::new(executor))
 }
 
 /// Refuses: winmm has no virtual ports.

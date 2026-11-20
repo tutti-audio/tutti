@@ -4,7 +4,13 @@ use tutti_platform::Instant;
 use tutti_midi_runtime::ACTIVE_SENSING_INTERVAL;
 use tutti_ump::{Message, MidiGroup, Protocol, System, Ump};
 
-use super::Pulse;
+use std::sync::Arc;
+
+use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
+use tutti_platform::Executor;
+
+use super::{Heartbeat, Pulse, beat};
+use crate::endpoints::DeviceOut;
 
 fn active_sensing() -> Ump {
     Ump::from(Message::System(MidiGroup::FIRST, System::ActiveSensing))
@@ -71,4 +77,64 @@ fn the_deadline_is_an_interval_past_the_last_message() {
     assert_eq!(pulse.deadline(), t0 + ACTIVE_SENSING_INTERVAL);
     pulse.sent(t0 + MS(100));
     assert_eq!(pulse.deadline(), t0 + MS(100) + ACTIVE_SENSING_INTERVAL);
+}
+
+/// An output that takes nothing and counts nothing: only its `Arc` is looked at.
+struct Idle;
+
+impl MidiOut for Idle {
+    fn queue_timed(&self, _events: &[Outgoing]) -> Taken {
+        Taken::NONE
+    }
+}
+
+impl DeviceOut for Idle {}
+
+/// Dropping a heartbeat cancels its task, which drops the clone of the sink the
+/// task holds: once the executor has run the cancellation, the caller's `Arc` is
+/// the only one. A heartbeat that kept running would still hold the sink.
+#[test]
+fn dropping_a_heartbeat_releases_the_sink_its_task_held() {
+    let executor = Executor::new();
+    let sink = Arc::new(Idle);
+    let heartbeat = Heartbeat::start(
+        &executor,
+        Arc::clone(&sink) as Arc<dyn DeviceOut>,
+        Protocol::Midi1,
+    );
+    executor.run_until_stalled();
+    assert_eq!(
+        Arc::strong_count(&sink),
+        2,
+        "the task holds the sink while it runs"
+    );
+    drop(heartbeat);
+    executor.run_until_stalled();
+    assert_eq!(
+        Arc::strong_count(&sink),
+        1,
+        "the cancelled task released it"
+    );
+}
+
+/// A heartbeat whose executor has shut down ends without sending: a `Timer`'s
+/// sleep resolves at once from then on, before its deadline, and a heartbeat that
+/// slept again would spin. The future is polled once by hand on a thread, under
+/// a hang guard: one that loops never returns.
+#[test]
+fn a_heartbeat_ends_when_its_executor_has_shut_down() {
+    let timer = Executor::new().timer();
+    let pulse = Pulse::new(Protocol::Midi1, Instant::now());
+    let sink: Arc<dyn DeviceOut> = Arc::new(Idle);
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut ended = std::pin::pin!(beat(&timer, &sink, &pulse));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        let _ = done.send(ended.as_mut().poll(&mut cx).is_ready());
+    });
+    assert_eq!(
+        finished.recv_timeout(Duration::from_secs(30)),
+        Ok(true),
+        "the heartbeat ends with its executor"
+    );
 }

@@ -5,53 +5,31 @@ use std::time::Duration;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
-use crate::error::{MidiHardwareError, MidiThread, Result};
+use crate::error::Result;
 use tutti_midi_device::OsDevice;
-use tutti_platform::{ThreadHandle, spawn_named};
+use tutti_platform::{Executor, Instant, Task, Timer};
 
 /// How often the list is read again: a device plugged in shows within this.
 pub(in crate::backend) const INTERVAL: Duration = Duration::from_secs(1);
 
-/// A running poll. Dropping it ends the thread and returns once it has ended
-/// (a thread that does not within [`JOIN_BOUND`] is left running and logged),
-/// so no report reaches the sink afterwards.
+/// A running poll: a task on the executor. Dropping it cancels the task, so no
+/// report reaches the sink after a look under way ends.
 pub(in crate::backend) struct PollWatch {
-    thread: Option<ThreadHandle<()>>,
+    _task: Task<()>,
 }
-
-/// How long dropping a watch waits for its thread before it lets the thread
-/// go: a thread ends within a look of the stop, and a drop that waited for ever
-/// would hang the caller with it.
-const JOIN_BOUND: Duration = Duration::from_secs(2);
 
 impl Watch for PollWatch {}
 
-impl Drop for PollWatch {
-    fn drop(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            match thread.stop_within(JOIN_BOUND) {
-                Ok(Ok(())) => {}
-                // A panic in a look is caught and reported to the sink; one
-                // that escapes the catch is reported here.
-                Ok(Err(panicked)) => tracing::error!("MIDI device watch: {panicked}"),
-                Err(stuck) => {
-                    tracing::warn!("MIDI device watch did not stop within {JOIN_BOUND:?}");
-                    stuck.detach();
-                }
-            }
-        }
-    }
-}
-
 /// Seeds `sink` with `snapshot()` before it returns, then reports each
-/// difference between looks every `interval` until the watch drops. A panic in
-/// `snapshot` ends the watch and says so through [`ChangeSink::fail`].
+/// difference between looks every `interval`, from a task on `executor`, until
+/// the watch drops or the executor shuts down. A panic in `snapshot` ends the
+/// watch and says so through [`ChangeSink::fail`].
 ///
 /// # Errors
 ///
-/// [`MidiHardwareError::Spawn`] if the thread cannot be spawned, and
-/// [`MidiHardwareError::Seed`] if the sink was already seeded.
+/// [`MidiHardwareError::Seed`](crate::MidiHardwareError::Seed) if the sink was already seeded.
 pub(in crate::backend) fn start(
+    executor: &Executor,
     sink: ChangeSink,
     snapshot: fn() -> Vec<OsDevice>,
     interval: Duration,
@@ -59,22 +37,38 @@ pub(in crate::backend) fn start(
     let failures = sink.clone();
     let mut reporter = Reporter::new(sink);
     reporter.seed(snapshot())?;
-    let thread = spawn_named(MidiThread::DeviceWatch.name(), None, move |stop| {
-        while !stop.wait(interval) {
-            let look = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                reporter.report(snapshot(), |_| false);
-            }));
-            if look.is_err() {
-                failures.fail(crate::WatchFailure::Panicked);
-                return;
-            }
+    let task = executor.spawn(run(
+        executor.timer(),
+        reporter,
+        failures,
+        snapshot,
+        interval,
+    ));
+    Ok(PollWatch { _task: task })
+}
+
+/// Looks every `interval` and reports the difference, until a look panics or the
+/// executor behind `timer` shuts down. A `Timer`'s sleep resolves at once after
+/// the shutdown, before its deadline: that ends the poll, so it never spins.
+pub(in crate::backend) async fn run(
+    timer: Timer,
+    mut reporter: Reporter,
+    failures: ChangeSink,
+    snapshot: fn() -> Vec<OsDevice>,
+    interval: Duration,
+) {
+    loop {
+        let deadline = Instant::now() + interval;
+        timer.sleep_until(deadline).await;
+        if Instant::now() < deadline {
+            return;
         }
-    })
-    .map_err(|source| MidiHardwareError::Spawn {
-        thread: MidiThread::DeviceWatch,
-        source,
-    })?;
-    Ok(PollWatch {
-        thread: Some(thread),
-    })
+        let look = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            reporter.report(snapshot(), |_| false);
+        }));
+        if look.is_err() {
+            failures.fail(crate::WatchFailure::Panicked);
+            return;
+        }
+    }
 }

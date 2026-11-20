@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
 
@@ -660,11 +660,12 @@ fn listed() -> Vec<OsDevice> {
     LISTED.lock().unwrap().clone()
 }
 
-struct Polled;
+struct Polled(tutti_platform::Executor);
 
 impl MidiEndpoints for Polled {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
         Ok(Box::new(poll::start(
+            &self.0,
             sink,
             listed,
             Duration::from_millis(5),
@@ -692,7 +693,9 @@ impl MidiEndpoints for Polled {
 #[test]
 fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     *LISTED.lock().unwrap() = vec![device(1, "A")];
-    let devices = Devices::open_over(Box::new(Polled)).unwrap();
+    let executor = tutti_platform::Executor::new();
+    let threads = executor.spawn_threads(std::num::NonZeroUsize::MIN).unwrap();
+    let devices = Devices::open_over(&executor, Box::new(Polled(executor.clone()))).unwrap();
     assert_eq!(devices.list().len(), 1, "seeded before open returns");
     let events = devices.subscribe();
 
@@ -708,12 +711,77 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     };
     assert_eq!(removed.name, "A");
 
-    // Once the last holder drops, the thread has ended (the drop joins it): no
-    // look follows. The window gives a surviving thread, looking every 5 ms,
-    // the chance to show; a longer one only makes the check stricter.
+    // Once the last holder drops, the task is cancelled: with the drivers
+    // stopped (so no look is under way) and started again, no look follows. The
+    // window gives a surviving task, looking every 5 ms, the chance to show; a
+    // longer one only makes the check stricter.
     drop(events);
     drop(devices);
+    drop(threads);
     let looks = LOOKS.load(Ordering::SeqCst);
+    let _threads = executor.spawn_threads(std::num::NonZeroUsize::MIN).unwrap();
     std::thread::sleep(Duration::from_millis(50));
     assert_eq!(LOOKS.load(Ordering::SeqCst), looks);
+}
+
+/// A backend that hands the test its `ChangeSink` and watches nothing.
+struct Captured(Arc<Mutex<Option<ChangeSink>>>);
+
+impl MidiEndpoints for Captured {
+    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
+        *self.0.lock().unwrap() = Some(sink);
+        Ok(Box::new(crate::endpoints::NoWatch))
+    }
+    fn inputs(&self) -> Vec<OsEndpoint> {
+        Vec::new()
+    }
+    fn outputs(&self) -> Vec<OsEndpoint> {
+        Vec::new()
+    }
+    fn open_input(
+        &self,
+        _: EndpointId,
+        _: crate::InputProducerHandle,
+    ) -> Result<Box<dyn InputConnection>> {
+        Err(MidiHardwareError::Unsupported("test"))
+    }
+    fn open_output(&self, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
+        Err(MidiHardwareError::Unsupported("test"))
+    }
+}
+
+/// A poll whose executor has shut down ends without a look: a `Timer`'s sleep
+/// resolves at once from then on, before its deadline, and a poll that looked
+/// again would spin. The future is polled once by hand on a thread, under a hang
+/// guard: one that loops never returns.
+#[test]
+fn a_poll_ends_when_its_executor_has_shut_down() {
+    static SHUT_LOOKS: AtomicUsize = AtomicUsize::new(0);
+    fn counted() -> Vec<OsDevice> {
+        SHUT_LOOKS.fetch_add(1, Ordering::SeqCst);
+        Vec::new()
+    }
+    let slot = Arc::new(Mutex::new(None));
+    let executor = tutti_platform::Executor::new();
+    let _devices = Devices::open_over(&executor, Box::new(Captured(Arc::clone(&slot)))).unwrap();
+    let sink = slot.lock().unwrap().take().unwrap();
+    let timer = tutti_platform::Executor::new().timer();
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut ended = std::pin::pin!(poll::run(
+            timer,
+            crate::devices::reporter::Reporter::new(sink.clone()),
+            sink,
+            counted,
+            Duration::from_secs(3600),
+        ));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        let _ = done.send(ended.as_mut().poll(&mut cx).is_ready());
+    });
+    assert_eq!(
+        finished.recv_timeout(Duration::from_secs(30)),
+        Ok(true),
+        "the poll ends with its executor"
+    );
+    assert_eq!(SHUT_LOOKS.load(Ordering::SeqCst), 0, "and does not look");
 }

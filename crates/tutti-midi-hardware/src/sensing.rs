@@ -1,9 +1,9 @@
-//! The Active Sensing heartbeat of one output: a thread of its own that sends
+//! The Active Sensing heartbeat of one output: a task on the executor that sends
 //! `0xFE` whenever the output has been silent for
 //! [`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL).
 //!
 //! The schedule is [`ActiveSensingSender`]; this module owns the clock and the
-//! thread it is polled on. The thread runs from the output's opening to its
+//! task it is polled in. The task runs from the heartbeat's start to its
 //! drop, whatever the caller does or stops doing (MIDI 1.0 Detailed
 //! Specification p. 32: a transmitter that starts must go on). It sends only
 //! while the output's Protocol is MIDI 1.0: a MIDI 2.0 Protocol output has no
@@ -11,21 +11,15 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
 use tutti_midi_runtime::ActiveSensingSender;
-use tutti_platform::{StopToken, ThreadHandle, spawn_named};
+use tutti_platform::{Executor, Task, Timer};
 use tutti_ump::{MidiGroup, Protocol, Ump};
 
 use crate::endpoints::DeviceOut;
-use crate::error::{MidiHardwareError, MidiThread};
-
-/// How long dropping a heartbeat waits for its thread: the thread sleeps on
-/// its stop token, so it ends at once unless the sink is stuck in a send.
-const STOP_BOUND: Duration = Duration::from_secs(1);
 
 /// The schedule of one output's Active Sensing and the Protocol gate on it:
 /// every method that depends on the time takes it as `now`.
@@ -68,32 +62,22 @@ impl Pulse {
     }
 }
 
-/// The running heartbeat. Dropping it stops the thread and waits for it.
+/// The running heartbeat: a task on the executor. Dropping it cancels the task.
 pub(crate) struct Heartbeat {
     pulse: Arc<Pulse>,
-    thread: Option<ThreadHandle<()>>,
+    _task: Task<()>,
 }
 
 impl Heartbeat {
-    /// Starts the heartbeat over `sink`, for an output in `protocol`.
-    ///
-    /// # Errors
-    ///
-    /// [`MidiHardwareError::Spawn`] when the thread cannot start.
-    pub(crate) fn start(sink: Arc<dyn DeviceOut>, protocol: Protocol) -> crate::Result<Self> {
+    /// Starts the heartbeat over `sink` on `executor`, for an output in `protocol`.
+    pub(crate) fn start(executor: &Executor, sink: Arc<dyn DeviceOut>, protocol: Protocol) -> Self {
         let pulse = Arc::new(Pulse::new(protocol, Instant::now()));
-        let thread = spawn_named(MidiThread::Sensing.name(), None, {
+        let task = executor.spawn({
             let pulse = Arc::clone(&pulse);
-            move |stop| beat(&sink, &pulse, stop)
-        })
-        .map_err(|source| MidiHardwareError::Spawn {
-            thread: MidiThread::Sensing,
-            source,
-        })?;
-        Ok(Self {
-            pulse,
-            thread: Some(thread),
-        })
+            let timer = executor.timer();
+            async move { beat(&timer, &sink, &pulse).await }
+        });
+        Self { pulse, _task: task }
     }
 
     /// The output sent something now: it is not silent.
@@ -107,36 +91,24 @@ impl Heartbeat {
     }
 }
 
-impl Drop for Heartbeat {
-    fn drop(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            match thread.stop_within(STOP_BOUND) {
-                Ok(Ok(())) => {}
-                Ok(Err(panicked)) => tracing::error!("Active Sensing thread: {panicked}"),
-                Err(stuck) => {
-                    tracing::warn!(
-                        "Active Sensing thread did not stop within {STOP_BOUND:?}; left running"
-                    );
-                    stuck.detach();
-                }
-            }
-        }
-    }
-}
-
 fn lock(schedule: &Mutex<ActiveSensingSender>) -> MutexGuard<'_, ActiveSensingSender> {
     schedule.lock_recover()
 }
 
-/// Sleeps to the schedule's deadline, sends what is due, and repeats until
-/// `stop` is requested.
-fn beat(sink: &Arc<dyn DeviceOut>, pulse: &Pulse, stop: &StopToken) {
+/// Sleeps to the schedule's deadline, sends what is due, and repeats until the
+/// task is cancelled or the executor shuts down.
+///
+/// A [`Timer`]'s sleep resolves at once after the shutdown, before its deadline:
+/// a sleep that resolves early ends the heartbeat, so it never spins.
+async fn beat(timer: &Timer, sink: &Arc<dyn DeviceOut>, pulse: &Pulse) {
     loop {
-        let wait = pulse.deadline().saturating_duration_since(Instant::now());
-        if stop.wait(wait) {
+        let deadline = pulse.deadline();
+        timer.sleep_until(deadline).await;
+        let now = Instant::now();
+        if now < deadline {
             return;
         }
-        if let Some(ump) = pulse.due(Instant::now()) {
+        if let Some(ump) = pulse.due(now) {
             let _ = sink.queue(&[(Offset::ZERO, ump)]);
         }
     }

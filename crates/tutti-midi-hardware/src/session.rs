@@ -296,10 +296,11 @@ impl MidiSession {
         inlets: Arc<InputInlets>,
         config: MidiHardwareConfig,
     ) -> Result<Self> {
-        Self::open_over(backend::active(executor), inlets, config)
+        Self::open_over(executor, backend::active(executor), inlets, config)
     }
 
-    /// A session over a supplied backend.
+    /// A session over a supplied backend, whose outputs' Active Sensing runs on
+    /// `executor`.
     ///
     /// This is what makes the session testable: a fake [`MidiEndpoints`] drives
     /// every connect/disconnect path deterministically, on any platform,
@@ -310,6 +311,7 @@ impl MidiSession {
     ///
     /// As [`Devices::open_over`].
     pub fn open_over(
+        executor: &Executor,
         backend: Box<dyn MidiEndpoints>,
         inlets: Arc<InputInlets>,
         config: MidiHardwareConfig,
@@ -317,7 +319,7 @@ impl MidiSession {
         Ok(Self {
             inputs: HashMap::new(),
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
-            devices: Devices::open_over(backend)?,
+            devices: Devices::open_over(executor, backend)?,
             config,
             presented: None,
             generated_instance: None,
