@@ -8,7 +8,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
-use tutti_sampler::Placement;
+use tutti_sampler::StreamStart;
 use tutti_session::{
     AudioEntry, OutPort, PoolState, Root, SamplerEvent, Session, SessionEvent, audio_file,
 };
@@ -132,7 +132,7 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    s.open_stream(&path, Placement::HEAD).expect("a streamer");
+    s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
     let id = until(&mut s, "the open", |_, events| {
         events.into_iter().find_map(|event| match event {
             SessionEvent::Sampler(SamplerEvent::Opened { id }) => Some(id),

@@ -577,9 +577,9 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, Direction as PlaybackDirection, Error, GUARD_FRAMES, OpenError,
-        Placement as ClipPlacement, RefusedPlacement, SamplerFloat, Stream, StreamFault,
-        StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus, VoiceNodeHandle,
+        Block, Direction, Error, GUARD_FRAMES, OpenError, RefusedStreamStart, SamplerFloat, Stream,
+        StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStart, StreamStatus,
+        VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
