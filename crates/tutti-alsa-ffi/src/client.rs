@@ -27,17 +27,8 @@ pub(crate) fn c_name(name: &str) -> Result<CString> {
 pub enum Read {
     /// One event.
     Event(Event),
-    /// Nothing queued (`-EAGAIN`; only a non-blocking client says so).
+    /// Nothing queued (`-EAGAIN`).
     Empty,
-}
-
-/// Whether a client's reads wait for an event.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Blocking {
-    /// A read waits until an event arrives.
-    Block,
-    /// A read answers [`Read::Empty`] when nothing is queued.
-    NonBlock,
 }
 
 /// The MIDI protocol a UMP client asks the kernel to deliver (and to convert
@@ -64,14 +55,14 @@ impl UmpVersion {
 /// An open sequencer client that speaks UMP. Owns the `snd_seq_t` and closes it
 /// on drop.
 ///
-/// It is `Send` and not `Sync`: one thread uses it at a time, and it moves to
-/// its pump thread at spawn.
+/// It is `Send` and not `Sync`: one thread uses it at a time. A client that
+/// several threads use lives in a [`Poller`](crate::Poller), which locks it per
+/// call.
 ///
-/// # One client per connection, not one per backend
-///
-/// [`read_event`](Client::read_event) **blocks** on a blocking client, so a
-/// shared client would mean every input pump contending on one handle, and one
-/// device going quiet would stall the others.
+/// A client is non-blocking: [`read_event`](Client::read_event) answers
+/// [`Read::Empty`] when nothing is queued, and a send into a full destination is
+/// refused with `-EAGAIN`. One client per connection, not one per backend, so one
+/// device going quiet stalls no other's reads.
 #[derive(Debug)]
 pub struct Client {
     seq: *mut sys::snd_seq_t,
@@ -126,14 +117,11 @@ impl Client {
     ///    versa. Kernel 6.5 or newer. Almost no Linux machine has a native-UMP
     ///    device yet, so without this the backend would be correct and useless.
     ///
-    /// [`Blocking::NonBlock`] opens it so a read answers [`Read::Empty`] rather
-    /// than blocking.
-    ///
     /// # Errors
     ///
     /// The step that failed, with alsa-lib's code.
-    pub fn open(name: &str, blocking: Blocking, version: UmpVersion) -> Result<Self> {
-        let client = Self::open_plain(name, blocking)?;
+    pub fn open(name: &str, version: UmpVersion) -> Result<Self> {
+        let client = Self::open_plain(name)?;
         client.set_ump_version(version)?;
         // SAFETY: `client.seq` is open.
         let rc = unsafe { sys::snd_seq_set_client_ump_conversion(client.seq, 1) };
@@ -155,26 +143,25 @@ impl Client {
     }
 
     /// `snd_seq_open` and the name: a client that is not yet a UMP client.
-    fn open_plain(name: &str, blocking: Blocking) -> Result<Self> {
+    fn open_plain(name: &str) -> Result<Self> {
         // `"hw"`, not `"default"`. The sequencer is a kernel device, and `hw`
         // addresses it directly; `default` routes through a config-file plugin
         // that, on at least Ubuntu, **cannot be opened non-blocking**: it
-        // returns `-ENOENT` for `SND_SEQ_NONBLOCK` while succeeding blocking.
-        //
-        // That asymmetry made input (which polls, so opens non-blocking) fail
-        // while output (blocking) worked, from the same function, and read as
-        // "no MIDI inputs" rather than as an open failure.
+        // returns `-ENOENT` for `SND_SEQ_NONBLOCK`, which read as "no MIDI
+        // inputs" rather than as an open failure.
         let device = c"hw";
         let mut seq: *mut sys::snd_seq_t = std::ptr::null_mut();
-        let mode = match blocking {
-            Blocking::NonBlock => sys::SND_SEQ_NONBLOCK,
-            Blocking::Block => 0,
-        };
 
         // SAFETY: `seq` is a valid out-pointer; `device` is a NUL-terminated
         // literal that outlives the call.
-        let rc =
-            unsafe { sys::snd_seq_open(&mut seq, device.as_ptr(), sys::SND_SEQ_OPEN_DUPLEX, mode) };
+        let rc = unsafe {
+            sys::snd_seq_open(
+                &mut seq,
+                device.as_ptr(),
+                sys::SND_SEQ_OPEN_DUPLEX,
+                sys::SND_SEQ_NONBLOCK,
+            )
+        };
         check(rc, Operation::Open)?;
         // Owned from here: any failure below closes it by `Drop`.
         #[cfg(feature = "testing")]
@@ -278,9 +265,8 @@ impl Client {
         self.connect_from(port, Address::ANNOUNCE)
     }
 
-    /// Reads one event, skipping a read that succeeds with none. A blocking
-    /// client waits for one; a non-blocking client answers [`Read::Empty`] when
-    /// none is queued.
+    /// Reads one event, skipping a read that succeeds with none. The client
+    /// answers [`Read::Empty`] when none is queued.
     ///
     /// # Errors
     ///
@@ -321,8 +307,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` on a
-    /// [`Blocking::NonBlock`] client whose destination has no room.
+    /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` when the
+    /// destination has no room.
     pub fn send_to_subscribers(&self, port: PortId, ump: &Ump) -> Result<()> {
         self.send_ump_event(port, ump, None)
     }
@@ -335,8 +321,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` on a
-    /// [`Blocking::NonBlock`] client whose destination has no room.
+    /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` when the
+    /// destination has no room.
     pub fn send_to_subscribers_at(
         &self,
         port: PortId,
@@ -400,7 +386,7 @@ impl Client {
 
     /// How many more events this client can hold in its own output pool: what
     /// a scheduled send needs a cell of, until the queue delivers it. A send
-    /// that finds the pool full is refused on a [`Blocking::NonBlock`] client.
+    /// that finds the pool full is refused.
     ///
     /// # Errors
     ///
@@ -505,8 +491,8 @@ impl Client {
     /// The step that failed, with alsa-lib's code.
     #[cfg(feature = "testing")]
     #[doc(hidden)]
-    pub fn open_legacy(name: &str, blocking: Blocking) -> Result<Self> {
-        Self::open_plain(name, blocking)
+    pub fn open_legacy(name: &str) -> Result<Self> {
+        Self::open_plain(name)
     }
 
     /// Sends one legacy channel event to everything subscribed to `port`.

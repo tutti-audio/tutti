@@ -319,8 +319,8 @@ unsafe extern "C" {
     ) -> c_int;
 
     // UMP event I/O. @@ALSA_1.2.10
-    /// Read one UMP event. Blocks unless the client was opened non-blocking, in
-    /// which case it returns `-EAGAIN` when the queue is empty.
+    /// Read one UMP event. Returns `-EAGAIN` when the queue is empty (the client is
+    /// opened non-blocking).
     ///
     /// The event is owned by alsa-lib and valid only until the next call — it
     /// must be copied out, never retained.

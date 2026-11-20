@@ -175,71 +175,50 @@ pub fn play<F: Float>(
 // Opening a stream in a test.
 // ---------------------------------------------------------------------------
 
-/// The answer to `opening` from a hand-stepped streamer: steps it until the
-/// streamer has answered, then until it has primed (`step_until_idle`), so
-/// the reader's ring holds what the threaded streamer would have read by the
-/// time a voice plays. The [`Stream`](crate::Stream) is the caller's to keep
-/// while the voice plays: dropping it ends the stream.
-///
-/// A file the streamer can seek in is answered on the first step. One it
-/// cannot is decoded whole on the decode thread, which
-/// no step runs: the wait between steps is a millisecond, up to ten seconds.
+/// The stream of `opening` on a hand-stepped streamer: reads the file, adopts
+/// it, steps the streamer until it has taken the stream, then until it has
+/// primed (`step_until_idle`), so the reader's ring holds what the threaded
+/// streamer would have read by the time a voice plays. The
+/// [`Stream`](crate::Stream) is the caller's to keep while the voice plays:
+/// dropping it ends the stream.
 ///
 /// # Errors
 ///
-/// The open's own failure, as the streamer answered it.
+/// The file's own failure ([`OpenStream::run`](crate::OpenStream::run)).
 ///
 /// # Panics
 ///
-/// If the streamer has not answered within ten seconds: a hand-stepped
-/// streamer answers a seekable file on the first step, so that is a hang, not
-/// a slow machine.
+/// If the streamer refuses the adopt: a test that expects a refusal calls
+/// [`adopt`](crate::DiskStreamer::adopt) itself.
 pub fn wait_for_open<F: tutti_rt::RingFloat>(
     streamer: &mut crate::DiskStreamer<crate::Manual<F>, F>,
-    mut opening: crate::PendingOpen<F>,
+    opening: crate::OpenStream<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
-    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
-    while tutti_platform::Instant::now() < deadline {
-        let _ = streamer.step();
-        match opening.poll() {
-            crate::Open::Pending(again) => opening = again,
-            crate::Open::Ready(stream, reader) => {
-                let _ = streamer.step_until_idle(1_000);
-                return Ok((stream, reader));
-            }
-            crate::Open::Failed(error) => return Err(error),
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-    panic!("a hand-stepped streamer did not answer an open in 10 s");
+    let (stream, reader) = streamer
+        .adopt(opening.run()?)
+        .expect("a hand-stepped streamer adopts what it read");
+    let _ = streamer.step_until_idle(1_000);
+    Ok((stream, reader))
 }
 
-/// The answer to `opening` from a streamer running its own thread, waited for
-/// up to ten seconds.
+/// The stream of `opening` on a streamer running its own thread: reads the
+/// file and adopts it. The stream is `Opening` until the streamer has primed
+/// its ring.
 ///
 /// # Errors
 ///
-/// The open's own failure, as the streamer answered it.
+/// The file's own failure ([`OpenStream::run`](crate::OpenStream::run)).
 ///
 /// # Panics
 ///
-/// If the streamer has not answered by then.
-pub fn wait_for_open_threaded<F: tutti_rt::RingFloat>(
-    mut opening: crate::PendingOpen<F>,
+/// If the streamer refuses the adopt.
+pub fn wait_for_open_threaded<D, F: tutti_rt::RingFloat>(
+    streamer: &crate::DiskStreamer<D, F>,
+    opening: crate::OpenStream<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
-    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        match opening.poll() {
-            crate::Open::Pending(again) => opening = again,
-            crate::Open::Ready(stream, reader) => return Ok((stream, reader)),
-            crate::Open::Failed(error) => return Err(error),
-        }
-        assert!(
-            tutti_platform::Instant::now() < deadline,
-            "the streamer did not answer an open in 10 s"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
+    Ok(streamer
+        .adopt(opening.run()?)
+        .expect("a running streamer adopts what it read"))
 }
 
 #[cfg(test)]

@@ -226,8 +226,7 @@ fn a_request_published_before_the_stream_is_live_is_taken_once_it_is() {
     use crate::streamer::config::BufferConfig;
     use crate::streamer::handlers::{Local, follow_steering};
     let config = BufferConfig::default();
-    let (reports, _queue) = crossbeam_channel::bounded(8);
-    let mut local = Local::<f32>::new(config.chunk_size, reports.into());
+    let mut local = Local::<f32>::new(config.chunk_size);
     let id = StreamId::of(1);
     let (rec, _ring, _pos, _status, looping, direction) =
         record_with_cells(id, PathBuf::from("t.wav"), 1024, 1u16);

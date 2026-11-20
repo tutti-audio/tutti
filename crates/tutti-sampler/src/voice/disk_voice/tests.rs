@@ -246,7 +246,7 @@ fn a_fork_closes_its_file_once_past_its_window() {
     w.finalize().expect("writes");
     let mut streamer =
         crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
-    let opening = streamer.open(&path, crate::StreamStart::HEAD);
+    let opening = streamer.open_stream(&path, crate::StreamStart::HEAD);
     let (_stream, reader) =
         crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     // Beats [0, 1): 24 000 frames at 120 BPM.
@@ -297,7 +297,7 @@ fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
     w.finalize().expect("writes");
     let mut streamer =
         crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
-    let opening = streamer.open(&path, crate::StreamStart::HEAD);
+    let opening = streamer.open_stream(&path, crate::StreamStart::HEAD);
     let (_stream, reader) =
         crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
@@ -352,7 +352,7 @@ fn a_stopped_clock_silences_a_fork() {
     w.finalize().expect("writes");
     let mut streamer =
         crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
-    let opening = streamer.open(&path, crate::StreamStart::HEAD);
+    let opening = streamer.open_stream(&path, crate::StreamStart::HEAD);
     let (_stream, reader) =
         crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
@@ -1630,7 +1630,7 @@ fn streamer_fed(script: &Script, no_skip: bool) -> (Vec<Vec<u32>>, u64, usize) {
     let mut streamer =
         DiskStreamer::<_, f32>::manual(SampleRate::of(SR), DiskStreamerConfig::default())
             .expect("streamer builds");
-    let opening = streamer.open(&path, crate::StreamStart::HEAD);
+    let opening = streamer.open_stream(&path, crate::StreamStart::HEAD);
     let (_stream, reader) =
         crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     for _ in 0..4096 {

@@ -389,7 +389,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
 
     /// Builds the voice that plays a stream, placed on the timeline at
     /// `window` (the transport it reads is its block's, from the graph). The reader is the stream's one, moved in: it is the
-    /// reply of the open ([`DiskStreamer::open`](crate::DiskStreamer::open)),
+    /// value of the adopt ([`DiskStreamer::adopt`](crate::DiskStreamer::adopt)),
     /// so it cannot be built into a second voice.
     ///
     /// The window is musical time; the gate converts them to

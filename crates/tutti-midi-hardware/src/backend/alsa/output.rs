@@ -14,7 +14,7 @@ use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;
 use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::stamp::Paired;
-use tutti_alsa_ffi::{Blocking, Client, PortCaps, PortId, PortKind, QueueClock, UmpVersion};
+use tutti_alsa_ffi::{Client, PortCaps, PortId, PortKind, QueueClock, UmpVersion};
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_ump::Ump;
@@ -161,7 +161,7 @@ pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
 
     // Non-blocking: a destination with no room refuses the send, which is
     // counted, rather than holding the caller until it has some.
-    let seq = super::client::open(CLIENT, Blocking::NonBlock, UmpVersion::Midi2)?;
+    let seq = super::client::open(CLIENT, UmpVersion::Midi2)?;
     let port = seq.open_port(
         CLIENT,
         // Not subscribable by others, so never listed as a device (see

@@ -227,6 +227,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
 };
+#[cfg(all(feature = "session", feature = "sampler"))]
+pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
@@ -235,8 +237,6 @@ pub use tutti_session::{ParamRef, RouteSpec};
 pub use tutti_session::{
     PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
 };
-#[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::{SamplerEvent, SamplerLoad};
 
 // --- the modules ------------------------------------------------------------
 
