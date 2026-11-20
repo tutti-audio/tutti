@@ -8,12 +8,13 @@
 //! client may publish the same records for itself.
 
 use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_uint};
 
 use tutti_ump::{
-    BlockDirection, EndpointInfoNotification, Field, FirstGroup, FunctionBlockCount,
-    FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan, Midi1Port, OsFunctionBlock,
-    Protocol, UiHint, UmpVersion, read_function_block, read_protocol,
+    BlockDirection, DeviceIdentity, EndpointInfoNotification, Field, FirstGroup,
+    FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
+    ManufacturerId, Midi1Port, OsFunctionBlock, ProductInstanceId, Protocol, SoftwareRevision, U7,
+    UiHint, UmpVersion, read_function_block, read_protocol,
 };
 
 use crate::address::ClientId;
@@ -79,6 +80,13 @@ pub struct UmpEndpoint {
     pub offered: EndpointInfoNotification,
     /// The Endpoint's name, when it has one.
     pub name: Option<String>,
+    /// Its Device Identity (M2-104 §7.1.3), when the record holds one: a record
+    /// whose manufacturer bytes are no id (the kernel's zero before a device
+    /// answers) has none.
+    pub device: Option<DeviceIdentity>,
+    /// Its Product Instance Id (§7.1.5), when the record holds a valid one. The
+    /// record's field is 128 bytes and the Id at most 42, so every Id fits.
+    pub instance: Option<ProductInstanceId>,
     /// Its blocks, by number, as many as the sequencer answered for.
     pub blocks: Vec<UmpBlock>,
 }
@@ -92,6 +100,62 @@ pub struct UmpBlock {
     pub info: FunctionBlockInfo,
     /// Its name, when it has one, as long as the sequencer holds it.
     pub name: Option<String>,
+}
+
+/// The numbers of a `snd_ump_endpoint_info_t`'s Device Identity, as alsa-lib gets
+/// and sets them. The record is the kernel's own, filled from a device's Device
+/// Identity Notification with the wire's bytes in these positions, so a number
+/// here is the Notification's bytes (M2-104 §7.1.3) in the wire's order: the
+/// manufacturer's three System Exclusive id bytes first byte most significant,
+/// and a 16-bit family or model with the Notification's second byte (the most
+/// significant) in the high byte. The one mapping is [`Self::of`] and
+/// [`Self::device`]; the types stop here, at the C record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct IdentityWords {
+    manufacturer: u32,
+    family: u16,
+    model: u16,
+    revision: [u8; 4],
+}
+
+impl IdentityWords {
+    /// The record's numbers for `device`.
+    fn of(device: &DeviceIdentity) -> Self {
+        let [a, b, c] = device.manufacturer.sysex_bytes().map(U7::get);
+        let pair = |[lsb, msb]: [U7; 2]| u16::from(msb.get()) << 8 | u16::from(lsb.get());
+        Self {
+            manufacturer: u32::from(a) << 16 | u32::from(b) << 8 | u32::from(c),
+            family: pair(device.family),
+            model: pair(device.model),
+            revision: device.revision.get().map(U7::get),
+        }
+    }
+
+    /// The Device Identity the numbers are: `None` for manufacturer bytes that
+    /// are no id, or a byte past 7 bits anywhere (the manufacturer's top byte included) (an identity the record can
+    /// hold but the spec cannot).
+    fn device(self) -> Option<DeviceIdentity> {
+        let [0, a, b, c] = self.manufacturer.to_be_bytes() else {
+            return None;
+        };
+        let [family_msb, family_lsb] = self.family.to_be_bytes();
+        let [model_msb, model_lsb] = self.model.to_be_bytes();
+        Some(DeviceIdentity {
+            manufacturer: ManufacturerId::from_sysex_bytes([
+                U7::new(a)?,
+                U7::new(b)?,
+                U7::new(c)?,
+            ])?,
+            family: [U7::new(family_lsb)?, U7::new(family_msb)?],
+            model: [U7::new(model_lsb)?, U7::new(model_msb)?],
+            revision: SoftwareRevision::from([
+                U7::new(self.revision[0])?,
+                U7::new(self.revision[1])?,
+                U7::new(self.revision[2])?,
+                U7::new(self.revision[3])?,
+            ]),
+        })
+    }
 }
 
 /// A number alsa-lib reports as the byte the spec's field holds: one past a
@@ -315,6 +379,26 @@ impl Client {
                 name(sys::snd_ump_endpoint_info_get_name(ptr)),
             )
         };
+        // SAFETY: as above; `sw_revision` points at the record's four bytes and
+        // is copied at once, the product id is copied before the record is used again.
+        let (words, instance) = unsafe {
+            let revision = sys::snd_ump_endpoint_info_get_sw_revision(ptr);
+            (
+                IdentityWords {
+                    manufacturer: sys::snd_ump_endpoint_info_get_manufacturer_id(ptr),
+                    family: u16::try_from(sys::snd_ump_endpoint_info_get_family_id(ptr))
+                        .unwrap_or(u16::MAX),
+                    model: u16::try_from(sys::snd_ump_endpoint_info_get_model_id(ptr))
+                        .unwrap_or(u16::MAX),
+                    revision: if revision.is_null() {
+                        [u8::MAX; 4]
+                    } else {
+                        revision.cast::<[u8; 4]>().read()
+                    },
+                },
+                name(sys::snd_ump_endpoint_info_get_product_id(ptr)),
+            )
+        };
         // The UMP limit: blocks are numbered 0 to 31.
         let mut blocks = Vec::new();
         for id in 0..count.min(MAX_BLOCKS) {
@@ -324,6 +408,8 @@ impl Client {
             protocol: protocol_of(protocol),
             offered: offered_of(version, flags, count, caps),
             name: ep_name,
+            device: words.device(),
+            instance: instance.as_deref().and_then(ProductInstanceId::new),
             blocks,
         }))
     }
@@ -384,6 +470,8 @@ impl Client {
         let p = info.as_ptr();
         let cname = c_name_of(endpoint.name.as_deref())?;
         let protocol = protocol_bits(endpoint.protocol)?;
+        let words = endpoint.device.as_ref().map(IdentityWords::of);
+        let product_id = c_name_of(endpoint.instance.as_ref().map(ProductInstanceId::as_str))?;
         let mut numbered = Vec::with_capacity(endpoint.blocks.len());
         for block in &endpoint.blocks {
             let fields = BlockFields::of(&block.info)?;
@@ -400,7 +488,8 @@ impl Client {
             .map(|(fields, ..)| fields.id + 1)
             .max()
             .unwrap_or(0);
-        // SAFETY: `info` is a live record; `cname` outlives the call that copies it.
+        // SAFETY: `info` is a live record; `cname`, `product_id` and `words.revision`
+        // outlive the calls that copy them.
         unsafe {
             sys::snd_ump_endpoint_info_set_protocol_caps(p, offered_bits(&endpoint.offered));
             sys::snd_ump_endpoint_info_set_protocol(p, protocol);
@@ -408,6 +497,13 @@ impl Client {
             sys::snd_ump_endpoint_info_set_flags(p, endpoint_flags(&endpoint.offered));
             sys::snd_ump_endpoint_info_set_num_blocks(p, count);
             sys::snd_ump_endpoint_info_set_name(p, cname.as_ptr());
+            sys::snd_ump_endpoint_info_set_product_id(p, product_id.as_ptr());
+            if let Some(words) = words {
+                sys::snd_ump_endpoint_info_set_manufacturer_id(p, words.manufacturer);
+                sys::snd_ump_endpoint_info_set_family_id(p, c_uint::from(words.family));
+                sys::snd_ump_endpoint_info_set_model_id(p, c_uint::from(words.model));
+                sys::snd_ump_endpoint_info_set_sw_revision(p, words.revision.as_ptr());
+            }
         }
         // SAFETY: `self.raw()` is open and `info` is a live record.
         let rc = unsafe { sys::snd_seq_set_ump_endpoint_info(self.raw(), p.cast()) };
@@ -503,6 +599,67 @@ mod tests {
             sysex8_streams: 5,
             ui_hint: 3,
         }
+    }
+
+    /// A Device Identity whose every byte differs, with a 21-bit manufacturer.
+    fn identity() -> DeviceIdentity {
+        DeviceIdentity {
+            manufacturer: ManufacturerId::of(0x8000 | 0x2109),
+            family: [U7::of(0x11), U7::of(0x22)],
+            model: [U7::of(0x33), U7::of(0x44)],
+            revision: SoftwareRevision::from([0x55, 0x66, 0x77, 0x7F].map(U7::of)),
+        }
+    }
+
+    /// The record's numbers are the Device Identity Notification's bytes (M2-104
+    /// §7.1.3, Table "Device Identity Notification"): word 1 holds the three
+    /// manufacturer id bytes (`00 21 09` for a 21-bit id), word 2 the family
+    /// then model, each least significant byte first, and word 3 the revision in
+    /// order. Family and model are 16-bit numbers with the second byte high.
+    #[test]
+    fn the_identity_words_are_the_notification_bytes_in_wire_order() {
+        let words = IdentityWords::of(&identity());
+        assert_eq!(words.manufacturer, 0x00_21_09);
+        assert_eq!(words.family, 0x2211);
+        assert_eq!(words.model, 0x4433);
+        assert_eq!(words.revision, [0x55, 0x66, 0x77, 0x7F]);
+        // A one-byte id is `xx 00 00`.
+        let one = DeviceIdentity {
+            manufacturer: ManufacturerId::NON_COMMERCIAL,
+            ..identity()
+        };
+        assert_eq!(IdentityWords::of(&one).manufacturer, 0x7D_00_00);
+    }
+
+    /// The numbers a record holds read back as the identity they were made from,
+    /// and a record no identity can be read from is `None`, never a default.
+    #[test]
+    fn the_identity_words_convert_both_ways_and_refuse_what_the_spec_cannot_hold() {
+        for device in [
+            identity(),
+            DeviceIdentity {
+                manufacturer: ManufacturerId::NON_COMMERCIAL,
+                ..identity()
+            },
+        ] {
+            assert_eq!(IdentityWords::of(&device).device(), Some(device));
+        }
+        let words = IdentityWords::of(&identity());
+        // The kernel's zero manufacturer before a device answers.
+        let unset = IdentityWords {
+            manufacturer: 0,
+            ..words
+        };
+        assert_eq!(unset.device(), None);
+        let wide = |edit: fn(&mut IdentityWords)| {
+            let mut w = words;
+            edit(&mut w);
+            w.device()
+        };
+        assert_eq!(wide(|w| w.family = 0x2280), None);
+        assert_eq!(wide(|w| w.model = 0x8033), None);
+        assert_eq!(wide(|w| w.revision[2] = 0x80), None);
+        assert_eq!(wide(|w| w.manufacturer = 0x01_00_21_09), None);
     }
 
     /// A record the spec can hold reads as the Function Block Info it says, and
