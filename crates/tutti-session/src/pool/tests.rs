@@ -1038,6 +1038,8 @@ mod clock_switch {
             .system_clock()
             .build()
             .unwrap();
+        // The streamer's future is not a load: the loads are what the tests count.
+        spawned.drop_all();
         (session, spawned)
     }
 
@@ -1109,6 +1111,8 @@ mod clock_switch {
             .device(Default::default())
             .build_device_on(spec, driver)
             .unwrap();
+        // The streamer's future is not a load: the loads are what the tests count.
+        spawned.drop_all();
         (session, spawned, stream)
     }
 
