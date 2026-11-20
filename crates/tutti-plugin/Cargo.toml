@@ -43,10 +43,8 @@ tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host" }
 
 # The transport the hosted plugins read.
 tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
-tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 # The engine's value vocabulary (`Samples`, `SampleRate`).
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
-tutti-music = { version = "0.0.1", path = "../tutti-music" }
 
 # The graph, for a plugin node's own `ForkSource` (fork by state
 # transfer). No cycle: `tutti-graph` names only `tutti-units`, `tutti-rt` and `tutti-ump`.
@@ -88,7 +86,9 @@ tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true 
 # `request_priority`, `PriorityRequest`: the pressure suite's priority probe.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-midi-runtime = { path = "../tutti-midi-runtime" }
-tutti-midi-protocol = { path = "../tutti-midi-protocol" }
+# The tests' tempo maps and note timing.
+tutti-tempo = { path = "../tutti-tempo" }
+tutti-music = { path = "../tutti-music" }
 # A size for `set_editor_size`.
 dpi.workspace = true
 tutti-ump = { path = "../tutti-ump", default-features = false }

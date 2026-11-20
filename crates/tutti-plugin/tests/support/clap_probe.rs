@@ -38,9 +38,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Latent;
 use tutti_graph::{GraphBuilder, Prepare, Renderer, Unforkable};
-use tutti_plugin::IpcConfig;
 use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::{PluginControls, PluginHandle};
+use tutti_plugin_ipc::IpcConfig;
 use tutti_units::{Latency, SampleRate, Samples};
 
 /// A bound plugin as the only node of a graph: the global inputs feed
@@ -456,7 +456,7 @@ pub struct LoadedProbe {
 /// failure to load is a broken fixture rather than an outcome worth asserting.
 pub fn load_probe(sample_rate: f64) -> LoadedProbe {
     load_probe_with(
-        IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source")),
+        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         sample_rate,
     )
 }
@@ -470,7 +470,7 @@ pub fn load_probe_with(config: IpcConfig, sample_rate: f64) -> LoadedProbe {
     let client = PluginClient::new(
         config,
         &tutti_fixtures::detached_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::clap_probe(),
         )),
         SampleRate::of(sample_rate),

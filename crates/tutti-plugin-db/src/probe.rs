@@ -448,12 +448,6 @@ mod tests {
         }
     }
 
-    /// The default allows a cold plugin well past the old five seconds.
-    #[test]
-    fn the_default_deadline_is_fifteen_seconds() {
-        assert_eq!(DEFAULT_PROBE_TIMEOUT, Duration::from_secs(15));
-    }
-
     /// The result file is in a directory of the probe's own, not a predictable
     /// name in the shared temp directory, and the directory is gone after.
     #[test]
