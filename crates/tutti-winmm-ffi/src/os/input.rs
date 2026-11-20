@@ -346,7 +346,9 @@ impl Drop for MidiIn {
         let shared = owner.slot();
         // No callback that looks the id up from here on finds the input.
         let closing = owner.begin_close(LEAVE_BOUND);
-        // The worker queues no buffer after it has ended. A wake that failed
+        // `midiInClose` runs only after the worker has ended, because a closed
+        // handle may be reused by another port and the worker queues buffers on
+        // it. A wake that failed
         // would leave that wait for ever, so the task is detached, the worker
         // is left running and, with the port still open, nothing is freed.
         if let Err(e) = shared.worker.wake() {
@@ -360,8 +362,9 @@ impl Drop for MidiIn {
             return;
         }
         if let Some(worker) = self.worker.take() {
-            // Returns when the worker's future has ended (or been dropped
-            // unrun), which closes the channel: the wake above is what ends it.
+            // The platform has no blocking wait on a `Task`: this returns when the
+            // worker's future has ended (or been dropped unrun), which closes the
+            // channel. The wake above is what ends it.
             let _ = worker
                 .ended
                 .lock()

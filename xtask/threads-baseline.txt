@@ -31,3 +31,8 @@ tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thre
 tutti-plugin-server  spawn_dedicated  crates/tutti-plugin-server/src/render.rs::RenderThread::spawn  plugin
 tutti-plugin-server  spawn  crates/tutti-plugin-server/src/server.rs::beat_while  plugin
 
+# midi
+# The CoreMIDI hub is a process-lifetime thread CoreMIDI requires: it delivers the
+# process-wide client's notifications on the run loop of the thread that created
+# it, and the client is never disposed. It is not ours to stop, and stays a row.
+tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/coremidi/watch.rs::start_hub  midi
