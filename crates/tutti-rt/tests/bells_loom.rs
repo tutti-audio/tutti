@@ -17,13 +17,17 @@
 //!   resolves it once (a further poll is `Pending`), and the tick parks (the
 //!   model ends only if it does);
 //! - `a_rung_bell_with_no_waiter_lets_the_tick_park`: nobody waits, the tick
-//!   parks rather than spins, and a later wait resolves at once.
+//!   parks rather than spins, and a later wait resolves at once;
+//! - `a_waiter_racing_the_shutdown_is_woken_or_released`: a ring, then the
+//!   shut and its last pass on the tick, race one wait poll. The poll is
+//!   `Ready`, or `Pending` and woken, and no waker stays stored in the bell.
 
 #![cfg(loom)]
 
 use std::future::Future;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
 use loom::thread;
@@ -103,6 +107,51 @@ fn a_rung_bell_with_no_waiter_lets_the_tick_park() {
         // A later wait resolves at once: the tick left the flag.
         let waiter = thread::spawn(move || wait(listener));
         drop(waiter.join().unwrap());
+        drop(bell);
+    });
+}
+
+/// Records its wake.
+#[derive(Default)]
+struct Probe(AtomicBool);
+
+impl Wake for Probe {
+    fn wake(self: Arc<Self>) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_waiter_racing_the_shutdown_is_woken_or_released() {
+    loom::model(|| {
+        let (bells, mut ticker) = Bells::stepped();
+        let (bell, listener) = bells.bell();
+        let tick = thread::spawn(move || while ticker.tick_once() {});
+        let probe = Arc::new(Probe::default());
+        let waiter = {
+            let probe = Arc::clone(&probe);
+            thread::spawn(move || {
+                let mut listener = listener;
+                let waker = Waker::from(probe);
+                let ready = poll_once(&mut listener, &waker).is_ready();
+                (listener, ready)
+            })
+        };
+        // The ring lands before the shut, whatever the poll does.
+        bell.ring();
+        bells.shut();
+        tick.join().unwrap();
+        let (listener, ready) = waiter.join().unwrap();
+        assert!(
+            ready || probe.0.load(Ordering::SeqCst),
+            "a poll that waited is woken by the ring before the shut"
+        );
+        assert_eq!(
+            Arc::strong_count(&probe),
+            1,
+            "no waker stays stored in the bell after the shut"
+        );
+        drop(listener);
         drop(bell);
     });
 }
