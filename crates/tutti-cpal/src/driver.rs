@@ -49,7 +49,7 @@ impl<F: Float> std::fmt::Debug for TuttiDriver<F> {
 
 impl<F: Float> TuttiDriver<F>
 where
-    CpalDriver: StreamDriver<F, Error = crate::Error>,
+    CpalDriver: StreamDriver<F, Error = crate::DeviceError>,
 {
     /// Creates a driver from an opened device and the state its callback will
     /// read. Does not start or stop anything.
@@ -92,7 +92,7 @@ where
     ///
     /// # Errors
     ///
-    /// [`Error::RateChanged`](crate::Error::RateChanged) when the device now
+    /// [`DeviceError::RateChanged`](crate::DeviceError::RateChanged) when the device now
     /// runs at another rate, **with the stream left stopped**: this driver
     /// holds the graph's audio side only, so it can re-rate nothing, and a
     /// graph at the previous rate would play every node off pitch and off
@@ -126,7 +126,7 @@ where
     ///
     /// What resolving or opening the device reports (as `E`), or the hook's
     /// own error.
-    pub fn restart_with<E: From<crate::Error>>(
+    pub fn restart_with<E: From<crate::DeviceError>>(
         &mut self,
         device: impl Into<DeviceSelector>,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
@@ -156,7 +156,7 @@ where
     /// `spec`, running `rerate` between the stop and the start, resolving no
     /// device: a restart whose driver is given, not found. **The driver is now
     /// the device**: the driver's errors are the device layer's
-    /// ([`Error`](crate::Error)), and the device is recorded as supplied (it
+    /// ([`DeviceError`](crate::DeviceError)), and the device is recorded as supplied (it
     /// names none). [`move_to`](Self::move_to) is the move to a driver that is
     /// not the device's.
     ///
@@ -169,14 +169,14 @@ where
     ///
     /// The hook's error (the stream left stopped), or what the driver's
     /// `open` reports.
-    pub fn switch<D: StreamDriver<F>, E: From<crate::Error>>(
+    pub fn switch<D: StreamDriver<F>, E: From<crate::DeviceError>>(
         &mut self,
         spec: OutputSpec,
         driver: D,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<(), E>
     where
-        D::Error: Into<crate::Error>,
+        D::Error: Into<crate::DeviceError>,
     {
         self.host
             .restart_with(
@@ -190,7 +190,7 @@ where
 
     /// The one start [`AudioEngine::start_resolved`] and `start_on` make:
     /// `driver` takes the host's stream.
-    pub(crate) fn take_over<D: StreamDriver<F>, E: From<crate::Error>>(
+    pub(crate) fn take_over<D: StreamDriver<F>, E: From<crate::DeviceError>>(
         mut host: StreamHost<F>,
         spec: OutputSpec,
         driver: D,
@@ -199,7 +199,7 @@ where
         opened: Opened,
     ) -> core::result::Result<Self, (StreamHost<F>, E)>
     where
-        D::Error: Into<crate::Error>,
+        D::Error: Into<crate::DeviceError>,
     {
         match host.restart_with(
             || Ok((spec, driver)),
@@ -257,7 +257,7 @@ where
     /// see [`AudioEngine::opened_name`].
     ///
     /// # Errors
-    /// [`Error::InvalidDevice`](crate::Error::InvalidDevice) when the device
+    /// [`DeviceError::InvalidDevice`](crate::DeviceError::InvalidDevice) when the device
     /// opened but the host could not name it.
     pub fn opened_name(&self) -> Result<Option<String>> {
         self.opened.name()
@@ -283,7 +283,7 @@ where
     /// As [`AudioEngine::start_with`].
     pub fn start_with<D: StreamDriver<F>>(&mut self, driver: D) -> Result<()>
     where
-        D::Error: Into<crate::Error>,
+        D::Error: Into<crate::DeviceError>,
     {
         Ok(self.host.start_with(driver)?)
     }
@@ -297,23 +297,25 @@ where
 /// A restart's failure, before it is told apart for the caller: the device
 /// layer's own, or the caller's hook's.
 enum Restart<E> {
-    Device(crate::Error),
+    Device(crate::DeviceError),
     Hook(E),
 }
 
-impl<E> From<crate::Error> for Restart<E> {
-    fn from(err: crate::Error) -> Self {
+impl<E> From<crate::DeviceError> for Restart<E> {
+    fn from(err: crate::DeviceError) -> Self {
         Self::Device(err)
     }
 }
 
-impl<E, D: Into<crate::Error> + std::error::Error + 'static> From<StartError<D>> for Restart<E> {
+impl<E, D: Into<crate::DeviceError> + std::error::Error + 'static> From<StartError<D>>
+    for Restart<E>
+{
     fn from(err: StartError<D>) -> Self {
         Self::Device(err.into())
     }
 }
 
-impl<E: From<crate::Error>> Restart<E> {
+impl<E: From<crate::DeviceError>> Restart<E> {
     fn into_user(self) -> E {
         match self {
             Self::Device(err) => E::from(err),
@@ -324,7 +326,7 @@ impl<E: From<crate::Error>> Restart<E> {
 
 /// The hook a plain [`TuttiDriver::restart`] runs: the new device must run
 /// at `graph`, the rate the graph was built at, or the restart stops there
-/// with [`Error::RateChanged`](crate::Error::RateChanged).
+/// with [`DeviceError::RateChanged`](crate::DeviceError::RateChanged).
 fn refuse_rate_change<F: Float>(
     graph: tutti_units::SampleRate,
 ) -> impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> Result<()> {
@@ -332,7 +334,7 @@ fn refuse_rate_change<F: Float>(
         if spec.sample_rate == graph {
             Ok(())
         } else {
-            Err(crate::Error::RateChanged {
+            Err(crate::DeviceError::RateChanged {
                 device: spec.sample_rate,
                 graph,
             })

@@ -62,5 +62,8 @@ fn a_device_wider_than_the_cap_is_refused() {
     let (at, _) = spec_from_supported(&device(MAX_CHANNELS as u16)).unwrap();
     assert_eq!(at.channels.count() as usize, MAX_CHANNELS);
     let past = spec_from_supported(&device(MAX_CHANNELS as u16 + 1));
-    assert!(matches!(past, Err(Error::InvalidConfig(_))), "{past:?}");
+    assert!(
+        matches!(past, Err(DeviceError::InvalidConfig(_))),
+        "{past:?}"
+    );
 }

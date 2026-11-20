@@ -61,9 +61,9 @@ fn a_failed_build_is_reported() {
     let guard = Guard(Arc::clone(&dropped));
     let r = Owned::spawn::<()>("probe", move || {
         let _guard = guard;
-        Err(Error::InvalidConfig("no".into()))
+        Err(DeviceError::InvalidConfig("no".into()))
     });
-    assert!(matches!(r, Err(Error::InvalidConfig(_))));
+    assert!(matches!(r, Err(DeviceError::InvalidConfig(_))));
     let id = dropped
         .lock()
         .unwrap()
@@ -75,5 +75,5 @@ fn a_failed_build_is_reported() {
 #[test]
 fn a_panicking_build_is_an_error() {
     let r = Owned::spawn::<()>("probe", || panic!("boom"));
-    assert!(matches!(r, Err(Error::Io(_))));
+    assert!(matches!(r, Err(DeviceError::Io(_))));
 }

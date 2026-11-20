@@ -195,7 +195,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     /// A [`ClockError`] whose error is [`Error::Device`] when the device cannot
     /// be found or opened (a chosen
     /// [`sample_format`](OutputConfig::sample_format) the device lacks is
-    /// [`tutti_cpal::Error::OutputFormatUnavailable`]), [`Error::Unplaceable`], [`Error::MapUnplaceable`],
+    /// [`tutti_cpal::DeviceError::OutputFormatUnavailable`]), [`Error::Unplaceable`], [`Error::MapUnplaceable`],
     /// [`Error::Reprepare`] or [`Error::RunsPending`] when the graph cannot
     /// take the device **before the timer stops**, the re-prepare's or the
     /// card's own failure after it, and [`Error::SwitchNotUndone`] when the
@@ -239,7 +239,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
         driver: D,
     ) -> std::result::Result<LiveSession<K, F>, ClockError<Self>>
     where
-        D::Error: Into<tutti_cpal::Error>,
+        D::Error: Into<tutti_cpal::DeviceError>,
     {
         let channels = spec.channels;
         self.switch_to_device(channels, DeviceSelector::default(), move |host, session| {
@@ -386,7 +386,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
         back: B,
     ) -> std::result::Result<SystemSession<K, F>, ClockError<Self>>
     where
-        B::Error: Into<tutti_cpal::Error>,
+        B::Error: Into<tutti_cpal::DeviceError>,
     {
         self.into_timer(timer, |session, device, old| {
             device.driver.switch(old, back, |spec, stopped| {
@@ -483,7 +483,7 @@ mod tests {
 
     impl StreamDriver for UnopenableCard {
         type Running = Never;
-        type Error = tutti_cpal::Error;
+        type Error = tutti_cpal::DeviceError;
 
         fn open(
             self,
@@ -491,7 +491,7 @@ mod tests {
             _: OutputBlock,
             _: std::sync::Arc<StreamFaults>,
         ) -> std::result::Result<Never, Self::Error> {
-            Err(tutti_cpal::Error::InvalidDevice("no card".into()))
+            Err(tutti_cpal::DeviceError::InvalidDevice("no card".into()))
         }
     }
 
