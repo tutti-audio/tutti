@@ -5,15 +5,14 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, MaxBlock};
+use tutti_buffers::{BusTopology, MaxBlock, Planes};
 
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, EqBandConfig, EqBandNode, InterpolationMode, LimiterConfig,
-    LimiterControls, LimiterNode, MaxDelay, SvfType,
+    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, DelayConfig,
+    DelayControls, DelayLayout, DelayNode, EqBandConfig, EqBandNode, InterpolationMode,
+    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
@@ -119,7 +118,7 @@ fn the_strip_holds_off_non_finite_volume_and_balance() {
     ];
     for (name, write) in cells {
         for bad in BAD {
-            let mut node = BusStripNode::stereo();
+            let mut node = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
             Node::<f32>::prepare(
                 &mut node,
                 &Prepare::new(RATE, MaxBlock::of(Samples::new(64))),

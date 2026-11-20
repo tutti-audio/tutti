@@ -221,7 +221,7 @@ impl Bed {
     ///
     /// The answer says nothing of the channel order: the bed's own order is
     /// [`topology`](Self::topology), and what is derived from a bed
-    /// ([`direction`](Self::direction), `SpeakerLayout::from_bed`'s gains)
+    /// ([`direction`](Self::direction), `SpeakerLayout`'s gains from a bed)
     /// follows it. A consumer holding another order maps each channel through
     /// [`index_of`](ChannelTopology::index_of) on the bed's topology.
     ///

@@ -4,8 +4,7 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
-use tutti_buffers::Bed;
-use tutti_buffers::Planes;
+use tutti_buffers::{Bed, Planes};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::VbapPannerNode;
@@ -65,7 +64,7 @@ fn bits(channels: &[Vec<f32>]) -> Vec<Vec<u32>> {
 /// A panner of `bed`, seated by one grid segment at front-centre, then moved:
 /// the gains ramp for the whole render.
 fn moving(bed: Bed) -> VbapPannerNode<f32> {
-    let mut node = prepared(VbapPannerNode::<f32>::new(bed).unwrap(), RATE, 2_048);
+    let mut node = prepared(vbap::<f32>(bed), RATE, 2_048);
     let params = node.param_set();
     params.set(UnitParam::Spread, 0.2);
     let seat = noise(GRID, 1);
@@ -120,7 +119,7 @@ fn a_reset_node_renders_what_a_fresh_one_does() {
     render(&mut cut, &noise(37, 3), &[37]);
     tutti_graph::Node::reset(&mut cut);
 
-    let mut fresh = prepared(VbapPannerNode::<f32>::surround_5_1(), RATE, 64);
+    let mut fresh = prepared(vbap::<f32>(tutti_buffers::Bed::Surround51), RATE, 64);
     let params = fresh.param_set();
     params.set(UnitParam::Spread, 0.2);
     aim(&params, Azimuth::new(-120.0), Elevation::new(20.0));
@@ -134,7 +133,7 @@ fn a_reset_node_renders_what_a_fresh_one_does() {
 /// two branches along the next 16 frames in even steps, instead of stepping.
 #[test]
 fn a_width_crossing_the_fold_threshold_crossfades_in_even_steps() {
-    let mut node = prepared(VbapPannerNode::<f32>::stereo(), RATE, 64);
+    let mut node = prepared(vbap::<f32>(tutti_buffers::Bed::Stereo), RATE, 64);
     let params = node.param_set();
     aim(&params, Azimuth::new(-15.0), Elevation::LEVEL);
     params.set(UnitParam::StereoWidth, 1.0);
@@ -165,4 +164,10 @@ fn a_width_crossing_the_fold_threshold_crossfades_in_even_steps() {
             "frame {i}: {s} is off the even steps ({want})"
         );
     }
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
 }
