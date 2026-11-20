@@ -38,7 +38,7 @@ use std::sync::{Arc, Weak};
 use crate::TapId;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
-use tutti_rt::{ControlDrop, FaultLatch};
+use tutti_rt::{Bell, ControlDrop, FaultLatch};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_units::{Frame, Samples};
 
@@ -64,6 +64,52 @@ pub struct TapWriter<F: Float = f32> {
     /// Frames refused, counted per frame (the rings take whole blocks or none:
     /// they are `Refuse` and count nothing), shared with the reader.
     lost: Arc<AtomicU64>,
+    /// Rung after each block written, for a reader that awaits frames.
+    bell: Option<Bell>,
+    /// Rings the bell when the writer is gone. Last, so it drops after the rings: the
+    /// reader that wakes finds their writers gone.
+    _gone: RingOnDrop,
+}
+
+/// Rings a bell as it drops.
+struct RingOnDrop(Option<Bell>);
+
+impl Drop for RingOnDrop {
+    fn drop(&mut self) {
+        if let Some(bell) = &self.0 {
+            bell.ring();
+        }
+    }
+}
+
+/// How a tap ends: the latch the editor raises when every node the tap read was
+/// removed, and the bell it rings so a reader that awaits frames sees the end.
+pub(crate) struct TapEnd {
+    latch: FaultLatch,
+    bell: Option<Bell>,
+}
+
+impl TapEnd {
+    /// A tap end that rings `bell` when it is raised.
+    fn new(bell: Option<Bell>) -> Self {
+        Self {
+            latch: FaultLatch::new(),
+            bell,
+        }
+    }
+
+    /// Raises the latch, then rings: the reader asks the latch before it reads the
+    /// rings, so a frame written before the end is never missed.
+    pub(crate) fn raise(&self) {
+        self.latch.raise(());
+        if let Some(bell) = &self.bell {
+            bell.ring();
+        }
+    }
+
+    fn is_raised(&self) -> bool {
+        self.latch.is_raised()
+    }
 }
 
 /// Whether a lane's reader is still held.
@@ -135,6 +181,17 @@ impl<F: Float> TapWriter<F> {
             );
         }
         self.count_lost(frames - take);
+        if take > 0 {
+            self.ring();
+        }
+    }
+
+    /// Rings the reader's bell, if it has one.
+    #[inline]
+    fn ring(&self) {
+        if let Some(bell) = &self.bell {
+            bell.ring();
+        }
     }
 
     /// The channel layout of a block this writer takes: `width` channels.
@@ -213,6 +270,9 @@ pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
         tap.lost
             .fetch_add((frames - take) as u64, Ordering::Relaxed);
     }
+    if take > 0 {
+        tap.ring();
+    }
 }
 
 /// The caller's end of a tap: every lane, read together.
@@ -236,7 +296,7 @@ pub struct TapReader<F: Float = f32> {
     /// The editor holds a `Weak` of this: when it dies, the reader is gone.
     alive: Arc<()>,
     /// Raised when the tap was taken out of the plan for good.
-    end: Arc<FaultLatch>,
+    end: Arc<TapEnd>,
 }
 
 impl<F: Float> std::fmt::Debug for TapReader<F> {
@@ -256,17 +316,27 @@ impl<F: Float> TapReader<F> {
     /// one here, and its reader has no [`id`](Self::id).
     #[must_use]
     pub fn pair(width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
-        Self::build(None, width, capacity)
+        Self::build(None, width, capacity, None)
     }
 
     /// The reader of the tap `id` names, and its writer.
-    pub(crate) fn named(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
-        Self::build(Some(id), width, capacity)
+    pub(crate) fn named(
+        id: TapId,
+        width: usize,
+        capacity: Samples,
+        bell: Option<Bell>,
+    ) -> (Self, TapWriter<F>) {
+        Self::build(Some(id), width, capacity, bell)
     }
 
-    fn build(id: Option<TapId>, width: usize, capacity: Samples) -> (Self, TapWriter<F>) {
+    fn build(
+        id: Option<TapId>,
+        width: usize,
+        capacity: Samples,
+        bell: Option<Bell>,
+    ) -> (Self, TapWriter<F>) {
         let lost = Arc::new(AtomicU64::new(0));
-        let end = Arc::new(FaultLatch::new());
+        let end = Arc::new(TapEnd::new(bell.clone()));
         let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
         let (cons, prods): (Vec<_>, Vec<_>) = (0..width)
             .map(|_| ring::<F>(capacity.get().max(1), Overflow::Refuse))
@@ -289,6 +359,8 @@ impl<F: Float> TapReader<F> {
             runs: run_prod,
             next: Frame::ZERO,
             lost,
+            _gone: RingOnDrop(bell.clone()),
+            bell,
         };
         (reader, writer)
     }
@@ -302,7 +374,7 @@ impl<F: Float> TapReader<F> {
 
     /// The latch the editor raises when the tap leaves the plan because every
     /// node it read was removed.
-    pub(crate) fn end_latch(&self) -> Arc<FaultLatch> {
+    pub(crate) fn end_latch(&self) -> Arc<TapEnd> {
         Arc::clone(&self.end)
     }
 
@@ -317,6 +389,17 @@ impl<F: Float> TapReader<F> {
     #[must_use]
     pub fn source_gone(&self) -> bool {
         self.end.is_raised()
+    }
+
+    /// Whether the writer is gone (its tap closed, or its graph dropped) and no frame
+    /// will be written after what is in the rings. Unlike
+    /// [`source_gone`](Self::source_gone), which the editor raises, a reader that awaits
+    /// a bell asks this too: the writer's drop rings the bell it was opened with.
+    ///
+    /// **Ask before reading the rings**, as for `source_gone`.
+    #[must_use]
+    pub fn writer_gone(&self) -> bool {
+        self.runs.is_disconnected()
     }
 
     /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap)
@@ -536,6 +619,87 @@ impl<F: Float> Source for TapReader<F> {
 mod tests {
     use super::*;
     use crate::arena::Arena;
+
+    /// **A dropped writer rings the bell after its rings are gone**, so the reader that
+    /// wakes reads the writer gone with every frame written before it still there.
+    #[test]
+    fn a_dropped_writer_rings_and_the_reader_reads_it_gone() {
+        use std::future::Future;
+        use std::pin::pin;
+        use std::task::{Context, Poll, Waker};
+
+        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let (bell, mut listener) = bells.bell();
+        let (mut reader, mut writer) =
+            TapReader::<f32>::named(TapId::of(2), 1, Samples::new(8), Some(bell));
+        writer.push_interleaved(Interleaved::new(&[1.0, 2.0], writer.layout()).unwrap());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert_eq!(pin!(listener.rung()).poll(&mut cx), Poll::Ready(()));
+        assert!(!reader.writer_gone());
+        drop(writer);
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Ready(()),
+            "the drop rings"
+        );
+        assert!(reader.writer_gone(), "the ring follows the writer's end");
+        let mut out = [0.0f32; 2];
+        let popped = reader
+            .pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap())
+            .unwrap();
+        assert_eq!(
+            (popped.get(), out),
+            (2, [1.0, 2.0]),
+            "what was written is still read"
+        );
+    }
+
+    /// **A tap rings its bell as it writes a block and when it ends, and not
+    /// otherwise.** A reader that awaits frames is woken by the audio thread's
+    /// ring; a block the rings had no room for wrote nothing and rings nothing.
+    #[test]
+    fn a_tap_rings_its_bell_after_a_block_and_at_its_end() {
+        use std::future::Future;
+        use std::pin::pin;
+        use std::task::{Context, Poll, Waker};
+
+        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let (bell, mut listener) = bells.bell();
+        let (reader, mut writer) =
+            TapReader::<f32>::named(TapId::of(1), 1, Samples::new(4), Some(bell));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Pending,
+            "nothing written"
+        );
+
+        writer.push_interleaved(Interleaved::new(&[1.0, 2.0], writer.layout()).unwrap());
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Ready(()),
+            "a block rings"
+        );
+
+        // The ring holds four frames: a block of eight finds room for none of it once
+        // it is full.
+        writer.push_interleaved(Interleaved::new(&[0.0; 4], writer.layout()).unwrap());
+        assert_eq!(pin!(listener.rung()).poll(&mut cx), Poll::Ready(()));
+        writer.push_interleaved(Interleaved::new(&[0.0; 4], writer.layout()).unwrap());
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Pending,
+            "a block with no room wrote nothing and rings nothing"
+        );
+
+        reader.end_latch().raise();
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Ready(()),
+            "the end rings"
+        );
+        assert!(reader.source_gone());
+    }
 
     /// An `f64` block reaches an `f64` tap sample for sample, with the
     /// digits `f32` cannot hold.
