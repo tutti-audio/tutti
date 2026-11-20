@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 use tutti_coremidi_ffi::{BlockRefusal, Error, ump_endpoints};
+use tutti_fixtures::unique_name;
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_hardware::{
@@ -75,7 +76,7 @@ fn listed(block: &str) -> tutti_coremidi_ffi::UmpEndpointInfo {
 /// spec's Device Identity and Product Instance Id. Where the OS is before macOS
 /// 15 the spec is refused by name.
 pub fn a_source_with_function_blocks_is_listed_with_those_blocks() {
-    let name = "tutti-vsrc-blocks";
+    let name = &unique_name("tutti-vsrc-blocks");
     let opened = VirtualSource::open(&two_blocks(name), main_thread());
     if !has_ump_endpoints() {
         assert!(matches!(
@@ -85,7 +86,7 @@ pub fn a_source_with_function_blocks_is_listed_with_those_blocks() {
         return;
     }
     let source = opened.expect("macOS 15 opens the source");
-    let listed = listed("tutti-vsrc-blocks Out");
+    let listed = listed(&format!("{name} Out"));
     let block = |suffix: &str| {
         listed
             .blocks
@@ -119,7 +120,8 @@ pub fn a_source_with_function_blocks_is_listed_with_those_blocks() {
 /// The same spec opened as a destination is listed with the same blocks and
 /// identity.
 pub fn a_destination_with_function_blocks_is_listed_with_those_blocks() {
-    let spec = two_blocks("tutti-vdst-blocks");
+    let name = unique_name("tutti-vdst-blocks");
+    let spec = two_blocks(&name);
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let session = MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session");
     let (producer, _inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
@@ -132,13 +134,13 @@ pub fn a_destination_with_function_blocks_is_listed_with_those_blocks() {
         return;
     }
     let destination = opened.expect("macOS 15 opens the destination");
-    let listed = listed("tutti-vdst-blocks Both");
+    let listed = listed(&format!("{name} Both"));
     assert_eq!(listed.blocks.len(), 2);
     let number = |suffix: &str| {
         listed
             .blocks
             .iter()
-            .find(|b| b.name.as_deref() == Some(&format!("tutti-vdst-blocks {suffix}")))
+            .find(|b| b.name.as_deref() == Some(&format!("{name} {suffix}")))
             .and_then(|b| b.info.id.value())
     };
     assert_eq!(
@@ -190,7 +192,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
 /// reached only if all but a few of the 100 are counted, which a counter that drops
 /// or ignores messages does not do.
 pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
-    let name = "tutti-vsrc-losses";
+    let name = &unique_name("tutti-vsrc-losses");
     let opened = VirtualSource::open(&two_blocks(name), main_thread());
     if !has_ump_endpoints() {
         assert!(matches!(
@@ -213,6 +215,11 @@ pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
     let mut out = session.connect_output(&device.id).expect("connects");
     let note: Ump = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::of(1), 60, 0x8000);
     let before = source.losses().refused;
+    // On stderr for a failure: the release and the level the count started from.
+    eprintln!(
+        "macOS {:?}, {before} refused before the notes",
+        tutti_fixtures::macos_major()
+    );
     for _ in 0..100 {
         assert_eq!(out.queue(&[(Offset::ZERO, note)]).packets(), 1);
     }
@@ -224,7 +231,10 @@ pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
 /// A sender whose source was dropped is refused by name, and one sent while it
 /// lived was accepted.
 pub fn a_sender_outlives_its_source_and_refuses_by_name() {
-    let opened = VirtualSource::open(&two_blocks("tutti-vsrc-sender"), main_thread());
+    let opened = VirtualSource::open(
+        &two_blocks(&unique_name("tutti-vsrc-sender")),
+        main_thread(),
+    );
     if !has_ump_endpoints() {
         assert!(matches!(
             opened,
