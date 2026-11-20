@@ -155,7 +155,7 @@ impl<N: ?Sized> InstrumentHandle<N> {
 
     /// The queue node before the event input: the event inlet the handle's
     /// [`keys`](Self::keys) fill. Everything the handle plays passes its event
-    /// output, which is what [`Midi::record`](crate::Midi::record) taps.
+    /// output, which is what [`Midi::tap`](crate::Midi::tap) taps.
     #[must_use]
     pub fn queue(&self) -> Key<EventInletNode> {
         self.queue

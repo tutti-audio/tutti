@@ -30,7 +30,7 @@ const OURS: SysexDeviceId = SysexDeviceId::of(5);
 fn rig() -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut s = Session::builder()
-        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareOptions::new())
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");

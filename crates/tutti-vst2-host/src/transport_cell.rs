@@ -35,7 +35,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{SeqReader, SeqWriter};
-use vst::api::{SmpteFrameRate, TimeInfo};
+use vst::{SmpteFrameRate, TimeInfo};
 
 /// Copies a read tries after the first before it gives up: eight in all. A
 /// write is eleven relaxed stores, so a reader that loses this many races
@@ -184,8 +184,8 @@ fn smpte_from_i32(v: i32) -> SmpteFrameRate {
 mod tests {
     use super::*;
 
-    fn info_with(sample_pos: f64) -> vst::api::TimeInfo {
-        vst::api::TimeInfo {
+    fn info_with(sample_pos: f64) -> vst::TimeInfo {
+        vst::TimeInfo {
             sample_pos,
             ..Default::default()
         }
@@ -195,7 +195,7 @@ mod tests {
     /// other field does, negatives and the last frame rate included.
     #[test]
     fn every_field_round_trips() {
-        let info = vst::api::TimeInfo {
+        let info = vst::TimeInfo {
             sample_pos: 1.5,
             sample_rate: 2.5,
             nanoseconds: 3.5,
@@ -207,7 +207,7 @@ mod tests {
             time_sig_numerator: 7,
             time_sig_denominator: -8,
             smpte_offset: -9,
-            smpte_frame_rate: vst::api::SmpteFrameRate::Smpte60fps,
+            smpte_frame_rate: vst::SmpteFrameRate::Smpte60fps,
             samples_to_next_clock: 11,
             flags: -12,
         };
@@ -309,7 +309,7 @@ mod tests {
 
         for i in 0..200_000u32 {
             let v = f64::from(i);
-            writer.write(vst::api::TimeInfo {
+            writer.write(vst::TimeInfo {
                 sample_pos: v,
                 ppq_pos: v,
                 tempo: v,

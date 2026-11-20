@@ -71,7 +71,7 @@ fn bytes(session: &crate::DetachedSession, key: &'static str) -> Vec<u8> {
 /// Runs a refresh to its landing: the stat job, then the update that lands it.
 fn refreshed(s: &mut crate::DetachedSession, spawned: &Spawned) -> RefreshReport {
     let job = s.refresh_pool();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     job.wait(s).expect("the job finished")
 }
 
@@ -81,7 +81,7 @@ fn loaded(dir: &Path, text: &[u8]) -> (crate::DetachedSession, Spawned, PathBuf,
     let (mut s, spawned) = session();
     let reads = Arc::new(AtomicUsize::new(0));
     s.pool(read("a", &path, &reads)).unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     (s, spawned, path, reads)
 }
@@ -129,12 +129,12 @@ fn an_asset_of_bytes_never_refreshes() {
         },
     ))
     .unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     for _ in 0..2 {
         let found = refreshed(&mut s, &spawned);
         assert!(found.reloaded().is_empty() && found.unreadable().is_empty());
-        assert!(spawned.take().is_empty(), "nothing started");
+        assert!(spawned.poll(usize::MAX) == 0, "nothing started");
     }
 }
 
@@ -144,7 +144,7 @@ fn a_refresh_of_unchanged_files_loads_nothing_again() {
     let (mut s, spawned, _, reads) = loaded(dir.path(), b"one");
     let found = refreshed(&mut s, &spawned);
     assert!(found.reloaded().is_empty() && found.unreadable().is_empty());
-    assert!(spawned.take().is_empty(), "nothing started");
+    assert!(spawned.poll(usize::MAX) == 0, "nothing started");
     assert_eq!(reads.load(Ordering::SeqCst), 1);
 }
 
@@ -157,7 +157,7 @@ fn a_refresh_loads_again_the_entry_whose_file_changed_and_keeps_the_old_value_un
     assert_eq!(found.reloaded(), [PoolKey::new(&"a")]);
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
     assert_eq!(bytes(&s, "a"), b"one", "the old value stays");
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
     assert_eq!(bytes(&s, "a"), b"longer");
     assert_eq!(reads.load(Ordering::SeqCst), 2);
@@ -172,9 +172,9 @@ fn a_dropped_refresh_job_starts_no_reload() {
     std::fs::write(&path, b"longer").unwrap();
     let job = s.refresh_pool();
     drop(job);
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = s.update();
-    assert!(spawned.take().is_empty(), "no reload started");
+    assert!(spawned.poll(usize::MAX) == 0, "no reload started");
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
     assert_eq!(reads.load(Ordering::SeqCst), 1);
 }
@@ -186,7 +186,7 @@ fn the_pool_diff_never_reads_the_file_so_a_declared_key_shares_the_stale_entry_u
     std::fs::write(&path, b"changed on disk").unwrap();
     s.pool((read("a", &path, &reads), read("b", &path, &reads)))
         .unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     assert_eq!(
         reads.load(Ordering::SeqCst),
@@ -200,7 +200,7 @@ fn the_pool_diff_never_reads_the_file_so_a_declared_key_shares_the_stale_entry_u
         "the new key shares the loaded entry"
     );
     refreshed(&mut s, &spawned);
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     assert_eq!(bytes(&s, "a"), b"changed on disk");
 }
@@ -214,13 +214,13 @@ fn two_keys_of_one_changed_file_reload_with_one_read() {
     let reads = Arc::new(AtomicUsize::new(0));
     s.pool((read("a", &path, &reads), read("b", &path, &reads)))
         .unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     assert_eq!(reads.load(Ordering::SeqCst), 1);
     std::fs::write(&path, b"changed").unwrap();
     let found = refreshed(&mut s, &spawned);
     assert_eq!(found.reloaded().len(), 2);
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     assert_eq!(
         events(&mut s),
         [("a", "reloaded".to_owned()), ("b", "reloaded".to_owned())]
@@ -254,9 +254,9 @@ fn an_entry_that_reloaded_meanwhile_is_not_reloaded_by_the_refresh_that_began_be
     let other = dir.path().join("b.bin");
     std::fs::write(&other, b"other").unwrap();
     s.pool(read("a", &other, &reads)).unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let mut landed = s.update();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = s.update();
     let found = super::took(&mut landed, &wait)
         .expect("landed")
@@ -270,7 +270,7 @@ fn a_kind_with_no_file_is_not_refreshed() {
     let (mut s, spawned) = session();
     let runs = super::runs();
     s.pool(super::entry("a", super::probe(1, &runs))).unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     let found = refreshed(&mut s, &spawned);
     assert!(found.reloaded().is_empty() && found.unreadable().is_empty());
@@ -335,7 +335,7 @@ fn a_reload_never_copies_the_stale_value_of_a_held_sibling() {
     let reads = Arc::new(AtomicUsize::new(0));
     s.pool((read("a", &path, &reads), read("b", &path, &reads)))
         .unwrap();
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     let _hold = s
         .pool
@@ -351,7 +351,7 @@ fn a_reload_never_copies_the_stale_value_of_a_held_sibling() {
         Some("reloading"),
         "not the held sibling's old value"
     );
-    spawned.run_all();
+    spawned.poll(usize::MAX);
     let _ = events(&mut s);
     assert_eq!(bytes(&s, "a"), b"changed");
 }

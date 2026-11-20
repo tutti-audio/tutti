@@ -133,11 +133,10 @@ fn process_ended(pid: u32) -> bool {
 #[test]
 fn a_plugin_that_stops_answering_is_ended_and_replaced() {
     let once = once_file("recovery-hang.once");
-    // The spawner is the load's moment: once the death is reported, a job it
-    // is handed (the reload) finds the hung server gone.
-    let reloading = Arc::new(AtomicBool::new(false));
+    // The reload runs in the first frame's collect after the death is reported:
+    // the drive checks the hung server is gone before that frame's jobs run.
     let hung_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let (seen, pid_cell) = (Arc::clone(&reloading), Arc::clone(&hung_pid));
+    let pid_cell = Arc::clone(&hung_pid);
     let mut s = session_built(
         &[
             PASSTHROUGH,
@@ -147,16 +146,6 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
         |b| {
             b.plugin_hang(quick_hang_policy())
                 .plugin_recovery(quick_reload_policy())
-                .executor(tutti_platform::Executor::new(move |job| {
-                    if seen.load(Ordering::SeqCst) {
-                        let pid = pid_cell.load(Ordering::SeqCst);
-                        assert!(
-                            process_ended(pid),
-                            "the hung server {pid} was still alive when its replacement was loaded"
-                        );
-                    }
-                    tutti_fixtures::run_future(job);
-                }))
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -170,7 +159,13 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
     hung_pid.store(pid, Ordering::SeqCst);
 
     let mut drive = Drive::new();
-    drive.reloading = Some(reloading);
+    drive.at_reload = Some(Box::new(move || {
+        let pid = pid_cell.load(Ordering::SeqCst);
+        assert!(
+            process_ended(pid),
+            "the hung server {pid} was still alive when its replacement was loaded"
+        );
+    }));
     drive.until(&mut s, "recovered", |e| {
         matches!(
             e,

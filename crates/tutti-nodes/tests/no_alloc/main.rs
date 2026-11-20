@@ -20,6 +20,7 @@ mod rt_no_alloc_envelope_filter;
 mod rt_no_alloc_eq_filters;
 mod rt_no_alloc_filter;
 mod rt_no_alloc_filter_corners;
+mod rt_no_alloc_leveller;
 mod rt_no_alloc_modulate;
 mod rt_no_alloc_modulated_reverb;
 mod rt_no_alloc_modulation;

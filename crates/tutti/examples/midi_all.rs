@@ -14,12 +14,12 @@
 //! CI runs it as a test (`test = true`).
 //!
 //! **Not covered here:** MIDI Time Code out, and the MIDI-CI session
-//! ([`MidiHardwareOptions::ci`](tutti::midi::MidiHardwareOptions::ci) and the peers a
+//! ([`MidiHardwareConfig::ci`](tutti::midi::MidiHardwareConfig::ci) and the peers a
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
     self, AddedInstrument, FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup,
-    MidiHardwareOptions, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
+    MidiHardwareConfig, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
     PitchBendSensitivity, SmfDivision, TakePlacement, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
@@ -53,7 +53,7 @@ fn session() -> Result<Session, Error> {
     let build = |hardware: bool| {
         let builder = Session::builder().midi_groups(MidiGroup::of(1));
         let builder = if hardware {
-            builder.midi_hardware(MidiHardwareOptions::new())
+            builder.midi_hardware(MidiHardwareConfig::new())
         } else {
             builder
         };
@@ -114,8 +114,8 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
         handle: mut synth, ..
     } = s.add_instrument(PolySynth::new(SynthConfig::default()))?;
 
-    // A take: an event tap on what the instrument's handle plays, read with `drain`.
-    let mut take = s.midi().record(synth.node(), EventCapacity::of(256))?;
+    // A tap on what the instrument's handle plays, read with `drain`.
+    let mut take = s.midi().tap(synth.node(), EventCapacity::of(256))?;
 
     // A clip from a file's timeline: the packets it holds at their beats.
     // The load is a job on the session's worker, which converts each track to

@@ -176,7 +176,7 @@ mod vst3 {
         let plugin = PluginRef::file(bundle.to_path_buf());
         let (catalog, id, _dir) = crate::pooled::catalog_of(&plugin);
         let mut s = Session::builder()
-            .executor(tutti_fixtures::inline_executor())
+            .executor(tutti_platform::Executor::polled())
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
