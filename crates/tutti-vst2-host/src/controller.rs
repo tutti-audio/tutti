@@ -13,18 +13,18 @@ use tutti_plugin_types::{
 
 use crate::loaded::Vst2Loaded;
 use crate::processor::{EntryRefusals, ProcessorParts, Vst2Processor};
-use crate::scratch::RenderScratch;
+use vst::RenderScratch;
 
 /// The main-thread half of an activation: the whole control surface of a
 /// [`Vst2Loaded`] (the [`Control`](tutti_plugin_types::Control) trait; [`loaded`](Self::loaded) and
 /// [`loaded_mut`](Self::loaded_mut) for the format's own surface), beside a Processor that renders.
 ///
 /// It **owns** the [`Vst2Loaded`], and so the plugin: the Processor holds only the audio
-/// handle ([`RenderHandle`](vst::host::RenderHandle)), which shares the plugin's core and
+/// handle ([`RenderHandle`](vst::RenderHandle)), which shares the plugin's core and
 /// does not keep it open. Dropping the Controller (on the thread the plugin was loaded on)
 /// closes the plugin; a Processor that outlives it renders silence, and a Processor dropped
 /// last does nothing. The main-thread entries take a [`MainThreadMarker`] (see
-/// [`PluginInstance`](tutti_vst2_ffi::host::PluginInstance)); a parameter write is a direct
+/// [`PluginInstance`](tutti_vst2_ffi::PluginInstance)); a parameter write is a direct
 /// `setParameter`, which the SDK allows from either thread, so no write is queued and a
 /// rejoin has none to carry.
 ///

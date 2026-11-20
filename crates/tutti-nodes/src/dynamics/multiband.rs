@@ -16,8 +16,8 @@ use atomic_float::AtomicF64;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
-    BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, CrossoverError,
-    Lerp, MultibandBank, MultibandSettings, MultibandSignals, SimdLanes,
+    BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, Lerp,
+    MultibandBands, MultibandBank, MultibandSettings, MultibandSignals, SimdLanes,
 };
 use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
@@ -32,8 +32,8 @@ use crate::kernel::{Grid, first_non_finite, log_non_finite, slice_in, slice_out,
 use crate::ramp::LastGood;
 
 /// The crossover frequencies a band count starts with.
-fn default_crossovers(bands: usize) -> &'static [Hz] {
-    match bands {
+fn default_crossovers(bands: MultibandBands) -> &'static [Hz] {
+    match bands.get() {
         2 => &const { [Hz::new(1_000.0)] },
         3 => &const { [Hz::new(200.0), Hz::new(3_000.0)] },
         _ => &const { [Hz::new(120.0), Hz::new(1_000.0), Hz::new(6_000.0)] },
@@ -308,39 +308,47 @@ impl<F: Float + SimdLanes + Lerp> fmt::Debug for MultibandCompressorNode<F> {
     }
 }
 
-impl<F: Float + SimdLanes + Lerp> MultibandCompressorNode<F> {
-    /// A compressor of `bands` bands over `layout`.
+/// What a [`MultibandCompressorNode`] is made from: its bus and band count.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MultibandCompressorConfig {
+    input: BusTopology,
+    bands: MultibandBands,
+}
+
+impl MultibandCompressorConfig {
+    /// A compressor of `bands` bands over the bus `input`, as wide as it. The node's ports
+    /// name no speaker.
     ///
     /// The crossovers start at 1 kHz (2 bands), 200 Hz and 3 kHz (3), or
     /// 120 Hz, 1 kHz and 6 kHz (4). Each band starts at a -18 dB threshold,
     /// 2:1, 10 ms attack, 100 ms release, hard knee, 0 dB makeup, neither
     /// bypassed nor soloed. The node has no rate until the graph's `prepare` gives it
     /// one, and renders silence before.
-    ///
-    /// # Errors
-    ///
-    /// [`CrossoverError::Bands`] if `bands` is not 2 to 4;
-    /// [`CrossoverError::Channels`] if `layout` has no channels or more than
-    /// a bus holds (16).
-    pub fn new(layout: ChannelLayout, bands: usize) -> Result<Self, CrossoverError> {
-        let channels = usize::from(layout.count());
-        // A bus that names no speaker (as the node's shape does): a width past one bus has
-        // none.
-        BusTopology::unassigned(layout).ok_or(CrossoverError::Channels { channels })?;
-        let shape = BankShape::try_from((layout, bands))?;
+    #[must_use]
+    pub fn new(input: BusTopology, bands: MultibandBands) -> Self {
+        Self { input, bands }
+    }
+}
+
+impl<F: Float + SimdLanes + Lerp> From<MultibandCompressorConfig> for MultibandCompressorNode<F> {
+    fn from(config: MultibandCompressorConfig) -> Self {
+        let MultibandCompressorConfig { input, bands } = config;
         let defaults = default_crossovers(bands);
-        let crossover = CrossoverControls::try_from(defaults)?;
-        Ok(Self {
+        let crossover = CrossoverControls::try_from(defaults)
+            .expect("the default splits are positive and strictly increasing");
+        Self {
             rig: Rig {
-                shape,
-                bands: (0..bands).map(|_| Band::new()).collect(),
+                shape: BankShape::new(input, bands),
+                bands: (0..bands.get()).map(|_| Band::new()).collect(),
                 splits: Splits::new(defaults),
                 crossover,
             },
             tuned: None,
-        })
+        }
     }
+}
 
+impl<F: Float + SimdLanes + Lerp> MultibandCompressorNode<F> {
     /// How many bands there are.
     #[must_use]
     pub fn bands(&self) -> usize {
@@ -404,7 +412,7 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
     /// Prepares a bank for `rate`.
     fn new(shape: BankShape, rate: SampleRate) -> Self {
         Self {
-            bank: MultibandBank::<F>::from_shape(shape, rate),
+            bank: MultibandBank::<F>::new(shape, rate),
             applied: None,
             rate,
             position: 0,
@@ -761,8 +769,11 @@ mod tests {
         }
     }
 
-    fn node(bands: usize) -> (MultibandCompressorNode<f32>, Ctl) {
-        let n = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, bands).unwrap();
+    fn node(bands: u8) -> (MultibandCompressorNode<f32>, Ctl) {
+        let n = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::MONO,
+            MultibandBands::new(bands).unwrap(),
+        ));
         let c = Ctl::new(&n);
         (n, c)
     }
@@ -811,7 +822,10 @@ mod tests {
     /// unit-magnitude sum is within `12 * 4 * 2^-24 / g` of 1.
     #[test]
     fn an_f32_node_sums_its_bands_within_the_rounding_of_its_sections() {
-        let n = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, 4).unwrap();
+        let n = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::MONO,
+            MultibandBands::of(4),
+        ));
         let c = Ctl::new(&n);
         unity(&c);
         let mut n = prepared(n);
@@ -835,7 +849,10 @@ mod tests {
             for i in 0..16 {
                 let hz =
                     (20.0 * (16_000.0f64 / 20.0).powf(f64::from(i) / 15.0) / 5.0).round() * 5.0;
-                let n = MultibandCompressorNode::<f64>::new(ChannelLayout::MONO, bands).unwrap();
+                let n = MultibandCompressorNode::<f64>::from(MultibandCompressorConfig::new(
+                    BusTopology::MONO,
+                    MultibandBands::new(bands).unwrap(),
+                ));
                 unity(&Ctl::new(&n));
                 let x = wide_sine(hz, FS, SETTLE + WINDOW);
                 let out = render_f64(n, RATE, &[&x], x.len());
@@ -947,7 +964,10 @@ mod tests {
     /// of the gain.
     #[test]
     fn bypass_passes_the_band_unprocessed() {
-        let n = MultibandCompressorNode::<f64>::new(ChannelLayout::MONO, 4).unwrap();
+        let n = MultibandCompressorNode::<f64>::from(MultibandCompressorConfig::new(
+            BusTopology::MONO,
+            MultibandBands::of(4),
+        ));
         let c = Ctl::new(&n);
         let b0 = c.band(0);
         b0.set_threshold(-30.0);
@@ -1207,7 +1227,10 @@ mod tests {
     /// scaled by the one gain the loud channel sets.
     #[test]
     fn detection_is_linked_across_channels() {
-        let n = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 2).unwrap();
+        let n = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::STEREO,
+            MultibandBands::of(2),
+        ));
         let c = Ctl::new(&n);
         let b0 = c.band(0);
         b0.set_threshold(-20.0);
@@ -1228,34 +1251,28 @@ mod tests {
         );
     }
 
-    /// A band count outside 2 to 4, or a layout with no ports, is refused.
+    /// A node has the band count it was made with and a width of the bus it was made over,
+    /// the empty bus (no ports) included.
     #[test]
-    fn the_band_count_and_layout_are_validated() {
-        for bands in [0, 1, 5, 6, 100] {
-            assert_eq!(
-                MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, bands).unwrap_err(),
-                CrossoverError::Bands {
-                    bands,
-                    min: 2,
-                    max: 4
-                }
-            );
-        }
-        for bands in 2..=4 {
-            let n = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, bands).unwrap();
+    fn a_node_has_the_bands_and_width_it_was_made_with() {
+        for bands in 2..=4u8 {
+            let n = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+                BusTopology::STEREO,
+                MultibandBands::new(bands).unwrap(),
+            ));
+            let bands = usize::from(bands);
             assert_eq!(
                 (n.bands(), n.clone().into_parts().controls.bands()),
                 (bands, bands)
             );
+            assert_eq!(n.layout(), ChannelLayout::STEREO);
         }
-        assert_eq!(
-            MultibandCompressorNode::<f32>::new(ChannelLayout::from_count(0), 3).unwrap_err(),
-            CrossoverError::Channels { channels: 0 }
-        );
-        assert_eq!(
-            MultibandCompressorNode::<f32>::new(ChannelLayout::from_count(65), 3).unwrap_err(),
-            CrossoverError::Channels { channels: 65 }
-        );
+        let empty = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::EMPTY,
+            MultibandBands::of(3),
+        ));
+        assert_eq!(empty.layout(), ChannelLayout::EMPTY);
+        assert_eq!(empty.shape().audio_in().count(), 0);
     }
 
     /// The defaults for each band count: the crossovers, and each band's
@@ -1320,9 +1337,9 @@ mod tests {
     /// cell with the live node, whatever the band.
     #[test]
     fn a_fork_shares_no_cell() {
-        tutti_graph::contract::assert_param_fork(
-            MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 4).unwrap(),
-        );
+        tutti_graph::contract::assert_param_fork(MultibandCompressorNode::<f32>::from(
+            MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(4)),
+        ));
     }
 
     /// A fork has its own meter: the live node's reads unity while the fork
@@ -1408,7 +1425,10 @@ mod tests {
     /// parameter then per crossover: 27 at four bands, within the graph's cap.
     #[test]
     fn the_shape_declares_the_indexed_ports() {
-        let n = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 4).unwrap();
+        let n = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::STEREO,
+            MultibandBands::of(4),
+        ));
         let s = n.shape();
         assert_eq!((s.audio_in().count(), s.audio_out().count()), (2, 2));
         assert_eq!(s.latency, tutti_units::Latency::default());
@@ -1427,7 +1447,10 @@ mod tests {
             .map(|i| UnitAddr::new(UnitParam::Cutoff, i))
             .collect();
         assert_eq!(&s.params.as_slice()[24..], &tail[..]);
-        let two = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, 2).unwrap();
+        let two = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::MONO,
+            MultibandBands::of(2),
+        ));
         assert_eq!(two.shape().params.len(), 2 * 6 + 1);
     }
 
@@ -1437,7 +1460,10 @@ mod tests {
     #[test]
     fn each_port_reads_the_cell_of_its_address() {
         for bands in 2..=4 {
-            let n = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, bands).unwrap();
+            let n = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+                BusTopology::MONO,
+                MultibandBands::new(bands).unwrap(),
+            ));
             let set = n.param_set();
             let ports = n.shape().params;
             for (k, &addr) in ports.as_slice().iter().enumerate() {
@@ -1451,8 +1477,8 @@ mod tests {
             }
             assert_eq!(n.param_base(ports.len()), None);
             let cells: Vec<_> = set.params().collect();
-            assert_eq!(cells.len(), ports.len() + 2 * bands);
-            for b in 0..bands as u8 {
+            assert_eq!(cells.len(), ports.len() + 2 * usize::from(bands));
+            for b in 0..bands {
                 for kind in [UnitParam::Bypass, UnitParam::Solo] {
                     let a = UnitAddr::new(kind, b);
                     assert!(cells.contains(&a) && !ports.as_slice().contains(&a));
@@ -1822,7 +1848,10 @@ mod tests {
         let threshold = ramp(-40.0, -10.0);
         let cutoff = ramp(300.0, 900.0);
         let render = |block: usize| {
-            let n = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 3).unwrap();
+            let n = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+                BusTopology::STEREO,
+                MultibandBands::of(3),
+            ));
             let c = Ctl::new(&n);
             let mut n = prepared(n);
             let ports = 3 * PER_BAND + 2;

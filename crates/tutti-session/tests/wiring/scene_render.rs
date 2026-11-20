@@ -22,17 +22,17 @@
 //!   law, and ends on the new filter as if it had run from the fade's start:
 //!   a hand-wired graph whose filter hears silence until then.
 
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::PlanesMut;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, FadeLaw, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
-    DistortionConfig, DistortionNode, LimiterControls, LimiterNode, ShapeKind, SvfFilterConfig,
-    SvfFilterNode, SvfType,
+    DistortionConfig, DistortionNode, LimiterConfig, LimiterControls, LimiterNode, ShapeKind,
+    SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Root, Session};
 use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples, Seconds};
@@ -56,11 +56,13 @@ fn shaper(drive: f64) -> DistortionNode<f32> {
     )
 }
 fn limiter() -> LimiterNode<f32> {
-    LimiterNode::mono(LimiterControls {
-        threshold: Db::new(-12.0),
-        ceiling: Db::new(-1.0),
-        ..LimiterControls::DEFAULT
-    })
+    LimiterNode::from(
+        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+            threshold: Db::new(-12.0),
+            ceiling: Db::new(-1.0),
+            ..LimiterControls::DEFAULT
+        }),
+    )
 }
 
 /// The scene's waveshaper drive, unless a test says otherwise.

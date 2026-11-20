@@ -9,8 +9,8 @@ use tutti_graph::{
     Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::{
-    CompressorControls, CompressorNode, KeySource, MultibandCompressorNode, SvfFilterConfig,
-    SvfFilterNode, SvfType,
+    CompressorConfig, CompressorControls, CompressorNode, KeySource, MultibandBands,
+    MultibandCompressorConfig, MultibandCompressorNode, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::Param;
 use tutti_session::{
@@ -37,10 +37,10 @@ fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterN
 
 fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>> {
     s.graph()
-        .add(CompressorNode::new(
-            BusTopology::MONO,
-            KeySource::Sidechain,
-            CompressorControls::DEFAULT,
+        .add(CompressorNode::from(
+            CompressorConfig::new(BusTopology::MONO)
+                .key(KeySource::Sidechain)
+                .controls(CompressorControls::DEFAULT),
         ))
         .0
 }
@@ -48,7 +48,9 @@ fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>
 /// A node whose `Seconds` params are `f64` cells.
 fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode<f32>> {
     s.graph()
-        .add(MultibandCompressorNode::new(ChannelLayout::STEREO, 2).unwrap())
+        .add(MultibandCompressorNode::from(
+            MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
+        ))
         .0
 }
 

@@ -235,29 +235,6 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
-    /// The node with its kernel edited by `edit`, before the node has a rate: the kernel reads
-    /// what it was given at its `prepare`.
-    #[must_use]
-    pub(crate) fn map_kernel(mut self, edit: impl FnOnce(&mut K)) -> Self {
-        edit(&mut self.kernel);
-        self
-    }
-
-    /// This node with its kernel mapped by `kernel` and its set by `set`, its controls at the
-    /// values they hold: a build-time option of a node whose kernel or set depends on it,
-    /// applied before the node is inserted. A control the new set adds starts at the base of
-    /// its [`assemble`](ControlSet::assemble). Allocates: control side.
-    #[must_use]
-    pub(crate) fn rebuilt(
-        self,
-        kernel: impl FnOnce(K) -> K,
-        set: impl FnOnce(K::Set) -> K::Set,
-    ) -> Self {
-        let held = self.params.held();
-        let set = set(self.params.set().clone());
-        Self::with_kernel(kernel(self.kernel), set, held)
-    }
-
     /// Back to silence: the grid counted from here, no ring-out owed, no input heard.
     fn clear(&mut self) {
         self.kernel.reset();

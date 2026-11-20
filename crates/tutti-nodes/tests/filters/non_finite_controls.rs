@@ -23,10 +23,10 @@ use tutti_fixtures::Noise;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    ChannelTimes, CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode,
-    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
-    LadderType, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterConfig,
-    SvfFilterNode, SvfType,
+    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayControls, DelayLayout,
+    DelayNode, GateConfig, GateControls, GateNode, InterpolationMode, KeySource,
+    LadderFilterConfig, LadderFilterNode, LadderType, MaxDelay, ModDelayNode, PhaserControls,
+    PhaserNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -234,17 +234,17 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "compressor",
         || {
-            CompressorNode::<f32>::new(
-                BusTopology::STEREO,
-                KeySource::Sidechain,
-                CompressorControls {
-                    threshold: Db::new(-20.0),
-                    knee: Db::new(6.0),
-                    ratio: CompressionRatio::new(4.0),
-                    attack: Seconds::new(0.001),
-                    release: Seconds::new(0.05),
-                    ..CompressorControls::DEFAULT
-                },
+            CompressorNode::<f32>::from(
+                CompressorConfig::new(BusTopology::STEREO)
+                    .key(KeySource::Sidechain)
+                    .controls(CompressorControls {
+                        threshold: Db::new(-20.0),
+                        knee: Db::new(6.0),
+                        ratio: CompressionRatio::new(4.0),
+                        attack: Seconds::new(0.001),
+                        release: Seconds::new(0.05),
+                        ..CompressorControls::DEFAULT
+                    }),
             )
         },
         |n| {
@@ -277,17 +277,17 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "gate",
         || {
-            GateNode::<f32>::new(
-                BusTopology::STEREO,
-                KeySource::Sidechain,
-                GateControls {
-                    threshold: Db::new(-30.0),
-                    attack: Seconds::new(0.001),
-                    hold: Seconds::new(0.01),
-                    release: Seconds::new(0.05),
-                    range: Db::new(-80.0),
-                    ..GateControls::DEFAULT
-                },
+            GateNode::<f32>::from(
+                GateConfig::new(BusTopology::STEREO)
+                    .key(KeySource::Sidechain)
+                    .controls(GateControls {
+                        threshold: Db::new(-30.0),
+                        attack: Seconds::new(0.001),
+                        hold: Seconds::new(0.01),
+                        release: Seconds::new(0.05),
+                        range: Db::new(-80.0),
+                        ..GateControls::DEFAULT
+                    }),
             )
         },
         |n| {

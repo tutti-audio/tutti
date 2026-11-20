@@ -24,7 +24,7 @@
 
 use core::ops::Range;
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
@@ -32,7 +32,7 @@ use super::compressor::{CompressorBank, CompressorControls, CompressorSignals};
 use super::gain_pass::{CHUNK, GAIN_RAMP};
 use crate::{
     COEFF_INTERVAL, CrossoverBands, CrossoverBank, CrossoverBlend, CrossoverControls,
-    CrossoverError, CrossoverModel, Lerp, Ramp, SimdLanes, Steps,
+    CrossoverModel, Lerp, Ramp, SimdLanes, Steps,
 };
 
 /// The most bands.
@@ -132,18 +132,22 @@ impl BandReductions {
     }
 }
 
-/// The width and band count of a [`MultibandBank`] that can be built: what
-/// [`BankShape::try_from`] makes (from `(width, bands)`), so [`MultibandBank::from_shape`] has
-/// nothing to refuse. The check does not depend on the bank's float.
-///
-/// # Errors
-///
-/// `BankShape::try_from((width, bands))` is [`CrossoverError::Bands`] if `bands` is not 2 to 4,
-/// and [`CrossoverError::Channels`] for no channels or more than the planes of a crossover hold.
+tutti_units::ranged! {
+    /// How many bands a [`MultibandBank`] splits into, `2..=4`: a band count the crossover
+    /// design holds.
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    MultibandBands(u8), MultibandBandsError, "a band count within 2..=4",
+    |raw| raw as usize >= BankShape::MIN_BANDS && raw as usize <= BankShape::MAX_BANDS
+}
+
+/// The width and band count of a [`MultibandBank`]: each band has the channels of the input
+/// bus. A bus holds at most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) channels, so
+/// `width * bands` fits the planes of a crossover and nothing here can be refused. The check
+/// does not depend on the bank's float.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BankShape {
     width: ChannelLayout,
-    bands: usize,
+    bands: MultibandBands,
 }
 
 impl BankShape {
@@ -151,6 +155,15 @@ impl BankShape {
     pub const MIN_BANDS: usize = 2;
     /// The most bands.
     pub const MAX_BANDS: usize = 4;
+
+    /// A shape of `bands` bands, each as wide as the bus `input`.
+    #[must_use]
+    pub fn new(input: BusTopology, bands: MultibandBands) -> Self {
+        Self {
+            width: input.layout(),
+            bands,
+        }
+    }
 
     /// The channels each band has.
     #[must_use]
@@ -161,26 +174,7 @@ impl BankShape {
     /// The bands, 2 to 4.
     #[must_use]
     pub fn bands(&self) -> usize {
-        self.bands
-    }
-}
-
-impl TryFrom<(ChannelLayout, usize)> for BankShape {
-    type Error = CrossoverError;
-
-    fn try_from((width, bands): (ChannelLayout, usize)) -> Result<Self, CrossoverError> {
-        if !(Self::MIN_BANDS..=Self::MAX_BANDS).contains(&bands) {
-            return Err(CrossoverError::Bands {
-                bands,
-                min: Self::MIN_BANDS,
-                max: Self::MAX_BANDS,
-            });
-        }
-        let channels = usize::from(width.count());
-        if channels == 0 || ChannelLayout::try_from(channels * bands).is_err() {
-            return Err(CrossoverError::Channels { channels });
-        }
-        Ok(Self { width, bands })
+        usize::from(self.bands.get())
     }
 }
 
@@ -241,30 +235,17 @@ pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
 }
 
 impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
-    /// A multiband of `bands` bands over `width` at `rate`, splitting and summing until it
-    /// is set. Allocates: build it on the control side.
-    ///
-    /// # Errors
-    ///
-    /// As [`BankShape::try_from`].
-    pub fn new(
-        width: ChannelLayout,
-        bands: usize,
-        rate: SampleRate,
-    ) -> Result<Self, CrossoverError> {
-        Ok(Self::from_shape(BankShape::try_from((width, bands))?, rate))
-    }
-
-    /// A multiband of a checked `shape` at `rate`: [`new`](Self::new) past its checks.
+    /// A multiband of a checked `shape` at `rate`, splitting and summing until it is set.
     /// Allocates: build it on the control side.
     ///
     /// # Panics
     ///
-    /// Never for a shape [`BankShape::try_from`] made: the one `expect` is on the crossover
-    /// design's band count, which a shape keeps within 2 to 4.
+    /// Never: the one `expect` is on the crossover design's band count, which a shape keeps
+    /// within 2 to 4.
     #[must_use]
-    pub fn from_shape(shape: BankShape, rate: SampleRate) -> Self {
+    pub fn new(shape: BankShape, rate: SampleRate) -> Self {
         let BankShape { width, bands } = shape;
+        let bands = usize::from(bands.get());
         let channels = usize::from(width.count());
         let split = CrossoverBands::new(bands)
             .expect("a shape's bands are 2 to 4, inside a crossover's 2 to 6");

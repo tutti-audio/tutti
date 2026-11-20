@@ -81,7 +81,6 @@ tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolve
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::normalized
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/times.rs::ChannelTimes::each
-tutti-dsp  ctor-result  crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/mod_delay.rs::ModDelayLayout::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/phaser.rs::SweepRange::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/sweep.rs::Stagger::each
@@ -193,18 +192,6 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::from_layout
 tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::mono
 tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::with_bus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/kernel.rs::KernelNode::with_kernel
 tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::LfoNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::chorus
@@ -240,7 +227,6 @@ tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverN
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  ctor-result  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new

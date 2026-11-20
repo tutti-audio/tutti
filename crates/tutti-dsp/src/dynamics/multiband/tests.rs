@@ -1,6 +1,6 @@
 use core::f64::consts::PI;
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_units::{CompressionRatio, Seconds};
 
@@ -18,7 +18,13 @@ const RAMP: usize = 240;
 const SETTLE: usize = 24_000;
 
 fn bank(width: u16, bands: usize) -> MultibandBank<f32> {
-    MultibandBank::<f32>::new(ChannelLayout::from_count(width), bands, RATE).unwrap()
+    MultibandBank::<f32>::new(
+        BankShape::new(
+            BusTopology::assumed(ChannelLayout::from_count(width)).unwrap(),
+            MultibandBands::new(u8::try_from(bands).unwrap()).unwrap(),
+        ),
+        RATE,
+    )
 }
 
 fn hz(freqs: &[f64]) -> CrossoverControls {
@@ -174,25 +180,35 @@ fn the_analytic_band_magnitudes_sum_to_one() {
     assert!((g[0].norm() - band_magnitude(0, &[1_000.0], 1_000.0)).abs() < 1e-6);
 }
 
-/// The bank refuses a band count outside 2 to 4 and an empty layout.
+/// `MultibandBands` keeps the range-checked shape over `2..=4`, the crossover design's band
+/// counts.
 #[test]
-fn a_bank_has_two_to_four_bands_over_a_width() {
-    for bands in [0, 1, 5, 6] {
-        assert!(
-            matches!(
-                MultibandBank::<f32>::new(ChannelLayout::STEREO, bands, RATE),
-                Err(CrossoverError::Bands { min: 2, max: 4, .. })
-            ),
-            "{bands}"
-        );
-    }
-    assert_eq!(
-        MultibandBank::<f32>::new(ChannelLayout::from_count(0), 3, RATE).unwrap_err(),
-        CrossoverError::Channels { channels: 0 }
-    );
+fn the_band_count_keeps_the_range_checked_shape() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: MultibandBands::new,
+        get: MultibandBands::get,
+        of: Some(MultibandBands::of),
+        valid: &[2, 3, 4],
+        invalid: &[0, 1, 5, 6, 255],
+    });
+}
+
+/// A band count of one or five is not a count: `MultibandBands::new` refuses both ends of
+/// the neighbourhood of the range.
+#[test]
+fn a_band_count_one_below_or_above_the_range_is_refused() {
+    assert_eq!(MultibandBands::new(1), None);
+    assert_eq!(MultibandBands::new(5), None);
+}
+
+/// A bank has the band count it was built with, over any width a bus holds, the empty bus
+/// included.
+#[test]
+fn a_bank_has_the_bands_it_was_built_with_over_a_width() {
     for bands in 2..=4 {
         assert_eq!(bank(2, bands).bands(), bands);
     }
+    assert_eq!(bank(0, 3).bands(), 3);
 }
 
 /// With every band at unity ratio and no makeup the bands sum to the product of the splits'
@@ -369,7 +385,10 @@ fn a_bypassed_band_passes_unprocessed() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 6.0);
     set.bands[0].bypass = true;
-    let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
+    let mut k = MultibandBank::<f64>::new(
+        BankShape::new(BusTopology::MONO, MultibandBands::of(3)),
+        RATE,
+    );
     k.retarget(&set);
     let x = vec![0.5f64; SETTLE + 9_600];
     let out = run(&mut k, &[&x]);
@@ -592,7 +611,10 @@ fn a_band_reads_its_own_threshold_signal() {
     run_in(&mut k, &[&x], [Some(&nan), None, None, None], 256);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     // The same control signal in f64 over f64 audio.
-    let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
+    let mut k = MultibandBank::<f64>::new(
+        BankShape::new(BusTopology::MONO, MultibandBands::of(3)),
+        RATE,
+    );
     k.retarget(&set);
     let (x64, low64) = (vec![0.5f64; len], vec![-30.0f64; len]);
     let mut out = vec![0.0f64; len];
@@ -825,7 +847,10 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let n = 4_800;
     let x = wide_signal(n);
-    let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 2, RATE).unwrap();
+    let mut k = MultibandBank::<f64>::new(
+        BankShape::new(BusTopology::MONO, MultibandBands::of(2)),
+        RATE,
+    );
     // The signal is near 0.25 (-12 dB), 12 dB under the threshold of every band.
     k.retarget(&MultibandSettings {
         crossover: hz(&[1_000.0]),
