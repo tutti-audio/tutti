@@ -3,6 +3,7 @@
 use std::io;
 use tutti_platform::{Asset, Identity};
 
+use crate::apply::Cut;
 use crate::pool::key::PoolKey;
 
 /// What [`Session::refresh_pool`](crate::Session::refresh_pool) found: the
@@ -60,12 +61,13 @@ pub(crate) struct Checked {
 #[derive(Debug)]
 #[must_use = "work does nothing until it runs"]
 pub struct RefreshPool {
+    cut: Cut,
     entries: Vec<Stamped>,
 }
 
 impl RefreshPool {
-    pub(crate) const fn new(entries: Vec<Stamped>) -> Self {
-        Self { entries }
+    pub(crate) const fn new(cut: Cut, entries: Vec<Stamped>) -> Self {
+        Self { cut, entries }
     }
 
     /// Takes each asset's identity again, reading the assets and no more: the
@@ -75,6 +77,7 @@ impl RefreshPool {
     /// is unreadable, and one that does is not watched.
     pub fn run(self) -> RefreshedPool {
         RefreshedPool {
+            cut: self.cut,
             checked: self
                 .entries
                 .into_iter()
@@ -114,6 +117,7 @@ impl std::fmt::Debug for Stamped {
 #[derive(Debug)]
 #[must_use = "the refresh changes nothing until the session applies it"]
 pub struct RefreshedPool {
+    pub(crate) cut: Cut,
     pub(crate) checked: Vec<Checked>,
 }
 

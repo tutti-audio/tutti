@@ -239,7 +239,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// or a provided asset is never detected. Dropping the value reloads
     /// nothing.
     pub fn refresh_pool(&self) -> RefreshPool {
-        RefreshPool::new(self.pool.entries.stamped_files())
+        RefreshPool::new(
+            crate::apply::Cut::of(self),
+            self.pool.entries.stamped_files(),
+        )
     }
 
     /// Where the entry under `key` stands, `None` when the pool has none: never

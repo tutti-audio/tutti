@@ -1025,6 +1025,7 @@ impl<C: Clock> SessionBuilder<C> {
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
         let session = Session {
+            id: crate::apply::SessionId::new(),
             values: crate::value::ValueState::new(Arc::clone(&table)),
             _early_work,
             running,

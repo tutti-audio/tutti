@@ -277,6 +277,26 @@ fn a_refresh_whose_entry_was_released_is_refused_as_stale() {
 }
 
 #[test]
+fn an_output_of_another_session_is_refused_as_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, _spawned_a, path, reads_a) = loaded(dir.path(), b"one");
+    let (mut b, spawned_b) = session();
+    let reads_b = Arc::new(AtomicUsize::new(0));
+    b.pool(read("a", &path, &reads_b)).unwrap();
+    spawned_b.run_until_stalled();
+    let _ = events(&mut b);
+    let generation = |s: &crate::DetachedSession| s.pool.entries.stamped_files()[0].generation;
+    assert_eq!(generation(&a), generation(&b), "the generations match");
+    std::fs::write(&path, b"changed").unwrap();
+    let done = a.refresh_pool().run();
+    assert_eq!(b.apply(done).unwrap_err(), RefreshError::Stale);
+    assert!(spawned_b.run_until_stalled() == 0, "nothing reloaded");
+    assert_eq!(state(&b, "a").as_deref(), Some("loaded"));
+    assert_eq!(reads_b.load(Ordering::SeqCst), 1);
+    assert_eq!(reads_a.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn a_kind_with_no_file_is_not_refreshed() {
     let (mut s, spawned) = session();
     let runs = super::runs();
