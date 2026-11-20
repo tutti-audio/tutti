@@ -258,10 +258,10 @@ mod tests {
         )
     }
 
-    /// A probe that does not finish by the deadline is killed and reaped, and the
-    /// caller is told it timed out.
+    /// A probe a stop ends is killed and reaped, and the caller is told it was
+    /// cancelled.
     #[test]
-    fn a_probe_that_hangs_is_killed_at_the_deadline() {
+    fn a_cancelled_probe_is_killed_and_reaped() {
         let dir = TempDir::new().unwrap();
         let fifo = dir.path().join("pid");
         assert!(
