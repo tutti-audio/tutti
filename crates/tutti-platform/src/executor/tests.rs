@@ -297,7 +297,7 @@ fn a_sleep_wakes_a_parked_thread_at_its_deadline() {
     let (tx, rx) = mpsc::channel();
     executor
         .spawn(async move {
-            sleep.await;
+            assert_eq!(sleep.await, Ok(()));
             tx.send("due").unwrap();
         })
         .detach();
@@ -321,7 +321,7 @@ fn a_near_sleep_spawned_after_a_far_one_wakes_a_parked_thread() {
     let (tx, rx) = mpsc::channel();
     executor
         .spawn(async move {
-            near.await;
+            assert_eq!(near.await, Ok(()));
             tx.send("near").unwrap();
         })
         .detach();
@@ -447,7 +447,10 @@ fn a_pending_sleep_resolves_once_its_executor_drops() {
     let mut cx = Context::from_waker(Waker::noop());
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
     drop(executor);
-    assert!(Pin::new(&mut sleep).poll(&mut cx).is_ready());
+    assert_eq!(
+        Pin::new(&mut sleep).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
 }
 
 #[test]
@@ -484,6 +487,7 @@ fn a_timer_sleep_fires_when_due_and_something_drives() {
     assert!(!task.is_finished(), "nothing has driven yet");
     executor.run_until_stalled();
     assert!(task.is_finished());
+    assert_eq!(wait(task), Ok(()));
     let far = executor.spawn(timer.sleep(Duration::from_secs(3600 * 24)));
     executor.run_until_stalled();
     assert!(!far.is_finished(), "its deadline is not due");
@@ -522,6 +526,7 @@ fn a_timer_sleep_pending_on_another_thread_resolves_when_the_executor_drops() {
     drop(executor);
     waiter.run_until_stalled();
     assert!(task.is_finished(), "the shutdown woke the waiting task");
+    assert_eq!(wait(task), Err(Shutdown));
 }
 
 #[test]
@@ -531,7 +536,10 @@ fn a_timer_sleep_made_after_the_executor_dropped_resolves_at_once() {
     drop(executor);
     let mut sleep = timer.sleep(Duration::from_secs(3600 * 24));
     let mut cx = Context::from_waker(Waker::noop());
-    assert!(Pin::new(&mut sleep).poll(&mut cx).is_ready());
+    assert_eq!(
+        Pin::new(&mut sleep).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
 }
 
 #[test]
@@ -628,7 +636,7 @@ fn a_dedicated_future_fires_the_executors_sleeps() {
     let sleep = executor.sleep(Duration::from_millis(5));
     let task = executor
         .spawn_dedicated("tutti-test-sleeper", None, async move {
-            sleep.await;
+            assert_eq!(sleep.await, Ok(()));
             "due"
         })
         .unwrap();

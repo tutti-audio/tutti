@@ -21,7 +21,7 @@ mod timers;
 
 pub use async_task::Task;
 use timers::Timers;
-pub use timers::{Sleep, Timer};
+pub use timers::{Shutdown, Sleep, Timer};
 
 #[cfg_attr(not(target_arch = "wasm32"), path = "executor/native.rs")]
 #[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
@@ -78,8 +78,8 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// instead. A long-lived future ends on its own stop flag before the executor drops. A
 /// future that needs deadlines holds a [`Timer`], which keeps nothing alive.
 ///
-/// The executor's deadline queue closes with it: every [`Sleep`] pending wakes and resolves,
-/// and one made or polled later resolves at once; nothing fires deadlines after that.
+/// The executor's deadline queue closes with it: every [`Sleep`] pending wakes and resolves
+/// `Err(`[`Shutdown`]`)`, and one made or polled later does at once; nothing fires deadlines after that.
 ///
 /// # Not on the audio thread
 ///
@@ -217,8 +217,8 @@ impl Executor {
     /// already past resolves on its first poll.
     ///
     /// A driver fires it, so its resolution is the cadence of whoever drives. Dropping the
-    /// [`Sleep`] before it resolves removes it from the queue. It resolves at once once
-    /// this executor has shut down.
+    /// [`Sleep`] before it resolves removes it from the queue. It resolves at once with
+    /// `Err(`[`Shutdown`]`)` once this executor has shut down.
     ///
     /// ```
     /// use tutti_platform::{Executor, Instant};
@@ -243,7 +243,7 @@ impl Executor {
     ///
     /// The timer holds the deadline queue only: it keeps the executor, its threads and its
     /// queue from nothing, so the executor still shuts down when its last clone drops, and
-    /// a [`Sleep`] it made resolves at once from then on.
+    /// a [`Sleep`] it made resolves at once with `Err(`[`Shutdown`]`)` from then on.
     pub fn timer(&self) -> Timer {
         Timer::new(&self.handle.shared.timers)
     }
