@@ -4,7 +4,6 @@
 use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
@@ -297,13 +296,13 @@ struct Flight {
 }
 
 /// A load the app runs: waiting to be handed out, or handed out and not yet
-/// applied.
+/// applied. Landing the flight ends the offer.
 struct Offer {
     /// The stage, until it is handed out.
     work: Option<DataWork>,
-    /// Set by the handed-out value when it is dropped without its output being
-    /// applied: the stage is then built again and handed out again.
-    returned: Option<Arc<AtomicBool>>,
+    /// The handed-out value's [`Handout`]: dead once that value and its output
+    /// are dropped, so the stage is built again and handed out again.
+    out: Option<Weak<()>>,
 }
 
 /// A load handed to the app: the flight it lands under, the first key that waits
@@ -316,35 +315,10 @@ pub(crate) struct Offered {
     pub(crate) handout: Handout,
 }
 
-/// What a handed-out load reports when it is dropped without its output being
-/// applied: the entry's load is available to the next
-/// [`take_loads`](crate::Session::take_loads).
-pub(crate) struct Handout {
-    returned: Arc<AtomicBool>,
-    applied: bool,
-}
-
-impl Handout {
-    fn new(returned: Arc<AtomicBool>) -> Self {
-        Self {
-            returned,
-            applied: false,
-        }
-    }
-
-    /// The output was applied: the load is not handed out again.
-    pub(crate) const fn settle(&mut self) {
-        self.applied = true;
-    }
-}
-
-impl Drop for Handout {
-    fn drop(&mut self) {
-        if !self.applied {
-            self.returned.store(true, Ordering::Release);
-        }
-    }
-}
+/// What a handed-out load holds while it or its output is alive: when it is
+/// dropped without the flight landing, the entry's load is available to the
+/// next [`take_loads`](crate::Session::take_loads).
+pub(crate) struct Handout(#[expect(dead_code, reason = "held for its drop")] Arc<()>);
 
 /// A worker stage the pool let start: its flight, the stage, and the asset whose
 /// identity the worker takes before running it.
@@ -848,7 +822,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         if let Some(flight) = self.flights.get_mut(&flight) {
             flight.offer = Some(Offer {
                 work: Some(work),
-                returned: None,
+                out: None,
             });
         }
     }
@@ -866,7 +840,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// The loads the app has not been given, in declaration order, handed out
     /// once: one whose handed-out value was dropped without its output being
     /// applied is built again. A load no entry waits on any more is forgotten.
-    pub(crate) fn take_offers(&mut self) -> Vec<Offered> {
+    pub(crate) fn take_offers(&mut self) -> (Vec<Offered>, Vec<Start<C::Float>>) {
         let flights: Vec<u64> = self
             .flights
             .iter()
@@ -874,20 +848,33 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             .map(|(id, _)| *id)
             .collect();
         let mut out = Vec::new();
+        let mut restarts = Vec::new();
         for id in flights {
             let Some(key) = self.first_waiting(id) else {
+                // Nothing waits on it any more.
                 self.flights.remove(&id);
                 continue;
             };
             let returned = self.flights[&id]
                 .offer
                 .as_ref()
-                .and_then(|offer| offer.returned.as_ref())
-                .is_some_and(|flag| flag.load(Ordering::Acquire));
+                .and_then(|offer| offer.out.as_ref())
+                .is_some_and(|out| out.strong_count() == 0);
             let rebuilt = if returned {
-                match (self.slots[&key].reload)().step {
-                    Step::Data(work) => Some(work),
-                    _ => continue,
+                match (self.slots[&key].reload)() {
+                    PoolLoad {
+                        step: Step::Data(work),
+                        ..
+                    } => Some(work),
+                    // The kind's load is another stage now: the declare path
+                    // runs it, and the flight is no longer the app's.
+                    load => {
+                        if let Some(flight) = self.flights.get_mut(&id) {
+                            flight.offer = None;
+                        }
+                        restarts.push(Start { flight: id, load });
+                        continue;
+                    }
                 }
             } else {
                 None
@@ -898,16 +885,18 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                 .get_mut(&id)
                 .and_then(|flight| flight.offer.as_mut())
             else {
+                // Filtered on having an offer above.
                 continue;
             };
             if rebuilt.is_some() {
                 offer.work = rebuilt;
             }
             let Some(work) = offer.work.take() else {
+                // Handed out, and not dropped: the app has it.
                 continue;
             };
-            let flag = Arc::new(AtomicBool::new(false));
-            offer.returned = Some(Arc::clone(&flag));
+            let held = Arc::new(());
+            offer.out = Some(Arc::downgrade(&held));
             out.push((
                 self.slots[&key].order,
                 Offered {
@@ -915,12 +904,15 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     key,
                     asset,
                     work,
-                    handout: Handout::new(flag),
+                    handout: Handout(held),
                 },
             ));
         }
         out.sort_by_key(|(order, offered)| (*order, offered.flight));
-        out.into_iter().map(|(_, offered)| offered).collect()
+        (
+            out.into_iter().map(|(_, offered)| offered).collect(),
+            restarts,
+        )
     }
 
     /// A flight's worker stage ended with a stage for the main thread: it

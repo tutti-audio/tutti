@@ -172,9 +172,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// never handed out, and a plugin entry is loaded by the session until it is.
     pub fn take_loads(&mut self) -> Vec<LoadEntry<C::Float>> {
         let cut = crate::apply::Cut::of(self);
-        self.pool
-            .entries
-            .take_offers()
+        let (offered, restarts) = self.pool.entries.take_offers();
+        // A dropped load whose kind now loads in another stage runs as a declare's.
+        self.pool_start(restarts);
+        offered
             .into_iter()
             .map(|offered| LoadEntry::Data(LoadData::new(cut, offered)))
             .collect()

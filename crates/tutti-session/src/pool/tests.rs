@@ -416,6 +416,41 @@ fn a_load_dropped_without_running_is_handed_out_again() {
     assert_eq!(load_all(&mut s), 0, "and then it is loaded");
 }
 
+/// A kind whose first `load` is for the app and whose later ones are ready.
+struct Flips(Arc<AtomicUsize>);
+
+impl PoolEntry for Flips {
+    type Identity = ();
+    type Loaded = u32;
+    type Handle = u32;
+
+    fn identity(&self) {}
+
+    fn load(&self) -> PoolLoad<u32> {
+        if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+            PoolLoad::on_app(|| Ok(1))
+        } else {
+            PoolLoad::ready(2)
+        }
+    }
+
+    fn handle(loaded: &u32, _: &Life) -> u32 {
+        *loaded
+    }
+}
+
+#[test]
+fn a_dropped_load_whose_kind_now_loads_ready_leaves_the_entry_loaded_by_take_loads() {
+    let mut s = session();
+    let calls = Arc::new(AtomicUsize::new(0));
+    s.pool(Declared::new("a", Flips(Arc::clone(&calls))))
+        .unwrap();
+    drop(s.take_loads());
+    assert!(s.take_loads().is_empty(), "nothing is left for the app");
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
+    assert_eq!(s.pool.entries.handle::<_, Flips>(&"a").unwrap(), 2);
+}
+
 #[test]
 fn an_output_dropped_without_being_applied_makes_its_entry_available_again() {
     let mut s = session();

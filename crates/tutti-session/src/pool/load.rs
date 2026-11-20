@@ -103,7 +103,7 @@ impl<F: SessionFloat> LoadData<F> {
             flight,
             loaded_from,
             done,
-            handout,
+            _handout: handout,
             _float: PhantomData,
         }
     }
@@ -135,7 +135,8 @@ pub struct LoadedEntry<F: SessionFloat> {
     flight: u64,
     loaded_from: Option<Identity>,
     done: Result<Value, LoadError>,
-    handout: Handout,
+    /// Held while the output is alive.
+    _handout: Handout,
     _float: PhantomData<fn() -> F>,
 }
 
@@ -179,12 +180,10 @@ impl<F: SessionFloat> Sealed<F> for LoadedEntry<F> {
             flight,
             loaded_from,
             done,
-            mut handout,
             ..
         } = self;
         let entries = &mut session.pool.entries;
         let key = entries.first_waiting(flight).ok_or(PoolApplyError::Stale)?;
-        handout.settle();
         entries.stamped(flight, loaded_from);
         entries.land(flight, done);
         Ok(key)
