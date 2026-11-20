@@ -6,7 +6,9 @@
 //! It is memory, not a file the kernel writes back. It supports neither `read` nor
 //! `write` (both are `ENXIO`), so a blob is written and read through a mapping,
 //! which is sound because XNU refuses a second `ftruncate` (the tests pin it): no
-//! holder can shrink the object under the mapping. There are no seals on this
+//! holder can shrink the object under the mapping. A descriptor that is not a
+//! shared memory object is refused, a regular file included, because its holder
+//! could shrink it under the mapping. There are no seals on this
 //! platform; the object is sized by one `ftruncate`, and the tests pin that no
 //! later `ftruncate` is accepted.
 //!
@@ -137,15 +139,17 @@ pub(super) fn read_front(file: &File, len: usize, out: &mut Vec<u8>) -> std::io:
     Ok(())
 }
 
-/// Checks that `file` is a shared memory object (or a regular file), not a pipe,
+/// Checks that `file` is a shared memory object, not a regular file, pipe,
 /// socket, directory or device: this platform has no seals to look for, so the
 /// descriptor's type is all it can say. XNU reports a POSIX shared memory object
-/// with no file type bits; the length is the caller's check.
+/// with no file type bits, and only that is accepted: a regular file could be
+/// shrunk by its holder under the mapping (XNU refuses a second `ftruncate` of
+/// shared memory only); the length is the caller's check.
 pub(super) fn verify(file: &File, _: usize) -> Result<(), SlabError> {
     use rustix::fs::{FileType, fstat};
     let stat = fstat(file).map_err(file_error("read the type of"))?;
     match FileType::from_raw_mode(stat.st_mode) {
-        FileType::RegularFile | FileType::Unknown => Ok(()),
+        FileType::Unknown => Ok(()),
         _ => Err(SlabError::NotSharedMemory),
     }
 }
@@ -168,6 +172,22 @@ pub(super) fn receive(conn: Connection<'_>, _: SlabWire) -> Result<Slab, SlabErr
 
 #[cfg(test)]
 mod tests {
+    /// **A regular file is refused**: its holder could `ftruncate` it under the
+    /// mapping, which a shared memory object does not allow.
+    #[test]
+    fn a_regular_file_is_refused() {
+        let path = std::env::temp_dir().join(format!("tutti-ffi-regular-{}", std::process::id()));
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(verify(&file, 0), Err(SlabError::NotSharedMemory)));
+    }
+
     /// **A descriptor that is not a memory object is refused by name**: a socket
     /// end sent where a blob was announced does not read.
     #[test]
