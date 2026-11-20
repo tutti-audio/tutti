@@ -50,6 +50,12 @@ pub(crate) fn max_data_frames(layout: ChannelLayout, pcm: Pcm) -> u64 {
     MAX_DATA_BYTES / frame_bytes(layout, pcm)
 }
 
+/// Whether the header is the extensible one: past two channels or 16 bits, a
+/// plain `PCMWAVEFORMAT` cannot describe the file.
+fn extensible(layout: ChannelLayout, pcm: Pcm) -> bool {
+    layout.count() > 2 || pcm.bits() > 16
+}
+
 /// Bytes per frame: every sample in a whole number of bytes.
 fn frame_bytes(layout: ChannelLayout, pcm: Pcm) -> u64 {
     u64::from(pcm.bits().div_ceil(8)) * u64::from(layout.count().max(1))
@@ -65,7 +71,7 @@ impl Header {
     fn new(spec: &Spec, pcm: Pcm, rate: u32, mask: u32) -> Self {
         let channels = spec.layout().count();
         let sample_bytes = pcm.bits().div_ceil(8);
-        let extensible = channels > 2 || pcm.bits() > 16;
+        let extensible = extensible(spec.layout(), pcm);
         let float = matches!(pcm, Pcm::Float32 | Pcm::Float64);
         let bytes_per_sec = rate
             .wrapping_mul(u32::from(sample_bytes))
@@ -170,20 +176,51 @@ impl<W: Write + Seek> WavWriter<W> {
     /// file and flushes it.
     fn patch_sizes(&mut self) -> std::io::Result<()> {
         let data = self.frames * frame_bytes(self.layout, self.pcm);
-        // Both fit a `u32`: `max_frames` keeps the data under `MAX_DATA_BYTES`.
-        let data = data as u32;
-        let riff = data + (self.header.data_len_offset as u32 + 4 - 8);
         let at = self.header.data_len_offset as u64;
         let Some(sink) = self.sink.as_mut() else {
             return Ok(());
         };
-        sink.seek(SeekFrom::Start(4))?;
-        sink.write_all(&riff.to_le_bytes())?;
-        sink.seek(SeekFrom::Start(at))?;
-        sink.write_all(&data.to_le_bytes())?;
+        write_sizes(sink, at, data)?;
         sink.seek(SeekFrom::End(0))?;
         sink.flush()
     }
+}
+
+/// Writes the RIFF and `data` sizes of a file whose `data` size field is at
+/// `data_len_offset` and whose data is `data_bytes` long. Both fit a `u32`:
+/// the frames written are bounded by [`MAX_DATA_BYTES`].
+fn write_sizes<W: Write + Seek>(
+    sink: &mut W,
+    data_len_offset: u64,
+    data_bytes: u64,
+) -> std::io::Result<()> {
+    let data = data_bytes.min(MAX_DATA_BYTES) as u32;
+    let riff = data + (data_len_offset as u32 + 4 - 8);
+    sink.seek(SeekFrom::Start(4))?;
+    sink.write_all(&riff.to_le_bytes())?;
+    sink.seek(SeekFrom::Start(data_len_offset))?;
+    sink.write_all(&data.to_le_bytes())
+}
+
+/// Makes the unfinished WAV `file` of `layout` at `pcm` a readable one: its
+/// sizes are written for the whole frames it holds on disk, and a torn last
+/// frame is cut off.
+pub(crate) fn patch_unfinished(
+    file: &mut std::fs::File,
+    spec: &Spec,
+    pcm: Pcm,
+) -> std::io::Result<()> {
+    // The header the writer wrote for this spec: its length and the offset of
+    // its `data` size come from the builder (the rate and the mask do not
+    // change either).
+    let header = Header::new(spec, pcm, 1, 0);
+    let length = header.bytes.len() as u64;
+    let frame = frame_bytes(spec.layout(), pcm);
+    let held = file.metadata()?.len().saturating_sub(length);
+    let data = held / frame * frame;
+    write_sizes(file, header.data_len_offset as u64, data)?;
+    file.set_len(length + data.min(MAX_DATA_BYTES))?;
+    file.sync_all()
 }
 
 impl<W: Write + Seek> Drop for WavWriter<W> {

@@ -296,6 +296,7 @@ pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
     dither: Option<DitherShape>,
     on_event_loss: EventLossPolicy,
     normalize: Option<Normalize>,
+    create_new: bool,
     edit: Option<PrepareEdit<F>>,
 }
 
@@ -322,6 +323,7 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
             dither: Some(DitherShape::Triangular),
             on_event_loss: EventLossPolicy::default(),
             normalize: None,
+            create_new: false,
             edit: None,
         }
     }
@@ -377,6 +379,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         } = self;
         Bounce {
@@ -395,6 +398,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         }
     }
@@ -434,6 +438,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         } = self;
         let stems = stems
@@ -456,6 +461,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         })
     }
@@ -536,6 +542,21 @@ impl<N, M, F: Float> Bounce<N, M, F> {
         self
     }
 
+    /// Refuses a path that already exists, for every file the bounce writes
+    /// (the master and each file stem), instead of replacing it.
+    ///
+    /// Each file is written beside its path and put in place when the bounce
+    /// finishes. A path that exists then fails the commit with
+    /// [`tutti_codec::Error::Commit`] of kind `AlreadyExists`, reported as
+    /// [`BounceError::Export`] (or inside
+    /// [`NotCommitted`](tutti_export::Error::NotCommitted) when earlier files
+    /// had landed). What is at the path is left alone and the complete file is
+    /// kept at the error's `kept` path: the app owns it, to move or delete.
+    pub fn create_new(mut self) -> Self {
+        self.create_new = true;
+        self
+    }
+
     /// Edits the forked graph before it renders: see [`PrepareEdit`].
     pub fn edit(mut self, edit: PrepareEdit<F>) -> Self {
         self.edit = Some(edit);
@@ -606,6 +627,7 @@ impl<N: std::fmt::Debug, M: std::fmt::Debug, F: Float> std::fmt::Debug for Bounc
             .field("dither", &self.dither)
             .field("on_event_loss", &self.on_event_loss)
             .field("normalize", &self.normalize)
+            .field("create_new", &self.create_new)
             .field("edit", &self.edit.is_some())
             .finish()
     }
@@ -1075,6 +1097,11 @@ pub enum BounceError {
     /// (naming its node's key), a lost event.
     #[error("bounce: {0}")]
     Export(tutti_export::Error),
+}
+
+/// `file`, refusing an existing path when the bounce asks for it.
+fn refusing_existing(file: FileTarget, create_new: bool) -> FileTarget {
+    if create_new { file.create_new() } else { file }
 }
 
 impl From<tutti_export::Error> for BounceError {
@@ -1788,6 +1815,7 @@ where
             dither,
             on_event_loss,
             normalize,
+            create_new,
             edit,
         } = bounce;
         if self.graph.outputs() == 0 {
@@ -1821,7 +1849,7 @@ where
                 .resample(resample)
                 .dither(dither)
                 .normalize(normalize.map(NormalizeSpec::own));
-                file.into()
+                refusing_existing(file, create_new).into()
             }
             None => {
                 let planes = BufferTarget::new(channels);
@@ -1874,11 +1902,11 @@ where
                             0,
                         )),
                     };
-                    FileTarget::new(path, format, layout)
+                    let file = FileTarget::new(path, format, layout)
                         .resample(resample)
                         .dither(dither)
-                        .normalize(gain)
-                        .into()
+                        .normalize(gain);
+                    refusing_existing(file, create_new).into()
                 }
                 StemTo::Buffers => BufferTarget::new(layout).into(),
             };
