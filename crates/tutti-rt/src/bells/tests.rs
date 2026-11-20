@@ -126,3 +126,55 @@ fn a_pass_wakes_a_rung_bell_and_not_an_unrung_one() {
     assert!(!bells.shared.pending());
     assert!(poll_once(&mut rung, Waker::noop()).is_ready());
 }
+
+#[test]
+fn a_ring_then_the_drop_wakes_the_stored_waker_exactly_once() {
+    let bells = Bells::new().unwrap();
+    let (bell, mut listener) = bells.bell();
+    let count = std::sync::Arc::new(Count::default());
+    let waker = Waker::from(std::sync::Arc::clone(&count));
+    assert!(poll_once(&mut listener, &waker).is_pending());
+    bell.ring();
+    // The drop joins the tick thread, whose last pass has run by then.
+    drop(bells);
+    assert_eq!(count.0.load(Ordering::SeqCst), 1);
+    drop(bell);
+}
+
+#[test]
+fn the_drop_releases_an_unrung_listeners_waker() {
+    let bells = Bells::new().unwrap();
+    let (bell, mut listener) = bells.bell();
+    let count = std::sync::Arc::new(Count::default());
+    let waker = Waker::from(std::sync::Arc::clone(&count));
+    assert!(poll_once(&mut listener, &waker).is_pending());
+    drop(waker);
+    assert_eq!(std::sync::Arc::strong_count(&count), 2, "the bell holds it");
+    drop(bells);
+    assert_eq!(
+        std::sync::Arc::strong_count(&count),
+        1,
+        "the drop released it"
+    );
+    assert_eq!(
+        count.0.load(Ordering::SeqCst),
+        0,
+        "an unrung bell is not woken"
+    );
+    drop(bell);
+}
+
+#[test]
+fn a_poll_after_the_drop_stores_no_waker() {
+    let bells = Bells::new().unwrap();
+    let (bell, mut listener) = bells.bell();
+    drop(bells);
+    let count = std::sync::Arc::new(Count::default());
+    let waker = Waker::from(std::sync::Arc::clone(&count));
+    assert!(poll_once(&mut listener, &waker).is_pending());
+    drop(waker);
+    assert_eq!(std::sync::Arc::strong_count(&count), 1);
+    // A ring seen before the drop still resolves a later poll.
+    bell.ring();
+    assert!(poll_once(&mut listener, Waker::noop()).is_ready());
+}
