@@ -30,7 +30,7 @@ mod sealed {
 
     impl Cut {
         /// A cut from `session`, made when the session makes the value.
-        #[cfg(feature = "sampler")]
+        #[cfg(any(feature = "sampler", feature = "plugin"))]
         pub(crate) const fn of<K: AppKey, C: Clock>(session: &Session<K, C>) -> Self {
             Self {
                 session: session.id,
@@ -86,13 +86,13 @@ impl<F: SessionFloat, T: sealed::Sealed<F>> Apply<F> for T {
     type Error = <T as sealed::Sealed<F>>::Error;
 }
 
-#[cfg(feature = "sampler")]
+#[cfg(any(feature = "sampler", feature = "plugin"))]
 pub(crate) use sealed::{Cut, Sealed};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Takes back the output of work the app ran, and applies it.
     ///
-    /// Control thread. It never waits: an output whose target is busy comes back in
+    /// Control thread. It never waits: an output whose target can be busy comes back in
     /// its error's `Busy`. The output is cut from the session's state when the
     /// work was made; when that state has moved on (a node removed, a plugin
     /// instance replaced, a streamer gone) the apply refuses by

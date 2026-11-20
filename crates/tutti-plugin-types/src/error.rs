@@ -134,6 +134,11 @@ pub enum StateError {
     #[error("plugin subprocess has crashed")]
     PluginCrashed,
 
+    /// The plugin was not asked: the node it was cut from was removed, or
+    /// another plugin instance replaced it, since the work was made.
+    #[error("the plugin is no longer at its node; the plugin was not asked")]
+    Lost,
+
     /// The request could not be queued: the bridge's command queue is full,
     /// behind blocks it has not sent yet. The session is healthy and nothing
     /// was asked of the plugin, so a retry is reasonable. Reporting this as

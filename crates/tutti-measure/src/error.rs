@@ -22,6 +22,9 @@ pub enum Error {
     /// The shared STFT infrastructure refused a geometry or a grid.
     #[error(transparent)]
     Dsp(tutti_dsp::StftError),
+    /// A mel filterbank that does not fit the transform it was asked to read.
+    #[error(transparent)]
+    Mel(#[from] tutti_dsp::MelError),
     /// A zero window: a frame would hold nothing.
     #[error("analysis window is zero-length")]
     ZeroWindow,
