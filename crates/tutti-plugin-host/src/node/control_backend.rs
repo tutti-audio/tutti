@@ -286,7 +286,7 @@ where
     /// can tell "the plugin has no state" from "asking it failed".
     ///
     /// `effGetChunk` and its kin are main-thread calls, and the health snapshot
-    /// runs this on the session's spawner: off the main thread it
+    /// runs this on the session's executor: off the main thread it
     /// is run by the main thread's next tick (`on_main`), and
     /// [`StateError::Unavailable`] if that does not come within the deadline.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {

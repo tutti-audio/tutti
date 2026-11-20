@@ -109,7 +109,7 @@ pub enum Retention<T> {
 /// [`LoadError`], and the thread each runs on.
 ///
 /// - [`on_worker`](Self::on_worker): one stage on a thread of the session's
-///   spawner, which finishes the load there.
+///   executor, which finishes the load there.
 /// - [`on_worker_then_main`](Self::on_worker_then_main): a worker stage whose
 ///   output goes by value to a stage on the main thread, which finishes it.
 /// - [`on_session`](Self::on_session): one stage on the session's own thread,
@@ -244,7 +244,7 @@ impl Staged {
 
 impl<T: Send + 'static, S: Float> Load<T, S> {
     /// A load that finishes in one stage: `work`, on a thread of the session's
-    /// spawner.
+    /// executor.
     pub fn on_worker(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
         Self {
             step: Step::Worker(Box::new(move || {
@@ -255,7 +255,7 @@ impl<T: Send + 'static, S: Float> Load<T, S> {
     }
 
     /// A load of a worker stage and then a main-thread stage: `work` runs on a
-    /// thread of the session's spawner, and its output `W` goes by value to
+    /// thread of the session's executor, and its output `W` goes by value to
     /// `main`, which runs on the main thread in an
     /// [`update`](crate::Session::update) on it and makes the loaded value.
     ///
@@ -435,7 +435,7 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error("the node could not swap to the landed plugin: {0}")]
     PluginSwap(Arc<crate::CrossfadeRefused>),
-    /// The load's job did not finish: it panicked, or the spawner dropped it.
+    /// The load's job did not finish: it panicked, or the executor dropped it.
     #[error(transparent)]
     Job(#[from] WorkerError),
 }

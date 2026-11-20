@@ -6,5 +6,4 @@
 # main-thread method; a row says why a value must carry it.
 crates/tutti-session/src/editor.rs::Editor  the editor handle: its calls run on the main thread and the handle holds the proof
 crates/tutti-session/src/session/phases.rs::PhaseCx  a phase-stepping host's context: `main` is the proof, or none where the thread is not the main one
-crates/tutti-session/src/jobs.rs::run  `Task::run`, the spawner's door: it runs one unit of blocking work on a thread of the spawner's own
 crates/tutti-session/src/bounce.rs::run  `BounceJob::run`, the offline render's blocking door, until the bounce is a `Job`

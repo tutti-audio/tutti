@@ -41,7 +41,7 @@ pub enum LoadMidiError {
     /// The file could not be read.
     #[error("MIDI file: {0}")]
     Read(#[from] ReadError),
-    /// The worker did not finish: its work panicked, or the spawner dropped it.
+    /// The worker did not finish: its work panicked, or the executor dropped it.
     #[error(transparent)]
     Worker(#[from] WorkerError),
     /// The wait could not run ([`Job::wait`](crate::Job::wait)).
@@ -215,7 +215,7 @@ impl LoadedMidi {
 }
 
 impl<F: Float> Midi<'_, F> {
-    /// Reads the MIDI file `asset` (a path, or bytes) on the session's spawner and converts each
+    /// Reads the MIDI file `asset` (a path, or bytes) on the session's executor and converts each
     /// track to a clip value there. Returns at once; the [`LoadedMidi`] lands
     /// in a later [`update`](crate::Session::update) as a
     /// [`SessionEvent::JobDone`](crate::SessionEvent::JobDone), or

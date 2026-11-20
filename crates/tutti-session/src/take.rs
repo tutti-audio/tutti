@@ -4,7 +4,7 @@
 //! [`Session::record`] arms a take on an [`Input`]. It opens a plan tap on the
 //! input's inlet node, so the take is made of what the graph was given, frame
 //! for frame on the graph's own clock ([`TapReader::next_frame`]), and runs the
-//! pump into a sink on the session's spawner. Nothing is resampled or shifted
+//! pump into a sink on the session's executor. Nothing is resampled or shifted
 //! in the file: where the take belongs is metadata, a [`Placement`] the take
 //! states term by term.
 //!
@@ -605,7 +605,7 @@ pub enum TakeError {
     /// [`Sink`]'s contract, which has `finalize` report the first failure.
     #[error("the sink refused a write and its finalize reported no error")]
     SinkRefused,
-    /// The take's job panicked or was dropped by the spawner.
+    /// The take's job panicked or was dropped by the executor.
     #[error("the take's job did not finish: {0}")]
     Job(#[from] WorkerError),
     /// The take was finished (or its handle dropped) before its punch-in was
@@ -657,7 +657,7 @@ impl Drop for StopOnDrop {
 ///
 /// Both states [`finish`](Take::finish), which stops it at once; a take with a
 /// punch-out ends by itself. **Dropping the handle stops the take too**, without
-/// waiting: the pump closes its sink on the spawner and the end is still
+/// waiting: the pump closes its sink on the executor and the end is still
 /// reported ([`TakeEvent::Finished`]).
 #[must_use = "dropping a take stops it; keep it while it records, or finish it"]
 pub struct Take<S> {
@@ -755,14 +755,14 @@ impl<S: InFlight> Take<S> {
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
-    /// pump into `target` on the session's spawner. The take records what the
+    /// pump into `target` on the session's executor. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the
     /// device does; the module docs say where it is placed.
     ///
-    /// The take's pump holds one spawner job for the whole take: with a custom
-    /// [`spawn_with`](crate::SessionBuilder::spawn_with) over a bounded pool and
-    /// no worker free, the take does not start, and [`Take::finish`] blocks
-    /// until the job runs (the default thread-per-job spawner is unaffected).
+    /// The take's pump holds one future for the whole take, which blocks while it
+    /// runs: the threaded executor gives it a thread of its own. A
+    /// [`polled`](tutti_platform::Executor::polled) or host executor that does not run
+    /// it never starts the take, and [`Take::finish`] blocks until it does.
     ///
     /// The tap compiles in the next [`update`](Self::update). The pump drops
     /// what comes before the punch-in; [`TakeEvent::Started`] lands in the
@@ -829,7 +829,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             shared: Arc::clone(&shared),
             stop: Arc::clone(&stop),
         };
-        self.jobs.submit_stream(
+        self.jobs.submit_dedicated(
+            "tutti-take",
             move |landings: &Landings<Started>| {
                 let end = pump.run(landings);
                 // `finish` may have gone: then nobody wants the copy.

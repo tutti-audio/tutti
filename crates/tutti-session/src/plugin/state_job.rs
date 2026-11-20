@@ -3,7 +3,7 @@
 //! later [`update`](Session::update) or is waited for ([`Job::wait`]).
 //!
 //! A save is a round trip to the plugin, so it starts on a worker of the
-//! session's spawner, which asks the plugin's
+//! session's executor, which asks the plugin's
 //! [`AnyThread`](tutti_plugin_types::AnyThread) save. A served plugin answers
 //! it there. An in-process plugin's save runs on the **main thread**, through
 //! the session's main work: the worker waits for it, so the app must keep
@@ -102,7 +102,7 @@ pub enum StateJobFailed {
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Saves the state of the plugin in the node over the entry under `key`,
     /// for `state_use` ([`StateUse::Project`] is the state a project keeps).
-    /// The round trip starts on the session's spawner and the state lands in a
+    /// The round trip starts on the session's executor and the state lands in a
     /// later [`update`](Self::update), or [`Job::wait`] returns it. An in-process plugin saves on the main
     /// thread, through the session's main work: keep calling `update` there,
     /// or the save ends as [`StateJobFailed::State`] with
@@ -123,6 +123,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         P: crate::AppKey,
     {
         let (handle, plugin, _, _) = self.state_parts(key)?;
+        // blocks: the state save is an IPC round trip.
         Ok(self.jobs.submit_job(
             move |cancel| {
                 if cancel.is_cancelled() {

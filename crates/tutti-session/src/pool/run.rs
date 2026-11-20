@@ -1,4 +1,4 @@
-//! Running the pool's loads: the worker stages the spawner takes, the stages
+//! Running the pool's loads: the worker stages the executor takes, the stages
 //! on the main thread and on the session's own, and the landings.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};

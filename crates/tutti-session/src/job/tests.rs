@@ -1,11 +1,13 @@
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc::sync_channel;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tutti_units::SampleRate;
 
 use super::*;
-use crate::{DetachedSession, Session, SessionBuilder, Task};
+use crate::{DetachedSession, Session, SessionBuilder};
+use tutti_fixtures::HeldFutures;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 enum EchoError {
@@ -23,19 +25,15 @@ fn session(builder: SessionBuilder) -> DetachedSession {
     builder.build_detached(SampleRate::SR_48K).unwrap()
 }
 
-/// A session whose tasks wait in the returned list, run by the test.
-fn holding() -> (DetachedSession, Arc<Mutex<Vec<Task>>>) {
-    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
-    let into = Arc::clone(&held);
-    let s = session(Session::builder().spawn_with(move |task| into.lock().unwrap().push(task)));
+/// A session whose futures wait in the returned queue, run by the test.
+fn holding() -> (DetachedSession, HeldFutures) {
+    let held = HeldFutures::new();
+    let s = session(Session::builder().executor(held.executor()));
     (s, held)
 }
 
-fn run_all(held: &Arc<Mutex<Vec<Task>>>) {
-    let tasks: Vec<Task> = held.lock().unwrap().drain(..).collect();
-    for task in tasks {
-        task.run();
-    }
+fn run_all(held: &HeldFutures) {
+    held.run_all();
 }
 
 fn echo(s: &mut DetachedSession, n: u32) -> Job<Echo> {
@@ -135,9 +133,11 @@ fn a_worker_that_panicked_lands_panicked_and_wait_returns_it() {
 }
 
 #[test]
-fn wait_ends_when_the_spawner_drops_the_task() {
-    let mut s = session(Session::builder().spawn_with(drop));
+fn wait_ends_when_the_executor_drops_the_future() {
+    let held = HeldFutures::new();
+    let mut s = session(Session::builder().executor(held.executor()));
     let job = echo(&mut s, 1);
+    held.drop_all();
     assert_eq!(
         job.wait(&mut s),
         Err(EchoError::Worker(WorkerError::Dropped))
@@ -171,35 +171,6 @@ fn a_job_waiting_for_the_main_thread_is_not_waited_for_off_it() {
     ticket.land(Ok(5));
     assert_eq!(job.wait(&mut s), Ok(5));
 }
-
-#[test]
-fn dropping_the_session_returns_though_a_worker_is_stuck() {
-    let mut s = session(Session::builder());
-    let (started, started_rx) = sync_channel::<()>(0);
-    let (release, release_rx) = sync_channel::<()>(0);
-    let job = s.jobs.submit_job(
-        move |_| {
-            started.send(()).unwrap();
-            let _ = release_rx.recv();
-        },
-        |_, _, ticket: Ticket<Unit>| ticket.land(Ok(())),
-    );
-    started_rx.recv_timeout(LONG).unwrap();
-    // The worker stays stuck until `release` is sent below, so a drop that
-    // waited for it would never signal.
-    let (dropped, dropped_rx) = sync_channel::<()>(0);
-    let dropper = std::thread::spawn(move || {
-        drop(s);
-        let _ = dropped.send(());
-    });
-    let returned = dropped_rx.recv_timeout(LONG);
-    let _ = release.send(());
-    returned.expect("drop returns though a worker is stuck");
-    dropper.join().unwrap();
-    drop(job);
-}
-
-job_kind!(Unit => (), EchoError);
 
 #[test]
 fn a_job_waited_for_while_another_lands_still_returns_the_other_later() {
@@ -297,4 +268,69 @@ fn a_save_job_dropped_before_its_worker_starts_does_the_round_trip_never() {
     run_all(&held);
     assert!(!saved.load(Ordering::SeqCst), "nothing was saved");
     assert_eq!(landings(&s.update()), []);
+}
+
+#[test]
+fn an_awaited_job_resolves_in_the_poll_after_the_update_that_landed_it() {
+    let executor = tutti_platform::Executor::polled();
+    let mut s = session(Session::builder().executor(executor.clone()));
+    let job = echo(&mut s, 7);
+    let got = Arc::new(Mutex::new(None));
+    let into = Arc::clone(&got);
+    executor
+        .spawn(async move {
+            *into.lock().unwrap() = Some(job.await);
+        })
+        .unwrap();
+    let events = s.update();
+    assert!(got.lock().unwrap().is_none(), "the update only landed it");
+    assert!(
+        landings(&events).is_empty(),
+        "an awaited job's landing is the future's, not an event"
+    );
+    assert_eq!(executor.poll(8), 1, "the landing woke the awaiting future");
+    assert_eq!(got.lock().unwrap().take(), Some(Ok(7)));
+}
+
+#[test]
+fn an_awaited_job_whose_landing_the_collect_phase_reported_answers_already_landed() {
+    let executor = tutti_platform::Executor::polled();
+    let mut s = session(Session::builder().executor(executor.clone()));
+    let job = echo(&mut s, 7);
+    let _events = s.update();
+    let got = Arc::new(Mutex::new(None));
+    let into = Arc::clone(&got);
+    executor
+        .spawn(async move {
+            *into.lock().unwrap() = Some(job.await);
+        })
+        .unwrap();
+    assert_eq!(executor.poll(8), 1);
+    assert_eq!(
+        got.lock().unwrap().take(),
+        Some(Err(EchoError::Wait(WaitError::AlreadyLanded)))
+    );
+}
+
+#[test]
+fn an_awaited_job_whose_work_is_dropped_resolves_dropped() {
+    let held = HeldFutures::new();
+    let mut s = session(Session::builder().executor(held.executor()));
+    let polled = tutti_platform::Executor::polled();
+    let job = echo(&mut s, 7);
+    let got = Arc::new(Mutex::new(None));
+    let into = Arc::clone(&got);
+    polled
+        .spawn(async move {
+            *into.lock().unwrap() = Some(job.await);
+        })
+        .unwrap();
+    assert_eq!(polled.poll(8), 1);
+    held.drop_all();
+    let _events = s.update();
+    assert_eq!(polled.poll(8), 1, "the landing woke the awaiting future");
+    assert_eq!(
+        got.lock().unwrap().take(),
+        Some(Err(EchoError::Worker(WorkerError::Dropped)))
+    );
 }
