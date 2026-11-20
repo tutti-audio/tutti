@@ -107,6 +107,10 @@ pub enum SlabError {
     /// growing: whoever holds it could resize the memory under the mapping.
     #[error("the slab descriptor is not a memfd sealed against shrinking and growing")]
     NotSealed,
+    /// The descriptor received is not a shared memory object (macOS): it is a pipe,
+    /// socket, directory or device.
+    #[error("the descriptor is not a shared memory object")]
+    NotSharedMemory,
     /// The byte that carries a slab's descriptor arrived without one, or did
     /// not arrive.
     #[error("the slab's descriptor did not arrive")]

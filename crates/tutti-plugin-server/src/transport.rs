@@ -737,6 +737,7 @@ mod state_object_tests {
     /// both ways, leaves the process with the descriptors it began with.
     #[test]
     fn many_states_leak_no_descriptors() {
+        // Counts this process's descriptors, so it relies on nextest's one process per test.
         let open_fds = || std::fs::read_dir("/dev/fd").unwrap().count();
         let (mut host, mut transport) = pair();
         let before = open_fds();

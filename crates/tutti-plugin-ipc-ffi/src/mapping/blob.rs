@@ -257,6 +257,18 @@ mod tests {
         assert!(matches!(err, SlabError::NotSealed), "{err}");
     }
 
+    /// **A descriptor that is not a memory object is refused**: a socket end sent
+    /// where a blob was announced does not read, on any platform.
+    #[test]
+    fn a_descriptor_that_is_not_a_memory_object_is_refused() {
+        use crate::descriptor;
+        let (a, b) = UnixStream::pair().unwrap();
+        let (x, _x) = UnixStream::pair().unwrap();
+        descriptor::send(a.as_fd(), x.as_fd()).unwrap();
+        let read = Blob::receive(b.as_fd(), SlabWire).unwrap().read(16, CAP);
+        assert!(read.is_err(), "a socket was read as a state");
+    }
+
     /// **A blob frame whose object never follows is refused by name**: the mark
     /// byte arrives with no descriptor.
     #[test]
@@ -298,6 +310,7 @@ mod tests {
     #[test]
     fn many_blobs_leak_no_descriptors() {
         let (a, b) = UnixStream::pair().unwrap();
+        // Counts this process's descriptors, so it relies on nextest's one process per test.
         let open_fds = || std::fs::read_dir("/dev/fd").unwrap().count();
         let before = open_fds();
         for i in 0..64u8 {

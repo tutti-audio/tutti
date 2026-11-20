@@ -945,13 +945,15 @@ pub(super) fn handle_control(
         ControlCommand::SaveState { state_use, reply } => {
             let Lane { stream, state } = lane;
             let window = lifecycle.timeouts().state;
+            // The server's `Working` while it saves restarts the window, up to the
+            // ceiling.
             let id = ask(
                 stream,
                 state,
                 ControlRequest::SaveState { state_use },
                 Abandoned::Discard,
                 window,
-                window,
+                lifecycle.timeouts().state_ceiling(),
             )?;
             reply.send(recv_state(stream, inbox, state, id, window)?);
         }
@@ -969,9 +971,13 @@ pub(super) fn handle_control(
             let Lane { stream, state } = lane;
             let window = lifecycle.timeouts().state;
             let id = state.fresh();
-            state
-                .conv
-                .open(id, Abandoned::Discard, Instant::now(), window, window);
+            state.conv.open(
+                id,
+                Abandoned::Discard,
+                Instant::now(),
+                window,
+                lifecycle.timeouts().state_ceiling(),
+            );
             // Held until the answer: where the object is read by name, it stays
             // until then.
             let _lease = ipc::send_blob(stream, id, body, blob)?;
@@ -1557,6 +1563,66 @@ mod tests {
                 .hear(state_ready(2), None, Instant::now(), &mut inbox)
                 .is_err(),
             "the state's answer had ended"
+        );
+    }
+
+    /// **A state request slower than its window lives on the server's beats, under
+    /// the ceiling, and without them is due at the window**: constructed instants,
+    /// no clock. The window and the ceiling are the ones the state handlers open
+    /// a request with.
+    #[test]
+    fn a_state_request_slower_than_its_window_lives_on_beats_under_the_ceiling() {
+        let timeouts = Timeouts::default();
+        let (window, ceiling) = (timeouts.state, timeouts.state_ceiling());
+        let start = Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        let working = |id| ControlFrame::Working {
+            id,
+            stage: crate::Working::Opening,
+        };
+        let open = |state: &mut ControlState| {
+            let id = ReqId::new(1);
+            state
+                .conv
+                .open(id, Abandoned::Discard, start, window, ceiling);
+            id
+        };
+        let mut inbox = Unsolicited::new();
+
+        // Without beats: due at the window.
+        let mut silent = control_state();
+        let id = open(&mut silent);
+        assert!(!silent.conv.is_due(id, at(window.as_secs() - 1)));
+        assert!(silent.conv.is_due(id, at(window.as_secs())));
+
+        // With a beat every few seconds: alive well past the window, due a window
+        // after the last beat, and never past the ceiling.
+        let mut beaten = control_state();
+        let id = open(&mut beaten);
+        for step in 1..=5u64 {
+            let now = at(step * (window.as_secs() - 2));
+            assert!(!beaten.conv.is_due(id, now), "beat {step} came in time");
+            assert!(matches!(
+                beaten.hear(working(id), Some(id), now, &mut inbox),
+                Ok(None)
+            ));
+        }
+        assert!(window.as_secs() * 3 < ceiling.as_secs());
+        let last = at(5 * (window.as_secs() - 2));
+        assert!(
+            !beaten
+                .conv
+                .is_due(id, last + window - Duration::from_secs(1))
+        );
+        assert!(beaten.conv.is_due(id, last + window));
+        assert!(
+            beaten
+                .hear(working(id), Some(id), at(ceiling.as_secs() - 1), &mut inbox)
+                .is_ok()
+        );
+        assert!(
+            beaten.conv.is_due(id, at(ceiling.as_secs())),
+            "the ceiling stands"
         );
     }
 

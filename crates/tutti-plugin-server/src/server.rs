@@ -284,6 +284,10 @@ impl PluginServer {
                 Ok(Incoming::Request(Request { id, body })) => {
                     let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
                         self.load_working(transport, id, body)?
+                    } else if matches!(body, ControlRequest::SaveState { .. }) {
+                        working(transport, id, false, || {
+                            self.session.handle_with(self.main, body, &mut |_| {})
+                        })?
                     } else {
                         self.session.handle_with(self.main, body, &mut |_| {})?
                     };
@@ -296,7 +300,12 @@ impl PluginServer {
                     id,
                     state_use,
                     state,
-                }) => (id, self.session.load_state(self.main, &state, state_use)),
+                }) => (
+                    id,
+                    working(transport, id, true, || {
+                        self.session.load_state(self.main, &state, state_use)
+                    }),
+                ),
                 Ok(Incoming::StageState { id, state }) => (id, self.session.stage_state(state)),
                 Ok(Incoming::StateRefused { id, staging, error }) => {
                     (id, self.session.refuse_state(staging, error))
@@ -358,6 +367,27 @@ impl PluginServer {
     }
 }
 
+/// Runs `work` on request `id` with the host told the server is at work on it,
+/// as [`Working::Restoring`] when `restoring` and as [`Working::Opening`]
+/// otherwise, every [`WORKING_PERIOD`]: a plugin's state save or load is one
+/// call that tells nothing, and the host's wait for the answer restarts on each
+/// beat.
+pub(crate) fn working<R>(
+    transport: &ControlTransport,
+    id: ReqId,
+    restoring: bool,
+    work: impl FnOnce() -> R,
+) -> R {
+    let restoring = AtomicBool::new(restoring);
+    beat_while(
+        transport.pulser().as_deref(),
+        WORKING_PERIOD,
+        id,
+        &restoring,
+        work,
+    )
+}
+
 /// Ends a beat when it goes out of scope, however the scope is left.
 struct StopOnDrop<'a>(&'a StopToken);
 
@@ -411,7 +441,7 @@ impl Drop for PluginServer {
 /// How long a stopped render thread is given to return: it ends at its next
 /// step, so this is a thread stuck inside the plugin or in a read.
 /// How often the server tells the host it is at work on a load.
-const WORKING_PERIOD: Duration = Duration::from_secs(1);
+pub(crate) const WORKING_PERIOD: Duration = Duration::from_secs(1);
 
 const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -502,6 +532,35 @@ mod beat_tests {
         });
         assert_eq!(seen[..3], [Working::Opening; 3]);
         assert!(seen.iter().filter(|s| **s == Working::Restoring).count() >= 3);
+    }
+
+    /// **A state request is beaten over the real control connection**: while the
+    /// work runs, the host reads `Working` frames for the request (as `Restoring`
+    /// for a load, `Opening` for a save), and the work waits on three of them, so
+    /// a beat that never came leaves it waiting.
+    #[cfg(unix)]
+    #[test]
+    fn working_beats_a_state_request_over_the_connection() {
+        use crate::transport::SocketTransport;
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::UnixStream;
+        use tutti_plugin_ipc::read_frame;
+        for restoring in [true, false] {
+            let (mut host, server) = UnixStream::pair().expect("socket pair");
+            let transport: SocketTransport<crate::transport::Incoming, ControlFrame> =
+                SocketTransport::new(crate::main_loop::Stream::from(OwnedFd::from(server)));
+            let seen = working(&transport, ID, restoring, || {
+                (0..3)
+                    .map(|_| stage_of(&read_frame::<_, ControlFrame>(&mut host).expect("a beat")))
+                    .collect::<Vec<_>>()
+            });
+            let want = if restoring {
+                Working::Restoring
+            } else {
+                Working::Opening
+            };
+            assert_eq!(seen, [want; 3]);
+        }
     }
 
     /// **The beat has ended when the work's result is returned**: nothing is

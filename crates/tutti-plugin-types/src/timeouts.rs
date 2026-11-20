@@ -112,12 +112,20 @@ impl Timeouts {
         self.rate.saturating_add(self.param_wait())
     }
 
+    /// The most a state request may be kept waiting by the server's signs of
+    /// life: ten windows. Without them the request is due at
+    /// [`state`](Self::state).
+    #[must_use]
+    pub fn state_ceiling(&self) -> Duration {
+        self.state.saturating_mul(10)
+    }
+
     /// How long a caller waits for a state request's answer: the bridge's
-    /// [`state`](Self::state) deadline and the margin, so the
-    /// bridge's own stall report arrives first.
+    /// [`state_ceiling`](Self::state_ceiling) and the margin, so the bridge's own
+    /// stall report arrives first.
     #[must_use]
     pub fn state_wait(&self) -> Duration {
-        self.state.saturating_add(self.reply_margin)
+        self.state_ceiling().saturating_add(self.reply_margin)
     }
 
     /// Whether every deadline can be waited on.

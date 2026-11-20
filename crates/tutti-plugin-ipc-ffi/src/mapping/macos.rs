@@ -98,10 +98,17 @@ pub(super) fn open(slab: &Slab) -> Result<(File, Backing), SlabError> {
     Ok((duplicate(slab)?, ()))
 }
 
-/// Nothing to check beyond the length the caller checks: this platform has no
-/// seals to look for.
-pub(super) fn verify(_: &File, _: usize) -> Result<(), SlabError> {
-    Ok(())
+/// Checks that `file` is a shared memory object (or a regular file), not a pipe,
+/// socket, directory or device: this platform has no seals to look for, so the
+/// descriptor's type is all it can say. XNU reports a POSIX shared memory object
+/// with no file type bits; the length is the caller's check.
+pub(super) fn verify(file: &File, _: usize) -> Result<(), SlabError> {
+    use rustix::fs::{FileType, fstat};
+    let stat = fstat(file).map_err(file_error("read the type of"))?;
+    match FileType::from_raw_mode(stat.st_mode) {
+        FileType::RegularFile | FileType::Unknown => Ok(()),
+        _ => Err(SlabError::NotSharedMemory),
+    }
 }
 
 pub(super) fn wire(_: &Slab) -> SlabWire {
@@ -122,6 +129,15 @@ pub(super) fn receive(conn: Connection<'_>, _: SlabWire) -> Result<Slab, SlabErr
 
 #[cfg(test)]
 mod tests {
+    /// **A descriptor that is not a memory object is refused by name**: a socket
+    /// end sent where a blob was announced does not read.
+    #[test]
+    fn a_descriptor_that_is_not_shared_memory_is_refused() {
+        let (a, _b) = std::os::unix::net::UnixStream::pair().unwrap();
+        let file = File::from(OwnedFd::from(a));
+        assert!(matches!(verify(&file, 0), Err(SlabError::NotSharedMemory)));
+    }
+
     use super::super::SlabHandle;
     use super::*;
     use crate::MappingWriter;

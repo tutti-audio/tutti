@@ -38,7 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_plugin_ipc::{ControlFrame, Request};
+use tutti_plugin_ipc::{ControlFrame, ControlRequest, Request};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{IpcError, IpcResult, MainThreadMarker, StateError, Wakeups};
 
@@ -255,13 +255,26 @@ pub(crate) fn serve_every(
             continue;
         }
         let (id, reaction) = match transport.recv()? {
-            Incoming::Request(Request { id, body }) => (id, session.handle(main, body)?),
+            Incoming::Request(Request { id, body }) => {
+                let saving = matches!(body, ControlRequest::SaveState { .. });
+                let reaction = if saving {
+                    crate::server::working(transport, id, false, || session.handle(main, body))?
+                } else {
+                    session.handle(main, body)?
+                };
+                (id, reaction)
+            }
             Incoming::SetupSlab { id, layout, slab } => (id, session.setup_slab(&slab, layout)),
             Incoming::LoadState {
                 id,
                 state_use,
                 state,
-            } => (id, session.load_state(main, &state, state_use)),
+            } => (
+                id,
+                crate::server::working(transport, id, true, || {
+                    session.load_state(main, &state, state_use)
+                }),
+            ),
             Incoming::StageState { id, state } => (id, session.stage_state(state)),
             Incoming::StateRefused { id, staging, error } => {
                 (id, session.refuse_state(staging, error))

@@ -86,7 +86,8 @@ pub struct Request {
 /// life the host waits longer on, and for a load the point it has reached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Working {
-    /// Opening the plugin: its library, instance and initialisation.
+    /// At work before any restore: opening the plugin (its library, instance and
+    /// initialisation), or saving or applying a state.
     Opening,
     /// Restoring the staged state into the opened plugin: one opaque plugin
     /// call, after which a failure is the state's to answer for.
