@@ -100,6 +100,11 @@ impl<F: RingFloat> Built<F> {
         self.tx.clone()
     }
 
+    /// The streams' sizing, for the control side's building of a stream.
+    pub(super) fn config(&self) -> BufferConfig {
+        self.config
+    }
+
     /// The shared handles, for the control side's own reads.
     pub(super) fn shared(&self) -> Handles<F> {
         self.shared.clone()
@@ -117,7 +122,7 @@ impl<F: RingFloat> Built<F> {
     pub(super) fn start(self, executor: &Executor) -> Result<Running, Error> {
         let stop = Arc::new(AtomicBool::new(false));
         let bell = self.shared.bell.clone();
-        let cycle = StreamerCycle::new(self.config, self.tx.clone());
+        let cycle = StreamerCycle::new(self.config);
         // The future owns the queue's one receiver, so however it ends (a panic
         // included) its drop tells every sender the streamer is gone instead of
         // letting them queue into nothing; and its table's drop tells every live
@@ -143,12 +148,11 @@ impl<F: RingFloat> Built<F> {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    /// The caller drives: its cycle is stepped by `Manual::step`, and the decodes the
-    /// executor holds run in the same step.
+    /// The caller drives: its cycle is stepped by `Manual::step`.
     pub(super) fn manual(self) -> Manual<F> {
         Manual {
             rx: Some(self.rx),
-            cycle: StreamerCycle::new(self.config, self.tx),
+            cycle: StreamerCycle::new(self.config),
             shared: self.shared,
         }
     }
@@ -218,8 +222,8 @@ impl<F: RingFloat> std::fmt::Debug for Manual<F> {
 
 #[cfg(any(test, feature = "testing"))]
 impl<F: RingFloat> Manual<F> {
-    /// One cycle on the calling thread: drain every queued command, poll the
-    /// decodes in flight, then apply directions and refills. Returns once that work
+    /// One cycle on the calling thread: drain every queued command, then
+    /// apply directions and refills. Returns once that work
     /// is done, reporting what the future *would* have done next.
     pub(super) fn step(&mut self) -> StepOutcome {
         let queue = self.rx.as_ref();

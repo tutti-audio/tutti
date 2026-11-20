@@ -1,55 +1,37 @@
-//! The decode lane: whole-file decodes off the streamer's cycles.
+//! Reading a file for an open: [`OpenStream`] is the work, [`OpenedStream`] what it found.
 //!
-//! A file that cannot seek (mp3, ogg: no frame count, or a decoder that will
-//! not seek) is decoded whole before its stream can exist, and that takes as
-//! long as the file is. Done inside the command drain it stopped every other
-//! stream's refill for its duration and back-pressured the caller's bounded
-//! queue. Each decode is a future that yields between
-//! chunks of [`DECODE_CHUNK`] frames, so one poll stays short; its result comes
-//! back through the streamer's own command queue as
-//! [`Decoded`](super::command::StreamerCommand::Decoded), so the streamer wakes for
-//! it as it wakes for any command.
-//!
-//! A decode ends after the answer it sends, or when the streamer's queue is gone
-//! (its send fails). The lane holds the decodes and the streamer's cycles poll them,
-//! so no executor is held by the streamer's future.
-
-// With no codec feature there is no decode to run: the lane is never asked for
-// a job, and `load_wave` reads only the cache. A feature-matrix artifact, so
-// scoped to that build (as `metrics.rs` and `cache.rs` are).
-#![cfg_attr(
-    not(codec),
-    allow(
-        dead_code,
-        reason = "the decode lane's only caller is the codec-gated whole-file arm of `begin`"
-    )
-)]
+//! A stream's ring is sized from the file's header and fed from a decoder that
+//! seeks, or from the file decoded whole when it cannot seek (mp3, ogg: no frame
+//! count, or a decoder that will not seek). Both are file reads that take as long
+//! as the file is, so they run on the thread of the app that asked
+//! ([`OpenStream::run`]), never on the streamer's, which only keeps rings fed.
+//! The streamer takes the result back ([`DiskStreamer::adopt`](crate::DiskStreamer::adopt)).
 
 use std::any::Any;
-use std::future::Future;
-#[cfg(any(test, codec))]
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Waker};
+use std::sync::Arc;
 
-use crossbeam_channel::TrySendError;
-use tutti_buffers::Wave;
+use tutti_buffers::{ChannelLayout, Wave};
 use tutti_platform::Asset;
+#[cfg(codec)]
 use tutti_units::Samples;
 
-use super::StreamerSender;
 use super::cache::LruCache;
 #[cfg(codec)]
 use super::cache::wave_bytes;
-use super::command::{Decoded, StreamId, StreamerCommand};
-use super::handlers::Handles;
-use super::loop_body::yield_now;
-use super::metrics::{Metrics, ReadMeter};
-use crate::OpenError;
+#[cfg(test)]
+use super::command::StreamId;
+#[cfg(codec)]
+use super::metrics::Metrics;
+#[cfg(codec)]
+use super::metrics::ReadMeter;
+use super::open::Opened;
+use super::record::Record;
+use crate::{OpenError, StreamStart};
 use tutti_rt::RingFloat;
 
-/// The frames one poll of a decode reads before it yields.
+/// The frames one step of a whole-file decode reads.
+#[cfg(codec)]
 const DECODE_CHUNK: Samples = Samples::new(1 << 16);
 
 /// A hook a test runs where the streamer reads a file: the stream and the
@@ -57,22 +39,19 @@ const DECODE_CHUNK: Samples = Samples::new(1 << 16);
 #[cfg(test)]
 pub(super) type ReadHook = Arc<dyn Fn(StreamId, usize) + Send + Sync>;
 
-/// A hook a test runs where a decode starts, before a file is decoded. It may
-/// block, to hold a decode open.
+/// A hook a test runs where a whole-file decode starts, before a file is
+/// decoded. It may panic.
 #[cfg(test)]
 pub(super) type DecodeHook = Arc<dyn Fn(&Asset) + Send + Sync>;
 
-/// What a test can replace: what runs where the streamer reads a file and where a
-/// decode starts. Production is [`Seams::default`].
+/// What a test can replace: what runs where the streamer reads a file and where an
+/// open's decode starts. Production is [`Seams::default`].
 #[derive(Clone, Default)]
 pub(super) struct Seams {
     #[cfg(test)]
     pub(super) read_hook: Option<ReadHook>,
     #[cfg(test)]
     pub(super) decode_hook: Option<DecodeHook>,
-    /// The frames a decode reads per poll, in place of [`DECODE_CHUNK`].
-    #[cfg(test)]
-    pub(super) decode_chunk: Option<Samples>,
 }
 
 /// Why `asset` could not be turned into audio: the source itself when it
@@ -84,174 +63,187 @@ pub(super) fn unreadable(asset: &Asset) -> OpenError {
     }
 }
 
-/// A decode as the lane holds it.
-type Decode = Pin<Box<dyn Future<Output = ()> + Send>>;
-
-/// The decode lane: the decodes in flight, polled by the streamer's own cycles, one
-/// chunk each. Streamer-local, so the streamer's future holds no executor.
-pub(super) struct DecodeLane<F: RingFloat> {
-    /// The streamer's own queue, where a result is sent.
-    reports: StreamerSender<F>,
-    /// In a `Mutex` only for `Sync` (a streamer is held by shared reference); the lane
-    /// is streamer-local and only ever reaches it through `get_mut`.
-    active: Mutex<Vec<Decode>>,
-}
-
-impl<F: RingFloat> DecodeLane<F> {
-    pub(super) fn new(reports: StreamerSender<F>) -> Self {
-        Self {
-            reports,
-            active: Mutex::new(Vec::new()),
-        }
-    }
-
-    /// Starts decoding `asset` whole for stream `id`. The answer arrives as a
-    /// `Decoded` command, after enough [`poll`](Self::poll)s.
-    pub(super) fn submit(&mut self, shared: &Handles<F>, id: StreamId, asset: Asset) {
-        let reports = self.reports.clone();
-        let (cache, metrics) = (Arc::clone(&shared.cache), Arc::clone(&shared.metrics));
-        #[cfg(test)]
-        let decode_hook = shared.seams.decode_hook.clone();
-        #[cfg(test)]
-        let chunk = shared.seams.decode_chunk.unwrap_or(DECODE_CHUNK);
-        #[cfg(not(test))]
-        let chunk = DECODE_CHUNK;
-        self.active_mut().push(Box::pin(async move {
-            #[cfg(test)]
-            let wave = decode_whole(&cache, &metrics, &asset, chunk, decode_hook.as_ref()).await;
-            #[cfg(not(test))]
-            let wave = decode_whole(&cache, &metrics, &asset, chunk).await;
-            send_decoded(&reports, id, wave).await;
-        }));
-    }
-
-    /// Polls every decode once, which reads one chunk of each; whether any ran: one
-    /// that is still running, or one that ended and sent its answer, which the next
-    /// cycle's drain applies. The streamer polls again after yielding, so the waker
-    /// is not used.
-    pub(super) fn poll(&mut self) -> bool {
-        let mut cx = Context::from_waker(Waker::noop());
-        let active = self.active_mut();
-        let before = active.len();
-        active.retain_mut(|decode| decode.as_mut().poll(&mut cx).is_pending());
-        before > 0
-    }
-
-    fn active_mut(&mut self) -> &mut Vec<Decode> {
-        self.active
-            .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-/// The wave of `asset` or why there is none. A panic in the decoder is this file's
-/// failure, not the executor's.
-async fn decode_whole<F: RingFloat>(
-    cache: &LruCache<F>,
-    metrics: &Metrics,
-    asset: &Asset,
-    chunk: Samples,
-    #[cfg(test)] hook: Option<&DecodeHook>,
-) -> Result<Arc<Wave<F>>, OpenError> {
-    #[cfg(test)]
-    let hooked = catch_unwind(AssertUnwindSafe(|| {
-        if let Some(hook) = hook {
-            hook(asset);
-        }
-    }));
-    #[cfg(not(test))]
-    let hooked: Result<(), Box<dyn Any + Send>> = Ok(());
-    let loaded = match hooked {
-        Ok(()) => load_wave(cache, metrics, asset, chunk).await,
-        Err(payload) => Err(payload),
-    };
-    match loaded {
-        Ok(Some(wave)) => Ok(wave),
-        Ok(None) => Err(unreadable(asset)),
-        Err(payload) => {
-            tracing::error!(
-                "decoding {} panicked: {}",
-                asset.name(),
-                panic_message(payload.as_ref())
-            );
-            Err(OpenError::Format)
-        }
-    }
-}
-
-/// Sends the answer without blocking: a full queue yields and tries again, a
-/// gone streamer drops it.
-async fn send_decoded<F: RingFloat>(
-    reports: &StreamerSender<F>,
-    id: StreamId,
-    wave: Result<Arc<Wave<F>>, OpenError>,
-) {
-    let mut cmd = StreamerCommand::Decoded {
-        id,
-        wave: Decoded(wave),
-    };
-    loop {
-        match reports.try_send(cmd) {
-            Err(TrySendError::Full(back)) => {
-                cmd = back;
-                yield_now().await;
-            }
-            Ok(()) | Err(TrySendError::Disconnected(_)) => return,
-        }
-    }
-}
-
-/// The whole-file fallback: hand back a cached [`Wave`], or decode one and cache
-/// it. `None` means the file could not be turned into audio.
-///
-/// With no codec feature enabled there is no decoder to call, so the miss arm is
-/// gated out and a miss is simply `None`. The cache *lookup* stays live in both
-/// builds: entries reach it from elsewhere, and a hit needs no decoder.
-async fn load_wave<F: RingFloat>(
-    cache: &LruCache<F>,
-    metrics: &Metrics,
-    asset: &Asset,
-    chunk: Samples,
-) -> Result<Option<Arc<Wave<F>>>, Box<dyn Any + Send>> {
-    // Taken once: a hit and the insert after a miss use the same key. An asset
-    // with no identity is decoded each time and never cached.
-    let key = asset.identity();
-    if let Some(cached) = key.as_ref().and_then(|key| cache.get(key)) {
-        return Ok(Some(cached));
-    }
-
-    // `WaveDecode` is `tutti-codec`'s decode path, which is compiled only when a
-    // codec feature is on — calling it unconditionally breaks the
-    // `--no-default-features` build.
+/// What a stream's ring is fed from: a decoder that seeks in the file, or the
+/// file decoded whole.
+pub(super) enum Source<F: RingFloat> {
     #[cfg(codec)]
-    {
-        let mut meter = ReadMeter::new();
-        let Ok(mut decode) = tutti_codec::WaveDecode::<F>::open(asset.clone()) else {
-            return Ok(None);
-        };
-        loop {
-            match catch_unwind(AssertUnwindSafe(|| decode.step(chunk)))? {
-                Ok(Some(wave)) => {
-                    let arc_wave = Arc::new(wave);
-                    meter.record_read(wave_bytes(&arc_wave), metrics);
-                    if let Some(key) = key {
-                        cache.insert(key, arc_wave.clone());
-                    }
-                    return Ok(Some(arc_wave));
-                }
-                Ok(None) => yield_now().await,
-                Err(_) => return Ok(None),
-            }
+    Stream(tutti_codec::WaveMetadata, Box<tutti_codec::FileIn<F>>),
+    Whole(Arc<Wave<F>>),
+}
+
+/// An open the app runs: the reading of one file, for a stream that
+/// [`DiskStreamer::adopt`](crate::DiskStreamer::adopt) then puts in service.
+/// Made by [`DiskStreamer::open_stream`](crate::DiskStreamer::open_stream).
+///
+/// It holds nothing of the streamer but its wave cache, so it is `Send`: run
+/// it on whichever thread the app reads files on.
+#[must_use = "an open does nothing until it runs"]
+pub struct OpenStream<F: RingFloat> {
+    asset: Asset,
+    start: StreamStart,
+    width: Option<ChannelLayout>,
+    cache: Arc<LruCache<F>>,
+    #[cfg(codec)]
+    metrics: Arc<Metrics>,
+    #[cfg(test)]
+    decode_hook: Option<DecodeHook>,
+}
+
+impl<F: RingFloat> std::fmt::Debug for OpenStream<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenStream")
+            .field("asset", &self.asset.name())
+            .field("start", &self.start)
+            .field("width", &self.width)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F: RingFloat> OpenStream<F> {
+    pub(super) fn new(
+        asset: Asset,
+        start: StreamStart,
+        width: Option<ChannelLayout>,
+        cache: Arc<LruCache<F>>,
+        #[cfg(codec)] metrics: Arc<Metrics>,
+        #[cfg(test)] decode_hook: Option<DecodeHook>,
+    ) -> Self {
+        Self {
+            asset,
+            start,
+            width,
+            cache,
+            #[cfg(codec)]
+            metrics,
+            #[cfg(test)]
+            decode_hook,
         }
     }
 
-    // Silences the unused-parameter warning in the codec-free build, where the
-    // only way to reach this line is a cache miss with nothing able to fill it.
-    #[cfg(not(codec))]
-    {
-        let _ = (metrics, ReadMeter::new(), chunk);
-        Ok(None)
+    /// Reads the file: a seeking decoder when the file can seek (what
+    /// [`probe`](crate::probe()) says), else the wave the cache already holds,
+    /// else the file decoded whole, on this thread, which the cache then keeps.
+    ///
+    /// The streamer is not touched. A decoder that panics fails this open
+    /// ([`OpenError::Format`]) and nothing else.
+    ///
+    /// # Errors
+    ///
+    /// [`OpenError::Io`] when the file cannot be opened, [`OpenError::Format`] when it is
+    /// not audio this build decodes.
+    pub fn run(self) -> Result<OpenedStream<F>, OpenError> {
+        let source = match catch_unwind(AssertUnwindSafe(|| self.read())) {
+            Ok(source) => source?,
+            Err(payload) => {
+                tracing::error!(
+                    "opening {} panicked: {}",
+                    self.asset.name(),
+                    panic_message(payload.as_ref())
+                );
+                return Err(OpenError::Format);
+            }
+        };
+        Ok(OpenedStream {
+            asset: self.asset,
+            start: self.start,
+            width: self.width,
+            stage: Stage::Read(source),
+        })
     }
+
+    /// The source of the stream: a seeking decoder, a cached wave, or the file
+    /// decoded whole.
+    ///
+    /// The verdict on seeking comes from [`crate::probe()`], not from a local
+    /// copy of the rule. A host picks a playback tier before any of this runs, and it
+    /// must reach the same conclusion this does, so "can the streamer stream it" is asked
+    /// in exactly one place.
+    fn read(&self) -> Result<Source<F>, OpenError> {
+        #[cfg(codec)]
+        if let Some((meta, decoder)) = seeking_decoder(&self.asset) {
+            return Ok(Source::Stream(meta, Box::new(decoder)));
+        }
+        let key = self.asset.identity();
+        if let Some(wave) = key.as_ref().and_then(|key| self.cache.get(key)) {
+            return Ok(Source::Whole(wave));
+        }
+        // With no decoder compiled in, a miss has nowhere to be filled.
+        #[cfg(not(codec))]
+        {
+            Err(unreadable(&self.asset))
+        }
+        #[cfg(codec)]
+        {
+            #[cfg(test)]
+            if let Some(hook) = &self.decode_hook {
+                hook(&self.asset);
+            }
+            let mut meter = ReadMeter::new();
+            let Ok(mut decode) = tutti_codec::WaveDecode::<F>::open(self.asset.clone()) else {
+                return Err(unreadable(&self.asset));
+            };
+            loop {
+                match decode.step(DECODE_CHUNK) {
+                    Ok(Some(wave)) => {
+                        let wave = Arc::new(wave);
+                        meter.record_read(wave_bytes(&wave), &self.metrics);
+                        // An asset with no identity is decoded each time and never cached.
+                        if let Some(key) = key {
+                            self.cache.insert(key, Arc::clone(&wave));
+                        }
+                        return Ok(Source::Whole(wave));
+                    }
+                    Ok(None) => {}
+                    Err(_) => return Err(unreadable(&self.asset)),
+                }
+            }
+        }
+    }
+}
+
+/// An open's read file: what [`DiskStreamer::adopt`](crate::DiskStreamer::adopt) builds
+/// the stream from. `Send`, so it crosses from the thread that read the file to the one
+/// that owns the streamer.
+#[must_use = "a read file is a stream only once adopted"]
+pub struct OpenedStream<F: RingFloat> {
+    pub(super) asset: Asset,
+    pub(super) start: StreamStart,
+    pub(super) width: Option<ChannelLayout>,
+    pub(super) stage: Stage<F>,
+}
+
+/// How far an open has come: the file read, or the stream built from it and
+/// waiting for room in the streamer's queue.
+pub(super) enum Stage<F: RingFloat> {
+    Read(Source<F>),
+    Built(Box<Record<F>>, Opened<F>),
+}
+
+impl<F: RingFloat> std::fmt::Debug for OpenedStream<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenedStream")
+            .field("asset", &self.asset.name())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Opens an incremental disk decoder for `asset`: `Some((metadata, decoder))` when the
+/// format seeks (it has a frame count and the decoder opened), so the region can stream
+/// real ranges from disk; `None` for the whole-file fallback, when the probe fails or the
+/// format does not seek.
+#[cfg(codec)]
+fn seeking_decoder<F: RingFloat>(
+    asset: &Asset,
+) -> Option<(tutti_codec::WaveMetadata, tutti_codec::FileIn<F>)> {
+    if !crate::probe(asset.clone()).ok()?.streamable {
+        return None;
+    }
+    // Streamable, so both of these succeed, but they are still fallible calls and are
+    // handled rather than unwrapped: the probe read the header a moment ago, and a file
+    // can be replaced between the two reads.
+    let meta = tutti_codec::read_wave_metadata(asset.clone()).ok()?;
+    let decoder = tutti_codec::FileIn::<F>::open(asset.clone()).ok()?;
+    Some((meta, decoder))
 }
 
 /// What a panic said, for the log.

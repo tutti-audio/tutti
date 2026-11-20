@@ -279,7 +279,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
+pub use sampler::{OpenStream, OpenStreamError, OpenedStream, SamplerError};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;

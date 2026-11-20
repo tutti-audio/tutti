@@ -9,9 +9,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
 use tutti_sampler::StreamStart;
-use tutti_session::{
-    AudioEntry, OutPort, PoolState, Root, SamplerEvent, Session, SessionEvent, audio_file,
-};
+use tutti_session::{AudioEntry, OutPort, PoolState, Root, Session, SessionEvent, audio_file};
 use tutti_units::{Beat, SampleRate};
 
 #[path = "../support/f64_nodes.rs"]
@@ -123,7 +121,7 @@ fn a_pooled_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     }
 }
 
-/// **A disk stream opened on an `f64` session lands as `Opened`, is taken in `f64`, and its
+/// **A disk stream opened on an `f64` session is applied in `f64`, and its
 /// clip renders `FINE + value(k)` at the file's frame `k` in `f64`.**
 #[test]
 fn an_f64_session_streams_a_file_into_f64_frames() {
@@ -132,14 +130,12 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
-    let id = until(&mut s, "the open", |_, events| {
-        events.into_iter().find_map(|event| match event {
-            SessionEvent::Sampler(SamplerEvent::Opened { id }) => Some(id),
-            _ => None,
-        })
-    });
-    let (stream, reader) = s.take_stream(id).expect("the landed stream");
+    let opened = s
+        .open_stream(&path, StreamStart::HEAD)
+        .expect("a streamer")
+        .run()
+        .expect("the file reads");
+    let (stream, reader) = s.apply(opened).expect("the session serves it");
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
     let (key, handle) = s
         .graph()

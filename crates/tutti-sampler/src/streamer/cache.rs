@@ -20,9 +20,9 @@ use tutti_rt::LockExt;
 
 /// Bounded LRU cache with entry count and byte limits.
 ///
-/// Two threads touch it: the streamer's (a lookup when it opens a stream, a pin
-/// while the stream lives) and the decode lane's (a lookup, then an insert of
-/// the wave it decoded). Neither is the audio thread, and neither holds the
+/// Two kinds of thread touch it: the thread that adopts a stream (a pin while
+/// the stream lives) and the thread that reads a file for an open (a lookup,
+/// then an insert of the wave it decoded). Neither is the audio thread, and neither holds the
 /// lock for more than a map operation: a wave an insert evicts is dropped after
 /// the lock is released. The control side never reads it (a stream's file is
 /// its own [`StreamFile`](super::control::StreamFile)), so a plain map behind
