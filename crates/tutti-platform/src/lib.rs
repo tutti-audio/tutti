@@ -29,7 +29,8 @@
 //!   [`unblock`](Executor::unblock) runs a blocking closure off the drive;
 //!   [`spawn_dedicated`](Executor::spawn_dedicated) gives a long-lived future a thread
 //!   of its own; [`Executor::sleep_until`] is a deadline as a future ([`Sleep`]);
-//!   [`Executor::timer`] gives a [`Timer`] that makes them and keeps nothing alive.
+//!   [`Executor::timer`] gives a [`Timer`] that makes them and keeps nothing alive, and
+//!   [`Executor::downgrade`] a [`WeakExecutor`] that reaches the executor while it lives.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
