@@ -10,7 +10,7 @@ use tutti_graph::{
 };
 use tutti_nodes::{
     CompressorConfig, CompressorControls, CompressorNode, KeySource, MultibandBands,
-    MultibandCompressorConfig, MultibandCompressorNode, SvfFilterNode, SvfType,
+    MultibandCompressorConfig, MultibandCompressorNode, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::Param;
 use tutti_session::{
@@ -27,10 +27,10 @@ fn detached() -> (DetachedSession, tutti_session::Background) {
 
 fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
     s.graph()
-        .add(SvfFilterNode::new(
-            SvfType::LowPass,
-            Hz::new(cutoff),
-            Q::new(0.75),
+        .add(SvfFilterNode::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(cutoff))
+                .q(Q::new(0.75)),
         ))
         .0
 }
@@ -298,10 +298,10 @@ fn a_seconds_param_keeps_its_full_width() {
 #[test]
 fn a_write_and_a_read_go_through_the_nodes_cell() {
     let (mut s, _bg) = detached();
-    let (lp, controls) = s.graph().add(SvfFilterNode::new(
-        SvfType::LowPass,
-        Hz::new(1_000.0),
-        Q::new(0.7),
+    let (lp, controls) = s.graph().add(SvfFilterNode::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7)),
     ));
     s.set(lp.cutoff().to(Hz::new(2_500.0))).unwrap();
     assert_eq!(controls.get(UnitParam::Cutoff), Some(2_500.0));
@@ -451,10 +451,10 @@ fn a_key_of_a_swapped_out_node_type_is_no_such_target() {
     swap(
         &mut s,
         bare,
-        Unforkable(SvfFilterNode::new(
-            SvfType::LowPass,
-            Hz::new(1_000.0),
-            Q::new(0.7),
+        Unforkable(SvfFilterNode::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(0.7)),
         )),
     );
     for key in [stale, bare] {

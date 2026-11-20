@@ -20,11 +20,12 @@ use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode,
     ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, LfoNode,
-    LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode,
-    PhaserConfig, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages,
-    SvfControls, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    DelayLayout, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode,
+    EqBandConfig, EqBandNode, GateConfig, GateControls, GateNode, InterpolationMode, KeySource,
+    LadderFilterConfig, LadderFilterNode, LadderType, LfoNode, LfoShape, LimiterConfig,
+    LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig,
+    PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfFilterConfig,
+    SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -182,7 +183,9 @@ fn delay_line() {
 #[test]
 fn distortion() {
     IsolateRow::new("DistortionNode (stereo)", || {
-        DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(2.0))
+        DistortionNode::<f32>::from(
+            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(2.0)),
+        )
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
@@ -501,10 +504,10 @@ fn plate_reverb() {
 #[test]
 fn ladder() {
     IsolateRow::new("LadderFilterNode (LP12)", || {
-        LadderFilterNode::<f32>::new(
-            LadderType::LP12,
-            Hz::new(1_000.0),
-            Resonance::new_clamped(0.3),
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP12)
+                .freq(Hz::new(1_000.0))
+                .res(Resonance::new_clamped(0.3)),
         )
     })
     .control("cutoff", |l| {
@@ -525,24 +528,21 @@ fn ladder() {
 /// unit tests run it).
 #[test]
 fn svf() {
-    tutti_graph::contract::assert_param_fork(SvfFilterNode::<f32>::with_controls(
-        ChannelLayout::MONO,
-        SvfControls {
-            ty: SvfType::Bell,
-            freq: Hz::new(1_000.0),
-            q: Q::new(0.7),
-            gain: Db::new(6.0),
-        },
+    tutti_graph::contract::assert_param_fork(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Bell)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(6.0)),
     ));
 }
 
 #[test]
 fn eq_band() {
-    tutti_graph::contract::assert_param_fork(EqBandNode::<f32>::new(
-        SvfType::Bell,
-        Hz::new(1_000.0),
-        Q::new(0.7),
-        Db::new(6.0),
+    tutti_graph::contract::assert_param_fork(EqBandNode::<f32>::from(
+        EqBandConfig::new(SvfType::Bell)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(6.0)),
     ));
 }
 

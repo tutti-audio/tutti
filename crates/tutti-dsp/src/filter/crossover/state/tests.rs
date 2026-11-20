@@ -1,7 +1,6 @@
 use super::super::CrossoverBlend;
 use super::super::blend::Tpt;
 use super::*;
-use crate::CrossoverModel;
 use crate::testing::{amplitude_at, lock_in};
 use tutti_units::{Hz, SampleRate};
 
@@ -40,7 +39,7 @@ fn sweep() -> Vec<f64> {
 /// `hz`, in steady state: the tree of `freqs` at 48 kHz run as the crossover runs it.
 fn bands_at(freqs: &[f64], hz: f64) -> (Vec<(f64, f64)>, f64) {
     let freqs: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
-    let model = CrossoverModel::new(&freqs, SampleRate::of(RATE)).unwrap();
+    let model = crate::testing::crossover_model(&freqs, SampleRate::of(RATE));
     let mut state = CrossoverState::<f64>::default();
     let c = model.blend();
     let x = unit_sine(hz, RATE, SETTLE + WINDOW);
@@ -173,10 +172,8 @@ fn max_gain() -> f64 {
 fn ends(splits: usize) -> [CrossoverBlend; 2] {
     let at = |lo: f64, hi: f64| {
         let f: Vec<Hz> = [lo, hi][..splits].iter().map(|&f| Hz::new(f)).collect();
-        // Strictly increasing and under Nyquist as `new` checks; `design_into` clamps to the cap.
-        CrossoverModel::new(&f, SampleRate::of(RATE))
-            .unwrap()
-            .blend()
+        // Strictly increasing and under Nyquist, as a crossover accepts; `design_into` clamps to the cap.
+        crate::testing::crossover_model(&f, SampleRate::of(RATE)).blend()
     };
     [at(1.0, 2.0), at(23_951.0, 23_952.0)]
 }
@@ -338,9 +335,7 @@ fn a_held_split_rings_out_by_the_time_its_matrix_gives() {
         n += 1;
         assert!(n < 100_000, "never decays");
     }
-    let held = CrossoverModel::new(&[Hz::new(1_000.0)], SampleRate::of(RATE))
-        .unwrap()
-        .blend();
+    let held = crate::testing::crossover_model(&[Hz::new(1_000.0)], SampleRate::of(RATE)).blend();
     for _ in 0..n {
         state.tick(&held.narrowed(), 0.0);
     }

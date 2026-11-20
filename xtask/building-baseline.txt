@@ -74,10 +74,6 @@ tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with
 tutti-dsp  with-prefix  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::with_window_fn
 tutti-dsp  setter  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::set_sample_rate
 tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolver::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::ordered
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::designed
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/resample/fft.rs::FftResampler::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::new
@@ -181,15 +177,6 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNod
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::true_stereo
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir
-tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/eq_band.rs::EqBandNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_controls
 tutti-nodes  node-ctor  crates/tutti-nodes/src/kernel.rs::KernelNode::with_kernel
 tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::LfoNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::saw
@@ -215,7 +202,6 @@ tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverN
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  ctor-result  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new
 

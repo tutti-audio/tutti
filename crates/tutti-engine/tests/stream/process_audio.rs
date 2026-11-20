@@ -9,7 +9,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_timeline::{MotionEvent, Timeline, Transport};
 use tutti_units::{Beat, BeatDuration};
 use tutti_units::{Hz, Q};
@@ -35,7 +35,11 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
     ed.insert(
         filter,
         "filter",
-        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(2_000.0), Q::new(0.7)),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(2_000.0))
+                .q(Q::new(0.7)),
+        ),
     );
     ed.spec_mut().topology.edges.insert(
         InPort {

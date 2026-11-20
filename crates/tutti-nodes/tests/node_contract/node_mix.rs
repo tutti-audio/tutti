@@ -23,10 +23,11 @@ use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
 use tutti_graph::{IntoNode, Prepare, Standalone};
 use tutti_nodes::{
-    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, CrossoverNode, DelayConfig,
-    DelayControls, DelayLayout, DelayNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode,
-    GateConfig, GateControls, GateNode, InterpolationMode, KeySource, MaxDelay, ModDelayConfig,
-    ModDelayNode, PhaserConfig, PhaserNode, PlateReverbConfig, PlateReverbNode, Stages,
+    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig,
+    CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
+    FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, KeySource, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
+    PlateReverbConfig, PlateReverbNode, Stages,
 };
 use tutti_units::{CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds};
 
@@ -404,8 +405,11 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     check_io(
         "crossover (stereo, two bands)",
         &|| {
-            CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)])
-                .expect("one split")
+            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                BusTopology::STEREO,
+                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+            ))
+            .expect("one split")
         },
         2,
         4,
@@ -414,7 +418,13 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     // Mono: band 0 is the input at DRY, band 1 silent (not a centre on both).
     let x = vec![noise(90, FRAMES)];
     let dry = rendered(
-        &|| CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(1_000.0)]).expect("one split"),
+        &|| {
+            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                BusTopology::MONO,
+                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+            ))
+            .expect("one split")
+        },
         &x,
         Mix::DRY,
     );

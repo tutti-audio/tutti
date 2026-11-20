@@ -22,8 +22,9 @@ use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
 
+use tutti_buffers::ChannelLayout;
 use tutti_modulation::{Follower, Lfo};
-use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{InPort, Key, OutPort, Root, RouteSpec, Session};
 use tutti_units::Samples;
 use tutti_units::{BeatsPerCycle, Depth, Hz, Q};
@@ -37,10 +38,10 @@ fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
         .expect("builds");
     let mut filters = Vec::with_capacity(n);
     for _ in 0..n {
-        let (f, _) = s.graph().add(SvfFilterNode::<f32>::new(
-            SvfType::LowPass,
-            Hz::new(1_000.0),
-            Q::new(0.7),
+        let (f, _) = s.graph().add(SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(0.7)),
         ));
         if let Some(&prev) = filters.last() {
             s.graph()

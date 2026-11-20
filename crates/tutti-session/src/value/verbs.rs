@@ -30,14 +30,19 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Examples
     ///
     /// ```
-    /// use tutti_nodes::{SvfFilterNode, SvfType};
+    /// use tutti_buffers::ChannelLayout;
+    /// use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
     /// use tutti_session::Session;
     /// use tutti_units::{Hz, Q};
     ///
     /// let (mut session, _background) = Session::builder().build().unwrap();
     /// let (filter, _) = session
     ///     .graph()
-    ///     .add(SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(500.0), Q::new(0.7)));
+    ///     .add(SvfFilterNode::<f32>::from(
+    ///         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+    ///             .freq(Hz::new(500.0))
+    ///             .q(Q::new(0.7)),
+    ///     ));
     /// session.set(filter.cutoff().to(Hz::new(800.0))).unwrap();
     /// session.set(filter.cutoff().modify(|hz| *hz * 2.0)).unwrap();
     /// assert_eq!(session.get(filter.cutoff()).unwrap(), Hz::new(1_600.0));

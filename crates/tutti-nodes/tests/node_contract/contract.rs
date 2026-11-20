@@ -23,14 +23,14 @@
 //!
 //! Every row is a graph node (`Row::new`).
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::Mono;
-use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_graph::contract_tests;
 use tutti_nodes::{
-    CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode,
-    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, MultibandBands,
-    MultibandCompressorConfig, MultibandCompressorNode,
+    CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout,
+    DelayNode, InterpolationMode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
+    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::{Db, Feedback, Hz, Samples, Seconds};
 
@@ -114,7 +114,15 @@ fn delay_line_row() -> Row {
 fn crossover_row() -> Row {
     Row::new(
         "CrossoverNode<f32> (stereo, 2 bands, right low band)",
-        || Box::new(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap()),
+        || {
+            Box::new(
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                ))
+                .unwrap(),
+            )
+        },
         impulse(1),
         Detect::Threshold(0.0),
     )
