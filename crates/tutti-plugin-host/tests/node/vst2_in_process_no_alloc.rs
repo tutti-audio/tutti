@@ -69,7 +69,7 @@ fn process_steady_state_does_not_allocate() {
 #[test]
 fn process_with_a_meter_does_not_allocate() {
     use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-    use tutti_transport::ProjectMeter;
+    use tutti_timeline::ProjectMeter;
     use tutti_units::Beat;
 
     let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();

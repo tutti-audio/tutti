@@ -38,7 +38,7 @@ use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
 use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
 use tutti_rt::PendingSampleRate;
 use tutti_tempo::TempoView;
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
@@ -958,7 +958,7 @@ mod transport_tests {
     use tutti_music::TimeSignature;
     use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue};
     use tutti_tempo::TempoMap;
-    use tutti_transport::ProjectMeter;
+    use tutti_timeline::ProjectMeter;
     use tutti_units::Latency;
     use tutti_units::{Beat, Bpm, Frame, SampleRate};
 

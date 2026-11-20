@@ -7,7 +7,7 @@
 )]
 
 use tutti_graph::NodeKey;
-use tutti_transport::{MotionFsm, Transport, TransportSettings};
+use tutti_timeline::{MotionFsm, Transport, TransportSettings};
 use tutti_units::SampleRate;
 
 use crate::TransportHandle;

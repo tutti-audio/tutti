@@ -397,7 +397,7 @@ pub struct Graph<F: Float = f32> {
     /// reader on the control side; [`SessionNode::bind_tempo`]). The
     /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
     /// already covers the cell.
-    pub(crate) tempo: tutti_transport::TempoReader,
+    pub(crate) tempo: tutti_timeline::TempoReader,
     /// A re-prepare resumed in the update's collect: its plan's figures are
     /// published at the commit.
     resumed: bool,
@@ -516,7 +516,7 @@ impl<F: Float> Graph<F> {
         rate: SampleRate,
         max_block: MaxBlock,
         quantum: Option<MaxBlock>,
-        tempo: tutti_transport::TempoReader,
+        tempo: tutti_timeline::TempoReader,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
         let topology = &mut editor.spec_mut().topology;
@@ -640,7 +640,7 @@ impl<F: Float> Graph<F> {
     /// or `topology` is not its width.
     pub(crate) fn engine(
         &mut self,
-        transport: &tutti_transport::Transport,
+        transport: &tutti_timeline::Transport,
         device: ChannelLayout,
         topology: Option<tutti_buffers::ChannelTopology>,
         dates: tutti_engine::BlockDates,
@@ -4019,7 +4019,7 @@ mod tail_tests {
             rate,
             MaxBlock::of(Samples::new(64)),
             None,
-            tutti_transport::TempoReader::fixed(Arc::new(map)),
+            tutti_timeline::TempoReader::fixed(Arc::new(map)),
         )
     }
 
@@ -4151,7 +4151,7 @@ mod root_fade_tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
             None,
-            tutti_transport::TempoReader::fixed(Arc::new(map)),
+            tutti_timeline::TempoReader::fixed(Arc::new(map)),
         );
         let (node, _) = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);

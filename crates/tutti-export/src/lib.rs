@@ -45,7 +45,7 @@
 //!
 //! This crate re-exports no other crate's type: a `Format` or `Pcm` is
 //! `tutti_codec`'s, a `ChannelLayout` is `tutti_buffers`', and the clocks (`RenderClock`,
-//! `FrozenClock`) are `tutti_transport`'s. Each figure it needs of one of them it asks
+//! `FrozenClock`) are `tutti_timeline`'s. Each figure it needs of one of them it asks
 //! that crate for: the frames a file can hold of the encoder, the length of a resampled
 //! stream of the resampler.
 //!
@@ -88,7 +88,7 @@
 //! forks it and assembles the fork (`tutti-session` does both).
 //!
 //! ```rust
-//! use tutti_transport::FrozenClock;
+//! use tutti_timeline::FrozenClock;
 //! use tutti_units::{Hz, SampleRate, Samples, Seconds};
 //! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup};
 //! use tutti_buffers::ChannelLayout;
@@ -228,7 +228,7 @@ use std::path::PathBuf;
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::FftFloat;
 use tutti_measure::Loudness;
-use tutti_transport::RenderClock;
+use tutti_timeline::RenderClock;
 use tutti_units::{Db, Samples};
 
 /// A file an export wrote, from a file [`Output`] of [`render()`]
@@ -319,8 +319,8 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// [`RenderGraph::prepare`]), the audible span, the
 /// latency trimmed from the head of every output, the tail kept past the end
 /// and what to do about a dropped event. `clock` is advanced once per block,
-/// after the graph processes ([`render_graph`](tutti_transport::render_graph)); pass
-/// [`FrozenClock`](tutti_transport::FrozenClock) for a graph with no time-dependent nodes. `graph` is
+/// after the graph processes ([`render_graph`](tutti_timeline::render_graph)); pass
+/// [`FrozenClock`](tutti_timeline::FrozenClock) for a graph with no time-dependent nodes. `graph` is
 /// borrowed, so a graph holding a unit whose teardown is main-thread-only (an
 /// in-process VST2 plugin's fork) and rendered on a worker is brought back and
 /// dropped on the main thread.

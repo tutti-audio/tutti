@@ -32,7 +32,7 @@ use tutti_graph::{
     Shape, Status,
 };
 use tutti_rt::{Param, Publisher, Reader};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_units::{Amplitude, PlaybackRate, SampleRate, Tail, UnitParam};
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
@@ -205,7 +205,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     }
 
     /// This node reading the project's tempo map through `tempo`
-    /// ([`TransportSettings::tempo_reader`](tutti_transport::TransportSettings::tempo_reader)).
+    /// ([`TransportSettings::tempo_reader`](tutti_timeline::TransportSettings::tempo_reader)).
     /// Over a map whose tempo changes, how long a placed voice has played is
     /// the map's seconds between its start and the playhead, not the beats
     /// over the tempo of the moment; see

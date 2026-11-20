@@ -29,7 +29,7 @@ built; see the as-built notes at §9. §11 (following an outside tempo, MIDI L7c
 
 | Piece | Where | What it does |
 |---|---|---|
-| `AtomicBpm` | `tutti-transport` `state.rs`, `settings.rs` | The one tempo. `TransportSettings::set_tempo` stores it; `tempo()` loads it. `current_tempo` is the clock's write-back for readers. |
+| `AtomicBpm` | `tutti-timeline` `state.rs`, `settings.rs` | The one tempo. `TransportSettings::set_tempo` stores it; `tempo()` loads it. `current_tempo` is the clock's write-back for readers. |
 | `tempo_in_effect(asked, in_force)` | `clock.rs` | Hysteresis: a tempo within `TEMPO_EPSILON` (0.001 BPM) of the one in force is the one in force, so ULP noise from a control source does not restart the clock every block. |
 | `Control` | `clock.rs` | The untimed inputs, read once per block: `tempo`, `paused`, loop, `recording`. |
 | `FrameClock` / `TimelineSegment` | `tutti-types` `value/frame_clock.rs`, `timeline.rs` | A frame count on a constant-tempo segment `(origin_frame, origin_beat, tempo, rate)`; the beat is `origin_beat + frames x tempo / (60 x rate)` in closed form. `set_tempo` starts a segment only when the tempo differs; a seek, rate change or loop wrap also restarts. |
@@ -41,7 +41,7 @@ built; see the as-built notes at §9. §11 (following an outside tempo, MIDI L7c
 | `OfflineTimeline` | `offline.rs` | One `Bpm` and a `FrameClock`; `graph_block()` returns `TransportPosition::counted(true, tempo, origin, loop)` with `TransportChanges::NONE`. Its docs say "an offline render does not ramp". |
 
 Evidence for "no map anywhere": `grep TempoMap crates` hits only `tutti-tempo`;
-`tutti-transport` does not depend on `tutti-tempo`; `Cell`, `CellGrid` and
+`tutti-timeline` does not depend on `tutti-tempo`; `Cell`, `CellGrid` and
 `TempoView::chord_cell` have no caller outside it.
 
 **Readers of `tempo()`** (each is a constant-tempo reader of one segment):
@@ -76,7 +76,7 @@ the map as it stands when the fork is made.
 
 ### 2.2 The block's transport is a pure function
 
-A new `TempoWalk` in `tutti-transport` (crate-private, used by
+A new `TempoWalk` in `tutti-timeline` (crate-private, used by
 `TransportClock` and `OfflineTimeline`, so there is one copy) carries:
 
 | Field | Meaning |
@@ -317,7 +317,7 @@ render bit-identical (stage 0 adds the guards first).
 | # | PR | Content | Guard |
 |---|---|---|---|
 | 0 | Guards | Tests of §7 and §8 that hold for today's code: constant-tempo emits `NONE`, closed form to the bit, block-size independence, offline = clock sample for sample. | Pass on main. |
-| 1 | `tutti-transport` takes `tutti-tempo` | Dependency (layer 2 into 3). `TempoWalk` with a constant map only; `TransportClock` and `OfflineTimeline` call it. No API change. | Stage 0 passes; goldens unchanged. |
+| 1 | `tutti-timeline` takes `tutti-tempo` | Dependency (layer 2 into 3). `TempoWalk` with a constant map only; `TransportClock` and `OfflineTimeline` call it. No API change. | Stage 0 passes; goldens unchanged. |
 | 2 | Publish the map | `ArcLend<TempoMap>` on the session, the engine's `Reader`, reclaim on `Phase::Reclaim`; `set_tempo` publishes a constant map. `AtomicBpm` stays as the write-back for readers. | loom is not needed (reuses `ArcLend`); no-alloc gate on the engine; golden unchanged. |
 | 3 | Steps | Non-constant maps in the walker; step cells push `TransportChanges`; the block split at the 8th entry. `OfflineTimelineConfig` takes a map. | New step tests of §8. |
 | 4 | Ramps | Ramp cells, the grid bound, `tempo_at` slope on `TempoMap` if missing. | Ramp tests; block-size independence. |
@@ -330,7 +330,7 @@ exist (the closed-form `FrameClock` property, `offline_timeline_agrees_with_tran
 (`TempoWalk`) is not a separate step, because a walker that owns a map needs one
 published. What landed:
 
-- `tutti-transport` depends on `tutti-tempo` (layout script and CLAUDE.md say so).
+- `tutti-timeline` depends on `tutti-tempo` (layout script and CLAUDE.md say so).
   `TransportSettings` holds an `ArcLend<TempoMap>` and a publish count;
   `set_tempo(Bpm)` publishes `TempoMap::constant(bpm)` (the bits as given) and
   `set_tempo_map(Arc<TempoMap>)` publishes a map. `TransportAudio` registers its
@@ -357,7 +357,7 @@ published. What landed:
 
 **As built, stage 3 (steps).**
 
-- `TempoWalk` (`tutti-transport/src/walk.rs`, crate-private) is the one walker:
+- `TempoWalk` (`tutti-timeline/src/walk.rs`, crate-private) is the one walker:
   a map frame beside a `FrameClock`, rolled in cells of `CELL_GRID` = 128 frames
   (one constant, never a block's length). At a cell's end it asks `TempoView::chord_cell`
   and, when the tempo differs from the clock's, starts a segment on the map's
@@ -508,7 +508,7 @@ rendered.
 **As built, stage 5a (the plugin hosts).** A plugin is told the map's tempo,
 not the graph's chord, and CLAP its slope.
 
-- `tutti_transport::TempoReader` (a `tutti_rt::Reader<TempoMap>`: `lend` once
+- `tutti_timeline::TempoReader` (a `tutti_rt::Reader<TempoMap>`: `lend` once
   per block, no `Loan` across blocks, `Clone` registers a reader and so is
   control-side) is the one way to read the published map:
   `TransportSettings::tempo_reader()` is public, the engine's clock reads
@@ -711,7 +711,7 @@ Added with MIDI L7c, agreed with the transport's owner. The transport can take
 its tempo and meter from a MIDI 2.0 source (Flex Data Set Tempo, M2-104 §7.5.3,
 and Set Time Signature, §7.5.4) while a `TempoMap` is published. It is built in
 `tutti-session` (`midi_follow.rs`, `Midi::follow_tempo`) over a pure core in
-`tutti-midi-runtime` (`TempoFollower`, scoped to Flex). `tutti-transport` and `tutti-tempo` needed no change:
+`tutti-midi-runtime` (`TempoFollower`, scoped to Flex). `tutti-timeline` and `tutti-tempo` needed no change:
 the model of §3 (an edit republishes the map) is all it uses.
 
 ### 11.1 Where a received tempo becomes a map edit

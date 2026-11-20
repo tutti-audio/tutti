@@ -42,7 +42,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host" }
 
 # The transport the hosted plugins read.
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 # The engine's value vocabulary (`Samples`, `SampleRate`).
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 

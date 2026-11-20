@@ -169,9 +169,9 @@ pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
 use crate::jobs::{Landing, PluginLanding};
 use crate::plugin_diagnostics::Figures;
 use crate::{
-    Diagnostics, GiveUp, HangDetector, Key, OtherPeer, Params, PeerState, PluginBuses, PortCounts,
-    Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, SavedPeer, Session,
-    SessionEvent, WorkerError,
+    Diagnostics, GiveUp, HangDetector, Key, OtherPeer, PeerState, PluginBuses, PluginParams,
+    PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, SavedPeer,
+    Session, SessionEvent, WorkerError,
 };
 
 /// How often a healthy plugin's state is captured, by default: 8 s.
@@ -1517,8 +1517,8 @@ impl<'a> Plugin<'a> {
     /// The plugin's parameters: what it declares, read at load and again when
     /// it announces a rescan, and the value of each, kept current from what the
     /// plugin reports and the host sets.
-    pub fn params(&self) -> Params<'a> {
-        Params::new(self.node, self.hosted)
+    pub fn params(&self) -> PluginParams<'a> {
+        PluginParams::new(self.node, self.hosted)
     }
 
     /// The target of the automation mode the host tells the plugin, or `None`

@@ -56,8 +56,8 @@ impl Default for OfflineTimelineConfig {
 /// # use std::sync::Arc;
 /// # use tutti_tempo::TempoMap;
 /// # use tutti_units::{Beat, Bpm, SampleRate, Samples};
-/// # use tutti_transport::Timeline;
-/// # use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+/// # use tutti_timeline::Timeline;
+/// # use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 /// let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
 ///     start_beat: Beat::new(0.0),
 ///     tempo_map: Arc::new(TempoMap::constant(Bpm::of(120.0))?),
@@ -313,14 +313,14 @@ impl super::Timeline for OfflineTimeline {
 ///
 /// ```compile_fail,E0277
 /// use std::sync::Arc;
-/// use tutti_transport::{OfflineTransport, Transport};
+/// use tutti_timeline::{OfflineTransport, Transport};
 /// let live = Arc::new(Transport::new(48_000.0));
 /// let ctx = OfflineTransport::new(live); // the live playhead as a render's: refused
 /// ```
 ///
 /// ```
 /// use std::sync::Arc;
-/// use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport};
+/// use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport};
 /// let ctx = OfflineTransport::new(Arc::new(OfflineTimeline::new(&OfflineTimelineConfig::default())));
 /// ```
 impl super::OfflineClock for OfflineTimeline {}

@@ -8,11 +8,11 @@
 //! limiter takes the channel it fed to silence, and with nothing
 //! latency-bearing left the published latency is nothing at all.
 
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_nodes::{LimiterControls, LimiterNode};
+use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{InPort, OutPort, Root, Session};
 use tutti_units::{Db, SampleRate, Samples};
 
@@ -24,11 +24,13 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
         .expect("builds");
     let (dry, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db::new(-1.0),
-        ceiling: Db::new(-0.3),
-        ..LimiterControls::DEFAULT
-    }));
+    let (lim, _) = s.graph().add(LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+            threshold: Db::new(-1.0),
+            ceiling: Db::new(-0.3),
+            ..LimiterControls::DEFAULT
+        }),
+    ));
     s.graph()
         .set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(src, 0)])
         .unwrap();

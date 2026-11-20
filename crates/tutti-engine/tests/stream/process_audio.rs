@@ -10,7 +10,7 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_transport::{MotionEvent, Timeline, Transport};
+use tutti_timeline::{MotionEvent, Timeline, Transport};
 use tutti_units::{Beat, BeatDuration};
 use tutti_units::{Hz, Q};
 use tutti_units::{SampleRate, Samples};
@@ -95,7 +95,7 @@ fn test_transport_loop_wrapping() {
         .motion()
         .schedule(
             tutti_units::At::NextBlock,
-            tutti_transport::LoopEdit::over(
+            tutti_timeline::LoopEdit::over(
                 tutti_music::LoopRange::new(Beat::new(0.0), Beat::new(4.0)).expect("ordered"),
             ),
         )

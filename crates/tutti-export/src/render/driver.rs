@@ -27,7 +27,7 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut, Sample, interleave};
 use tutti_graph::{RtLogReaders, fold_to_width};
-use tutti_transport::RenderClock;
+use tutti_timeline::RenderClock;
 use tutti_units::Samples;
 
 /// What a target's channels are, for the fold from the graph's outputs or a
@@ -94,7 +94,7 @@ impl FileChannels<'_> {
 /// One block per [`render_block`](Self::render_block), the clock advanced by
 /// exactly the frames produced. The executor reads the transport from each
 /// block's `Env`, so this hands it one — through
-/// [`render_graph`](tutti_transport::render_graph), which reads the clock's
+/// [`render_graph`](tutti_timeline::render_graph), which reads the clock's
 /// snapshot before the block and advances it after (`OfflineTimeline` cuts a
 /// block at its tempo steps through `graph_piece`).
 pub(crate) struct GraphSource<'a, F: Float> {
@@ -275,7 +275,7 @@ impl<F: Float> GraphSource<'_, F> {
         // it (every node reads the snapshot from its `Env`), so an advance
         // before the block would start the render one frame past its own
         // start beat.
-        tutti_transport::render_graph(
+        tutti_timeline::render_graph(
             self.clock,
             self.executor,
             if inputs.is_empty() {
