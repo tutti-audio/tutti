@@ -42,6 +42,14 @@
 //! (reading faster raises the pitch), `SrcRatio` is sample-rate conversion
 //! (derived from the file and engine rates, never set by the user), and
 //! `StretchFactor` drives the phase vocoder (duration changes, pitch does not).
+//! A voice asked to stretch or transpose owns a
+//! [`PhaseVocoder`](tutti_dsp::PhaseVocoder) that always runs, at unity too, so
+//! its latency is constant. A memory voice reads its source the vocoder's latency
+//! ahead of its place on the timeline, so it sounds on time and declares none. A
+//! disk voice cannot read before where it seats, so it sounds the latency late: a
+//! standalone `VoiceNode` declares it for delay compensation, and a `VoicePool`,
+//! which takes voices while it plays, cannot. The same holds for any voice started
+//! with no timeline position to read ahead of. Nothing ties the stretch to the tempo.
 //! All three are `tutti-units` types.
 //!
 //! ## Quick start
@@ -87,10 +95,8 @@
 //! (`MemorySource<F>`, `DiskVoice<F>`, `Voice<F>`, `VoicePool<F>`, `VoiceNode<F>`,
 //! `Clip<F>`), and plays in a graph of that format; a disk voice's stream is
 //! opened by a [`DiskStreamer`] of the same format. Playback controls (speed,
-//! stretch factor, gain) are `f64` units whatever the format.
-//! A stretched voice runs the time-stretch vocoder in `f32`: the signal is
-//! narrowed to `f32` through it, so stretched playback has `f32` precision in
-//! an `f64` graph; unstretched playback keeps the graph's format end to end.
+//! stretch factor, gain) are `f64` units whatever the format; a stretched
+//! voice's vocoder runs in the graph's format too.
 //!
 //! ## Channel ceiling
 //!
@@ -129,7 +135,6 @@
 //!   owns the disk stream that feeds it).
 //! - [`Clip`]: one sample placed on the timeline, resident or streamed.
 //! - [`Loop`]: the one checked loop every tier takes.
-//! - [`stretch::Unit`]: the phase-vocoder time stretch and pitch shift.
 //! - `probe`: the header probe that informs a caller's tier choice (the
 //!   sampler never decides the tier on its own).
 //!
@@ -188,15 +193,11 @@ pub use tutti_buffers::Wave;
 mod voice;
 
 // Planar block scratch and its kernels: the voices render into it, the
-// stretch filter reads and writes it. Crate-level because both use it.
+// stretch vocoder reads and writes it. Crate-level because both use it.
 mod lanes;
 
-// Time-stretch / pitch-shift (phase vocoder). A peer DSP subsystem, not a
-// voice-playback concern: it owns no source and imports nothing from `voice`.
-pub mod stretch;
-
 /// A bound alias, with a blanket impl: a [`Float`](tutti_buffers::Float) the sampler's
-/// voices run in, `f32` or `f64`, which a ring holds and the stretcher's FFT
+/// voices run in, `f32` or `f64`, which a ring holds and the stretch vocoder's FFT
 /// transforms.
 pub trait SamplerFloat: tutti_rt::RingFloat + tutti_dsp::FftFloat {}
 

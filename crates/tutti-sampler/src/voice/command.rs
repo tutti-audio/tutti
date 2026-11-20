@@ -3,7 +3,7 @@
 //!
 //! A [`VoicePoolHandle`] queues a command per call, drained inside the audio
 //! callback, so every command is built control-side, allocation included: the
-//! handle is where the stretch filter gets constructed for a voice that needs
+//! handle is where the vocoder gets constructed for a voice that needs
 //! one, precisely so the callback never has to. A [`VoiceNodeHandle`] steers
 //! its one voice and owns the disk [`Stream`] that feeds it.
 
@@ -12,17 +12,18 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use crate::streamer::{ControlCell, Stream, StreamId};
-use crate::stretch;
 
 use super::disk_voice::DiskVoice;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
 use super::pool::{DrainCounters, PoolDrops, Retired};
 use super::slot::{stretch_values_want_filter, stretch_wanted};
+use super::stretched;
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
+use tutti_dsp::PhaseVocoder;
 use tutti_graph::ParamSet;
 use tutti_rt::{AtomicSampleRate, Param};
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
@@ -30,7 +31,7 @@ use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor};
 
 /// A node's sample rate, shared with its handle: the node stores it when it
 /// is prepared (control thread), the handle reads it to build a stretch
-/// filter at that rate (control thread). A scalar: no audio-thread read.
+/// vocoder at that rate (control thread). A scalar: no audio-thread read.
 #[derive(Clone, Debug)]
 pub(crate) struct SharedRate(Arc<AtomicSampleRate>);
 
@@ -71,7 +72,7 @@ pub(super) const COMMAND_CAPACITY: usize = 64;
 ///
 /// Drained inside the audio callback, so every variant is built and
 /// allocated control-side: that is why the two stretch-carrying variants
-/// have the filter handed to them rather than constructing one. Each is one
+/// have the vocoder handed to them rather than constructing one. Each is one
 /// of the handle's methods.
 pub(crate) enum VoiceCommand<F: SamplerFloat> {
     /// Add a voice by handing the reader a fully-formed [`Voice`]: a
@@ -100,27 +101,27 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
         /// it frees nothing — and leaves through the retirement ring with
         /// the slot.
         voice: Box<Voice<F>>,
-        /// A stretch filter built by the SENDER, on the control thread, when
+        /// A vocoder built by the SENDER, on the control thread, when
         /// `voice.play` asks for stretching.
         ///
         /// The drain runs inside `process`, so building this there would
-        /// allocate in the audio callback (an FFT setup plus two block-scratch
-        /// buffers per channel). the handle fills it in
+        /// allocate in the audio callback (an FFT plan plus the
+        /// rings of each channel). The handle fills it in
         /// before the command is queued; the drain only moves it into the slot.
         ///
         /// `None` when the voice does not stretch, which is the common case and
         /// costs nothing.
         ///
-        /// Unboxed, as `UpdateStretch`'s is: moving a `Unit` out of a `Box`
-        /// frees the box, a deallocation on the audio thread. A `Unit` moves as
-        /// a pointer anyway (its state is boxed inside it).
-        stretch: Option<stretch::Unit<F>>,
+        /// Boxed, as `UpdateStretch`'s is, so the command stays small: the
+        /// slot keeps the same box, and moving a box is a pointer move that
+        /// frees nothing.
+        stretch: Option<Box<PhaseVocoder<F>>>,
     },
-    /// Retire the slot with this id, filter and all.
+    /// Retire the slot with this id, vocoder and all.
     ///
     /// The drain does not drop the slot in the callback — it hands it to the
     /// control thread through the retirement ring, because freeing a
-    /// [`stretch::Unit`] frees its vocoder bank. See
+    /// [`PhaseVocoder`] frees its rings. See
     /// [`VoicePoolHandle::collect_retired`].
     Remove(SlotId),
     /// Point an in-memory slot at a different wave, keeping its placement,
@@ -215,30 +216,25 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
         stretch_factor: StretchFactor,
         /// Pitch shift in [`Cents`]; `0.0` is unity. Duration is unchanged.
         pitch_cents: Cents,
-        /// A pre-built processor for the case where the slot has none yet, same
+        /// A pre-built vocoder for the case where the slot has none yet, same
         /// contract as [`AddVoice::stretch`](Self::AddVoice::stretch):
         /// [`VoicePoolHandle::send`] fills it in on the control thread, and the
         /// drain only moves it into the slot.
         ///
         /// This field is why turning stretch ON mid-flight works at all. A voice
         /// spawned at unity/zero gets `stretch: None` from `AddVoice` (correctly
-        /// — it did not need one), so without a filter arriving here,
+        /// — it did not need one), so without a vocoder arriving here,
         /// `PlaybackSlot::set_stretch` would flip the gate fields on a slot that
         /// has nothing to flip and the voice would read dry forever. It cannot
         /// be built in the drain: that is the audio thread, and construction
-        /// allocates an FFT setup plus per-channel scratch.
+        /// allocates an FFT plan plus per-channel rings.
         ///
-        /// `None` when the slot already holds a processor (the update is then
-        /// pure atomics) or when the update turns stretching off.
+        /// `None` when the slot already holds a processor (the update then only writes
+        /// `voice.play`) or when the update turns stretching off.
         ///
-        /// Unboxed, unlike [`AddVoice::stretch`](Self::AddVoice::stretch).
-        /// `PlaybackSlot::stretch` is an `Option<stretch::Unit<F>>`, so a `Box` here
-        /// would have to be unboxed to install it — and moving out of a `Box`
-        /// frees the box, in the drain, on the audio thread. That is a 56-byte
-        /// free the no-alloc guard catches. `AddVoice` gets away with a `Box`
-        /// only because `VoiceCommand` is sized to its largest variant and that
-        /// one is already the largest; here the box buys nothing.
-        stretch: Option<stretch::Unit<F>>,
+        /// Boxed, as [`AddVoice::stretch`](Self::AddVoice::stretch) is, and
+        /// the slot keeps the same box: moving it frees nothing.
+        stretch: Option<Box<PhaseVocoder<F>>>,
     },
 }
 
@@ -410,7 +406,7 @@ impl SendError {
 /// all: a window, a loop and a speed are values only the latest of which
 /// matters, so each is published rather than sent, and nothing a caller does
 /// here can hand the node a payload (a boxed `Voice`, a wave, a stretch
-/// filter) to drop on the audio thread.
+/// vocoder) to drop on the audio thread.
 ///
 /// ```compile_fail
 /// # use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource};
@@ -662,7 +658,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
 /// Held by the host (an ECS system, typically) and cloned freely — its several
 /// control threads share the one command writer behind a lock. It mirrors the
 /// reader's width, and shares the rate the reader was last prepared at, so
-/// `send` can build a stretch filter that matches, on this thread. It holds the [`Stream`] of every
+/// `send` can build a vocoder that matches, on this thread. It holds the [`Stream`] of every
 /// streaming voice added through [`add_streaming`](Self::add_streaming), so
 /// `send` publishes a streaming voice's loop and direction to its stream itself:
 /// the pool's drain has no stream to publish them to, and a stream cannot live
@@ -692,7 +688,7 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     /// is the call that does it.
     pub(crate) retired: Arc<Mutex<RingReader<Retired<F>>>>,
     /// The reader's output width, copied at construction (it is fixed for the
-    /// reader's lifetime). Lets [`send`](Self::send) build a stretch filter at
+    /// reader's lifetime). Lets [`send`](Self::send) build a vocoder at
     /// the right width on the CONTROL thread — see
     /// [`VoiceCommand::AddVoice::stretch`].
     pub(crate) channels: ChannelLayout,
@@ -737,7 +733,7 @@ pub struct StreamingAddError<F: SamplerFloat> {
 
 impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// Frees everything the audio thread has retired since the last call — removed
-    /// slots, surplus stretch filters and replaced waves alike.
+    /// slots, surplus vocoders and replaced waves alike.
     ///
     /// Call this periodically from the control thread — once a frame is ample.
     /// Skipping it is safe but forfeits the point: the retirement ring fills,
@@ -897,7 +893,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 
     /// Sets the voice's time-stretch factor and pitch shift: the two controls
     /// that change duration and pitch independently, unlike
-    /// [`set_speed`](Self::set_speed). The stretch filter a voice needs is
+    /// [`set_speed`](Self::set_speed). The vocoder a voice needs is
     /// built here, on the calling thread.
     ///
     /// # Errors
@@ -927,7 +923,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// This is the one chokepoint every command passes through, which makes it the
     /// right place to keep the audio thread clean: `drain_commands` runs from
     /// `process`, so anything expensive left for the drain is an allocation
-    /// in the callback. That means materialising the stretch filter for an
+    /// in the callback. That means materialising the vocoder for an
     /// `AddVoice` or an `UpdateStretch` that needs one.
     ///
     /// `Ok` means only that the command was *queued*: the pool applies it on the
@@ -968,7 +964,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     ///
     /// `play`'s loop and direction are published to the stream first, if they
     /// differ from what it has, and the add is queued only after. A stretch
-    /// filter the voice needs is built here.
+    /// vocoder the voice needs is built here.
     ///
     /// Control thread.
     ///
@@ -998,13 +994,13 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     }
 
     /// The queueing half of [`add_streaming`](Self::add_streaming): `voice`
-    /// is a streaming voice, its stretch filter already built.
+    /// is a streaming voice, its vocoder already built.
     fn add_stream_voice(
         &self,
         id: SlotId,
         voice: Box<Voice<F>>,
         stream: Stream<F>,
-        stretch: Option<stretch::Unit<F>>,
+        stretch: Option<Box<PhaseVocoder<F>>>,
     ) -> Result<(), Box<StreamingAddError<F>>> {
         if self.writer().is_full() {
             let error = SendError::Full;
@@ -1121,13 +1117,11 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 voice,
                 stretch: None,
             } if stretch_wanted(&voice.play) => {
-                let unit = stretch::Unit::<F>::with_channels(self.rate.load(), self.channels);
-                unit.set_stretch_factor(voice.play.stretch);
-                unit.set_pitch_cents(voice.play.pitch);
+                let vocoder = stretched::vocoder::<F>(self.channels, self.rate.load());
                 VoiceCommand::AddVoice {
                     id,
                     voice,
-                    stretch: Some(unit),
+                    stretch: Some(vocoder),
                 }
             }
             // Same materialisation for an update that turns stretching ON.
@@ -1143,14 +1137,12 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 pitch_cents,
                 stretch: None,
             } if stretch_values_want_filter(stretch_factor, pitch_cents) => {
-                let unit = stretch::Unit::<F>::with_channels(self.rate.load(), self.channels);
-                unit.set_stretch_factor(stretch_factor);
-                unit.set_pitch_cents(pitch_cents);
+                let vocoder = stretched::vocoder::<F>(self.channels, self.rate.load());
                 VoiceCommand::UpdateStretch {
                     id,
                     stretch_factor,
                     pitch_cents,
-                    stretch: Some(unit),
+                    stretch: Some(vocoder),
                 }
             }
             other => other,

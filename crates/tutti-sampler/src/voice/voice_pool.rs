@@ -170,14 +170,13 @@ fn resetting_a_fork_leaves_the_live_voice_playing() {
 ///
 /// A fork renders on another thread while the audio thread plays the
 /// original. `VoicePool`'s fork is an empty pool; `VoiceNode`'s holds a
-/// copy of its voice, so its stretch filter must be the fork's own.
+/// copy of its voice, so its stretch vocoder must be the fork's own.
 ///
 /// Asserted on audio: a live voice whose fork was taken mid-play, reset
 /// and rendered for 4096 frames plays, sample for sample, what an
 /// identical voice that was never forked plays.
 ///
-/// This pins, at the voice, what a reintroduced shared bank would break; the unit-level
-/// twin is `stretch::tests::a_clone_and_its_original_tick_independently`.
+/// This pins, at the voice, what a reintroduced shared vocoder would break.
 #[test]
 fn a_standalone_voices_fork_shares_no_stretch_state() {
     const SR: f64 = 44_100.0;
@@ -244,7 +243,7 @@ fn a_standalone_voices_fork_shares_no_stretch_state() {
 /// A pool's fork holds copies of the voices the pool was built with and
 /// shares nothing with the live pool: a voice the live handle adds later is
 /// not in it (one voice's ramp, not two), preparing it at another rate does
-/// not move the rate the live handle builds its stretch filters at, and a
+/// not move the rate the live handle builds its stretch vocoders at, and a
 /// pool whose handle has queued a command is not forked at all (its voices
 /// are on the audio thread).
 #[test]
@@ -321,14 +320,14 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
     );
 }
 
-/// A transport seek must flush the stretch filter's buffered audio.
+/// A transport seek must flush the vocoder's buffered audio.
 ///
 /// A seek reaches a node only as its block's `Env` (a transport change,
 /// or a block that does not continue the last), and nothing on any
 /// transport-driven path calls `Node::reset`. So when the playhead
 /// jumps, the placement gate re-derives the new position correctly and
-/// immediately, while `stretch::Unit` would keep draining a FIFO primed
-/// from *before* the jump — up to `window * 4` FRAMES per channel, plus
+/// immediately, while a vocoder would keep draining input taken in from
+/// *before* the jump — up to two windows of frames per channel, plus
 /// per-bin phase accumulators still tracking the old material — unless
 /// the node flushes it on the jump's frame.
 ///
@@ -396,7 +395,7 @@ fn a_transport_seek_flushes_stretch_state() {
     let mut out = [0.0f32; 1];
     tick(&mut unit, &transport, SR, &mut out);
     assert!(
-        unit.voices[0].needs_stretch(),
+        unit.voices[0].stretch.is_some(),
         "test is vacuous unless the stretch path is live"
     );
 
@@ -433,7 +432,7 @@ fn a_transport_seek_flushes_stretch_state() {
 
     assert!(
         after_seek < 0.01,
-        "stretch filter leaked pre-seek audio across a transport jump: \
+        "vocoder leaked pre-seek audio across a transport jump: \
              peak {after_seek} (the source is silent at this playhead)"
     );
 }
@@ -480,7 +479,7 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
         1u16,
     );
     assert!(
-        node.slot.needs_stretch() && node.slot.stretch.is_some(),
+        node.slot.stretch.is_some(),
         "test is vacuous unless the stretch path is live"
     );
 
@@ -572,10 +571,10 @@ fn continuous_playback_does_not_flush_a_standalone_voice_node() {
 /// A stretched placed voice must not transpose, across block boundaries.
 ///
 /// What this pins is the *assembly*, not the DSP: if `VoicePool` did not
-/// apply [`stretch::Unit::input_rate`], the vocoder would be fed one source
-/// sample per output sample and the factor would act as plain varispeed
+/// feed the vocoder the source frames it asks for, the vocoder would be fed one
+/// source sample per output sample and the factor would act as plain varispeed
 /// (2.0x turning 440 Hz into 880 Hz with the duration unchanged), while
-/// every unit test of [`stretch::Unit`] still passed.
+/// every test of the vocoder alone still passed.
 ///
 /// Why this renders many blocks. The failure lives at block boundaries.
 /// A placed voice re-derives its origin from the playhead each block, and the
@@ -704,8 +703,12 @@ fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
 /// Asserted as source consumption, not as pitch. A ring-fed reader has no
 /// absolute position to measure a frequency against — it renders whatever the
 /// streamer last handed it — so the observable property is how fast the ring
-/// drains: at 2x stretch a block of output must consume half a block of
-/// source, because the vocoder supplies the other half.
+/// drains: at stretch `s` the vocoder takes `1 / s` source frames per output
+/// frame, whatever the block size. Over 128 blocks of 64 frames (8192 output
+/// frames) past the vocoder's start, the ring drains `8192 / s` frames, to within
+/// the hop's worth of source the vocoder reads in steps of: each reading of the
+/// position is within `hop / s` of the stream's, and two are compared, with one
+/// more for the burst the last block read.
 ///
 /// This is the same defect as
 /// `a_stretched_placed_voice_holds_its_pitch_across_blocks`, in the tier
@@ -715,33 +718,36 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
     use crate::streamer::Cells;
 
     const BLOCK: usize = 64;
-    const BLOCKS: usize = 8;
+    const WARM: usize = 64;
+    const MEASURED: usize = 128;
+    /// The vocoder's hop, in frames.
+    const HOP: f64 = 512.0;
 
     use crate::streamer::{RegionBuffer, StreamId};
     use crate::voice::VoiceWindow;
     use crate::voice::disk_voice::{DiskSource, DiskVoice, DiskVoiceConfig};
     use std::path::PathBuf;
 
-    // How far into its source the reader got over a fixed render, at a
+    // How far into its source the reader got over the measured blocks, at a
     // given stretch factor: the position it last published to the streamer
-    // (`Ring::play`, what the streamer fills ahead of), so this measures
-    // where the reader actually read rather than what anything claims it
-    // should have.
-    let consumed = |factor: f64| -> u64 {
+    // (`Ring::play`, what the streamer fills ahead of) after the warm-up, and
+    // after the measured blocks, so this measures where the reader actually
+    // read rather than what anything claims it should have.
+    let consumed = |factor: f64| -> f64 {
         let (mut pool, handle) = VoicePool::new().with_handle();
         let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
 
         // Enough ring that the unstretched (fastest) case cannot underrun,
         // so a short read means the rate applied rather than that the ring
         // ran dry — the control assertion below checks the other direction.
-        let flat: Vec<f32> = (0..8192)
+        let flat: Vec<f32> = (0..20_000)
             .flat_map(|i| {
                 let s = ((std::f64::consts::TAU * 440.0 * i as f64 / 44_100.0).sin()) as f32;
                 [s, s]
             })
             .collect();
         let (mut writer, reader, pos) =
-            RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 8192 + 64, 2u16);
+            RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 20_000 + 64, 2u16);
         writer.push_interleaved(&flat).expect("the ring\'s width");
         let ring = std::sync::Arc::clone(&reader);
         // ONE `Cells`, shared by the source and the gate — `DiskVoice::new`
@@ -776,30 +782,34 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
             })
             .expect("the command queue has room in a test");
 
-        for _ in 0..BLOCKS {
+        let mut play = 0;
+        for block in 0..WARM + MEASURED {
+            if block == WARM {
+                play = ring.play();
+            }
             run(&mut pool, &transport, 44_100.0, BLOCK);
             transport.advance(BLOCK as i64, SampleRate::SR_44K1);
         }
-        ring.play()
+        (ring.play() - play) as f64
     };
 
     let unstretched = consumed(1.0);
-    let doubled = consumed(2.0);
     assert!(
-        unstretched > 0,
+        unstretched > 0.0,
         "the unstretched control consumed nothing — the ring never fed, so \
              this comparison would prove nothing"
     );
-
-    // At 2x the vocoder emits two output samples per source sample, so the
-    // ring must drain at half the rate.
-    let ratio = unstretched as f64 / doubled.max(1) as f64;
-    assert!(
-        (ratio - 2.0).abs() < 0.15,
-        "2x stretch consumed {doubled} source frames where 1x consumed \
-             {unstretched} (ratio {ratio:.2}, want 2.0): the stretch rate never \
-             reached the disk tier's ring, so the factor acts as varispeed"
-    );
+    for factor in [1.0, 2.0] {
+        let got = consumed(factor);
+        let want = (MEASURED * BLOCK) as f64 / factor;
+        assert!(
+            (got - want).abs() <= 3.0 * HOP / factor,
+            "{factor}x stretch consumed {got} source frames over {} output frames, \
+             want {want}: the stretch rate never reached the disk tier's ring, \
+             so the factor acts as varispeed",
+            MEASURED * BLOCK
+        );
+    }
 }
 
 /// Stream ids for the patterns that match a command's stream.
@@ -887,7 +897,10 @@ fn continuous_playback_does_not_flush_the_stretch_filter() {
         tick(&mut unit, &transport, SR, &mut out);
         transport.advance(1, SampleRate::of(SR));
     }
-    assert!(unit.voices[0].needs_stretch(), "stretch path must be live");
+    assert!(
+        unit.voices[0].stretch.is_some(),
+        "stretch path must be live"
+    );
 
     // Steady state: measure per-block peaks and require every one to carry
     // signal. A reset mid-run empties the FIFO, so the following block is
@@ -1099,6 +1112,25 @@ fn update_gain() {
     assert!((out_after[0] - out_before[0] * 0.5).abs() < 0.01);
 }
 
+/// How many of `planes` channels a vocoder sounds on: fed a constant on every
+/// one at unity, it writes a nonzero tail to the channels it has and leaves the
+/// rest silent.
+fn sounding_width(vocoder: &mut tutti_dsp::PhaseVocoder<f32>, planes: usize) -> usize {
+    use tutti_buffers::{Planes, PlanesMut};
+    let frames = 4096;
+    let needed = vocoder.input_needed(Samples::new(frames)).get();
+    let input = vec![vec![1.0f32; needed]; planes];
+    let mut output = vec![vec![0.0f32; frames]; planes];
+    vocoder.process(
+        Planes::from_vecs(&input).expect("equal planes"),
+        PlanesMut::from_vecs(&mut output).expect("equal planes"),
+    );
+    output
+        .iter()
+        .filter(|plane| plane[frames - 1].abs() > 0.5)
+        .count()
+}
+
 #[test]
 fn update_stretch_enables_processor() {
     let (mut unit, handle) = VoicePool::new().with_handle();
@@ -1111,7 +1143,7 @@ fn update_stretch_enables_processor() {
 
     let mut out = [0.0f32; 2];
     tick(&mut unit, &transport, SR, &mut out);
-    assert!(!unit.voices[0].needs_stretch(), "no stretch by default");
+    assert!(unit.voices[0].stretch.is_none(), "no stretch by default");
 
     handle
         .send(VoiceCommand::UpdateStretch {
@@ -1122,14 +1154,18 @@ fn update_stretch_enables_processor() {
         })
         .expect("the command queue has room in a test");
     tick(&mut unit, &transport, SR, &mut out);
-    assert!(unit.voices[0].needs_stretch(), "stretch should be active");
-    // The gate above is only the *intent*. Assert the filter actually arrived:
-    // this voice spawned at unity, so `AddVoice` correctly gave it none, and
-    // the hot path reads `needs_stretch() && stretch.is_some()`. Checking the
-    // gate alone is what let a voice sit "stretching" and dry forever.
+    assert_eq!(
+        unit.voices[0].voice.play.stretch,
+        StretchFactor::new(2.0),
+        "the intent is recorded"
+    );
+    // The vocoder has to arrive on the command: this voice spawned at unity, so
+    // `AddVoice` correctly gave it none, and the read is dry without one.
+    // Checking the intent alone is what let a voice sit "stretching" and dry
+    // forever.
     assert!(
         unit.voices[0].stretch.is_some(),
-        "turning stretch on must deliver a processor, not just flip the gate"
+        "turning stretch on must deliver a vocoder, not just record the intent"
     );
 
     handle
@@ -1142,8 +1178,8 @@ fn update_stretch_enables_processor() {
         .expect("the command queue has room in a test");
     tick(&mut unit, &transport, SR, &mut out);
     assert!(
-        !unit.voices[0].needs_stretch(),
-        "identity stretch disables processor"
+        unit.voices[0].stretch.is_some(),
+        "a vocoder stays resident at unity, so the voice's latency does not change"
     );
 }
 
@@ -1152,7 +1188,7 @@ fn update_stretch_enables_processor() {
 /// `AddVoice` correctly attaches no filter to a
 /// voice at unity, so if `set_stretch` only flipped atomics on a *resident*
 /// filter, `UpdateStretch` would mirror the values into `voice.play`,
-/// `needs_stretch()` would go true, `stretch.is_some()` would stay false, and
+/// `stretch.is_some()` would stay false, and
 /// `tick_frame_into` would take the dry branch — silently, forever. The
 /// filter has to arrive on the command.
 ///
@@ -2078,7 +2114,7 @@ fn six_channel_clip_with_stretch_reaches_all_six_outputs() {
         Voice {
             source: VoiceSource::Memory(sampler),
             play: Playback {
-                // Off unity, so `needs_stretch()` takes the vocoder path.
+                // Off unity, so the vocoder is built.
                 stretch: StretchFactor::new(2.0),
                 ..Default::default()
             },
@@ -2115,7 +2151,7 @@ fn six_channel_clip_with_stretch_reaches_all_six_outputs() {
     );
 }
 
-/// The SENDER builds the stretch filter, not the drain.
+/// The SENDER builds the stretch vocoder, not the drain.
 ///
 /// `VoicePoolHandle::send` runs on the control thread and fills
 /// `AddVoice::stretch` when the voice asks for stretching; `drain_commands`
@@ -2184,9 +2220,10 @@ fn send_builds_the_stretch_filter_not_the_drain() {
         "send must attach the filter BEFORE queueing — if this is None the \
              construction has moved back into the audio-thread drain",
     );
+    let mut peeked = peeked;
     assert_eq!(
-        peeked.channels(),
-        ChannelLayout::from(6u16),
+        sounding_width(&mut peeked, 8),
+        6,
         "the sender must build at the reader's width"
     );
 
@@ -2209,21 +2246,20 @@ fn send_builds_the_stretch_filter_not_the_drain() {
     let mut out = [0.0f32; 6];
     tick(&mut unit, &transport, SR, &mut out); // drains
 
-    let stretching = unit.voices.iter().find(|s| s.id == SlotId(1)).unwrap();
-    let plain = unit.voices.iter().find(|s| s.id == SlotId(2)).unwrap();
-
+    let stretching = unit.voices.iter_mut().find(|s| s.id == SlotId(1)).unwrap();
     let filter = stretching
         .stretch
-        .as_ref()
-        .expect("send must have built a filter for the stretching voice");
+        .as_mut()
+        .expect("send must have built a vocoder for the stretching voice");
     assert_eq!(
-        filter.channels(),
-        ChannelLayout::from(6u16),
-        "the filter must match the reader's width, not a default"
+        sounding_width(filter, 8),
+        6,
+        "the vocoder must match the reader's width, not a default"
     );
+    let plain = unit.voices.iter().find(|s| s.id == SlotId(2)).unwrap();
     assert!(
         plain.stretch.is_none(),
-        "a non-stretching voice must not carry a filter — that is the whole \
+        "a non-stretching voice must not carry a vocoder — that is the whole \
              point of building lazily"
     );
 }

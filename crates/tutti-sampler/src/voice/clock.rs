@@ -16,7 +16,7 @@
 //!
 //! # Jumps
 //!
-//! Buffered state — a stretch filter's FIFOs, the live disk reader's
+//! Buffered state — a vocoder's rings, the live disk reader's
 //! crossfade — needs to know where the playhead moved discontinuously,
 //! which one block cannot say: a block starting at beat 4 continues a block
 //! that ended at beat 4, and jumps from one that ended at 7. So the node that
@@ -683,7 +683,7 @@ mod tests {
 
     /// `BlockClock::jumps` is whether any run of the block jumps: the
     /// slot walks a range's runs for a reset only when it says so, so a
-    /// `false` over a jump would leave a stretch filter or a live read
+    /// `false` over a jump would leave a stretch vocoder or a live read
     /// holding stale state. Over a continuation, a seek back, a seek inside
     /// a block, a stop and a restart.
     #[test]

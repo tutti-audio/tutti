@@ -86,8 +86,13 @@ struct Cursor {
     last_start: Option<usize>,
     /// The output frames finished so far: the next frame's first output sample.
     finished: usize,
-    /// Where the next output frame reads the finished output, fractional.
+    /// Where the cubic read stood when the pitch ratio last changed (the start,
+    /// before a change), fractional.
     read: SamplePosition,
+    /// The output frames read since `read`: a read position is `read` plus the step
+    /// times these, one product, so it does not depend on how the output was split
+    /// into calls.
+    read_frames: usize,
 }
 
 impl Cursor {
@@ -106,11 +111,15 @@ impl Cursor {
         self.finished += hop;
     }
 
+    /// Where the cubic read of output frame `k` past the next one stands.
+    fn read_at(&self, k: usize, step: ReadRate) -> SamplePosition {
+        self.read + step.advance(Samples::new(self.read_frames + k))
+    }
+
     /// The finished frames a read of `n` output frames needs: through the last read
     /// position's cubic neighbours.
     fn finished_for(&self, n: usize, step: ReadRate) -> usize {
-        let last = self.read + step.advance(Samples::new(n - 1));
-        libm::floor(last.get()) as usize + 3
+        libm::floor(self.read_at(n - 1, step).get()) as usize + 3
     }
 }
 
@@ -121,7 +130,8 @@ impl Cursor {
 /// the stretch and identical channels stay identical, bit for bit. Both controls apply at the
 /// next hop with no flush: the phase history carries on across a change.
 ///
-/// A non-finite input sample poisons the phase history until [`reset`](Self::reset).
+/// A non-finite input sample reaches the output for the frames whose windows hold it, and the
+/// vocoder is clean again once they have passed: nothing latches, and no reset is needed.
 ///
 /// ```
 /// use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
@@ -229,6 +239,7 @@ impl<F: FftFloat> PhaseVocoder<F> {
                 last_start: None,
                 finished: 0,
                 read: SamplePosition::new(0.0),
+                read_frames: 0,
             },
             advance: ReadRate::UNITY,
             step: ReadRate::UNITY,
@@ -266,7 +277,12 @@ impl<F: FftFloat> PhaseVocoder<F> {
             .map_or(0.0, |c| c.clamp(-MAX_PITCH.get(), MAX_PITCH.get()));
         let shortest = self.geometry.hop().get() as f64 / self.geometry.window().get() as f64;
         let ratio = Cents::new(pitch).to_pitch_ratio().max(shortest / stretch);
-        self.step = ReadRate::new(ratio);
+        let step = ReadRate::new(ratio);
+        if step != self.step {
+            self.cursor.read = self.cursor.read_at(0, self.step);
+            self.cursor.read_frames = 0;
+        }
+        self.step = step;
         self.advance = ReadRate::new(1.0 / (stretch * ratio));
     }
 
@@ -289,6 +305,7 @@ impl<F: FftFloat> PhaseVocoder<F> {
             last_start: None,
             finished: 0,
             read: SamplePosition::new(0.0),
+            read_frames: 0,
         };
     }
 
@@ -309,7 +326,7 @@ impl<F: FftFloat> PhaseVocoder<F> {
                 required = start + size;
                 cursor.frame_done(start, hop, self.advance);
             }
-            cursor.read += self.step.advance(Samples::new(n));
+            cursor.read_frames += n;
             left -= n;
         }
         Samples::new(required.saturating_sub(self.cursor.fed))
@@ -437,12 +454,11 @@ impl<F: FftFloat> PhaseVocoder<F> {
     /// cubic read between its frames, and the frame itself on a whole position.
     fn read_output(&mut self, output: &mut PlanesMut<'_, '_, F>, at: usize, count: usize) {
         let mask = self.finished[0].len() - 1;
-        let start = self.cursor.read;
         for (c, ring) in self.finished.iter().enumerate().take(output.channels()) {
             let mut plane = output.plane_mut(c);
             let out = &mut plane.samples_mut()[at..at + count];
             for (i, y) in out.iter_mut().enumerate() {
-                let position = start + self.step.advance(Samples::new(i));
+                let position = self.cursor.read_at(i, self.step);
                 let whole = libm::floor(position.get()) as usize;
                 let t = position.fract();
                 let tap = |offset: usize| ring[whole.wrapping_add(offset).wrapping_sub(1) & mask];
@@ -453,6 +469,6 @@ impl<F: FftFloat> PhaseVocoder<F> {
                 };
             }
         }
-        self.cursor.read = start + self.step.advance(Samples::new(count));
+        self.cursor.read_frames += count;
     }
 }

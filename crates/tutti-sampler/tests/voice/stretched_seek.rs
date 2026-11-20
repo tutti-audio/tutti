@@ -1,10 +1,11 @@
 //! A stretched memory voice has sound right after a seek.
 //!
-//! A seek flushes the stretch filter so pre-jump audio does not smear over
-//! the new region, and a flushed filter is silent until it has taken in a
-//! window of input again (a window times the effective stretch: about 4 100
-//! frames at 2x). Without priming, every seek or loop wrap of a stretched
-//! voice left ~85 ms of silence. `verify-audio`'s `seek_while_stretched` case heard
+//! A seek unseats the vocoder, so pre-jump audio does not smear over the new
+//! region, and an unprimed vocoder is silent until its latency has passed (more
+//! than 2 000 frames). The seat is primed: the vocoder runs a latency and a window
+//! of output frames from source read before the seek's target, and discards them.
+//! Without it every seek or loop wrap of a stretched voice left tens of
+//! milliseconds of silence. `verify-audio`'s `seek_while_stretched` case heard
 //! it; this pins it in the suite.
 
 use tutti_buffers::Interleaved;
@@ -69,7 +70,7 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
 }
 
 /// The first 2 048 frames after a seek are as loud as the steady state
-/// before it (within 3 dB), not the flushed filter's silence.
+/// before it (within 3 dB), not the flushed vocoder's silence.
 #[test]
 fn a_stretched_voice_is_audible_right_after_a_seek() {
     let seek_at = 375 * BLOCK; // 24 000

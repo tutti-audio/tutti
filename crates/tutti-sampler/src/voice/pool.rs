@@ -7,7 +7,6 @@
 
 use crate::nonempty;
 use crate::streamer::StreamId;
-use crate::stretch;
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
@@ -17,6 +16,7 @@ use super::command::{
 use super::loop_span::Loop;
 use super::memory_source::MemorySource;
 use super::slot::{PlaybackSlot, stretch_wanted};
+use super::stretched;
 use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
+use tutti_dsp::PhaseVocoder;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     RenderMode, Shape, Status,
@@ -39,7 +40,7 @@ use tutti_units::{SampleRate, Tail};
 /// Something the drain took ownership of and must not free in the callback.
 ///
 /// Every variant exists for the same reason: dropping it can free a large
-/// allocation — a [`stretch::Unit`]'s vocoders (~100 KB per channel), or a
+/// allocation — a [`PhaseVocoder`]'s rings (about 60 KB per channel), or a
 /// decoded [`Wave`] whose last reference it is. Rather than teach each call
 /// site its own evasion, everything the drain needs to shed goes down one
 /// ring and is freed by [`VoicePoolHandle::collect_retired`] on the
@@ -66,7 +67,7 @@ use tutti_units::{SampleRate, Tail};
 /// any field would move the deallocation back into the audio callback.
 ///
 /// The variants are also very different sizes (a `PlaybackSlot` dwarfs a bare
-/// filter), which normally argues for boxing the large one. Not here: this value
+/// vocoder), which normally argues for boxing the large one. Not here: this value
 /// exists to cross a thread boundary and be dropped, so a `Box` would add an
 /// allocation on one side and a free on the other — the exact cost being avoided.
 /// The ring holds `MAX_RESIDENT_VOICES`, so the waste is one slot-sized
@@ -77,20 +78,19 @@ use tutti_units::{SampleRate, Tail};
     reason = "the payloads exist to be received and dropped on the control thread, never read; boxing the large variant would re-add the audio-thread free this type exists to avoid"
 )]
 pub(crate) enum Retired<F: SamplerFloat> {
-    /// A slot removed by `VoiceCommand::Remove`, filter and all.
+    /// A slot removed by `VoiceCommand::Remove`, vocoder and all.
     Slot(PlaybackSlot<F>),
-    /// A stretch filter the sender built for an `UpdateStretch` that turned out
+    /// A vocoder the sender built for an `UpdateStretch` that turned out
     /// not to need it, because the slot already had one.
     ///
-    /// The sender cannot know whether a filter is resident — that is audio-thread
+    /// The sender cannot know whether a vocoder is resident — that is audio-thread
     /// state — so it builds whenever the new values ask for stretching and accepts
     /// that some arrivals are redundant. Handing the spare back here is what keeps
     /// that trade free of an audio-thread free.
     ///
-    /// Unboxed: boxing it would mean allocating on the control thread and
-    /// *deallocating* on the audio one, which is the hazard this type exists to
-    /// avoid.
-    Stretch(stretch::Unit<F>),
+    /// The box the command carried: the drain moves it to the ring and the
+    /// control thread frees it.
+    Stretch(Box<PhaseVocoder<F>>),
     /// A wave a `ReplaceWave` let go of: the one a memory slot swapped out,
     /// or the new one when no memory slot took it.
     ///
@@ -99,15 +99,15 @@ pub(crate) enum Retired<F: SamplerFloat> {
     /// is retired at all.
     Wave(Arc<Wave<F>>),
     /// A voice an `AddVoice` brought to a pool already holding
-    /// `MAX_RESIDENT_VOICES` slots, refused whole: its box, and the filter
+    /// `MAX_RESIDENT_VOICES` slots, refused whole: its box, and the vocoder
     /// the sender built for it.
     ///
     /// Taking it would grow the slot vector (a reallocation in the
     /// callback), and dropping it would free the box, the source and the
-    /// filter there. Counted as [`PoolDrops::voices_refused`].
+    /// vocoder there. Counted as [`PoolDrops::voices_refused`].
     Refused {
         voice: Box<Voice<F>>,
-        stretch: Option<stretch::Unit<F>>,
+        stretch: Option<Box<PhaseVocoder<F>>>,
     },
 }
 
@@ -230,7 +230,7 @@ pub struct PoolTooWide {
 /// command queue, reads the transport from the block's `Env`, then reads and
 /// sums its slots — all of it on the audio thread, and all of it
 /// allocation-free provided the control side did its share:
-/// `VoicePoolHandle::send` builds any stretch filter a command implies, and
+/// `VoicePoolHandle::send` builds any vocoder a command implies, and
 /// [`VoicePoolHandle::collect_retired`] frees what the drain hands back.
 ///
 /// # As a graph node
@@ -276,8 +276,7 @@ pub struct VoicePool<F: SamplerFloat> {
     ///
     /// `VoiceCommand::Remove` is handled inside `drain_commands`, which runs
     /// from `tick`/`process` — the audio callback. Dropping the slot there frees
-    /// its `stretch::Unit`'s vocoders (~100 KB per channel), which the unit
-    /// owns, in the callback.
+    /// its vocoder's rings (about 60 KB per channel) in the callback.
     ///
     /// Pushing to a bounded ring instead is lock-free and allocation-free.
     /// The control thread drains it via [`VoicePoolHandle::collect_retired`];
@@ -288,14 +287,13 @@ pub struct VoicePool<F: SamplerFloat> {
     /// What the drain dropped or refused, shared with the handle
     /// ([`VoicePoolHandle::drops`]).
     pub(crate) counters: Arc<DrainCounters>,
-    /// The engine rate every slot and its stretch filter is tuned to. Written by
-    /// `prepare` and forwarded to each of them, so a device-rate change
-    /// cannot leave a filter tuned to the old one.
+    /// The engine rate every slot is prepared at, and the vocoders the handle
+    /// builds carry. Written by `prepare`.
     pub(crate) sample_rate: SampleRate,
     /// The render mode the pool was last prepared in, given to every source
     /// (a fork's file read waits only when it is offline).
     render_mode: RenderMode,
-    /// The rate, shared with the handle, so a filter the handle builds for a
+    /// The rate, shared with the handle, so a vocoder the handle builds for a
     /// command is built at the rate the pool runs at.
     pub(crate) rate: SharedRate,
     /// Output width — the node's audio outputs, fixed at construction.
@@ -413,7 +411,7 @@ impl<F: SamplerFloat> VoicePool<F> {
 
     /// A pool at an explicit output width.
     ///
-    /// Each slot's stretch unit is built at this width too, so a wide voice is
+    /// Each slot's vocoder is built at this width too, so a wide voice is
     /// not truncated on the stretch path.
     ///
     /// # Errors
@@ -445,7 +443,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         self.rx = rx;
         self.retired = retired_tx;
         // The handle mirrors the reader's width and shares its rate so `send`
-        // can build a stretch filter that matches it, on the control thread.
+        // can build a vocoder that matches it, on the control thread.
         let handle = VoicePoolHandle {
             tx: Arc::new(Mutex::new(tx)),
             retired: Arc::new(Mutex::new(retired)),
@@ -608,7 +606,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// Inserts an in-memory voice as a new slot, `source` played as `play`
     /// says (its gain, speed, direction, loop, stretch and pitch; the loop in
     /// `play` is the voice's, replacing any the source holds), building the
-    /// stretch filter here if the voice needs one. An insert at an id already
+    /// vocoder here if the voice needs one. An insert at an id already
     /// resident replaces that slot.
     ///
     /// For a pool that is not yet in a graph (a host rebuilding a track's
@@ -617,7 +615,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// door here: its loop and direction are its stream's, set through the
     /// handle ([`VoicePoolHandle::add_streaming`]).
     ///
-    /// Allocates (the filter, when the voice stretches, and the slot's box):
+    /// Allocates (the vocoder, when the voice stretches, and the slot's box):
     /// control thread only.
     pub fn insert(&mut self, id: SlotId, source: MemorySource<F>, play: Playback) {
         self.insert_voice(
@@ -637,12 +635,8 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// stream's, set by the control thread first, then recorded). A streaming
     /// voice's direction is the stream's too, so it is only recorded.
     pub(crate) fn insert_voice(&mut self, id: SlotId, voice: Voice<F>) {
-        let stretch = stretch_wanted(&voice.play).then(|| {
-            let unit = stretch::Unit::<F>::with_channels(self.sample_rate, self.channels);
-            unit.set_stretch_factor(voice.play.stretch);
-            unit.set_pitch_cents(voice.play.pitch);
-            unit
-        });
+        let stretch = stretch_wanted(&voice.play)
+            .then(|| stretched::vocoder::<F>(self.channels, self.sample_rate));
         self.insert_voice_inner(id, Box::new(voice), stretch);
     }
 
@@ -655,7 +649,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         &mut self,
         id: SlotId,
         mut voice: Box<Voice<F>>,
-        stretch: Option<stretch::Unit<F>>,
+        stretch: Option<Box<PhaseVocoder<F>>>,
     ) {
         if let Some(i) = self.voices.iter().position(|s| s.id == id) {
             let old = self.voices.swap_remove(i);
@@ -670,7 +664,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         let direction = voice.play.direction;
         // The slot is built at THIS READER's width: a slot narrower than the
         // reader would truncate on the stretch path only, which no stereo test
-        // can observe. Its stretch unit, if any, was built by the sender on
+        // can observe. Its vocoder, if any, was built by the sender on
         // the control thread (`VoicePoolHandle::send`) and only moves in here.
         let mut slot = PlaybackSlot::with_channels(id, voice, self.sample_rate, self.channels);
         slot.stretch = stretch;
@@ -727,13 +721,13 @@ impl<F: SamplerFloat> VoicePool<F> {
                         self.retire(Retired::Refused { voice, stretch });
                         continue;
                     }
-                    // The filter arrives prebuilt from `send` (control thread);
+                    // The vocoder arrives prebuilt from `send` (control thread);
                     // this only moves it into the slot.
                     self.insert_voice_inner(id, voice, stretch);
                 }
                 VoiceCommand::Remove(id) => {
                     // `retain` would DROP the slot here, on the audio thread,
-                    // freeing its stretch filter's vocoder bank inside the
+                    // freeing its vocoder's rings inside the
                     // callback. Swap it out and hand it to the control thread
                     // instead — a lock-free push, no free.
                     if let Some(i) = self.voices.iter().position(|s| s.id == id) {
@@ -812,11 +806,11 @@ impl<F: SamplerFloat> VoicePool<F> {
                 } => {
                     // Take the surplus out of `set_stretch` and retire it rather
                     // than letting it drop here: this is the audio callback, and
-                    // dropping a `stretch::Unit` frees its vocoders. Same
+                    // dropping a vocoder frees its rings. Same
                     // treatment as `Remove` above.
                     //
                     // `slot_mut` returning `None` (the slot was removed between
-                    // send and drain) must retire the filter too — an early
+                    // send and drain) must retire the vocoder too — an early
                     // `return`/`continue` here would drop it on this thread.
                     let surplus = match self.slot_mut(id) {
                         Some(slot) => slot.set_stretch(stretch_factor, pitch_cents, stretch),
@@ -847,12 +841,19 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
                 // Reserved like a new pool's, so a clone's drain refuses at the
                 // same count rather than at whatever `collect` sized.
                 let mut voices = Vec::with_capacity(MAX_RESIDENT_VOICES.max(self.voices.len()));
-                voices.extend(self.voices.iter().map(|s| PlaybackSlot {
-                    id: s.id,
-                    voice: s.voice.clone(),
-                    stretch: s.stretch.clone(),
-                    channels: s.channels,
-                    sample_rate: s.sample_rate,
+                voices.extend(self.voices.iter().map(|s| {
+                    PlaybackSlot {
+                        id: s.id,
+                        voice: s.voice.clone(),
+                        stretch: s
+                            .stretch
+                            .as_ref()
+                            .map(|_| stretched::vocoder::<F>(s.channels, s.sample_rate)),
+                        cursor: None,
+                        seats: 0,
+                        channels: s.channels,
+                        sample_rate: s.sample_rate,
+                    }
                 }));
                 voices
             },
@@ -888,8 +889,8 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
             .with_cost(tutti_graph::Cost::Heavy)
     }
 
-    /// The rate every slot, its source and its stretch filter run at, and
-    /// the handle builds filters at; the block scratch sized from
+    /// The rate every slot and its source run at, and
+    /// the handle builds vocoders at; the block scratch sized from
     /// `max_block` (a re-prepare at another size resizes it).
     fn prepare(&mut self, p: &Prepare) {
         let sample_rate = p.sample_rate();
@@ -901,9 +902,6 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
         for slot in &mut self.voices {
             slot.voice.source.set_render(sample_rate, self.render_mode);
             slot.sample_rate = sample_rate;
-            if let Some(unit) = &mut slot.stretch {
-                unit.set_sample_rate(sample_rate);
-            }
         }
     }
 

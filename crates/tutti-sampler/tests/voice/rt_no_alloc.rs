@@ -5,10 +5,10 @@
 //! is caught where it happens rather than reported afterwards.
 //!
 //! Covered: in-memory `MemorySource` (the workhorse playback node) in full
-//! blocks and in one-frame blocks, the voice-pool command drain, and
-//! `stretch::Unit`, whose fixed-capacity `Box<[f32]>` scratch buffers make
-//! `process` non-allocating for any block size (a block past the scratch is
-//! split into runs; `time_stretch_process_past_the_scratch_is_allocation_free`).
+//! blocks and in one-frame blocks, the voice-pool command drain, and a
+//! stretching voice, whose phase vocoder is built on the control side and whose
+//! ratio changes between blocks
+//! (`a_stretching_voice_with_a_changing_ratio_is_allocation_free`).
 //!
 //! The sampler's nodes are graph nodes: each is driven through
 //! `tutti_graph::contract::Direct`, whose buffers are built once, under a
@@ -28,7 +28,6 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
-use tutti_sampler::stretch::Unit;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
     Direction, MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
@@ -37,8 +36,6 @@ use tutti_sampler::{
 use tutti_units::{
     Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
 };
-
-type TimeStretchUnit = Unit<f32>;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -121,104 +118,38 @@ fn memory_source_one_frame_blocks_are_allocation_free() {
     });
 }
 
-/// One 64-frame stereo block through `Unit::process`, planar slices built on
-/// the stack (no allocation of the harness's own).
-fn process_stereo(node: &mut TimeStretchUnit, input: &[[f32; 64]; 2], output: &mut [[f32; 64]; 2]) {
-    let ins = [&input[0][..], &input[1][..]];
-    let [o0, o1] = output;
-    let mut outs = [&mut o0[..], &mut o1[..]];
-    node.process(64, &ins, &mut outs);
-}
-
+/// A stretching voice whose ratio keeps changing renders without allocating.
+///
+/// The vocoder is built on the control side when the command is sent, and the
+/// drain only moves it in, so each block here (a retarget of the vocoder's
+/// controls, the input it asks for read at the cursor, and a hop of frames) is
+/// guarded. The ratio steps every block, over stretches both sides of unity
+/// and a pitch shift, so the vocoder's input count varies from block to block.
 #[test]
-fn time_stretch_process_is_allocation_free() {
-    // The stretcher is a pure filter: it owns no source and reads the stereo
-    // frames the caller feeds in. Feed a 2-channel input (matching its two
-    // vocoders) primed with a constant source signal.
-    let mut node = TimeStretchUnit::new(SampleRate::SR_48K);
-    node.set_sample_rate(SampleRate::SR_48K);
-    node.set_stretch_factor(StretchFactor::new(1.5));
-    assert!(node.is_processing());
-
-    let input = [[0.25f32; 64]; 2];
-    let mut output = [[0.0f32; 64]; 2];
-
-    // Warm up past the phase-vocoder fill-up latency so `process` is on its
-    // steady-state path inside the guarded loop.
+fn a_stretching_voice_with_a_changing_ratio_is_allocation_free() {
+    let wave = sine_wave(4.0, 48_000.0);
+    let (pool, handle) = VoicePool::new().with_handle();
+    let mut rig = Rig::new(pool, 64);
+    let (sampler, play) = placed_parts(&wave, 1.5);
+    handle
+        .add(SlotId(1), sampler, play)
+        .expect("the command queue has room in a test");
+    // The add drains, and the vocoder fills past its latency.
     for _ in 0..64 {
-        process_stereo(&mut node, &input, &mut output);
+        rig.block();
     }
 
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..1_000 {
-            process_stereo(&mut node, &input, &mut output);
-        }
-    });
-}
-
-/// One `process` of a block past the 8192-frame scratch, in processing
-/// mode: the block is split into runs inside `process`, and the split must
-/// not allocate either. The 64-frame gate above never reaches the split.
-#[test]
-fn time_stretch_process_past_the_scratch_is_allocation_free() {
-    const FRAMES: usize = 8192 + 300;
-    let mut node = TimeStretchUnit::new(SampleRate::SR_48K);
-    node.set_sample_rate(SampleRate::SR_48K);
-    node.set_stretch_factor(StretchFactor::new(1.5));
-    assert!(
-        node.is_processing(),
-        "the gate is on the vocoder path, not bypass"
-    );
-
-    // Built outside the gate: the harness's buffers are not the unit's.
-    let input = vec![vec![0.25f32; FRAMES]; 2];
-    let mut output = vec![vec![0.0f32; FRAMES]; 2];
-    let ins = [&input[0][..], &input[1][..]];
-    let [o0, o1] = &mut output[..] else {
-        unreachable!("two channels")
-    };
-    let mut outs = [&mut o0[..], &mut o1[..]];
-
-    // One warm-up block, so the gated one is past the vocoder's fill-up.
-    node.process(FRAMES, &ins, &mut outs);
-
-    assert_no_alloc::assert_no_alloc(|| {
-        node.process(FRAMES, &ins, &mut outs);
-    });
-}
-
-/// The same guarantee for a cloned unit — the shape a fork produces.
-///
-/// A clone builds its own vocoders and block scratch, so there is no step
-/// between cloning and running: a clone is ready as built.
-///
-/// `time_stretch_process_is_allocation_free` above cannot catch a regression
-/// here: it drives a freshly constructed unit, not a clone.
-///
-/// A clone that sized its scratch only on first use would slip past: the warm-up runs
-/// that use. `stretch::tests::a_clone_arrives_with_its_block_scratch_sized` pins that a
-/// clone arrives sized.
-#[test]
-fn cloned_time_stretch_process_is_allocation_free() {
-    let mut original = TimeStretchUnit::new(SampleRate::SR_48K);
-    original.set_sample_rate(SampleRate::SR_48K);
-    original.set_stretch_factor(StretchFactor::new(1.5));
-
-    let mut node = original.clone();
-    assert!(node.is_processing());
-
-    let input = [[0.25f32; 64]; 2];
-    let mut output = [[0.0f32; 64]; 2];
-
-    for _ in 0..64 {
-        process_stereo(&mut node, &input, &mut output);
+    for step in 0..400u32 {
+        let stretch = 0.8 + 0.1 * f64::from(step % 7);
+        let cents = 100.0 * f64::from(step % 5);
+        handle
+            .set_stretch(SlotId(1), StretchFactor::new(stretch), Cents::new(cents))
+            .expect("the command queue has room in a test");
+        // The block drains the update and renders the voice; the surplus
+        // vocoder the update carried leaves through the retirement ring.
+        assert_no_alloc::assert_no_alloc(|| rig.block());
+        handle.collect_retired();
     }
-
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..1_000 {
-            process_stereo(&mut node, &input, &mut output);
-        }
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +208,7 @@ fn voice_pool_process_steady_state_is_allocation_free() {
 /// stretch tests never clone a pool, so this is the pool's RT contract across
 /// a clone. The clone needs no preparation first: its filters build their
 /// own scratch, and the pool builds its own block lanes
-/// (the slot reads through `stretch::Unit::filter_lanes` into them). (The
+/// (the slot reads through the vocoder into them). (The
 /// graph never clones a node — a pool's fork is a fresh, empty pool —
 /// so a clone is what a host holding a template makes.)
 #[test]
@@ -294,9 +225,8 @@ fn cloned_voice_pool_with_stretch_is_allocation_free() {
             speed: sampler.speed(),
             loop_: sampler.loop_(),
             direction: Direction::Forward,
-            // Actually stretching: a unity voice bypasses the filter, so the
-            // scratch would never be touched and the test would pass either
-            // way.
+            // Actually stretching: a unity voice has no vocoder, so the
+            // read would never touch one and the test would pass either way.
             stretch: StretchFactor::new(2.0),
             pitch: Cents::new(0.0),
         };
@@ -523,18 +453,15 @@ fn a_loop_wrap_crossfade_is_allocation_free() {
 
 /// The `VoiceCommand::UpdateStretch` drain is allocation-free.
 ///
-/// Draining an `UpdateStretch` calls `PlaybackSlot::set_stretch`, which flips the
-/// processor's lock-free `stretch_factor` / `pitch_cents` atomics, mirrors them
-/// into the routing-gate fields, and — when the slot has no processor yet — moves
+/// Draining an `UpdateStretch` calls `PlaybackSlot::set_stretch`, which writes
+/// the voice's stretch and pitch and — when the slot has no vocoder yet — moves
 /// in the one the sender built. Every one of those is a store or a move; nothing
 /// is constructed here. So the per-block command drain stays
-/// alloc-free even when a stretch update lands on it. (Earlier, the drain rebuilt
-/// the stretch unit inline and allocated; batch-1's resident-stretch moved that
-/// construction to slot creation, closing the hole this test guards.)
+/// alloc-free even when a stretch update lands on it.
 ///
-/// The drain must not *free* either: a surplus filter (one that arrived for a slot
+/// The drain must not *free* either: a surplus vocoder (one that arrived for a slot
 /// that already had one) goes to the retirement channel instead of being dropped
-/// here, because dropping a `stretch::Unit` can free its vocoder bank. That half
+/// here, because dropping a vocoder frees its rings. That half
 /// is pinned by
 /// `a_redundant_stretch_filter_is_retired_not_freed_on_the_audio_thread`; this
 /// test would not catch it, since `assert_no_alloc` counts allocations, and a free
@@ -573,7 +500,7 @@ fn voice_pool_update_stretch_drain_is_allocation_free() {
     assert!(
         status.success(),
         "UpdateStretch drain allocated on the audio thread (child exited {status}). \
-         The drain must only flip the resident stretch unit's atomics — never allocate."
+         The drain must only write the voice's stretch and move a vocoder in — never allocate."
     );
 }
 
@@ -598,7 +525,7 @@ fn run_stretch_drain_under_guard() {
     }
 
     // Enqueue a stretch update. The voice spawned at `Playback::default()` —
-    // unity factor, zero cents — so it has NO resident filter, and this is the
+    // unity factor, zero cents — so it has NO resident vocoder, and this is the
     // command that has to deliver one. `send` builds it here, on this (control)
     // thread; the guarded drain below only moves it into the slot.
     //
@@ -765,7 +692,7 @@ fn six_channel_clip_reaches_six_reader_outputs_without_allocating() {
 //
 // `drain_commands` runs from `process`, so anything it builds is built
 // in the audio callback. Two paths are the standing temptation: `AddVoice`
-// needs a stretch filter (an FFT setup plus two block-scratch buffers PER
+// needs a stretch vocoder (an FFT setup plus two block-scratch buffers PER
 // CHANNEL), and `UpdateLoop` needs a pre-loop crossfade plus a read buffer.
 // Both are kept off the callback — the sender builds the filter, and the
 // crossfade buffer is resident and re-pointed in place.
@@ -852,7 +779,7 @@ fn add_voice_drain_is_allocation_free_at_six_channels() {
 ///
 /// `VoiceCommand::Remove` is handled by `voices.retain(...)` inside
 /// `drain_commands`, which runs from `process` — the audio callback. A
-/// slot dropped there takes its `stretch::Unit` with it, and the unit owns its
+/// slot dropped there takes its vocoder with it, and the vocoder owns its
 /// vocoders and block scratch (~100 KB per channel), which would be freed
 /// inside the callback.
 ///
@@ -1023,7 +950,7 @@ fn reclaim_frees_the_removed_slots_a_callback_parked() {
 /// The slot vector is reserved to `MAX_RESIDENT_VOICES` (64), and the drain
 /// runs inside `process`. A push past the reservation would reallocate the
 /// vector there, and dropping the voice instead would free its box, its
-/// source and the stretch filter the sender built for it. The drain refuses
+/// source and the stretch vocoder the sender built for it. The drain refuses
 /// the add, hands the voice back through the retirement channel, and counts
 /// it; the control thread frees it in `collect_retired`.
 ///

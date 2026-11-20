@@ -109,27 +109,31 @@ impl<F: Float> std::fmt::Debug for Lanes<F> {
 }
 
 /// What a voice's block read renders through: the lanes it hands on, the
-/// lanes its stretch filter reads from, and the block's positions and
+/// lanes its stretch vocoder reads from, and the block's positions and
 /// gather. One per rendering node (a pool reads every slot through its
 /// one), sized on the control thread from the node's width and
 /// `Prepare::max_block`, so a voice's block read touches no stack arrays of
 /// its own and renders a whole block in one piece.
 ///
-/// Its cost a frame: 41 bytes (a position, 16; the gather's index, 4,
+/// Its cost a frame: 57 bytes (two positions, 32; the gather's index, 4,
 /// fraction, 4, flag, 1, and four tap lanes, 16) plus 8 a channel (an `out`
-/// and a `raw` lane): 57 bytes a stereo frame, 57 KiB for a stereo voice
+/// and a `raw` lane): 73 bytes a stereo frame, 73 KiB for a stereo voice
 /// prepared at 1024 frames (`tests::a_resize_sizes_every_buffer_to_the_width`
 /// counts it).
 #[derive(Debug)]
 pub(crate) struct BlockScratch<F: Float> {
     /// The voice's output for the block, before the mix.
     pub(crate) out: Lanes<F>,
-    /// The source's frames, when a stretch filter sits between them and
+    /// The source's frames, when a vocoder sits between them and
     /// `out`.
     pub(crate) raw: Lanes<F>,
     /// Where each frame of the block reads (`None`: silence). The disk tier
     /// rewrites them in place to its ring positions.
     pub(crate) positions: Vec<Option<SamplePosition>>,
+    /// Where each source frame a stretching voice feeds its vocoder reads: the
+    /// vocoder takes its input at a cursor of its own, apart from the
+    /// per-output-frame `positions`.
+    pub(crate) reads: Vec<Option<SamplePosition>>,
     /// The along-time reads' taps (`MemorySource::read_placed_lanes`, a
     /// steady live disk read).
     pub(crate) gather: Gather<F>,
@@ -150,6 +154,7 @@ impl<F: Float> BlockScratch<F> {
             out: Lanes::empty(),
             raw: Lanes::empty(),
             positions: Vec::new(),
+            reads: Vec::new(),
             gather: Gather::empty(),
         }
     }
@@ -183,6 +188,7 @@ impl<F: Float> BlockScratch<F> {
         self.out.resize(frames, width);
         self.raw.resize(frames, width);
         fit(&mut self.positions, frames, None);
+        fit(&mut self.reads, frames, None);
         self.gather.resize(frames);
     }
 }
@@ -276,9 +282,10 @@ mod tests {
     use tutti_buffers::Interleaved;
     use tutti_buffers::MaxBlock;
 
-    /// [`BlockScratch`]'s bytes a frame that do not depend on the width: a
-    /// position, the gather's index, fraction, flag and four tap lanes.
-    const BYTES_PER_FRAME_FIXED: usize = size_of::<Option<SamplePosition>>() + 4 + 4 + 1 + 4 * 4;
+    /// [`BlockScratch`]'s bytes a frame that do not depend on the width: two
+    /// positions, the gather's index, fraction, flag and four tap lanes.
+    const BYTES_PER_FRAME_FIXED: usize =
+        2 * size_of::<Option<SamplePosition>>() + 4 + 4 + 1 + 4 * 4;
 
     /// [`BlockScratch`]'s bytes a frame per channel: an `out` and a `raw`
     /// lane.
@@ -312,7 +319,7 @@ mod tests {
     /// read writes (the first two lanes of `out` and `raw`, the positions,
     /// the gather) and nothing in the lanes past its width; resized to 64
     /// frames of 6 it holds 64 in six lanes; and its bytes are the ones
-    /// [`BYTES_PER_FRAME_FIXED`] and [`BYTES_PER_FRAME_CHANNEL`] state (57 a
+    /// [`BYTES_PER_FRAME_FIXED`] and [`BYTES_PER_FRAME_CHANNEL`] state (73 a
     /// stereo frame).
     #[test]
     fn a_resize_sizes_every_buffer_to_the_width() {
@@ -335,7 +342,8 @@ mod tests {
                 (frames, frames, frames)
             );
             assert!(g.y.iter().all(|l| l.len() == frames));
-            let bytes = s.positions.capacity() * size_of::<Option<SamplePosition>>()
+            let bytes = (s.positions.capacity() + s.reads.capacity())
+                * size_of::<Option<SamplePosition>>()
                 + g.index.capacity() * 4
                 + g.frac.capacity() * 4
                 + g.live.capacity()
@@ -350,7 +358,7 @@ mod tests {
                 frames * (BYTES_PER_FRAME_FIXED + width * BYTES_PER_FRAME_CHANNEL)
             );
         }
-        assert_eq!(BYTES_PER_FRAME_FIXED + 2 * BYTES_PER_FRAME_CHANNEL, 57);
+        assert_eq!(BYTES_PER_FRAME_FIXED + 2 * BYTES_PER_FRAME_CHANNEL, 73);
     }
 
     /// Every voice node sizes its scratch from `Prepare::max_block` and
