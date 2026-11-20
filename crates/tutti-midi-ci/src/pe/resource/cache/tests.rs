@@ -113,7 +113,9 @@ fn pages_expire_each_on_its_own_cache_time() {
     assert!(get_at(&mut script, &page(0), secs(60), Some(30)));
 }
 
-// M2-103 §7.4.3: a notification of a subscribed Resource overrides the cacheTime.
+// M2-103 §7.4.3: a notification of a subscribed Resource overrides the cacheTime:
+// it ends early the use of cached data that #2 allows.
+/// Spec: m2-103/7.4.3#2
 #[test]
 fn a_subscription_update_overrides_the_cache_time() {
     let (mut script, id) = subscribed_script();
@@ -318,8 +320,8 @@ fn subscribed_list() -> (Script, crate::SubscribeId) {
 }
 
 // M2-103 §7.4.3: a notification of a subscribed Resource overrides the cacheTime,
-// of every page of it.
-/// Spec: m2-103/7.4.3#3
+// of every page of it: it ends early the use of cached data that #2 allows.
+/// Spec: m2-103/7.4.3#2
 #[test]
 fn a_subscription_update_drops_every_page_a_walk_held() {
     let (mut script, id) = subscribed_list();
@@ -399,7 +401,7 @@ fn a_set_drops_every_page_a_get_held() {
 /// Spec: m2-103/7.4.3#4, m2-103/7.4.3#5
 #[test]
 fn per_resource_a_renewed_cache_time_does_not_lengthen_the_oldest() {
-    let mut script = Script::caching(&paginating_list(), PeCacheScope::PerResource);
+    let mut script = Script::new(&paginating_list()).cache_scope(PeCacheScope::PerResource);
     assert!(get_at(&mut script, &page(0), secs(0), Some(60)));
     assert!(get_at(&mut script, &page(3), secs(10), Some(60)));
     assert!(!get_at(&mut script, &page(0), secs(59), Some(60)));
@@ -423,7 +425,7 @@ fn per_request_a_later_page_lives_its_own_cache_time() {
 /// Spec: m2-103/7.4.3#5
 #[test]
 fn per_resource_a_shorter_cache_time_shortens_the_pages_held() {
-    let mut script = Script::caching(&paginating_list(), PeCacheScope::PerResource);
+    let mut script = Script::new(&paginating_list()).cache_scope(PeCacheScope::PerResource);
     assert!(get_at(&mut script, &page(0), secs(0), Some(60)));
     assert!(get_at(&mut script, &page(3), secs(10), Some(20)));
     assert!(!get_at(&mut script, &page(0), secs(29), Some(60)));
@@ -435,7 +437,7 @@ fn per_resource_a_shorter_cache_time_shortens_the_pages_held() {
 /// Spec: m2-103/7.4.3#6
 #[test]
 fn per_resource_a_page_after_the_expiry_drops_all_that_was_cached() {
-    let mut script = Script::caching(&paginating_list(), PeCacheScope::PerResource);
+    let mut script = Script::new(&paginating_list()).cache_scope(PeCacheScope::PerResource);
     assert!(get_at(&mut script, &page(0), secs(0), Some(100)));
     assert!(get_at(&mut script, &page(3), secs(5), Some(10)));
     // The Resource expired at 15 s. Page 6 arrives at 20 s with 100 s.
@@ -453,7 +455,7 @@ fn per_resource_a_page_after_the_expiry_drops_all_that_was_cached() {
 /// Spec: m2-103/7.4.3#5
 #[test]
 fn per_resource_a_walk_expires_all_its_pages_together() {
-    let mut script = Script::caching(&paginating_list(), PeCacheScope::PerResource);
+    let mut script = Script::new(&paginating_list()).cache_scope(PeCacheScope::PerResource);
     assert!(walk_at(
         &mut script,
         secs(0),
@@ -465,4 +467,155 @@ fn per_resource_a_walk_expires_all_its_pages_together() {
         secs(30),
         &[(0, Some(30)), (3, Some(60))]
     ));
+}
+
+// M2-103 §7.4.3: with one cacheTime per Resource the entry's time is the oldest, and
+// two replies to the same request, each answering a Get sent before the other's
+// reply, do not renew it: the second, at 5 s with 100 s, expires with the first,
+// at 0 s with 10 s.
+/// Spec: m2-103/7.4.3#5
+#[test]
+fn per_resource_a_second_reply_to_the_same_request_does_not_renew_the_first() {
+    let mut script = Script::new(&paginating_list()).cache_scope(PeCacheScope::PerResource);
+    let ask = |script: &mut Script| {
+        let (_, actions) = script.init.get(&page(0), script.now).unwrap();
+        script.take(actions);
+        script.last_get_id()
+    };
+    let first = ask(&mut script);
+    let second = ask(&mut script);
+    answer(&mut script, first, Some(10), &program_page(0, 3));
+    script.now = script.start() + secs(5);
+    answer(&mut script, second, Some(100), &program_page(0, 3));
+    assert!(!get_at(&mut script, &page(0), secs(9), Some(100)));
+    assert!(get_at(&mut script, &page(0), secs(10), Some(100)));
+}
+
+// The pages a walk joins are what the peer sent, not what the held data encodes
+// to: a property the page carries beyond the type's (here a manufacturer's, and
+// one that is not) is as it was in a walk from the cache.
+#[test]
+fn a_walk_from_the_cache_joins_the_pages_as_the_peer_sent_them() {
+    let mut script = Script::new(&paginating_list());
+    let pages = |script: &mut Script| {
+        let id = script.last_get_id();
+        let mut header = PeReply::new(PeStatus::Ok);
+        header.cache_time = Some(PeCacheTime::from_secs(100));
+        header.total_count = Some(6);
+        let mut page = program_page(0, 3);
+        if let PeJson::Array(items) = &mut page
+            && let Some(PeJson::Object(o)) = items.first_mut()
+        {
+            o.insert("x-tag", PeJson::Integer(7));
+            o.insert("unknown", PeJson::Integer(1));
+        }
+        script.reply_with(id, PeMessageKind::GET_REPLY, header, page.encode());
+    };
+    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let size = NonZeroU32::new(3).unwrap();
+    let (call, actions) = script.init.get_list(&get, size, script.now).unwrap();
+    script.take(actions);
+    pages(&mut script);
+    answer_page(&mut script, 3, Some(100));
+    let fresh = got(&script, call);
+    script.events.clear();
+    let (call, actions) = script.init.get_list(&get, size, script.now).unwrap();
+    script.take(actions);
+    assert_eq!(sent_gets(&script), 2, "the second walk asked for nothing");
+    assert_eq!(got(&script, call), fresh);
+    let PeData::ProgramList(list) = fresh else {
+        panic!("a ProgramList")
+    };
+    assert_eq!(
+        list.entries()[0].extensions.get("x-tag"),
+        Some(&PeJson::Integer(7))
+    );
+}
+
+// A walk page in flight when a Subscription update replaces its Resource's data got
+// data the update has replaced, so it is not held; the page asked after the update is.
+#[test]
+fn a_walk_page_overtaken_by_a_subscription_update_is_not_cached() {
+    let (mut script, id) = subscribed_list();
+    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let (_, actions) = script
+        .init
+        .get_list(&get, NonZeroU32::new(3).unwrap(), script.now)
+        .unwrap();
+    script.take(actions);
+    script.subscription(
+        5,
+        update(PeUpdateCommand::Full, &id),
+        &program_page(0, 6).encode(),
+    );
+    answer_page(&mut script, 0, Some(100));
+    answer_page(&mut script, 3, Some(100));
+    assert!(
+        walk_at(&mut script, secs(1), &[(0, Some(100))]),
+        "page 3 held"
+    );
+}
+
+// The same for a Set of the Resource, a custom List Resource, as no standard one is set.
+#[test]
+fn a_walk_page_overtaken_by_a_set_is_not_cached() {
+    let resource = custom("X-ScoreList");
+    let list = PeResourceList::new().with(
+        ResourceEntry::builder(resource.clone())
+            .schema(json(r#"{"title":"Score List","type":"array"}"#))
+            .can_paginate(true)
+            .can_set(CanSet::Full)
+            .build()
+            .unwrap(),
+    );
+    let mut script = Script::new(&list);
+    let get = ResourceGet::new(target(resource.clone()));
+    let size = NonZeroU32::new(3).unwrap();
+    let (_, actions) = script.init.get_list(&get, size, script.now).unwrap();
+    script.take(actions);
+    let walk_id = script.last_get_id();
+    let new = ResourceSet::full(
+        target(resource.clone()),
+        PeData::Opaque(PeOpaque::new(resource.clone(), PeJson::Array(Vec::new())).unwrap()),
+    )
+    .unwrap();
+    let (_, actions) = script.init.set(&new, script.now).unwrap();
+    script.take(actions);
+    let set_id = script.last_request_id();
+    script.reply_with(
+        set_id,
+        PeMessageKind::SET_REPLY,
+        PeReply::new(PeStatus::Ok),
+        Vec::new(),
+    );
+    let reply = |script: &mut Script, id| {
+        let mut header = PeReply::new(PeStatus::Ok);
+        header.cache_time = Some(PeCacheTime::from_secs(100));
+        header.total_count = Some(6);
+        script.reply_with(id, PeMessageKind::GET_REPLY, header, b"[1,2,3]".to_vec());
+    };
+    reply(&mut script, walk_id);
+    let second = script.last_get_id();
+    reply(&mut script, second);
+    // Page 3 asked after the Set is held; page 0 is asked for again.
+    let sent = sent_gets(&script);
+    let (_, actions) = script.init.get_list(&get, size, script.now).unwrap();
+    script.take(actions);
+    assert_eq!(sent_gets(&script) - sent, 1);
+}
+
+/// The data the call ended with.
+fn got(script: &Script, call: super::super::CallId) -> PeData {
+    script
+        .events
+        .iter()
+        .find_map(|e| match e {
+            ResourceEvent::Got {
+                call: c,
+                result: Ok(data),
+                ..
+            } if *c == call => Some(data.clone()),
+            _ => None,
+        })
+        .unwrap()
 }

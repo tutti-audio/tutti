@@ -4,14 +4,18 @@
 use tutti_platform::Instant;
 
 use super::super::header::{PeCacheTime, PePage};
+use super::super::tree::PeJson;
 use super::data::PeData;
 use super::request::ResourceTarget;
 use crate::deadline::Pending;
 
-/// What a reply gave: its Property Data, and the `totalCount` of its header.
+/// What a reply gave: its Property Data and the `totalCount` of its header.
 #[derive(Debug)]
-pub(super) struct Kept {
+pub(super) struct Cached {
     pub(super) data: PeData,
+    /// The reply's JSON as it came, which a walk joins: a re-encoding of `data`
+    /// would not be what the peer sent.
+    pub(super) json: Option<PeJson>,
     pub(super) total_count: Option<u32>,
 }
 
@@ -20,7 +24,7 @@ pub(super) struct Kept {
 struct Held {
     target: ResourceTarget,
     page: Option<PePage>,
-    kept: Kept,
+    cached: Cached,
     life: Pending,
 }
 
@@ -33,11 +37,12 @@ pub enum PeCacheScope {
     /// `cacheTime`: the spec's recommendation.
     #[default]
     PerRequest,
-    /// One `cacheTime` per Resource entry: the data held for it expires together.
-    /// A reply that arrives while data is held cannot lengthen the time: the
-    /// Resource expires at the sooner of the time held and the reply's own, so no
-    /// page is used past either limit. A reply that arrives after the time held
-    /// ended drops all the data held, and only it is valid.
+    /// One `cacheTime` per Resource entry, `resId` and all: the data held for an
+    /// entry expires together. The oldest `cacheTime` is retained (#5), read
+    /// strictly: a reply that arrives while data is held cannot lengthen the
+    /// time, and one with a shorter time shortens it, so no page is used past its
+    /// own reply's `cacheTime` or the oldest. A reply that arrives after the time
+    /// held ended finds all the data held dropped, and only it is valid (#6).
     PerResource,
 }
 
@@ -80,11 +85,11 @@ impl GetCache {
         target: &ResourceTarget,
         page: Option<PePage>,
         now: Instant,
-    ) -> Option<&Kept> {
+    ) -> Option<&Cached> {
         self.held
             .iter()
             .find(|h| h.is(target, page) && !h.life.expired(now))
-            .map(|h| &h.kept)
+            .map(|h| &h.cached)
     }
 
     /// Holds the reply to the request for its `time` from `now`, in place of the
@@ -94,28 +99,42 @@ impl GetCache {
         &mut self,
         target: &ResourceTarget,
         page: Option<PePage>,
-        kept: Kept,
+        cached: Cached,
         time: PeCacheTime,
         began_at: u64,
         now: Instant,
     ) {
-        self.held
-            .retain(|h| !h.is(target, page) && !h.life.expired(now));
-        if time.as_secs() > 0 && began_at == self.drops {
-            let mut life = Pending::after(now, time.into());
+        let keeping = time.as_secs() > 0 && began_at == self.drops;
+        let life = keeping.then(|| {
+            let own = Pending::after(now, time.into());
             if self.scope == PeCacheScope::PerResource {
-                // What is held here has not expired: the retain above dropped the rest.
-                for held in self.held.iter().filter(|h| h.target == *target) {
-                    life = life.sooner(held.life);
-                }
-                for held in self.held.iter_mut().filter(|h| h.target == *target) {
-                    held.life = life;
-                }
+                // The entry's time held, this request's own reply included, as the
+                // retain below has not yet dropped it: the reply may not outlive it.
+                self.held
+                    .iter()
+                    .filter(|h| h.target == *target && !h.life.expired(now))
+                    .fold(own, |life, h| life.min(h.life))
+            } else {
+                own
             }
+        });
+        self.held.retain_mut(|h| {
+            if h.life.expired(now) || h.is(target, page) {
+                return false;
+            }
+            if let Some(life) = life
+                && self.scope == PeCacheScope::PerResource
+                && h.target == *target
+            {
+                h.life = life;
+            }
+            true
+        });
+        if let Some(life) = life {
             self.held.push(Held {
                 target: target.clone(),
                 page,
-                kept,
+                cached,
                 life,
             });
         }

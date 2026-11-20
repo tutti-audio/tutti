@@ -6,7 +6,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 /// A wait that ends at an instant: reached when `now` is at or past it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Pending {
     deadline: Instant,
 }
@@ -32,15 +32,6 @@ impl Pending {
     /// Whether the wait is over at `now`: an instant at the deadline is late.
     pub(crate) fn expired(self, now: Instant) -> bool {
         now >= self.deadline
-    }
-
-    /// Whichever of the two waits ends first.
-    pub(crate) fn sooner(self, other: Self) -> Self {
-        if other.deadline < self.deadline {
-            other
-        } else {
-            self
-        }
     }
 
     /// The instant the wait ends.

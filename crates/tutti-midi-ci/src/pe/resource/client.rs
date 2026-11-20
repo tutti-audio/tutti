@@ -16,7 +16,7 @@ use super::super::limits::{MediaType, SubscribeId};
 use super::super::partial::PartialUpdate;
 use super::super::reassemble::PeFlowControl;
 use super::super::tree::{PeJson, PeJsonError};
-use super::cache::{GetCache, Kept, PeCacheScope};
+use super::cache::{Cached, GetCache, PeCacheScope};
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::fields::PeDataError;
@@ -450,11 +450,11 @@ impl ResourceInitiator {
         }
         let call = self.call_id();
         self.cache.prune(now);
-        if let Some(kept) = self.cache.fresh(get.target(), get.page(), now) {
+        if let Some(cached) = self.cache.fresh(get.target(), get.page(), now) {
             let got = event(ResourceEvent::Got {
                 call,
                 target: get.target().clone(),
-                result: Ok(kept.data.clone()),
+                result: Ok(cached.data.clone()),
             });
             return Ok((call, vec![got]));
         }
@@ -685,13 +685,19 @@ impl ResourceInitiator {
             } => {
                 let cache_time = reply.as_ref().ok().and_then(|r| r.header.cache_time);
                 let total_count = reply.as_ref().ok().and_then(|r| r.header.total_count);
+                let json = cache_time
+                    .filter(|t| t.as_secs() > 0)
+                    .and(reply.as_ref().ok())
+                    .filter(|r| r.header.media_type.is_none())
+                    .and_then(|r| parse(r).ok());
                 let result = reply.and_then(|r| decode(target.resource(), &r));
                 if let (Ok(data), Some(time)) = (&result, cache_time) {
-                    let kept = Kept {
+                    let cached = Cached {
                         data: data.clone(),
+                        json,
                         total_count,
                     };
-                    self.cache.keep(&target, page, kept, time, drops, now);
+                    self.cache.keep(&target, page, cached, time, drops, now);
                 }
                 out.push(event(ResourceEvent::Got {
                     call,
@@ -805,13 +811,14 @@ impl ResourceInitiator {
         if let (Ok((page, total)), Some(time)) = (&step, cache_time)
             && let Ok(data) = PeData::decode(walk.target.resource(), page)
         {
-            let kept = Kept {
+            let cached = Cached {
                 data,
+                json: Some(page.clone()),
                 total_count: Some(*total),
             };
             let (target, asked, drops) = (walk.target.clone(), walk.asked, walk.drops);
             self.cache
-                .keep(&target, Some(asked), kept, time, drops, now);
+                .keep(&target, Some(asked), cached, time, drops, now);
         }
         match walk.step(step) {
             Stepped::More => {
@@ -841,7 +848,7 @@ impl ResourceInitiator {
             let held = self
                 .cache
                 .fresh(&walk.target, Some(page), now)
-                .and_then(|k| Some((k.data.to_json()?, k.total_count?)));
+                .and_then(|c| Some((c.json.clone()?, c.total_count?)));
             if let Some(held) = held {
                 match walk.step(Ok(held)) {
                     Stepped::More => continue,
