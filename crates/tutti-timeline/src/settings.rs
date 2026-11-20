@@ -232,14 +232,6 @@ impl TransportSettings {
         self.in_preroll.load(Ordering::Acquire)
     }
 
-    /// The count-in flag as one cell a node reads on its own thread
-    /// (`ClickNode`), set by [`set_in_preroll`](Self::set_in_preroll). Read
-    /// it with `Ordering::Acquire`; nothing else writes it.
-    #[must_use]
-    pub fn in_preroll_cell(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.in_preroll)
-    }
-
     /// Mark the count-in as running or finished.
     pub fn set_in_preroll(&self, in_preroll: bool) {
         self.in_preroll.store(in_preroll, Ordering::Release);

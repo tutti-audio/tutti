@@ -120,6 +120,7 @@ fn render_probes(workers: usize, entry: Entry) {
                     &TransportChanges::NONE,
                     &[&input],
                     &mut outs,
+                    None,
                 );
             }
         }

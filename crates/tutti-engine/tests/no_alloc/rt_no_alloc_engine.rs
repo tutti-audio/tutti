@@ -491,7 +491,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));
-    let click = ClickNode::from(ClickNodeConfig::new(&transport, Arc::clone(&settings)));
+    let click = ClickNode::from(ClickNodeConfig::new(Arc::clone(&settings)));
 
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),

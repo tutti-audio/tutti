@@ -12,8 +12,8 @@ use tutti_tempo::TempoMap;
 use super::walk::TempoWalk;
 use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_music::FrameClock;
 use tutti_music::LoopRange;
+use tutti_music::{FrameClock, MeterMap};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// Configuration for constructing an [`OfflineTimeline`].
@@ -121,6 +121,10 @@ pub struct OfflineTimeline {
     /// The active loop region, validated at construction — so `advance()` needs
     /// no `end > start` guard of its own.
     loop_range: Option<LoopRange>,
+    /// The meter a render under this timeline lends its nodes
+    /// ([`RenderClock::meter`](super::RenderClock::meter)), or `None` for a
+    /// render with no meter (a node then counts 4/4 bars).
+    meter: Option<Arc<MeterMap>>,
 }
 
 /// The playhead, and where it is on a map that changes tempo.
@@ -155,6 +159,19 @@ impl OfflineTimeline {
             stepped,
             sample_rate: config.sample_rate,
             loop_range: config.loop_range,
+            meter: None,
+        }
+    }
+
+    /// This timeline lending `meter` to the graph it renders
+    /// ([`RenderClock::meter`](super::RenderClock::meter)), so a metronome in
+    /// the render counts the project's bars. It keeps the map it is given: a
+    /// later edit to the project's meter does not reach it.
+    #[must_use]
+    pub fn meter(self, meter: Arc<MeterMap>) -> Self {
+        Self {
+            meter: Some(meter),
+            ..self
         }
     }
 
@@ -365,6 +382,10 @@ impl super::RenderClock for OfflineTimeline {
         usize,
     ) {
         self.block(frames)
+    }
+
+    fn meter(&self) -> Option<&MeterMap> {
+        self.meter.as_deref()
     }
 }
 

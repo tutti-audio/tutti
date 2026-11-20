@@ -11,6 +11,7 @@ static ALLOC: AllocDisabler = AllocDisabler;
 mod by_hand;
 mod chase;
 mod contract;
+mod cx_meter;
 mod executor;
 mod f64_render;
 mod inlet_no_alloc;

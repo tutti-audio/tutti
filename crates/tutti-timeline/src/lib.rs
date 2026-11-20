@@ -118,11 +118,18 @@ pub trait RenderClock: Send + Sync {
         let (transport, changes) = self.graph_block();
         (transport, changes, frames)
     }
+
+    /// The meter the graph's nodes read through `Cx::meter` while it renders
+    /// under this clock. `None` (the default) is no meter: 4/4 from beat 0.
+    fn meter(&self) -> Option<&tutti_music::MeterMap> {
+        None
+    }
 }
 
 /// Renders one block through `exec` under `clock`, then advances the clock by
 /// it: [`graph_piece`](RenderClock::graph_piece),
-/// `Executor::process_with_changes`, then [`advance`](RenderClock::advance),
+/// `Executor::apply_pending` and `Executor::render_applied` (lending the
+/// clock's [`meter`](RenderClock::meter)), then [`advance`](RenderClock::advance),
 /// again for each piece — the one order that keeps every reader of the clock
 /// on the frame the graph renders (emit-then-advance, as above). The block is
 /// the frames of `outputs`, so it needs at least one output plane (a view
@@ -171,12 +178,14 @@ pub fn render_graph<F: Float>(
             from.next()
                 .map_or(Default::default(), |o| o.into_samples_mut())
         });
-        exec.process_with_changes(
+        exec.apply_pending();
+        exec.render_applied(
             n,
             &transport,
             &changes,
             &table_in[..ni],
             &mut table_out[..no],
+            clock.meter(),
         );
         clock.advance(tutti_units::Samples::new(n));
         done += n;
