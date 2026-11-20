@@ -11,7 +11,7 @@ use tutti_engine::Engine;
 use tutti_graph::{Editor, MeterReader, Prepare};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
 use tutti_graph::{OutPort, Source};
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -191,7 +191,7 @@ fn the_pure_render_feeds_the_meter() {
 /// source's level within the block).
 #[test]
 fn the_master_reads_before_the_declick() {
-    use tutti_transport::MotionEvent;
+    use tutti_timeline::MotionEvent;
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),

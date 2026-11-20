@@ -56,7 +56,7 @@ use tutti_codec::{FlacLevel, Format, Pcm, Quality};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::Amplitude;
 use tutti_units::Hz;
 

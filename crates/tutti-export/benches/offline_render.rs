@@ -36,7 +36,7 @@ use tutti_export::{
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

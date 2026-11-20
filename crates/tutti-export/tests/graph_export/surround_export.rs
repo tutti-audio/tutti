@@ -44,7 +44,7 @@ fn export(g: GraphBuilder, layout: ChannelLayout, secs: f64, path: &std::path::P
             },
             ..Default::default()
         },
-        &tutti_transport::FrozenClock,
+        &tutti_timeline::FrozenClock,
         path,
     )
     .expect("export");

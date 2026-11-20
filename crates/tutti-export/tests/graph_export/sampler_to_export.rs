@@ -59,7 +59,7 @@ use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_tempo::TempoMap;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;

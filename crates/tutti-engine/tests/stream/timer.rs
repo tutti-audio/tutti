@@ -18,7 +18,7 @@ use tutti_engine::{
 };
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
 fn timer_state() -> (Arc<AudioCallbackState>, BlockClockReader) {

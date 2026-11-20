@@ -15,7 +15,7 @@ use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
-use tutti_transport::MotionEvent;
+use tutti_timeline::MotionEvent;
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples, Seconds};
 
 const OLD: f64 = 44_100.0;

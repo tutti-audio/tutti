@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 use tutti_plugin_types::{Features, LoopRegion, TransportInfo};
 use tutti_rt::Loan;
-use tutti_transport::TimeSignatureSlotReader;
+use tutti_timeline::TimeSignatureSlotReader;
 
 /// The transport facts a plugin snapshot is made of, at one frame.
 ///
@@ -1147,7 +1147,7 @@ mod tests {
         Rate(f64),
     }
 
-    /// The transport as the engine keeps it (tutti-transport's `TransportClock`):
+    /// The transport as the engine keeps it (tutti-timeline's `TransportClock`):
     /// a [`FrameClock`] that a seek seats, a tempo or rate change starts a
     /// new segment on, a loop wraps, and a stop only stops counting. Each
     /// block's transport and changes are counted ones, as the engine's

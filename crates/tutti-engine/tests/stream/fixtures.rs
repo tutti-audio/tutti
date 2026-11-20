@@ -16,7 +16,7 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_transport::{MotionEvent, Transport};
+use tutti_timeline::{MotionEvent, Transport};
 use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 
 pub const SAMPLE_RATE: f64 = 48_000.0;

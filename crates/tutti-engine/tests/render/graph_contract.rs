@@ -18,7 +18,7 @@ use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::{ImpulseSource, Latent};
 use tutti_graph::{EventIn, EventKind, GraphBuilder, Prepare, Unforkable};
-use tutti_transport::{MotionEvent, Transport};
+use tutti_timeline::{MotionEvent, Transport};
 use tutti_ump::MidiChannel;
 use tutti_units::Latency;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};

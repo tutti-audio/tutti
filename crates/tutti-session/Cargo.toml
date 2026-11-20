@@ -29,7 +29,7 @@ tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = f
 atomic_float = "1.1"
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 # The project's tempo map, which a bounce's range and clock are derived from.
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-engine = { version = "0.0.1", path = "../tutti-engine" }

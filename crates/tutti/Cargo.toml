@@ -17,7 +17,7 @@ workspace = true
 [dependencies]
 # Always present: the vocabulary, the node catalogue and the graph's node contract.
 # Everything else is a feature.
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }

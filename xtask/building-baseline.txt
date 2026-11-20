@@ -384,16 +384,16 @@ tutti-soundfont  ctor-result  crates/tutti-soundfont/src/lib.rs::SoundFontUnit::
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::constant
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::new
 
-# tutti-transport
-tutti-transport  setter  crates/tutti-transport/src/audio.rs::TransportAudio::set_playhead
-tutti-transport  setter  crates/tutti-transport/src/clock.rs::TransportClock::set_sample_rate
-tutti-transport  setter  crates/tutti-transport/src/handle.rs::Transport::set_sample_rate
-tutti-transport  setter  crates/tutti-transport/src/project_meter.rs::ProjectMeter::set_meter
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_in_preroll
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_recording
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo_map
-tutti-transport  ctor-result  crates/tutti-transport/src/tempo_reader.rs::TempoReader::constant
+# tutti-timeline
+tutti-timeline  setter  crates/tutti-timeline/src/audio.rs::TransportAudio::set_playhead
+tutti-timeline  setter  crates/tutti-timeline/src/clock.rs::TransportClock::set_sample_rate
+tutti-timeline  setter  crates/tutti-timeline/src/handle.rs::Transport::set_sample_rate
+tutti-timeline  setter  crates/tutti-timeline/src/project_meter.rs::ProjectMeter::set_meter
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_in_preroll
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_recording
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_tempo
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_tempo_map
+tutti-timeline  ctor-result  crates/tutti-timeline/src/tempo_reader.rs::TempoReader::constant
 
 # tutti-ump
 tutti-ump  chain-result  crates/tutti-ump/src/midi_translation.rs::Message::try_to_midi1

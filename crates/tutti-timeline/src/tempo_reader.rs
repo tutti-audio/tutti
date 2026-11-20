@@ -33,7 +33,7 @@ use tutti_tempo::TempoMap;
 ///
 /// ```
 /// use tutti_tempo::TempoMap;
-/// use tutti_transport::{TempoReader, TransportSettings};
+/// use tutti_timeline::{TempoReader, TransportSettings};
 /// use tutti_units::Bpm;
 ///
 /// let settings = TransportSettings::new();

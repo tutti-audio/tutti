@@ -180,7 +180,7 @@ impl Node for Late {
 #[test]
 fn an_export_is_the_live_render_on_a_native_param() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+    use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
     let (mut s, mut side) = rig(2);
     let (a, _) = s.graph().add(ProbeUnit::new(500.0));

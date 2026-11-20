@@ -17,7 +17,7 @@ use tutti_engine::{
 };
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_platform::Instant;
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 use tutti_units::Samples;
 

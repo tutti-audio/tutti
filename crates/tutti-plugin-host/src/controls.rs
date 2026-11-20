@@ -33,7 +33,7 @@ use tutti_rt::LockExt;
 
 use tutti_plugin_types::{ChunkCounters, PluginInvalidation, PluginTail};
 use tutti_rt::AtomicSampleRate;
-use tutti_transport::ProjectMeter;
+use tutti_timeline::ProjectMeter;
 use tutti_units::Latency;
 use tutti_units::{SampleRate, Samples};
 

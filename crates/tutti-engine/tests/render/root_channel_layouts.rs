@@ -18,7 +18,7 @@ use tutti_engine::{Engine, GraphEngineError};
 use tutti_graph::NodeKey;
 use tutti_graph::{CommitError, Editor, ForkByClone, Prepare};
 use tutti_graph::{OutPort, Source};
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::{Hz, SampleRate, Samples};
 
 /// A graph whose root has `outputs` channels, with a sine at key 1 feeding
