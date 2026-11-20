@@ -305,7 +305,7 @@ fn surround_5_1_exports_folded_mono_keeps_center() {
 }
 
 /// A 7.1.4 Atmos (12-channel) graph exports a genuine 12-channel WAV — the
-/// producer supports the layout (VBAP atmos_7_1_4 preset), and the export
+/// producer supports the layout (a VBAP panner over `Bed::Surround714`), and the export
 /// dispatch admits width 12. A rear-panned source lands in a rear-surround
 /// channel, proving per-source placement survives to the 12-wide file.
 ///

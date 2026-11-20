@@ -16,8 +16,7 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
-use tutti_buffers::MaxBlock;
-use tutti_buffers::Planes;
+use tutti_buffers::{MaxBlock, Planes};
 use tutti_dsp::{HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE};
 use tutti_fixtures::Noise;
 use tutti_graph::ParamNode;
@@ -162,11 +161,7 @@ fn bearing_of(p: [f32; 3]) -> Direction {
 
 fn node(bytes: &[u8], rate: u32) -> HrtfBinauralNode<f32> {
     let rate = SampleRate::of(f64::from(rate));
-    prepared(
-        HrtfBinauralNode::<f32>::new(bytes, rate).expect("the sphere parses"),
-        rate,
-        64,
-    )
+    prepared(hrtf::<f32>(bytes).expect("the sphere parses"), rate, 64)
 }
 
 /// The stereo response to a `[1, 1]` impulse at a settled position, `len`
@@ -558,7 +553,7 @@ fn the_spheres_rate_and_response_length_are_bounded() {
             r
         })
     };
-    let build = |bytes: &[u8]| HrtfBinauralNode::<f32>::new(bytes, SampleRate::SR_48K);
+    let build = |bytes: &[u8]| hrtf::<f32>(bytes);
 
     for rate in [1, MIN_SPHERE_RATE - 1, MAX_SPHERE_RATE + 1] {
         assert!(
@@ -577,9 +572,7 @@ fn the_spheres_rate_and_response_length_are_bounded() {
         Some(HrtfBinauralError::ResponseTooLong { len, max: m }) if len == max + 1 && m == max
     ));
     let longest = sphere(MIN_SPHERE_RATE, max);
-    let mut node =
-        HrtfBinauralNode::<f32>::new(&longest, SampleRate::of(f64::from(MIN_SPHERE_RATE)))
-            .expect("the longest response allowed builds");
+    let mut node = hrtf::<f32>(&longest).expect("the longest response allowed builds");
     let to = 2 * MIN_SPHERE_RATE;
     node.prepare(&Prepare::new(
         SampleRate::of(f64::from(to)),
@@ -593,13 +586,13 @@ fn the_spheres_rate_and_response_length_are_bounded() {
     );
 }
 
-/// The rate the sphere is prepared at is held to `MAX_PREPARED_RATE`,
-/// whether it comes from `new` or from `prepare`: a node asked for more
-/// prepares the set at the ceiling. Unbounded, `1e10` sized each vertex's
-/// spectrum at 2^26 values and aborted on allocation.
+/// The rate the sphere is prepared at is held to `MAX_PREPARED_RATE`: a node prepared for
+/// more prepares the set at the ceiling. Unbounded, `1e10` sized each vertex's spectrum at
+/// 2^26 values and aborted on allocation.
 ///
-/// The set's rate shows in the tail: a 48 kHz sphere's 32 taps are
-/// `32 * rate / 48 000` frames at `rate`, 512 at the ceiling.
+/// The set's rate shows in the tail: a 48 kHz sphere's 32 taps are `32 * rate / 48 000`
+/// frames at `rate`, 512 at the ceiling. Before `prepare` the rate is unknown, so the tail is
+/// unbounded.
 #[test]
 fn the_prepared_rate_is_held_to_its_ceiling() {
     let (verts, faces) = tetrahedron();
@@ -610,13 +603,9 @@ fn the_prepared_rate_is_held_to_its_ceiling() {
     });
     let at_ceiling = Tail::Finite(Samples::new(512 - 1));
 
-    let mut node =
-        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(2.0 * f64::from(MAX_PREPARED_RATE)))
-            .expect("builds");
-    assert_eq!(node.shape().tail, at_ceiling, "built above the ceiling");
-
-    let mut node2 = HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(1e10)).expect("builds");
-    assert_eq!(node2.shape().tail, at_ceiling, "built at 1e10 Hz");
+    let mut node = hrtf::<f32>(&bytes).expect("builds");
+    assert_eq!(node.shape().tail, Tail::Unbounded, "not yet prepared");
+    let mut node2 = hrtf::<f32>(&bytes).expect("builds");
 
     node.prepare(&Prepare::new(
         SampleRate::of(f64::from(RATE)),
@@ -628,6 +617,11 @@ fn the_prepared_rate_is_held_to_its_ceiling() {
         MaxBlock::of(Samples::new(64)),
     ));
     assert_eq!(node.shape().tail, at_ceiling, "prepared at 1e10 Hz");
+    node2.prepare(&Prepare::new(
+        SampleRate::of(2.0 * f64::from(MAX_PREPARED_RATE)),
+        MaxBlock::of(Samples::new(64)),
+    ));
+    assert_eq!(node2.shape().tail, at_ceiling, "prepared above the ceiling");
 
     // The set prepared at the ceiling renders: an impulse comes out.
     node2.prepare(&Prepare::new(
@@ -660,9 +654,9 @@ fn a_malformed_sphere_is_refused_at_construction() {
         r
     };
     let good = sphere_bytes(RATE, 8, &verts, &faces, delta);
-    assert!(HrtfBinauralNode::<f32>::new(&good, SampleRate::SR_48K).is_ok());
+    assert!(hrtf::<f32>(&good).is_ok());
 
-    let build = |bytes: &[u8]| HrtfBinauralNode::<f32>::new(bytes, SampleRate::SR_48K).err();
+    let build = |bytes: &[u8]| hrtf::<f32>(bytes).err();
 
     let mut bad_faces = faces.clone();
     bad_faces[3] = [0, 7, 12];
@@ -956,4 +950,15 @@ fn the_panner_takes_the_mean_of_a_stereo_pair() {
     }
     let leak = tutti_fixtures::signal::peak(&anti);
     assert!(leak <= 1e-5 * peak, "an anti-phase pair leaves {leak}");
+}
+
+/// A binaural node over the sphere in `bytes`, prepared at `rate`.
+fn hrtf<F: tutti_dsp::FftFloat>(
+    bytes: &[u8],
+) -> Result<tutti_nodes::HrtfBinauralNode<F>, tutti_dsp::HrtfBinauralError> {
+    Ok(tutti_nodes::HrtfBinauralNode::from(
+        tutti_nodes::HrtfBinauralConfig::new(std::sync::Arc::new(
+            tutti_dsp::HrirSphere::from_bytes(bytes)?,
+        )),
+    ))
 }

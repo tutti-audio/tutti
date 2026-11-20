@@ -803,7 +803,7 @@ impl<F: FftFloat> Convolver<F> {
 }
 
 mod matrix;
-pub use matrix::{MatrixConvolver, MatrixConvolverError};
+pub use matrix::{MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError};
 
 #[cfg(test)]
 mod tests;

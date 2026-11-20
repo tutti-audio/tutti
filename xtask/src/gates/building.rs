@@ -543,6 +543,12 @@ pub(super) const ALLOW: &[Allow] = &[
     ty("crates/tutti-nodes/", "AutoPanConfig", WIDTH, STEREO_ONLY),
     ty(
         "crates/tutti-nodes/",
+        "HrtfBinauralConfig",
+        WIDTH,
+        "a stereo-only node: the binaural renderer folds a pair to mono and writes the left and right ear, so the width is not a choice and the config takes none",
+    ),
+    ty(
+        "crates/tutti-nodes/",
         "PlateReverbConfig",
         WIDTH,
         STEREO_PLATE,

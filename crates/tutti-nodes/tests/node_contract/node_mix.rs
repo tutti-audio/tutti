@@ -15,9 +15,7 @@
 //! Each render is preceded by one block of silence, the block the mix's ramp from
 //! the unit's `WET` start lands on, and only the frames after it are compared.
 
-use tutti_buffers::MaxBlock;
-use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Planes};
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
@@ -164,22 +162,19 @@ fn check_io<N: IntoNode>(
 fn the_convolver_is_blended_by_the_graph() {
     use tutti_buffers::Mono;
     use tutti_fixtures::signal::room_ir;
-    use tutti_nodes::ConvolverNode;
+
     let ir = room_ir(0.5, Seconds::new(0.05), RATE);
     let ir2 = room_ir(0.8, Seconds::new(0.08), RATE);
     check(
         "convolver (dual mono, 64-frame block)",
-        &|| {
-            ConvolverNode::per_channel(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(64))
-                .unwrap()
-        },
+        &|| per_channel_node(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(64)).unwrap(),
         2,
         64,
     );
     check(
         "convolver (true stereo, 64-frame block)",
         &|| {
-            ConvolverNode::true_stereo(
+            true_stereo_node(
                 Mono::new(&ir),
                 Mono::new(&ir2),
                 Mono::new(&ir2),
@@ -192,13 +187,13 @@ fn the_convolver_is_blended_by_the_graph() {
     );
     check(
         "convolver (shared IR, six channels)",
-        &|| ConvolverNode::shared_ir(6u16, Mono::new(&[1.0, 0.5]), Samples::new(128)).unwrap(),
+        &|| shared_ir_node(6u16, Mono::new(&[1.0, 0.5]), Samples::new(128)).unwrap(),
         6,
         128,
     );
     check(
         "convolver (folded, stereo)",
-        &|| ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(32)).unwrap(),
+        &|| folded_node(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(32)).unwrap(),
         2,
         32,
     );
@@ -422,4 +417,61 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
         dry[1].iter().all(|&v| v == 0.0),
         "mono crossover: band 1 at DRY is silent"
     );
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
+}
+
+/// One response per channel, at as many unassigned channels as responses.
+fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    )
+}
+
+/// Every input folded to mono, then one response per output, at the engine's placement of
+/// that many channels.
+fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    let bus = tutti_buffers::BusTopology::assumed(width).expect("a test width fits a bus");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(bus, irs)
+            .folded()
+            .block_size(block_size),
+    )
+}
+
+/// True stereo from `[LL, LR, RL, RR]`.
+fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ll: tutti_buffers::Mono<'_, S>,
+    lr: tutti_buffers::Mono<'_, S>,
+    rl: tutti_buffers::Mono<'_, S>,
+    rr: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
+            .true_stereo()
+            .block_size(block_size),
+    )
+    .expect("four responses on a stereo pair")
 }

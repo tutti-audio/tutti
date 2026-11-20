@@ -34,11 +34,11 @@
 //! thread), stamped with a [`Stamp`](tutti_graph::Stamp), and a gain is a store into the strip's
 //! volume cell. Neither takes `&mut` of anything in the graph.
 
-use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, Float};
 use tutti_graph::NodeKey;
 use tutti_graph::{EventInletNode, Instrument};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
-use tutti_nodes::BusStripNode;
+use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_ump::MidiGroup;
 use tutti_units::Amplitude;
 
@@ -349,7 +349,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let graph = self.graph();
         let (queue, keys) = open_keys(graph);
         graph.set_feed(node, Feeder::Instrument, vec![queue.events_out()]);
-        let (strip, _) = graph.add(BusStripNode::stereo());
+        let (strip, _) = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         graph.connect(OutPort::new(node, usize::from(main[0])), strip.input(0))?;
         graph.connect(OutPort::new(node, usize::from(main[1])), strip.input(1))?;
         Ok(InstrumentHandle {

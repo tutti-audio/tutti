@@ -188,7 +188,9 @@ pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
 pub use channel_group::CHANNEL_GROUP;
 pub use control_rate::COEFF_INTERVAL;
-pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
+pub use convolver::{
+    Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
+};
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
 pub use delay::{

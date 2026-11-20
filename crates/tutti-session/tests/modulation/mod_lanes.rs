@@ -13,7 +13,7 @@
 //! its latency, a target placed an update late) are not repeated here.
 
 use crate::common;
-use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, PlanesMut};
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -21,7 +21,6 @@ use tutti_platform::Instant;
 
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
-use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
@@ -904,7 +903,9 @@ fn a_routes_polarity_and_curve_reach_the_render() {
 #[test]
 fn a_bus_strips_volume_and_pan_take_lanes() {
     let (mut s, _side) = rig(2);
-    let (strip, _) = s.graph().add(tutti_nodes::BusStripNode::stereo());
+    let (strip, _) = s.graph().add(tutti_nodes::BusStripNode::from(
+        tutti_nodes::BusStripConfig::new(BusTopology::STEREO),
+    ));
     let mut m = s.mods_mut();
     let offset = m.macro_(0.5);
     for param in [UnitParam::Volume, UnitParam::Balance] {

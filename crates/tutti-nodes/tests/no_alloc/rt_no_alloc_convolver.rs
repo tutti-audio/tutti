@@ -2,8 +2,7 @@
 //! blocks of one frame to past a partition, a hostile wet gain (in the cell and on its param
 //! port). The output stays finite and nothing allocates.
 
-use tutti_buffers::Mono;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MAX_CHANNELS};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MAX_CHANNELS, Mono};
 use tutti_graph::contract::Direct;
 use tutti_nodes::ConvolverNode;
 use tutti_units::{Amplitude, SampleRate, Samples};
@@ -31,13 +30,13 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
         let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("per channel x{width}"),
-            ConvolverNode::<f32>::per_channel(&refs, Samples::new(32)).unwrap(),
+            per_channel_node::<f32, _>(&refs, Samples::new(32)).unwrap(),
         ));
     }
     let four = irs(4);
     all.push((
         "true stereo".into(),
-        ConvolverNode::<f32>::true_stereo(
+        true_stereo_node::<f32, _>(
             Mono::new(&four[0]),
             Mono::new(&four[1]),
             Mono::new(&four[2]),
@@ -50,7 +49,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
     let views: Vec<Mono<'_, f32>> = eight.iter().map(|ir| Mono::new(ir)).collect();
     all.push((
         "ambisonic 1 to stereo".into(),
-        ConvolverNode::<f32>::ambisonic(
+        ambisonic_node::<f32, _>(
             AmbisonicFormat::ambix(AmbisonicOrder::of(1)),
             ChannelTopology::from(Bed::Stereo),
             &views,
@@ -70,7 +69,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
         let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("ambisonic order {order}"),
-            ConvolverNode::<f32>::ambisonic(
+            ambisonic_node::<f32, _>(
                 format,
                 ChannelTopology::from(format),
                 &views,
@@ -166,4 +165,50 @@ fn the_convolver_corners_are_allocation_free_and_finite() {
             sweep(&name, node, &[None], true);
         }
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// One response per channel, at as many unassigned channels as responses.
+fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    )
+}
+
+/// True stereo from `[LL, LR, RL, RR]`.
+fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ll: tutti_buffers::Mono<'_, S>,
+    lr: tutti_buffers::Mono<'_, S>,
+    rl: tutti_buffers::Mono<'_, S>,
+    rr: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
+            .true_stereo()
+            .block_size(block_size),
+    )
+    .expect("four responses on a stereo pair")
+}
+
+/// An ambisonic set of `input` in, `output` out.
+fn ambisonic_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    input: tutti_buffers::AmbisonicFormat,
+    output: tutti_buffers::ChannelTopology,
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let output = tutti_buffers::BusTopology::try_from(&output).expect("a test output fits a bus");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(output, irs)
+            .ambisonic(input)
+            .block_size(block_size),
+    )
 }

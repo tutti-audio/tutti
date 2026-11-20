@@ -13,27 +13,21 @@
 //! is read-only, or frozen by its fork when it is not — its own unit test
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
-use tutti_buffers::Mono;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{BusTopology, ChannelLayout, Mono};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
-    AutoPanConfig, AutoPanNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
-    CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode, DistortionNode,
-    DynamicEqConfig, DynamicEqNode, EqBandNode, GateControls, GateNode, InterpolationMode,
-    KeySource, LadderFilterNode, LadderType, LfoNode, LfoShape, LimiterControls, LimiterNode,
-    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind,
-    Stages, SvfControls, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
-};
-use tutti_nodes::{
-    BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
-    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TransientShaperConfig,
-    TransientShaperNode,
-};
-use tutti_nodes::{
-    PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
-    TiltFilterNode,
+    AutoPanConfig, AutoPanNode, BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode,
+    BrickwallLimiterNode, BusStripConfig, BusStripNode, ButterworthOrder, ChannelTimes,
+    CompressorControls, CompressorNode, ConvolverNode, CutAlignment, CutFilterConfig,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, DelayControls, DelayLayout,
+    DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EnvelopeFilterConfig,
+    EnvelopeFilterNode, EqBandNode, GateControls, GateNode, InterpolationMode, KeySource,
+    LadderFilterNode, LadderType, LevellerConfig, LevellerNode, LfoNode, LfoShape, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, PlateReverbConfig,
+    PlateReverbNode, RingModConfig, RingModNode, ShapeKind, Stages, StereoWidthConfig,
+    StereoWidthNode, SvfControls, SvfFilterNode, SvfType, TiltFilterConfig, TiltFilterNode,
+    TransientShaperConfig, TransientShaperNode, TremoloConfig, TremoloNode,
 };
 use tutti_units::{
     Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
@@ -544,12 +538,14 @@ fn eq_band() {
 
 #[test]
 fn bus_strip() {
-    IsolateRow::new("BusStripNode (stereo)", BusStripNode::stereo)
-        .control("volume", |s| s.set_volume(Amplitude::new(0.5)))
-        .control("balance", |s| {
-            assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
-        })
-        .check();
+    IsolateRow::new("BusStripNode (stereo)", || {
+        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO))
+    })
+    .control("volume", |s| s.volume().store(Amplitude::new(0.5)))
+    .control("balance", |s| {
+        assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
+    })
+    .check();
 }
 #[test]
 fn fir_convolver() {
@@ -564,17 +560,17 @@ fn fir_convolver() {
         .design(SampleRate::SR_48K, &[tilt])
         .unwrap();
     IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
-        FirConvolverConfig::new(tutti_buffers::ChannelLayout::MONO, &fir)
-            .block_size(Samples::new(64))
-            .build::<f32>()
-            .unwrap()
+        ConvolverNode::<f32>::try_from(
+            FirConvolverConfig::new(tutti_buffers::BusTopology::MONO, &fir)
+                .block_size(Samples::new(64)),
+        )
+        .unwrap()
     })
-    .control("gain", |c| c.set_gain(Amplitude::new(0.3)))
+    .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
     .check();
 }
 #[test]
 fn convolver() {
-    use tutti_nodes::ConvolverNode;
     // A short decaying tail: a fixed LCG, so the IR is the same every run.
     let ir: Vec<f32> = (0..512u32)
         .map(|n| {
@@ -584,8 +580,20 @@ fn convolver() {
         })
         .collect();
     IsolateRow::new("ConvolverNode (mono)", move || {
-        ConvolverNode::new(Mono::new(&ir), Samples::new(64))
+        mono_node(Mono::new(&ir), Samples::new(64))
     })
-    .control("gain", |c| c.set_gain(Amplitude::new(0.3)))
+    .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
     .check();
+}
+
+/// A one-channel convolver over `ir`.
+fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+            .block_size(block_size),
+    )
+    .expect("one response on a mono bus")
 }

@@ -12,11 +12,9 @@
 //! drives a control lane whose knob is the filter's cell.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::{Mono, Planes};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
 use tutti_fixtures::signal::peak;
 
-use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -364,8 +362,7 @@ fn convolver_addresses_nothing() {
     // Room size is baked into the IR, the gain has no address and the mix is
     // the graph's (`NodeMix::ADDR`, not a node's param).
     // A minimal unit IR is fine — only the param surface is probed.
-    let node =
-        tutti_nodes::ConvolverNode::shared_ir(2u16, Mono::new(&[1.0]), Samples::new(64)).unwrap();
+    let node = shared_ir_node(2u16, Mono::new(&[1.0]), Samples::new(64)).unwrap();
     assert!(!addresses(&node, UnitParam::Wet));
     assert!(!addresses(&node, UnitParam::RoomSize));
     assert!(!addresses(&node, UnitParam::Cutoff));
@@ -833,4 +830,19 @@ fn a_control_a_lane_lets_go_of_is_handed_back_without_a_step() {
             "blocks of {block} differ from blocks of 64"
         );
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
 }

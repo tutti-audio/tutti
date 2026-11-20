@@ -11,6 +11,10 @@ use tutti_dsp::SpeakerGeometryError;
 #[derive(Debug, Clone, Error)]
 #[non_exhaustive]
 pub enum VbapError {
+    /// The bus places no bed: VBAP pans over a bed's speakers, so a bus of unassigned
+    /// channels, an ambisonic one or any other placement has none to pan between.
+    #[error("the bus is not a bed, so it has no speakers to pan between")]
+    NotABed,
     /// The bed's speakers cannot be panned over: `Bed::Mono` has one.
     #[error("the bed's speakers cannot be panned over: {0}")]
     Geometry(#[from] SpeakerGeometryError),

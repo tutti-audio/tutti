@@ -13,11 +13,9 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
-use tutti_buffers::Mono;
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 
 use crate::support::{render_to_buffers, render_to_file};
-use tutti_buffers::ChannelTopology;
-use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
@@ -240,9 +238,7 @@ fn a_convolver_reports_its_ir_ring_out() {
     let ir = vec![0.5f32; 4096];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
     assert_eq!(
@@ -260,12 +256,8 @@ fn cascaded_convolvers_sum_their_tails() {
     let b = vec![0.5f32; 2048];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let first = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&a)))
-        .0;
-    let second = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&b)))
-        .0;
+    let first = g.add_with_controls(convolver(&a)).0;
+    let second = g.add_with_controls(convolver(&b)).0;
     g.connect(src, 0, first, 0)
         .connect(first, 0, second, 0)
         .pipe_output(second);
@@ -306,9 +298,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
     let quiet = g.add(ForkByClone(Unreporting));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, quiet, 0)
         .connect(quiet, 0, conv, 0)
         .pipe_output(conv);
@@ -407,9 +397,7 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
     let ir = vec![0.5f32; 4096];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
     let reported = built(g, RATE).reported_tail();
@@ -1464,4 +1452,13 @@ fn export_spends_the_ceiling_of_a_node_that_narrows_its_tail() {
     let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
     let duration = 8_820; // 0.2 s at 44.1 kHz
     assert_eq!(out.frames().get(), duration + 4_000);
+}
+
+/// A one-channel convolver over `ir`, with the default head partition.
+fn convolver(ir: &[f32]) -> tutti_nodes::ConvolverNode<f32> {
+    tutti_nodes::ConvolverNode::try_from(tutti_nodes::ConvolverConfig::new(
+        tutti_buffers::BusTopology::MONO,
+        &[Mono::new(ir)],
+    ))
+    .expect("one response on a mono bus")
 }

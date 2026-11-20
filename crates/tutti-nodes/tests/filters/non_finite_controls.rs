@@ -15,10 +15,8 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::{Mono, Planes};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
 
-use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::Noise;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
@@ -325,14 +323,11 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
 #[test]
 fn the_convolver_holds_off_non_finite_controls() {
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::ConvolverNode;
+
     let ir = decay_ir(128, Seconds::new(0.1), SampleRate::SR_48K);
     survives_node(
         "convolver",
-        || {
-            ConvolverNode::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), Samples::new(64))
-                .unwrap()
-        },
+        || shared_ir_node(ChannelLayout::STEREO, Mono::new(&ir), Samples::new(64)).unwrap(),
         |n| vec![("gain", n.gain().cell(), 2.0)],
     );
 }
@@ -376,4 +371,19 @@ fn a_distortion_built_with_a_non_finite_drive_renders_finite() {
             "drive {bad}"
         );
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
 }
