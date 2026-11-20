@@ -123,10 +123,10 @@ impl Variant {
     }
 }
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{InterleavedMut, Mono};
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
-use tutti_nodes::{BusStripNode, ConvolverNode, LimiterControls, LimiterNode};
+use tutti_nodes::{BusStripNode, ConvolverNode, LimiterConfig, LimiterControls, LimiterNode};
 use tutti_platform::Instant;
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_rt::SplitMix64;
@@ -344,11 +344,13 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     for strip in &sums {
         add_stereo(&mut s, master, *strip);
     }
-    let (limiter, _) = s.graph().add(LimiterNode::<f32>::stereo(LimiterControls {
-        threshold: Db::new(-1.0),
-        ceiling: Db::new(0.0),
-        ..LimiterControls::DEFAULT
-    }));
+    let (limiter, _) = s.graph().add(LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+            threshold: Db::new(-1.0),
+            ceiling: Db::new(0.0),
+            ..LimiterControls::DEFAULT
+        }),
+    ));
     connect_stereo(&mut s, limiter, 0, master);
     for c in 0..2 {
         s.graph()

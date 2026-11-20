@@ -8,12 +8,12 @@
 //! The plugin half is `plugin_latency.rs`'s, the MIDI clock's is
 //! `device_midi_clock.rs`'s.
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::NodeKey;
 use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
-use tutti_nodes::{LimiterControls, LimiterNode};
+use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
 use tutti_transport::MotionEvent;
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples, Seconds};
@@ -43,11 +43,13 @@ fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
         .build_device_on(spec_at(OLD), driver)
         .expect("builds with no device");
     let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
-    let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db::new(0.0),
-        ceiling: Db::new(0.0),
-        ..LimiterControls::DEFAULT
-    }));
+    let (lim, _) = s.graph().add(LimiterNode::<f32>::from(
+        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+            threshold: Db::new(0.0),
+            ceiling: Db::new(0.0),
+            ..LimiterControls::DEFAULT
+        }),
+    ));
     s.graph()
         .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();

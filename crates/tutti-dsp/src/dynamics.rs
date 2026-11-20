@@ -34,6 +34,7 @@ pub use limiter::{
     TruePeakError,
 };
 pub use multiband::{
-    BandReductions, BandSettings, BankShape, MultibandBank, MultibandSettings, MultibandSignals,
+    BandReductions, BandSettings, BankShape, MultibandBands, MultibandBandsError, MultibandBank,
+    MultibandSettings, MultibandSignals,
 };
 pub use transient::{TransientBank, TransientControls};
