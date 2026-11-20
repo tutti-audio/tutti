@@ -35,7 +35,8 @@
 use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{
-    Bipolar, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
+    Bipolar, Cents, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples,
+    Seconds,
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
@@ -90,6 +91,26 @@ impl ModDelayControls {
         depth: Seconds::new(0.002),
         feedback: Feedback::new(0.7),
     };
+
+    /// Vibrato: a pitch swing of `depth` at `rate`, no feedback (for [`Sweep::VIBRATO`]).
+    ///
+    /// A sine sweep `d(t) = base + D sin(2 pi r t)` of the delay reads the input at the rate
+    /// `1 - d'(t) = 1 - 2 pi r D cos(2 pi r t)`, so the pitch swings between the ratios `1 +- 2
+    /// pi r D`. The depth is the peak rise, `2^(depth / 1200) = 1 + 2 pi r D`, which gives
+    /// `D = (2^(depth / 1200) - 1) / (2 pi r)` seconds; the peak fall is the same ratio
+    /// step down, `1200 log2(2 - 2^(depth / 1200))` cents (a little more). A `rate` below
+    /// [`MIN_RATE`] is read as it, as the sweep does, and a `depth` the sweep's range cannot
+    /// reach is clamped there when it is taken.
+    #[must_use]
+    pub fn vibrato(depth: Cents, rate: Hz) -> Self {
+        let rate = rate.max(MIN_RATE);
+        let swing = depth.to_pitch_ratio() - 1.0;
+        Self {
+            rate,
+            depth: Seconds::new(swing / (core::f64::consts::TAU * rate.get())),
+            feedback: Feedback::NONE,
+        }
+    }
 
     /// The General MIDI chorus: 0.4 Hz, a 1.9 ms sweep, no feedback (for
     /// [`Sweep::GENERAL_MIDI_CHORUS`]).
@@ -149,6 +170,13 @@ impl ModDelayLayout {
     #[must_use]
     pub fn chorus(input: BusTopology) -> Self {
         Self::preset(input, Sweep::CHORUS, PhaseIncrement::new(0.25))
+    }
+
+    /// A vibrato: [`Sweep::VIBRATO`], every channel's sweep in step (a pitch swing that moved
+    /// between channels would be a chorus).
+    #[must_use]
+    pub fn vibrato(input: BusTopology) -> Self {
+        Self::preset(input, Sweep::VIBRATO, PhaseIncrement::new(0.0))
     }
 
     /// A flanger: [`Sweep::FLANGER`], channels a half cycle apart.

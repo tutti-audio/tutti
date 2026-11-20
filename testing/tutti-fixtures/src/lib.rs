@@ -55,6 +55,9 @@ mod digest;
 mod env;
 #[cfg(feature = "graph")]
 mod event_rig;
+// A loom build leaves the executor out (see `tutti-platform`).
+#[cfg(not(loom))]
+mod executor;
 mod links;
 mod machine_lock;
 mod macos;
@@ -86,6 +89,9 @@ pub use digest::{Fnv, Noise, noise};
 pub use env::{ScopedEnv, cases};
 #[cfg(feature = "graph")]
 pub use event_rig::{BlockClock, EventRig, Output, Seen, Sink, heard};
+#[cfg(not(loom))]
+#[cfg(not(loom))]
+pub use executor::executor;
 pub use machine_lock::{MachineLock, machine_lock};
 pub use macos::macos_major;
 pub use main_thread::{main_thread, main_thread_cases};

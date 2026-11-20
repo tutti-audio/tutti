@@ -29,7 +29,8 @@
 //! - **Cascaded sections** (`sos/`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose
 //!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`] and
 //!   [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`] peaking
-//!   equalizer, the [`Tilt`] shelf, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
+//!   equalizer, the [`Tilt`] shelf, the Audio EQ [`Cookbook`] filters, the [`GraphicBands`]
+//!   graphic equalizer design, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
 //!   one as state-variable sections over [`SosCoefficients`].
 //! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
@@ -66,7 +67,12 @@
 //!   [`Ramp`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
 //!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Ramp`] per channel's
 //!   coefficient, [`sweep_hz`] and [`allpass_complement`] the pure pieces the sweep is solved
-//!   from).
+//!   from); the vibrato preset ([`ModDelayControls::vibrato`], a pitch swing in cents mapped to
+//!   a depth by its closed form); the comb and all-pass delay filters ([`CombFilter`] and
+//!   [`CombBank`] over a [`CombForm`], [`AllPassFilter`] in Schroeder's lattice form or
+//!   Freeverb's); and the frequency shifter ([`FrequencyShifterBank`]: a Hilbert network of two
+//!   all-pass chains, [`QUADRATURE_ERROR`] over [`quadrature_band`], and single-sideband
+//!   modulation by a signed shift).
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
 //!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
@@ -140,10 +146,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod all_pass;
 mod bands;
 mod beat;
 mod bit_crush;
 mod channel_group;
+mod comb;
 mod control_rate;
 mod convolver;
 mod dc_block;
@@ -155,6 +163,7 @@ mod fft;
 mod filter;
 mod fir;
 mod follower;
+mod frequency_shifter;
 mod interp;
 mod level;
 mod loudness;
@@ -187,10 +196,12 @@ mod stft;
 mod testing;
 mod viterbi;
 
+pub use all_pass::AllPassFilter;
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
 pub use channel_group::CHANNEL_GROUP;
+pub use comb::{CombBank, CombControls, CombFilter, CombForm};
 pub use control_rate::COEFF_INTERVAL;
 pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
@@ -226,6 +237,9 @@ pub use filter::{
 pub use fir::{
     Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,
     kaiser_beta,
+};
+pub use frequency_shifter::{
+    FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
 };
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
@@ -272,8 +286,9 @@ pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;
 pub use sos::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, KWeighting, LinkwitzRiley,
-    MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank, SosCoefficients, SosError, Tilt,
+    Butterworth, ButterworthOrder, ButterworthOrderError, Cookbook, CutResponse, GraphicBands,
+    KWeighting, LinkwitzRiley, MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank,
+    SosCoefficients, SosError, Tilt,
 };
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,

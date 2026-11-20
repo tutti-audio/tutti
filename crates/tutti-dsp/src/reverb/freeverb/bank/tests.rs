@@ -89,14 +89,14 @@ fn a_comb_is_the_feedback_comb_of_its_definition() {
         (64, 0.7, 0.4),
         (200, 0.98, 0.1),
     ] {
-        let mut comb = CombFilter::new(l);
-        comb.feedback = g as f32;
-        comb.damp1 = d as f32;
-        comb.damp2 = 1.0 - d as f32;
+        let mut comb = CombFilter::<f32>::new(CombForm::Feedback, Samples::new(l), Feedback::NONE);
+        comb.retune(g as f32, d as f32);
         let len = 6 * l + 3;
         let x = impulse(len);
         let mut y = vec![0.0f32; len];
-        comb.process(&x, 1.0, &mut y);
+        for (y, &x) in y.iter_mut().zip(&x) {
+            *y = comb.tick(x);
+        }
         let want = comb_response(len, l, g, d);
         for (n, (&got, &w)) in y.iter().zip(&want).enumerate() {
             assert!(
@@ -118,8 +118,11 @@ fn a_comb_is_the_feedback_comb_of_its_definition() {
 #[test]
 fn an_all_pass_is_freeverbs_form() {
     let (d, g) = (8usize, 0.5f32);
-    let mut ap = AllPassFilter::new(d);
-    ap.feedback = g;
+    let mut ap = AllPassFilter::<f32>::new(
+        AllPassForm::Freeverb,
+        Samples::new(d),
+        Feedback::new(f64::from(g)),
+    );
     let mut h = impulse(18 * d + 1);
     ap.process(&mut h);
     assert!((h[0] + 1.0).abs() < 1e-6, "h[0] = {}", h[0]);
@@ -165,10 +168,10 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
     let bank = FreeverbBank::<f32>::new(RATE);
     let lens = |side: usize| -> (Vec<usize>, Vec<usize>) {
         (
-            bank.combs[side].iter().map(|c| c.buffer.len()).collect(),
+            bank.combs[side].iter().map(|c| c.delay().get()).collect(),
             bank.all_passes[side]
                 .iter()
-                .map(|a| a.buffer.len())
+                .map(|a| a.delay().get())
                 .collect(),
         )
     };
@@ -189,7 +192,7 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
             assert_eq!(
                 bank.combs[side]
                     .iter()
-                    .map(|c| c.buffer.len())
+                    .map(|c| c.delay().get())
                     .collect::<Vec<_>>(),
                 left.iter().map(|&l| scale(l + spread)).collect::<Vec<_>>(),
                 "{hz} Hz, side {side}"
@@ -197,7 +200,7 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
             assert_eq!(
                 bank.all_passes[side]
                     .iter()
-                    .map(|a| a.buffer.len())
+                    .map(|a| a.delay().get())
                     .collect::<Vec<_>>(),
                 aps.iter().map(|&l| scale(l + spread)).collect::<Vec<_>>(),
                 "{hz} Hz, side {side}"
@@ -239,15 +242,12 @@ fn a_comb_falls_sixty_decibels_in_the_schroeder_rt60() {
     for room in [0.0f64, 0.5, 0.9, 1.0] {
         let feedback = controls(room, 0.0).feedback();
         let g = feedback.get();
-        let mut comb = CombFilter::new(l);
-        comb.feedback = f32::from_unit(feedback);
-        comb.damp1 = 0.0;
-        comb.damp2 = 1.0;
+        let mut comb = CombFilter::<f32>::new(CombForm::Feedback, Samples::new(l), feedback);
         let trips = (-3.0 / g.log10()).ceil() as usize + 2;
         let len = (trips + 1) * l;
         let x = impulse(len);
-        let mut y = vec![0.0f32; len];
-        comb.process(&x, 1.0, &mut y);
+        let mut y = x;
+        comb.process(&mut y);
         let first_below = (1..)
             .find(|&k| y[k * l].abs() < 1e-3)
             .expect("the comb decays");
@@ -332,7 +332,7 @@ fn a_moving_room_ramps_its_combs_a_chunk_at_a_time() {
     let chunk = |bank: &mut FreeverbBank<f32>, ramps: &mut FreeverbRamps<f32>| {
         run(bank, ramps, &x, FreeverbBank::<f32>::CHUNK);
         let c = &bank.combs[0][0];
-        (c.feedback, c.damp1)
+        (c.gain(), c.damping())
     };
     let (from, from_damp) = chunk(&mut bank, &mut ramps);
     assert_eq!(from, f32::from_unit(from_c.feedback()));
@@ -483,10 +483,10 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
         let scale = |t: usize| ((whole / 44_100.0 * t as f64).round() as usize).max(1);
         for (side, spread) in [(0, 0), (1, 23)] {
             for (c, t) in bank.combs[side].iter().zip(COMBS) {
-                assert_eq!(c.buffer.len(), scale(t + spread), "{hz} Hz comb");
+                assert_eq!(c.delay().get(), scale(t + spread), "{hz} Hz comb");
             }
             for (a, t) in bank.all_passes[side].iter().zip(ALL_PASSES) {
-                assert_eq!(a.buffer.len(), scale(t + spread), "{hz} Hz all-pass");
+                assert_eq!(a.delay().get(), scale(t + spread), "{hz} Hz all-pass");
             }
         }
         let (l, r) = run(&mut bank, &mut ramps, &impulse(2_000), 64);
@@ -494,7 +494,7 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
         assert!(l.iter().chain(&r).any(|&s| s != 0.0), "{hz} Hz sounds");
     }
     let bank = FreeverbBank::<f32>::new(SampleRate::of(1.0e9));
-    let longest = bank.combs.iter().flatten().map(|c| c.buffer.len()).max();
+    let longest = bank.combs.iter().flatten().map(|c| c.delay().get()).max();
     assert_eq!(longest, Some(1 << 16));
 }
 
@@ -571,10 +571,9 @@ fn an_f64_comb_is_its_difference_equation() {
         s = y[n] * (1.0 - d1) + s * d1;
         v[n] = x[n] * g_in + s * g;
     }
-    let mut comb = CombFilter::<f64>::new(l);
-    (comb.feedback, comb.damp1, comb.damp2) = (g, d1, 1.0 - d1);
-    let mut got = vec![0.0f64; len];
-    comb.process(&x, g_in, &mut got);
+    let mut comb = CombFilter::<f64>::new(CombForm::Feedback, Samples::new(l), Feedback::NONE);
+    comb.retune(g, d1);
+    let got: Vec<f64> = x.iter().map(|&x| comb.tick(x * g_in)).collect();
     assert_close_f64(&got, &y, 2.0f64.powi(-45));
 }
 
@@ -592,8 +591,8 @@ fn an_f64_all_pass_is_its_difference_equation() {
         y[n] = out - x[n];
         b[n] = x[n] + a * out;
     }
-    let mut ap = AllPassFilter::<f64>::new(d);
-    ap.feedback = a;
+    let mut ap =
+        AllPassFilter::<f64>::new(AllPassForm::Freeverb, Samples::new(d), Feedback::new(a));
     let mut got = x.clone();
     ap.process(&mut got);
     assert_close_f64(&got, &y, 2.0f64.powi(-45));

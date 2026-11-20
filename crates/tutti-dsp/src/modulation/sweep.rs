@@ -166,6 +166,18 @@ impl Sweep {
         Feedback::NONE,
     );
 
+    /// Vibrato: a 12 ms base delay in a 25 ms line, the depth `0..=12 ms`, and **no
+    /// feedback** (`feedback_max` is [`Feedback::NONE`]). The base keeps the
+    /// sweep inside the line, and [`ModDelayControls::vibrato`](crate::ModDelayControls::vibrato) maps a pitch swing to a depth by
+    /// its closed form: the full 12 ms is about 126 cents at 1 Hz.
+    pub const VIBRATO: Self = Self::of(
+        Seconds::new(0.012),
+        MaxDelay::of(Seconds::new(0.025)),
+        Seconds::ZERO,
+        Seconds::new(0.012),
+        Feedback::NONE,
+    );
+
     /// The centre delay the LFO sweeps around.
     #[must_use]
     pub const fn base(&self) -> Seconds {

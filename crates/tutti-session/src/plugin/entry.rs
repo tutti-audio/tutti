@@ -54,6 +54,8 @@ use crate::{OtherPeer, PeerState, SavedPeer};
 struct Context {
     rate: SampleRate,
     work: MainWorkHandle,
+    /// The session's executor, which a served plugin's exit watch runs on.
+    executor: tutti_platform::WeakExecutor,
     ids: ResourceIds,
     /// Whether the session recovers a plugin that dies at its node.
     recovery: bool,
@@ -478,6 +480,7 @@ impl PoolEntry for PoolPluginEntry {
             config: AudioConfig::default(),
             state: self.state.clone(),
             work: cx.work.clone(),
+            executor: cx.executor.clone(),
         };
         match placement {
             Err(refused) => PoolLoad::on_worker(move || Err(plugin_failed(refused))),
@@ -672,6 +675,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 cx: Context {
                     rate: self.graph.prepared().sample_rate(),
                     work: self.plugins.work.clone(),
+                    executor: self.plugins.executor.clone(),
                     ids: self.pool.resource_ids.clone(),
                     recovery: self.plugins.recovery.is_some(),
                 },

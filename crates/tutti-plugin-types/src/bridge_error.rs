@@ -140,6 +140,11 @@ pub enum IpcError {
         reason: String,
     },
 
+    /// The executor the load runs its watches on has shut down: the host is
+    /// shutting down, and the plugin did not fail.
+    #[error("the host is shutting down")]
+    ShutDown,
+
     /// The subprocess replied with a message the host was not waiting for.
     #[error("unexpected bridge message: expected {expected}, got {got}")]
     UnexpectedMessage {

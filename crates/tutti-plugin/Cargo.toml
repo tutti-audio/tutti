@@ -78,13 +78,15 @@ tutti-vst2-host = { version = "0.0.1", path = "../tutti-vst2-host", optional = t
 # `LockExt` and `tally`: the plugin's locks and loss counts.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
+# The `Executor` a served plugin's exit watch runs on, and `request_priority`,
+# `PriorityRequest` for the pressure suite's priority probe.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # Audio Unit hosting (optional, macOS only): `au` enables nothing elsewhere.
 tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 
 [dev-dependencies]
-# `request_priority`, `PriorityRequest`: the pressure suite's priority probe.
-tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-midi-runtime = { path = "../tutti-midi-runtime" }
 # The tests' tempo maps and note timing.
 tutti-tempo = { path = "../tutti-tempo" }
