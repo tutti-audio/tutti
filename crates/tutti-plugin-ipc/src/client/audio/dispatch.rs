@@ -533,9 +533,24 @@ fn ask(
     window: Duration,
     ceiling: Duration,
 ) -> IpcResult<ReqId> {
+    ask_by(stream, state, late, window, ceiling, |stream, id| {
+        ipc::send(stream, &Request { id, body })
+    })
+}
+
+/// [`ask`] with the request written by `send`, for one that travels with more
+/// than a frame (a slab's descriptor).
+fn ask_by(
+    stream: &mut ControlStream,
+    state: &mut ControlState,
+    late: Abandoned,
+    window: Duration,
+    ceiling: Duration,
+    send: impl FnOnce(&mut ControlStream, ReqId) -> IpcResult<()>,
+) -> IpcResult<ReqId> {
     let id = state.fresh();
     state.conv.open(id, late, Instant::now(), window, ceiling);
-    ipc::send(stream, &Request { id, body })?;
+    send(stream, id)?;
     Ok(id)
 }
 
@@ -603,9 +618,21 @@ fn query(
     lifecycle: &Lifecycle,
     body: ControlRequest,
 ) -> IpcResult<Option<ControlReply>> {
+    query_by(lane, inbox, lifecycle, |stream, id| {
+        ipc::send(stream, &Request { id, body })
+    })
+}
+
+/// [`query`] with the request written by `send`.
+fn query_by(
+    lane: &mut Lane<ControlState>,
+    inbox: &mut Unsolicited,
+    lifecycle: &Lifecycle,
+    send: impl FnOnce(&mut ControlStream, ReqId) -> IpcResult<()>,
+) -> IpcResult<Option<ControlReply>> {
     let window = lifecycle.timeouts().param;
     let Lane { stream, state } = lane;
-    let id = ask(stream, state, body, Abandoned::Discard, window, window)?;
+    let id = ask_by(stream, state, Abandoned::Discard, window, window, send)?;
     match wait_for(stream, inbox, state, id, None)? {
         Waited::Reply(reply) => Ok(Some(reply)),
         Waited::Pending | Waited::GaveUp => Ok(None),
@@ -1045,12 +1072,9 @@ pub(super) fn handle_control(
             // answer: no reason to wait out the deadline for a `Ready` that is
             // not coming.
             let ok = matches!(
-                query(
-                    lane,
-                    inbox,
-                    lifecycle,
-                    ControlRequest::SetupSharedMemory { slab, layout },
-                )?,
+                query_by(lane, inbox, lifecycle, |stream, id| {
+                    ipc::send_setup(stream, id, layout, &slab)
+                })?,
                 Some(ControlReply::SharedMemoryReady)
             );
             reply.send(ok);

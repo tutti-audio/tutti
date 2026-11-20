@@ -21,6 +21,8 @@ mod f64_takes;
 #[cfg(all(feature = "device", feature = "midi"))]
 mod device_midi_clock;
 // A sink is sent at the time of each event's frame.
+#[cfg(feature = "analyze")]
+mod analyzer;
 #[cfg(all(feature = "device", feature = "midi"))]
 mod device_midi_out_timing;
 #[cfg(feature = "device")]

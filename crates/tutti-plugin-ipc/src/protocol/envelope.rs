@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
-use crate::SlabHandle;
+use crate::SlabWire;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MidiEventVec;
@@ -285,10 +285,13 @@ pub enum ControlRequest {
         #[serde(with = "super::wire::bytes")]
         bytes: Vec<u8>,
     },
-    /// Point the subprocess at the shared-memory audio slab.
+    /// Point the subprocess at the shared-memory audio slab, which follows this
+    /// frame as a descriptor of its own on unix (`send_setup` writes both, and the
+    /// server's transport reads both before this reaches its session).
     SetupSharedMemory {
-        /// The slab to map, as its creator handed it out.
-        slab: SlabHandle,
+        /// What the frame carries of the slab: nothing on unix, where the
+        /// descriptor follows, and the slab's checked name on Windows.
+        slab: SlabWire,
         /// Region geometry, which both sides must agree on exactly.
         layout: SlabLayout,
     },

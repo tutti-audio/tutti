@@ -45,6 +45,11 @@ pub struct SlabLayout {
     pub outputs: BusChannels,
 }
 
+/// What the output ring's start is aligned to, in bytes: two of the larger cache
+/// line any supported target has, so the two rings share no line, nor one the
+/// adjacent-line prefetcher pairs.
+pub(crate) const RING_ALIGN: usize = 128;
+
 impl SlabLayout {
     /// Total flat channels the input direction occupies (sum across input buses).
     pub fn input_channels(&self) -> usize {
@@ -85,6 +90,14 @@ impl SlabLayout {
         self.ring_bytes(self.input_channels())
     }
 
+    /// Bytes from the input ring's start to the output ring's: the input ring
+    /// rounded up to [`RING_ALIGN`], so the input ring's last block (written by
+    /// the host) and the output ring's first (written by the server) are never
+    /// on one cache line.
+    pub(crate) fn input_region_bytes(&self) -> usize {
+        self.input_ring_bytes().next_multiple_of(RING_ALIGN)
+    }
+
     /// Total mapping size: header, then both rings, or `None` when it does not
     /// fit in `usize`.
     ///
@@ -110,7 +123,7 @@ impl SlabLayout {
                 .checked_mul(self.checked_channel_bytes()?)
         };
         header_bytes
-            .checked_add(ring(channels(&self.inputs)?)?)?
+            .checked_add(ring(channels(&self.inputs)?)?.checked_next_multiple_of(RING_ALIGN)?)?
             .checked_add(ring(channels(&self.outputs)?)?)
     }
 }
@@ -163,6 +176,22 @@ mod tests {
         assert_eq!(l.checked_byte_size_with_header(0), None);
         l.samples_per_channel = 64;
         assert_eq!(l.checked_byte_size_with_header(usize::MAX), None);
+    }
+
+    /// **The output ring starts on its own cache line.** A ring whose size is
+    /// not a multiple of the alignment is padded, in the total size too, so the
+    /// host's last input block and the server's first output block share no
+    /// line.
+    #[test]
+    fn the_output_ring_starts_on_its_own_cache_line() {
+        let mut l = layout(&[ChannelLayout::MONO], &[ChannelLayout::MONO]);
+        l.samples_per_channel = 5;
+        // 2 slots x 1 ch x 5 samples x 4 bytes = 40 per ring.
+        assert_eq!(l.input_ring_bytes(), 40);
+        assert_eq!(l.input_region_bytes(), RING_ALIGN);
+        assert_eq!(l.checked_byte_size_with_header(0), Some(RING_ALIGN + 40));
+        l.samples_per_channel = 64;
+        assert_eq!(l.input_region_bytes(), l.input_ring_bytes());
     }
 
     /// A sidechain widens only the input ring; the two directions are sized
