@@ -3,13 +3,12 @@
 
 use crate::pooled::{LoadEntry, LoadPlugin, Spec, catalog_of, probe};
 use crate::support::clap_probe;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
-use tutti_session::{LoadError, PoolEvent, Session, SessionEvent, Task};
+use tutti_session::{LoadError, PoolEvent, Session, SessionEvent};
 use tutti_units::Samples;
 
 fn session() -> Session {
@@ -72,23 +71,19 @@ fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolE
     }
 }
 
-/// A session whose spawner holds the jobs it is handed, and the jobs.
-fn holding() -> (Session, Arc<Mutex<Vec<Task>>>) {
-    let held: Arc<Mutex<Vec<Task>>> = Arc::default();
-    let spawned = Arc::clone(&held);
+/// A session whose executor holds the futures it is handed, and the futures.
+fn holding() -> (Session, tutti_fixtures::HeldFutures) {
+    let held = tutti_fixtures::HeldFutures::new();
     let s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
-        .spawn_with(move |job| spawned.lock().unwrap().push(job))
+        .executor(held.executor())
         .build()
         .expect("an offline session builds");
     (s, held)
 }
 
-fn run_held(held: &Arc<Mutex<Vec<Task>>>) {
-    let jobs: Vec<Task> = held.lock().unwrap().drain(..).collect();
-    for job in jobs {
-        job.run();
-    }
+fn run_held(held: &tutti_fixtures::HeldFutures) {
+    held.run_all();
 }
 
 /// **The blacklist is asked when the load runs, not when the entry is built**:

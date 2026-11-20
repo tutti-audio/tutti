@@ -512,6 +512,11 @@ pub enum Error {
     #[error(transparent)]
     Take(#[from] crate::TakeError),
 
+    /// The session's bell tick thread did not start: the OS refused it
+    /// ([`SessionBuilder::build`](crate::SessionBuilder)).
+    #[error("the session's bell thread did not start: {0}")]
+    Bells(std::io::Error),
+
     /// Standard I/O error encountered while reading or writing audio data.
     #[error(transparent)]
     Io(#[from] std::io::Error),

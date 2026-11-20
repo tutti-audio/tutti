@@ -82,7 +82,7 @@ fn session_built(
     // Jobs run inline, in the phase that submits them: what they report lands
     // in the next `Collect`, in a deterministic order. A test that wants another
     // spawner says so in `build`.
-    build(Session::builder().spawn_with(|job| job.run()))
+    build(Session::builder().executor(tutti_fixtures::inline_executor()))
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
@@ -822,9 +822,9 @@ fn a_reload_completes_with_no_host_code_but_update() {
             }))
             // A thread per job, the way a host without a pool of its own runs
             // them: nothing here touches a job but to start it.
-            .spawn_with(|job| {
-                std::thread::spawn(move || job.run());
-            })
+            .executor(tutti_platform::Executor::new(|job| {
+                std::thread::spawn(move || tutti_fixtures::run_future(job));
+            }))
         },
     );
     let (node, _) = wired_probe(&mut s);
@@ -892,14 +892,14 @@ fn a_reload_job_the_spawner_drops_is_a_failed_attempt() {
                 backoff: Duration::from_millis(1),
                 ..Default::default()
             }))
-            .spawn_with(move |job| {
+            .executor(tutti_platform::Executor::new(move |job| {
                 if drops.load(Ordering::SeqCst) {
                     counted.fetch_add(1, Ordering::SeqCst);
                     drop(job);
                 } else {
-                    job.run();
+                    tutti_fixtures::run_future(job);
                 }
-            })
+            }))
         },
     );
     let (node, _) = wired_probe(&mut s);
