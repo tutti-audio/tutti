@@ -4,8 +4,19 @@ use crate::pool::{RefreshError, RefreshReport, RefreshedPool};
 use crate::{AppKey, Clock, Session};
 
 mod sealed {
-    /// Keeps the outputs a session takes back to the ones it defines.
-    pub trait Sealed {}
+    use super::{AppKey, Apply, Clock, Session};
+
+    /// Keeps the outputs a session takes back to the ones it defines, and is
+    /// where an output applies itself: no outside crate can name it.
+    pub trait Sealed {
+        /// Applies the output to `session`.
+        fn apply_to<K: AppKey, C: Clock>(
+            self,
+            session: &mut Session<K, C>,
+        ) -> Result<Self::Applied, Self::Error>
+        where
+            Self: Apply;
+    }
 }
 
 /// An output of app-run work that the session takes back
@@ -21,13 +32,6 @@ pub trait Apply: sealed::Sealed {
     /// Why an apply refused; every output's error has a `Stale` variant for an
     /// output cut from an older state of the session.
     type Error;
-
-    /// Applies the output to `session`.
-    #[doc(hidden)]
-    fn apply_to<K: AppKey, C: Clock>(
-        self,
-        session: &mut Session<K, C>,
-    ) -> Result<Self::Applied, Self::Error>;
 }
 
 impl<K: AppKey, C: Clock> Session<K, C> {
@@ -44,16 +48,16 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// The output's own error: `Stale` for an output cut from an older state,
     /// and whatever else applying it can refuse.
     pub fn apply<D: Apply>(&mut self, done: D) -> Result<D::Applied, D::Error> {
-        done.apply_to(self)
+        sealed::Sealed::apply_to(done, self)
     }
 }
-
-impl sealed::Sealed for RefreshedPool {}
 
 impl Apply for RefreshedPool {
     type Applied = RefreshReport;
     type Error = RefreshError;
+}
 
+impl sealed::Sealed for RefreshedPool {
     fn apply_to<K: AppKey, C: Clock>(
         self,
         session: &mut Session<K, C>,
