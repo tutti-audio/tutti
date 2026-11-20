@@ -24,7 +24,6 @@ serde = ["dep:serde", "tutti-ump/serde"]
 [dependencies]
 bitflags = "2"
 thiserror = { workspace = true, features = ["std"] }
-unicode-normalization = { workspace = true }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 winnow = { workspace = true }

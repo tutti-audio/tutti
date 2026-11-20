@@ -1,8 +1,8 @@
-use tutti_midi_ci::ProductInstanceId;
 use tutti_midi_device::{
     DeviceEvent, DeviceInfo, DeviceTable, EndpointId, Identity, OsChange, OsDevice, PortDirection,
     Resolved, WinMmDevice,
 };
+use tutti_ump::ProductInstanceId;
 
 fn listed(identity: Identity, count: u64) -> (DeviceTable, Vec<DeviceInfo>) {
     let mut table = DeviceTable::default();

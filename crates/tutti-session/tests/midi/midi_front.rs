@@ -419,12 +419,12 @@ fn a_route_rule_keyed_by_the_apps_id_round_trips_and_refuses_a_bad_channel() {
 #[cfg(feature = "midi-hardware")]
 mod hardware {
     use super::*;
-    use tutti_midi_ci::ProductInstanceId;
     use tutti_midi_device::{EndpointId, Identity, PortDirection};
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
     use tutti_session::{
         LoadError, MidiPortError, Peer, PoolState, PortCause, Presence, midi_input, midi_output,
     };
+    use tutti_ump::ProductInstanceId;
 
     fn session() -> (Session, FakeCounters) {
         let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);

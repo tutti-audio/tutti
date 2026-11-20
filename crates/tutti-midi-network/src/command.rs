@@ -1,7 +1,7 @@
 //! [`Command`]: one Command Packet (M2-124 section 5.4) as a value, with the
 //! one writer and the one reader of its bytes.
 
-use tutti_midi_ci::{EndpointName, InstanceIdError, NameError, ProductInstanceId};
+use tutti_ump::{EndpointName, InstanceIdError, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
 use tutti_units::{Text, TextError};

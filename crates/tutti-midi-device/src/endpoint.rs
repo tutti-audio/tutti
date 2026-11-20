@@ -12,7 +12,7 @@ use tutti_ump::{
     Protocol, Stream, StreamConfig, Sysex8StreamIds, UiHint, Ump, UmpVersion, text_packets,
 };
 
-use tutti_midi_ci::{BlockName, EndpointName, NameError, ProductInstanceId};
+use tutti_ump::{BlockName, EndpointName, NameError, ProductInstanceId};
 
 /// How many Function Blocks an Endpoint holds (M2-104 §7.1.7: numbers `0..=31`).
 pub const MAX_FUNCTION_BLOCKS: usize = 32;
@@ -1174,7 +1174,7 @@ mod wire {
     use super::{
         BlockError, Capabilities, Endpoint, FunctionBlock, MAX_FUNCTION_BLOCKS, NotAnEndpoint,
     };
-    use tutti_midi_ci::{BlockName, EndpointName, ProductInstanceId};
+    use tutti_ump::{BlockName, EndpointName, ProductInstanceId};
 
     #[derive(serde::Serialize, serde::Deserialize)]
     pub(super) struct BlockDocument {
