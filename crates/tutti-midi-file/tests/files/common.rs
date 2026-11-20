@@ -198,3 +198,15 @@ pub fn unspecified(file: &MidiFile, track: usize) -> Vec<(Tick, FileEvent)> {
         .map(|(_, e)| e.clone())
         .collect()
 }
+
+/// Reads `bytes` as a MIDI file: the one `MidiFile::read`, from an owned copy.
+pub fn read_bytes(bytes: impl AsRef<[u8]>) -> Result<MidiFile, tutti_midi_file::ReadError> {
+    MidiFile::read(bytes.as_ref().to_vec())
+}
+
+/// `file` written to a `Vec`.
+pub fn encoded(file: &MidiFile) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    file.write(&mut bytes).expect("a Vec takes the write");
+    bytes
+}

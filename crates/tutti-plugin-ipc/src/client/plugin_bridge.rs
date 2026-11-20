@@ -121,17 +121,24 @@ impl PluginBridge {
         &self.editor
     }
 
-    /// Queues a parameter write for the plugin and shows it on an open editor.
-    /// Realtime-safe; `false` when the audio instance did not take it.
-    pub fn set_parameter_rt(&self, param_id: ParamId, value: Normalized) -> bool {
+    /// Stores a parameter write for the plugin, sent with its next block, and
+    /// shows it on an open editor. A control-side call: it takes a lock.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownParam`](tutti_plugin_types::UnknownParam) when the plugin does
+    /// not declare `param_id`.
+    pub fn set_parameter_value(
+        &self,
+        param_id: ParamId,
+        value: Normalized,
+    ) -> Result<(), tutti_plugin_types::UnknownParam> {
         // Cosmetic GUI mirror (keeps the display in sync): queued for the next
-        // `editor_idle`, a bounded lock-free queue so the `_rt` contract
-        // stays non-blocking and allocation-free. The authoritative delivery is
-        // the audio command below; a dropped mirror write self-heals on the next
-        // edit.
+        // `editor_idle`, a bounded lock-free queue that never blocks. The
+        // authoritative delivery is the slot below; a dropped mirror write
+        // self-heals on the next edit.
         self.editor.show_parameter(param_id, value);
-        // The wire carries `f32`; the domain is enforced up to this point.
-        self.audio.set_parameter_rt(param_id, value)
+        self.audio.write_parameter(param_id, value)
     }
 
     /// Sends the host's automation mode to the plugin, mirrored into an open

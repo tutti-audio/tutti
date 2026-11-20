@@ -31,8 +31,8 @@ use crate::ServerWatch;
 use crate::SlabLayout;
 use dpi::Size;
 use tutti_plugin_types::{
-    BlockStatus, BridgeResult, ContentScale, Delivered, EditorError, PluginFailure, StateError,
-    StateUse,
+    BlockStatus, BridgeResult, ContentScale, Delivered, EditWriter, EditorError, PluginFailure,
+    StateError, StateUse, UnknownParam, edit_slots,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -85,6 +85,8 @@ impl Submitted {
 }
 
 use ask::{Ask, Reply};
+#[cfg(test)]
+pub(crate) use channels::COMMAND_QUEUE_SIZE;
 use channels::Channels;
 pub use channels::Replies;
 pub(crate) use channels::response_ring;
@@ -131,6 +133,18 @@ pub struct AudioBridge {
     listener: ListenerSlot,
     /// The count of audio responses the response ring lost to being full.
     responses_lost: tutti_rt::Counter<u64>,
+    /// The writer of the host's parameter slots, built from the plugin's
+    /// declared parameters by the first write; its reader is the audio lane's
+    /// ([`Channels::install_host_edits`]). Control side.
+    host_edits: Arc<Mutex<Option<HostEdits>>>,
+}
+
+/// The host's parameter slots, as the control side writes them.
+struct HostEdits {
+    writer: EditWriter,
+    /// A write was made since the last flush was asked for: a flush with none
+    /// asks the audio lane for nothing.
+    written: bool,
 }
 
 impl std::fmt::Debug for AudioBridge {
@@ -236,6 +250,7 @@ impl AudioBridge {
             lifecycle,
             listener,
             responses_lost,
+            host_edits: Arc::default(),
         };
         Ok((bridge, thread, replies))
     }
@@ -401,20 +416,129 @@ impl AudioBridge {
         self.channels.fate(seq)
     }
 
-    // --- RT fire-and-forget ---
+    // --- The host's parameter writes ---
 
-    /// Queues a parameter write for the plugin. Realtime-safe; `false` when the
-    /// queue was full or the plugin is dead.
+    /// Stores a parameter write for the plugin, to ride the next block the audio
+    /// lane sends as a change on its first frame. Never dropped for lack of
+    /// room: a write replaces the value of the same parameter no block has
+    /// taken, so the latest wins. **A control-side call**: it takes a lock, and
+    /// the first write asks the plugin for its parameters, once.
     ///
-    /// Ordered one way against blocks: it never reaches the server ahead of a
-    /// block submitted before it, but it may land after a block submitted after
-    /// it (the write is on the control lane, which a block does not wait for, so
-    /// a stuck control request cannot stall audio).
-    pub(crate) fn set_parameter_rt(&self, param_id: ParamId, value: Normalized) -> bool {
-        !self.lifecycle.is_crashed()
-            && self
-                .channels
-                .push_control(ControlCommand::SetParameter { param_id, value })
+    /// A crashed plugin answers `Ok` and stores nothing, as does one that does
+    /// not answer the parameter list: its recovery restores from the host's
+    /// mirror.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownParam`] when the parameters the table holds do not include `id`.
+    /// The table follows the plugin's own word that its list changed
+    /// ([`invalidate_host_edits`](Self::invalidate_host_edits)), never a write.
+    pub(crate) fn write_parameter(
+        &self,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), UnknownParam> {
+        if self.lifecycle.is_crashed() {
+            return Ok(());
+        }
+        if let Some(table) = self.host_edits.lock().as_mut() {
+            table.written = true;
+            return table.writer.write(id, value);
+        }
+        // No table: the plugin's list is asked, once, outside the lock (a round
+        // trip), and the table is built from it.
+        let Some(infos) = self.parameters() else {
+            return Ok(());
+        };
+        self.declare_host_edits(infos.iter().map(ParameterInfo::id));
+        match self.host_edits.lock().as_mut() {
+            Some(table) => {
+                table.written = true;
+                table.writer.write(id, value)
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Builds the table of the host's slots from the parameters the plugin
+    /// declares (`ids`) when there is none: the list a write's policy check
+    /// asked for is the table's, so a write does not ask twice. A table that
+    /// stands is kept, with what its slots hold: it changes only when the plugin
+    /// says its list did ([`invalidate_host_edits`](Self::invalidate_host_edits)).
+    pub(crate) fn declare_host_edits(&self, ids: impl IntoIterator<Item = ParamId>) {
+        let mut slot = self.host_edits.lock();
+        if slot.is_none() {
+            let (writer, reader) = edit_slots(ids);
+            self.channels.install_host_edits(reader);
+            *slot = Some(HostEdits {
+                writer,
+                written: false,
+            });
+        }
+    }
+
+    /// The plugin said its parameter list changed (or it died): the table is
+    /// built again from the list at the next write. What the old slots held and
+    /// no block took is dropped, and the host's mirror restores it.
+    pub(crate) fn invalidate_host_edits(&self) {
+        *self.host_edits.lock() = None;
+    }
+
+    /// Makes every write made so far stale: a state or preset load replaced the
+    /// values they were written against, so none still in its slot lands after it.
+    ///
+    /// **The overlap window:** a write the audio lane has already taken into a
+    /// block it is sending, or kept in `carry_write` for the next, is past the
+    /// slots and is not voided. The load rides the control lane, which waits for
+    /// the blocks pushed before it, so such a write reaches the server before the
+    /// load and the load replaces it; one in a block the lane sends after the
+    /// load was asked for can land after it, as a block overlaps any host call
+    /// (the in-process path has the same window).
+    pub(crate) fn reset_host_edits(&self) {
+        if let Some(table) = self.host_edits.lock().as_mut() {
+            table.writer.reset();
+        }
+    }
+
+    /// Asks the audio lane to send the writes no block has carried yet, in order
+    /// with the blocks: the command carries none, and the lane takes them from the
+    /// slots when it reaches it. `None` when the queue is full (the writes stay
+    /// in their slots for the next block) or the plugin is dead.
+    fn request_flush(&self) -> Option<ask::Ask<bool>> {
+        if self.lifecycle.is_crashed() {
+            return None;
+        }
+        // Nothing written since the last flush: nothing for the lane to send.
+        if !self
+            .host_edits
+            .lock()
+            .as_mut()
+            .is_some_and(|table| std::mem::take(&mut table.written))
+        {
+            return None;
+        }
+        let (done_ask, done) = ask::ask::<bool>();
+        if self.channels.push_block(AudioCommand::Params { done }) {
+            Some(done_ask)
+        } else {
+            // The flush never queued: the writes are still unsent, so the next
+            // request asks again.
+            if let Some(table) = self.host_edits.lock().as_mut() {
+                table.written = true;
+            }
+            None
+        }
+    }
+
+    /// Has the plugin apply the writes no block has carried yet, before the
+    /// caller's next request: they go on the audio lane, in order with the
+    /// blocks pushed before them, and the server applies them through the
+    /// format's own route between blocks. Waits up to a query's wait for the
+    /// answer. Control side.
+    fn flush_host_edits(&self) {
+        if let Some(applied) = self.request_flush() {
+            let _ = await_reply(applied, self.lifecycle.timeouts().param_wait());
+        }
     }
 
     /// Queue an automation-state push, saying **why** if it did not go.
@@ -635,6 +759,8 @@ impl AudioBridge {
         if self.lifecycle.is_crashed() {
             return Err(StateError::PluginCrashed);
         }
+        // What the host wrote and no block has carried is in the state.
+        self.flush_host_edits();
         let progress = StateProgress::new(self.lifecycle.timeouts());
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
             ControlCommand::SaveState {
@@ -670,6 +796,9 @@ impl AudioBridge {
         if self.lifecycle.is_crashed() {
             return Err(StateError::PluginCrashed);
         }
+        // The writes made so far were made against the values this load
+        // replaces: none lands after it.
+        self.reset_host_edits();
         // Refuse here as well as in the dispatcher. Not redundant: this saves
         // copying a gigabyte into a command that is only going to be rejected,
         // and it answers on the calling thread rather than after a round trip
@@ -847,6 +976,7 @@ impl AudioBridge {
         if self.lifecycle.is_crashed() {
             return false;
         }
+        self.reset_host_edits();
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
             ControlCommand::LoadPreset { id, reply }
         }) else {
@@ -922,6 +1052,8 @@ impl AudioBridge {
         if self.lifecycle.is_crashed() {
             return None;
         }
+        // What the host wrote and no block has carried is read back.
+        self.flush_host_edits();
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
             ControlCommand::GetParameter { param_id, reply }
         })?;
@@ -1017,6 +1149,101 @@ impl AudioBridge {
 mod tests {
     use super::*;
 
+    /// A bridge with no lane thread: its commands stay in the queues for a test
+    /// to take, as the lane's thread would.
+    fn bridge_without_a_lane() -> AudioBridge {
+        let channels = Channels::new(SampleRate::SR_48K, Arc::default())
+            .expect("the channels")
+            .0;
+        AudioBridge {
+            payloads: PayloadPool::new(
+                SampleRate::SR_48K,
+                channels.refusal_writer(),
+                channels.leak_writer(),
+            ),
+            channels,
+            lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
+            listener: Arc::new(Mutex::new(None)),
+            responses_lost: channels::response_ring().2,
+            host_edits: Arc::default(),
+        }
+    }
+
+    /// **A flush takes the writes when the lane dequeues it, not when it is
+    /// asked for**: a write made after the request and before the lane reaches it
+    /// is the one sent. Taking at the request left a window in which a block
+    /// queued ahead could ship the newer value and the flush then overwrite it
+    /// with the older.
+    #[test]
+    fn a_flush_takes_the_writes_when_the_lane_dequeues_it() {
+        let bridge = bridge_without_a_lane();
+        let id = ParamId::new(1);
+        bridge.declare_host_edits([id]);
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.25)), Ok(()));
+        let _answer = bridge.request_flush().expect("the queue has room");
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.75)), Ok(()));
+        let Some(AudioCommand::Params { .. }) = bridge.channels.pop_block() else {
+            panic!("the flush is queued");
+        };
+        let changes = dispatch::host_edit_changes(&bridge.channels);
+        let sent: Vec<f64> = changes
+            .queues
+            .iter()
+            .flat_map(|q| q.points.iter().map(|p| p.value.get()))
+            .collect();
+        assert_eq!(sent, [0.75], "the newest write, taken when dequeued");
+    }
+
+    /// **A flush the full block queue refused is asked for again**: the writes
+    /// are still in their slots, so a later request sends them.
+    #[test]
+    fn a_flush_refused_on_a_full_queue_is_asked_for_again() {
+        let bridge = bridge_without_a_lane();
+        let id = ParamId::new(1);
+        bridge.declare_host_edits([id]);
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.5)), Ok(()));
+        loop {
+            let (_ask, done) = ask::ask::<bool>();
+            if bridge
+                .channels
+                .try_push_block(AudioCommand::Params { done })
+                .is_err()
+            {
+                break;
+            }
+        }
+        assert!(bridge.request_flush().is_none(), "the queue is full");
+        while bridge.channels.pop_block().is_some() {}
+        assert!(
+            bridge.request_flush().is_some(),
+            "the writes still wait for a flush"
+        );
+    }
+
+    /// **Writes either side of a queued flush end at the last**: W1, a flush
+    /// asked for, a block queued ahead, W2, then the lane dequeues both. What the
+    /// server is sent last for the parameter is W2.
+    #[test]
+    fn the_last_write_is_the_last_the_server_is_sent_whatever_is_queued() {
+        let bridge = bridge_without_a_lane();
+        let id = ParamId::new(1);
+        bridge.declare_host_edits([id]);
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.25)), Ok(()));
+        let _answer = bridge.request_flush().expect("room");
+        assert!(bridge.channels.push_block(AudioCommand::Params {
+            done: ask::ask::<bool>().1
+        }));
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.75)), Ok(()));
+        let mut last = None;
+        while let Some(AudioCommand::Params { .. }) = bridge.channels.pop_block() {
+            let changes = dispatch::host_edit_changes(&bridge.channels);
+            for point in changes.queues.iter().flat_map(|q| q.points.iter()) {
+                last = Some(point.value.get());
+            }
+        }
+        assert_eq!(last, Some(0.75));
+    }
+
     /// **A block submitted to an empty pool is refused and counted, nothing
     /// queued and nothing allocated.** Every pooled payload is held out, as
     /// when more are out than the queue and both threads can hold.
@@ -1035,6 +1262,7 @@ mod tests {
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
+            host_edits: Arc::default(),
         };
         let mut held = Vec::new();
         while let Some(payload) = bridge.payloads.acquire() {
@@ -1079,6 +1307,7 @@ mod tests {
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
+            host_edits: Arc::default(),
         };
         while bridge.channels.push_control(ControlCommand::CloseEditor) {}
 

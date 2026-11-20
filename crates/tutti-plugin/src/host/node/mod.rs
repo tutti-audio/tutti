@@ -671,17 +671,27 @@ impl<S> PluginClient<S> {
         self.bridge.audio().dropped_parameter_events()
     }
 
-    /// Queues a parameter change for the plugin. RT-safe, fire-and-forget: it
-    /// never waits on a round trip, so it does not check the write against the
-    /// plugin's declared parameters. The server's own `Control::set_parameter`
-    /// refuses a write to a parameter the plugin does not declare or declares
-    /// read-only, and writes nothing; the wire has no reply to say so.
+    /// Stores a parameter change for the plugin, sent with its next block: it
+    /// never waits on the block, and a newer write to the parameter replaces one
+    /// no block has taken. The server's own `Control::set_parameter` refuses a
+    /// write to a read-only parameter, and writes nothing; the wire has no reply
+    /// to say so.
     ///
     /// Main-thread parameter reads and writes are on
     /// [`PluginHandle`]; this lets a
-    /// builder set initial values before any handle exists.
-    pub fn set_parameter(&self, param_id: ParamId, value: Normalized) {
-        let _ = self.bridge.set_parameter_rt(param_id, value);
+    /// builder set initial values before any handle exists. A control-side call:
+    /// it takes a lock.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownParam`](tutti_plugin_types::UnknownParam) when the plugin does
+    /// not declare `param_id`.
+    pub fn set_parameter(
+        &self,
+        param_id: ParamId,
+        value: Normalized,
+    ) -> Result<(), tutti_plugin_types::UnknownParam> {
+        self.bridge.set_parameter_value(param_id, value)
     }
 
     /// Sends the host [`AutomationMode`](tutti_plugin_types::AutomationMode) to the

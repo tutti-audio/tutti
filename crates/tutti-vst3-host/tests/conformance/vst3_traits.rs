@@ -14,9 +14,9 @@ use tutti_rt::LockExt;
 use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare, PresetId,
-    ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope, SampleRate,
-    Samples, Wraps,
+    Control, Controller, Loaded, MaxBlock, ParameterChanges, PluginError, PluginIo, PluginTail,
+    Prepare, PresetId, ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope,
+    SampleRate, Samples, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -152,6 +152,26 @@ fn render(
             Ok(o[0][0])
         }
     }
+}
+
+/// One `f32` block through `processor` with `ctx`, and the last sample of the
+/// first output channel.
+fn render_last_f32(processor: &mut ProcessorAny, ctx: &ProcessContext<'_>) -> f64 {
+    const FRAMES: usize = 64;
+    let mut out = ProcessOutput::default();
+    let input = [0.0f32; FRAMES];
+    let mut o = [[1.0f32; FRAMES], [1.0; FRAMES], [1.0; FRAMES]];
+    let inputs = [input.as_slice(), input.as_slice(), input.as_slice()];
+    let [a, b, c] = &mut o;
+    let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
+    let mut io = PluginIo {
+        buffer: InputOutput::from_slices(Samples::new(FRAMES), &inputs, &mut outputs)
+            .expect("equal channels"),
+        ctx,
+        out: &mut out,
+    };
+    processor.process(&mut io).expect("a block renders");
+    f64::from(o[0][FRAMES - 1])
 }
 
 fn render_f32(processor: &mut ProcessorAny) -> f64 {
@@ -878,6 +898,129 @@ fn the_reset_is_in_before_restore_not_after() {
         (rendered - 0.3).abs() < 1e-6,
         "before_restore voided the write, so the render keeps 0.3: {rendered}"
     );
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
+/// **A host write reaches the edit controller and not the Processor again**:
+/// `inform_controller` is `setParamNormalized` on the controller alone, so the
+/// controller reads the value, and the Processor, which has it through the
+/// block's parameter changes, is not handed it a second time over a later one.
+#[test]
+fn informing_the_controller_sets_it_and_queues_nothing_to_the_processor() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let before = render_f32(&mut processor);
+    Wraps::inform_controller(
+        &mut controller,
+        main_thread(),
+        id(PARAM_RAMP),
+        Normalized::of(0.4),
+    );
+    assert_eq!(
+        controller.parameter(main_thread(), id(PARAM_RAMP)),
+        Some(Normalized::of(0.4)),
+        "the controller follows the host's write"
+    );
+    assert_eq!(
+        render_f32(&mut processor),
+        before,
+        "the Processor was queued nothing"
+    );
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
+/// **A write made after a flush wins over it**: the Controller's write (a
+/// flush is one) is queued to the Processor's slots, and the block's own
+/// parameter changes carry a later write of the same parameter. The Processor
+/// puts its slots ahead of the block's changes, so the later write is the last
+/// word: the render reads it. Reversing the two renders the flushed value.
+#[test]
+fn a_write_after_a_flush_is_the_blocks_last_word() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    render_f32(&mut processor);
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
+        .expect("a declared, writable parameter");
+    let mut later = ParameterChanges::reserved(1, 4);
+    assert!(later.add_change(id(PARAM_RAMP), 0, 0.6));
+    // The probe renders the parameter's value at the end of the block.
+    let rendered = render_last_f32(&mut processor, &ProcessContext::new().params(&later));
+    assert!(
+        (rendered - 0.6).abs() < 1e-6,
+        "the later write is the last word: {rendered}"
+    );
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
+/// **A flush between blocks delivers parameters to a plugin that is
+/// processing**, with a `process` call of no samples (the SDK's route for
+/// parameters outside a block): the next block renders the flushed value.
+#[test]
+fn a_flush_between_blocks_reaches_a_processing_plugin() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    render_f32(&mut processor);
+    let mut changes = ParameterChanges::reserved(1, 1);
+    assert!(changes.add_change(id(PARAM_RAMP), 0, 0.4));
+    Processor::flush_parameters(&mut processor, &changes).expect("the plugin takes the flush");
+    let rendered = render_f32(&mut processor);
+    assert!((rendered - 0.4).abs() < 1e-6, "{rendered}");
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
+/// **A flush while the plugin is not processing waits for the next block, and
+/// does not start processing**: the SDK has `process` follow `setProcessing(true)`, which
+/// a flush does not toggle, so the writes are staged for the next block's input
+/// changes and that block renders them.
+#[test]
+fn a_flush_while_the_plugin_is_not_processing_is_staged_for_the_next_block_and_starts_nothing() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    render_f32(&mut processor);
+    Processor::stop(&mut processor);
+    let mut changes = ParameterChanges::reserved(1, 1);
+    assert!(changes.add_change(id(PARAM_RAMP), 0, 0.4));
+    Processor::flush_parameters(&mut processor, &changes).expect("staged");
+    let ProcessorAny::F32(inner) = &processor else {
+        panic!("activated at f32");
+    };
+    assert!(!inner.is_processing(), "the flush did not start processing");
+    let rendered = render_f32(&mut processor);
+    assert!((rendered - 0.4).abs() < 1e-6, "{rendered}");
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
 }
 

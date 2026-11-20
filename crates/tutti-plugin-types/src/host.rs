@@ -34,7 +34,7 @@ use crate::{
     PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
     SampleRate, Samples, WindowHandle,
 };
-use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
+use crate::{Delivered, ParamEdit, ParameterChanges, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
     MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
     StateUse, TimerId, TrackInfo, Wakeups, Widths,
@@ -159,6 +159,19 @@ pub trait Control: EditorWindow {
         id: ParamId,
         value: Normalized,
     ) -> Result<(), ParamWriteError>;
+
+    /// Tells the plugin's edit controller of a value the host wrote and the
+    /// Processor was handed another way (in the block's parameter changes), so
+    /// the controller's own value and the plugin's editor follow it. VST3 hosts
+    /// inform both halves of a plugin on a host-side change: the component
+    /// through the block, the controller with `setParamNormalized` on the main
+    /// thread, and that is the only format that has a controller of its own to
+    /// tell (CLAP, VST2 and AU answer a read from the plugin the Processor
+    /// drives). The default does nothing, so a format with one controller
+    /// leaves it so.
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        let _ = (main, id, value);
+    }
 
     /// The plain value `value` stands for, in the unit
     /// [`ParameterInfo::unit`](crate::ParameterInfo::unit) names: the
@@ -444,6 +457,31 @@ pub trait Processor: Send {
     /// block (likewise a request). Every format drops a SysEx open across the reset.
     fn reset(&mut self);
 
+    /// Delivers `changes` to the plugin between blocks, by the format's own
+    /// route for parameters outside a block, so a caller that must see them
+    /// applied (a state save, a read of the plugin) has them in before it asks.
+    /// Realtime, between blocks, on the thread that renders them. What the
+    /// Processor's own slots hold (the Controller's writes) goes in first, then
+    /// `changes`, as at the head of a block, so a later write is the last word.
+    ///
+    /// Per format: CLAP `params.flush` (an audio-thread entry, never beside
+    /// `process`); VST3 `process` with `numSamples = 0`, which the SDK
+    /// allows for flushing parameters; VST2 and AU a direct set of each
+    /// parameter's last value.
+    ///
+    /// The default refuses: a Processor takes parameters in a block only.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Block`] when the Processor has no such route, or the
+    /// plugin refused the call.
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+        let _ = changes;
+        Err(PluginError::Block(
+            "this Processor takes parameters in a block only",
+        ))
+    }
+
     /// The frames this Processor renders in, if it renders in fixed chunks
     /// that may begin in the middle of a graph block and span several
     /// [`process`](Self::process) calls (the served pipeline's: it ships a
@@ -566,6 +604,13 @@ pub trait Wraps {
 
     /// The plugin, mutably.
     fn plugin_mut(&mut self) -> &mut Self::Plugin;
+
+    /// A host write the Processor was handed through a block: tells the
+    /// plugin's edit controller where the format has one of its own
+    /// ([`Control::inform_controller`]).
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        let _ = (main, id, value);
+    }
 
     /// A host write, after the plugin took it (or instead of it): hands it to
     /// the Processor.
@@ -695,6 +740,10 @@ impl<W: Wraps> Control for W {
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
         self.plugin().parameter_writable(main, id)
+    }
+
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        Wraps::inform_controller(self, main, id, value);
     }
 
     fn set_parameter(

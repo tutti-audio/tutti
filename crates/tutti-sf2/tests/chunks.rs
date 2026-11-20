@@ -3,8 +3,6 @@
 //! bytes: sub-chunks it does not know, odd sizes and their pad byte, the RIFF
 //! size, and sizes that lie.
 
-use std::io::Cursor;
-
 use tutti_fixtures::sf2::{Inst, Preset, bytes};
 use tutti_sf2::{Error, SoundFont};
 
@@ -24,7 +22,7 @@ fn base() -> Vec<u8> {
 }
 
 fn load(file: Vec<u8>) -> Result<SoundFont, Error> {
-    SoundFont::from_reader(&mut Cursor::new(file))
+    SoundFont::open(file)
 }
 
 fn word(file: &[u8], at: usize) -> u32 {

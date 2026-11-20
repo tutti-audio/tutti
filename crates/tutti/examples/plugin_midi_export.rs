@@ -185,10 +185,7 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             U7::of(100),
         );
     }
-    MidiFile::smf(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?
-        .write_options()
-        .replace()
-        .write(path)?;
+    MidiFile::smf(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?.write(path)?;
     Ok(())
 }
 

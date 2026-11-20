@@ -41,6 +41,13 @@ pub trait MainThreadControl: Send + Sync {
     /// is lost.
     fn lend(&self, f: &mut dyn FnMut(&mut dyn Control));
 
+    /// A state or preset load is about to replace the values the host's
+    /// parameter writes so far were made against: those writes are made stale,
+    /// so none lands after the load. Called before the load runs; the default
+    /// is for a control whose writes are not held apart from the plugin (a
+    /// served plugin's `Control` resets its own).
+    fn before_restore(&self) {}
+
     /// The editor's tick, which an in-process plugin pairs with the pump of
     /// what the plugin changed about itself.
     fn editor_idle(&self, main: MainThreadMarker);
@@ -162,11 +169,11 @@ impl PluginStatus {
 /// [`status`](Self::status) and [`is_crashed`](Self::is_crashed) read an atomic.
 /// Call these per frame.
 ///
-/// **Fire-and-forget.** [`AnyThread::set_parameter_value`] queues the write
-/// and returns without waiting (a served plugin's goes onto its command queue,
-/// an in-process plugin's runs at once on the main thread or is posted to it).
-/// A knob turn must never stall a UI, so it deliberately has no reply to wait
-/// for, and therefore no way to report that the plugin refused.
+/// **Fire-and-forget.** [`AnyThread::set_parameter_value`] stores the write in
+/// the parameter's slot and returns without waiting; the plugin's next block
+/// applies it, and a newer write to the same parameter replaces one no block
+/// has taken. A knob turn must never stall a UI, so it has no reply to wait
+/// for: the only failure is a parameter the plugin does not declare.
 /// [`set_automation_mode`](Self::set_automation_mode) does not wait either; it
 /// answers at once whether the push was accepted.
 ///
@@ -322,7 +329,7 @@ impl PluginHandle {
     ///
     /// # Errors
     ///
-    /// [`UnknownParam`] when the plugin does not declare `id`.
+    /// [`UnknownParam`] when the plugin did not declare `id`.
     pub fn send_parameter(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
         self.any_thread.set_parameter_value(id, value)
     }
@@ -560,6 +567,7 @@ impl PluginHandle {
         let Some(control) = self.control.as_deref() else {
             return Err(StateError::NoStateRoute);
         };
+        control.before_restore();
         match lent(control, |c| {
             c.load_state(main, data, tutti_plugin_types::StateUse::Project)
         }) {
@@ -594,6 +602,7 @@ impl PluginHandle {
     /// UI selection where it was), [`PresetError::Lost`] when it is gone.
     pub fn load_preset(&self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         let control = self.control.as_deref().ok_or(PresetError::Unsupported)?;
+        control.before_restore();
         match lent(control, |c| c.load_preset(main, id)) {
             Some(true) => Ok(()),
             Some(false) => Err(PresetError::Refused),
@@ -1054,7 +1063,7 @@ mod tests {
                 &self,
                 _id: ParamId,
                 _value: Normalized,
-            ) -> Result<(), UnknownParam> {
+            ) -> Result<(), tutti_plugin_types::UnknownParam> {
                 Ok(())
             }
             fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {

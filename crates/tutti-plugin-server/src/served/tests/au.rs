@@ -512,7 +512,9 @@ fn direct_parameter_path_is_normalized_end_to_end() {
     let (min, max) = cutoff.bounds().expect("a plain range");
     let addr = cutoff.id();
 
-    au.set_parameter(main, addr, Normalized::of(1.0))
+    au.control_mut()
+        .expect("a live plugin")
+        .set_parameter(main, addr, Normalized::of(1.0))
         .expect("a declared, writable parameter");
     let plain = tutti_au_host::parameters::get(au.loaded_ref().unwrap().unit(), addr.get())
         .expect("cutoff is readable");
@@ -528,7 +530,9 @@ fn direct_parameter_path_is_normalized_end_to_end() {
     );
     assert!((au.normalized(main, addr) - 1.0).abs() < 1e-3);
 
-    au.set_parameter(main, addr, Normalized::of(0.0))
+    au.control_mut()
+        .expect("a live plugin")
+        .set_parameter(main, addr, Normalized::of(0.0))
         .expect("a declared, writable parameter");
     assert!((au.normalized(main, addr)).abs() < 1e-3);
 }
@@ -640,7 +644,9 @@ fn au_parameter_text_denormalizes_and_reports_absence_honestly() {
     let (min, max) = target.bounds().expect("AU declares a plain range");
 
     // The write path lands full scale on `max`, not on the raw `1.0`.
-    au.set_parameter(main, target.id(), Normalized::of(1.0))
+    au.control_mut()
+        .expect("a live plugin")
+        .set_parameter(main, target.id(), Normalized::of(1.0))
         .expect("a declared, writable parameter");
     let after = tutti_au_host::parameters::get(au.loaded_ref().unwrap().unit(), target.id().get())
         .expect("param is readable");

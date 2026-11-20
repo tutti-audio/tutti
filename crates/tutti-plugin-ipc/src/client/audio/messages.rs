@@ -60,6 +60,15 @@ impl ProcessPayload {
 pub(super) enum AudioCommand {
     Process(Box<ProcessPayload>),
     Reset,
+    /// The parameter writes no block has carried, sent on this lane so they are
+    /// in order with the blocks: it carries none itself. The lane's thread
+    /// takes the writes from the slots when it dequeues this, so the taking and
+    /// the sending are one step in the lane's order, and a block queued before
+    /// it has already taken what was written before that block. Answered into
+    /// `done` (`true` when the server applied them, or there were none).
+    Params {
+        done: Reply<bool>,
+    },
     /// A caller's wait for everything queued before it to have been applied and
     /// heard: held behind the settings in this queue like them, answered into
     /// `done` once the control lane has been through two fences.
@@ -93,10 +102,6 @@ pub(super) enum Setting {
 /// thread holds the paired `Ask<T>` and blocks on it. There is no shared
 /// response queue — responses cannot be misrouted between requests.
 pub(super) enum ControlCommand {
-    SetParameter {
-        param_id: ParamId,
-        value: Normalized,
-    },
     SetAutomationState {
         /// Format-neutral automation mode; each format loader encodes it onto its
         /// own ABI at the FFI edge (VST3 `IAutomationState`, etc.). The wire does
@@ -540,10 +545,7 @@ impl ControlCommand {
     pub(super) fn is_fire_and_forget(&self) -> bool {
         matches!(
             self,
-            Self::SetParameter { .. }
-                | Self::SetAutomationState { .. }
-                | Self::SetTrackInfo { .. }
-                | Self::CloseEditor
+            Self::SetAutomationState { .. } | Self::SetTrackInfo { .. } | Self::CloseEditor
         )
     }
 }

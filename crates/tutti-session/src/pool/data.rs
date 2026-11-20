@@ -248,12 +248,7 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
     fn load(&self) -> Load<Self::Loaded, S> {
         let asset = self.asset.clone();
         Load::on_worker(move || {
-            asset
-                .open()
-                .map_err(tutti_sf2::Error::from)
-                .and_then(|reader| {
-                    tutti_sf2::SoundFont::from_reader(std::io::BufReader::new(reader))
-                })
+            tutti_sf2::SoundFont::open(asset)
                 .map(Arc::new)
                 .map_err(|error| LoadError::SoundFont(Arc::new(error)))
         })
