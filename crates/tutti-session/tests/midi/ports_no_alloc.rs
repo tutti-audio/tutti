@@ -13,7 +13,7 @@ use tutti_fixtures::midi;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_session::{MidiRouteRule, Session, midi_input, midi_output};
+use tutti_session::{MidiRouteRule, Session};
 use tutti_ump::MidiChannel;
 
 /// A stand-in synth that counts the events it takes and keeps none (the common
@@ -52,11 +52,8 @@ fn an_input_and_an_output_port_render_without_allocating() {
         .route(MidiRouteRule::any_channel().to(synth))
         .expect("routes");
     let list = s.midi().devices();
-    s.pool((
-        midi_input("keys", list[0].clone()),
-        midi_output("synth", list[1].clone()),
-    ))
-    .expect("declares");
+    let input = s.open_midi_input(list[0].clone()).expect("opens");
+    let output = s.open_midi_output(list[1].clone()).expect("opens");
     let _ = s.update();
     s.midi_nodes()
         .unwrap()
@@ -99,5 +96,5 @@ fn an_input_and_an_output_port_render_without_allocating() {
         !fake.take_sent(EndpointId::from_raw(10)).is_empty(),
         "the output node forwarded the clock to the device"
     );
-    assert!(s.midi_input(&"keys").unwrap().node() != s.midi_output(&"synth").unwrap().node());
+    assert!(input.node() != output.node());
 }

@@ -33,9 +33,7 @@ use tutti_ump::{MpeChannels, MpeZoneSpan};
 use tutti_units::{Beat, BeatDuration, Frame, SampleRate};
 
 use tutti_fixtures::midi;
-use tutti_session::{
-    EventInPort, EventOutPort, Feeder, MidiError, Session, SessionEvent, midi_sink,
-};
+use tutti_session::{EventInPort, EventOutPort, Feeder, MidiError, Session, SessionEvent};
 #[cfg(feature = "midi-hardware")]
 use tutti_session::{MidiReport, PHASES, PhaseCx};
 #[cfg(feature = "midi-hardware")]
@@ -514,11 +512,12 @@ impl tutti_midi_runtime::MidiOut for Refusing {
 }
 
 /// The builder's clock, enabled, rolling for half a second into the
-/// `midi_sink` entry declared on `sink`: its Beat Clock reaches the sink's node.
-fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
+/// sink opened on `sink`: its Beat Clock reaches the sink's node. The sink's
+/// handle keeps it open.
+fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> (Session, tutti_session::MidiSink) {
     let mut s = offline();
-    s.pool(midi_sink("out", sink)).expect("declares");
-    let _ = s.update(); // the sink's node, loaded and committed
+    let out = s.open_midi_sink(sink);
+    let _ = s.update(); // the sink's node, committed
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -528,7 +527,7 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
             ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 24_000);
-    s
+    (s, out)
 }
 
 /// **A sink is drained to with stamping off**: the `MidiOut` phase hands the
@@ -537,21 +536,21 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
 #[test]
 fn a_sink_is_drained_to_stamping_off() {
     let count = Arc::new(AtomicUsize::new(0));
-    let mut s = clocked(Arc::new(CountingSink(Arc::clone(&count))));
+    let (mut s, sink) = clocked(Arc::new(CountingSink(Arc::clone(&count))));
     let _ = s.update();
     assert!(
         count.load(Ordering::SeqCst) > 0,
         "the clock reached the sink, unstamped"
     );
-    assert_eq!(s.midi_sink(&"out").unwrap().losses(), Losses::NONE);
+    assert_eq!(sink.losses(), Losses::NONE);
 }
 
 /// **A sink that refuses events has them counted in its own losses.**
 #[test]
 fn a_refusing_sink_counts_what_it_refused() {
-    let mut s = clocked(Arc::new(Refusing));
+    let (mut s, sink) = clocked(Arc::new(Refusing));
     let _ = s.update();
-    let losses = s.midi_sink(&"out").unwrap().losses();
+    let losses = sink.losses();
     assert!(
         losses.refused > 0,
         "the ticks are refused, counted: {losses:?}"
@@ -560,10 +559,7 @@ fn a_refusing_sink_counts_what_it_refused() {
     let before = losses.refused;
     roll(&s, 24_000);
     let _ = s.update();
-    assert!(
-        s.midi_sink(&"out").unwrap().losses().refused > before,
-        "and the count only rises"
-    );
+    assert!(sink.losses().refused > before, "and the count only rises");
 }
 
 /// **The session's own MIDI nodes go in through `add`**, so the reclaim
@@ -712,24 +708,25 @@ fn keyboards() -> (
     (s, fake, seen)
 }
 
-/// Declares an input port for each of `names` (a device's name, which is also
-/// its key), whole, and updates: the entries load and their input nodes and
-/// inlets are in the plan.
+/// Opens an input port for each of `names` (a device's name), and updates: the
+/// input nodes and inlets are in the plan. The handles keep the ports open, in
+/// the order of `names`.
 #[cfg(feature = "midi-hardware")]
-pub(crate) fn connect(s: &mut Session, names: &[&'static str]) {
+#[must_use = "a port closes when its handles are dropped"]
+pub(crate) fn connect(s: &mut Session, names: &[&'static str]) -> Vec<tutti_session::MidiInput> {
     let list = s.midi().devices();
-    let ports: Vec<_> = names
+    let ports = names
         .iter()
         .map(|&name| {
             let device = list
                 .iter()
                 .find(|d| d.name.eq_ignore_ascii_case(name))
                 .unwrap_or_else(|| panic!("{name} is listed"));
-            tutti_session::midi_input(name, device.clone())
+            s.open_midi_input(device.clone()).expect("opens")
         })
         .collect();
-    s.pool(ports).expect("declares");
     let _ = s.update();
+    ports
 }
 
 /// A note-on on channel `channel`.
@@ -746,7 +743,7 @@ fn key(channel: u8, n: u8) -> Ump {
 #[test]
 fn a_connected_devices_note_reaches_the_synth_through_its_inlet() {
     let (mut s, fake, seen) = keyboards();
-    connect(&mut s, &["keys"]);
+    let _ports = connect(&mut s, &["keys"]);
     roll(&s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), Instant::now()));
     roll(&s, 8_192);
@@ -762,7 +759,9 @@ fn a_connected_devices_note_reaches_the_synth_through_its_inlet() {
 fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
     let (mut s, fake, seen) = keyboards();
     let before = plan_nodes(&s);
-    connect(&mut s, &["keys", "pads"]);
+    let [keys, _pads] = connect(&mut s, &["keys", "pads"])
+        .try_into()
+        .expect("two ports");
     assert_eq!(
         plan_nodes(&s),
         before + 4,
@@ -783,7 +782,8 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
     );
     assert_eq!(heard[0].0, heard[1].0, "one frame: {heard:?}");
 
-    connect(&mut s, &["pads"]);
+    drop(keys);
+    let _ = s.update();
     blocks(&s, 2);
     let _ = s.update();
     assert_eq!(
@@ -797,24 +797,21 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
     );
 }
 
-/// **A port that is removed with a key held ends the key downstream, once**
+/// **A port that is dropped with a key held ends the key downstream, once**
 /// (MIDI 1.0 Detailed Specification p. 24: individual Note Offs): the input node
 /// node releases what the device held at its next block, and the executor's
 /// close of the inlet's edge, which would send the same Note Off at the next
 /// update, finds a device that is gone and is not heard.
 #[cfg(feature = "midi-hardware")]
 #[test]
-fn a_removed_port_ends_its_held_key_once() {
+fn a_dropped_port_ends_its_held_key_once() {
     let (mut s, fake, seen) = keyboards();
-    connect(&mut s, &["keys"]);
+    let ports = connect(&mut s, &["keys"]);
     roll(&s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
     roll(&s, 8_192);
     assert_eq!(note_ons(&seen).len(), 1);
-    s.pool(Vec::<
-        tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
-    >::new())
-        .expect("declares nothing");
+    drop(ports);
     let _ = s.update();
     roll(&s, 8_192);
     let offs: Vec<u8> = seen
@@ -837,7 +834,7 @@ fn a_removed_port_ends_its_held_key_once() {
 #[test]
 fn a_devices_arrival_is_placed_on_the_engines_clock() {
     let (mut s, fake, seen) = keyboards();
-    connect(&mut s, &["keys"]);
+    let _ports = connect(&mut s, &["keys"]);
     roll(&s, 1_024);
     let ahead = Instant::now() + Duration::from_secs(1);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), ahead));
@@ -883,20 +880,18 @@ fn a_dead_device_watch_is_reported_once() {
 }
 
 /// **An app holding a session restores a remembered device through it.** The
-/// fake OS names devices as ALSA does, so a `midi_input` of the saved device
+/// fake OS names devices as ALSA does, so an input port of the saved device
 /// binds the present device as a same-name match and reads `Live`, and reads
 /// `Lost` once it is gone.
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_remembered_device_resolves_through_the_session() {
-    use tutti_session::{PortCause, Presence, midi_input};
+    use tutti_session::{PortCause, Presence};
     let (mut s, fake) = hot_plug_session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let saved = s.midi().devices().remove(0);
-    s.pool(midi_input("keys", saved)).expect("declares");
-    let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
+    let port = s.open_midi_input(saved).expect("opens");
     assert_eq!(
         port.presence(),
         Presence::Live,
@@ -1038,8 +1033,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     });
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
-    connect(&mut s, &["wire"]);
-    let port = s.midi_input(&"wire").expect("loaded");
+    let port = connect(&mut s, &["wire"]).remove(0);
 
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
@@ -1160,8 +1154,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
-    connect(&mut s, &["wire"]);
-    let port = s.midi_input(&"wire").expect("loaded");
+    let port = connect(&mut s, &["wire"]).remove(0);
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
         BlockDirection::Bidirectional,
@@ -1372,13 +1365,9 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         c.disable().wait(&mut s),
         Err(tutti_session::PeerError::Disconnected)
     );
-    // A request on a released port fails at the call.
-    s.pool(Vec::<
-        tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
-    >::new())
-        .expect("declares nothing");
+    // A request on a port whose handles were all dropped fails at the call.
+    drop(port);
     let _ = s.update();
-    assert_eq!(port.presence(), tutti_session::Presence::Closed);
     assert_eq!(
         c.disable().wait(&mut s),
         Err(tutti_session::PeerError::Released)
@@ -1693,8 +1682,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
         .expect("routes");
     plug(&fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
     let _ = s.update();
-    connect(&mut s, &["wire"]);
-    let port = s.midi_input(&"wire").expect("loaded");
+    let port = connect(&mut s, &["wire"]).remove(0);
     let mut peer = MpePeer::new();
     play(&s);
     let start = Instant::now();
@@ -1858,8 +1846,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
-    connect(&mut s, &["wire"]);
-    let port = s.midi_input(&"wire").expect("loaded");
+    let port = connect(&mut s, &["wire"]).remove(0);
     let block = FunctionBlock::builder(
         FunctionBlockId::new(0).unwrap(),
         BlockDirection::Bidirectional,
@@ -2023,11 +2010,12 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
 }
 
 /// Runs the Stream negotiation of the open duplex device `raw`, the input port
-/// `"dev"`, to its end, answering as an Endpoint that receives no JR does.
+/// `input`, to its end, answering as an Endpoint that receives no JR does.
 /// Returns the time it started at.
 #[cfg(feature = "midi-hardware")]
 fn settle(
     s: &mut Session,
+    input: &tutti_session::MidiInput,
     fake: &tutti_midi_hardware::test_support::FakeCounters,
     raw: EndpointId,
 ) -> Instant {
@@ -2045,9 +2033,7 @@ fn settle(
     for ms in 0..8 {
         let now = start + Duration::from_millis(ms);
         let _ = update_at(s, now);
-        settled |= s
-            .midi_input(&"dev")
-            .is_ok_and(|port| port.info().stream().is_some());
+        settled |= input.info().stream().is_some();
         let mut answers = Vec::new();
         for ump in fake.take_sent(raw) {
             if let Ok(message @ Message::Stream(_)) = ump.decode() {
@@ -2062,22 +2048,18 @@ fn settle(
     start
 }
 
-/// Declares the duplex device `Dev` as the input port `"dev"` and the output
-/// port `"dev"`, and updates.
+/// Opens the duplex device `Dev` as an input port and an output port.
 #[cfg(feature = "midi-hardware")]
-fn declare_dev(s: &mut Session) {
+fn open_dev(s: &mut Session) -> (tutti_session::MidiInput, tutti_session::MidiOutput) {
     let dev = s
         .midi()
         .devices()
         .into_iter()
         .find(|d| d.name == "Dev")
         .expect("Dev is listed");
-    s.pool((
-        tutti_session::midi_input("dev", dev.clone()),
-        tutti_session::midi_output("dev out", dev),
-    ))
-    .expect("declares");
-    let _ = s.update();
+    let input = s.open_midi_input(dev.clone()).expect("opens");
+    let output = s.open_midi_output(dev).expect("opens");
+    (input, output)
 }
 
 /// **An output port JR-stamps only as its device's configuration says**
@@ -2096,8 +2078,7 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
     plug(&fake, 7, "Dev", PortDirection::Duplex);
     let _ = s.update();
     let raw = EndpointId::from_raw(7);
-    declare_dev(&mut s);
-    let out = s.midi_output(&"dev out").expect("loaded");
+    let (input, out) = open_dev(&mut s);
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -2107,7 +2088,7 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
             ..tutti_midi_runtime::SyncMessages::OFF
         });
 
-    let start = settle(&mut s, &fake, raw);
+    let start = settle(&mut s, &input, &fake, raw);
     assert!(!out.info().config().rx_jr, "asked for JR off");
 
     // A stretch of the session's clock, which the output sends.
@@ -2153,7 +2134,7 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     plug(&fake, 7, "Dev", PortDirection::Duplex);
     let _ = s.update();
     let raw = EndpointId::from_raw(7);
-    declare_dev(&mut s);
+    let (input, _out) = open_dev(&mut s);
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -2162,7 +2143,7 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    let start = settle(&mut s, &fake, raw);
+    let start = settle(&mut s, &input, &fake, raw);
     let on = Ump::from(Message::Stream(Stream::StreamConfigurationNotification(
         StreamConfig {
             protocol: Protocol::Midi2,

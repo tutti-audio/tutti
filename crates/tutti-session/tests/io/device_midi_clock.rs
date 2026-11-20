@@ -7,7 +7,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::MidiOut;
-use tutti_session::{LiveSession, Session, midi_sink};
+use tutti_session::{LiveSession, Session};
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_units::{SampleRate, Samples};
 
@@ -65,7 +65,7 @@ fn clock(
 /// locate: 512-frame blocks move the beat further at 44.1 kHz than at 48,
 /// which a seek check with a fixed epsilon would take for a locate).
 ///
-/// A `midi_sink`'s tap follows the restart: its frames are on the new rate
+/// A sink's tap follows the restart: its frames are on the new rate
 /// from the hook on, and what it carries is the ticks' spacing on the new grid.
 #[test]
 fn a_restart_re_rates_the_midi_clock() {
@@ -76,8 +76,7 @@ fn a_restart_re_rates_the_midi_clock() {
         .expect("builds with no device");
     let _ = s.update();
     let wire = Wire::default();
-    s.pool(midi_sink("out", Arc::new(wire.clone())))
-        .expect("declares");
+    let _sink = s.open_midi_sink(Arc::new(wire.clone()));
     let _ = s.update();
     s.midi_nodes()
         .expect("the engine's MIDI nodes")

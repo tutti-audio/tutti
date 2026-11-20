@@ -10,7 +10,7 @@ use tutti_platform::Instant;
 use tutti_buffers::MaxBlock;
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
-use tutti_session::{Session, midi_sink};
+use tutti_session::Session;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_units::{SampleRate, Samples};
 
@@ -50,8 +50,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    s.pool(midi_sink("out", Arc::new(wire.clone())))
-        .expect("declares");
+    let _sink = s.open_midi_sink(Arc::new(wire.clone()));
     let _ = s.update();
     s.play().expect("room");
 

@@ -1136,10 +1136,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
 
     /// `E`'s handle for the loaded entry under `key`.
     #[cfg_attr(
-        not(any(test, feature = "plugin", feature = "midi")),
+        not(any(test, feature = "plugin")),
         expect(
             dead_code,
-            reason = "the readers of the kinds (features `plugin`, `midi`) are its callers"
+            reason = "the readers of the kinds (feature `plugin`) are its callers"
         )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>

@@ -39,8 +39,7 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         .expect("builds");
     let _ = s.update();
     let synth = s.midi().devices().remove(0);
-    s.pool(crate::midi_output("synth", synth))
-        .expect("declares");
+    let _out = s.open_midi_output(synth).expect("opens");
     let _ = s.update();
     // The device receives JR Timestamps, so the output stamps and its stream moves.
     s.midi.state.ports.outputs[0]

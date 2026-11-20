@@ -398,10 +398,6 @@ pub enum LoadError {
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
     SoundFont(Arc<tutti_sf2::Error>),
-    /// A MIDI port could not be opened.
-    #[cfg(feature = "midi-hardware")]
-    #[error(transparent)]
-    Midi(Arc<crate::MidiPortError>),
     /// A plugin did not open.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
@@ -511,14 +507,6 @@ pub struct Owned;
 /// value is `Clone`, which [`Session::pool`](crate::Session::pool) checks.
 #[derive(Clone, Copy, Debug)]
 pub struct Sharing;
-
-impl<K, E, M> Declared<K, E, M> {
-    /// The entry, for a kind's builder to set its options on.
-    #[cfg(feature = "midi")]
-    pub(crate) fn entry_mut(&mut self) -> &mut E {
-        &mut self.entry
-    }
-}
 
 impl<K, E> Declared<K, E, Owned> {
     /// `entry`, declared under `key`: one instance per key, even when another

@@ -226,14 +226,13 @@ pub use midi_load::{
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
-    InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
-    MidiOutputInfo, MidiPortError, NoHardware, OutputLoaded, OutputOptions, PortCause, midi_input,
-    midi_output,
+    MidiInput, MidiInputInfo, MidiOutput, MidiOutputInfo, MidiPortError, NoHardware, OutputOptions,
+    PortCause,
 };
 #[cfg(feature = "midi")]
 pub use midi_report::MidiReport;
 #[cfg(feature = "midi")]
-pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptions, midi_sink};
+pub use midi_sink::{MidiSink, MidiSinkInfo, SinkOptions};
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,

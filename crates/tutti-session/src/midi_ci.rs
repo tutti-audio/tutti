@@ -162,7 +162,8 @@ impl PortLink {
     {
         let (job, ticket) = Ticket::new(&self.outputs);
         match self.shared.upgrade() {
-            None => ticket.land(Err(PeerError::Disconnected)),
+            // Every handle of the port was dropped, and the session took the port out.
+            None => ticket.land(Err(PeerError::Released)),
             Some(shared) => shared.push(request, ticket, lists, make),
         }
         job

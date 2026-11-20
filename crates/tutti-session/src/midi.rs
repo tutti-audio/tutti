@@ -2,7 +2,7 @@
 //! input per target, one clip per target, the hardware input's route rules,
 //! and the outputs, each a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode)
 //! whose event tap [`Phase::MidiOut`] drains to a device's output
-//! (`midi_output`) or a host's own sink ([`midi_sink`](crate::midi_sink())).
+//! (`MidiOutput`, feature `midi-hardware`) or a host's own sink ([`MidiSink`](crate::MidiSink)).
 //!
 //! Every piece is wiring. A clip is a `MidiClipNode`, a live input a
 //! an event inlet, each the session's own node fed into its target's event
@@ -174,7 +174,7 @@ pub(crate) struct OutputTiming {
 pub(crate) const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity =
     tutti_graph::EventCapacity::of(1024);
 
-/// Whether a host's own sink ([`midi_sink`](crate::midi_sink())) is sent JR
+/// Whether a host's own sink ([`MidiSink`](crate::MidiSink)) is sent JR
 /// Timestamps (M2-104-UM §7.2.2.2). It gates timestamps, not delivery: with it
 /// off the events still go out, unstamped. A device's output has no such choice:
 /// it stamps iff its negotiated configuration receives JR Timestamps.
@@ -191,7 +191,7 @@ pub enum Stamping {
 }
 
 /// A UMP MIDI output and its JR stamp stream: where one output node's events
-/// go, a `midi_output` entry's device or a `midi_sink` entry's [`MidiOut`](tutti_midi_runtime::MidiOut).
+/// go, an output port's device or a sink's [`MidiOut`](tutti_midi_runtime::MidiOut).
 ///
 /// The sink carries UMP words to the wire, so JR Timestamps and other
 /// MIDI-2-only messages survive, which is the whole reason this type exists:
@@ -687,9 +687,9 @@ pub(crate) struct MidiState {
     /// Whether a host's last `set_routes` declared any rule or fallback:
     /// the routes are then the host's, and the session's own are refused.
     host_routes: bool,
-    /// The sinks the pool's `midi_sink` entries opened.
+    /// The sinks opened by `open_midi_sink`.
     pub(crate) sinks: crate::midi_sink::Sinks,
-    /// The ports the pool's `midi_input` and `midi_output` entries opened.
+    /// The ports opened by `open_midi_input` and `open_midi_output`.
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`MpeModeTarget`](crate::MpeModeTarget)),
     /// the cell every input and clip transform reads.
@@ -1983,7 +1983,7 @@ impl<F: Float> Midi<'_, F> {
     /// sound an event (it is sent that much earlier) and a trim on top
     /// (positive sends later), added to the terms every event is timed by
     /// ([`output_terms`](Self::output_terms)). A write applies from the next
-    /// drain, to every `midi_sink` and `midi_output` entry: it is one setting
+    /// drain, to every sink and output port: it is one setting
     /// of the session, not an output's.
     #[must_use]
     pub const fn output_latency(&self) -> crate::OutputLatencyTarget {

@@ -41,6 +41,13 @@ impl fmt::Display for ResourceId {
 /// (off the session's own call) takes ids no other token has.
 #[derive(Clone, Debug)]
 pub(crate) struct ResourceIds {
+    #[cfg_attr(
+        not(any(test, feature = "plugin", feature = "midi")),
+        expect(
+            dead_code,
+            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi`)"
+        )
+    )]
     last: Arc<tutti_rt::Mint>,
 }
 
@@ -53,6 +60,13 @@ impl ResourceIds {
 
     /// The next id: distinct from every one this source (and its clones)
     /// returned before.
+    #[cfg_attr(
+        not(any(test, feature = "plugin", feature = "midi")),
+        expect(
+            dead_code,
+            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi`)"
+        )
+    )]
     pub(crate) fn mint(&self) -> ResourceId {
         ResourceId(self.last.mint().get())
     }
@@ -179,10 +193,10 @@ pub enum PeerError<E> {
     /// The peer said it does not support the request.
     #[error("the peer does not support the request")]
     Unsupported,
-    /// The peer's pool entry was released, or swapped to another identity,
-    /// before the request landed: this handle reads
-    /// [`Presence::Closed`].
-    #[error("the peer's pool entry was released")]
+    /// The peer was released before the request landed: its pool entry was
+    /// released or swapped to another identity (its handle reads
+    /// [`Presence::Closed`]), or every handle of its MIDI port was dropped.
+    #[error("the peer was released")]
     Released,
     /// The peer answered, and the answer is not success.
     #[error("the peer refused the request: {0}")]

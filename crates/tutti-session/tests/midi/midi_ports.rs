@@ -1,6 +1,6 @@
-//! MIDI ports as pool entries: a `midi_input` or `midi_output` declares a saved
-//! device, the session opens it, and its handle reads whether it is there. A
-//! fake OS plugs and unplugs the devices.
+//! MIDI ports: `open_midi_input` and `open_midi_output` open a saved device,
+//! and the handle reads whether it is there. A fake OS plugs and unplugs the
+//! devices.
 
 use std::collections::BTreeSet;
 use tutti_platform::Instant;
@@ -13,9 +13,8 @@ use tutti_midi_hardware::InputFault;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
-    Declared, EventInPort, HandleError, LoadError, MidiInputEntry, MidiPortError, MidiRouteRule,
-    OutputOptions, Peer, PoolEvent, PoolState, PortCause, Presence, Resource, ResourceFact,
-    Session, SessionEvent, midi_input, midi_output,
+    EventInPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, OutputOptions, Peer,
+    PortCause, Presence, Resource, ResourceFact, Session, SessionEvent,
 };
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, U7, Voice2};
 use tutti_units::{Beat, BeatDuration, SampleRate};
@@ -52,19 +51,18 @@ fn device(s: &mut Session, name: &str) -> DeviceInfo {
         .unwrap_or_else(|| panic!("{name} is listed"))
 }
 
-type Keys = &'static str;
+/// Opens the input port of `info`, and updates: the port's nodes are committed.
+fn input(s: &mut Session, info: &DeviceInfo) -> MidiInput {
+    let port = s.open_midi_input(info.clone()).expect("opens");
+    let _ = s.update();
+    port
+}
 
-/// Declares the input ports and the output ports, whole.
-fn declare(s: &mut Session, inputs: &[(Keys, &DeviceInfo)], outputs: &[(Keys, &DeviceInfo)]) {
-    let inputs: Vec<_> = inputs
-        .iter()
-        .map(|&(key, info)| midi_input(key, info.clone()))
-        .collect();
-    let outputs: Vec<_> = outputs
-        .iter()
-        .map(|&(key, info)| midi_output(key, info.clone()))
-        .collect();
-    s.pool((inputs, outputs)).expect("declares");
+/// Opens the output port of `info`, and updates.
+fn output(s: &mut Session, info: &DeviceInfo) -> MidiOutput {
+    let port = s.open_midi_output(info.clone()).expect("opens");
+    let _ = s.update();
+    port
 }
 
 /// What an update said of the resource `id`.
@@ -109,10 +107,10 @@ fn note_offs(seen: &Seen) -> Vec<u8> {
     })
 }
 
-/// **A saved device that is absent loads, and reads `Lost(Unplugged)`**: a port
+/// **A saved device that is absent opens, and reads `Lost(Unplugged)`**: a port
 /// needs no device to exist.
 #[test]
-fn an_absent_device_loads_lost_unplugged() {
+fn an_absent_device_opens_lost_unplugged() {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
@@ -120,37 +118,21 @@ fn an_absent_device_loads_lost_unplugged() {
     unplug(&fake, 1);
     let _ = s.update();
 
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let events = s.update();
-    assert!(matches!(s.pool_state(&"keys"), Some(PoolState::Loaded)));
-    assert!(
-        events.iter().any(|e| matches!(
-            e,
-            SessionEvent::Pool {
-                event: PoolEvent::Loaded,
-                ..
-            }
-        )),
-        "the load landed: {events:?}"
-    );
-    let port = s.midi_input(&"keys").expect("the port is there");
+    let port = input(&mut s, &keys);
     assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
     assert_eq!(port.info().device(), &keys, "it reads the saved device");
 }
 
-/// **A device that is unplugged and plugged again goes `Lost` and `Live` on the
-/// same key**: the handle read before follows it, the pool entry stays loaded
-/// throughout, each change is one `ResourceChanged` of presence, and the same
-/// input node serves the port.
+/// **A device that is unplugged and plugged again goes `Lost` and `Live` behind
+/// the same handle**: each change is one `ResourceChanged` of presence, and the
+/// same input node serves the port.
 #[test]
-fn a_replug_goes_live_on_the_same_key_and_node() {
+fn a_replug_goes_live_on_the_same_handle_and_node() {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
+    let port = input(&mut s, &keys);
     let node = port.node();
     assert_eq!(port.presence(), Presence::Live);
 
@@ -158,7 +140,6 @@ fn a_replug_goes_live_on_the_same_key_and_node() {
     let events = s.update();
     assert_eq!(changed(&events, port.id()), [ResourceFact::Presence]);
     assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
-    assert!(matches!(s.pool_state(&"keys"), Some(PoolState::Loaded)));
     assert!(
         fake.connected_inputs().is_empty(),
         "the device's connection is closed"
@@ -175,9 +156,7 @@ fn a_replug_goes_live_on_the_same_key_and_node() {
         Presence::Live,
         "the handle read before follows"
     );
-    let again = s.midi_input(&"keys").expect("still loaded");
-    assert_eq!(again.id(), port.id(), "the same port, not a new one");
-    assert_eq!(again.node(), node, "wired to the same input node");
+    assert_eq!(port.node(), node, "wired to the same input node");
     assert!(s.graph_ref().contains(node));
     assert!(!fake.connected_inputs().is_empty());
 }
@@ -191,13 +170,11 @@ fn a_returning_device_known_only_by_name_is_opened_when_it_is_the_only_one() {
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
+    let port = input(&mut s, &keys);
     assert_eq!(
         port.presence(),
         Presence::Live,
-        "the only one of its name is bound at load"
+        "the only one of its name is bound at open"
     );
 
     unplug(&fake, 1);
@@ -209,16 +186,14 @@ fn a_returning_device_known_only_by_name_is_opened_when_it_is_the_only_one() {
 }
 
 /// **Two devices of the saved name returning stay Lost**: either could be the
-/// saved one, which is the load's ambiguity too, so nothing is bound unasked.
+/// saved one, which is the open's ambiguity too, so nothing is bound unasked.
 #[test]
 fn two_returning_devices_of_the_saved_name_leave_the_port_lost() {
     let (mut s, fake) = session();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
+    let port = input(&mut s, &keys);
     unplug(&fake, 1);
     let _ = s.update();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
@@ -236,9 +211,7 @@ fn another_devices_arrival_does_not_restore_a_lost_port() {
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
+    let port = input(&mut s, &keys);
     unplug(&fake, 1);
     let _ = s.update();
     plug(&fake, 2, "Pads", PortDirection::Input);
@@ -250,28 +223,27 @@ fn another_devices_arrival_does_not_restore_a_lost_port() {
     assert_eq!(port.presence(), Presence::Live);
 }
 
-/// **A port whose device is held by another port fails its load `InUse`**: the
-/// second entry on one device cannot open it, and names it.
+/// **A port whose device is held by another port fails its open `InUse`**: the
+/// second port on one device cannot open it, and names it.
 #[test]
 fn a_second_port_on_one_device_fails_in_use() {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("first", &keys), ("second", &keys)], &[]);
-    let _ = s.update();
-    assert_eq!(s.midi_input(&"first").unwrap().presence(), Presence::Live);
-    let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"second") else {
-        panic!("the second port failed: {:?}", s.pool_state(&"second"));
-    };
+    let first = input(&mut s, &keys);
+    let error = s
+        .open_midi_input(keys.clone())
+        .expect_err("the device is held");
+    assert_eq!(first.presence(), Presence::Live);
     assert!(
-        matches!(&*error, MidiPortError::InUse(id) if *id == keys.id),
+        matches!(&error, MidiPortError::InUse(id) if *id == keys.id),
         "{error:?}"
     );
     assert_eq!(
         fake.connected_inputs().len(),
         1,
-        "the failed load left no port"
+        "the failed open left no port"
     );
 }
 
@@ -284,12 +256,7 @@ fn a_refused_reopen_reads_reopen_failed_and_is_retried_when_the_device_returns()
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
     let (keys, synth) = (device(&mut s, "Keys"), device(&mut s, "Synth"));
-    declare(&mut s, &[("keys", &keys)], &[("synth", &synth)]);
-    let _ = s.update();
-    let (input, output) = (
-        s.midi_input(&"keys").unwrap(),
-        s.midi_output(&"synth").unwrap(),
-    );
+    let (input, output) = (input(&mut s, &keys), output(&mut s, &synth));
     unplug(&fake, 1);
     unplug(&fake, 10);
     let _ = s.update();
@@ -324,9 +291,7 @@ fn a_dead_reader_is_reopened_or_reads_reader_failed() {
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let port = s.midi_input(&"keys").unwrap();
+    let port = input(&mut s, &keys);
 
     fake.kill_input_reader(EndpointId::from_raw(1), InputFault::PortBroken);
     let _ = s.update();
@@ -351,7 +316,7 @@ fn a_dead_reader_is_reopened_or_reads_reader_failed() {
     assert_eq!(port.presence(), Presence::Live);
 }
 
-/// **An unrouted port is processed, settles and leaves**: no synth is routed to
+/// **An unrouted port is processed, settles and leaves once dropped**: no synth is routed to
 /// it, nothing hears it, and its node is still taken out once its release has
 /// gone, so a port that comes and goes leaves nothing in the graph.
 #[test]
@@ -363,12 +328,11 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     let before = s.graph_ref().testing().sent_plan().map(|p| p.order().len());
     let mut nodes = Vec::new();
     for _ in 0..3 {
-        declare(&mut s, &[("keys", &keys)], &[]);
+        let port = input(&mut s, &keys);
         let _ = s.update();
         blocks(&s, 1);
-        nodes.push(s.midi_input(&"keys").unwrap().node());
-        s.pool(Vec::<Declared<Keys, MidiInputEntry>>::new())
-            .expect("declares nothing");
+        nodes.push(port.node());
+        drop(port);
         let _ = s.update();
         assert!(s.graph_ref().contains(*nodes.last().unwrap()));
         blocks(&s, 2);
@@ -381,111 +345,163 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     assert_eq!(before, after, "nothing was left in the plan");
 }
 
-/// **An ambiguous saved device fails the load with its candidates, and `retry`
-/// loads it again**: two present devices of one name could be the saved one;
-/// once one leaves, the retry binds the other.
+/// **An ambiguous saved device fails the open with its candidates, and opens
+/// once one leaves**: two present devices of one name could be the saved one;
+/// once one leaves, the next open binds the other.
 #[test]
-fn an_ambiguous_match_fails_with_candidates_and_retry_loads_it_again() {
+fn an_ambiguous_match_fails_with_candidates_and_opens_once_one_leaves() {
     let (mut s, fake) = session();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     fake.plug(endpoint(2, "Keys"), PortDirection::Input);
     let _ = s.update();
     let saved = s.midi().devices().remove(0);
 
-    declare(&mut s, &[("keys", &saved)], &[]);
-    let events = s.update();
-    let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"keys") else {
-        panic!("the load failed: {:?}", s.pool_state(&"keys"));
-    };
-    let MidiPortError::Ambiguous(candidates) = &*error else {
+    let error = s
+        .open_midi_input(saved.clone())
+        .expect_err("two devices could be the saved one");
+    let MidiPortError::Ambiguous(candidates) = &error else {
         panic!("ambiguous, got {error:?}");
     };
     assert_eq!(candidates.len(), 2, "both devices are candidates");
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            SessionEvent::Pool {
-                event: PoolEvent::Failed(_),
-                ..
-            }
-        )),
-        "the failure is a pool event: {events:?}"
+        fake.connected_inputs().is_empty(),
+        "the failed open left no port"
     );
-    assert!(matches!(
-        s.midi_input(&"keys"),
-        Err(HandleError::NotLoaded(PoolState::Failed(_)))
-    ));
 
     unplug(&fake, 2);
     let _ = s.update();
-    s.retry(&"keys").expect("a failed entry retries");
-    let events = s.update();
-    assert!(events.iter().any(|e| matches!(
-        e,
-        SessionEvent::Pool {
-            event: PoolEvent::Loaded,
-            ..
-        }
-    )));
-    let port = s.midi_input(&"keys").expect("loaded after the retry");
+    let port = s.open_midi_input(saved).expect("opens once one left");
     assert_eq!(port.presence(), Presence::Live);
 }
 
-/// **A session without the OS MIDI layer fails the load with a named error.**
+/// **A session without the OS MIDI layer fails the open with a named error.**
 #[test]
-fn a_session_without_the_hardware_layer_fails_the_load_by_name() {
+fn a_session_without_the_hardware_layer_fails_the_open_by_name() {
     let (mut with, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = with.update();
     let keys = device(&mut with, "Keys");
 
     let mut s = Session::builder().build().expect("builds");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"keys") else {
-        panic!("the load failed: {:?}", s.pool_state(&"keys"));
-    };
-    assert!(matches!(&*error, MidiPortError::NoHardware(_)), "{error:?}");
+    let error = s.open_midi_input(keys).expect_err("no OS MIDI layer");
+    assert!(matches!(error, MidiPortError::NoHardware(_)), "{error:?}");
 }
 
-/// **A released port reads `Closed`**: once the pool no longer names the entry,
-/// its handle reads `Closed`, the key is not pooled, and the device's
-/// connection and input node go with it.
+/// **A port closes when its last handle is dropped, and not before**: a clone
+/// keeps the device's connection and the input node, and the last drop ends the
+/// connection the OS peer sees and takes the node out of the graph.
 #[test]
-fn a_released_handle_reads_closed_and_the_port_goes() {
+fn a_port_closes_when_its_last_handle_is_dropped() {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let port = s.midi_input(&"keys").expect("loaded");
+    let port = input(&mut s, &keys);
+    let clone = port.clone();
     let node = port.node();
     assert!(s.graph_ref().contains(node));
+    assert_eq!(fake.connected_inputs().len(), 1);
 
-    s.pool(Vec::<Declared<Keys, MidiInputEntry>>::new())
-        .expect("declares nothing");
-    let events = s.update();
+    drop(port);
+    let _ = s.update();
+    assert_eq!(clone.presence(), Presence::Live, "a clone holds the port");
+    assert_eq!(fake.connected_inputs().len(), 1);
+    assert!(s.graph_ref().contains(node));
+
+    drop(clone);
+    let _ = s.update();
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            SessionEvent::Pool {
-                event: PoolEvent::Released,
-                ..
-            }
-        )),
-        "{events:?}"
+        fake.connected_inputs().is_empty(),
+        "the OS peer no longer sees the subscription"
     );
-    assert_eq!(port.presence(), Presence::Closed);
-    assert!(matches!(
-        s.midi_input(&"keys"),
-        Err(HandleError::NotPooled("keys"))
-    ));
-    assert!(fake.connected_inputs().is_empty());
     // The node leaves once it has released what its device held: after a block.
     blocks(&s, 2);
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "the input node went");
+}
+
+/// **An output port closes with its last handle**: the node leaves the graph
+/// and a device that returns finds no port to open.
+#[test]
+fn an_output_port_closes_when_its_last_handle_is_dropped() {
+    let (mut s, fake) = session();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    let synth = device(&mut s, "Synth");
+    let out = output(&mut s, &synth);
+    let node = out.node();
+    assert!(s.graph_ref().contains(node));
+
+    drop(out);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "the output node went");
+    unplug(&fake, 10);
+    let _ = s.update();
+    plug(&fake, 10, "Synth", PortDirection::Output);
+    let _ = s.update();
+    s.midi_nodes()
+        .unwrap()
+        .sync_controls
+        .messages()
+        .store(tutti_midi_runtime::SyncMessages {
+            clock: true,
+            ..tutti_midi_runtime::SyncMessages::OFF
+        });
+    roll(&s, 4_096);
+    let _ = s.update();
+    assert!(
+        fake.take_sent(EndpointId::from_raw(10)).is_empty(),
+        "the dropped port did not reopen with its device"
+    );
+}
+
+/// **A port that was dropped is not reopened when its device returns**: the
+/// session tracks a port by its handles, so a dropped one is no longer
+/// watched for its device.
+#[test]
+fn a_dropped_input_is_not_reopened_when_its_device_returns() {
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    let _ = s.update();
+    let keys = device(&mut s, "Keys");
+    let port = input(&mut s, &keys);
+    unplug(&fake, 1);
+    let _ = s.update();
+    drop(port);
+    let _ = s.update();
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    let _ = s.update();
+    assert!(fake.connected_inputs().is_empty());
+}
+
+/// **A device that returns is heard by the handle opened before it left**: the
+/// port is tracked by its own state, not by a name the app declared, so the
+/// handle that read `Lost` hears a note again once the device is back.
+#[test]
+fn the_same_handle_hears_a_device_that_returns() {
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    let _ = s.update();
+    let (synth, seen) = tap(&mut s);
+    s.midi()
+        .route(MidiRouteRule::any_channel().to(synth))
+        .expect("routes");
+    let keys = device(&mut s, "Keys");
+    let port = input(&mut s, &keys);
+    roll(&s, 1_024);
+    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
+    roll(&s, 4_096);
+    assert_eq!(note_ons(&seen), [60]);
+
+    unplug(&fake, 1);
+    let _ = s.update();
+    assert_eq!(port.presence(), Presence::Lost(PortCause::Unplugged));
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    let _ = s.update();
+    assert_eq!(port.presence(), Presence::Live);
+    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 62), Instant::now()));
+    roll(&s, 4_096);
+    assert_eq!(note_ons(&seen), [60, 62], "the returned device is heard");
 }
 
 /// How many times the sustain pedal went up (a controller 64 of value 0) in what
@@ -534,12 +550,12 @@ fn centred_bends(seen: &Seen) -> usize {
 
 /// **What a device holds is released when its port goes**: a key, the sustain
 /// pedal and a bend off centre on the device sound on the synth the route feeds,
-/// and the entry's removal ends them with a note off, a pedal up and a centred
+/// and dropping the port ends them with a note off, a pedal up and a centred
 /// bend, before the input node is taken out. (The executor's close of the
 /// inlet's edge ends the keys and the pedal; the bend is the input node's own
 /// release alone.)
 #[test]
-fn held_notes_are_released_when_the_port_is_removed() {
+fn held_notes_are_released_when_the_port_is_dropped() {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
@@ -548,8 +564,7 @@ fn held_notes_are_released_when_the_port_is_removed() {
         .route(MidiRouteRule::any_channel().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
+    let port = input(&mut s, &keys);
     roll(&s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), Instant::now()));
     let pedal = midi::m1_cc(MidiChannel::of(2), CCNumber::SUSTAIN, U7::of(127));
@@ -564,10 +579,9 @@ fn held_notes_are_released_when_the_port_is_removed() {
     assert!(note_offs(&seen).is_empty(), "the key is still down");
     assert_eq!(pedal_ups(&seen), 0, "the pedal is still down");
     assert_eq!(centred_bends(&seen), 0, "the bend is still off centre");
-    let node = s.midi_input(&"keys").expect("loaded").node();
+    let node = port.node();
 
-    s.pool(Vec::<Declared<Keys, MidiInputEntry>>::new())
-        .expect("declares nothing");
+    drop(port);
     let _ = s.update();
     assert!(
         s.graph_ref().contains(node),
@@ -598,9 +612,8 @@ fn held_notes_are_released_when_the_device_is_unplugged() {
         .route(MidiRouteRule::any_channel().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
-    let node = s.midi_input(&"keys").unwrap().node();
+    let port = input(&mut s, &keys);
+    let node = port.node();
     roll(&s, 1_024);
     hold(&fake, 1, 0, 64);
     roll(&s, 8_192);
@@ -623,6 +636,7 @@ fn held_notes_are_released_when_the_device_is_unplugged() {
     blocks(&s, 4);
     assert_eq!(note_offs(&seen), [64], "nothing is released twice");
     assert_eq!((pedal_ups(&seen), centred_bends(&seen)), (1, 1));
+    assert_eq!(port.presence(), Presence::Live);
 }
 
 /// **Every input port has an input node of its own, and there is no cap**: ten
@@ -641,18 +655,12 @@ fn every_input_port_has_its_own_input_node() {
         .route(MidiRouteRule::any_channel().to(synth))
         .expect("routes");
     let devices: Vec<DeviceInfo> = names.iter().map(|name| device(&mut s, name)).collect();
-    let keys: Vec<(Keys, &DeviceInfo)> = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
-        .into_iter()
-        .zip(&devices)
+    let ports: Vec<_> = devices
+        .iter()
+        .map(|d| s.open_midi_input(d.clone()).expect("opens"))
         .collect();
-    declare(&mut s, &keys, &[]);
     let _ = s.update();
     roll(&s, 1_024);
-
-    let ports: Vec<_> = keys
-        .iter()
-        .map(|(k, _)| s.midi_input(k).expect("loaded"))
-        .collect();
     assert!(ports.iter().all(|p| p.presence() == Presence::Live));
     let nodes: BTreeSet<NodeKey> = ports.iter().map(|p| p.node()).collect();
     assert_eq!(nodes.len(), 10, "one node each");
@@ -677,15 +685,11 @@ fn another_devices_removal_leaves_a_port_open() {
     plug(&fake, 2, "Pads", PortDirection::Input);
     let _ = s.update();
     let (keys, pads) = (device(&mut s, "Keys"), device(&mut s, "Pads"));
-    declare(&mut s, &[("keys", &keys), ("pads", &pads)], &[]);
-    let _ = s.update();
+    let (keys, pads) = (input(&mut s, &keys), input(&mut s, &pads));
     unplug(&fake, 2);
     let _ = s.update();
-    assert_eq!(s.midi_input(&"keys").unwrap().presence(), Presence::Live);
-    assert_eq!(
-        s.midi_input(&"pads").unwrap().presence(),
-        Presence::Lost(PortCause::Unplugged)
-    );
+    assert_eq!(keys.presence(), Presence::Live);
+    assert_eq!(pads.presence(), Presence::Lost(PortCause::Unplugged));
 }
 
 /// **What a device says of itself is its handle's info**: the update that
@@ -701,9 +705,7 @@ fn a_ports_info_follows_what_the_device_says() {
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
     let wire = device(&mut s, "Wire");
-    declare(&mut s, &[("wire", &wire)], &[]);
-    let _ = s.update();
-    let port = s.midi_input(&"wire").expect("loaded");
+    let port = input(&mut s, &wire);
     assert!(port.info().stream().is_none(), "nothing settled yet");
 
     let mut device = Endpoint::new(Supports::of(Capabilities {
@@ -740,9 +742,7 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
     let synth = device(&mut s, "Synth");
-    declare(&mut s, &[], &[("synth", &synth)]);
-    let _ = s.update();
-    let out = s.midi_output(&"synth").expect("loaded");
+    let out = output(&mut s, &synth);
     assert_eq!(out.presence(), Presence::Live);
 
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
@@ -775,9 +775,7 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
     let synth = device(&mut s, "Synth");
-    declare(&mut s, &[], &[("synth", &synth)]);
-    let _ = s.update();
-    let out = s.midi_output(&"synth").expect("loaded");
+    let out = output(&mut s, &synth);
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -818,8 +816,8 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     );
 }
 
-/// **A port is a peer**: its token's id is the one in the events about it, and
-/// two ports have two.
+/// **A port is a peer**: its id is the one in the events about it, and two
+/// ports have two.
 #[test]
 fn a_ports_id_names_it_in_the_events() {
     let (mut s, fake) = session();
@@ -827,12 +825,7 @@ fn a_ports_id_names_it_in_the_events() {
     plug(&fake, 2, "Pads", PortDirection::Input);
     let _ = s.update();
     let (keys, pads) = (device(&mut s, "Keys"), device(&mut s, "Pads"));
-    declare(&mut s, &[("keys", &keys), ("pads", &pads)], &[]);
-    let _ = s.update();
-    let (a, b) = (
-        s.midi_input(&"keys").unwrap(),
-        s.midi_input(&"pads").unwrap(),
-    );
+    let (a, b) = (input(&mut s, &keys), input(&mut s, &pads));
     assert_ne!(a.id(), b.id());
     unplug(&fake, 1);
     let events = s.update();
@@ -855,9 +848,9 @@ fn is_active_sensing(u: &tutti_ump::Ump) -> bool {
     )
 }
 
-/// A session with a MIDI 1.0 Protocol `Synth` output declared under `"synth"`
-/// with `options`.
-fn sensing_session(options: OutputOptions) -> (Session, FakeCounters) {
+/// A session with a MIDI 1.0 Protocol `Synth` output opened with `options`, and
+/// its handle.
+fn sensing_session(options: OutputOptions) -> (Session, FakeCounters, MidiOutput) {
     let (mut s, fake) = session();
     let mut synth = persistent_endpoint(SYNTH, "Synth");
     // A MIDI 1.0 port that declares no block: the Protocol in use is MIDI 1.0 and
@@ -869,10 +862,8 @@ fn sensing_session(options: OutputOptions) -> (Session, FakeCounters) {
     fake.plug(synth, PortDirection::Output);
     let _ = s.update();
     let device = device(&mut s, "Synth");
-    s.pool(vec![midi_output("synth", device).options(options)])
-        .expect("declares");
-    let _ = s.update();
-    (s, fake)
+    let out = s.open_midi_output_with(device, options).expect("opens");
+    (s, fake, out)
 }
 
 fn sent_by_the_port(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
@@ -904,11 +895,10 @@ fn sent_until(
 /// node does not stop it.**
 #[test]
 fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
-    let (mut s, fake) = sensing_session(OutputOptions::new().active_sensing(true));
+    let (mut s, fake, out) = sensing_session(OutputOptions::new().active_sensing(true));
     let first = sent_until(&fake, "no Active Sensing was sent", |sent| !sent.is_empty());
     assert!(first.iter().all(is_active_sensing), "{first:?}");
     // The node's sources are replaced, and no update runs while it goes on.
-    let out = s.midi_output(&"synth").expect("loaded");
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
@@ -931,52 +921,22 @@ fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
 /// **An output port declared without the option never sends Active Sensing.**
 #[test]
 fn an_output_port_without_the_option_never_sends_active_sensing() {
-    let (_s, fake) = sensing_session(OutputOptions::new());
+    let (_s, fake, _out) = sensing_session(OutputOptions::new());
     std::thread::sleep(SECOND);
     assert!(sent_by_the_port(&fake).is_empty());
 }
 
-/// **Closing the port stops Active Sensing**: the entry released, nothing more
-/// reaches the device.
+/// **Closing the port stops Active Sensing**: the last handle dropped, nothing
+/// more reaches the device.
 #[test]
 fn closing_an_output_port_stops_its_active_sensing() {
-    let (mut s, fake) = sensing_session(OutputOptions::new().active_sensing(true));
+    let (mut s, fake, out) = sensing_session(OutputOptions::new().active_sensing(true));
     let _ = sent_until(&fake, "precondition: it runs", |sent| !sent.is_empty());
-    declare(&mut s, &[], &[]);
+    drop(out);
     let _ = s.update();
     let _ = sent_by_the_port(&fake);
     std::thread::sleep(SECOND);
     assert!(sent_by_the_port(&fake).is_empty());
-}
-
-/// **The option is part of the port's identity**: declaring the port again
-/// with it changed reopens the port (a new resource), and the new port sends.
-#[test]
-fn changing_the_active_sensing_option_reopens_the_port() {
-    let (mut s, fake) = sensing_session(OutputOptions::new());
-    let before = s.midi_output(&"synth").expect("loaded").id();
-    let same = device(&mut s, "Synth");
-    s.pool(vec![
-        midi_output("synth", same).options(OutputOptions::new()),
-    ])
-    .expect("declares");
-    let _ = s.update();
-    assert_eq!(
-        s.midi_output(&"synth").unwrap().id(),
-        before,
-        "the same options keep the port"
-    );
-    let device = device(&mut s, "Synth");
-    s.pool(vec![
-        midi_output("synth", device).options(OutputOptions::new().active_sensing(true)),
-    ])
-    .expect("declares");
-    let _ = s.update();
-    let _ = s.update();
-    assert_ne!(s.midi_output(&"synth").unwrap().id(), before, "reopened");
-    let _ = sent_until(&fake, "the reopened port sends", |sent| {
-        sent.iter().any(is_active_sensing)
-    });
 }
 
 /// **A port whose device is in the MIDI 2.0 Protocol sends no Active Sensing**,
@@ -987,11 +947,9 @@ fn a_midi2_protocol_output_port_sends_no_active_sensing() {
     plug(&fake, SYNTH, "Synth", PortDirection::Output);
     let _ = s.update();
     let device = device(&mut s, "Synth");
-    s.pool(vec![
-        midi_output("synth", device).options(OutputOptions::new().active_sensing(true)),
-    ])
-    .expect("declares");
-    let _ = s.update();
+    let _out = s
+        .open_midi_output_with(device, OutputOptions::new().active_sensing(true))
+        .expect("opens");
     std::thread::sleep(SECOND);
     assert!(sent_by_the_port(&fake).is_empty());
 }
@@ -1010,9 +968,7 @@ fn an_output_port_counts_what_its_device_refused() {
     plug(&fake, SYNTH, "Synth", PortDirection::Output);
     let _ = s.update();
     let synth = device(&mut s, "Synth");
-    declare(&mut s, &[], &[("synth", &synth)]);
-    let _ = s.update();
-    let out = s.midi_output(&"synth").expect("loaded");
+    let out = output(&mut s, &synth);
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -1036,9 +992,7 @@ fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
     plug(&fake, SYNTH, "Synth", PortDirection::Output);
     let _ = s.update();
     let synth = device(&mut s, "Synth");
-    declare(&mut s, &[], &[("synth", &synth)]);
-    let _ = s.update();
-    let out = s.midi_output(&"synth").expect("loaded");
+    let out = output(&mut s, &synth);
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -1076,8 +1030,7 @@ fn the_sessions_mpe_mode_reaches_a_ports_input_node() {
         .route(MidiRouteRule::any_channel().to(synth))
         .expect("routes");
     let keys = device(&mut s, "Keys");
-    declare(&mut s, &[("keys", &keys)], &[]);
-    let _ = s.update();
+    let _port = input(&mut s, &keys);
     roll(&s, 1_024);
     assert_eq!(registered(&seen), 0);
 

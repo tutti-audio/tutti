@@ -1,18 +1,21 @@
-//! MIDI ports as pool entries (feature `midi-hardware`): [`midi_input`] and
-//! [`midi_output`] declare a saved device, [`Session::midi_input`] and
-//! [`Session::midi_output`] read the port back as a [`MidiInput`] or
-//! [`MidiOutput`].
+//! MIDI ports (feature `midi-hardware`): [`Session::open_midi_input`] and
+//! [`Session::open_midi_output`] open a saved device and return a
+//! [`MidiInput`] or a [`MidiOutput`].
 //!
-//! A port needs no device to exist. An entry whose saved device is absent
-//! loads at once and reads [`Presence::Lost`] with [`PortCause::Unplugged`];
-//! the session opens it in place, under the same key and the same [`Life`],
-//! when the device arrives and is the one a load would bind (surely the saved
-//! device, or the only present one of its name). Only a saved device
-//! that several present devices could be fails the load, with the candidates
-//! ([`MidiPortError::Ambiguous`]).
+//! A port needs no device to exist. A saved device that is absent opens at
+//! once and reads [`Presence::Lost`] with [`PortCause::Unplugged`]; the session
+//! opens it in place, behind the same handle, when the device arrives and is
+//! the one an open would bind (surely the saved device, or the only present one
+//! of its name). Only a saved device that several present devices could be
+//! fails the open, with the candidates ([`MidiPortError::Ambiguous`]).
+//!
+//! A handle is a reference-counted claim on the port: clones share it, and
+//! the port closes when the last clone is dropped. The session tracks its open
+//! ports by a weak reference to that claim, so a dropped handle needs no
+//! release call.
 //!
 //! An input is fed to the graph through an input node of its own, made when
-//! the entry loads: it releases the notes its device holds before it goes, and
+//! the port opens: it releases the notes its device holds before it goes, and
 //! survives an unplug and a replug, so what is wired to it stays wired. An
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
 //! whose events the session sends to the device each update.
@@ -39,7 +42,6 @@ use crate::midi_ci::{
     EndSubscription, GetProperty, Pending, PortLink, ProfilePeer, ReportPeer, RequestReport,
     ResourcePeer, SetProperty, Subscribe, SwitchProfile,
 };
-use crate::pool::{Declared, HandleError, Life, LoadError, PoolEntry, PoolLoad};
 use crate::{
     EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
     ResourceId, Session, SessionEvent,
@@ -74,8 +76,8 @@ pub enum PortCause {
     ReaderFailed(InputFault),
 }
 
-/// What an output port is opened with. Part of the entry's identity: declaring
-/// the port again with other options reopens it.
+/// What an output port is opened with: the options of
+/// [`Session::open_midi_output_with`].
 ///
 /// ```
 /// use tutti_session::OutputOptions;
@@ -269,7 +271,7 @@ struct Cell<I> {
     presence: Presence<PortCause>,
 }
 
-/// An input port's record: shared by its entry, its handles and the session's
+/// An input port's record: shared by its handles and the session's
 /// table.
 pub(crate) struct InputShared {
     id: ResourceId,
@@ -279,7 +281,7 @@ pub(crate) struct InputShared {
     link: PortLink,
     /// The cells a connection's device input writes: the latest correction the
     /// port's clock map made, its re-anchors and the events its inlet had no
-    /// room for. Made once with the entry; a connection writes them and closes
+    /// room for. Made once with the port; a connection writes them and closes
     /// them when it ends, and the counts are cumulative across connections.
     cells: InputReaders,
     /// What the port's input node lost: translated events its mailbox had no
@@ -317,7 +319,7 @@ impl InputRequest {
 pub(crate) enum Ended {
     /// The device is away, or the session is gone.
     Disconnected,
-    /// The entry was released or swapped.
+    /// Every handle of the port was dropped.
     Released,
 }
 
@@ -339,7 +341,7 @@ enum Gate {
     /// The device is away, or the session is gone: a request ends at once.
     #[default]
     Away,
-    /// The entry was released or swapped, for good.
+    /// Every handle was dropped, for good.
     Released,
 }
 
@@ -356,7 +358,7 @@ impl InputShared {
     /// Queues `request` with its `ticket` when the port can take it now and
     /// `lists` says the peer and what is asked of it are still listed in the
     /// port's info; otherwise ends the job at once: [`PeerError::Released`]
-    /// once the entry is released or swapped, [`PeerError::Disconnected`] while
+    /// once every handle is dropped, [`PeerError::Disconnected`] while
     /// the device is away or when `lists` is false, since the peer or the
     /// Profile it lists has gone.
     pub(crate) fn push<J, R, E>(
@@ -438,142 +440,33 @@ impl OutputShared {
 
 // --- The entries ---
 
-/// What the pool holds of a loaded input: the record, and the claim the
-/// session's table watches for the entry's end. Read it through the
-/// [`MidiInput`] handle.
+/// What the handles of an input port share: its record and its node. The
+/// session watches it by a weak reference, so the port closes with the last
+/// clone of its [`MidiInput`].
 #[derive(Debug)]
-pub struct InputLoaded {
+struct InputClaim {
     shared: Arc<InputShared>,
     node: NodeKey,
-    /// Dropped with the loaded value: the entry was released or swapped.
-    _token: Arc<()>,
 }
 
-/// What the pool holds of a loaded output. Read it through the [`MidiOutput`]
-/// handle.
+/// What the handles of an output port share: as [`InputClaim`].
 #[derive(Debug)]
-pub struct OutputLoaded {
+struct OutputClaim {
     shared: Arc<OutputShared>,
     node: NodeKey,
-    _token: Arc<()>,
-}
-
-/// An input port: [`midi_input`]'s entry. Its identity is the saved device.
-#[derive(Clone, Debug)]
-pub struct MidiInputEntry {
-    saved: DeviceInfo,
-}
-
-/// Declares the input port of the saved device `saved` under `key`.
-///
-/// The entry loads in [`Session::update`], on the session's thread. It
-/// binds a device that is surely the saved one, or the only present one of its
-/// name; an absent one loads with the port reading
-/// [`Lost`](Presence::Lost)([`PortCause::Unplugged`]) and opens when it
-/// arrives.
-pub fn midi_input<K>(key: K, saved: DeviceInfo) -> Declared<K, MidiInputEntry> {
-    Declared::new(key, MidiInputEntry { saved })
-}
-
-impl<S: tutti_buffers::Float> PoolEntry<S> for MidiInputEntry {
-    type Identity = DeviceInfo;
-    type Loaded = InputLoaded;
-    type Handle = MidiInput;
-
-    fn identity(&self) -> DeviceInfo {
-        self.saved.clone()
-    }
-
-    fn load(&self) -> PoolLoad<InputLoaded, S> {
-        let saved = self.saved.clone();
-        PoolLoad::on_session(move |cx| {
-            let id = cx.mint_resource_id();
-            let ids = cx.resource_ids();
-            cx.midi()
-                .open_input_port(id, ids, saved)
-                .map_err(|error| LoadError::Midi(Arc::new(error)))
-        })
-    }
-
-    fn handle(loaded: &InputLoaded, life: &Life) -> MidiInput {
-        MidiInput {
-            shared: Arc::clone(&loaded.shared),
-            node: loaded.node,
-            life: life.clone(),
-        }
-    }
-}
-
-/// An output port: [`midi_output`]'s entry. Its identity is the saved device
-/// and the options.
-#[derive(Clone, Debug)]
-pub struct MidiOutputEntry {
-    saved: DeviceInfo,
-    options: OutputOptions,
-}
-
-/// Declares the output port of the saved device `saved` under `key`, opened
-/// with no options (`.options(..)` on the declared entry sets them).
-pub fn midi_output<K>(key: K, saved: DeviceInfo) -> Declared<K, MidiOutputEntry> {
-    Declared::new(
-        key,
-        MidiOutputEntry {
-            saved,
-            options: OutputOptions::new(),
-        },
-    )
-}
-
-impl<K> Declared<K, MidiOutputEntry> {
-    /// This port, opened with `options`: they are part of its identity.
-    pub fn options(mut self, options: OutputOptions) -> Self {
-        self.entry_mut().options = options;
-        self
-    }
-}
-
-impl<S: tutti_buffers::Float> PoolEntry<S> for MidiOutputEntry {
-    type Identity = (DeviceInfo, OutputOptions);
-    type Loaded = OutputLoaded;
-    type Handle = MidiOutput;
-
-    fn identity(&self) -> (DeviceInfo, OutputOptions) {
-        (self.saved.clone(), self.options.clone())
-    }
-
-    fn load(&self) -> PoolLoad<OutputLoaded, S> {
-        let saved = self.saved.clone();
-        let options = self.options.clone();
-        PoolLoad::on_session(move |cx| {
-            let id = cx.mint_resource_id();
-            cx.midi()
-                .open_output_port(id, saved, options)
-                .map_err(|error| LoadError::Midi(Arc::new(error)))
-        })
-    }
-
-    fn handle(loaded: &OutputLoaded, life: &Life) -> MidiOutput {
-        MidiOutput {
-            shared: Arc::clone(&loaded.shared),
-            node: loaded.node,
-            life: life.clone(),
-        }
-    }
 }
 
 // --- The handles ---
 
-/// An input port, read by key: [`Session::midi_input`].
+/// An input port: [`Session::open_midi_input`].
 ///
-/// `Clone` and `Send`, and it owns nothing: dropping it ends nothing, and the
-/// port ends when the pool no longer names its entry. It follows its entry
-/// across an unplug and a replug; once the entry is released or reloaded with
-/// another identity it reads [`Presence::Closed`].
+/// `Clone` and `Send`. Clones share the port, and it closes when the last
+/// clone is dropped: the session takes its input node out of the graph once
+/// that node has released the notes its device held. It follows its device
+/// across an unplug and a replug.
 #[derive(Clone, Debug)]
 pub struct MidiInput {
-    shared: Arc<InputShared>,
-    node: NodeKey,
-    life: Life,
+    claim: Arc<InputClaim>,
 }
 
 impl std::fmt::Debug for InputShared {
@@ -588,8 +481,8 @@ impl MidiInput {
     /// The port's input node: the node to wire from and to follow. Its event
     /// outputs are one per Group and channel
     /// ([`MidiNodes::input_ports`](crate::MidiNodes::input_ports)), which a route
-    /// rule, a follower or a tap reads. The node is in the graph while the entry
-    /// is loaded, and the same node serves the port across an unplug and a
+    /// rule, a follower or a tap reads. The node is in the graph while a handle of the
+    /// port lives, and the same node serves the port across an unplug and a
     /// replug.
     ///
     /// Its one event input is the session's: the device's inlet is wired to it
@@ -597,8 +490,8 @@ impl MidiInput {
     /// until the next replug. The graph has no way to refuse an edge into a node
     /// by who owns it, so it is not refused; do not wire into it.
     #[must_use]
-    pub const fn node(&self) -> NodeKey {
-        self.node
+    pub fn node(&self) -> NodeKey {
+        self.claim.node
     }
 
     /// The latest correction the port's clock map made to place the device's
@@ -606,14 +499,14 @@ impl MidiInput {
     /// came late. A steady input reads a small figure, and one whose timing is
     /// unsteady jumps.
     ///
-    /// The gauge belongs to the entry, not to a connection: it reads the same
+    /// The gauge belongs to the port, not to a connection: it reads the same
     /// cell across an unplug and a replug, and reads 0 until a map first makes
     /// a correction. While the device is away it holds the last correction
     /// ([`is_closed`](Gauge::is_closed) says so); a replug does not reset it,
     /// and the new connection's first map writes over it.
     #[must_use]
     pub fn timing(&self) -> Gauge<Seconds> {
-        self.shared.cells.timing.clone()
+        self.claim.shared.cells.timing.clone()
     }
 
     /// How many times the port's clock map re-anchored (a reading too far from
@@ -621,12 +514,12 @@ impl MidiInput {
     /// show an input whose timing is unsteady. A map that was only rescaled for
     /// another rate is not one, and neither is the first map of a connection.
     ///
-    /// Cumulative for the entry: the count carries across an unplug and a
+    /// Cumulative for the port: the count carries across an unplug and a
     /// replug on the same cell. It is meaningful only against a real-time
     /// clock: an offline session's readings re-anchor often.
     #[must_use]
     pub fn resyncs(&self) -> Counter<Resyncs> {
-        self.shared.cells.resyncs.clone()
+        self.claim.shared.cells.resyncs.clone()
     }
 
     /// What this port did not take in, cumulative over its life and across an
@@ -645,10 +538,10 @@ impl MidiInput {
     /// output never carries it.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        self.shared.cells.lost.get()
-            + self.shared.input.losses()
-            + self.shared.cells.inlet.get()
-            + self.shared.cells.ci_refused.get()
+        self.claim.shared.cells.lost.get()
+            + self.claim.shared.input.losses()
+            + self.claim.shared.cells.inlet.get()
+            + self.claim.shared.cells.ci_refused.get()
     }
 }
 
@@ -656,7 +549,7 @@ impl crate::peer::sealed::Sealed for MidiInput {}
 
 impl Resource for MidiInput {
     fn id(&self) -> ResourceId {
-        self.shared.id
+        self.claim.shared.id
     }
 }
 
@@ -665,22 +558,19 @@ impl Peer for MidiInput {
     type Cause = PortCause;
 
     fn info(&self) -> Arc<MidiInputInfo> {
-        self.shared.read(|cell| Arc::clone(&cell.info))
+        self.claim.shared.read(|cell| Arc::clone(&cell.info))
     }
 
     fn presence(&self) -> Presence<PortCause> {
-        self.life
-            .presence(|| self.shared.read(|cell| cell.presence))
+        self.claim.shared.read(|cell| cell.presence)
     }
 }
 
-/// An output port, read by key: [`Session::midi_output`]. As [`MidiInput`],
-/// for the device an output sends to.
+/// An output port: [`Session::open_midi_output`]. As [`MidiInput`], for the
+/// device an output sends to.
 #[derive(Clone, Debug)]
 pub struct MidiOutput {
-    shared: Arc<OutputShared>,
-    node: NodeKey,
-    life: Life,
+    claim: Arc<OutputClaim>,
 }
 
 impl std::fmt::Debug for OutputShared {
@@ -696,11 +586,11 @@ impl MidiOutput {
     /// input (`Graph::set_sources`) is sent to the device each update, beside the
     /// session's MIDI clock, which feeds it as a feed of its own
     /// ([`Feeder::Clock`](crate::Feeder::Clock)) that a host's `set_sources` does not replace. The node is
-    /// in the graph while the entry is loaded, and the same node serves the
+    /// in the graph while a handle of the port lives, and the same node serves the
     /// port across an unplug and a replug.
     #[must_use]
-    pub const fn node(&self) -> NodeKey {
-        self.node
+    pub fn node(&self) -> NodeKey {
+        self.claim.node
     }
 
     /// What this port did not send, cumulative over its life and across an
@@ -712,7 +602,7 @@ impl MidiOutput {
     /// had no device to go to.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        self.shared.losses.get()
+        self.claim.shared.losses.get()
     }
 }
 
@@ -720,7 +610,7 @@ impl crate::peer::sealed::Sealed for MidiOutput {}
 
 impl Resource for MidiOutput {
     fn id(&self) -> ResourceId {
-        self.shared.id
+        self.claim.shared.id
     }
 }
 
@@ -729,41 +619,62 @@ impl Peer for MidiOutput {
     type Cause = PortCause;
 
     fn info(&self) -> Arc<MidiOutputInfo> {
-        self.shared.read(|cell| Arc::clone(&cell.info))
+        self.claim.shared.read(|cell| Arc::clone(&cell.info))
     }
 
     fn presence(&self) -> Presence<PortCause> {
-        self.life
-            .presence(|| self.shared.read(|cell| cell.presence))
+        self.claim.shared.read(|cell| cell.presence)
     }
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// The input port of the `midi_input` entry under `key`.
+    /// Opens the input port of the saved device `saved`: its input node joins
+    /// the graph (the next [`update`](Session::update) commits it), and the
+    /// device opens into it when it is present. The port lives while any clone
+    /// of the handle does.
+    ///
+    /// It binds a device that is surely the saved one, or the only present one
+    /// of its name; an absent device opens the port reading
+    /// [`Lost`](Presence::Lost)([`PortCause::Unplugged`]), and it opens
+    /// behind the same handle when the device arrives.
     ///
     /// # Errors
     ///
-    /// [`HandleError::NotPooled`] when the key is not declared (never, or
-    /// released); [`HandleError::WrongKind`] when it is another kind of entry;
-    /// [`HandleError::NotLoaded`] before the load lands, or after it failed (an
-    /// ambiguous saved device: the state carries the candidates).
-    pub fn midi_input<P>(&self, key: &P) -> Result<MidiInput, HandleError<P>>
-    where
-        P: crate::AppKey,
-    {
-        self.pool.entries.handle::<P, MidiInputEntry>(key)
+    /// [`MidiPortError::NoHardware`] without
+    /// [`midi_hardware`](crate::SessionBuilder::midi_hardware);
+    /// [`MidiPortError::Ambiguous`] when several present devices could be
+    /// `saved`; [`MidiPortError::Hardware`] or [`MidiPortError::InUse`] when a
+    /// present device cannot be opened.
+    pub fn open_midi_input(&mut self, saved: DeviceInfo) -> Result<MidiInput, MidiPortError> {
+        let (mut midi, ids) = self.midi_and_ids();
+        let id = ids.mint();
+        let ids = ids.clone();
+        midi.open_input_port(id, ids, saved)
     }
 
-    /// The output port of the `midi_output` entry under `key`.
+    /// Opens the output port of the saved device `saved`, with no options: as
+    /// [`open_midi_input`](Self::open_midi_input), for a device a port sends to.
     ///
     /// # Errors
     ///
-    /// As [`midi_input`](Self::midi_input).
-    pub fn midi_output<P>(&self, key: &P) -> Result<MidiOutput, HandleError<P>>
-    where
-        P: crate::AppKey,
-    {
-        self.pool.entries.handle::<P, MidiOutputEntry>(key)
+    /// As [`open_midi_input`](Self::open_midi_input).
+    pub fn open_midi_output(&mut self, saved: DeviceInfo) -> Result<MidiOutput, MidiPortError> {
+        self.open_midi_output_with(saved, OutputOptions::new())
+    }
+
+    /// Opens the output port of `saved` with `options`.
+    ///
+    /// # Errors
+    ///
+    /// As [`open_midi_input`](Self::open_midi_input).
+    pub fn open_midi_output_with(
+        &mut self,
+        saved: DeviceInfo,
+        options: OutputOptions,
+    ) -> Result<MidiOutput, MidiPortError> {
+        let (mut midi, ids) = self.midi_and_ids();
+        let id = ids.mint();
+        midi.open_output_port(id, saved, options)
     }
 }
 
@@ -771,8 +682,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
 /// One input port as the session keeps it.
 struct InputPort {
-    /// Upgrades while the entry's loaded value lives.
-    token: Weak<()>,
+    /// Upgrades while a handle of the port lives.
+    claim: Weak<InputClaim>,
     shared: Arc<InputShared>,
     node: NodeKey,
     controls: MidiInputControls,
@@ -782,7 +693,7 @@ struct InputPort {
     generation: DeviceGeneration,
     /// The inlet node of the open connection, in the graph.
     inlet: Option<NodeKey>,
-    /// What the entry was declared with: what a returning device is matched on.
+    /// What the port was opened with: what a returning device is matched on.
     saved: DeviceInfo,
     /// The device the port holds open.
     open: Option<DeviceId>,
@@ -792,7 +703,8 @@ struct InputPort {
 
 /// One output port as the session keeps it.
 struct OutputPort {
-    token: Weak<()>,
+    /// Upgrades while a handle of the port lives.
+    claim: Weak<OutputClaim>,
     shared: Arc<OutputShared>,
     node: NodeKey,
     tap: EventTapReader,
@@ -922,9 +834,9 @@ impl InputPort {
         self.pending.end(why);
     }
 
-    /// Whether the entry that made this port still holds it.
+    /// Whether a handle of this port lives.
     fn is_held(&self) -> bool {
-        self.token.strong_count() > 0
+        self.claim.strong_count() > 0
     }
 
     /// Takes in what the OS layer reads of the open device, saying so when it
@@ -1056,7 +968,7 @@ impl Ports {
     }
 
     /// The step of the update's `Phase::Poll` for the ports: retires those whose
-    /// entry ended, takes in a device that went or came, sends what the handles
+    /// handles were dropped, takes in a device that went or came, sends what the handles
     /// asked, and reads what the devices said. What was edited.
     pub(crate) fn poll<F: tutti_buffers::Float>(
         &mut self,
@@ -1086,7 +998,7 @@ impl Ports {
         edits
     }
 
-    /// Ends the ports whose entry was released or swapped, and takes out the
+    /// Ends the ports whose handles were all dropped, and takes out the
     /// input nodes that have released what their devices held.
     fn retire<F: tutti_buffers::Float>(
         &mut self,
@@ -1113,7 +1025,7 @@ impl Ports {
         }
         let before = self.outputs.len();
         self.outputs.retain_mut(|port| {
-            let held = port.token.strong_count() > 0;
+            let held = port.claim.strong_count() > 0;
             if !held {
                 // A host that removed the node itself leaves nothing to take.
                 let _ = graph.remove(port.node);
@@ -1481,7 +1393,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         id: ResourceId,
         ids: crate::peer::ResourceIds,
         saved: DeviceInfo,
-    ) -> Result<InputLoaded, MidiPortError> {
+    ) -> Result<MidiInput, MidiPortError> {
         let io = self
             .io
             .as_deref_mut()
@@ -1504,7 +1416,6 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             .following(&generation);
         let (key, controls) = self.graph.add(node);
         let node = key.erase();
-        let token = Arc::new(());
         let info = found.clone().unwrap_or_else(|| saved.clone());
         // The cells start closed: a connection reopens them.
         let (writers, cells) = InputWriters::new();
@@ -1526,8 +1437,12 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 input,
             }
         });
+        let claim = Arc::new(InputClaim {
+            shared: Arc::clone(&shared),
+            node,
+        });
         self.state.ports.inputs.push(InputPort {
-            token: Arc::downgrade(&token),
+            claim: Arc::downgrade(&claim),
             shared: Arc::clone(&shared),
             node,
             controls,
@@ -1545,7 +1460,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 .as_deref_mut()
                 .ok_or(MidiPortError::from(NoHardware))?;
             if let Err(error) = self.state.ports.connect_input(at, io, self.graph, &info) {
-                // The port was never loaded: it leaves with the entry's failure.
+                // The port was never loaded: it leaves with the open's failure.
                 self.state.ports.inputs.remove(at);
                 let removed = self.graph.remove(node);
                 // The input node was added in this call, so it is there.
@@ -1563,11 +1478,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             cell.presence = Presence::Live;
         }
         self.compile_session_routes();
-        Ok(InputLoaded {
-            shared,
-            node,
-            _token: token,
-        })
+        Ok(MidiInput { claim })
     }
 
     /// Opens the output port of `saved` as `id`: the output node joins the graph
@@ -1578,7 +1489,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         id: ResourceId,
         saved: DeviceInfo,
         options: OutputOptions,
-    ) -> Result<OutputLoaded, MidiPortError> {
+    ) -> Result<MidiOutput, MidiPortError> {
         let io = self.io.as_deref().ok_or(MidiPortError::from(NoHardware))?;
         let found = match io.devices().resolve(&saved) {
             Resolved::Exact(info) | Resolved::SameName(info) => Some(info),
@@ -1594,7 +1505,6 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         let (node, tap) = self.add_output_node();
         let config = device.as_ref().map(tutti_midi_hardware::OpenOutput::config);
         let info = found.clone().unwrap_or_else(|| saved.clone());
-        let token = Arc::new(());
         let live = device.is_some();
         let (losses, readers) = loss_cells();
         let shared = Arc::new(OutputShared {
@@ -1616,8 +1526,12 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 },
             }),
         });
+        let claim = Arc::new(OutputClaim {
+            shared: Arc::clone(&shared),
+            node,
+        });
         self.state.ports.outputs.push(OutputPort {
-            token: Arc::downgrade(&token),
+            claim: Arc::downgrade(&claim),
             shared: Arc::clone(&shared),
             node,
             tap,
@@ -1628,11 +1542,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             out: device.map(|device| UmpOut::of_device(device, rate)),
             parked: None,
         });
-        Ok(OutputLoaded {
-            shared,
-            node,
-            _token: token,
-        })
+        Ok(MidiOutput { claim })
     }
 }
 
