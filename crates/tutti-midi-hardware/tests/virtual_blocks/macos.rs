@@ -207,10 +207,18 @@ pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
     tutti_fixtures::wait_until("the destination is listed", PATIENCE, || {
         session.outputs().iter().any(|d| d.name.contains(name))
     });
-    let device = session
+    let matching: Vec<_> = session
         .outputs()
         .into_iter()
-        .find(|d| d.name.contains(name))
+        .filter(|d| d.name.contains(name))
+        .collect();
+    eprintln!(
+        "outputs named like the endpoint: {:?}",
+        matching.iter().map(|d| d.name.clone()).collect::<Vec<_>>()
+    );
+    let device = matching
+        .into_iter()
+        .next()
         .expect("the destination is listed");
     let mut out = session.connect_output(&device.id).expect("connects");
     let note: Ump = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::of(1), 60, 0x8000);
