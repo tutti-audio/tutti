@@ -19,8 +19,8 @@ use super::command::StreamerCommand;
 use super::handlers::Handles;
 use super::step::{StepOutcome, StreamerCycle};
 
-/// Gives the executor its thread back once, and asks to be polled again: a loop
-/// that is still busy after its budget does not hold a polled executor's `update`.
+/// Gives the executor its thread back once, and asks to be polled again: a loop that is
+/// still busy after its budget does not hold a caller-driven executor's drive.
 pub(super) async fn yield_now() {
     let mut yielded = false;
     poll_fn(|cx| {

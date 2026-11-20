@@ -165,8 +165,8 @@ impl AnyThread for Fake {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
-        Err(tutti_plugin::error::StateError::NoStateRoute)
+    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+        Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: RenderMode) -> bool {
         false
@@ -214,7 +214,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
     )
     .with_refresh_sink(refresh.clone());
     let mut s = Session::builder()
-        .executor(tutti_platform::Executor::polled())
+        .executor(tutti_platform::Executor::new())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -223,7 +223,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         &mut s,
         node,
         handle,
-        tutti_plugin::catalog::PluginRef::file("fake.clap"),
+        tutti_plugin_types::PluginRef::file("fake.clap"),
     );
     s.commit();
     (s, key, fake, refresh)
@@ -806,15 +806,15 @@ fn a_read_only_parameter_is_refused() {
 /// refused third item lands nothing, and the same batch without it lands all.
 #[test]
 fn a_batch_over_plugin_and_native_params_lands_nothing_when_one_is_refused() {
-    use tutti_nodes::{SvfFilterNode, SvfType};
+    use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_units::Q;
 
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(800.0),
-        Q::new(0.707),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(800.0))
+            .q(Q::new(0.707)),
     ));
     s.commit();
 
@@ -882,7 +882,7 @@ fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin
     );
     let (controls, _) =
         PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
-    let plugin = tutti_plugin::catalog::PluginRef::file(plugin);
+    let plugin = tutti_plugin_types::PluginRef::file(plugin);
     let hosted = s.graph.plugins.get_mut(&node).expect("a hosted plugin");
     let outgoing = hosted.replace_hosted(handle, (*controls).clone(), plugin);
     outgoing.retire().settle(node, &mut s.graph.graveyard);

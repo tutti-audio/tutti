@@ -46,14 +46,14 @@ fn layout(positions: &[Position]) -> SpeakerLayout {
         .iter()
         .map(|&(a, e)| Direction::new(Azimuth::new(a), Elevation::new(e)))
         .collect();
-    SpeakerLayout::new(&p).unwrap()
+    SpeakerLayout::try_from(&p[..]).unwrap()
 }
 
 /// The beds the tests pan over, each with the nominal positions of its placed
 /// speakers (BS.2051-3 Table 1: middle layer at 0, upper at +30), restated
 /// here, in the bed's channel order with the LFE left out.
 fn presets() -> Vec<(&'static str, SpeakerLayout, &'static [Position])> {
-    let bed = |bed| SpeakerLayout::from_bed(bed).expect("a bed's speakers form tuples");
+    let bed = |bed| SpeakerLayout::try_from(bed).expect("a bed's speakers form tuples");
     vec![
         ("stereo", bed(Bed::Stereo), &STEREO),
         ("quad", bed(Bed::Quad), &QUAD),
@@ -223,7 +223,7 @@ fn the_corrected_gains_are_unit_power_everywhere() {
 /// at 15 degrees (`0.939071`, `0.343724`) and the equal-power centre.
 #[test]
 fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
-    let layout = SpeakerLayout::from_bed(Bed::Stereo).unwrap();
+    let layout = SpeakerLayout::try_from(Bed::Stereo).unwrap();
     let centre = core::f64::consts::FRAC_1_SQRT_2;
     // (azimuth, left, right)
     for (az, left, right) in [
@@ -260,7 +260,7 @@ fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
 /// bearing the front pair (speakers FL, FR, RL, RR).
 #[test]
 fn a_surrounding_layout_does_not_fold_its_rear_arc() {
-    let layout = SpeakerLayout::from_bed(Bed::Quad).unwrap();
+    let layout = SpeakerLayout::try_from(Bed::Quad).unwrap();
     let at = |az: f64| {
         let mut g = [Gain::SILENT; 4];
         layout.gains_into(Azimuth::new(az), Elevation::new(0.0), Spread::POINT, &mut g);
@@ -389,7 +389,7 @@ fn gains_are_continuous_across_every_tuple_edge() {
 /// gains agree: the tuples share the edge and its two speakers' gains.
 #[test]
 fn a_shared_edge_has_the_same_gains_on_both_sides() {
-    let layout = SpeakerLayout::from_bed(Bed::Surround714).unwrap();
+    let layout = SpeakerLayout::try_from(Bed::Surround714).unwrap();
     let mut edges: Vec<((u16, u16), usize)> = Vec::new();
     for t in &layout.tuples {
         let s = t.speakers();
@@ -451,7 +451,7 @@ fn a_layout_that_cannot_be_tiled_is_refused() {
             .iter()
             .map(|&(a, e)| Direction::new(Azimuth::new(a), Elevation::new(e)))
             .collect();
-        SpeakerLayout::new(&p).unwrap_err()
+        SpeakerLayout::try_from(&p[..]).unwrap_err()
     };
     assert_eq!(
         make(&[(0.0, 0.0)]),
@@ -502,7 +502,7 @@ fn a_layout_that_cannot_be_tiled_is_refused() {
 #[test]
 fn a_bed_pans_to_each_of_its_speakers_at_unity() {
     for bed in Bed::ALL {
-        let Ok(layout) = SpeakerLayout::from_bed(bed) else {
+        let Ok(layout) = SpeakerLayout::try_from(bed) else {
             assert_eq!(bed, Bed::Mono, "{bed:?} must build");
             continue;
         };
@@ -529,7 +529,7 @@ fn a_bed_pans_to_each_of_its_speakers_at_unity() {
         }
     }
     assert_eq!(
-        SpeakerLayout::from_bed(Bed::Mono).unwrap_err(),
+        SpeakerLayout::try_from(Bed::Mono).unwrap_err(),
         SpeakerGeometryError::InsufficientSpeakers {
             provided: 1,
             required: 2

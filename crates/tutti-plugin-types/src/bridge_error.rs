@@ -75,8 +75,8 @@ pub enum IpcError {
     NotOutOfProcess {
         /// The plugin file.
         path: PathBuf,
-        /// The format's name, as a user knows it.
-        format: &'static str,
+        /// The plugin's format.
+        format: crate::PluginFormat,
     },
 
     /// The plugin's format cannot be hosted in this process by this build: the
@@ -89,8 +89,8 @@ pub enum IpcError {
     NotInProcess {
         /// The plugin file.
         path: PathBuf,
-        /// The format's name, as a user knows it.
-        format: &'static str,
+        /// The plugin's format.
+        format: crate::PluginFormat,
     },
 
     /// The plugin names no id and its file's extension names no plugin format,
@@ -420,7 +420,6 @@ mod tests {
     #[test]
     fn a_state_failure_keeps_its_typed_cause_both_ways() {
         let stalled = StateError::Stalled {
-            bytes: 7,
             after: Duration::from_millis(250),
         };
         match IpcError::from(PluginError::StateFailed(stalled.clone())) {
@@ -576,10 +575,9 @@ mod tests {
             ),
             (
                 Box::new(IpcError::State(StateError::Stalled {
-                    bytes: 3,
                     after: Duration::from_secs(2),
                 })),
-                "stalled after 3 bytes",
+                "stalled: no answer within 2000ms",
             ),
             (
                 Box::new(IpcError::Editor(EditorError::PluginCrashed)),

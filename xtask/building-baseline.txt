@@ -71,26 +71,6 @@ tutti-cpal  ctor-result  crates/tutti-cpal/src/mic.rs::MicIn::open
 tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with_range
 
 # tutti-dsp
-tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
-tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
-tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
-tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
-tutti-dsp  setter  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::set_sample_rate
-tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolver::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::normalized
-tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/times.rs::ChannelTimes::each
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::ordered
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::designed
-tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/mod_delay.rs::ModDelayLayout::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/phaser.rs::SweepRange::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/sweep.rs::Stagger::each
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/sweep.rs::Sweep::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::from_bed
-tutti-dsp  ctor-result  crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::new
 
 # tutti-engine
 tutti-engine  with-prefix  crates/tutti-engine/src/routing.rs::OutputLevels::with_dim
@@ -159,67 +139,8 @@ tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_samp
 tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_tempo
 
 # tutti-nodes
-tutti-nodes  setter  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::set_gain
-tutti-nodes  setter  crates/tutti-nodes/src/strip.rs::BusStripNode::set_volume
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::ambisonic
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::true_stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::from_layout
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/eq_band.rs::EqBandNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_controls
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::chorus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::flanger
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::general_midi_chorus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::general_midi
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::live
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_fdn.rs::FdnNode::live
-tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::atmos_7_1_4
-tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::quad
-tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::surround_5_1
-tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::surround_7_1
-tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::stereo
-tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::ambisonic
-tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded
-tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
-tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
-tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  ctor-result  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
-tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
-tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
-tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new
-tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new
 
 # tutti-plugin
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/capability_view.rs::TransportView::set_meter
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/mod.rs::PluginClient::set_automation_state
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/mod.rs::PluginClient::set_parameter
-tutti-plugin  setter  crates/tutti-plugin/src/host/node/mod.rs::PluginClient::set_render_mode
-tutti-plugin  setter  crates/tutti-plugin/src/host/plugin.rs::Plugin::set_meter
-tutti-plugin  setter  crates/tutti-plugin/src/host/plugin.rs::Plugin::set_render_mode
 
 # tutti-plugin-host
 tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_invalidate_sink

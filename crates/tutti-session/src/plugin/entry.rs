@@ -31,11 +31,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tutti_buffers::ChannelLayout;
-use tutti_plugin::catalog::{
-    AudioConfig, BindError, Catalog, Hosting, Loadable, PluginDescriptor, PluginId, PluginRef,
-};
+use tutti_plugin::catalog::ResolvedHosting;
+use tutti_plugin_db::{BindError, Catalog, Hosting, Loadable};
 use tutti_plugin_host::PluginHandle;
+use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::{Features, IpcError, MainThreadMarker, MainWorkHandle, PluginFailure};
+use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
 
@@ -323,7 +324,10 @@ impl LoadedPlugin {
             mirror,
         } = open;
         let plugin = plugin.map_err(plugin_failed)?;
-        let hosting = plugin.hosting();
+        let hosting = match plugin.hosting() {
+            ResolvedHosting::OutOfProcess => Hosting::OutOfProcess,
+            ResolvedHosting::InProcess => Hosting::InProcess,
+        };
         let served = hosting == Hosting::OutOfProcess;
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
@@ -479,11 +483,13 @@ impl PoolEntry for PluginEntry {
             Err(refused) => Load::on_worker(move || Err(plugin_failed(refused))),
             // The worker checks the catalog's refusal and leaves the open for
             // the main thread, which an in-process plugin is confined to.
-            Ok(Hosting::InProcess) => Load::on_worker_then_main(
+            Ok(ResolvedHosting::InProcess) => Load::on_worker_then_main(
                 move || Ok(request.run()),
                 move |loaded: PluginLoaded, main| land(&cx, loaded, Some(main)),
             ),
-            Ok(_) => Load::on_worker(move || land(&cx, request.run(), None)),
+            Ok(ResolvedHosting::OutOfProcess) => {
+                Load::on_worker(move || land(&cx, request.run(), None))
+            }
         }
     }
 

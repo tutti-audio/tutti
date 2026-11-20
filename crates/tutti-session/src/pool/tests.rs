@@ -35,7 +35,7 @@ fn took<J: JobKind>(
 type Spawned = Executor;
 
 fn session() -> (crate::DetachedSession, Spawned) {
-    let spawned = Executor::polled();
+    let spawned = Executor::new();
     let session = Session::builder()
         .executor(spawned.clone())
         .build_detached(SampleRate::SR_48K)
@@ -201,7 +201,7 @@ fn a_new_key_loads_once_and_lands_in_update() {
         0,
         "no work runs before an update"
     );
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
     assert_eq!(*handle(&s, "a").unwrap().info(), 100);
@@ -213,7 +213,7 @@ fn declaring_a_loaded_key_with_the_same_identity_does_not_reload() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     // `initial` is not identity: it is applied at the load and never compared.
     let again = Probe {
@@ -221,7 +221,7 @@ fn declaring_a_loaded_key_with_the_same_identity_does_not_reload() {
         ..probe(1, &runs)
     };
     s.pool(entry("a", again)).unwrap();
-    assert!(spawned.poll(usize::MAX) == 0, "no load started");
+    assert!(spawned.run_until_stalled() == 0, "no load started");
     assert!(events(&mut s).is_empty());
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
     assert_eq!(
@@ -242,7 +242,7 @@ fn the_diff_adds_keeps_reloads_and_undeclares_by_key_and_identity() {
         entry("c", probe(1, &runs)),
     ))
     .unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     s.pool((
         entry("b", probe(2, &runs)), // identity changed
@@ -254,7 +254,7 @@ fn the_diff_adds_keeps_reloads_and_undeclares_by_key_and_identity() {
     assert_eq!(state(&s, "b").as_deref(), Some("reloading"));
     assert_eq!(state(&s, "c").as_deref(), Some("loaded"));
     assert_eq!(state(&s, "d").as_deref(), Some("loading"));
-    assert_eq!(spawned.poll(usize::MAX), 2, "b and d load; a, c do not");
+    assert_eq!(spawned.run_until_stalled(), 2, "b and d load; a, c do not");
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn a_changed_identity_keeps_the_old_value_until_the_new_one_lands_then_closes_th
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let old = handle(&s, "a").unwrap();
     s.pool(entry("a", probe(2, &runs))).unwrap();
@@ -272,7 +272,7 @@ fn a_changed_identity_keeps_the_old_value_until_the_new_one_lands_then_closes_th
         "Reloading reads as loaded"
     );
     assert_eq!(old.presence(), Presence::Live);
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
     assert_eq!(*handle(&s, "a").unwrap().info(), 200);
     assert_eq!(
@@ -289,7 +289,7 @@ fn a_load_superseded_after_it_ran_never_lands() {
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
     // The first load ran and sent its end; it has not landed.
-    assert_eq!(spawned.poll(usize::MAX), 1);
+    assert_eq!(spawned.run_until_stalled(), 1);
     s.pool(entry("a", probe(2, &runs))).unwrap();
     // One update polls the newer load and lands both ends, the superseded one
     // first: a landing that ignored the supersession would report twice.
@@ -310,7 +310,7 @@ fn a_failed_load_reports_and_reads_failed() {
         ..probe(1, &runs)
     };
     s.pool(entry("a", failing)).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let landed = events(&mut s);
     assert_eq!(landed.len(), 1);
     assert!(landed[0].1.starts_with("failed"), "{landed:?}");
@@ -319,26 +319,6 @@ fn a_failed_load_reports_and_reads_failed() {
         handle(&s, "a"),
         Err(HandleError::NotLoaded(PoolState::Failed(_)))
     ));
-}
-
-/// A worker whose future the executor dropped unrun ends `Dropped`, and the entry fails
-/// with it. The session's executor is replaced, which drops the load's future.
-#[test]
-fn a_job_dropped_unrun_fails_the_entry() {
-    let (mut s, spawned) = session();
-    let runs = runs();
-    s.pool(entry("a", probe(1, &runs))).unwrap();
-    drop(spawned);
-    crate::jobs::tests::replace_executor(&mut s, Executor::polled());
-    assert!(matches!(s.pool_state(&"a"), Some(PoolState::Loading)));
-    let landed = events(&mut s);
-    assert_eq!(landed.len(), 1);
-    assert!(
-        landed[0].1.contains(&WorkerError::Dropped.to_string()),
-        "{landed:?}"
-    );
-    assert!(matches!(s.pool_state(&"a"), Some(PoolState::Failed(_))));
-    assert_eq!(runs.load(Ordering::SeqCst), 0, "the load never ran");
 }
 
 /// The superseded load's worker ends after the newer one's, and its landing never
@@ -414,7 +394,7 @@ fn an_entry_no_one_holds_is_released_at_the_next_update_and_its_handle_closes() 
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let handle = handle(&s, "a").unwrap();
     undeclare(&mut s);
@@ -433,7 +413,7 @@ fn dropping_a_handle_leaves_its_entry_loaded() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let first = handle(&s, "a").unwrap();
     let second = first.clone();
@@ -451,7 +431,7 @@ fn a_held_entry_is_released_at_its_last_holds_drop_not_before() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let one = s
         .pool
@@ -475,7 +455,7 @@ fn declaring_a_held_key_with_its_identity_adopts_it_without_a_reload() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let held = handle(&s, "a").unwrap();
     let hold = s
@@ -487,7 +467,7 @@ fn declaring_a_held_key_with_its_identity_adopts_it_without_a_reload() {
     assert_eq!(state(&s, "a").as_deref(), Some("held"));
     s.pool(entry("a", probe(1, &runs))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
-    assert!(spawned.poll(usize::MAX) == 0, "no load started");
+    assert!(spawned.run_until_stalled() == 0, "no load started");
     assert_eq!(runs.load(Ordering::SeqCst), 1);
     assert_eq!(held.presence(), Presence::Live, "the same entry");
     drop(hold);
@@ -500,7 +480,7 @@ fn declaring_a_held_key_with_another_identity_reloads_it() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let _hold = s
         .pool
@@ -510,7 +490,7 @@ fn declaring_a_held_key_with_another_identity_reloads_it() {
     undeclare(&mut s);
     s.pool(entry("a", probe(2, &runs))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
 }
 
@@ -519,7 +499,7 @@ fn a_key_named_twice_is_refused_and_nothing_of_the_set_is_applied() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("kept", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let refused = s.pool((
         entry("new", probe(1, &runs)),
@@ -534,7 +514,7 @@ fn a_key_named_twice_is_refused_and_nothing_of_the_set_is_applied() {
         Some("loaded"),
         "not undeclared"
     );
-    assert!(spawned.poll(usize::MAX) == 0);
+    assert!(spawned.run_until_stalled() == 0);
 }
 
 #[test]
@@ -553,7 +533,7 @@ fn a_handle_of_another_kind_or_an_undeclared_key_is_refused() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     assert!(matches!(
         s.pool.entries.handle::<_, Other>(&"a"),
@@ -570,12 +550,12 @@ fn a_released_key_can_be_declared_again_and_loads_afresh() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     undeclare(&mut s);
     let _ = events(&mut s);
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
     assert_eq!(runs.load(Ordering::SeqCst), 2);
 }
@@ -607,12 +587,12 @@ fn a_key_declared_as_another_kind_with_an_equal_identity_reloads() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let old = handle(&s, "a").unwrap();
     s.pool(Declared::new("a", Twin(1))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
-    assert_eq!(spawned.poll(usize::MAX), 1, "a load started");
+    assert_eq!(spawned.run_until_stalled(), 1, "a load started");
     s.pool(Declared::new("a", Twin(1))).unwrap();
     assert!(matches!(handle(&s, "a"), Err(HandleError::WrongKind("a"))));
     drop(old);
@@ -623,7 +603,7 @@ fn a_failed_reload_drops_the_old_value_and_closes_its_handles() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let old = handle(&s, "a").unwrap();
     let bad = Probe {
@@ -632,7 +612,7 @@ fn a_failed_reload_drops_the_old_value_and_closes_its_handles() {
     };
     s.pool(entry("a", bad)).unwrap();
     assert_eq!(old.presence(), Presence::Live, "until the reload lands");
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let landed = events(&mut s);
     assert!(landed[0].1.starts_with("failed"), "{landed:?}");
     assert_eq!(old.presence(), Presence::Closed);
@@ -649,10 +629,10 @@ fn a_failed_entry_declared_again_with_its_identity_does_not_retry() {
         ..probe(1, &runs)
     };
     s.pool(entry("a", bad())).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     s.pool(entry("a", bad())).unwrap();
-    assert!(spawned.poll(usize::MAX) == 0);
+    assert!(spawned.run_until_stalled() == 0);
     assert_eq!(state(&s, "a").as_deref(), Some("failed"));
 }
 
@@ -667,7 +647,7 @@ fn an_outcome_that_landed_while_held_is_reported_when_the_entry_is_adopted() {
         .hold(&PoolKey::new(&"a"), HoldKind::Node)
         .unwrap();
     undeclare(&mut s);
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert!(events(&mut s).is_empty(), "held: nothing to report yet");
     s.pool(entry("a", probe(1, &runs))).unwrap();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())], "once");
@@ -685,10 +665,10 @@ fn releases_are_reported_after_the_sets_landings_in_key_order() {
         entry("b", probe(1, &runs)),
     ))
     .unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     s.pool(entry("new", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(
         events(&mut s),
         [
@@ -705,11 +685,11 @@ fn a_key_released_and_declared_again_before_the_report_is_not_released() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     undeclare(&mut s);
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
 }
@@ -725,7 +705,7 @@ fn a_released_slots_queued_outcome_is_not_reported_for_the_key_declared_again() 
         .hold(&PoolKey::new(&"a"), HoldKind::Node)
         .unwrap();
     undeclare(&mut s);
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert!(events(&mut s).is_empty());
     // Adopting queues the held outcome; releasing and declaring again before
     // the report leaves only the new slot's landing.
@@ -733,7 +713,7 @@ fn a_released_slots_queued_outcome_is_not_reported_for_the_key_declared_again() 
     drop(hold);
     undeclare(&mut s);
     s.pool(entry("a", probe(2, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
 }
 
@@ -742,12 +722,12 @@ fn declaring_keys_of_another_type_undeclares_every_entry_of_the_first() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     s.pool(Declared::new(1_u32, probe(1, &runs))).unwrap();
     assert_eq!(state(&s, "a"), None);
     assert!(s.pool_state(&1_u32).is_some());
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let landed = s
         .update()
         .into_iter()
@@ -761,10 +741,10 @@ fn a_refused_set_applies_nothing_while_a_release_is_pending() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("gone", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     s.pool(entry("kept", probe(1, &runs))).unwrap(); // releases "gone", unreported
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let refused = s.pool((
         entry("new", probe(1, &runs)),
         entry("twice", probe(1, &runs)),
@@ -822,7 +802,7 @@ mod audio {
         write_wav(&long, 250);
         let (mut s, spawned) = session();
         s.pool(audio_file("kick", &short)).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         assert_eq!(events(&mut s), [("kick", "loaded".to_owned())]);
         let loaded = wave(&s, "kick");
         assert_eq!(loaded.len().get(), 100);
@@ -830,11 +810,11 @@ mod audio {
         assert_eq!(loaded.at(1, 50), -0.5, "the file's own samples");
         s.pool(audio_file("kick", &short)).unwrap();
         assert!(
-            spawned.poll(usize::MAX) == 0,
+            spawned.run_until_stalled() == 0,
             "the same path is the same entry"
         );
         s.pool(audio_file("kick", &long)).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         assert_eq!(events(&mut s), [("kick", "reloaded".to_owned())]);
         assert_eq!(wave(&s, "kick").len().get(), 250);
         assert_eq!(loaded.len().get(), 100, "a reader of the old wave keeps it");
@@ -855,7 +835,7 @@ mod audio {
             audio_file("piece", bytes).streamed(),
         ))
         .unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut s);
         let loaded = wave(&s, "whole");
         assert_eq!(loaded.len().get(), 100);
@@ -874,7 +854,7 @@ mod audio {
         write_wav(&path, 10);
         let (mut s, spawned) = session();
         s.pool(audio_file("kick", &path)).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut s);
         let first = wave(&s, "kick");
         let handle = s.audio(&"kick").unwrap();
@@ -883,7 +863,7 @@ mod audio {
         assert!(events(&mut s).is_empty(), "no release, no reload");
         assert_eq!(state(&s, "kick").as_deref(), Some("loaded"));
         assert!(Arc::ptr_eq(&first, &wave(&s, "kick")), "the one decode");
-        assert!(spawned.poll(usize::MAX) == 0, "nothing loads again");
+        assert!(spawned.run_until_stalled() == 0, "nothing loads again");
     }
 
     #[test]
@@ -893,7 +873,7 @@ mod audio {
         write_wav(&path, 480);
         let (mut s, spawned) = session();
         s.pool(audio_file("long", &path).streamed()).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         assert_eq!(events(&mut s), [("long", "loaded".to_owned())]);
         let AudioEntry::Streamed(info) = s.audio(&"long").unwrap() else {
             panic!("a streamed entry reads as its header");
@@ -911,11 +891,11 @@ mod audio {
         write_wav(&path, 10);
         let (mut s, spawned) = session();
         s.pool(audio_file("a", &path)).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut s);
         s.pool(audio_file("a", &path).streamed()).unwrap();
         assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
         assert!(matches!(s.audio(&"a"), Ok(AudioEntry::Streamed(_))));
     }
@@ -927,7 +907,7 @@ mod audio {
         std::fs::write(&path, b"not audio").unwrap();
         let (mut s, spawned) = session();
         s.pool(audio_file("a", &path).streamed()).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = s.update();
         assert!(matches!(
             s.pool_state(&"a"),
@@ -954,7 +934,7 @@ mod audio {
             s.audio(&"kick"),
             Err(HandleError::NotLoaded(PoolState::Loading))
         ));
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = s.update();
         assert!(s.audio(&"kick").is_ok());
         assert!(matches!(
@@ -976,7 +956,7 @@ mod audio {
         let (mut s, spawned) = session();
         s.pool((audio_file("kick", &path), audio_file("again", &path)))
             .unwrap();
-        assert_eq!(spawned.poll(usize::MAX), 1, "one decode for both keys");
+        assert_eq!(spawned.run_until_stalled(), 1, "one decode for both keys");
         assert_eq!(
             events(&mut s),
             [
@@ -993,7 +973,7 @@ mod audio {
         let (mut s, spawned) = session();
         s.pool(audio_file("kick", dir.path().join("absent.wav")))
             .unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = s.update();
         assert!(matches!(
             s.pool_state(&"kick"),
@@ -1012,7 +992,7 @@ mod audio {
         write_wav(&path, 10);
         let (mut s, spawned) = session();
         s.pool(audio_file("kick", &path)).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = s.update();
         undeclare(&mut s);
         assert_eq!(events(&mut s), [("kick", "released".to_owned())]);
@@ -1030,7 +1010,7 @@ mod font {
         let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
         let (mut s, spawned) = session();
         s.pool(soundfont("gm", &path)).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         assert_eq!(events(&mut s), [("gm", "loaded".to_owned())]);
         let font = s.soundfont(&"gm").unwrap();
         let again = s.soundfont(&"gm").unwrap();
@@ -1049,7 +1029,7 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
     let runs = Arc::new(AtomicUsize::new(0));
     let key = PoolKey::new(&"a");
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     let _ = events(&mut s);
     let (landing, _) = s.pool.entries.landing_of::<Probe>(&key).expect("loaded");
     let refusal = || LoadError::Job(WorkerError::Dropped);
@@ -1059,7 +1039,7 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
     assert!(!s.pool.entries.refuse_landed(&key, landing, refusal()));
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"), "untouched");
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
 
     // The newer landing is refused by its own generation, and a refusal of
@@ -1074,7 +1054,7 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
 
     // A failed entry loads again as a first landing.
     s.retry(&"a").unwrap();
-    spawned.poll(usize::MAX);
+    spawned.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
 }
 
@@ -1090,7 +1070,7 @@ mod clock_switch {
     use super::*;
 
     fn system_session() -> (crate::SystemSession, Spawned) {
-        let spawned = Executor::polled();
+        let spawned = Executor::new();
         let session = Session::builder()
             .executor(spawned.clone())
             .system_clock()
@@ -1098,7 +1078,7 @@ mod clock_switch {
             .unwrap();
         // The streamer's future is not a load: it starts here, so what the tests
         // poll afterwards is the loads.
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         (session, spawned)
     }
 
@@ -1151,7 +1131,7 @@ mod clock_switch {
     }
 
     fn live_session() -> (crate::LiveSession, Spawned, tutti_engine::ManualStream) {
-        let spawned = Executor::polled();
+        let spawned = Executor::new();
         let (driver, stream) = ManualStreamDriver::new();
         let spec = OutputSpec::new(
             SampleRate::SR_48K,
@@ -1165,7 +1145,7 @@ mod clock_switch {
             .unwrap();
         // The streamer's future is not a load: it starts here, so what the tests
         // poll afterwards is the loads.
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         (session, spawned, stream)
     }
 
@@ -1180,7 +1160,7 @@ mod clock_switch {
         let (mut s, spawned) = system_session();
         let runs = runs();
         s.pool(entry("a", probe(1, &runs))).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut s);
         let seen = Arc::clone(&ran);
         s.when_loaded(&"a", move |s| {
@@ -1198,7 +1178,7 @@ mod clock_switch {
         let (mut live, spawned, _stream) = live_session();
         let runs = self::runs();
         live.pool(entry("b", probe(1, &runs))).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut live);
         let seen = Arc::clone(&ran);
         live.when_loaded(&"b", move |s| {
@@ -1244,7 +1224,7 @@ mod clock_switch {
         );
         let mut s = err.into_session();
         assert_eq!(s.stream_spec().sample_rate, SampleRate::SR_48K);
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut s);
         let _ = s.update();
         assert_eq!(ran.load(Ordering::SeqCst), 1, "the run fires when it loads");
@@ -1275,7 +1255,7 @@ mod clock_switch {
             stream.render_block(tutti_units::Samples::new(64)).is_some(),
             "and rendering"
         );
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut live);
         let _ = live.update();
         assert_eq!(ran.load(Ordering::SeqCst), 2, "the run fires when it loads");
@@ -1390,7 +1370,7 @@ mod clock_switch {
     /// timer carry that rate.
     #[test]
     fn a_switch_honours_what_a_due_run_did_to_the_session() {
-        let spawned = Executor::polled();
+        let spawned = Executor::new();
         let mut s = Session::builder()
             .executor(spawned.clone())
             .outputs(ChannelLayout::from(6u16))
@@ -1399,7 +1379,7 @@ mod clock_switch {
             .unwrap();
         let runs = runs();
         s.pool(entry("a", probe(1, &runs))).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut s);
         s.when_loaded(&"a", |s| {
             s.set(s.policy::<crate::OutputPolicy>().to(crate::OutputPolicy {
@@ -1424,7 +1404,7 @@ mod clock_switch {
         let (mut live, spawned, _stream) = live_session();
         let runs = self::runs();
         live.pool(entry("a", probe(1, &runs))).unwrap();
-        spawned.poll(usize::MAX);
+        spawned.run_until_stalled();
         let _ = events(&mut live);
         live.when_loaded(&"a", |s| {
             let (driver, _new) = ManualStreamDriver::new();

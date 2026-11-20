@@ -8,7 +8,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 fn model(freqs: &[f64]) -> CrossoverModel {
     let f: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
-    CrossoverModel::new(&f, RATE).unwrap()
+    crate::testing::crossover_model(&f, RATE)
 }
 
 fn at(m: &CrossoverModel, band: usize, f: f64) -> Complex64 {
@@ -108,7 +108,7 @@ fn the_two_bands_are_the_prewarped_bilinear_image_of_the_lr4_prototypes() {
 fn the_response_is_what_the_crossover_runs() {
     const N: usize = 1 << 15;
     let freqs = [Hz::new(300.0), Hz::new(3_000.0)];
-    let m = CrossoverModel::new(&freqs, RATE).unwrap();
+    let m = crate::testing::crossover_model(&freqs, RATE);
     let mut xo = CrossoverState::<f64>::default();
     let c = m.blend();
     let mut bands = vec![vec![0.0f64; N]; 3];
@@ -156,7 +156,7 @@ fn the_radius_is_the_lowest_splits_butterworth_pole() {
 fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     const N: usize = 1 << 17;
     let freqs = [Hz::new(80.0), Hz::new(2_000.0)];
-    let m = CrossoverModel::new(&freqs, RATE).unwrap();
+    let m = crate::testing::crossover_model(&freqs, RATE);
     let mut xo = CrossoverState::<f64>::default();
     let c = m.blend();
     let ir: Vec<f64> = (0..N)
@@ -208,7 +208,7 @@ fn controls(low: f64, high: f64) -> CrossoverControls {
 /// the one before it).
 #[test]
 fn a_design_orders_and_caps_the_splits() {
-    let mut m = CrossoverModel::designed(3, &controls(100.0, 1_000.0), RATE).unwrap();
+    let mut m = CrossoverModel::designed(CrossoverBands::of(3), &controls(100.0, 1_000.0), RATE);
     for set in [[5_000.0, 4_000.0], [30_000.0, 25_000.0], [-1.0, f64::NAN]] {
         m.design_into(&controls(set[0], set[1]), RATE);
         let (a, b) = (m.frequency(0).unwrap().get(), m.frequency(1).unwrap().get());
@@ -224,30 +224,37 @@ fn a_design_orders_and_caps_the_splits() {
 /// new controls, whatever it held before.
 #[test]
 fn a_design_in_place_is_the_design_made_whole() {
-    let mut m = CrossoverModel::designed(3, &controls(100.0, 1_000.0), RATE).unwrap();
+    let mut m = CrossoverModel::designed(CrossoverBands::of(3), &controls(100.0, 1_000.0), RATE);
     m.design_into(&controls(300.0, 4_000.0), RATE);
     assert_eq!(
         m,
-        CrossoverModel::designed(3, &controls(300.0, 4_000.0), RATE).unwrap()
+        CrossoverModel::designed(CrossoverBands::of(3), &controls(300.0, 4_000.0), RATE)
     );
 }
 
-/// The band count is 2 to 6.
+/// A design has the band count it is asked for, 2 to 6.
 #[test]
-fn a_design_refuses_a_band_count_a_tree_does_not_have() {
+fn a_design_has_the_bands_it_is_asked_for() {
     let c = controls(100.0, 1_000.0);
-    for bands in [0, 1, 7] {
-        assert!(matches!(
-            CrossoverModel::designed(bands, &c, RATE),
-            Err(CrossoverError::Bands { .. })
-        ));
-    }
     for bands in 2..=CrossoverModel::MAX_BANDS {
         assert_eq!(
-            CrossoverModel::designed(bands, &c, RATE).unwrap().bands(),
+            CrossoverModel::designed(CrossoverBands::of(bands), &c, RATE).bands(),
             bands
         );
     }
+}
+
+/// `CrossoverBands` keeps the range-checked shape: `new` refuses a band count a tree does not
+/// have and never clamps.
+#[test]
+fn crossover_bands_keep_the_range_checked_shape() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: CrossoverBands::new,
+        get: CrossoverBands::get,
+        of: Some(CrossoverBands::of),
+        valid: &[2, 3, 6],
+        invalid: &[0, 1, 7, usize::MAX],
+    });
 }
 
 /// One sample through `state` at `c`.

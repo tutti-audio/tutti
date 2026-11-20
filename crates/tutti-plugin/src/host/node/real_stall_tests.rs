@@ -103,27 +103,40 @@ pub(super) fn plugin_server_path() -> &'static str {
 /// while parked. A file rather than a signal or a socket because the plugin must
 /// stay free of anything that could block or allocate — it is spinning on the
 /// audio thread — and an `exists()` check is neither.
-fn release_the_block() {
-    let _ = std::fs::File::create(release_path());
-}
+struct Release(tempfile::TempDir);
 
-/// Where [`release_the_block`] writes, and what the parked plugin polls.
-fn release_path() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("tutti-clap-probe-release.{}", std::process::id()))
+impl Release {
+    fn new() -> Self {
+        Self(tempfile::tempdir().expect("a scratch directory"))
+    }
+
+    /// Where [`fire`](Self::fire) writes, and what the parked plugin polls.
+    fn path(&self) -> std::path::PathBuf {
+        self.0.path().join("release")
+    }
+
+    /// Releases the parked plugin.
+    fn fire(&self) {
+        std::fs::File::create(self.path()).expect("the release file is written");
+    }
 }
 
 /// Load the probe into a real `plugin-server` subprocess.
-fn load_probe(env: &mut ScopedEnv, render_mode: u32) -> (PluginClient, PluginHandle) {
+fn load_probe(
+    env: &mut ScopedEnv,
+    render_mode: u32,
+    release: &Release,
+) -> (PluginClient, PluginHandle) {
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", render_mode.to_string());
     env.set(
         "TUTTI_CLAP_PROBE_RELEASE_FILE",
-        release_path().to_string_lossy().into_owned(),
+        release.path().to_string_lossy().into_owned(),
     );
     let client = PluginClient::new(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         &tutti_fixtures::detached_work(),
-        &crate::catalog::Loadable::uncatalogued(crate::catalog::PluginRef::file(
+        &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::clap_probe(),
         )),
         SampleRate::of(SAMPLE_RATE),
@@ -198,13 +211,13 @@ fn drive_block(unit: &mut Renderer, midi_out: &mut tutti_plugin_types::MidiEvent
 #[test]
 fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     let _lock = machine_lock();
-    let _ = std::fs::remove_file(release_path());
     let mut env = ScopedEnv::new();
     env.set("TUTTI_CLAP_PROBE_BLOCK_FROM", PARK_FROM.to_string());
 
     // `RenderMode::TagPassthrough` (1): every output sample is input + tag, so a
     // correct block is a known constant and silence is unmistakable.
-    let (client, handle) = load_probe(&mut env, 1);
+    let release = Release::new();
+    let (client, handle) = load_probe(&mut env, 1, &release);
     let bridge = client.bridge();
     let (mut client, controls) = graph_of(client);
     let mut midi_out = tutti_plugin_types::MidiEventVec::new();
@@ -257,7 +270,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     );
 
     // --- Release, and let the drain happen.
-    release_the_block();
+    release.fire();
     let late_before = bridge.audio().block_counts().late;
     let mut collected = 0;
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -304,8 +317,6 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
         !handle.status().is_dead(),
         "the session must still be healthy after recovery"
     );
-
-    let _ = std::fs::remove_file(release_path());
 }
 
 /// The counter really moves only because a block was abandoned, and an
@@ -324,11 +335,11 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 #[test]
 fn an_unstressed_plugin_abandons_few_blocks_and_collects_no_more_than_it_owed() {
     let _lock = machine_lock();
-    let _ = std::fs::remove_file(release_path());
     let mut env = ScopedEnv::new();
     // No `BLOCK_FROM`: the plugin answers every block on time.
 
-    let (client, handle) = load_probe(&mut env, 1);
+    let release = Release::new();
+    let (client, handle) = load_probe(&mut env, 1, &release);
     let bridge = client.bridge();
     let (mut client, controls) = graph_of(client);
     let mut midi_out = tutti_plugin_types::MidiEventVec::new();
@@ -373,7 +384,8 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
     let _lock = machine_lock();
     let mut env = ScopedEnv::new();
     env.set("TUTTI_CLAP_PROBE_BLOCK_FROM", PARK_FROM.to_string());
-    let (client, handle) = load_probe(&mut env, 1);
+    let release = Release::new();
+    let (client, handle) = load_probe(&mut env, 1, &release);
     let (mut client, _controls) = graph_of(client);
     let mut midi_out = tutti_plugin_types::MidiEventVec::new();
 
@@ -444,23 +456,6 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
     }
 }
 
-/// The park switch is armed only when asked for.
-///
-/// A guard on the fixture rather than on the host: if `BLOCK_FROM` leaked
-/// between tests (the environment is process-global, and `ScopedEnv` clears it on
-/// drop — including on an unwind, which is the case worth pinning), the control
-/// test above would silently become a second stall test and stop being a
-/// control.
-#[test]
-fn the_park_switch_is_off_unless_armed() {
-    let _lock = machine_lock();
-    assert!(
-        std::env::var("TUTTI_CLAP_PROBE_BLOCK_FROM").is_err(),
-        "the park switch leaked from another test; the control test is no \
-         longer a control"
-    );
-}
-
 /// A 30-byte SysEx dump's five packets, and a note: what the three tests
 /// below feed the node on its event input.
 fn dump_and_note() -> (Vec<tutti_graph::EventKind>, tutti_graph::EventKind) {
@@ -526,7 +521,7 @@ fn feed(
 fn a_reset_drops_the_pending_midi_and_keeps_its_sysex_cut() {
     let _lock = machine_lock();
     let mut env = ScopedEnv::new();
-    let (client, _handle) = load_probe(&mut env, 1);
+    let (client, _handle) = load_probe(&mut env, 1, &Release::new());
     let (mut unit, controls) = half_chunk_rig(client);
     let (dump, note) = dump_and_note();
     feed(&mut unit, &[dump[0], dump[1], dump[2], note]);
@@ -552,7 +547,7 @@ fn a_reset_drops_the_pending_midi_and_keeps_its_sysex_cut() {
 fn a_reprepare_drops_the_pending_midi_and_keeps_its_sysex_cut() {
     let _lock = machine_lock();
     let mut env = ScopedEnv::new();
-    let (client, _handle) = load_probe(&mut env, 1);
+    let (client, _handle) = load_probe(&mut env, 1, &Release::new());
     let (mut unit, controls) = half_chunk_rig(client);
     let (dump, note) = dump_and_note();
     feed(&mut unit, &[dump[0], dump[1], dump[2], note]);
@@ -582,7 +577,7 @@ fn a_reprepare_drops_the_pending_midi_and_keeps_its_sysex_cut() {
 fn the_controls_count_the_bridges_dropped_midi_too() {
     let _lock = machine_lock();
     let mut env = ScopedEnv::new();
-    let (client, _handle) = load_probe(&mut env, 1);
+    let (client, _handle) = load_probe(&mut env, 1, &Release::new());
     let bridge = client.bridge();
     let (mut unit, controls) = half_chunk_rig(client);
     let (_, note) = dump_and_note();

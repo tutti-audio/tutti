@@ -7,8 +7,8 @@
 use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::ParamUnit;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{
     DetachedSession, Root, Session, SetRefusal, UnitError, ValueError, ValueErrorKind,
 };

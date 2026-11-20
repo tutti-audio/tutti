@@ -10,7 +10,7 @@ use tutti_buffers::Planes;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, Network, System};
+use tutti_dsp::{FdnControls, FdnLayout, FreezeMode, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_declared_tail, assert_param_fork, drive, drive_input, prepared,
 };
@@ -20,7 +20,7 @@ use tutti_graph::{
 };
 use tutti_modulation::ControlProgramBuilder;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_nodes::{FdnNode, FreeverbNode};
+use tutti_nodes::{FdnConfig, FdnNode, FreeverbConfig, FreeverbNode};
 use tutti_units::{
     Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };
@@ -37,7 +37,7 @@ fn freezable() -> FdnLayout {
 }
 
 fn live(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
-    FdnNode::<f32>::live(layout, c)
+    FdnNode::<f32>::from(FdnConfig::new().layout(layout).controls(c))
 }
 
 fn node(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
@@ -349,7 +349,7 @@ fn a_non_finite_write_is_ignored() {
 /// controls, and the FDN is stereo out.
 #[test]
 fn a_live_node_has_its_layouts_params() {
-    let f = FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI);
+    let f = FreeverbNode::<f32>::from(FreeverbConfig::new());
     assert_eq!(f.param_set().params().count(), 2, "the room, the damping");
     let n = live(freezable(), FdnControls::DEFAULT);
     assert_eq!(n.param_set().params().count(), 11);

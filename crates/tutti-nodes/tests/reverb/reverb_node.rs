@@ -10,7 +10,7 @@ use tutti_buffers::Planes;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_dsp::{FdnControls, FdnLayout, FreeverbBank, FreeverbControls};
+use tutti_dsp::{FreeverbBank, FreeverbControls};
 use tutti_fixtures::Noise;
 use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive_input, prepared};
 use tutti_graph::{
@@ -19,7 +19,7 @@ use tutti_graph::{
 };
 use tutti_modulation::ControlProgramBuilder;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_nodes::{FdnNode, FreeverbNode};
+use tutti_nodes::{FdnConfig, FdnNode, FreeverbConfig, FreeverbNode};
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances
@@ -41,7 +41,11 @@ fn controls(room: f64, damp: f64) -> FreeverbControls {
 
 /// A live (modulatable) Freeverb node at `c`, prepared at 48 kHz.
 fn live(c: FreeverbControls) -> FreeverbNode<f32> {
-    prepared(FreeverbNode::<f32>::live(c), SR, BLOCK)
+    prepared(
+        FreeverbNode::<f32>::from(FreeverbConfig::new().controls(c)),
+        SR,
+        BLOCK,
+    )
 }
 
 /// A node driven block by block, at its own running frame.
@@ -135,7 +139,11 @@ fn the_tail_is_the_schroeder_figure() {
 /// live node offers the room and the damping. Its tail is a ceiling.
 #[test]
 fn the_ports_and_the_ceiling() {
-    let fixed = prepared(FreeverbNode::<f32>::general_midi(), SR, BLOCK);
+    let fixed = prepared(
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        SR,
+        BLOCK,
+    );
     let shape = fixed.shape();
     assert_eq!(shape.audio_in(), ChannelLayout::MONO);
     assert_eq!(shape.audio_out(), ChannelLayout::STEREO);
@@ -179,11 +187,7 @@ fn the_port_order_is_the_cells_in_their_order() {
             UnitAddr::first(UnitParam::Damping),
         ]
     );
-    let fdn: FdnNode<f32> = prepared(
-        FdnNode::<f32>::live(FdnLayout::default(), FdnControls::DEFAULT),
-        SR,
-        BLOCK,
-    );
+    let fdn: FdnNode<f32> = prepared(FdnNode::<f32>::from(FdnConfig::new()), SR, BLOCK);
     assert_eq!(
         fdn.shape().params.as_slice(),
         [
@@ -230,7 +234,11 @@ fn a_live_node_reports_the_tail_of_its_current_network() {
 #[test]
 fn the_reported_tail_is_honest() {
     assert_declared_tail(
-        &mut prepared(FreeverbNode::<f32>::general_midi(), SR, BLOCK),
+        &mut prepared(
+            FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+            SR,
+            BLOCK,
+        ),
         SR,
     );
     assert_declared_tail(&mut live(controls(0.1, 0.5)), SR);
@@ -281,7 +289,11 @@ fn the_room_is_cut_at_its_tail_to_the_frame() {
     x.resize(n + tail + 4 * BLOCK, 0.0);
     // Block-aligned input ends at a block edge: 4000 = 62 * 64 + 32, so the last
     // input frame is mid-block, as it may be.
-    let mut rig = Rig::new(prepared(FreeverbNode::<f32>::general_midi(), SR, BLOCK));
+    let mut rig = Rig::new(prepared(
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        SR,
+        BLOCK,
+    ));
     let mut out = [Vec::new(), Vec::new()];
     for chunk in x.chunks(BLOCK) {
         for (all, more) in out.iter_mut().zip(rig.block(chunk, &[]).audio) {
@@ -459,7 +471,9 @@ fn the_node_is_the_room_alone() {
 /// does not carry the ring (a fork is `fresh()` plus the graph's preroll).
 #[test]
 fn a_fork_starts_silent_with_the_values_set() {
-    assert_param_fork(FreeverbNode::<f32>::live(gm()));
+    assert_param_fork(FreeverbNode::<f32>::from(
+        FreeverbConfig::new().controls(gm()),
+    ));
 
     let mut rig = Rig::new(live(controls(0.9, 0.5)));
     rig.block(&noise(5, BLOCK), &[]);
@@ -492,7 +506,7 @@ fn a_fork_starts_silent_with_the_values_set() {
 #[test]
 fn a_lane_driving_the_room_changes_how_long_it_rings() {
     let ring = |room: f64| -> f64 {
-        let node = FreeverbNode::<f32>::live(gm());
+        let node = FreeverbNode::<f32>::from(FreeverbConfig::new().controls(gm()));
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
         let (n, _) = g.add_with_controls(node);
         g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -539,14 +553,14 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
 /// `ParamSet`, so the session can address the room by `UnitParam`.
 #[test]
 fn it_is_inserted_with_a_param_set() {
-    let (_, set) = FreeverbNode::<f32>::live(gm()).into_node();
+    let (_, set) = FreeverbNode::<f32>::from(FreeverbConfig::new().controls(gm())).into_node();
     assert!(set.set(UnitParam::RoomSize, 0.7));
     assert_eq!(set.get(UnitParam::RoomSize), Some(0.7));
     assert!(
         !set.set(UnitParam::Wet, 0.25),
         "no mix port: the graph blends"
     );
-    let (_, fixed) = FreeverbNode::<f32>::general_midi().into_node();
+    let (_, fixed) = FreeverbNode::<f32>::from(FreeverbConfig::general_midi()).into_node();
     assert!(!fixed.set(UnitParam::RoomSize, 0.7), "the send has no room");
 }
 
@@ -556,7 +570,7 @@ fn it_is_inserted_with_a_param_set() {
 /// declares two tails.
 #[test]
 fn an_unprepared_node_declares_nothing_derived_from_a_rate() {
-    let node = FreeverbNode::<f32>::general_midi();
+    let node = FreeverbNode::<f32>::from(FreeverbConfig::general_midi());
     let shape = node.shape();
     assert_eq!(shape.latency.samples().get(), 0);
     assert_eq!(shape.tail, Tail::Unknown);
@@ -652,7 +666,7 @@ fn a_cell_moved_before_a_reset_lands_at_once_as_on_a_fresh_node() {
     blocks(&mut used);
     moved(&used.node);
     used.node.reset();
-    let fresh = FreeverbNode::<f32>::live(gm());
+    let fresh = FreeverbNode::<f32>::from(FreeverbConfig::new().controls(gm()));
     moved(&fresh);
     let mut fresh = Rig::new(prepared(fresh, SR, BLOCK));
     let (a, b) = (blocks(&mut used), blocks(&mut fresh));

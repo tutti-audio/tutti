@@ -27,6 +27,11 @@ fn tetrahedron(rate: u32) -> Vec<u8> {
     b
 }
 
+/// The parsed [`tetrahedron`] sphere at `rate` Hz.
+fn sphere(rate: u32) -> Arc<HrirSphere> {
+    Arc::new(HrirSphere::from_bytes(&tetrahedron(rate)).expect("parses"))
+}
+
 /// A clone (the fork's template, and every fork) shares the parsed
 /// sphere and its prepared spectra; only a new rate prepares a new set,
 /// and a re-prepare at the same rate keeps the one it has.
@@ -34,14 +39,14 @@ fn tetrahedron(rate: u32) -> Vec<u8> {
 fn a_clone_shares_the_sphere_and_its_spectra() {
     let rate = SampleRate::SR_48K;
     let front = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
-    let mut a = HrtfBinaural::<f32>::new(&tetrahedron(48_000), rate, front).expect("parses");
+    let mut a = HrtfBinaural::<f32>::new(sphere(48_000), rate, front);
     let b = a.fresh(front);
     assert!(Arc::ptr_eq(&a.sphere, &b.sphere));
     assert!(Arc::ptr_eq(&a.set, &b.set));
 
-    a.set_sample_rate(rate, || front);
+    a.prepare(rate, || front);
     assert!(Arc::ptr_eq(&a.set, &b.set), "a same-rate prepare rebuilt");
-    a.set_sample_rate(SampleRate::SR_96K, || front);
+    a.prepare(SampleRate::SR_96K, || front);
     assert!(Arc::ptr_eq(&a.sphere, &b.sphere));
     assert!(!Arc::ptr_eq(&a.set, &b.set));
     assert_eq!(a.set.rate, 96_000);
@@ -52,10 +57,9 @@ fn a_clone_shares_the_sphere_and_its_spectra() {
 #[test]
 fn a_prepare_above_the_ceiling_keeps_one_set() {
     let front = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
-    let mut a = HrtfBinaural::<f32>::new(&tetrahedron(48_000), SampleRate::of(1_536_000.0), front)
-        .expect("parses");
+    let mut a = HrtfBinaural::<f32>::new(sphere(48_000), SampleRate::of(1_536_000.0), front);
     let set = a.set.clone();
-    a.set_sample_rate(SampleRate::of(1_024_000.0), || front);
+    a.prepare(SampleRate::of(1_024_000.0), || front);
     assert!(Arc::ptr_eq(&a.set, &set), "both rates key to one set");
     assert_eq!(a.set.rate, MAX_PREPARED_RATE);
 }
@@ -71,11 +75,10 @@ fn a_prepare_above_the_ceiling_keeps_one_set() {
 fn a_degenerate_direction_takes_a_real_vertex_and_renders_finite_audio() {
     let rate = SampleRate::SR_48K;
     let mut p = HrtfBinaural::<f32>::new(
-        &tetrahedron(48_000),
+        sphere(48_000),
         rate,
         Direction::new(Azimuth::FRONT, Elevation::LEVEL),
-    )
-    .expect("parses");
+    );
     let mut hint = 0;
     for dir in [
         [f64::NAN; 3],
@@ -113,8 +116,7 @@ fn a_degenerate_direction_takes_a_real_vertex_and_renders_finite_audio() {
 #[test]
 fn an_f64_render_is_the_input_delayed_one_step_and_scaled_per_ear() {
     let front = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
-    let mut p =
-        HrtfBinaural::<f64>::new(&tetrahedron(48_000), SampleRate::SR_48K, front).expect("parses");
+    let mut p = HrtfBinaural::<f64>::new(sphere(48_000), SampleRate::SR_48K, front);
     let input: Vec<f64> = (0..2 * HRTF_STEP).map(|n| 0.01 * n as f64 - 0.7).collect();
     let (mut left, mut right) = (vec![0.0f64; input.len()], vec![0.0f64; input.len()]);
     p.process(

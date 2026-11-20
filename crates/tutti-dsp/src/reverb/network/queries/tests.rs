@@ -2,7 +2,7 @@ use tutti_units::{Amplitude, Gain, SampleRate, SampleSpan};
 
 use super::super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Gains, Inline, Line, LineModulation,
-    Matrix, Network, NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain,
+    Matrix, Network, NetworkCapacity, NetworkOutputMap, Stage, Tap, Taps, loop_gain,
 };
 use super::*;
 use crate::Lti as _;
@@ -29,7 +29,7 @@ fn fdn(lines: &[Line], matrix: Matrix) -> Fdn {
         lines: Inline::from_slice(lines).unwrap(),
         matrix,
         input: Gains::filled(Gain::UNITY, lines.len()).unwrap(),
-        output: OutputMap::default(),
+        output: NetworkOutputMap::default(),
     }
 }
 

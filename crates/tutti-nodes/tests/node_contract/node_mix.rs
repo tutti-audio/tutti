@@ -18,15 +18,15 @@
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, ChannelLayout};
-use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
 use tutti_graph::{IntoNode, Prepare, Standalone};
 use tutti_nodes::{
-    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, CrossoverNode,
-    DelayControls, DelayLayout, DelayNode, FdnNode, FreeverbNode, GateConfig, GateControls,
-    GateNode, InterpolationMode, KeySource, MaxDelay, ModDelayNode, PhaserControls, PhaserNode,
+    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig,
+    CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
+    FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, KeySource, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
     PlateReverbConfig, PlateReverbNode, Stages,
 };
 use tutti_units::{CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds};
@@ -165,22 +165,19 @@ fn check_io<N: IntoNode>(
 fn the_convolver_is_blended_by_the_graph() {
     use tutti_buffers::Mono;
     use tutti_fixtures::signal::room_ir;
-    use tutti_nodes::ConvolverNode;
+
     let ir = room_ir(0.5, Seconds::new(0.05), RATE);
     let ir2 = room_ir(0.8, Seconds::new(0.08), RATE);
     check(
         "convolver (dual mono, 64-frame block)",
-        &|| {
-            ConvolverNode::per_channel(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(64))
-                .unwrap()
-        },
+        &|| per_channel_node(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(64)).unwrap(),
         2,
         64,
     );
     check(
         "convolver (true stereo, 64-frame block)",
         &|| {
-            ConvolverNode::true_stereo(
+            true_stereo_node(
                 Mono::new(&ir),
                 Mono::new(&ir2),
                 Mono::new(&ir2),
@@ -193,13 +190,13 @@ fn the_convolver_is_blended_by_the_graph() {
     );
     check(
         "convolver (shared IR, six channels)",
-        &|| ConvolverNode::shared_ir(6u16, Mono::new(&[1.0, 0.5]), Samples::new(128)).unwrap(),
+        &|| shared_ir_node(6u16, Mono::new(&[1.0, 0.5]), Samples::new(128)).unwrap(),
         6,
         128,
     );
     check(
         "convolver (folded, stereo)",
-        &|| ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(32)).unwrap(),
+        &|| folded_node(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(32)).unwrap(),
         2,
         32,
     );
@@ -210,21 +207,19 @@ fn the_delay_is_blended_by_the_graph() {
     check(
         "delay (stereo, cross-fed)",
         &|| {
-            let layout = DelayLayout::new(
+            let layout = DelayLayout::builder(
                 BusTopology::STEREO,
                 MaxDelay::of(Seconds::new(0.1)),
                 InterpolationMode::Linear,
             )
-            .with_times(ChannelTimes::each(&[Seconds::new(0.021)]).unwrap())
+            .times(ChannelTimes::try_from(&[Seconds::new(0.021)][..]).unwrap())
+            .build()
             .unwrap();
-            DelayNode::<f32>::from_layout(
-                layout,
-                DelayControls {
-                    time: Seconds::new(0.013),
-                    feedback: Feedback::new(0.5),
-                    cross_feedback: Feedback::new(0.3),
-                },
-            )
+            DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+                time: Seconds::new(0.013),
+                feedback: Feedback::new(0.5),
+                cross_feedback: Feedback::new(0.3),
+            }))
         },
         2,
         0,
@@ -232,13 +227,17 @@ fn the_delay_is_blended_by_the_graph() {
     check(
         "delay (mono)",
         &|| {
-            DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds::new(0.1)),
-                DelayControls {
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(0.1)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(DelayControls {
                     time: Seconds::new(0.01),
                     feedback: Feedback::new(0.4),
                     ..DelayControls::DEFAULT
-                },
+                }),
             )
         },
         1,
@@ -250,19 +249,22 @@ fn the_delay_is_blended_by_the_graph() {
 fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
     check(
         "chorus (stereo)",
-        &|| ModDelayNode::<f32>::chorus(BusTopology::STEREO),
+        &|| ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
         2,
         0,
     );
     check(
         "flanger (mono)",
-        &|| ModDelayNode::<f32>::flanger(BusTopology::MONO),
+        &|| ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::MONO)),
         1,
         0,
     );
     check(
         "phaser (stereo, 4 stages)",
-        &|| PhaserNode::<f32>::stereo(Stages::of(4), PhaserControls::DEFAULT),
+        &|| {
+            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::STEREO, Stages::of(4)))
+                .unwrap()
+        },
         2,
         0,
     );
@@ -277,25 +279,19 @@ fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
 fn the_reverbs_are_blended_by_the_graph() {
     check_io(
         "freeverb (General MIDI room)",
-        &FreeverbNode::<f32>::general_midi,
+        &|| FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
         1,
         2,
         0,
     );
     check_io(
         "freeverb (live)",
-        &|| FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI),
+        &|| FreeverbNode::<f32>::from(FreeverbConfig::new()),
         1,
         2,
         0,
     );
-    check_io(
-        "fdn",
-        &|| FdnNode::<f32>::live(FdnLayout::default(), FdnControls::DEFAULT),
-        1,
-        2,
-        0,
-    );
+    check_io("fdn", &|| FdnNode::<f32>::from(FdnConfig::new()), 1, 2, 0);
     check_io(
         "plate",
         &|| PlateReverbNode::<f32>::from(PlateReverbConfig::new()),
@@ -312,15 +308,17 @@ fn the_reverbs_are_blended_by_the_graph() {
 #[test]
 fn a_mix_move_on_a_delay_ramps_across_the_block() {
     let make = || {
-        DelayNode::<f32>::new(
-            BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus"),
-            MaxDelay::of(Seconds::new(0.1)),
-            InterpolationMode::Linear,
-            DelayControls {
+        DelayNode::<f32>::from(
+            DelayConfig::new(DelayLayout::new(
+                BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus"),
+                MaxDelay::of(Seconds::new(0.1)),
+                InterpolationMode::Linear,
+            ))
+            .controls(DelayControls {
                 time: Seconds::new(0.0005),
                 feedback: Feedback::new(0.3),
                 ..DelayControls::DEFAULT
-            },
+            }),
         )
     };
     let x: Vec<Vec<f32>> = (0..6).map(|c| noise(70 + c, 2 * BLOCK)).collect();
@@ -404,8 +402,11 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     check_io(
         "crossover (stereo, two bands)",
         &|| {
-            CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)])
-                .expect("one split")
+            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                BusTopology::STEREO,
+                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+            ))
+            .expect("one split")
         },
         2,
         4,
@@ -414,7 +415,13 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     // Mono: band 0 is the input at DRY, band 1 silent (not a centre on both).
     let x = vec![noise(90, FRAMES)];
     let dry = rendered(
-        &|| CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(1_000.0)]).expect("one split"),
+        &|| {
+            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                BusTopology::MONO,
+                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+            ))
+            .expect("one split")
+        },
         &x,
         Mix::DRY,
     );
@@ -423,4 +430,61 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
         dry[1].iter().all(|&v| v == 0.0),
         "mono crossover: band 1 at DRY is silent"
     );
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
+}
+
+/// One response per channel, at as many unassigned channels as responses.
+fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    )
+}
+
+/// Every input folded to mono, then one response per output, at the engine's placement of
+/// that many channels.
+fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    let bus = tutti_buffers::BusTopology::assumed(width).expect("a test width fits a bus");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(bus, irs)
+            .folded()
+            .block_size(block_size),
+    )
+}
+
+/// True stereo from `[LL, LR, RL, RR]`.
+fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ll: tutti_buffers::Mono<'_, S>,
+    lr: tutti_buffers::Mono<'_, S>,
+    rl: tutti_buffers::Mono<'_, S>,
+    rr: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
+            .true_stereo()
+            .block_size(block_size),
+    )
+    .expect("four responses on a stereo pair")
 }

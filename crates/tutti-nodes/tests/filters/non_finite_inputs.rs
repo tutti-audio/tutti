@@ -5,14 +5,14 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, MaxBlock};
+use tutti_buffers::{BusTopology, MaxBlock, Planes};
 
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode,
-    EqBandNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, SvfType,
+    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, DelayConfig,
+    DelayControls, DelayLayout, DelayNode, EqBandConfig, EqBandNode, InterpolationMode,
+    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
@@ -63,8 +63,16 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
     }
     let longest = MaxDelay::of(MaxDelay::CAP);
     for mut node in [
-        DelayNode::<f32>::mono(longest, DelayControls::DEFAULT),
-        DelayNode::<f32>::stereo(longest, DelayControls::DEFAULT),
+        DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
+            BusTopology::MONO,
+            longest,
+            InterpolationMode::Linear,
+        ))),
+        DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
+            BusTopology::STEREO,
+            longest,
+            InterpolationMode::Linear,
+        ))),
     ] {
         Node::<f32>::prepare(
             &mut node,
@@ -77,12 +85,16 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
 /// A NaN initial delay time is read as zero, whatever the maximum.
 #[test]
 fn a_delay_with_a_nan_initial_time_starts_at_zero() {
-    let node = DelayNode::<f32>::mono(
-        MaxDelay::of(Seconds::new(0.1)),
-        DelayControls {
+    let node = DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::MONO,
+            MaxDelay::of(Seconds::new(0.1)),
+            InterpolationMode::Linear,
+        ))
+        .controls(DelayControls {
             time: Seconds::new(f64::NAN),
             ..DelayControls::DEFAULT
-        },
+        }),
     );
     assert_eq!(node.param_base(0), Some(0.0), "the time is port 0");
 }
@@ -106,7 +118,7 @@ fn the_strip_holds_off_non_finite_volume_and_balance() {
     ];
     for (name, write) in cells {
         for bad in BAD {
-            let mut node = BusStripNode::stereo();
+            let mut node = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
             Node::<f32>::prepare(
                 &mut node,
                 &Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
@@ -197,7 +209,12 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("eq band", || {
-        let n = EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(3.0));
+        let n = EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(3.0)),
+        );
         let cells = vec![
             (
                 "frequency",

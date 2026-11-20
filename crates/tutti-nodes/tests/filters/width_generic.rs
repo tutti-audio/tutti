@@ -16,9 +16,10 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode, ParamSet};
 use tutti_nodes::{
-    DelayControls, DelayNode, InterpolationMode, LadderFilterNode, LadderType, MaxDelay,
-    ModDelayControls, ModDelayNode, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterNode,
-    SvfType, Sweep, SweepRange,
+    DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode, LadderFilterConfig,
+    LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayControls, ModDelayLayout,
+    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterConfig,
+    SvfFilterNode, SvfType, Sweep,
 };
 use tutti_units::{Feedback, Hz, PhaseIncrement, Q, Resonance, SampleRate, Seconds, UnitParam};
 
@@ -138,28 +139,33 @@ fn assert_width_generic<N: Node + ParamNode + 'static>(
 }
 
 fn svf(layout: ChannelLayout) -> SvfFilterNode<f32> {
-    SvfFilterNode::<f32>::with_channels(layout, SvfType::LowPass, Hz::new(1_000.0), Q::new(0.9))
+    SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(layout, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.9)),
+    )
 }
 
 fn ladder(layout: ChannelLayout) -> LadderFilterNode<f32> {
-    LadderFilterNode::<f32>::with_channels(
-        layout,
-        LadderType::LP24,
-        Hz::new(900.0),
-        Resonance::new(0.6),
+    LadderFilterNode::<f32>::from(
+        LadderFilterConfig::new(layout, LadderType::LP24)
+            .freq(Hz::new(900.0))
+            .res(Resonance::new(0.6)),
     )
 }
 
 fn delay(layout: ChannelLayout) -> DelayNode<f32> {
-    DelayNode::<f32>::new(
-        BusTopology::assumed(layout).expect("a test width is one bus"),
-        MaxDelay::of(Seconds::new(0.5)),
-        InterpolationMode::CubicHermite,
-        DelayControls {
+    DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::assumed(layout).expect("a test width is one bus"),
+            MaxDelay::of(Seconds::new(0.5)),
+            InterpolationMode::CubicHermite,
+        ))
+        .controls(DelayControls {
             time: Seconds::new(0.0123),
             feedback: Feedback::new(0.55),
             cross_feedback: Feedback::NONE,
-        },
+        }),
     )
 }
 
@@ -171,25 +177,30 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
         depth: Seconds::new(0.004),
         feedback: Feedback::new(0.3),
     };
-    ModDelayNode::<f32>::new(
-        BusTopology::assumed(layout).expect("a test width is one bus"),
-        Sweep::CHORUS,
-        Stagger::each(&zeros).expect("zero offsets"),
-        controls,
+    ModDelayNode::<f32>::from(
+        ModDelayConfig::new(
+            ModDelayLayout::builder(
+                BusTopology::assumed(layout).expect("a test width is one bus"),
+                Sweep::CHORUS,
+            )
+            .stagger(Stagger::try_from(&zeros[..]).expect("zero offsets"))
+            .build()
+            .unwrap(),
+        )
+        .controls(controls),
     )
-    .expect("one offset for each channel")
 }
 
 fn phaser(layout: ChannelLayout) -> PhaserNode<f32> {
-    PhaserNode::<f32>::new(
-        BusTopology::assumed(layout).expect("a test width is one bus"),
-        Stages::of(6),
-        SweepRange::DEFAULT,
-        Stagger::NONE,
-        PhaserControls {
+    PhaserNode::<f32>::try_from(
+        PhaserConfig::new(
+            BusTopology::assumed(layout).expect("a test width is one bus"),
+            Stages::of(6),
+        )
+        .controls(PhaserControls {
             rate: Hz::new(2.0),
             ..PhaserControls::DEFAULT
-        },
+        }),
     )
     .expect("a step fits any width")
 }

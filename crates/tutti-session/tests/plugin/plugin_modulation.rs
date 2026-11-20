@@ -25,7 +25,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
 use tutti_plugin::PluginClient;
-use tutti_plugin::catalog::{Loadable, PluginRef};
+use tutti_plugin_db::Loadable;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{
     Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
     Session, SessionEvent,
@@ -55,7 +56,7 @@ fn detached() -> DetachedSession {
     // The executor is polled: a job runs in the `Collect` that polls it, and lands
     // there.
     Session::builder()
-        .executor(tutti_platform::Executor::polled())
+        .executor(tutti_platform::Executor::new())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds")
@@ -287,8 +288,8 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     );
 
     let incoming = PluginClient::new(
-        tutti_plugin::IpcConfig::at(
-            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        tutti_plugin_ipc::IpcConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),

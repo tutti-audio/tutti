@@ -23,15 +23,12 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_buffers};
-use tutti_buffers::Float;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::{Interleaved, Mono};
+use tutti_buffers::{Bed, BusTopology, ChannelLayout, Float, Interleaved, MaxBlock, Mono};
 
 use std::sync::Arc;
 use tutti_units::Seconds;
 
 use crate::support::{render_normalized_to_file, render_to_buffers, render_to_file};
-use tutti_buffers::{Bed, BusTopology, ChannelLayout};
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{Error, GRAPH_MAX_BLOCK, Normalize, RenderGraph, Rendered, Resample, Setup};
@@ -169,9 +166,7 @@ fn ir() -> Vec<f32> {
 fn convolved() -> GraphBuilder {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Osc::sine(Hz::new(330.0)).with_amplitude(Amplitude::new(0.5)));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir())))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir())).0;
     // Half the dry input, aligned by the latency, and half the wet: the graph's mix.
     g.spec_mut().set_mix(conv, tutti_units::Mix::new(0.5));
     g.connect(src, 0, conv, 0).pipe_output(conv);
@@ -845,4 +840,13 @@ fn a_forked_clip_reader_renders_the_tone_at_the_graph_block() {
     let b = render_under(forked, &graph_clock, ChannelLayout::MONO);
     assert_audible(&b);
     assert_the_tone("forked", &b[0]);
+}
+
+/// A one-channel convolver over `ir`, with the default head partition.
+fn convolver(ir: &[f32]) -> tutti_nodes::ConvolverNode<f32> {
+    tutti_nodes::ConvolverNode::try_from(tutti_nodes::ConvolverConfig::new(
+        tutti_buffers::BusTopology::MONO,
+        &[Mono::new(ir)],
+    ))
+    .expect("one response on a mono bus")
 }

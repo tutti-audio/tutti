@@ -6,18 +6,36 @@
 
 use crate::mtime::Mtime;
 use crate::table::FileRow;
-use tutti_plugin_types::PluginFormat;
 
 /// What the scan found on disk for one candidate, read once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileFacts {
+pub enum FileFacts {
+    /// The path does not exist.
+    Missing,
+    /// The path exists.
+    Present {
+        /// The file's last modification, or `None` if it cannot be read or lies
+        /// before the Unix epoch. A file without a time is always rescanned.
+        mtime: Option<Mtime>,
+    },
+}
+
+impl FileFacts {
     /// Whether the path exists.
-    pub exists: bool,
-    /// The file's last modification, or `None` if it cannot be read or lies
-    /// before the Unix epoch. A file without a time is always rescanned.
-    pub mtime: Option<Mtime>,
-    /// The format the path's extension names.
-    pub format: Option<PluginFormat>,
+    #[must_use]
+    pub fn exists(&self) -> bool {
+        matches!(self, Self::Present { .. })
+    }
+
+    /// The file's last modification, or `None` for a missing file and one whose
+    /// time cannot be read.
+    #[must_use]
+    pub fn mtime(&self) -> Option<Mtime> {
+        match self {
+            Self::Present { mtime } => *mtime,
+            Self::Missing => None,
+        }
+    }
 }
 
 /// What a scan does with one discovered plugin.
@@ -50,7 +68,7 @@ pub(crate) fn classify(row: Option<&FileRow>, facts: &FileFacts) -> ScanDecision
 /// without one is always rescanned.
 #[must_use]
 pub(crate) fn needs_rescan(row: &FileRow, facts: &FileFacts) -> bool {
-    match (row.mtime, facts.mtime) {
+    match (row.mtime, facts.mtime()) {
         (Some(stamped), Some(read)) => stamped != read,
         _ => true,
     }
@@ -71,7 +89,7 @@ pub(crate) fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_plugin_types::{Described, PluginClass, PluginDescriptor, PluginId};
+    use tutti_plugin_types::{Described, PluginClass, PluginDescriptor, PluginFormat, PluginId};
 
     use std::time::Duration;
 
@@ -82,11 +100,7 @@ mod tests {
     }
 
     fn facts(mtime: Option<Mtime>) -> FileFacts {
-        FileFacts {
-            exists: true,
-            mtime,
-            format: Some(PluginFormat::Clap),
-        }
+        FileFacts::Present { mtime }
     }
 
     fn healthy(mtime: Option<Mtime>) -> FileRow {

@@ -6,12 +6,14 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    CrossoverNode, EqBandNode, LadderFilterNode, LadderType, SvfControls, SvfFilterNode, SvfType,
+    CrossoverConfig, CrossoverControls, CrossoverNode, EqBandConfig, EqBandNode,
+    LadderFilterConfig, LadderFilterNode, LadderType, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_units::{Db, Frame, Hz, Q, Resonance, SampleRate, Samples};
 
@@ -75,14 +77,11 @@ fn near(what: &str, got: f64, want: f64, tolerance: f64) {
 #[test]
 fn a_bell_has_its_gain_at_the_centre_and_unity_far_away() {
     let bell = |gain: f64| {
-        SvfFilterNode::<f32>::with_controls(
-            ChannelLayout::STEREO,
-            SvfControls {
-                ty: SvfType::Bell,
-                freq: Hz::new(1_500.0),
-                q: Q::new(2.0),
-                gain: Db::new(gain),
-            },
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::Bell)
+                .freq(Hz::new(1_500.0))
+                .q(Q::new(2.0))
+                .gain(Db::new(gain)),
         )
     };
     near(
@@ -104,11 +103,11 @@ fn a_bell_has_its_gain_at_the_centre_and_unity_far_away() {
 #[test]
 fn a_high_shelf_is_unity_below_and_its_gain_above() {
     let shelf = |gain: f64| {
-        EqBandNode::<f32>::new(
-            SvfType::HighShelf,
-            Hz::new(4_000.0),
-            Q::new(0.8),
-            Db::new(gain),
+        EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::HighShelf)
+                .freq(Hz::new(4_000.0))
+                .q(Q::new(0.8))
+                .gain(Db::new(gain)),
         )
     };
     near("below", gains_db(shelf(8.0), 100.0, 0.1)[0], 0.0, 0.1);
@@ -127,11 +126,10 @@ fn a_high_shelf_is_unity_below_and_its_gain_above() {
 #[test]
 fn a_ladder_low_pass_has_unity_dc_a_quarter_at_cutoff_and_falls_24_db_an_octave() {
     let ladder = || {
-        LadderFilterNode::<f32>::with_channels(
-            ChannelLayout::STEREO,
-            LadderType::LP24,
-            Hz::new(500.0),
-            Resonance::NONE,
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                .freq(Hz::new(500.0))
+                .res(Resonance::NONE),
         )
     };
     near(
@@ -155,7 +153,11 @@ fn a_ladder_low_pass_has_unity_dc_a_quarter_at_cutoff_and_falls_24_db_an_octave(
 #[test]
 fn a_crossover_is_6_db_down_at_each_neighbour_at_the_split() {
     let node = || {
-        CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(300.0), Hz::new(3_000.0)]).unwrap()
+        CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            BusTopology::MONO,
+            CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+        ))
+        .unwrap()
     };
     let at_split = gains_db(node(), 300.0, 0.1);
     assert_eq!(at_split.len(), 3, "three bands of one channel");

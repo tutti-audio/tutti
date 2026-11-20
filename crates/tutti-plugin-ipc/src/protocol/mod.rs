@@ -85,8 +85,8 @@ pub(crate) mod wire;
 ///   serves it) while the control connection carries every other request and
 ///   the plugin's unsolicited news (its main thread serves it, and an editor's
 ///   paint may keep it busy). A version-33 server accepts no third connection.
-/// - **Version 35** says what a state is for: `SaveState`, the final
-///   `LoadStateChunk` of a sequence and the `StagedState` a load declares carry a
+/// - **Version 35** says what a state is for: `SaveState`, a state's
+///   load and the `StagedState` a load declares carry a
 ///   `StateUse` (the project's own, or a duplicate's),
 ///   which a format that distinguishes them (CLAP's `state-context`) acts on.
 /// - **Version 36** appends the server's `ProcessRequested`: the plugin asked
@@ -143,10 +143,9 @@ pub(crate) mod wire;
 ///   `ControlReply`/`News` on the control one), so a message of the other
 ///   connection has no variant to be written as.
 /// - **Version 51** gives each connection's wire types their own frame cap
-///   (`Framed::CAP`), and every state chunk (`LoadStateChunk`,
-///   `StageStateChunk`, `StateChunk`) carries the `total` of the whole state,
-///   so the receiver sizes its buffer once and refuses a total over the limit
-///   before it allocates.
+///   (`Framed::CAP`), and every chunk of a state, in either direction, carries
+///   the `total` of the whole state, so the receiver sizes its buffer once and
+///   refuses a total over the limit before it allocates.
 /// - **Version 52** numbers the requests: a control request travels as a
 ///   `Request` with its `ReqId`, an `ApplyParameters` carries one, and an answer
 ///   echoes it (`ControlFrame::Reply`, `ParametersApplied`), so the host matches an
@@ -164,7 +163,15 @@ pub(crate) mod wire;
 ///   descriptor does not arrive, and on Linux one that is not a sealed memfd of the
 ///   layout's exact length. The slab's rings also start on a cache line of their
 ///   own, so the layout's offsets differ from version 53's.
-pub const PROTOCOL_VERSION: u32 = 54;
+/// - **Version 55** sends a plugin state as one memory object beside its frame:
+///   `LoadState`, `StageState` and `StateReady` declare its length (`len`) and
+///   carry its `BlobWire` (nothing, on unix), and the object follows the frame as
+///   a descriptor, as the slab's does, in either direction. They replace the
+///   messages that carried a state in chunks, so no answer has more than one
+///   frame. The receiver refuses an object of another length than
+///   declared, a length over `MAX_STATE_BYTES`, and on Linux one that is not a
+///   sealed memfd.
+pub const PROTOCOL_VERSION: u32 = 55;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -185,12 +192,10 @@ pub const PROTOCOL_VERSION: u32 = 54;
 ///
 /// Each lane and direction has its own cap, carried by its message type
 /// ([`Framed`]): the control lane's messages are bounded by a
-/// fixed struct, by `ParameterList` or by a `STATE_CHUNK_BYTES` slice of
-/// plugin state, so this is far above an honest control frame and far below a
-/// denial of service. **Plugin state is not carried in one frame**: it travels
-/// as chunks ([`STATE_CHUNK_BYTES`]), bounded on reassembly by
-/// [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES), each frame under
-/// this cap.
+/// fixed struct or by `ParameterList`, so this is far above an honest control
+/// frame and far below a denial of service. **Plugin state is not carried in a
+/// frame**: it travels as a memory object beside the frame that declares it,
+/// bounded by [`MAX_STATE_BYTES`](tutti_plugin_types::MAX_STATE_BYTES).
 pub const CONTROL_FRAME_BYTES: usize = 32 * 1024 * 1024;
 
 /// Largest frame body the audio connection takes from the host, in bytes: a
@@ -203,15 +208,6 @@ pub const AUDIO_REQUEST_FRAME_BYTES: usize = 64 * 1024 * 1024;
 /// take. The host reads no more than this from the audio connection, so a
 /// server cannot make it allocate for a reply bigger than a block's.
 pub const AUDIO_REPLY_FRAME_BYTES: usize = tutti_plugin_types::MIDI_STACK_CAPACITY * 32 + 256;
-
-/// Payload size of one `StateChunk` on the wire.
-///
-/// Comfortably under [`CONTROL_FRAME_BYTES`] so the framed message (chunk bytes
-/// plus the `seq`/`last`/`total` header and the codec's own overhead) cannot approach
-/// the cap however the envelope grows. 4 MiB keeps a 1 GiB state to 256 round
-/// trips, which at local-socket speeds is not the bottleneck; the plugin's own
-/// `get_state`/`set_state` is.
-pub const STATE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 /// Validate a subprocess-reported protocol version against [`PROTOCOL_VERSION`].
 /// Called at each handshake consumer so a version skew fails loudly instead of

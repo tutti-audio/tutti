@@ -28,7 +28,7 @@ use support::clap_probe;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{InPort, ModeTarget, NodeMode, OutPort, Root, Session};
 use tutti_units::{SampleRate, Samples};
 

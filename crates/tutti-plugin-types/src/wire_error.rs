@@ -93,8 +93,17 @@ pub enum ResultError {
     },
     /// The payload does not decode as a `ProbeOutcome`.
     #[error("malformed probe result: {0}")]
-    Malformed(String),
+    Malformed(postcard::Error),
+    /// The file holds bytes after the payload its header declares.
+    #[error("malformed probe result: bytes after the payload")]
+    TrailingFile,
+    /// The payload holds bytes after the outcome.
+    #[error("malformed probe result: bytes after the outcome in its payload")]
+    TrailingPayload,
+    /// The outcome is one this build does not know: a newer probe wrote it.
+    #[error("malformed probe result: an outcome this build does not know")]
+    UnknownOutcome,
     /// The file exists and could not be read.
     #[error("probe result unreadable: {0}")]
-    Io(String),
+    Io(std::io::ErrorKind),
 }

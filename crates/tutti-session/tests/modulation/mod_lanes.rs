@@ -13,6 +13,7 @@
 //! its latency, a target placed an update late) are not repeated here.
 
 use crate::common;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 
 use std::cell::Cell;
@@ -21,7 +22,6 @@ use tutti_platform::Instant;
 
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
-use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
@@ -29,7 +29,7 @@ use tutti_modulation::{
     RouteTarget, Source, SourceKey, TargetKey,
 };
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
-use tutti_nodes::{Feed, ReconcileError};
+use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
     AudioSide, AutomationTake, DepthTarget, DetachedSession, MixRef, ModInput, ModKeys, ModRefusal,
     ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef,
@@ -904,7 +904,9 @@ fn a_routes_polarity_and_curve_reach_the_render() {
 #[test]
 fn a_bus_strips_volume_and_pan_take_lanes() {
     let (mut s, _side) = rig(2);
-    let (strip, _) = s.graph().add(tutti_nodes::BusStripNode::stereo());
+    let (strip, _) = s.graph().add(tutti_nodes::BusStripNode::from(
+        tutti_nodes::BusStripConfig::new(BusTopology::STEREO),
+    ));
     let mut m = s.mods_mut();
     let offset = m.macro_(0.5);
     for param in [UnitParam::Volume, UnitParam::Balance] {
@@ -933,13 +935,16 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
 #[test]
 fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
     let (mut s, _side) = rig(2);
-    let (chorus, _) = s.graph().add(tutti_nodes::ModDelayNode::<f32>::chorus(
-        tutti_buffers::BusTopology::STEREO,
+    let (chorus, _) = s.graph().add(tutti_nodes::ModDelayNode::<f32>::from(
+        ModDelayConfig::chorus(tutti_buffers::BusTopology::STEREO),
     ));
-    let (phaser, _) = s.graph().add(tutti_nodes::PhaserNode::<f32>::stereo(
-        tutti_nodes::Stages::of(4),
-        tutti_nodes::PhaserControls::DEFAULT,
-    ));
+    let (phaser, _) = s.graph().add(
+        tutti_nodes::PhaserNode::<f32>::try_from(
+            PhaserConfig::new(BusTopology::STEREO, tutti_nodes::Stages::of(4))
+                .controls(tutti_nodes::PhaserControls::DEFAULT),
+        )
+        .unwrap(),
+    );
     // The phaser's mix is the graph's (`MixRef`), not a param of the node.
     let targets = [
         ModTarget::from(ParamRef::unit(chorus, UnitParam::Rate)),

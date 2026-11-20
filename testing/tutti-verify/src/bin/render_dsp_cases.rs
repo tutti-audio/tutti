@@ -20,8 +20,8 @@ use std::path::Path;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, LadderBank, LadderBlend,
-    LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes, Stages,
+    ChunkSize, CrossoverBands, CrossoverBank, CrossoverControls, CrossoverModel, LadderBank,
+    LadderBlend, LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes, Stages,
     StreamingResampler, StreamingResamplerConfig, SvfBank, SvfCoefficients, SvfControls, SvfModel,
     SvfType, allpass_complement,
 };
@@ -200,8 +200,12 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         ("lr4_3band", vec![300.0, 3_000.0]),
     ] {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
-        let c = CrossoverControls::new(&hz, rate).expect("controls");
-        let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
+        let c = CrossoverControls::try_from((&hz[..], rate)).expect("controls");
+        let model = CrossoverModel::designed(
+            CrossoverBands::new(splits.len() + 1).expect("bands"),
+            &c,
+            rate,
+        );
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
         let mut coefficients = Ramp::new(model.blend());
         // One channel per band, band 0 first.

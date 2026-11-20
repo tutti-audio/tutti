@@ -5,11 +5,9 @@
 //! panner is the gain vector itself, so each case reads the gains off one
 //! rendered block.
 
-use tutti_buffers::Bed;
-use tutti_buffers::Planes;
+use tutti_buffers::{Bed, Planes};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
-use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
 use tutti_units::{Azimuth, Elevation, SampleRate, UnitParam};
 
@@ -71,7 +69,7 @@ fn channel_of_speaker(bed: Bed) -> Vec<usize> {
 /// The panner over `bed` with its width at zero (one gain vector), aimed and
 /// seated, rendering a block of DC: the gains, one per channel.
 fn gains(bed: Bed, azimuth: f64, elevation: f64, spread: f32) -> Vec<f32> {
-    let mut node = prepared(VbapPannerNode::<f32>::new(bed).unwrap(), RATE, 16);
+    let mut node = prepared(vbap::<f32>(bed), RATE, 16);
     let params = node.param_set();
     params.set(UnitParam::StereoWidth, 0.0);
     params.set(UnitParam::Spread, f64::from(spread));
@@ -130,4 +128,10 @@ fn the_gains_are_non_negative_and_unit_power_and_never_feed_the_lfe() {
             }
         }
     }
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
 }

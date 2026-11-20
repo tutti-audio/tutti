@@ -27,14 +27,19 @@
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Standalone};
-use tutti_nodes::{EqBandNode, SvfType};
+use tutti_nodes::{EqBandConfig, EqBandNode, SvfType};
 use tutti_units::UnitParam;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn band(gain: f64) -> EqBandNode<f32> {
-    EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(gain))
+    EqBandNode::<f32>::from(
+        EqBandConfig::new(SvfType::Bell)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(1.0))
+            .gain(Db::new(gain)),
+    )
 }
 
 /// Energy of the band's response to a 1 kHz tone at its centre — the
@@ -106,11 +111,11 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
     let mut s = solo(band(24.0));
     let active = energy(&mut s);
     // A high-pass far above the 1 kHz tone: all but nothing of it passes.
-    let high_pass = EqBandNode::<f32>::new(
-        SvfType::HighPass,
-        Hz::new(20_000.0),
-        Q::new(0.7),
-        Db::new(0.0),
+    let high_pass = EqBandNode::<f32>::from(
+        EqBandConfig::new(SvfType::HighPass)
+            .freq(Hz::new(20_000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(0.0)),
     );
     let key = s.key();
     let editor = s.renderer_mut().editor_mut();

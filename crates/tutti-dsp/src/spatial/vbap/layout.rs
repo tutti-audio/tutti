@@ -66,7 +66,7 @@ impl Tuple {
 
 /// A speaker array, ready to pan over.
 ///
-/// Built once on the control side by [`from_bed`](Self::from_bed) or [`new`](Self::new); the solve
+/// Built once on the control side from a [`Bed`] or a slice of [`Direction`]s (`TryFrom`); the solve
 /// ([`gains_into`](Self::gains_into)) takes `&self` and allocates nothing, so one layout
 /// serves any number of sources.
 #[derive(Debug, Clone)]
@@ -76,9 +76,10 @@ pub struct SpeakerLayout {
     has_rear_speakers: bool,
 }
 
-impl SpeakerLayout {
-    /// The layout of a [`Bed`], from its BS.2051 positions
-    /// ([`Bed::direction`]).
+impl TryFrom<Bed> for SpeakerLayout {
+    type Error = SpeakerGeometryError;
+
+    /// The layout of a [`Bed`], from its BS.2051 positions ([`Bed::direction`]).
     ///
     /// Gain `i` is the `i`-th placed speaker of the bed in the bed's own channel
     /// order ([`Bed::topology`]): the LFE has no direction and is never fed, so a
@@ -88,7 +89,7 @@ impl SpeakerLayout {
     ///
     /// [`SpeakerGeometryError`] when the bed's speakers cannot be panned over:
     /// [`Bed::Mono`] has one.
-    pub fn from_bed(bed: Bed) -> Result<Self, SpeakerGeometryError> {
+    fn try_from(bed: Bed) -> Result<Self, SpeakerGeometryError> {
         let directions: Vec<Direction> = bed
             .topology()
             .positions()
@@ -96,10 +97,29 @@ impl SpeakerLayout {
             .iter()
             .filter_map(|&speaker| bed.direction(speaker))
             .collect();
-        Self::new(&directions)
+        Self::from_positions(&directions)
     }
+}
 
-    /// A layout of speakers at the given bearings and heights.
+impl TryFrom<&[Direction]> for SpeakerLayout {
+    type Error = SpeakerGeometryError;
+
+    /// A layout of speakers at the given bearings and heights, one gain per position.
+    ///
+    /// The refusal depends on the positions together (a speaker at the same place as another,
+    /// or all in one plane through the listener), which no type of one position can hold.
+    ///
+    /// # Errors
+    ///
+    /// [`SpeakerGeometryError`] for too few or too many speakers, a position that is not
+    /// finite, or positions no pair or triplet can be formed from.
+    fn try_from(positions: &[Direction]) -> Result<Self, SpeakerGeometryError> {
+        Self::from_positions(positions)
+    }
+}
+
+impl SpeakerLayout {
+    /// The layout of speakers at the given bearings and heights.
     ///
     /// The layout pans between pairs of speakers when every speaker is within a
     /// millionth of a degree of the horizontal plane, and between triplets
@@ -111,7 +131,7 @@ impl SpeakerLayout {
     /// that is not finite, or positions no pair or triplet can be formed from
     /// (a speaker at the same place as another, or all in one plane through
     /// the listener).
-    pub fn new(positions: &[Direction]) -> Result<Self, SpeakerGeometryError> {
+    fn from_positions(positions: &[Direction]) -> Result<Self, SpeakerGeometryError> {
         let count = positions.len();
         if count > MAX_CHANNELS {
             return Err(SpeakerGeometryError::TooManySpeakers {
