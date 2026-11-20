@@ -503,6 +503,16 @@ pub mod session {
     // `load_audio` decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
+    #[cfg(all(
+        feature = "sampler",
+        any(
+            feature = "decode-wav",
+            feature = "decode-flac",
+            feature = "decode-mp3",
+            feature = "decode-ogg"
+        )
+    ))]
+    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, StreamInfo, Tier};
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
@@ -527,16 +537,6 @@ pub mod session {
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};
-    #[cfg(all(
-        feature = "sampler",
-        any(
-            feature = "decode-wav",
-            feature = "decode-flac",
-            feature = "decode-mp3",
-            feature = "decode-ogg"
-        )
-    ))]
-    pub use tutti_session::{LoadAudio, LoadedAudio, StreamInfo, Tier};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the

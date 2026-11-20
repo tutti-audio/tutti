@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tutti_platform::{Asset, Identity};
 
 use crate::jobs::panic_message;
-use crate::{AppKey, Clock, LoadError, Session, WorkerError};
+use crate::{AppKey, Clock, LoadError, Session};
 
 /// A SoundFont to parse, built by [`Session::load_soundfont`] and not yet run:
 /// [`run`](Self::run) returns a [`LoadedSoundFont`].
@@ -32,7 +32,7 @@ impl LoadSoundFont {
     /// # Errors
     ///
     /// [`LoadError::SoundFont`] for a file that is no SoundFont;
-    /// [`LoadError::Job`] when the parser panicked.
+    /// [`LoadError::Panicked`] when the parser panicked.
     pub fn run(self) -> Result<LoadedSoundFont, LoadError> {
         let loaded_from = self.asset.identity();
         let font = catch_unwind(AssertUnwindSafe(|| {
@@ -40,9 +40,9 @@ impl LoadSoundFont {
                 .map_err(|error| LoadError::SoundFont(Arc::new(error)))
         }))
         .unwrap_or_else(|payload| {
-            Err(LoadError::Job(WorkerError::Panicked {
+            Err(LoadError::Panicked {
                 message: panic_message(payload.as_ref()),
-            }))
+            })
         })?;
         Ok(LoadedSoundFont {
             asset: self.asset,
@@ -79,14 +79,13 @@ impl LoadedSoundFont {
     /// the one taken before the load. This reads the file's metadata, and
     /// nothing else.
     ///
-    /// An asset of bytes never changes, and one that cannot be stamped now (a
-    /// file that is gone) reads unchanged. To reload, run
+    /// An asset of bytes never changes. A file stamped at the load reads
+    /// changed when it is gone or differs; one that could not be stamped reads
+    /// changed once it can be. To reload, run
     /// [`Session::load_soundfont`] over [`asset`](Self::asset).
     #[must_use]
     pub fn changed(&self) -> bool {
-        self.asset
-            .identity()
-            .is_some_and(|now| self.loaded_from.as_ref() != Some(&now))
+        self.asset.identity() != self.loaded_from
     }
 }
 

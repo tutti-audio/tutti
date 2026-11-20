@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use tutti_platform::{Asset, Open, ReadSeek};
 use tutti_sampler::StreamStart;
-use tutti_session::{LoadError, Session, Tier, WorkerError};
+use tutti_session::{AudioData, LoadError, Session, Tier};
 use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
@@ -62,7 +62,9 @@ fn load_audio_runs_where_the_app_runs_it() {
         .join()
         .expect("the thread ends")
         .expect("loads");
-    let wave = audio.wave().expect("a resident load");
+    let AudioData::Resident(wave) = audio.data() else {
+        panic!("a resident load");
+    };
     assert_eq!(wave.len().get(), FRAMES);
     for n in 0..FRAMES {
         let error = (f64::from(wave.at(0, n)) - sine(n)).abs();
@@ -85,21 +87,20 @@ fn two_loads_of_one_file_are_two_values() {
             .expect("loads")
     };
     let (first, second) = (load(), load());
-    assert!(!Arc::ptr_eq(
-        first.wave().expect("resident"),
-        second.wave().expect("resident")
-    ));
     let clone = first.clone();
-    assert!(Arc::ptr_eq(
-        first.wave().expect("resident"),
-        clone.wave().expect("resident")
-    ));
+    let (AudioData::Resident(first), AudioData::Resident(second), AudioData::Resident(clone)) =
+        (first.data(), second.data(), clone.data())
+    else {
+        panic!("resident loads");
+    };
+    assert!(!Arc::ptr_eq(first, second));
+    assert!(Arc::ptr_eq(first, clone));
 }
 
-/// **A handle outlives nothing it was not given**: the session holds no clone,
+/// **The session keeps no clone of a loaded wave**: the session holds no clone,
 /// so dropping every clone of the handle frees the wave.
 #[test]
-fn a_handle_outlives_nothing_it_was_not_given() {
+fn the_session_keeps_no_clone_of_a_loaded_wave() {
     let dir = dir();
     let path = dir.path().join("sine.wav");
     write_sine(&path);
@@ -109,7 +110,10 @@ fn a_handle_outlives_nothing_it_was_not_given() {
         .tier(Tier::Resident)
         .run()
         .expect("loads");
-    let weak = Arc::downgrade(audio.wave().expect("resident"));
+    let AudioData::Resident(wave) = audio.data() else {
+        panic!("a resident load");
+    };
+    let weak = Arc::downgrade(wave);
     let clone = audio.clone();
     drop(audio);
     assert!(weak.upgrade().is_some(), "a clone keeps the wave");
@@ -153,16 +157,37 @@ fn a_streamed_handle_opens_a_stream() {
         .tier(Tier::Streamed)
         .run()
         .expect("loads");
-    assert!(audio.wave().is_none(), "a streamed load decodes nothing");
-    let info = audio.stream().expect("a streamed load");
+    let AudioData::Streamed(info) = audio.data() else {
+        panic!("a streamed load decodes nothing");
+    };
     assert_eq!(info.facts().frames.map(|f| f.get()), Some(FRAMES));
     let opened = s
-        .open_stream(info.as_ref(), StreamStart::HEAD)
+        .open_stream(info.asset().clone(), StreamStart::HEAD)
         .expect("a streamer")
         .run()
         .expect("the file reads");
     let (stream, reader) = s.apply(opened).expect("the session serves it");
     assert_eq!(stream.id(), reader.id());
+}
+
+/// **A file removed after the load reads changed**: its identity is gone, so
+/// the handle no longer matches its asset, and a reload names why.
+#[test]
+fn a_file_removed_after_the_load_reads_changed() {
+    let dir = dir();
+    let path = dir.path().join("sine.wav");
+    write_sine(&path);
+    let s = session();
+    let audio = s.load_audio(&path).run().expect("loads");
+    assert!(!audio.changed());
+    std::fs::remove_file(&path).expect("removes");
+    assert!(audio.changed(), "the file is gone");
+    assert!(matches!(
+        s.load_audio(audio.asset().clone())
+            .tier(Tier::Resident)
+            .run(),
+        Err(LoadError::Decode(_))
+    ));
 }
 
 /// An asset whose reader panics: a decoder that does.
@@ -185,7 +210,7 @@ fn a_decoder_panic_is_a_load_error() {
     let asset = Asset::from(Arc::new(Panics) as Arc<dyn Open>);
     let outcome = session().load_audio(asset).tier(Tier::Resident).run();
     match outcome {
-        Err(LoadError::Job(WorkerError::Panicked { message })) => {
+        Err(LoadError::Panicked { message }) => {
             assert!(message.contains("the decoder panicked"), "{message}");
         }
         other => panic!("a panic is a load error, got {:?}", other.map(|_| ())),

@@ -424,6 +424,13 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error("the node could not swap to the landed plugin: {0}")]
     PluginSwap(Arc<crate::CrossfadeRefused>),
+    /// A load panicked (a decoder, a parser); `message` is the panic's, when it
+    /// was a string.
+    #[error("a load panicked: {message}")]
+    Panicked {
+        /// The panic's message, or a placeholder for a payload of another type.
+        message: String,
+    },
     /// The load's job did not finish: it panicked, or the executor dropped it.
     #[error(transparent)]
     Job(#[from] WorkerError),

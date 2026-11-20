@@ -11,7 +11,7 @@ use tutti_platform::Instant;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, StreamPhase, StreamStart};
-use tutti_session::{OpenStreamError, OutPort, Root, SamplerError, Session, Tier};
+use tutti_session::{AudioData, OpenStreamError, OutPort, Root, SamplerError, Session, Tier};
 use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -117,17 +117,20 @@ fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
         })
         .run()
         .expect("loads");
-    let clip = if let Some(wave) = audio.wave() {
-        tutti_sampler::Clip::new(Arc::clone(wave)).expect("a placeable wave")
-    } else {
-        let info = audio.stream().expect("a load is resident or streamed");
-        let opened = s
-            .open_stream(info.as_ref(), StreamStart::HEAD)
-            .expect("a streamer")
-            .run()
-            .expect("the file reads");
-        let (stream, reader) = s.apply(opened).expect("the session serves it");
-        tutti_sampler::Clip::streaming(reader, stream)
+    let clip = match audio.data() {
+        AudioData::Resident(wave) => {
+            tutti_sampler::Clip::new(Arc::clone(wave)).expect("a placeable wave")
+        }
+        AudioData::Streamed(info) => {
+            let opened = s
+                .open_stream(info.asset().clone(), StreamStart::HEAD)
+                .expect("a streamer")
+                .run()
+                .expect("the file reads");
+            let (stream, reader) = s.apply(opened).expect("the session serves it");
+            tutti_sampler::Clip::streaming(reader, stream)
+        }
+        other => panic!("unexpected load {other:?}"),
     };
     (s, clip)
 }
@@ -247,11 +250,15 @@ fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
     let s = session();
     let short = s.load_audio(&short).run().expect("loads");
     let long = s.load_audio(&long).run().expect("loads");
-    let wave = short.wave().expect("a short file is resident");
+    let AudioData::Resident(wave) = short.data() else {
+        panic!("a short file is resident");
+    };
     for i in 0..LEN {
         assert_eq!(wave.at(0, i), value(i), "frame {i}");
     }
-    let info = long.stream().expect("a file past the line streams");
+    let AudioData::Streamed(info) = long.data() else {
+        panic!("a file past the line streams");
+    };
     assert_eq!(info.facts().frames.map(|f| f.get()), Some(frames));
 }
 
@@ -266,6 +273,12 @@ fn the_threshold_is_the_files_decoded_size() {
     let s = session();
     let decoded = (LEN as u64) * 4;
     let load = |above| s.load_audio(&path).tier(Tier::Auto { above }).run();
-    assert!(load(decoded).expect("loads").wave().is_some());
-    assert!(load(decoded - 1).expect("loads").stream().is_some());
+    assert!(matches!(
+        load(decoded).expect("loads").data(),
+        AudioData::Resident(_)
+    ));
+    assert!(matches!(
+        load(decoded - 1).expect("loads").data(),
+        AudioData::Streamed(_)
+    ));
 }

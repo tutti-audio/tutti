@@ -10,7 +10,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
 use tutti_sampler::StreamStart;
-use tutti_session::{OutPort, Root, Session, Tier};
+use tutti_session::{AudioData, OutPort, Root, Session, Tier};
 use tutti_units::{Beat, SampleRate};
 
 #[path = "../support/f64_nodes.rs"]
@@ -79,7 +79,10 @@ fn a_loaded_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
         .tier(Tier::Resident)
         .run()
         .expect("loads");
-    let wave = Arc::clone(audio.wave().expect("a resident load"));
+    let AudioData::Resident(wave) = audio.data() else {
+        panic!("a resident load");
+    };
+    let wave = Arc::clone(wave);
     assert_eq!(wave.len().get(), LEN);
     assert_eq!(wave.at(0, 7), fine_value(7));
 

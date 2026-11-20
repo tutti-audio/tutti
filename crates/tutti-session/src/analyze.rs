@@ -90,9 +90,9 @@ impl<S: Float> From<&std::path::Path> for Audio<S> {
 #[cfg(all(feature = "sampler", codec))]
 impl<S: Float> From<crate::LoadedAudio<S>> for Audio<S> {
     fn from(audio: crate::LoadedAudio<S>) -> Self {
-        match audio.wave() {
-            Some(wave) => Self::Wave(Arc::clone(wave)),
-            None => Self::File(audio.asset().clone()),
+        match audio.data() {
+            crate::AudioData::Resident(wave) => Self::Wave(Arc::clone(wave)),
+            crate::AudioData::Streamed(info) => Self::File(info.asset().clone()),
         }
     }
 }
