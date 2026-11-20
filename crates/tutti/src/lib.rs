@@ -139,7 +139,7 @@ pub use tutti_session::Error;
 pub use tutti_graph::{
     DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
     InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
-    TapReader, TapWriter,
+    TapOptions, TapReader, TapWriter,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_rt::PushError;

@@ -769,7 +769,7 @@ pub use rtlog::{
 };
 pub use spec::{EventEdge, EventIn, EventOut, GraphInvalid, GraphSpec, ValidGraph};
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
-pub use tap::{TapReader, TapWriter};
+pub use tap::{TapOptions, TapReader, TapWriter};
 pub use time::{Continuity, Due, Offset, Playhead};
 pub use tutti_rt::BlockWaits;
 // The reading is a value type, `tutti-units`' (the modulation compiler

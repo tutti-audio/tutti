@@ -72,7 +72,7 @@ use tutti_export::{
     JobError, Normalize, NormalizeSpec, Outcome, Output, Placement, Produced, Progress, Rendered,
     Resample, Target, Written,
 };
-use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapAlign, TapId};
+use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapId, TapOptions};
 use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
@@ -1662,7 +1662,7 @@ fn open_stem_taps<F: Float>(
             let id = TapId::of(next);
             next += 1;
             editor
-                .open_tap(id, sources, TapAlign::ToOutput, capacity)
+                .open_tap(id, sources, TapOptions::new(capacity))
                 .map_err(|missing| match missing {
                     MissingSource::Port { node, port, .. } => {
                         BounceConfigError::StemChannelMissing {

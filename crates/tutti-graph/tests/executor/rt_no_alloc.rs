@@ -2624,7 +2624,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     use tutti_buffers::MaxBlock;
     use tutti_graph::{
         EdgeGain, EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, Sink, TapAlign,
-        TapId,
+        TapId, TapOptions,
     };
     use tutti_units::{Amplitude, SampleRate};
 
@@ -2636,7 +2636,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.spec_mut().topology.set_outputs(vec![out_of(first)]);
     let cap = Samples::new(1 << 16);
     let mut tap = ed
-        .open_tap(TapId::of(1), vec![out_of(first)], TapAlign::ToOutput, cap)
+        .open_tap(TapId::of(1), vec![out_of(first)], TapOptions::new(cap))
         .expect("the source exists");
     let meter = ed
         .open_meter(MeterId::of(1), MeterSpec::Outputs)
@@ -2730,7 +2730,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.set_latency(lag, Latency::new(Samples::new(400)))
         .expect("fits");
     let reopened = ed
-        .open_tap(TapId::of(1), vec![out_of(first)], TapAlign::ToOutput, cap)
+        .open_tap(TapId::of(1), vec![out_of(first)], TapOptions::new(cap))
         .expect("the source exists");
     drop(std::mem::replace(&mut tap, reopened));
     ed.commit().expect("commits");
