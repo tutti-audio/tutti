@@ -57,7 +57,7 @@ pub use block::Block;
 pub(crate) use block::RingReader;
 pub use control::StreamFile;
 pub use control_cell::ControlCell;
-pub use open::{Open, OpenError, PendingOpen, Placement, RefusedPlacement, StreamReader};
+pub use open::{Open, OpenError, PendingOpen, RefusedStreamStart, StreamReader, StreamStart};
 pub(crate) use status::StatusCell;
 pub use status::{StreamFault, StreamPhase, StreamStatus};
 pub use stream::Stream;
@@ -111,7 +111,7 @@ use tutti_units::SampleRate;
 ///
 /// ```no_run
 /// use tutti_units::Beat;
-/// use tutti_sampler::{DiskStreamer, DiskVoice, Open, Placement, Running, VoiceWindow};
+/// use tutti_sampler::{DiskStreamer, DiskVoice, Open, StreamStart, Running, VoiceWindow};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let executor = tutti_platform::Executor::new();
@@ -126,7 +126,7 @@ use tutti_units::SampleRate;
 /// // The streamer opens the file on its own; the reply is polled, and
 /// // a poll that is not ready hands the `PendingOpen` back (awaiting it is the
 /// // other way to wait).
-/// let mut opening = streamer.open("take_1.wav", Placement::HEAD);
+/// let mut opening = streamer.open("take_1.wav", StreamStart::HEAD);
 /// let (stream, reader) = loop {
 ///     match opening.poll() {
 ///         Open::Ready(stream, reader) => break (stream, reader),
@@ -348,7 +348,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// Control thread. It waits while the streamer's queue is full, as every
     /// stream command does. A streamer that is gone answers
     /// [`OpenError::StreamerGone`] at the first poll.
-    pub fn open(&self, asset: impl Into<Asset>, place: Placement) -> PendingOpen<F> {
+    pub fn open(&self, asset: impl Into<Asset>, place: StreamStart) -> PendingOpen<F> {
         self.open_as(asset.into(), place, None)
     }
 
@@ -365,7 +365,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     pub fn open_into(
         &self,
         asset: impl Into<Asset>,
-        place: Placement,
+        place: StreamStart,
         width: tutti_buffers::ChannelLayout,
     ) -> PendingOpen<F> {
         self.open_as(asset.into(), place, Some(width))
@@ -374,7 +374,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     fn open_as(
         &self,
         asset: Asset,
-        place: Placement,
+        place: StreamStart,
         width: Option<tutti_buffers::ChannelLayout>,
     ) -> PendingOpen<F> {
         let id = StreamId::mint(&self.next_stream);
@@ -464,7 +464,7 @@ mod tests {
         write_tone(&path, 48_000, 2.0);
         let mut sampler =
             DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
-        let opening = sampler.open(&path, Placement::HEAD);
+        let opening = sampler.open(&path, StreamStart::HEAD);
         let (stream, reader) =
             crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         for fade in [0usize, 500] {
@@ -525,7 +525,7 @@ mod tests {
 
         let mut sampler = DiskStreamer::manual(SampleRate::SR_44K1, Default::default()).unwrap();
         let stream = |sampler: &mut DiskStreamer<Manual<f32>, f32>, path: &std::path::Path| {
-            let opening = sampler.open(path, Placement::HEAD);
+            let opening = sampler.open(path, StreamStart::HEAD);
             crate::testing::wait_for_open(sampler, opening).expect("the file opens")
         };
 
@@ -583,7 +583,7 @@ mod tests {
 
         let mut sampler =
             DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
-        let opening = sampler.open(&path, Placement::HEAD);
+        let opening = sampler.open(&path, StreamStart::HEAD);
         let (stream, reader) =
             crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         let ring = Arc::downgrade(&reader.ring);

@@ -14,14 +14,14 @@ pub struct PoolConfig {
     /// order, and start as running ones land. Stages on the main thread or the
     /// session's own thread are not counted: they run in
     /// [`update`](crate::Session::update). Default 4.
-    pub parallel_loads: NonZeroUsize,
+    pub(super) parallel_loads: NonZeroUsize,
     /// How many of the newest snapshot holds keep their entries live: a count
     /// of holds, not of distinct entries, so several holds on one entry count
     /// several. A released entry kept only by older holds is parked: a kind
     /// with something live behind it releases it
     /// ([`PoolEntry::retain`](crate::PoolEntry::retain)), and recalling it loads
     /// again. A node's hold never parks. Default 8.
-    pub live_holds: usize,
+    pub(super) live_holds: usize,
 }
 
 impl PoolConfig {
@@ -36,14 +36,14 @@ impl PoolConfig {
 
     /// At most `loads` worker stages run at once.
     #[must_use]
-    pub const fn with_parallel_loads(mut self, loads: NonZeroUsize) -> Self {
+    pub const fn parallel_loads(mut self, loads: NonZeroUsize) -> Self {
         self.parallel_loads = loads;
         self
     }
 
     /// The newest `holds` snapshot holds keep their entries live.
     #[must_use]
-    pub const fn with_live_holds(mut self, holds: usize) -> Self {
+    pub const fn live_holds(mut self, holds: usize) -> Self {
         self.live_holds = holds;
         self
     }

@@ -16,8 +16,8 @@ workspace = true
 [features]
 default = []
 
-# `serde` for `Placement` (a range-checked position: it serialises as the bare
-# `f64` and refuses what `Placement::new` refuses). Off by default; the crate's
+# `serde` for `StreamStart` (a range-checked position: it serialises as the bare
+# `f64` and refuses what `StreamStart::new` refuses). Off by default; the crate's
 # own dev-dependency turns it on so its contract test runs under a plain
 # `cargo nextest run`.
 serde = ["dep:serde"]

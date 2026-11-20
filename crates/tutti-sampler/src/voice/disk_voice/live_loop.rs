@@ -148,7 +148,7 @@ impl Live {
     fn with(path: &Path, setup: Setup) -> Self {
         let config = DiskStreamerConfig::default();
         let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
-        let start = crate::Placement::new(SamplePosition::new(setup.beat / 2.0 * SR))
+        let start = crate::StreamStart::new(SamplePosition::new(setup.beat / 2.0 * SR))
             .expect("a position in the file");
         let openings: Vec<_> = (0..=setup.neighbours)
             .map(|_| streamer.open(path, start))
@@ -956,7 +956,7 @@ fn streaming(
 ) {
     let mut streamer =
         DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
-    let opening = streamer.open(path, crate::Placement::HEAD);
+    let opening = streamer.open(path, crate::StreamStart::HEAD);
     let (stream, reader) =
         crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
@@ -1017,7 +1017,7 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
     let mut streamer =
         DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let mut open = |path: &Path| {
-        let opening = streamer.open(path, crate::Placement::HEAD);
+        let opening = streamer.open(path, crate::StreamStart::HEAD);
         crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens")
     };
     let (stream_a, reader_a) = open(&first);
@@ -1075,7 +1075,7 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     let mut streamer =
         DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let open = |streamer: &mut DiskStreamer<Manual<f32>, f32>| {
-        let opening = streamer.open(&path, crate::Placement::HEAD);
+        let opening = streamer.open(&path, crate::StreamStart::HEAD);
         let (stream, reader) =
             crate::testing::wait_for_open(streamer, opening).expect("the file opens");
         (

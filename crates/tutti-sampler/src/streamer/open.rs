@@ -1,4 +1,4 @@
-//! Opening a stream: the request ([`Placement`]), the reply ([`PendingOpen`],
+//! Opening a stream: the request ([`StreamStart`]), the reply ([`PendingOpen`],
 //! [`Open`], [`OpenError`]) and what the reply carries: the control side's
 //! [`Stream`] and the audio side's one [`StreamReader`].
 //!
@@ -53,9 +53,9 @@ use tutti_rt::RingFloat;
     derive(serde::Serialize, serde::Deserialize),
     serde(try_from = "f64", into = "f64")
 )]
-pub struct Placement(SamplePosition);
+pub struct StreamStart(SamplePosition);
 
-impl Placement {
+impl StreamStart {
     /// The head of the file.
     pub const HEAD: Self = Self(SamplePosition::new(0.0));
 
@@ -80,21 +80,21 @@ impl Placement {
     }
 }
 
-/// A position [`Placement`] refuses, carrying the refused raw.
+/// A position [`StreamStart`] refuses, carrying the refused raw.
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 #[error("{0} is not a position in a file: it must be finite and not negative")]
-pub struct RefusedPlacement(pub f64);
+pub struct RefusedStreamStart(pub f64);
 
-impl TryFrom<f64> for Placement {
-    type Error = RefusedPlacement;
+impl TryFrom<f64> for StreamStart {
+    type Error = RefusedStreamStart;
 
-    fn try_from(raw: f64) -> Result<Self, RefusedPlacement> {
-        Self::new(SamplePosition::new(raw)).ok_or(RefusedPlacement(raw))
+    fn try_from(raw: f64) -> Result<Self, RefusedStreamStart> {
+        Self::new(SamplePosition::new(raw)).ok_or(RefusedStreamStart(raw))
     }
 }
 
-impl From<Placement> for f64 {
-    fn from(placement: Placement) -> f64 {
+impl From<StreamStart> for f64 {
+    fn from(placement: StreamStart) -> f64 {
         placement.0.get()
     }
 }

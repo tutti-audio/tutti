@@ -333,7 +333,7 @@ fn disk_voice(
 ) {
     let mut s = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
-    let opening = s.open(path, tutti_sampler::Placement::HEAD);
+    let opening = s.open(path, tutti_sampler::StreamStart::HEAD);
     let (stream, reader) =
         tutti_sampler::testing::wait_for_open(&mut s, opening).expect("the file opens");
     for _ in 0..4096 {
