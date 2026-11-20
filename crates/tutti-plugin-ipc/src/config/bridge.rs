@@ -87,9 +87,8 @@ fn unguessable() -> Result<String, RandomSourceError> {
 /// `IpcConfig` from it. `tutti-plugin-server` takes one to know where to
 /// listen.
 ///
-/// [`at`](Self::at) takes the socket path and uses the `tutti_audio_` slab
-/// prefix, 8192-frame blocks, the default [`Timeouts`] and 32-bit float
-/// samples. There is no `Default`: a fresh path ([`unique_socket_path`]) needs
+/// [`at`](Self::at) takes the socket path and uses 8192-frame blocks, the default
+/// [`Timeouts`] and 32-bit float samples. There is no `Default`: a fresh path ([`unique_socket_path`]) needs
 /// the operating system's random source, which can fail, and a fixed one would
 /// make every default a collision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,8 +100,6 @@ pub struct IpcConfig {
     /// so two bridges sharing a path break each other. [`unique_socket_path`]
     /// makes one.
     pub socket_path: PathBuf,
-    /// Prefix for the shared-memory audio slab's OS name.
-    pub shm_prefix: String,
     /// Largest block, in **frames**, the plugin will be asked to process. Sizes
     /// the slab, so a later block may not exceed it.
     pub max_buffer_size: usize,
@@ -135,7 +132,6 @@ impl IpcConfig {
     pub fn at(socket_path: PathBuf) -> Self {
         Self {
             socket_path,
-            shm_prefix: "tutti_audio_".to_string(),
             max_buffer_size: 8192,
             timeouts: Timeouts::default(),
             preferred_format: FloatWidth::F32,

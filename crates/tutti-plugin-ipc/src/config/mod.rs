@@ -4,7 +4,7 @@
 //! - [`AudioConfig`] (in [`audio`]) — **how a loaded plugin runs**: sample
 //!   format, block size, IPC timeout. Read per load.
 //! - [`IpcConfig`] (in [`bridge`]) — the **low-level, per-subprocess**
-//!   transport tuning: socket path, shared-memory prefix, buffer size,
+//!   transport tuning: socket path, buffer size,
 //!   timeout, sample format. One drives a single plugin-server connection;
 //!   `AudioConfig::to_bridge_config` derives it.
 //!
