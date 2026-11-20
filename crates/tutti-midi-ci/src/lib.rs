@@ -31,15 +31,13 @@
 //! ([`RotaryControl`]) Profiles are the same kind of table, and [`Gm2FunctionBlock`]
 //! and [`Gm2SingleChannel`] say whether a peer has General MIDI 2 enabled.
 //!
-//! The checked names a UMP Endpoint and a MIDI-CI Product Instance Id carry
-//! ([`EndpointName`], [`BlockName`], [`ProductInstanceId`]) live here too: the
-//! Discovery messages carry the same text.
 #![forbid(unsafe_code)]
 
 use std::vec::Vec;
 
 use tutti_ump::{
-    MidiChannel, MidiGroup, Sysex7Packets, SysexError, U7, U28, UNIVERSAL_NON_REAL_TIME, Ump,
+    MidiChannel, MidiGroup, ProductInstanceId, Sysex7Packets, SysexError, U7, U28,
+    UNIVERSAL_NON_REAL_TIME, Ump,
 };
 
 mod articulation;
@@ -57,7 +55,6 @@ mod handshake;
 mod initiate;
 mod initiator;
 mod link;
-mod name;
 mod pe;
 mod process;
 mod process_initiator;
@@ -95,10 +92,6 @@ pub use initiate::Initiator;
 pub use initiator::{
     EnabledMpeZones, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileOutcome,
     ProfileRequest, ProfileRequestError, ProfileTable,
-};
-pub use name::{
-    BLOCK_NAME_BYTES, BlockName, ENDPOINT_NAME_BYTES, EndpointName, INSTANCE_ID_BYTES,
-    InstanceIdError, Name, NameError, ProductInstanceId,
 };
 #[cfg(feature = "serde")]
 pub use pe::SavedStateError;

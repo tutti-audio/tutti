@@ -138,12 +138,7 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     (
         "tutti-midi-network",
-        &[
-            "tutti-ump",
-            "tutti-midi-ci",
-            "tutti-units",
-            "tutti-platform",
-        ],
+        &["tutti-ump", "tutti-units", "tutti-platform"],
     ),
     ("tutti-metering", &["tutti-units"]),
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).

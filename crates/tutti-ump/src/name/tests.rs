@@ -1,7 +1,5 @@
-use tutti_ump::{Form, text_packets};
-
 use super::*;
-use crate::MessageText;
+use crate::{Form, text_packets};
 
 fn collect<const W: usize>(bytes: &[u8]) -> Vec<(Form, [u8; W])> {
     text_packets::<W>(bytes).collect()
@@ -150,10 +148,6 @@ fn a_refused_text_says_why() {
         ProductInstanceId::parse(&"a".repeat(43)),
         Err(InstanceIdError::TooLong { max: 42 })
     );
-    assert_eq!(
-        MessageText::try_from("a".repeat(104).as_str()),
-        Err(NameError::TooLong { max: 103 })
-    );
 }
 
 #[test]
@@ -167,9 +161,6 @@ fn the_text_types_convert_display_and_parse() {
         (id.to_string(), id.as_ref() as &str),
         ("SN-0001".into(), "SN-0001")
     );
-    let text: MessageText = "done".parse().unwrap();
-    assert_eq!(text.to_string(), "done");
-    assert_eq!(text.as_ref() as &str, "done");
     assert!("a\0".parse::<EndpointName>().is_err());
 }
 
