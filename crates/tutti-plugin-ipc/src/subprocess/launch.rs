@@ -4,7 +4,7 @@
 
 use crate::ProcessGuard;
 use crate::config::BridgeConfig;
-use crate::conversation::{Conversation, Heard};
+use crate::conversation::Conversation;
 use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
@@ -342,34 +342,11 @@ impl LoadPhase {
     }
 }
 
-/// What the server's sign of life for request `id` does to the wait, heard at
-/// `now`, and the phase of the load it says the server is in: at work opening
-/// the plugin restarts the load window; at work restoring the state gives the
-/// request the restore's window instead, and from then on a failure is the
-/// state's.
-fn work(
-    conv: &mut Conversation<ReqId, ()>,
-    id: ReqId,
-    stage: Working,
-    now: Instant,
-    timeouts: &Timeouts,
-) -> LoadPhase {
-    match stage {
-        Working::Opening => {
-            conv.extend(id, now);
-            LoadPhase::Opening
-        }
-        Working::Restoring => {
-            conv.restart(id, now, timeouts.state_restore);
-            LoadPhase::Restoring
-        }
-    }
-}
-
-/// A launch's connection: its requests are numbered and the answers matched to
-/// them by a [`Conversation`], whose deadlines the server's signs of life move.
-struct Launch<'t> {
-    stream: ControlStream,
+/// A launch's requests and what has been heard of them: the part of a launch
+/// that does no I/O. Its requests are numbered and the answers matched to them
+/// by a [`Conversation`], whose deadlines the server's signs of life move, and
+/// the load's phase only ever goes forward.
+struct Exchange<'t> {
     conv: Conversation<ReqId, ()>,
     last_id: u64,
     timeouts: &'t Timeouts,
@@ -378,10 +355,18 @@ struct Launch<'t> {
     window: Duration,
 }
 
-impl<'t> Launch<'t> {
-    fn new(stream: ControlStream, timeouts: &'t Timeouts) -> Self {
+/// What a frame heard in a launch came to.
+#[derive(Debug)]
+enum Heard {
+    /// The answer to the request waited for.
+    Answer(ControlReply),
+    /// A sign of life, which moved the wait.
+    Working,
+}
+
+impl<'t> Exchange<'t> {
+    fn new(timeouts: &'t Timeouts) -> Self {
         Self {
-            stream,
             conv: Conversation::new(),
             last_id: 0,
             timeouts,
@@ -390,15 +375,97 @@ impl<'t> Launch<'t> {
         }
     }
 
-    /// Numbers the next request, which the server has `window` to answer
-    /// (restarting at each sign of life, up to `ceiling` from now).
-    fn open(&mut self, window: Duration, ceiling: Duration) -> ReqId {
+    /// Numbers the next request, sent at `now`, which the server has `window`
+    /// to answer (restarting at each sign of life, up to `ceiling` from the
+    /// send).
+    fn open(&mut self, now: Instant, window: Duration, ceiling: Duration) -> ReqId {
         self.last_id += 1;
         let id = ReqId::new(self.last_id);
-        self.conv.open(id, (), Instant::now(), window, ceiling);
+        self.conv.open(id, (), now, window, ceiling);
         self.phase = LoadPhase::Opening;
         self.window = window;
         id
+    }
+
+    /// What `frame`, heard at `now`, does to the wait for request `id`.
+    ///
+    /// At work opening the plugin restarts the load window, up to its ceiling;
+    /// at work restoring the state the request is under the restore's own
+    /// window and ceiling from that instant, and from then on a failure is the
+    /// state's to answer for. The phase never goes back: a sign of life that
+    /// says `Opening` after the restore began (the beat and the notice come from
+    /// two threads) is a sign of life and no more.
+    ///
+    /// # Errors
+    ///
+    /// A frame that is not an answer to `id` or a sign of life: nothing the
+    /// plugin says unprompted comes before it is loaded, so news is no part of
+    /// this connection.
+    fn hear(&mut self, frame: ControlFrame, id: ReqId, now: Instant) -> BridgeResult<Heard> {
+        match frame {
+            ControlFrame::Working { id: of, stage } if of == id => {
+                match stage {
+                    Working::Opening => {
+                        self.conv.extend(id, now);
+                    }
+                    Working::Restoring => {
+                        self.phase = LoadPhase::Restoring;
+                        self.window = self.timeouts.state_restore;
+                        let restore = self.timeouts.state_restore;
+                        self.conv.restart(id, now, restore, restore);
+                    }
+                }
+                Ok(Heard::Working)
+            }
+            ControlFrame::Working { .. } => Ok(Heard::Working),
+            ControlFrame::Reply { id: of, reply } => match self.conv.hear(of, reply.ends(), now) {
+                Ok(crate::conversation::Heard::Answer { .. }) if of == id => {
+                    Ok(Heard::Answer(reply))
+                }
+                _ => Err(unexpected_message("the answer to the request", &reply)),
+            },
+            ref other => Err(unexpected_message("a reply", other)),
+        }
+    }
+
+    /// How long request `id` may still be waited for at `now`.
+    fn left(&self, id: ReqId, now: Instant) -> Duration {
+        self.conv.left(id, now).unwrap_or(Duration::ZERO)
+    }
+
+    /// `error` as the wait names it: a timeout carries the window the request
+    /// was under, and a failure in the restore is the state's.
+    fn blame(&self, error: BridgeError) -> BridgeError {
+        self.phase.blame(match error {
+            BridgeError::Timeout {
+                operation, partial, ..
+            } => BridgeError::Timeout {
+                operation,
+                after: self.window,
+                partial,
+            },
+            other => other,
+        })
+    }
+}
+
+/// A launch's connection and its [`Exchange`].
+struct Launch<'t> {
+    stream: ControlStream,
+    exchange: Exchange<'t>,
+}
+
+impl<'t> Launch<'t> {
+    fn new(stream: ControlStream, timeouts: &'t Timeouts) -> Self {
+        Self {
+            stream,
+            exchange: Exchange::new(timeouts),
+        }
+    }
+
+    /// Numbers the next request (see [`Exchange::open`]).
+    fn open(&mut self, window: Duration, ceiling: Duration) -> ReqId {
+        self.exchange.open(Instant::now(), window, ceiling)
     }
 
     /// Sends a frame of the request `id`.
@@ -406,42 +473,15 @@ impl<'t> Launch<'t> {
         ipc::send(&mut self.stream, &Request { id, body })
     }
 
-    /// The answer to request `id`. A sign of life restarts the wait; one that
-    /// says the server has begun restoring state gives it the restore's window,
-    /// and from then on a failure is the state's to answer for. Nothing the
-    /// plugin says unprompted comes before it is loaded, so news is no part of
-    /// this connection.
+    /// The answer to request `id`, the signs of life on the way moving the
+    /// wait.
     fn answer(&mut self, id: ReqId) -> BridgeResult<ControlReply> {
         loop {
-            let now = Instant::now();
-            let left = self.conv.left(id, now).unwrap_or(Duration::ZERO);
-            let frame = ipc::recv_within::<ControlFrame>(&mut self.stream, left).map_err(|e| {
-                self.phase.blame(match e {
-                    BridgeError::Timeout {
-                        operation, partial, ..
-                    } => BridgeError::Timeout {
-                        operation,
-                        after: self.window,
-                        partial,
-                    },
-                    other => other,
-                })
-            })?;
-            match frame {
-                ControlFrame::Working { id: of, stage } if of == id => {
-                    self.phase = work(&mut self.conv, id, stage, now, self.timeouts);
-                    if self.phase == LoadPhase::Restoring {
-                        self.window = self.timeouts.state_restore;
-                    }
-                }
-                ControlFrame::Working { .. } => {}
-                ControlFrame::Reply { id: of, reply } => {
-                    return match self.conv.hear(of, reply.ends(), now) {
-                        Ok(Heard::Answer { .. }) if of == id => Ok(reply),
-                        _ => Err(unexpected_message("the answer to the request", &reply)),
-                    };
-                }
-                ref other => return Err(unexpected_message("a reply", other)),
+            let left = self.exchange.left(id, Instant::now());
+            let frame = ipc::recv_within::<ControlFrame>(&mut self.stream, left)
+                .map_err(|e| self.exchange.blame(e))?;
+            if let Heard::Answer(reply) = self.exchange.hear(frame, id, Instant::now())? {
+                return Ok(reply);
             }
         }
     }
@@ -942,58 +982,125 @@ mod tests {
         ));
     }
 
-    /// **The server's signs of life restart the load's wait, and the restore
-    /// has a window of its own**: at work opening restarts the load window (up
-    /// to the ceiling), at work restoring the request is under the restore's
-    /// window from that instant, and only then is a failure the state's.
-    #[test]
-    fn the_servers_signs_of_life_restart_the_load_and_a_restore_has_its_own_window() {
+    fn exchange_timeouts() -> Timeouts {
         let mut t = Timeouts::default();
-        t.load = Duration::from_secs(10);
-        t.state_restore = Duration::from_secs(90);
-        let id = ReqId::new(1);
+        t.load = Duration::from_secs(5);
+        t.state_restore = Duration::from_secs(120);
+        t
+    }
+
+    fn working(id: ReqId, stage: Working) -> ControlFrame {
+        ControlFrame::Working { id, stage }
+    }
+
+    /// **The server's signs of life restart the load's wait, and only for its
+    /// window**: each `Working` at work opening moves the deadline a load
+    /// window past the sign, and the wait is still due that window after the
+    /// last one.
+    #[test]
+    fn a_sign_of_life_restarts_the_loads_wait() {
+        let t = exchange_timeouts();
         let start = Instant::now();
         let at = |secs| start + Duration::from_secs(secs);
-        let mut conv = Conversation::new();
-        conv.open(
-            id,
-            (),
-            start,
-            t.load,
-            t.load.saturating_mul(LOAD_CEILING_FACTOR),
-        );
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
 
+        let heard = exchange
+            .hear(working(id, Working::Opening), id, at(4))
+            .unwrap();
+        assert!(matches!(heard, Heard::Working));
         assert_eq!(
-            work(&mut conv, id, Working::Opening, at(8), &t),
-            LoadPhase::Opening
+            exchange.left(id, at(4)),
+            Duration::from_secs(5),
+            "restarted at the sign"
         );
         assert_eq!(
-            conv.left(id, at(8)),
-            Some(Duration::from_secs(10)),
-            "restarted"
+            exchange.left(id, at(9)),
+            Duration::ZERO,
+            "a window after the last"
         );
-        assert!(conv.is_due(id, at(18)), "and only for a window");
+        assert_eq!(exchange.phase, LoadPhase::Opening);
+    }
 
-        assert_eq!(
-            work(&mut conv, id, Working::Restoring, at(9), &t),
-            LoadPhase::Restoring
-        );
-        assert_eq!(conv.left(id, at(9)), Some(Duration::from_secs(90)));
-        assert_eq!(
-            work(&mut conv, id, Working::Opening, at(95), &t),
-            LoadPhase::Opening
-        );
+    /// **A restore has its own window and its own ceiling, from the instant the
+    /// server says it began**: with a 5 s load window (a 50 s ceiling) and a
+    /// 120 s restore, the restore is still waited for 100 s in, long past the
+    /// load's ceiling, and a failure from then on is the state's.
+    #[test]
+    fn a_restore_has_its_own_window_and_ceiling() {
+        let t = exchange_timeouts();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
+
+        exchange
+            .hear(working(id, Working::Restoring), id, at(3))
+            .unwrap();
+        assert_eq!(exchange.phase, LoadPhase::Restoring);
+        assert_eq!(exchange.left(id, at(3)), Duration::from_secs(120));
         assert!(
-            conv.left(id, at(95))
-                .is_some_and(|left| left <= Duration::from_secs(10)),
-            "a sign of life moves a wait only by its own window"
+            exchange.left(id, at(100)) > Duration::ZERO,
+            "past the load's 50 s ceiling and still within the restore's"
         );
-        let at_ceiling = conv.left(id, at(99)).expect("awaited");
-        assert!(at_ceiling <= Duration::from_secs(10), "{at_ceiling:?}");
-        assert!(
-            conv.is_due(id, at(100)),
-            "never past the ceiling, ten loads from the send"
+        assert_eq!(
+            exchange.left(id, at(123)),
+            Duration::ZERO,
+            "120 s after it began"
         );
+        assert!(matches!(
+            exchange.blame(BridgeError::Timeout {
+                operation: "a reply",
+                after: Duration::ZERO,
+                partial: false,
+            }),
+            BridgeError::StateRestore { cause }
+                if matches!(*cause, BridgeError::Timeout { after, .. } if after == Duration::from_secs(120))
+        ));
+    }
+
+    /// **The phase never goes back**: a beat's `Opening` that arrives after the
+    /// restore began (the beat and the notice are two threads) leaves the load
+    /// in its restore, so a failure after it is still the state's.
+    #[test]
+    fn the_phase_only_goes_forward() {
+        let t = exchange_timeouts();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(start, t.load, t.load.saturating_mul(LOAD_CEILING_FACTOR));
+        exchange
+            .hear(working(id, Working::Restoring), id, at(1))
+            .unwrap();
+        exchange
+            .hear(working(id, Working::Opening), id, at(2))
+            .unwrap();
+        assert_eq!(exchange.phase, LoadPhase::Restoring);
+        assert!(matches!(
+            exchange.blame(BridgeError::ProcessCrashed),
+            BridgeError::StateRestore { .. }
+        ));
+    }
+
+    /// **The answer is the one of the request waited for**, and a frame that is
+    /// neither an answer nor a sign of life is refused.
+    #[test]
+    fn only_the_awaited_answer_ends_the_wait() {
+        let t = exchange_timeouts();
+        let now = Instant::now();
+        let mut exchange = Exchange::new(&t);
+        let id = exchange.open(now, t.call, t.call);
+        let reply = |of| ControlFrame::Reply {
+            id: of,
+            reply: ControlReply::SharedMemoryReady,
+        };
+        assert!(exchange.hear(reply(ReqId::new(99)), id, now).is_err());
+        assert!(matches!(
+            exchange.hear(reply(id), id, now),
+            Ok(Heard::Answer(ControlReply::SharedMemoryReady))
+        ));
+        let other = ControlFrame::News(crate::News::EditorClosed);
+        assert!(exchange.hear(other, id, now).is_err());
     }
 
     /// **A plugin that dies before the restore is not blamed on the state**: it
