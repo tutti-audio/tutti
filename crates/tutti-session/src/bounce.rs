@@ -2165,7 +2165,7 @@ mod tests {
     /// and renders once it landed.
     #[test]
     fn a_bounce_is_refused_while_a_declared_pool_entry_is_pending() {
-        use crate::{Declared, Life, Load, PoolEntry, PoolKey};
+        use crate::{Declared, Life, PoolEntry, PoolKey, PoolLoad};
 
         struct Slow;
         impl PoolEntry for Slow {
@@ -2173,8 +2173,8 @@ mod tests {
             type Loaded = ();
             type Handle = ();
             fn identity(&self) {}
-            fn load(&self) -> Load<()> {
-                Load::on_worker(|| Ok(()))
+            fn load(&self) -> PoolLoad<()> {
+                PoolLoad::on_worker(|| Ok(()))
             }
             fn handle(_: &(), _: &Life) {}
         }

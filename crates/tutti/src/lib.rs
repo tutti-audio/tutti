@@ -222,7 +222,7 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
-    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
+    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget,
 };
 #[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
 pub use tutti_session::{
@@ -454,25 +454,22 @@ pub mod session {
     pub use tutti_modulation::PeriodPoint;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
-    #[cfg(feature = "plugin")]
-    pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{
-        BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
-        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
-        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, Inlet, InletError,
-        LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened, Outlet, OutputPlacement,
-        OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer, PeerError,
-        Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, RemoveError,
-        Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration, RootReader,
-        RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError, Weighted, Wire,
-        root_width,
+        BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade, CrossfadeId,
+        CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
+        RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError,
+        Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
         Timeline,
     };
     // The pool.
-    pub use tutti_session::Load as PoolLoad;
+    pub use tutti_session::PoolLoad;
     pub use tutti_session::WorkerError;
     pub use tutti_session::{
         Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
@@ -491,14 +488,15 @@ pub mod session {
     pub use tutti_session::{
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, BufferMaster,
         BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master, NoMaster,
-        Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
-        Stage as BounceStage,
+        Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample, Stage,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
-        Armed, InFlight, InputOpener, OpenedInput, Placement as RecordedPlacement, PunchError,
-        Rolling, Start, TakeEnd, TakeId, TakeLatency, Window,
+        Armed, InFlight, InputOpener, OpenedInput, PunchError, Rolling, TakeEnd, TakeId,
+        TakePlacement, Window,
     };
+    #[cfg(any(feature = "capture", feature = "midi"))]
+    pub use tutti_session::{Start, TakeLatency, Trim};
     // The `audio_file` entry decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
@@ -530,7 +528,7 @@ pub mod session {
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, LoadedPlugin, ParamGesture, PluginCause,
-        PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal, Recovery, RecoveryAction,
+        PluginParam, PluginPorts, PoolPluginEntry, PortsRefusal, Recovery, RecoveryAction,
         RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateJobFailed,
         StateRestore, StateView,
     };
@@ -571,9 +569,9 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, Direction as PlaybackDirection, Error, GUARD_FRAMES, OpenError,
-        Placement as ClipPlacement, RefusedPlacement, SamplerFloat, Stream, StreamFault,
-        StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus, VoiceNodeHandle,
+        Block, Direction, Error, GUARD_FRAMES, OpenError, RefusedStreamStart, SamplerFloat, Stream,
+        StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStart, StreamStatus,
+        VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
@@ -833,8 +831,8 @@ pub mod midi {
         AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
         InstrumentHandle, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, Midi,
         MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo,
-        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement,
-        TrackError, midi_sink,
+        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TrackError,
+        midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

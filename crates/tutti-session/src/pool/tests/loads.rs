@@ -10,7 +10,7 @@ use tutti_platform::MainThreadMarker;
 
 use super::{Spawned, events, session, state, took};
 use crate::{
-    Declared, HandleError, JobStatus, Life, Load, LoadError, PoolConfig, PoolEntry, PoolError,
+    Declared, HandleError, JobStatus, Life, LoadError, PoolConfig, PoolEntry, PoolError, PoolLoad,
     PoolOutcome, Presence, RetryError, Session, WorkerError,
 };
 
@@ -114,7 +114,7 @@ impl PoolEntry for Stub {
         self.version
     }
 
-    fn load(&self) -> Load<Arc<Made>> {
+    fn load(&self) -> PoolLoad<Arc<Made>> {
         let Self {
             name,
             version,
@@ -134,13 +134,13 @@ impl PoolEntry for Stub {
             }
         };
         match how {
-            How::Worker => Load::on_worker(move || {
+            How::Worker => PoolLoad::on_worker(move || {
                 log.push(format!("worker {name}"));
                 made()
             }),
             How::Main => {
                 let after = log.clone();
-                Load::on_worker_then_main(
+                PoolLoad::on_worker_then_main(
                     move || {
                         log.push(format!("worker {name}"));
                         Ok(Output { log, name })
@@ -152,7 +152,7 @@ impl PoolEntry for Stub {
                     },
                 )
             }
-            How::Session => Load::on_session(move |cx| {
+            How::Session => PoolLoad::on_session(move |cx| {
                 log.push(format!("session {name} at {}", cx.rate().get()));
                 made()
             }),
@@ -384,8 +384,8 @@ fn a_session_stage_that_panics_fails_its_entry_and_not_the_update() {
         type Loaded = ();
         type Handle = ();
         fn identity(&self) {}
-        fn load(&self) -> Load<()> {
-            Load::on_session(|_| panic!("the port is gone"))
+        fn load(&self) -> PoolLoad<()> {
+            PoolLoad::on_session(|_| panic!("the port is gone"))
         }
         fn handle(_: &(), _: &Life) {}
     }
@@ -407,8 +407,8 @@ fn a_ready_load_lands_at_the_declaration_with_the_value_it_was_given() {
         type Loaded = Arc<Made>;
         type Handle = Arc<Made>;
         fn identity(&self) {}
-        fn load(&self) -> Load<Arc<Made>> {
-            Load::ready(Arc::clone(&self.0))
+        fn load(&self) -> PoolLoad<Arc<Made>> {
+            PoolLoad::ready(Arc::clone(&self.0))
         }
         fn handle(loaded: &Arc<Made>, _: &Life) -> Arc<Made> {
             Arc::clone(loaded)
@@ -435,7 +435,7 @@ fn a_ready_load_lands_at_the_declaration_with_the_value_it_was_given() {
 fn one_at_a_time() -> crate::DetachedSession {
     Session::builder()
         .executor(Spawned::new())
-        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
+        .pool_config(PoolConfig::new().parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap()
 }
@@ -487,7 +487,7 @@ fn the_parallel_cap_is_the_builders() {
     let spawned = Spawned::new();
     let mut s = Session::builder()
         .executor(spawned.clone())
-        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(2).unwrap()))
+        .pool_config(PoolConfig::new().parallel_loads(std::num::NonZeroUsize::new(2).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
     s.pool(["a", "b", "c"].map(|name| declare(&stub(name, How::Worker, &log))))
@@ -501,7 +501,7 @@ fn a_queued_load_superseded_before_it_starts_never_runs() {
     let spawned = Spawned::new();
     let mut s = Session::builder()
         .executor(spawned.clone())
-        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
+        .pool_config(PoolConfig::new().parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
     s.pool((
@@ -842,8 +842,8 @@ fn a_panic_in_a_main_stage_fails_its_entry_and_not_the_update() {
         type Loaded = ();
         type Handle = ();
         fn identity(&self) {}
-        fn load(&self) -> Load<()> {
-            Load::on_worker_then_main(|| Ok(()), |(), _main| panic!("the plugin aborted"))
+        fn load(&self) -> PoolLoad<()> {
+            PoolLoad::on_worker_then_main(|| Ok(()), |(), _main| panic!("the plugin aborted"))
         }
         fn handle(_: &(), _: &Life) {}
     }

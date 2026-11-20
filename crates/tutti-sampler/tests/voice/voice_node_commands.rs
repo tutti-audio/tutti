@@ -1,7 +1,7 @@
 //! A standalone voice can be told to move, and the telling reaches the node
 //! the graph renders.
 //!
-//! Placement is not a scalar param: a window is a [`Beat`] (`f64`) plus an
+//! StreamStart is not a scalar param: a window is a [`Beat`] (`f64`) plus an
 //! optional duration, and truncating a beat position to `f32` re-introduces
 //! the ~2²⁴ cliff that `Sample.loop_start` was moved to `SamplePosition` (f64)
 //! to escape — so it takes the tier the engine reserves for multi-field

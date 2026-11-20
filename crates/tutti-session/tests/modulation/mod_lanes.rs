@@ -495,6 +495,43 @@ fn a_take_suspends_the_automation_then_restores_it() {
     );
 }
 
+/// **A latch take ends only when it is stopped.** The recorder is touched and
+/// released: a latch take stays open (it holds the released value), and
+/// `AutomationTake::stop` makes its trajectory the automation on the next
+/// update, so 650 plays.
+#[test]
+fn a_latch_take_becomes_the_automation_when_stopped() {
+    let (mut s, mut side) = rig(1);
+    let (probe, _) = s.graph().add(ProbeUnit::new(300.0));
+    master(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let cutoff_key = probe.cutoff();
+    let mut lane = Trajectory::new().with_range(Hz::new(0.0), Hz::new(1_000.0));
+    lane.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(800.0)));
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    assert!(m.automate(cutoff, Arc::new(lane)));
+    m.record(
+        cutoff_key,
+        AutomationTake::record(RecordMode::Latch, Hz::new(0.0), Hz::new(1_000.0)),
+    )
+    .unwrap();
+    let take = m.take_mut(cutoff_key).expect("the take is open");
+    take.recorder_mut().touch(Beat::new(0.0), Hz::new(650.0));
+    take.recorder_mut().release(Beat::new(1.0), Hz::new(650.0));
+    let _ = s.update();
+    assert!(
+        s.mods_mut().take_mut(cutoff_key).is_some(),
+        "a released latch take stays open"
+    );
+
+    s.mods_mut().take_mut(cutoff_key).unwrap().stop();
+    let _ = s.update();
+    assert!(s.mods_mut().take_mut(cutoff_key).is_none(), "stopped");
+    let last = *render(&mut side, 512, 128)[0].last().expect("rendered");
+    assert_eq!(last, 650.0, "the take's trajectory plays");
+}
+
 // ---------------------------------------------------------- refusal --
 
 /// The refusals of one `update`, in order.

@@ -12,7 +12,7 @@ use tutti_platform::{Asset, Identity, MainThreadMarker};
 use crate::job::Ticket;
 use crate::pool::config::PoolConfig;
 use crate::pool::entry::{
-    Cloner, ErasedIdentity, Item, Life, Load, LoadError, MainStage, PoolEntry, PoolSet, Reload,
+    Cloner, ErasedIdentity, Item, Life, LoadError, MainStage, PoolEntry, PoolLoad, PoolSet, Reload,
     Staged, Step, Value,
 };
 use crate::pool::key::PoolKey;
@@ -279,7 +279,7 @@ impl<S: Float> Slot<S> {
 /// the same flight.
 pub(crate) struct Start<S: Float> {
     pub(crate) flight: u64,
-    pub(crate) load: Load<Value, S>,
+    pub(crate) load: PoolLoad<Value, S>,
 }
 
 /// One load, in flight, and the entries waiting on it. An entry waits on the
@@ -605,7 +605,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// Starts `key`'s load: it shares a load in flight or a loaded value of the
     /// same identity under another key when the entry shares, and is a flight
     /// of its own otherwise. The slot's old flight, if any, is superseded.
-    fn begin(&mut self, key: &PoolKey, load: Load<Value, C::Float>) -> Option<Start<C::Float>> {
+    fn begin(&mut self, key: &PoolKey, load: PoolLoad<Value, C::Float>) -> Option<Start<C::Float>> {
         let generation = self.next_generation();
         let needs_main = load.needs_main();
         let stage = if matches!(load.step, Step::Session(_)) {

@@ -209,7 +209,7 @@ fn await_end(
         if deadline.passed(now()) {
             return false;
         }
-        let _ = wait.wait(END_SLICE);
+        let _ = wait.wait(END_SLICE, std::thread::sleep);
     }
 }
 
@@ -237,7 +237,9 @@ fn declare_exit(
     stop: &StopToken,
 ) {
     while !stop.is_stopped() {
-        if !wait.wait(EXIT_SLICE) {
+        if !wait.wait(EXIT_SLICE, |slice| {
+            let _ = stop.wait(slice);
+        }) {
             continue;
         }
         let mut process = process.lock_recover();

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, ThreadId};
 
 use tutti_plugin_types::MainWork;
-use tutti_session::{Declared, DetachedSession, Life, Load, PoolEntry, RetryError, Session};
+use tutti_session::{Declared, DetachedSession, Life, PoolEntry, PoolLoad, RetryError, Session};
 use tutti_units::SampleRate;
 
 /// What the worker hands the main stage: it says where it is dropped.
@@ -36,9 +36,9 @@ impl PoolEntry for InProcess {
 
     fn identity(&self) {}
 
-    fn load(&self) -> Load<()> {
+    fn load(&self) -> PoolLoad<()> {
         let (dropped_on, dropped) = (Arc::clone(&self.dropped_on), Arc::clone(&self.dropped));
-        Load::on_worker_then_main(
+        PoolLoad::on_worker_then_main(
             move || {
                 Ok(Output {
                     dropped_on,
@@ -115,7 +115,7 @@ impl PoolEntry for Dual {
 
     fn identity(&self) {}
 
-    fn load(&self) -> Load<Arc<u32>> {
+    fn load(&self) -> PoolLoad<Arc<u32>> {
         let fail = Arc::clone(&self.fail);
         let made = move || {
             if fail.load(Ordering::SeqCst) {
@@ -128,9 +128,9 @@ impl PoolEntry for Dual {
         };
         if self.main {
             let after = made.clone();
-            Load::on_worker_then_main(move || made().map(|_| ()), move |(), _main| after())
+            PoolLoad::on_worker_then_main(move || made().map(|_| ()), move |(), _main| after())
         } else {
-            Load::on_worker(made)
+            PoolLoad::on_worker(made)
         }
     }
 
