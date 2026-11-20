@@ -834,10 +834,9 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
-        InstrumentHandle, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, Midi,
-        MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo,
-        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement,
-        TrackError, midi_sink,
+        InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport,
+        MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo, NoCommonTimelineError,
+        NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement, TrackError, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

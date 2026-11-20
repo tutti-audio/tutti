@@ -49,19 +49,10 @@ impl LoadMidi {
     ///
     /// # Errors
     ///
-    /// [`LoadMidiError::Read`] when the file cannot be read.
-    pub fn run(self) -> Result<LoadedMidi, LoadMidiError> {
+    /// The [`ReadError`] of a file that cannot be read.
+    pub fn run(self) -> Result<LoadedMidi, ReadError> {
         Ok(convert(MidiFile::read(self.asset)?))
     }
-}
-
-/// Why a [`LoadMidi`] ended without a [`LoadedMidi`].
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum LoadMidiError {
-    /// The file could not be read.
-    #[error("MIDI file: {0}")]
-    Read(#[from] ReadError),
 }
 
 /// Why a [`LoadedMidi`] has no [`LoadedTrack`] `i`.
@@ -232,8 +223,8 @@ impl LoadedMidi {
 impl<F: Float> Midi<'_, F> {
     /// A [`LoadMidi`] of the MIDI file `asset` (a path, or bytes); nothing is
     /// read until the app calls [`run`](LoadMidi::run), which runs on the
-    /// caller's thread. A file that cannot be read fails with
-    /// [`LoadMidiError::Read`].
+    /// caller's thread. A file that cannot be read fails with its
+    /// [`ReadError`]. The value holds nothing of the session.
     pub fn load_midi(&self, asset: impl Into<Asset>) -> LoadMidi {
         LoadMidi {
             asset: asset.into(),

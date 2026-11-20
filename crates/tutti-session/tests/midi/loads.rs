@@ -9,9 +9,7 @@ use std::path::{Path, PathBuf};
 
 use tutti_midi_file::{Normalized, TimelineDrop};
 use tutti_music::TimeSignature;
-use tutti_session::{
-    DetachedSession, LoadMidiError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
-};
+use tutti_session::{DetachedSession, LoadedMidi, NoCommonTimelineError, Session, TrackError};
 use tutti_units::{Beat, SampleRate, Seconds};
 
 fn session() -> DetachedSession {
@@ -61,7 +59,7 @@ fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 /// Loads the file at `path`.
-fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadMidiError> {
+fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, tutti_midi_file::ReadError> {
     s.midi().load_midi(path).run()
 }
 
@@ -239,11 +237,11 @@ fn a_file_in_smpte_time_lands_and_says_why_it_has_no_clip_or_timeline() {
 }
 
 #[test]
-fn a_missing_file_lands_a_read_error() {
+fn a_missing_file_is_an_io_read_error() {
     let dir = tempfile::tempdir().unwrap();
     let outcome = load(&mut session(), dir.path().join("none.mid"));
     assert!(
-        matches!(outcome, Err(LoadMidiError::Read(_))),
+        matches!(outcome, Err(tutti_midi_file::ReadError::Io(_))),
         "{outcome:?}"
     );
 }
