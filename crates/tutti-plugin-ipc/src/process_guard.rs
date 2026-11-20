@@ -18,9 +18,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tutti_platform::{Executor, Task, WeakExecutor, monotonic_ns, sleep_until_ns};
+use tutti_platform::{Executor, Instant, Task, WeakExecutor, monotonic_ns, sleep_until_ns};
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
-use tutti_plugin_types::PluginFailure;
+use tutti_plugin_types::{Deadline, PluginFailure};
 use tutti_rt::LockExt;
 
 /// How long the exit task waits on the OS between looks at its stop flag.
@@ -32,6 +32,11 @@ const EXIT_SLICE: Duration = Duration::from_millis(100);
 /// another thread: a process in uninterruptible sleep outlasts its kill, and
 /// the thread that dropped the guard does not wait on it.
 const REAP_PATIENCE: Duration = Duration::from_millis(250);
+
+/// How long a wait for the server's end sleeps between looks at its deadline
+/// on a platform with no OS wake; the end of the process wakes the wait at once
+/// elsewhere.
+const END_SLICE: Duration = Duration::from_millis(20);
 
 /// What the guard and its exit task share: the guard's two instructions to the
 /// task, and the task's one answer.
@@ -75,6 +80,9 @@ struct Launched {
     /// locked on the audio thread.
     process: Arc<Mutex<Option<Reaped>>>,
     flow: Arc<ExitFlow>,
+    /// The OS's wake for the process's end, shared with the exit task: the
+    /// guard waits on it itself once the task is gone.
+    wait: Arc<ExitWait>,
     /// The exit task. Dropped last: it has ended by then.
     exit: Task<()>,
     /// Where a server that outlasts its kill is reaped, reached while the
@@ -118,7 +126,7 @@ impl ProcessGuard {
         executor: &Executor,
     ) -> std::io::Result<Self> {
         let watch = Arc::new(ServerWatch::new());
-        let wait = process.exit_wait();
+        let wait = Arc::new(process.exit_wait());
         let process = Arc::new(Mutex::new(Some(process)));
         let flow = Arc::new(ExitFlow::default());
         let exit = executor.spawn_dedicated(
@@ -126,7 +134,7 @@ impl ProcessGuard {
             None,
             exit_task(
                 Arc::clone(&process),
-                wait,
+                Arc::clone(&wait),
                 Arc::clone(&watch),
                 Finish(Arc::clone(&flow)),
             ),
@@ -135,6 +143,7 @@ impl ProcessGuard {
             launched: Some(Launched {
                 process,
                 flow,
+                wait,
                 exit,
                 executor: executor.downgrade(),
             }),
@@ -227,6 +236,7 @@ impl Drop for ProcessGuard {
             let Launched {
                 process,
                 flow,
+                wait,
                 exit,
                 executor,
             } = launched;
@@ -237,10 +247,10 @@ impl Drop for ProcessGuard {
             } else {
                 Duration::ZERO
             };
-            let mut reaped = reaped_by(&flow, &process, grace);
+            let mut reaped = reaped_within(&flow, &process, &wait, grace);
             if !reaped {
                 kill(&process);
-                reaped = reaped_by(&flow, &process, REAP_PATIENCE);
+                reaped = reaped_within(&flow, &process, &wait, REAP_PATIENCE);
             }
             flow.stop.store(true, Ordering::Release);
             // Ends within a slice of the stop, or at once when it has ended.
@@ -272,6 +282,48 @@ fn reaped_by(flow: &ExitFlow, process: &Mutex<Option<Reaped>>, timeout: Duration
             .lock_recover()
             .as_mut()
             .is_some_and(|process| matches!(process.try_reap(), Ok(Some(_))))
+}
+
+/// Whether the server has been reaped within `timeout`: by the exit task while
+/// it runs, else (the executor has shut down and taken the task, or the task
+/// ended without reaping) by waiting on the process itself. A server told to
+/// shut down is thus given its whole grace to end on its own whether or not
+/// the executor outlives the guard.
+fn reaped_within(
+    flow: &ExitFlow,
+    process: &Mutex<Option<Reaped>>,
+    wait: &ExitWait,
+    timeout: Duration,
+) -> bool {
+    let deadline = Deadline::after(Instant::now(), timeout);
+    if !flow.done.load(Ordering::Acquire) && reaped_by(flow, process, timeout) {
+        return true;
+    }
+    await_end(process, wait, deadline, Instant::now)
+}
+
+/// Waits on the OS for the process in `process` to end, until `deadline` as
+/// `now` reads it, and reaps it: whether it ended. The deadline is checked after
+/// each look, so a wait that has run out still looks once. The OS's wake ends
+/// each wait at the process's end; `ExitWait` paces a platform with none.
+fn await_end(
+    process: &Mutex<Option<Reaped>>,
+    wait: &ExitWait,
+    deadline: Deadline,
+    mut now: impl FnMut() -> Instant,
+) -> bool {
+    loop {
+        match process.lock_recover().as_mut().map(Reaped::try_reap) {
+            Some(Ok(Some(_))) => return true,
+            Some(Ok(None)) => {}
+            // No process, or a status that cannot be read: an end that cannot be awaited.
+            _ => return false,
+        }
+        if deadline.passed(now()) {
+            return false;
+        }
+        let _ = wait.wait(END_SLICE, pause);
+    }
 }
 
 /// Reaps a killed `process` on the `executor`'s blocking pool, which ends with
@@ -325,7 +377,7 @@ fn pause(slice: Duration) {
 /// (`EXIT_SLICE`) rather than waiting for the process to end.
 async fn exit_task(
     process: Arc<Mutex<Option<Reaped>>>,
-    wait: ExitWait,
+    wait: Arc<ExitWait>,
     watch: Arc<ServerWatch>,
     finish: Finish,
 ) {
@@ -518,7 +570,7 @@ mod tests {
     #[test]
     fn an_exit_task_dropped_unpolled_raises_its_latch() {
         let mut child = sleeper().spawn().expect("sleep spawns");
-        let wait = ExitWait::of(&child);
+        let wait = Arc::new(ExitWait::of(&child));
         let flow = Arc::new(ExitFlow::default());
         let task = exit_task(
             Arc::new(Mutex::new(None)),
@@ -589,6 +641,47 @@ mod tests {
             assert!(wait.wait(HANG_GUARD, |_| ()));
         }
         assert!(exists(pid), "the abandoned child was reaped");
+    }
+
+    /// **A server that ends on its own is reaped within its grace when the
+    /// executor is gone**: the exit task has been dropped with the executor, and
+    /// the wait for the server's end goes on, on the process itself, instead of
+    /// giving up for a kill.
+    #[test]
+    fn a_server_ending_on_its_own_is_reaped_within_the_grace_without_an_executor() {
+        let executor = Executor::new();
+        let mut command = Command::new("cat");
+        command.stdin(Stdio::piped());
+        let mut child = command.spawn().expect("cat spawns");
+        let stdin = child.stdin.take();
+        let guard = ProcessGuard::launched(
+            Reaped::new(child),
+            &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
+            &executor,
+        )
+        .expect("the exit task starts");
+        drop(executor);
+        let launched = guard.launched.as_ref().expect("launched");
+        assert!(launched.flow.wait_done(HANG_GUARD), "the exit task is gone");
+        let (end, ends) = std::sync::mpsc::channel::<()>();
+        let closer = std::thread::spawn(move || {
+            ends.recv().expect("the wait begins");
+            drop(stdin);
+        });
+
+        end.send(()).expect("the closer waits");
+        let reaped = reaped_within(
+            &launched.flow,
+            &launched.process,
+            &launched.wait,
+            HANG_GUARD,
+        );
+
+        closer.join().expect("closer");
+        assert!(
+            reaped,
+            "the server was not given its grace to end by itself"
+        );
     }
 
     /// **A reap that cannot be started leaves the child**: the child is killed
