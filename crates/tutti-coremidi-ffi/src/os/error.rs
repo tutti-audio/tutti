@@ -131,12 +131,6 @@ pub enum Error {
         /// How many CoreMIDI listed.
         listed: usize,
     },
-    /// The Product Instance Id is past the 42 characters CoreMIDI accepts.
-    #[error("a Product Instance Id of {len} characters is past the 42 CoreMIDI accepts")]
-    InstanceIdTooLong {
-        /// Its length in characters (the id is ASCII, so bytes are characters).
-        len: usize,
-    },
     /// The endpoint a send was for has been dropped.
     #[error("the endpoint was dropped")]
     EndpointGone,

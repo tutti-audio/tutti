@@ -9,13 +9,17 @@ use tutti_coremidi_ffi::{
 use tutti_platform::MainThreadMarker;
 use tutti_ump::{
     BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockInfo,
-    FunctionBlocks, GroupSpan, ManufacturerId, Message, Midi1Port, OsFunctionBlock, Protocol,
-    SoftwareRevision, U7, UiHint, Ump, Utility, read_function_block,
+    FunctionBlocks, GroupSpan, ManufacturerId, Message, Midi1Port, OsFunctionBlock,
+    ProductInstanceId, Protocol, SoftwareRevision, U7, UiHint, Ump, Utility, read_function_block,
 };
 
 const KEYS: &str = "tutti-ffi-test Keys";
 const PORT: &str = "tutti-ffi-test Port";
 const INSTANCE: &str = "tutti-ffi-test-1";
+
+fn instance(text: &str) -> ProductInstanceId {
+    ProductInstanceId::new(text).expect("printable ASCII, at most 42 bytes")
+}
 
 /// A bound that only guards a hang: each message arrives on CoreMIDI's thread.
 const HANG_GUARD: Duration = Duration::from_secs(10);
@@ -91,7 +95,7 @@ fn endpoint(on_ump: impl FnMut(Option<Duration>, Ump) + Send + 'static) -> Optio
         "tutti-ffi-test-endpoint",
         Protocol::Midi2,
         &identity(),
-        INSTANCE,
+        Some(&instance(INSTANCE)),
         &[(keys(), Some(KEYS)), (port(), Some(PORT))],
         on_ump,
     );
@@ -192,7 +196,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
         "tutti-ffi-test-ci",
         Protocol::Midi2,
         &identity(),
-        INSTANCE,
+        Some(&instance(INSTANCE)),
         &[(ci, None)],
         |_, _| {},
     );
@@ -205,33 +209,27 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     );
 }
 
-/// A Product Instance Id of 43 characters is refused by name, and 42 is not
-/// (`MIDIUMPMutableEndpoint` accepts at most 42): the refusal comes before any
-/// call into CoreMIDI. A 42-character id then creates the endpoint on macOS 15 or
-/// later, and is refused as unsupported before it.
-pub fn an_instance_id_past_42_characters_is_refused_by_name() {
-    let create = |instance: &str| {
-        UmpEndpoint::new(
-            main_thread(),
-            "tutti-ffi-test-instance",
-            Protocol::Midi2,
-            &identity(),
-            instance,
-            &[(keys(), None)],
-            |_, _| {},
-        )
-    };
-    assert_eq!(
-        create(&"x".repeat(43)).err(),
-        Some(Error::InstanceIdTooLong { len: 43 })
-    );
+/// **The longest Product Instance Id, 42 characters, is listed back intact**
+/// (M2-104 §7.1.5): `ProductInstanceId` makes a longer one unwritable, and
+/// CoreMIDI accepts the longest.
+pub fn a_42_character_instance_id_is_listed_back_intact() {
+    let longest = "x".repeat(42);
     let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
-    let longest = create(&"x".repeat(42));
-    if major >= 15 {
-        assert!(longest.is_ok(), "macOS 15 accepts 42 characters");
-    } else {
-        assert_eq!(longest.err(), Some(Error::UmpEndpointUnsupported));
+    let created = UmpEndpoint::new(
+        main_thread(),
+        "tutti-ffi-test-instance",
+        Protocol::Midi2,
+        &identity(),
+        Some(&instance(&longest)),
+        &[(keys(), Some(KEYS))],
+        |_, _| {},
+    );
+    if major < 15 {
+        assert_eq!(created.err(), Some(Error::UmpEndpointUnsupported));
+        return;
     }
+    let _endpoint = created.expect("macOS 15 accepts 42 characters");
+    assert_eq!(listed().instance.as_deref(), Some(longest.as_str()));
 }
 
 /// What an output port sends to the endpoint's destination reaches the callback
@@ -365,7 +363,7 @@ pub fn cases() {
         an_endpoint_lists_the_blocks_it_was_created_with,
         the_block_numbers_read_back_are_the_numbers_coremidi_lists,
         a_block_declaring_a_midi_ci_version_is_refused_by_name,
-        an_instance_id_past_42_characters_is_refused_by_name,
+        a_42_character_instance_id_is_listed_back_intact,
         an_endpoint_receives_what_is_sent_to_its_destination,
         what_the_sender_publishes_reaches_a_port_connected_to_the_source,
         a_sender_on_another_thread_sees_the_endpoint_go_by_name,

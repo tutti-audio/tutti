@@ -36,12 +36,9 @@ use objc2_foundation::{NSArray, NSError, NSString};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 use tutti_platform::MainThreadMarker;
-use tutti_ump::{DeviceIdentity, FunctionBlockId, FunctionBlockInfo, Protocol, U7, Ump};
-
-/// The longest Product Instance Id CoreMIDI accepts, in characters
-/// (`MIDIUMPMutableEndpoint`'s header: a longer one is an error). The id is ASCII
-/// (M2-104 §7.1.5), so its length in bytes is its length in characters.
-const MAX_INSTANCE_ID: usize = 42;
+use tutti_ump::{
+    DeviceIdentity, FunctionBlockId, FunctionBlockInfo, ProductInstanceId, Protocol, U7, Ump,
+};
 
 /// A 14-bit value as the two 7-bit bytes the wire holds it in, LSB first (M2-104
 /// §7.1.3): `MIDIUInteger14`.
@@ -141,7 +138,7 @@ impl UmpSender {
 impl UmpEndpoint {
     /// Creates the endpoint `name` carrying `protocol`, identified as `device`
     /// (the Device Identity, M2-104 §7.1.3) with Product Instance Id `instance`
-    /// (§7.1.5, empty for none), registers `blocks` as its static Function Blocks
+    /// (§7.1.5, `None` for none), registers `blocks` as its static Function Blocks
     /// and enables it. `on_ump` gets each message sent to it, on CoreMIDI's
     /// delivery thread. `main` proves the caller is on the main thread.
     ///
@@ -155,7 +152,7 @@ impl UmpEndpoint {
     /// Before any call into CoreMIDI: [`Error::ReservedProtocol`] for a reserved
     /// `protocol`, [`Error::Block`] for a block CoreMIDI cannot carry (checked
     /// before the class lookup, so it is the same on every macOS), and
-    /// [`Error::InstanceIdTooLong`] (past 42 characters). Then [`Error::UmpEndpointUnsupported`] before
+    /// Then [`Error::UmpEndpointUnsupported`] before
     /// macOS 15, [`Error::Exception`] when CoreMIDI raises an Objective-C
     /// exception, [`Error::Objc`] or [`Error::NoObject`] when CoreMIDI refuses
     /// the endpoint, [`Error::BlockNumber`] for a number the spec cannot hold, and
@@ -166,7 +163,7 @@ impl UmpEndpoint {
         name: &str,
         protocol: Protocol,
         device: &DeviceIdentity,
-        instance: &str,
+        instance: Option<&ProductInstanceId>,
         blocks: &[(FunctionBlockInfo, Option<&str>)],
         on_ump: F,
     ) -> Result<Self, Error>
@@ -175,11 +172,6 @@ impl UmpEndpoint {
     {
         let protocol = protocol_id(protocol)?;
         let blocks = platform_blocks(blocks)?;
-        if instance.len() > MAX_INSTANCE_ID {
-            return Err(Error::InstanceIdTooLong {
-                len: instance.len(),
-            });
-        }
         // `ClassType::class` panics on a missing class; the lookup by name is the
         // availability check.
         if AnyClass::get(c"MIDIUMPMutableEndpoint").is_none()
@@ -251,7 +243,7 @@ fn create(
     name: &str,
     protocol: MIDIProtocolID,
     device: &DeviceIdentity,
-    instance: &str,
+    instance: Option<&ProductInstanceId>,
     blocks: &[PlatformBlock],
     receiver: &Receiver,
     made: &mut Option<Retained<MIDIUMPMutableEndpoint>>,
@@ -282,7 +274,7 @@ fn create(
             MIDIUMPMutableEndpoint::alloc(),
             &NSString::from_str(name),
             &info,
-            &NSString::from_str(instance),
+            &NSString::from_str(instance.map_or("", ProductInstanceId::as_str)),
             Protocol_(protocol),
             receiver.block().cast::<DynBlock<_>>(),
         )
