@@ -1,7 +1,10 @@
 //! What a failed load says.
 
 use std::error::Error as _;
-use std::io::{self, Cursor, Read};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::sync::Arc;
+
+use tutti_platform::{Open, ReadSeek};
 
 use tutti_sf2::{Error, SoundFont};
 
@@ -14,11 +17,30 @@ impl Read for Broken {
     }
 }
 
+impl Seek for Broken {
+    fn seek(&mut self, _: SeekFrom) -> io::Result<u64> {
+        Ok(0)
+    }
+}
+
+/// A source whose every reader fails.
+struct BrokenSource;
+
+impl Open for BrokenSource {
+    fn open(&self) -> io::Result<Box<dyn ReadSeek>> {
+        Ok(Box::new(Broken))
+    }
+
+    fn name(&self) -> String {
+        "a broken disk".into()
+    }
+}
+
 /// `Io` does not echo its source as its message: the message says what was
 /// being done, and the cause is the `source`.
 #[test]
 fn an_io_failure_names_the_task_and_keeps_the_cause_as_its_source() {
-    let error = SoundFont::from_reader(&mut Broken).unwrap_err();
+    let error = SoundFont::open(Arc::new(BrokenSource) as Arc<dyn Open>).unwrap_err();
     assert!(matches!(error, Error::Io(_)));
     assert_eq!(error.to_string(), "reading the SoundFont failed");
     let cause = error.source().expect("the cause is the source");
@@ -41,7 +63,7 @@ fn opening_a_missing_path_is_an_io_not_found() {
 /// Spec: sf2.riff.damage.rejected
 #[test]
 fn a_truncated_file_is_an_io_error() {
-    let error = SoundFont::from_reader(&mut Cursor::new(b"RIFF".to_vec())).unwrap_err();
+    let error = SoundFont::open(b"RIFF".to_vec()).unwrap_err();
     assert!(matches!(error, Error::Io(_)), "{error:?}");
 }
 
@@ -54,7 +76,7 @@ fn a_wrong_form_type_names_what_it_found() {
     // The RIFF size is honoured, so it is true: the form type and 16 more bytes.
     let mut file = b"RIFF\x14\0\0\0WAV\x01".to_vec();
     file.extend([0; 16]);
-    let error = SoundFont::from_reader(&mut Cursor::new(file)).unwrap_err();
+    let error = SoundFont::open(file).unwrap_err();
     let message = error.to_string();
     assert!(message.contains("'sfbk'"), "{message}");
     assert!(message.contains("'WAV?'"), "{message}");
@@ -71,6 +93,6 @@ fn a_wrong_form_type_names_what_it_found() {
 /// Spec: sf2.riff.signature
 #[test]
 fn a_file_that_is_not_riff_is_refused() {
-    let error = SoundFont::from_reader(&mut Cursor::new(b"OggS\0\0\0\0".to_vec())).unwrap_err();
+    let error = SoundFont::open(b"OggS\0\0\0\0".to_vec()).unwrap_err();
     assert!(matches!(error, Error::RiffChunkNotFound), "{error:?}");
 }

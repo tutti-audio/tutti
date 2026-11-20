@@ -42,6 +42,7 @@ use tutti_transport::TempoReader;
 use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
+use super::host_edits::EditPort;
 use super::instance::{Figures, Instance, Lost};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
@@ -91,6 +92,10 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// delivers through the same. `None` for a served plugin, whose own
     /// listener reports it.
     pub(super) reporting: Option<Reporting>,
+    /// The host's parameter writes (`host_edits`), drained at the head of each
+    /// block a Processor renders. `None` for a plugin whose writes do not come
+    /// through this node (a served one's go to its bridge).
+    pub(super) edits: Option<EditPort>,
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
@@ -579,6 +584,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             lost,
             figures,
             reporting: None,
+            edits: None,
             descriptor,
             reload,
             pipeline,
@@ -660,6 +666,28 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// (`tutti-plugin`) does it through this.
     pub fn go_offline(&mut self) {
         self.transport.go_offline();
+    }
+}
+
+/// Moves the host's parameter writes since the last call into the block's
+/// changes, at chunk frame `at`: each is sent though the plugin has the value
+/// from this node already, since the write says where it stands, and carries
+/// the epoch it was drained in. Allocation-free, and takes no lock.
+pub(super) fn take_edits(edits: Option<&EditPort>, params: &mut ParamDelivery, at: usize) {
+    let Some(edits) = edits else {
+        return;
+    };
+    let offset = i32::try_from(at).unwrap_or(i32::MAX);
+    edits.drain(|id, value, epoch| {
+        params.write(id, offset, value.get(), epoch);
+    });
+}
+
+/// Drops the host writes a state or preset load made stale since they were
+/// drained, before the chunk that holds them is sent.
+pub(super) fn void_stale_edits(edits: Option<&EditPort>, params: &mut ParamDelivery) {
+    if let Some(edits) = edits {
+        params.void_writes_before(edits.epoch());
     }
 }
 

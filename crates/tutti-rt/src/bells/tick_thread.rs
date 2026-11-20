@@ -30,6 +30,9 @@ impl Tick {
     /// The thread ticks: nothing to do here.
     pub(super) fn run(&self, _shared: &Shared) {}
 
+    /// The thread runs the last pass on its way out: nothing to do here.
+    pub(super) fn shut(&self, _shared: &Shared) {}
+
     #[cfg(any(test, loom))]
     pub(super) fn none() -> Self {
         Self { _thread: None }
@@ -55,10 +58,11 @@ impl Shared {
     }
 
     /// Park until a bell has a waiter to wake or the set is shut, then run
-    /// one pass; `false` once shut. The tick thread loops on it.
+    /// one pass; `false` once shut, after the last pass. The tick thread loops on it.
     pub(super) fn tick_once(&self, parker: &mut Parker) -> bool {
         parker.park(|| self.shut.load(Ordering::Acquire) || self.pending());
         if self.shut.load(Ordering::Acquire) {
+            self.last_pass();
             return false;
         }
         self.pass();

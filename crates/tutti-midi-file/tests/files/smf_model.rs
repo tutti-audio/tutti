@@ -8,6 +8,7 @@
 //! reading of the bytes, never on the bytes.
 
 use crate::common::{self, metrical, sequences, track, unspecified};
+use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 
@@ -56,7 +57,7 @@ fn off(channel: u8, key: u8, vel: u8) -> FileEvent {
 }
 
 fn read(bytes: &[u8]) -> MidiFile {
-    MidiFile::from_bytes(bytes).expect("reads")
+    read_bytes(bytes).expect("reads")
 }
 
 /// A file one of every event the SMF has, in a track.
@@ -129,7 +130,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         let bytes = smf(format, &tracks);
         let file = read(&bytes);
         assert_eq!(
-            MidiFileKind::detect(&bytes),
+            MidiFileKind::detect(bytes.clone()).unwrap(),
             Some(MidiFileKind::StandardMidiFile)
         );
         let ticks_per_quarter = match file.timebase() {
@@ -221,7 +222,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         assert_eq!(at(23).1, FileEvent::Escape(vec![1, 2, 3].into()));
         assert_eq!(at(24).0, Tick(20 + u64::from(BEAT)));
 
-        let written = file.to_bytes();
+        let written = encoded(&file);
         // SMF 1.0 section 2.1: the header's format word, after the chunk type
         // "MThd" and the length 6.
         assert_eq!(&written[8..10], &format.to_be_bytes());
@@ -250,7 +251,7 @@ fn the_end_of_a_track_is_kept() {
         metrical(&file).beat_at(metrical(&file).end()),
         Beat::new(4.0)
     );
-    assert_eq!(read(&file.to_bytes()).tracks()[0].end(), Tick(1920));
+    assert_eq!(read(&encoded(&file)).tracks()[0].end(), Tick(1920));
 }
 
 /// A delta on a non-note event advances the clock: the note after a SysEx a
@@ -293,7 +294,7 @@ fn format_2_keeps_its_sequences_apart() {
             ],
         ],
     ));
-    assert_eq!(&file.to_bytes()[8..10], &[0, 2]);
+    assert_eq!(&encoded(&file)[8..10], &[0, 2]);
     assert!(
         file.timebase().metrical().is_none(),
         "no one timeline to ask"
@@ -457,7 +458,7 @@ fn the_tempo_map_follows_the_file() {
     assert_eq!(metrical(&file).beat_at(Tick(480)), Beat::new(1.0));
     // And it comes back out: the tempo events are events of the track.
     assert_eq!(
-        metrical(&read(&file.to_bytes())).seconds_at(beats(8.0)),
+        metrical(&read(&encoded(&file))).seconds_at(beats(8.0)),
         metrical(&file).seconds_at(beats(8.0))
     );
 }
@@ -561,7 +562,7 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
     assert_eq!(points[1].tempo, Bpm::of(60_000_000.0));
     assert!((points[2].tempo.get() - 60_000_000.0 / 16_777_215.0).abs() < 1e-12);
     // The zero is written back.
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 /// Writing a tempo above the wire's range writes the fastest quarter, 1 us,
@@ -612,7 +613,7 @@ fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
 fn a_zero_division_is_refused() {
     let bytes = build_smf(0, Division::Metrical(0), &[vec![]]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: None,
             offset: 0,
@@ -639,10 +640,10 @@ fn no_prefix_of_a_valid_file_is_accepted() {
             ],
         ],
     );
-    assert!(MidiFile::from_bytes(&bytes).is_ok());
+    assert!(read_bytes(&bytes).is_ok());
     for n in 0..bytes.len() {
         assert!(
-            MidiFile::from_bytes(&bytes[..n]).is_err(),
+            read_bytes(&bytes[..n]).is_err(),
             "the first {n} of {} bytes were accepted",
             bytes.len()
         );
@@ -655,7 +656,7 @@ fn a_chunk_cut_short_is_truncated() {
     let bytes = smf(0, &[everything()]);
     let cut = &bytes[..bytes.len() - 5];
     assert!(matches!(
-        MidiFile::from_bytes(cut),
+        read_bytes(cut),
         Err(ReadError::Smf {
             track: None,
             offset: 14,
@@ -664,7 +665,7 @@ fn a_chunk_cut_short_is_truncated() {
     ));
     // Cut inside the 8-byte chunk header of the track.
     assert!(matches!(
-        MidiFile::from_bytes(&bytes[..14 + 5]),
+        read_bytes(&bytes[..14 + 5]),
         Err(ReadError::Smf {
             track: None,
             offset: 14,
@@ -688,7 +689,7 @@ fn a_file_missing_a_track_is_truncated() {
     let one = smf(1, &[vec![RawEvent::note_on(0, 0, 60, 100)]]);
     let cut = &two[..one.len()];
     assert!(matches!(
-        MidiFile::from_bytes(cut),
+        read_bytes(cut),
         Err(ReadError::Smf {
             track: None,
             offset,
@@ -710,7 +711,7 @@ fn a_track_that_ends_mid_event_is_a_parse_error() {
     bytes.extend_from_slice(&[0x00, 0x90, 0x3C]);
     // The header chunk is 14 bytes and the track chunk's own header 8.
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: Some(0),
             offset: 22,
@@ -729,7 +730,7 @@ fn a_meta_event_longer_than_its_chunk_is_an_event_cut_off() {
     bytes.extend_from_slice(&4u32.to_be_bytes());
     // A Text meta event declaring 5 bytes of text and holding none.
     bytes.extend_from_slice(&[0x00, 0xFF, 0x01, 0x05]);
-    let err = MidiFile::from_bytes(&bytes).unwrap_err();
+    let err = read_bytes(&bytes).unwrap_err();
     assert!(
         matches!(
             err,
@@ -756,7 +757,7 @@ fn a_chunk_past_the_declared_tracks_is_named_where_it_starts() {
     bytes.extend_from_slice(&4u32.to_be_bytes());
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert!(matches!(
-        MidiFile::from_bytes(&bytes),
+        read_bytes(&bytes),
         Err(ReadError::Smf {
             track: None,
             offset,
@@ -835,7 +836,7 @@ fn a_velocity_zero_note_on_closes_the_note() {
 fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
     let file = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 0)]]));
     assert_eq!(unspecified(&file, 0)[0].1, on(0, 60, 0));
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 // ---- building a file -----------------------------------------------------
@@ -858,7 +859,7 @@ fn the_writer_frames_a_file_as_the_spec_bytes() {
     )
     .unwrap();
     assert_eq!(
-        file.to_bytes(),
+        encoded(&file),
         [
             // MThd, length 6, format 1, two tracks, 480 ticks per quarter.
             0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 2, 0x01, 0xE0, //
@@ -935,7 +936,7 @@ fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
         })
         .collect();
     let file = crate::common::format0(SMF_DIVISION, events.into_iter().collect()).unwrap();
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 /// What an SMF cannot hold is refused rather than dropped on write: a packet,
@@ -985,7 +986,7 @@ fn an_event_longer_than_28_bits_is_too_large() {
 fn the_widest_delta_round_trips() {
     let file =
         crate::common::format0(SMF_DIVISION, track(vec![(0x0FFF_FFFF, on(0, 60, 1))])).unwrap();
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 /// A file written to a path reads back from it, and a path that is not there
@@ -1007,11 +1008,8 @@ fn a_file_reads_and_writes_a_path() {
 #[test]
 fn bytes_of_neither_container_are_named_as_such() {
     assert!(matches!(
-        MidiFile::from_bytes(b"RIFF....WAVE"),
+        read_bytes(b"RIFF....WAVE"),
         Err(ReadError::UnknownFormat)
     ));
-    assert!(matches!(
-        MidiFile::from_bytes(b""),
-        Err(ReadError::UnknownFormat)
-    ));
+    assert!(matches!(read_bytes(b""), Err(ReadError::UnknownFormat)));
 }

@@ -25,9 +25,10 @@ const BLOCK: usize = 256;
 
 fn font() -> Arc<SoundFont> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
-    let mut file = std::fs::File::open(&path)
-        .unwrap_or_else(|e| panic!("test soundfont missing at {}: {e}", path.display()));
-    Arc::new(SoundFont::from_reader(&mut file).expect("parses"))
+    Arc::new(
+        SoundFont::open(path.as_path())
+            .unwrap_or_else(|e| panic!("test soundfont at {} does not load: {e}", path.display())),
+    )
 }
 
 fn unit() -> SoundFontUnit<f32> {

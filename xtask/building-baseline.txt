@@ -422,7 +422,6 @@ tutti-session  option-arg  crates/tutti-session/src/bounce.rs::Bounce::root_topo
 tutti-session  option-arg  crates/tutti-session/src/builder.rs::SessionBuilder::plugin_recovery
 
 # tutti-sf2
-tutti-sf2  ctor-result  crates/tutti-sf2/src/soundfont.rs::SoundFont::from_reader
 
 # tutti-soundfont
 tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_device

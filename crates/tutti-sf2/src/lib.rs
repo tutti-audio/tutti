@@ -18,7 +18,7 @@
 //! percussion) and its program a `U7`; a preset whose file values are neither
 //! cannot be played but is kept, as the specification says (section 7.2), and
 //! reports `None`. An exclusive class is an `Option<NonZeroU8>`: `None` is class 0.
-//! `SoundFont::open` reads a path and `SoundFont::from_reader` any `Read`. The
+//! `SoundFont::open` reads any `tutti_platform::Asset`: a path, bytes, or an app's own source. The
 //! crate's failure type is `Error`, with a `Result` alias.
 //!
 //! ```no_run

@@ -15,6 +15,11 @@ impl Tick {
         shared.pass();
     }
 
+    /// No thread: the drop runs the last pass itself.
+    pub(super) fn shut(&self, shared: &Shared) {
+        shared.last_pass();
+    }
+
     #[cfg(any(test, loom))]
     pub(super) fn none() -> Self {
         Self

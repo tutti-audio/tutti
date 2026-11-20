@@ -137,8 +137,7 @@ fn an_f64_instrument_gain_scales_a_held_sine_linearly() {
 #[test]
 fn an_f64_general_midi_rig_is_silent_then_renders_a_finite_note() {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
-    let mut file = std::fs::File::open(&path).expect("the test font is in the checkout");
-    let font = Arc::new(SoundFont::from_reader(&mut file).expect("the test font parses"));
+    let font = Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
     let unit = SoundFontUnit::<f64>::new(font, Settings::new()).expect("builds");
 
     let mut session = session();
