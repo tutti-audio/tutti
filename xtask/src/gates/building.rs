@@ -243,6 +243,12 @@ pub(super) const ALLOW: &[Allow] = &[
         rules: &[Rule::CtorResult],
         reason: "a conversion from a Function Block Info Notification and a name, not a configuration: it refuses what no block can hold, with a named error",
     },
+    ty(
+        "crates/tutti-midi-hardware/",
+        "MidiHardwareConfig",
+        WIDTH,
+        NOT_A_NODE,
+    ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualSource::open",
