@@ -76,7 +76,8 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// that holds an `Executor` clone keeps the executor alive, so that drop never comes:
 /// tutti's own futures never hold a clone, and a spawner passes a future what it needs
 /// instead. A long-lived future ends on its own stop flag before the executor drops. A
-/// future that needs deadlines holds a [`Timer`], which keeps nothing alive.
+/// future that needs deadlines holds a [`Timer`], which keeps nothing alive, and a future
+/// that spawns later holds a [`WeakExecutor`] and upgrades only for the spawn.
 ///
 /// The executor's deadline queue closes with it: every [`Sleep`] pending wakes and resolves
 /// `Err(`[`Shutdown`]`)`, and one made or polled later does at once; nothing fires deadlines after that.
@@ -138,7 +139,7 @@ impl Default for Executor {
     }
 }
 
-/// A handle to an [`Executor`] that keeps it from nothing, made by
+/// A handle to an [`Executor`] that keeps nothing alive, made by
 /// [`Executor::downgrade`]: the `Weak` of the executor's `Arc`.
 ///
 /// Work that is queued or handed out before it runs (a load the app runs later, a task
