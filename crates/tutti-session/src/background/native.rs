@@ -6,10 +6,15 @@ use std::num::NonZeroUsize;
 use super::Background;
 
 /// The threads a [`Background`] started, each group stopped and joined on drop.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct Threads(Vec<tutti_platform::Threads>);
 
 impl Threads {
+    /// No thread yet.
+    pub(super) fn new() -> Self {
+        Self(Vec::new())
+    }
+
     /// Whether none was started.
     pub(super) fn is_empty(&self) -> bool {
         self.0.is_empty()

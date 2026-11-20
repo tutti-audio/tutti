@@ -297,7 +297,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     /// use tutti_session::Session;
     /// use tutti_units::SampleRate;
     ///
-    /// let session: tutti_session::OfflineSession<&str, f64> = Session::builder()
+    /// let (session, _background): (tutti_session::OfflineSession<&str, f64>, _) = Session::builder()
     ///     .float::<f64>()
     ///     .sample_rate(SampleRate::SR_44K1)
     ///     .build()

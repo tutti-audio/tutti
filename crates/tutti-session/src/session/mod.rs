@@ -71,7 +71,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// use tutti_nodes::testing::Const;
 ///
 /// // One global output: the mono device takes it as it is, unfolded.
-/// let mut session = Session::builder()
+/// let (mut session, _background) = Session::builder()
 ///     .outputs_floor(ChannelLayout::MONO)
 ///     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(64))).build()
 ///     .unwrap();

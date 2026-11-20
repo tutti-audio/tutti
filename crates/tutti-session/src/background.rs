@@ -1,7 +1,7 @@
 //! [`Background`]: what runs the session's background work.
 //!
 //! The session queues its background work (a file load, a plugin round trip, a streamer's
-//! refills, a take's pump) on an [`Executor`](tutti_platform::Executor) it keeps to itself.
+//! refills, a take's pump) on an `tutti_platform::Executor` it keeps to itself.
 //! `build` hands the app the other half: a `Background` that runs the queue, on threads
 //! the app starts or on the calling thread. The platform's difference (a web page has no
 //! threads) is the one `os` module pair's.
@@ -97,7 +97,7 @@ impl Background {
     /// A driver over a new executor, with no thread started.
     pub(crate) fn new() -> Self {
         Self {
-            threads: os::Threads::default(),
+            threads: os::Threads::new(),
             executor: Executor::new(),
         }
     }
