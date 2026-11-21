@@ -390,13 +390,13 @@ where
     ))
 }
 
-impl From<ClientOverError> for IpcError {
-    fn from(e: ClientOverError) -> Self {
-        match e {
-            ClientOverError::TooWide(wide) => Self::TooWide(wide),
-            ClientOverError::Width { activated, hosted } => {
-                Self::WidthMismatch { activated, hosted }
-            }
+impl ClientOverError {
+    /// The failure as the [`IpcError`] a load reports.
+    #[must_use]
+    pub fn into_bridge(self) -> IpcError {
+        match self {
+            Self::TooWide(wide) => IpcError::TooWide(wide),
+            Self::Width { activated, hosted } => IpcError::WidthMismatch { activated, hosted },
         }
     }
 }

@@ -429,7 +429,7 @@ impl PluginClient<Unbound> {
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
         )
-        .map_err(IpcError::from)?;
+        .map_err(tutti_plugin_host::ClientOverError::into_bridge)?;
         Ok(Self {
             bridge,
             descriptor,

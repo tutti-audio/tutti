@@ -1018,6 +1018,7 @@ mod tests {
             matches!(
                 reports.as_slice(),
                 [PluginInvalidation::RateRefused(refusal)] if refusal.rate == SampleRate::SR_96K
+                    && matches!(refusal.cause, RateRefusalCause::Deactivated { .. })
             ),
             "{reports:?}"
         );
