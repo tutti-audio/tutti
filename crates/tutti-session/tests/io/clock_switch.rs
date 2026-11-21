@@ -44,7 +44,7 @@ fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>
     s: &mut Session<K, C>,
     level: f32,
 ) {
-    let (node, _) = s.graph().add(ForkByClone(Const::mono(level)));
+    let node = s.graph().add(ForkByClone(Const::mono(level)));
     for port in 0..2 {
         s.graph()
             .set_sources_unfaded(Root::output(port), [OutPort::new(node, 0)])
@@ -199,8 +199,8 @@ fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
 fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
     let mut s = system();
     play(&s);
-    let (osc, _) = s.graph().add(ForkByClone(Const::mono(0.1)));
-    let (lim, _) = s.graph().add(ForkByClone(Through::mono()));
+    let osc = s.graph().add(ForkByClone(Const::mono(0.1)));
+    let lim = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
         .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();
@@ -210,7 +210,7 @@ fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
     let _ = s.update();
     let before = wait_past(&mut s, 0);
     // An edit not yet committed feeds the node from a node it feeds.
-    let (loop_back, _) = s.graph().add(ForkByClone(Through::mono()));
+    let loop_back = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
         .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])
         .unwrap();
@@ -709,7 +709,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
     let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     // The timer, then a card on a thread of its own.
     let mut s = system();
-    let (node, _) = s.graph().add(ForkByClone(Renderer {
+    let node = s.graph().add(ForkByClone(Renderer {
         log: log.clone(),
         inside: Default::default(),
     }));

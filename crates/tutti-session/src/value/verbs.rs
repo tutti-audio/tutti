@@ -36,7 +36,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// use tutti_units::{Hz, Q};
     ///
     /// let mut session = Session::builder().build().unwrap();
-    /// let (filter, _) = session
+    /// let filter = session
     ///     .graph()
     ///     .add(SvfFilterNode::<f32>::from(
     ///         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)

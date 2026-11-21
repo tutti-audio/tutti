@@ -61,7 +61,7 @@ fn rig(at: usize) -> Rig {
         blocks: Arc::clone(&blocks),
         handle: Arc::clone(&handle),
     };
-    let (node, _) = session.graph().add(ForkByClone(node));
+    let node = session.graph().add(ForkByClone(node));
     session.graph().connect(node, Root).unwrap();
     Rig {
         session,

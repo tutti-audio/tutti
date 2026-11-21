@@ -3,7 +3,6 @@
 use crate::loading::{LoadPlugin, Spec};
 use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
-use tutti_session::AddedInstrument;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_units::{Amplitude, Seconds};
@@ -36,7 +35,7 @@ impl Subject for Poly {
             ..SynthConfig::default()
         });
         let mut session = offline_session();
-        let AddedInstrument { handle, .. } = session
+        let handle = session
             .add_instrument(synth)
             .expect("a synth is an instrument");
         Rig::played(session, handle)
@@ -64,7 +63,7 @@ impl Subject for Soundfont {
             std::sync::Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
         let unit = settings.build(font).expect("builds");
         let mut session = offline_session();
-        let AddedInstrument { handle, .. } = session
+        let handle = session
             .add_instrument(unit)
             .expect("a SoundFont unit is an instrument");
         Rig::played(session, handle)

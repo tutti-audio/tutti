@@ -529,8 +529,8 @@ device.stop(); device.start()?;
 **Add and wire nodes.**
 
 ```rust
-let (pad, _) = s.graph().add(PolySynth::new(SynthConfig::default())?);
-let (filter, _) = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
+let pad = s.graph().add(PolySynth::new(SynthConfig::default())?);
+let filter = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
 s.graph().connect(pad.out(0), filter.input(0))?;
 s.graph().connect(filter, Root)?;
 s.graph().crossfade(filter, other_filter, Seconds::new(0.005))?;  // retried by update() while Busy
@@ -884,9 +884,9 @@ The other host ids stay in the host: `ExportError::NotForkable` names an
 use tutti::prelude::*;
 
 let (mut s, _device) = Session::builder().build_device(DeviceSelector::Default)?;
-let (filter, _) = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
-let (pad, _) = s.graph().add(PolySynth::new(SynthConfig::default())?);
-let (kick_bus, _) = s.graph().add(BusStripNode::stereo());
+let filter = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
+let pad = s.graph().add(PolySynth::new(SynthConfig::default())?);
+let kick_bus = s.graph().add(BusStripNode::stereo());
 s.graph().connect(pad.out(0), filter.input(0))?;
 s.graph().connect(filter, Root)?;
 

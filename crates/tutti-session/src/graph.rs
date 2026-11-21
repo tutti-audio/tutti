@@ -6,7 +6,7 @@
 //!
 //! | `Graph` | the editor |
 //! |---|---|
-//! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls handed back, its params and reclaimer kept ([`SessionNode`]) |
+//! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept ([`SessionNode`]) |
 //! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written into `editor.spec_mut()` (a port holds a set of sources, which the graph sums) |
 //! | `replace`, `crossfade` | `Editor::replace_or_swap` with a [`Fade`]: a plain swap when there is nothing to fade from |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
@@ -150,15 +150,23 @@ tutti_rt::id! {
 }
 
 /// What [`Graph::crossfade`] came to, when the graph did not refuse it.
-#[derive(Debug)]
-pub enum Crossfade<C> {
-    /// Swapped in: the incoming node's controls, its params addressed.
-    Landed(C),
+pub enum Crossfade<N> {
+    /// Swapped in: the incoming node's key, its params addressed.
+    Landed(Key<N>),
     /// The graph is re-preparing: the node waits, and the update that finds
     /// the graph resumed swaps it in and reports
-    /// [`SessionEvent::CrossfadeLanded`](crate::SessionEvent) with this id
-    /// (its controls boxed), or `CrossfadeFailed`.
+    /// [`SessionEvent::CrossfadeLanded`](crate::SessionEvent) with this id, or
+    /// `CrossfadeFailed`.
     Waiting(CrossfadeId),
+}
+
+impl<N> std::fmt::Debug for Crossfade<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Landed(key) => f.debug_tuple("Landed").field(key).finish(),
+            Self::Waiting(id) => f.debug_tuple("Waiting").field(id).finish(),
+        }
+    }
 }
 
 /// Why a swap ([`Graph::replace`], [`Graph::crossfade`]) took nothing. The
@@ -183,13 +191,12 @@ struct Entry {
     /// What frees the values its published cells retired
     /// ([`SessionNode::reclaimer`]), run by [`Graph::reclaim`].
     reclaimer: Option<crate::Reclaimer>,
-    /// The node's controls ([`IntoNode::Controls`]), a clone of what
-    /// [`Graph::add`] handed out, kept for the node's life: a removal or a
-    /// swap moves them to the graph's retiring list, dropped once the
-    /// outgoing node has left the render, so a handle whose last drop releases
-    /// something (a voice's stream) holds it while the node still renders.
-    /// `None` for a node placed without [`SessionNode`]. Read by
-    /// [`Graph::controls`].
+    /// The node's controls ([`IntoNode::Controls`]), kept for the node's
+    /// life: a removal or a swap moves them to the graph's retiring list,
+    /// dropped once the outgoing node has left the render, so a handle whose
+    /// last drop releases something (a voice's stream) holds it while the node
+    /// still renders. `None` for a node placed without [`SessionNode`]. Read
+    /// by [`Graph::controls`].
     controls: Option<Box<dyn Any + Send>>,
 }
 
@@ -204,14 +211,14 @@ struct Local<F: Float> {
 
 /// A node waiting to be swapped in, its type erased.
 trait ErasedSwap<F: Float>: Send {
-    /// Swap it in under `node`; on success, its controls, boxed.
+    /// Swap it in under `node`.
     fn swap(
         self: Box<Self>,
         graph: &mut Graph<F>,
         node: NodeKey,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap<F>>>>;
+    ) -> Result<(), ReplaceRefused<Box<dyn ErasedSwap<F>>>>;
 }
 
 struct Swap<N>(N);
@@ -227,11 +234,11 @@ where
         node: NodeKey,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap<F>>>> {
+    ) -> Result<(), ReplaceRefused<Box<dyn ErasedSwap<F>>>> {
         match graph.swap_node(node, self.0, fade, law) {
             Ok(controls) => {
-                graph.address::<N>(node, &controls);
-                Ok(Box::new(controls))
+                graph.address::<N>(node, controls);
+                Ok(())
             }
             Err(ReplaceRefused::Busy(n)) => Err(ReplaceRefused::Busy(Box::new(Swap(n)))),
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
@@ -250,9 +257,9 @@ impl ErasedSwap<f32> for PluginSwap {
         node: NodeKey,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap<f32>>>> {
+    ) -> Result<(), ReplaceRefused<Box<dyn ErasedSwap<f32>>>> {
         match graph.replace_plugin(node, self.0, fade, law) {
-            Ok(()) => Ok(Box::new(())),
+            Ok(()) => Ok(()),
             Err(ReplaceRefused::Busy(c)) => Err(ReplaceRefused::Busy(Box::new(PluginSwap(c)))),
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
         }
@@ -284,7 +291,6 @@ pub(crate) enum Retried {
     Landed {
         node: NodeKey,
         id: CrossfadeId,
-        controls: Box<dyn Any + Send>,
     },
     Failed {
         node: NodeKey,
@@ -766,10 +772,9 @@ impl<F: Float> Graph<F> {
 
     // --- Nodes ---
 
-    /// Adds `node` to the graph, unwired, and returns its handle and its
-    /// controls: **the one way a node enters**. Its fork source goes to the
-    /// editor, so an export forks it as its type says; it is prepared at the
-    /// graph's rate. What the node says of its controls is kept
+    /// Adds `node` to the graph, unwired, and returns its key: **the one way a
+    /// node enters**. Its fork source goes to the editor, so an export forks it
+    /// as its type says; it is prepared at the graph's rate. What the node says of its controls is kept
     /// ([`SessionNode`]): its params are addressed
     /// ([`SessionNode::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
     /// modulation find them), its reclaimer is swept by the session's
@@ -780,10 +785,20 @@ impl<F: Float> Graph<F> {
     /// [`Unforkable`](tutti_graph::Unforkable), or is a
     /// [`Params`](tutti_graph::Params), or implements [`SessionNode`]. Writing
     /// the node is `tutti_graph`'s crate guide ("Writing a node").
-    pub fn add<N: SessionNode<F>>(&mut self, node: N) -> (Key<N>, N::Controls) {
+    ///
+    /// The graph keeps the node's controls for the node's life and an app never
+    /// holds them: every value of the node is a target on its key.
+    ///
+    /// ```compile_fail
+    /// # use tutti_session::{Graph, SessionNode};
+    /// fn cells<N: SessionNode<f32>>(graph: &mut Graph, node: N) {
+    ///     let (key, controls) = graph.add(node);
+    /// }
+    /// ```
+    pub fn add<N: SessionNode<F>>(&mut self, node: N) -> Key<N> {
         let (key, controls) = self.place(node.bind_tempo(&self.tempo));
-        self.address::<N>(key.erase(), &controls);
-        (key, controls)
+        self.address::<N>(key.erase(), controls);
+        key
     }
 
     /// The controls [`add`](Self::add) kept for the node at `key`; `None` when
@@ -796,11 +811,11 @@ impl<F: Float> Graph<F> {
             .downcast_ref()
     }
 
-    /// The sampler handle of the node at `key`, the controls
-    /// [`add`](Self::add) returned for it, until its commands become targets
-    /// ([`Handled`](crate::Handled) names the nodes). `None` when the node is gone.
+    /// The sampler handle of the node at `key`, until its commands become
+    /// targets ([`Handled`](crate::Handled) names the nodes). `None` when the
+    /// node is gone.
     ///
-    /// The graph keeps a clone for the node's life, so a handle's last drop
+    /// The graph owns the handle for the node's life, so a handle's last drop
     /// (a streamed voice's release) waits until the node has left the render:
     /// after its removal's fade-out, or a replacement's crossfade.
     #[cfg(feature = "sampler")]
@@ -886,7 +901,7 @@ impl<F: Float> Graph<F> {
     /// nothing is opened.
     pub fn add_inlet(&mut self, ring: InletRing<F>) -> Result<Key<InletNode<F>>, InletError> {
         let node = self.inlet_node(ring)?;
-        Ok(self.add(node).0)
+        Ok(self.add(node))
     }
 
     /// The node for `ring`, once its rate is the graph's: what
@@ -939,7 +954,7 @@ impl<F: Float> Graph<F> {
     /// layer already built ([`EventInletNode::pair`]), for a producer
     /// that must hold its writer before the graph sees the node.
     pub fn add_event_inlet(&mut self, node: EventInletNode) -> Key<EventInletNode> {
-        self.add(node).0
+        self.add(node)
     }
 
     /// The table the node's params are addressed in: the session's value
@@ -950,14 +965,14 @@ impl<F: Float> Graph<F> {
 
     /// Keeps what a [`SessionNode`] says of its controls under `node`: its
     /// params, its slots and its reclaimer.
-    fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: &N::Controls) {
+    fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
-            entry.controls = Some(Box::new(controls.clone()));
-            if let Some(set) = N::params(controls) {
+            if let Some(set) = N::params(&controls) {
                 self.values.address(node, std::any::TypeId::of::<N>(), set);
             }
-            self.values.provide_node(N::slots(node, controls));
-            entry.reclaimer = N::reclaimer(controls).into_reclaimer();
+            self.values.provide_node(N::slots(node, &controls));
+            entry.reclaimer = N::reclaimer(&controls).into_reclaimer();
+            entry.controls = Some(Box::new(controls));
         }
     }
 }
@@ -1323,7 +1338,7 @@ impl<F: Float> Graph<F> {
     /// Swaps the unit behind `node` for `incoming` under a `fade` along
     /// `law` when its shape fits the running unit's, else as a plain swap
     /// on the next commit (`Editor::replace_or_swap`), and hands back its
-    /// controls. The incoming node goes in as [`add`](Self::add) puts one in:
+    /// key. The incoming node goes in as [`add`](Self::add) puts one in:
     /// its params are addressed and its reclaimer kept, and the outgoing
     /// node's go with it. Refused as [`ReplaceRefused::Busy`] with the node
     /// handed back while the graph re-prepares, and for good on a poisoned
@@ -1345,12 +1360,12 @@ impl<F: Float> Graph<F> {
         incoming: N,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<N::Controls, ReplaceRefused<N>> {
+    ) -> Result<Key<N>, ReplaceRefused<N>> {
         let node = node.into();
         let incoming = incoming.bind_tempo(&self.tempo);
         let controls = self.swap_node(node, incoming, fade, law)?;
-        self.address::<N>(node, &controls);
-        Ok(controls)
+        self.address::<N>(node, controls);
+        Ok(Key::new(node))
     }
 
     /// Registers the plugin hosted at `node` with the value table, as its
@@ -1567,7 +1582,7 @@ impl<F: Float> Graph<F> {
         incoming: N,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Crossfade<N::Controls>, CrossfadeRefused>
+    ) -> Result<Crossfade<N>, CrossfadeRefused>
     where
         N: SessionNode<F>,
         N::Controls: Send + 'static,
@@ -1584,8 +1599,8 @@ impl<F: Float> Graph<F> {
         }
         match self.swap_node(node, incoming, fade, law) {
             Ok(controls) => {
-                self.address::<N>(node, &controls);
-                Ok(Crossfade::Landed(controls))
+                self.address::<N>(node, controls);
+                Ok(Crossfade::Landed(Key::new(node)))
             }
             Err(ReplaceRefused::Busy(n)) => Ok(Crossfade::Waiting(self.park(
                 node,
@@ -1600,8 +1615,8 @@ impl<F: Float> Graph<F> {
 
 impl Graph {
     /// [`crossfade`](Self::crossfade) for a hosted plugin: the swap is
-    /// [`replace_plugin`](Self::replace_plugin)'s, and a landing reports `()`
-    /// as its controls (capture the plugin's before handing it over).
+    /// [`replace_plugin`](Self::replace_plugin)'s, and a landing reports the
+    /// node's key (capture the plugin's controls before handing it over).
     ///
     /// # Errors
     ///
@@ -1613,7 +1628,7 @@ impl Graph {
         client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<Crossfade<()>, CrossfadeRefused> {
+    ) -> Result<Crossfade<crate::AnyPlugin>, CrossfadeRefused> {
         let node = node.into();
         if self.parked.iter().any(|p| p.node == node) {
             return Ok(Crossfade::Waiting(self.park(
@@ -1624,7 +1639,7 @@ impl Graph {
             )));
         }
         match self.replace_plugin(node, client, fade, law) {
-            Ok(()) => Ok(Crossfade::Landed(())),
+            Ok(()) => Ok(Crossfade::Landed(Key::new(node))),
             Err(ReplaceRefused::Busy(c)) => Ok(Crossfade::Waiting(self.park(
                 node,
                 Box::new(PluginSwap(c)),
@@ -1679,7 +1694,7 @@ impl<F: Float> Graph<F> {
                 continue;
             }
             match swap.swap(self, node, fade, law) {
-                Ok(controls) => out.push(Retried::Landed { node, id, controls }),
+                Ok(()) => out.push(Retried::Landed { node, id }),
                 Err(ReplaceRefused::Busy(swap)) => self.parked.push_back(Parked {
                     id,
                     node,
@@ -4137,7 +4152,7 @@ mod tail_tests {
 
             let tail_after = |frames: Samples| {
                 let mut g = graph_at(rate);
-                let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+                let node = g.add(ForkByClone(Const::mono(0.0)));
                 g.commit();
                 assert!(g.refresh_node_tail(node, Tail::Finite(frames)), "{rate:?}");
                 g.node_tail(node).expect("a node")
@@ -4160,7 +4175,7 @@ mod tail_tests {
 
             let latency_after = |frames: Samples| {
                 let mut g = graph_at(rate);
-                let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+                let node = g.add(ForkByClone(Const::mono(0.0)));
                 g.commit();
                 assert!(
                     g.refresh_node_latency(node, Latency::new(frames)),
@@ -4184,7 +4199,7 @@ mod tail_tests {
     #[test]
     fn refresh_node_tail_follows_the_figure_and_bounds() {
         let mut g = graph();
-        let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+        let node = g.add(ForkByClone(Const::mono(0.0)));
         g.commit();
         assert!(!g.is_edited());
 
@@ -4246,7 +4261,7 @@ mod root_fade_tests {
             None,
             tutti_timeline::TempoReader::fixed(Arc::new(map)),
         );
-        let (node, _) = g.add(ForkByClone(Const::mono(1.0)));
+        let node = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);
         g.editor.spec_mut().topology.set_outputs([
             PortSource::Node(OutPort { node, port: 0 }),

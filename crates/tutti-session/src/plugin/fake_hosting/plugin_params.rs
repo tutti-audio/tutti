@@ -217,7 +217,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
+    let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     let key = host(
         &mut s,
         node,
@@ -812,7 +812,7 @@ fn a_batch_over_plugin_and_native_params_lands_nothing_when_one_is_refused() {
 
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(800.0))
             .q(Q::new(0.707)),

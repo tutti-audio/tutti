@@ -53,7 +53,7 @@ fn a_create_new_bounce_onto_an_existing_master_keeps_the_bounce_and_leaves_the_p
     let master = dir.path().join("master.wav");
     std::fs::write(&master, b"old bytes").unwrap();
     let mut session = session();
-    let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
     let error = session
         .bounce(bounce().master(&master, float_wav()).create_new())
@@ -81,7 +81,7 @@ fn a_bounce_replaces_an_existing_master_and_leaves_nothing_beside_it() {
     let master = dir.path().join("master.wav");
     std::fs::write(&master, b"old bytes").unwrap();
     let mut session = session();
-    let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
     session
         .bounce(bounce().master(&master, float_wav()))

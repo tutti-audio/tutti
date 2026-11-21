@@ -42,13 +42,13 @@ fn render(s: &mut Session) -> Vec<f32> {
 fn a_route_onto_a_dropped_edge_reads_unresolved() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(0.25)));
-    let (p, _) = g.add(ForkByClone(Pulse {
+    let a = g.add(ForkByClone(Const::mono(0.25)));
+    let p = g.add(ForkByClone(Pulse {
         from: 0,
         to: u64::MAX,
         level: 0.5,
     }));
-    let (x, _) = g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
+    let x = g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
     g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
     g.connect(OutPort::new(p, 0), x.input(1)).unwrap().unfaded();
     g.connect(x.out(0), Root::output(0)).unwrap().unfaded();

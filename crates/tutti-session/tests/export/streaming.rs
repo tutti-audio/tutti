@@ -85,7 +85,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     write_ramp(&path);
     let mut s = session();
     let (stream, reader) = open(&mut s, &path);
-    let (node, _handle) = s
+    let node = s
         .graph()
         .add(Clip::streaming(reader, stream).at(Beat::new(0.0)));
     s.graph()

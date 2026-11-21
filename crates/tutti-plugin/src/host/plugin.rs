@@ -100,18 +100,6 @@ impl std::fmt::Debug for Plugin {
     }
 }
 
-/// Why a plugin did not take the state a load staged for it. The plugin is loaded
-/// at its defaults then, which beats no plugin.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum RestoreRefused {
-    /// An in-process plugin's refusal.
-    #[error(transparent)]
-    State(#[from] StateError),
-    /// An out-of-process plugin's: the server's account of it, as the wire carries it.
-    #[error("{0}")]
-    Served(String),
-}
-
 impl Plugin {
     /// Opens a plugin where its load resolves ([`placement`]) with the default
     /// bridge settings, holding the proof of the main thread an in-process load
@@ -211,7 +199,7 @@ impl Plugin {
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: &[u8],
-    ) -> IpcResult<(Self, Result<(), RestoreRefused>)> {
+    ) -> IpcResult<(Self, Result<(), StateError>)> {
         Self::serve(audio, executor, work, plugin, sample_rate, Some(state))
             .map(|(plugin, restored)| (plugin, restored.unwrap_or(Ok(()))))
     }
@@ -247,7 +235,7 @@ impl Plugin {
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: &[u8],
-    ) -> IpcResult<(Self, Result<(), RestoreRefused>)> {
+    ) -> IpcResult<(Self, Result<(), StateError>)> {
         Self::host(main, work, plugin, sample_rate, Some(state))
             .map(|(plugin, restored)| (plugin, restored.unwrap_or(Ok(()))))
     }
@@ -259,7 +247,7 @@ impl Plugin {
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)> {
+    ) -> IpcResult<(Self, Option<Result<(), StateError>>)> {
         let (client, restored) = PluginClient::open(
             audio.to_bridge_config()?,
             executor,
@@ -269,7 +257,6 @@ impl Plugin {
             state,
         )?;
         let handle = client.handle();
-        let restored = restored.map(|restored| restored.map_err(RestoreRefused::Served));
         Ok((Self::from_subprocess(client, handle), restored))
     }
 
@@ -279,7 +266,7 @@ impl Plugin {
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)> {
+    ) -> IpcResult<(Self, Option<Result<(), StateError>>)> {
         // A served load asks the blacklist in `PluginClient::open`; a session load
         // has asked it once already, before it defers.
         plugin.check()?;
@@ -302,7 +289,7 @@ impl Plugin {
         format: PluginFormat,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)> {
+    ) -> IpcResult<(Self, Option<Result<(), StateError>>)> {
         match format {
             #[cfg(feature = "vst2")]
             PluginFormat::Vst2 => Self::load_in_process::<tutti_vst2_host::Vst2Loaded>(
@@ -359,7 +346,7 @@ impl Plugin {
         plugin: &PluginRef,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)>
+    ) -> IpcResult<(Self, Option<Result<(), StateError>>)>
     where
         L: tutti_plugin_types::InProcess + 'static,
         L::Processor: 'static,
@@ -382,7 +369,7 @@ impl Plugin {
             sample_rate,
             restore.as_mut().map(|r| r as _),
         )
-        .map_err(|e| e.into_bridge(plugin.path()))?;
+        .map_err(|e| e.into_bridge())?;
         // The ref carries the id the load opened, so a state the plugin saves
         // names it as a scan would.
         let plugin = client.origin().cloned().unwrap_or_else(|| plugin.clone());
@@ -392,7 +379,7 @@ impl Plugin {
                 handle,
                 plugin,
             },
-            restored.map(|restored| restored.map_err(RestoreRefused::State)),
+            restored,
         ))
     }
 

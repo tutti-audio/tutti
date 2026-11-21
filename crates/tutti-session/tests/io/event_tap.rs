@@ -44,7 +44,7 @@ fn session() -> (DetachedSession, EventOutPort) {
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
-    let (key, ()) = s.graph().add(Unforkable(Every4));
+    let key = s.graph().add(Unforkable(Every4));
     (s, key.events_out())
 }
 
@@ -231,7 +231,7 @@ impl Node for Hears {
 #[test]
 fn a_tap_of_an_event_input_hears_what_the_node_hears() {
     let (mut s, source) = session();
-    let (hears, ()) = s.graph().add(Unforkable(Hears));
+    let hears = s.graph().add(Unforkable(Hears));
     s.graph()
         .connect(source, hears.events_in())
         .expect("both ports exist");

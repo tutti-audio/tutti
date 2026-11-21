@@ -49,9 +49,10 @@ use tutti_nodes::{
     SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
     TiltFilterNode,
 };
+use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
 use tutti_units::{
-    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, FrequencyRatio, Hz, Metres, Q,
-    Resonance, Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
+    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, FrequencyRatio, Gain, Hz,
+    Metres, Q, Resonance, Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -492,6 +493,28 @@ fn comb_filter() {
         })
         .check();
     }
+}
+
+#[test]
+fn modal_bank() {
+    let modes = [(440.0, 0.4), (1_130.0, 0.2)].map(|(f, t)| Mode {
+        frequency: Hz::new(f),
+        decay: Seconds::new(t),
+        gain: Gain::new(1.0),
+    });
+    IsolateRow::new("ModalBankNode (stereo)", move || {
+        ModalBankNode::from(ModalBankConfig::new(
+            ChannelLayout::STEREO,
+            Modes::try_from(&modes[..]).unwrap(),
+        ))
+    })
+    .control("frequency", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, 660.0))
+    })
+    .control("decay", |r| {
+        assert!(r.param_set().set(UnitParam::Decay, 0.1))
+    })
+    .check();
 }
 
 #[test]

@@ -27,8 +27,8 @@ fn a_route_onto_a_param_scales_an_f64_render_by_the_analytic_gain() {
         .sample_rate(SampleRate::SR_48K)
         .build()
         .expect("an f64 session builds");
-    let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
-    let (gain, _) = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
+    let dc = s.graph().add(ForkByClone(Dc(FINE)));
+    let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
     s.graph()
         .connect(OutPort::new(dc, 0), gain.input(0))
         .unwrap()

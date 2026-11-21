@@ -139,6 +139,7 @@ pub enum PresetError {
 /// stop using this plugin and [`NoStateRoute`](Self::NoStateRoute) means never
 /// offer the operation again for this backend.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum StateError {
     /// The plugin process is gone. Permanent — every later call answers the same.
@@ -220,4 +221,38 @@ pub enum StateError {
         /// The deadline that expired.
         after: std::time::Duration,
     },
+    /// The server holds no plugin to take the state: it was asked before a
+    /// load, or after the plugin went.
+    #[error("no plugin is loaded")]
+    NoPlugin,
+
+    /// The state's object is not the length its frame declared.
+    #[error("the state object is {actual} bytes, its frame declared {declared}")]
+    ObjectLength {
+        /// The length the frame declared.
+        declared: u64,
+        /// The object's length.
+        actual: u64,
+    },
+
+    /// The state's shared object was refused by the transport (not sealed, no
+    /// room): `reason` is the transport's own message, shown and never parsed.
+    #[error("the state object was refused: {reason}")]
+    ObjectRefused {
+        /// The transport's own message.
+        reason: String,
+    },
+
+    /// The server's state could not be made into a shared object to send:
+    /// `reason` is the operating system's own message.
+    #[error("the state could not be made into an object: {reason}")]
+    NotShared {
+        /// The operating system's own message.
+        reason: String,
+    },
+
+    /// The server answered a state request with a message that is not its
+    /// answer.
+    #[error("the server answered a state request with another request's reply")]
+    UnexpectedReply,
 }

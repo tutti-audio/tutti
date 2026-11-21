@@ -52,8 +52,8 @@ struct Rig {
 fn rig() -> Rig {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(A)));
-    let (halve, _) = g.add(ForkByClone(Halve));
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let halve = g.add(ForkByClone(Halve));
     g.set_sources_unfaded(InPort::new(halve, 0), [OutPort::new(a, 0)])
         .unwrap();
     g.set_sources_unfaded(Root::output(0), [OutPort::new(halve, 0)])
@@ -283,8 +283,8 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
 fn a_node_with_no_pass_refuses_a_bypass_and_a_blend_and_lands_nothing() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(A)));
-    let (q, _) = g.add(ForkByClone(Quarter));
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let q = g.add(ForkByClone(Quarter));
     g.set_sources_unfaded(InPort::new(q, 0), [OutPort::new(a, 0)])
         .unwrap();
     g.set_sources_unfaded(Root::output(0), [OutPort::new(q, 0)])

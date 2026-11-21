@@ -914,7 +914,7 @@ impl AudioBridge {
         // bridge thread answers with its own refusal at `Timeouts::editor`, so this
         // outlasts it by a margin and only ends sooner if that thread is gone.
         match ask_resp.recv_timeout(self.lifecycle.timeouts().editor_wait()) {
-            Ok(result) => result.map_err(EditorError::PluginError),
+            Ok(result) => result,
             Err(_) if self.lifecycle.is_crashed() => Err(EditorError::PluginCrashed),
             Err(_) => Err(EditorError::Busy),
         }
@@ -945,7 +945,7 @@ impl AudioBridge {
             return Err(EditorError::Busy);
         };
         match ask_resp.recv_timeout(self.lifecycle.timeouts().editor_wait()) {
-            Ok(result) => result.map_err(EditorError::PluginError),
+            Ok(result) => result,
             Err(_) if self.lifecycle.is_crashed() => Err(EditorError::PluginCrashed),
             Err(_) => Err(EditorError::Busy),
         }

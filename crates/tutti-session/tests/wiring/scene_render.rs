@@ -94,15 +94,15 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     let side = session.graph().take_audio_side();
 
     let g = session.graph();
-    let (osc, _) = g.add(saw());
-    let (filter, _) = g.add(low_pass(1_200.0));
+    let osc = g.add(saw());
+    let filter = g.add(low_pass(1_200.0));
     g.set_sources_unfaded(InPort::new(filter, 0), [OutPort::new(osc, 0)])
         .unwrap();
-    let (drive, _) = g.add(shaper(drive));
+    let drive = g.add(shaper(drive));
     g.set_sources_unfaded(InPort::new(drive, 0), [OutPort::new(filter, 0)])
         .unwrap();
     let right = if with_limiter {
-        let (lim, _) = g.add(limiter());
+        let lim = g.add(limiter());
         g.set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(osc, 0)])
             .unwrap();
         lim.erase()

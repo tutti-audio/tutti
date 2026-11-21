@@ -117,7 +117,7 @@ fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, Nod
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     session.graph().set_sample_rate(SampleRate::of(RATE));
-    let (synth, _) = session.graph().add(unit);
+    let synth = session.graph().add(unit);
     // The dry pair; the unit's other outputs are sends.
     for c in 0..2 {
         session
@@ -260,7 +260,7 @@ fn a_param_on_a_synth_reaches_it_and_its_fork() {
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
         session.graph().set_sample_rate(SampleRate::of(RATE));
-        let (synth, _) = session.graph().add(poly());
+        let synth = session.graph().add(poly());
         session.graph().connect(synth, Root).unwrap();
         let _ = session.update();
         if let Some(v) = volume {

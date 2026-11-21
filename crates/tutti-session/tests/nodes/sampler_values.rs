@@ -82,7 +82,7 @@ fn placed(
         .expect("a placeable wave")
         .at(at)
         .gain(Amplitude::new(1.0));
-    let (key, _) = s.graph().add(clip);
+    let key = s.graph().add(clip);
     let handle = handle_of(s, &key);
     wire(s, key.erase());
     let _ = s.update();
@@ -152,7 +152,7 @@ fn placed_ramp(
     let clip = Clip::new(wave)
         .and_then(|c| c.channels(ChannelLayout::STEREO))
         .expect("a placeable wave");
-    let (key, _) = s.graph().add(clip);
+    let key = s.graph().add(clip);
     let handle = handle_of(s, &key);
     wire(s, key.erase());
     let _ = s.update();
@@ -307,7 +307,7 @@ impl Rig {
             }
             (Clip::new(wave).expect("a placeable wave"), None)
         };
-        let (clip, _) = s.graph().add(clip.at(Beat::new(0.0)));
+        let clip = s.graph().add(clip.at(Beat::new(0.0)));
         let handle = handle_of(&s, &clip);
         for port in 0..2 {
             s.graph()

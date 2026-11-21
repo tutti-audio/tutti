@@ -748,7 +748,7 @@ mod owed_tests {
             &tutti_plugin_types::PluginRef::file(path),
             rate,
         )
-        .map_err(|e| e.into_bridge(path))
+        .map_err(|e| e.into_bridge())
     }
 
     const BLOCK: usize = 64;

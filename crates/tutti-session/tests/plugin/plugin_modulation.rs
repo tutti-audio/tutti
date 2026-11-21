@@ -299,7 +299,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
-    assert!(matches!(landed, Crossfade::Landed(())), "nothing waits");
+    assert!(matches!(landed, Crossfade::Landed(_)), "nothing waits");
     // Rebuilt by the crossfade: not ready until the job is run and landed.
     assert!(
         !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),
