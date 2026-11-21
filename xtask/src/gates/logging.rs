@@ -48,6 +48,10 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
         "permanent: the `harness = false` test runner prints each test's name and result as a test harness does",
     ),
     (
+        "testing/tutti-fixtures/src/rt_alloc_check.rs",
+        "permanent: the test allocator reports an audio-thread allocation on stderr before it aborts; `tracing` would allocate inside the allocator",
+    ),
+    (
         "testing/tutti-plugin-contract/src/format.rs",
         "permanent: the contract prints its gap marker, which the dashboard and the ratchet read from the test's stdout",
     ),
