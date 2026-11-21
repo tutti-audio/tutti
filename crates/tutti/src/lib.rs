@@ -322,8 +322,8 @@ pub mod nodes {
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
     pub use tutti_dsp::{
-        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
-        WaveguidePositions, WaveguideString,
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, LowestPitch, LowestPitchError,
+        WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString,
     };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
@@ -788,8 +788,8 @@ pub mod plugin {
         AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
     };
     pub use tutti_plugin_types::{
-        EditorError, LoadStage, NoEditorHost, RateRefusal, RateRefusalCause, ServerError,
-        TerminationReason,
+        EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,
+        RateRefusalCause, ServerError, TerminationReason,
     };
     pub use tutti_plugin_types::{
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,

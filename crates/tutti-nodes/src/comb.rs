@@ -1,5 +1,6 @@
 //! [`CombFilterNode`]: a delay summed with the signal, forward or back.
 
+use core::num::NonZeroUsize;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, CombBank, CombControls, CombForm};
@@ -19,13 +20,13 @@ pub struct CombFilterConfig {
 }
 
 impl CombFilterConfig {
-    /// A comb of `width` channels (an empty layout is taken as mono) of `form` and `delay`, at
+    /// A comb of `width` channels of `form` and `delay`, at
     /// [`CombControls::DEFAULT`]. The delay rounds up to whole frames at the prepared rate and
     /// is at least one; a delay that is not finite or is negative reads as one frame.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>, form: CombForm, delay: Seconds) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             form,
             delay,
             controls: CombControls::DEFAULT,
@@ -132,9 +133,9 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
         self.rate = rate;
         self.bank = Some(CombBank::new(
             self.form,
-            delay.to_samples_ceil(rate),
+            NonZeroUsize::new(delay.to_samples_ceil(rate).get()).unwrap_or(NonZeroUsize::MIN),
             CombControls::DEFAULT.gain,
-            usize::from(self.width.count()),
+            self.width,
         ));
     }
 
@@ -199,7 +200,7 @@ mod tests {
     }
 
     /// The shape is the width in and out and declares the coefficient as `Feedback`, with no
-    /// latency; an empty layout is mono; the delay is the declared tail of a feedforward comb.
+    /// latency; the delay is the declared tail of a feedforward comb.
     #[test]
     fn the_shape_declares_the_coefficient_and_the_tail() {
         let n = prepared(node(CombForm::Feedforward, 0.5), RATE, 64);
@@ -208,12 +209,12 @@ mod tests {
         assert_eq!(shape.latency, tutti_units::Latency::new(Samples::ZERO));
         assert_eq!(shape.tail, Tail::Finite(Samples::new(4)));
         assert_eq!(n.param_base(0), Some(0.5));
-        let mono = CombFilterNode::<f32>::from(CombFilterConfig::new(
+        let empty = CombFilterNode::<f32>::from(CombFilterConfig::new(
             ChannelLayout::EMPTY,
             CombForm::Feedback,
             Seconds::new(0.004),
         ));
-        assert_eq!(mono.shape().audio_in().count(), 1);
+        assert_eq!(empty.shape().audio_in().count(), 0);
     }
 
     /// A feedback comb's declared tail covers its ring-out.

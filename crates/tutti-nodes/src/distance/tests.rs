@@ -53,7 +53,7 @@ fn a_fork_shares_no_cell() {
 
 /// The shape is the width in and out, declares the distance as `Distance` starting as
 /// configured, reports no latency (the delay is musical) and a finite tail past the longest
-/// delay; an empty layout is mono.
+/// delay; an empty layout is no channels.
 #[test]
 fn the_shape_declares_the_distance_no_latency_and_a_tail_past_the_longest_delay() {
     let max = Metres::of(100.0);
@@ -74,8 +74,8 @@ fn the_shape_declares_the_distance_no_latency_and_a_tail_past_the_longest_delay(
     assert!(tail.get() as f64 >= (max / Speed::SOUND_IN_AIR_20C).get() * RATE.get());
     assert_eq!(shape.params.as_slice(), &[UnitParam::Distance][..]);
     assert_eq!(n.param_base(0), Some(8.0));
-    let mono = DistanceNode::<f32>::from(DistanceConfig::new(ChannelLayout::EMPTY, max));
-    assert_eq!(mono.shape().audio_in().count(), 1);
+    let empty = DistanceNode::<f32>::from(DistanceConfig::new(ChannelLayout::EMPTY, max));
+    assert_eq!(empty.shape().audio_in().count(), 0);
 }
 
 /// **The node delays by exactly `r / c` and scales by `r_ref / r`**: an impulse at a distance

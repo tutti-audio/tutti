@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize};
 use tutti_buffers::Float;
 
 use tutti_curve::FadeLaw;
-use tutti_rt::{ControlDrop, Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{CappedVec, ControlDrop, Overflow, PushError, RingReader, RingWriter, ring};
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
@@ -100,7 +100,7 @@ pub(crate) struct Crossfade<F: Float = f32> {
     /// While this fade waits behind the one running at its key: what the unit
     /// fading in wrote for the unit that waits (`Node::chase`), delivered to
     /// it when this fade starts. Empty otherwise.
-    pub(super) chase: Vec<Event>,
+    pub(super) chase: CappedVec<Event>,
 }
 
 impl<F: Float> Crossfade<F> {
@@ -252,7 +252,7 @@ impl<F: Float> Commit<F> {
                             done: 0,
                             len: f.duration.get(),
                             law: f.law,
-                            chase: Vec::new(),
+                            chase: CappedVec::with_capacity(0),
                         })
                     });
                 // The unit's param state, sized here so the audio thread

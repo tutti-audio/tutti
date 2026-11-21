@@ -108,7 +108,7 @@ impl EditorWindow for AuEditorInstance {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<Size> {
+    ) -> PluginResult<tutti_plugin_types::EditorOpened<Size>> {
         EditorWindow::open_editor(&mut self.inner, main, parent, scale)
     }
 
