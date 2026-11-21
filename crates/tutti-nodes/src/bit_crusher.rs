@@ -201,7 +201,7 @@ mod tests {
         assert_eq!((d.param_base(0), d.param_base(1)), (Some(8.0), Some(1.0)));
     }
 
-    ///
+    /// An empty layout is no channels, not one.
     #[test]
     fn an_empty_layout_has_no_channels() {
         let n = BitCrusherNode::<f32>::from(BitCrusherConfig::new(0u16));
