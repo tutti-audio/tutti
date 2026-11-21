@@ -54,7 +54,7 @@ use tutti_graph::fade_gains;
 use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
-    InletRing, IntoNode, MeterReader, NodeMode, ParamIn, ParamMod, ParamRange, Prepare, RenderMode,
+    InletRing, IntoNode, MeterReader, Prepare, RenderMode,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, PortSink, PortSource,
@@ -66,7 +66,7 @@ use tutti_graph::{
 use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
-use tutti_units::{Amplitude, Mix, SampleRate, UnitAddr};
+use tutti_units::{Amplitude, SampleRate};
 use tutti_units::{Samples, Tail};
 
 mod observe;
@@ -85,7 +85,7 @@ use crate::key::{
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
     ConnectError, Connection, DeclarationError, Edge, EventInPort, EventOutPort, InPort,
-    InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode,
+    InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode, SetRateError,
 };
 use tutti_rt::LockExt;
 
@@ -448,7 +448,7 @@ pub struct Graph<F: Float = f32> {
     /// first commit's `was` and the last's `now`, until the session reports
     /// them ([`SessionEvent::Rewired`](crate::SessionEvent::Rewired)).
     rewired: Vec<tutti_graph::Rewired>,
-    /// The nodes [`remove`](Self::remove) took out since the session last
+    /// The nodes the graph's removal took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
     /// What the root's channels are, when a host declared it
@@ -768,20 +768,33 @@ impl<F: Float> Graph<F> {
     /// Re-prepare every node for `rate`, keeping the block and the quantum.
     /// With the executor local, both halves of the re-prepare run here, now;
     /// with it taken, the second half lands on a later collect (and commits
-    /// are `Retry` until it does). A refusal is logged.
+    /// are `Retry` until it does).
     ///
     /// For a detached graph, which has no device to take a rate from. A
     /// device's session re-rates with [`Session::restart`](crate::Session).
-    pub fn set_sample_rate(&mut self, rate: SampleRate) {
-        let current = *self.editor.prepare();
-        if let Err(e) =
-            self.editor
-                .reprepare(prepare_for(rate, current.max_block(), current.quantum()))
+    ///
+    /// # Errors
+    ///
+    /// [`SetRateError::RateUnsupported`] naming a node that does not run at
+    /// `rate` ([`Shape::with_rates`](tutti_graph::Shape::with_rates)), or
+    /// [`SetRateError::Commit`] when the editor would not re-prepare; the graph
+    /// keeps its rate.
+    pub fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
+        if let Some((node, supported)) = self
+            .editor
+            .first_unsupported_rate(self.nodes.keys().copied(), rate)
         {
-            tracing::error!("graph: re-prepare at {} Hz refused: {e}", rate.get());
-            return;
+            return Err(SetRateError::RateUnsupported {
+                node,
+                supported,
+                rate,
+            });
         }
+        let current = *self.editor.prepare();
+        self.editor
+            .reprepare(prepare_for(rate, current.max_block(), current.quantum()))?;
         self.pump_local();
+        Ok(())
     }
 
     /// Whether a re-prepare is between its two commits.
@@ -1455,7 +1468,7 @@ impl<F: Float> Graph<F> {
     /// [`SessionEvent::ReplaceFailed`](crate::SessionEvent::ReplaceFailed)
     /// when the shapes then turn out to differ under a fade. A replacement
     /// asked for while another of the same node waits waits behind it, so the
-    /// later one still wins. [`remove`](Self::remove) drops a waiting
+    /// later one still wins. [`Session::remove`](crate::Session::remove) drops a waiting
     /// replacement and reports it
     /// ([`SessionEvent::ReplaceDropped`](crate::SessionEvent::ReplaceDropped)).
     ///
@@ -1994,21 +2007,6 @@ impl<F: Float> Graph<F> {
         Ok(())
     }
 
-    /// Takes what the caller wired out of `to`, the feeds' and a lane's
-    /// edges staying: whether anything went.
-    pub(crate) fn disconnect_all_events(&mut self, to: EventInPort) -> bool {
-        let ours = if to.index() == 0 {
-            self.fed_edges.get(&to.node()).cloned().unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        let hand = self
-            .event_sources_of(to)
-            .into_iter()
-            .any(|s| self.nodes.contains_key(&s.node()) && !ours.contains(&s));
-        hand && self.set_event_sources_of(to, &[]).is_ok()
-    }
-
     /// Feeds `sink`'s event input `port` from exactly `sources`, but for
     /// edges from nodes the graph did not insert.
     fn write_event_sources(&mut self, sink: NodeKey, port: u16, sources: &[EventOutPort]) {
@@ -2064,20 +2062,27 @@ impl<F: Float> Graph<F> {
     ///
     /// Each [`Feeder`] owns only its own entry, so feeders never overwrite
     /// each other.
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`] when `sink` is not in the graph; nothing changes.
     pub fn set_feed(
         &mut self,
         sink: impl Into<NodeKey>,
         feeder: Feeder,
         sources: Vec<EventOutPort>,
-    ) {
+    ) -> Result<(), NoSuchNode> {
         let sink = sink.into();
+        if !self.nodes.contains_key(&sink) {
+            return Err(NoSuchNode::new(sink));
+        }
         if sources.is_empty() {
             // No entry is made for a feeder that feeds nothing.
             let Some(feeds) = self.feeds.get_mut(&sink) else {
-                return;
+                return Ok(());
             };
             if feeds.remove(&feeder).is_none() {
-                return;
+                return Ok(());
             }
             if feeds.is_empty() {
                 self.feeds.remove(&sink);
@@ -2085,25 +2090,50 @@ impl<F: Float> Graph<F> {
         } else {
             let feeds = self.feeds.entry(sink).or_default();
             if feeds.get(&feeder) == Some(&sources) {
-                return;
+                return Ok(());
             }
             feeds.insert(feeder, sources);
         }
         self.write_feeds(sink);
+        Ok(())
     }
 
     /// What `feeder` feeds `sink`: empty when nothing.
-    pub fn feed(&self, sink: impl Into<NodeKey>, feeder: Feeder) -> &[EventOutPort] {
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`] when `sink` is not in the graph.
+    pub fn feed(
+        &self,
+        sink: impl Into<NodeKey>,
+        feeder: Feeder,
+    ) -> Result<&[EventOutPort], NoSuchNode> {
         let sink = sink.into();
-        self.feeds
+        if !self.nodes.contains_key(&sink) {
+            return Err(NoSuchNode::new(sink));
+        }
+        Ok(self
+            .feeds
             .get(&sink)
             .and_then(|f| f.get(&feeder))
-            .map_or(&[], Vec::as_slice)
+            .map_or(&[], Vec::as_slice))
     }
 
     /// Every source any feeder feeds `sink`, sorted and without repeats.
-    pub fn feeds(&self, sink: impl Into<NodeKey>) -> Vec<EventOutPort> {
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`] when `sink` is not in the graph.
+    pub fn feeds(&self, sink: impl Into<NodeKey>) -> Result<Vec<EventOutPort>, NoSuchNode> {
         let sink = sink.into();
+        if !self.nodes.contains_key(&sink) {
+            return Err(NoSuchNode::new(sink));
+        }
+        Ok(self.fed_sources(sink))
+    }
+
+    /// [`feeds`](Self::feeds) for a sink known to be in the graph.
+    fn fed_sources(&self, sink: NodeKey) -> Vec<EventOutPort> {
         let mut all: Vec<EventOutPort> = self
             .feeds
             .get(&sink)
@@ -2163,7 +2193,7 @@ impl<F: Float> Graph<F> {
     /// has: a source re-inserted without that port is not fed until it has it
     /// again.
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutPort> {
-        self.feeds(sink)
+        self.fed_sources(sink)
             .into_iter()
             .filter(|s| self.check_event_out(*s).is_ok())
             .collect()
@@ -2178,25 +2208,19 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// Takes `node` out of the graph. Every edge to and from it reads silence
-    /// afterwards, so a sink still naming it is left silent rather than
-    /// dangling, and the feeds into and from it go.
-    ///
-    /// The graph's one removal for a node, whatever it is (a plugin, an inlet,
-    /// a clip). The edges fade out first (a declicked removal): the node stays
-    /// in the editor, rendering, until they have. [`Removal::unfaded`] cuts it
-    /// at the next block boundary instead. A replacement waiting on it is
-    /// dropped and reported
-    /// ([`SessionEvent::ReplaceDropped`](crate::SessionEvent::ReplaceDropped)),
-    /// and the session forgets what it declared on the node (modulation, MIDI
-    /// routes, an input's capture) at its next update, as
-    /// [`Session::remove`](crate::Session::remove) does at once.
+    /// Takes `node` out of the graph, the one removal behind
+    /// [`Session::remove`](crate::Session::remove), which says what it does. A
+    /// removal the session's own code makes (a clip, a port's node) is forgotten
+    /// by the session at its next update.
     ///
     /// # Errors
     ///
     /// [`RemoveError::NoSuchNode`] when `node` is not in the graph (removed
     /// already, or never added); nothing changes.
-    pub fn remove(&mut self, node: impl Into<NodeKey>) -> Result<Removal<'_, F>, RemoveError> {
+    pub(crate) fn remove(
+        &mut self,
+        node: impl Into<NodeKey>,
+    ) -> Result<Removal<'_, F>, RemoveError> {
         let node = node.into();
         self.values.retire(node);
         self.values.retire_node_controls(node);
@@ -2649,8 +2673,9 @@ impl<F: Float> Graph<F> {
     /// Feeds `to` from exactly `from`, which the graph sums. A source listed
     /// twice is one source, and the order does not matter (the graph orders
     /// them). Touches nothing, and marks nothing edited, when that is what
-    /// the sink already holds. An empty set clears the sink
-    /// ([`disconnect_all`](Self::disconnect_all)): silence is the empty set.
+    /// the sink already holds. An empty set clears the sink: silence is the empty set.
+    /// For an [`EventInPort`] it takes what the caller wired; a feed's and a
+    /// modulation lane's edges stay.
     ///
     /// What is added fades in and what is taken out fades out;
     /// [`SetSources::unfaded`] makes the change step at the next block
@@ -2716,28 +2741,6 @@ impl<F: Float> Graph<F> {
         for &id in ids {
             self.drop_edge(id, true);
         }
-    }
-
-    /// Takes every source out of `to`, their gains with them: whether it fed
-    /// anything. (For an [`EventInPort`]: what the caller wired; a feed's
-    /// and a modulation lane's edges stay.) Each edge the plan has heard fades out
-    /// ([`disconnect`](Self::disconnect)).
-    ///
-    /// # Errors
-    ///
-    /// [`ConnectError`] for a node or port that does not exist; nothing
-    /// changes.
-    #[must_use = "the call refuses a node or port that does not exist"]
-    pub fn disconnect_all<P: Fanin>(&mut self, to: P) -> Result<bool, ConnectError> {
-        to.disconnect_all(self)
-    }
-
-    pub(crate) fn disconnect_all_channels(&mut self, to: InPort) -> bool {
-        let mut any = false;
-        for id in self.live_edges(to) {
-            any |= self.drop_edge(id, false);
-        }
-        any
     }
 
     /// Connects `from` to `to` and returns the connection, which a gain can
@@ -3216,7 +3219,7 @@ impl<F: Float> Graph<F> {
     /// `Bypassed`.
     #[cfg(feature = "plugin")]
     pub(crate) fn reconcile_own_bypass(&mut self) {
-        let wants: Vec<(NodeKey, NodeMode)> = self
+        let wants: Vec<(NodeKey, tutti_graph::NodeMode)> = self
             .plugins
             .keys()
             .filter_map(|&node| Some((node, self.mode(node).ok()?)))
@@ -3232,38 +3235,21 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// `node`'s mode as the editor holds it, [`NodeMode::Active`] for a node
+    /// `node`'s mode as the editor holds it, [`Active`](tutti_graph::NodeMode::Active) for a node
     /// never given one: [`ModeTarget`](crate::ModeTarget) holds the value a
     /// write has just made, which the editor takes at the next update.
     ///
     /// # Errors
     ///
     /// [`NoSuchNode`] when `node` is not in the graph.
-    #[must_use = "the call refuses a node that does not exist"]
-    pub fn mode(&self, node: impl Into<NodeKey>) -> Result<NodeMode, NoSuchNode> {
+    #[cfg(feature = "plugin")]
+    pub(crate) fn mode(
+        &self,
+        node: impl Into<NodeKey>,
+    ) -> Result<tutti_graph::NodeMode, NoSuchNode> {
         let node = node.into();
         self.shape_of(node)?;
         Ok(self.editor.mode(node))
-    }
-
-    /// `node`'s mix as the editor holds it, [`Mix::WET`] for a node never given
-    /// one: [`MixTarget`](crate::MixTarget) holds the value a write has just
-    /// made, which the editor takes at the next update.
-    ///
-    /// Once the graph has committed the node this reads its live cell, which is
-    /// also the knob of a modulation route onto the node's mix (`Mods::route`
-    /// with a `MixRef`): the base the route modulates
-    /// around, and what the mix returns to when the route goes. It is the base,
-    /// not the lane's value.
-    ///
-    /// # Errors
-    ///
-    /// [`NoSuchNode`] when `node` is not in the graph.
-    #[must_use = "the call refuses a node that does not exist"]
-    pub fn mix(&self, node: impl Into<NodeKey>) -> Result<Mix, NoSuchNode> {
-        let node = node.into();
-        self.shape_of(node)?;
-        Ok(self.editor.mix(node))
     }
 
     /// Removes the gain entries of edges the topology no longer has: an edge
@@ -3283,131 +3269,12 @@ impl<F: Float> Graph<F> {
         self.sweep_gain_targets();
     }
 
-    // --- Param modulation ---
-
-    /// Whether `node` declares `param` modulatable (its shape's params).
-    ///
-    /// # Errors
-    ///
-    /// [`NoSuchNode`] when `node` is not in the graph.
-    #[must_use = "the call refuses a node that does not exist"]
-    pub fn declares_param(
-        &self,
-        node: impl Into<NodeKey>,
-        param: impl Into<UnitAddr>,
-    ) -> Result<bool, NoSuchNode> {
-        Ok(self.shape_of(node.into())?.params.index_of(param).is_some())
-    }
-
-    /// Drives `node`'s declared `param` from `source`'s event output 0
-    /// (`None`: from nothing, so it reads its base), clamped to `range`:
-    /// replaces whatever drove it. When the source is the one the graph
-    /// already holds, only the range moves: that goes through
-    /// `Editor::set_param_range`, a store the running node reads on its next
-    /// block, and marks nothing for commit.
-    ///
-    /// # Errors
-    ///
-    /// Refused, touching nothing, for a NaN bound
-    /// (`GraphInvalid::BadParamRange`) and for a `node` or a `source` that is
-    /// not in the graph (`GraphInvalid::UnknownParamNode`), the errors the
-    /// commit would otherwise fail on.
-    pub fn set_param_mod(
-        &mut self,
-        node: impl Into<NodeKey>,
-        param: impl Into<UnitAddr>,
-        source: Option<NodeKey>,
-        range: ParamRange,
-    ) -> Result<(), GraphInvalid> {
-        let node = node.into();
-        let at = ParamIn {
-            node,
-            param: param.into(),
-        };
-        if range.min.is_nan() || range.max.is_nan() {
-            return Err(GraphInvalid::BadParamRange { at, range });
-        }
-        for missing in std::iter::once(node).chain(source) {
-            if !self.contains(missing) {
-                return Err(GraphInvalid::UnknownParamNode { at, missing });
-            }
-        }
-        let want = source.map(|from| EventOut {
-            node: from,
-            port: 0,
-        });
-        let held = self.editor.spec().params.get(&at).map(|m| m.source);
-        if want.is_some() && held == Some(want) {
-            // A range move alone: a control, not a rewire.
-            return self.editor.set_param_range(at, range);
-        }
-        let spec = self.editor.spec_mut();
-        spec.params.remove(&at);
-        spec.params.insert(
-            at,
-            ParamMod {
-                range,
-                source: want,
-            },
-        );
-        self.edited = true;
-        Ok(())
-    }
-
-    /// Stops modulating `node`'s `param`: it reads its own control again.
-    ///
-    /// # Errors
-    ///
-    /// [`NoSuchNode`] when `node` is not in the graph.
-    #[must_use = "the call refuses a node that does not exist"]
-    pub fn clear_param_mod(
-        &mut self,
-        node: impl Into<NodeKey>,
-        param: impl Into<UnitAddr>,
-    ) -> Result<(), NoSuchNode> {
-        let node = node.into();
-        self.shape_of(node)?;
-        let at = ParamIn {
-            node,
-            param: param.into(),
-        };
-        if self.editor.spec_mut().params.remove(&at).is_some() {
-            self.edited = true;
-        }
-        Ok(())
-    }
-
-    /// How `node`'s `param` is modulated, as the graph value holds it: `None`
-    /// when nothing drives it.
-    ///
-    /// # Errors
-    ///
-    /// [`NoSuchNode`] when `node` is not in the graph.
-    #[must_use = "the call refuses a node that does not exist"]
-    pub fn param_mod(
-        &self,
-        node: impl Into<NodeKey>,
-        param: impl Into<UnitAddr>,
-    ) -> Result<Option<ParamMod>, NoSuchNode> {
-        let node = node.into();
-        self.shape_of(node)?;
-        Ok(self
-            .editor
-            .spec()
-            .params
-            .get(&ParamIn {
-                node,
-                param: param.into(),
-            })
-            .cloned())
-    }
-
     /// The graph's taps: open and close audio and event copies of it.
     pub fn taps(&mut self) -> Taps<'_, F> {
         Taps { graph: self }
     }
 
-    /// The graph's level meters, the master's included.
+    /// The graph's level meters.
     pub fn meters(&mut self) -> Meters<'_, F> {
         Meters { graph: self }
     }
@@ -3550,10 +3417,12 @@ impl<F: Float> Graph<F> {
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
     ///   anything wider than the declaration: the root is not widened under
     ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
-    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the root
-    ///   is widened to that and the excess is not rendered
+    /// - past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS): the root keeps
+    ///   its width
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
     ///   channel with no place).
+    ///
+    /// A refused request changes nothing.
     ///
     /// A request for as many or fewer channels than the root has is a no-op.
     ///
@@ -3584,16 +3453,12 @@ impl<F: Float> Graph<F> {
             None
         };
         self.widen_refusal = refused;
-        // A declared root is not widened at all when refused; an over-wide
-        // request widens as far as the engine renders.
-        let target = match refused {
-            Some(tutti_graph::RootError::Width { .. }) => 0,
-            _ => channels.min(tutti_buffers::MAX_CHANNELS),
-        };
-        let outputs = &mut self.editor.spec_mut().topology.outputs;
-        if outputs.len() < target {
-            outputs.resize(target, Vec::new());
-            self.edited = true;
+        if refused.is_none() {
+            let outputs = &mut self.editor.spec_mut().topology.outputs;
+            if outputs.len() < channels {
+                outputs.resize(channels, Vec::new());
+                self.edited = true;
+            }
         }
         self.publish_output_facts();
         refused.map_or(Ok(()), Err)

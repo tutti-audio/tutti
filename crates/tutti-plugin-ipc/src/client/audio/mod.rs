@@ -367,6 +367,12 @@ impl AudioBridge {
         self.lifecycle.rate_refusal()
     }
 
+    /// Has the bridge thread offer each rate refusal to `wait`
+    /// ([`OfflineWait::refusal`](crate::OfflineWait::refusal)), so the audio thread only latches a flag.
+    pub(crate) fn offer_refusals_to(&self, wait: Arc<crate::OfflineWait>) {
+        self.lifecycle.offer_refusals_to(wait);
+    }
+
     /// Whether the plugin refuses its rate, as [`rate_refusal`](Self::rate_refusal)
     /// is `Some`, for the audio thread: wait-free, no lock and no allocation.
     pub(crate) fn rate_refused(&self) -> bool {
@@ -1030,7 +1036,7 @@ impl AudioBridge {
 
     // --- Requests answered into a future ---
 
-    /// [`save_state`](Self::save_state) as a oneshot receiver: queues the request and
+    /// [`save_state`](Self::save_state) as an [`Answer`]: queues the request and
     /// returns, and **the control lane's thread fills the answer** when the
     /// server's reply lands. That lane owns the deadline: with no reply within
     /// [`Timeouts::state`] (renewed by the server's `Working`, up to the
@@ -1041,7 +1047,7 @@ impl AudioBridge {
     pub fn save_state_answer(
         &self,
         state_use: StateUse,
-    ) -> futures_channel::oneshot::Receiver<std::result::Result<Vec<u8>, StateError>> {
+    ) -> Answer<std::result::Result<Vec<u8>, StateError>> {
         let (answer, reply) = ask::awaited();
         if self.lifecycle.is_crashed() {
             reply.send(Err(StateError::PluginCrashed));
@@ -1057,7 +1063,7 @@ impl AudioBridge {
         answer
     }
 
-    /// `load_state` as a oneshot receiver, filled and bounded as
+    /// `load_state` as an [`Answer`], filled and bounded as
     /// [`save_state_answer`](Self::save_state_answer) is: [`StateError::Stalled`]
     /// at [`Timeouts::state`]. The server may apply a state whose answer is no
     /// longer awaited.
@@ -1065,7 +1071,7 @@ impl AudioBridge {
         &self,
         data: &[u8],
         state_use: StateUse,
-    ) -> futures_channel::oneshot::Receiver<std::result::Result<(), StateError>> {
+    ) -> Answer<std::result::Result<(), StateError>> {
         let (answer, reply) = ask::awaited();
         match self.state_object(data) {
             Ok(blob) => self.queue(ControlCommand::LoadState {
@@ -1079,13 +1085,10 @@ impl AudioBridge {
         answer
     }
 
-    /// `load_preset` as a oneshot receiver, filled and bounded as
+    /// `load_preset` as an [`Answer`], filled and bounded as
     /// [`save_state_answer`](Self::save_state_answer) is:
     /// [`PresetError::Stalled`] at [`Timeouts::param`].
-    pub fn load_preset_answer(
-        &self,
-        id: PresetId,
-    ) -> futures_channel::oneshot::Receiver<std::result::Result<(), PresetError>> {
+    pub fn load_preset_answer(&self, id: PresetId) -> Answer<std::result::Result<(), PresetError>> {
         let (answer, reply) = ask::awaited();
         if self.lifecycle.is_crashed() {
             reply.send(Err(PresetError::Lost));

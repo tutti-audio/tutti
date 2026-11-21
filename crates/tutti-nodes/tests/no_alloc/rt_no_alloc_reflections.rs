@@ -1,7 +1,7 @@
 //! Regression gate: the early reflections and the decorrelator must not allocate per block.
 
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::{Inline, Tap, Taps};
+use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
@@ -44,7 +44,7 @@ fn early_reflections_process_is_allocation_free() {
         gain: Gain::new(gain),
         channel,
     };
-    let taps = Taps {
+    let taps = TapSet {
         taps: Inline::from_slice(&[
             tap(17.0, 0.6, 0),
             tap(101.5, -0.4, 1),

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
 use tutti_platform::Instant;
-use tutti_sampler::{Clip, StreamFault, StreamPhase, StreamStart};
+use tutti_sampler::{Clip, StreamFailure, StreamPhase, StreamStart};
 use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
 use tutti_units::{Beat, SampleRate, Seconds};
 
@@ -46,7 +46,10 @@ fn session() -> Session {
 fn open(
     s: &mut Session,
     asset: impl Into<tutti_platform::Asset>,
-) -> (tutti_sampler::Stream<f32>, tutti_sampler::StreamReader<f32>) {
+) -> (
+    tutti_sampler::StreamHandle<f32>,
+    tutti_sampler::StreamReader<f32>,
+) {
     let opened =
         tutti_fixtures::block_on(s.open_stream(asset, StreamStart::HEAD).expect("a streamer"))
             .expect("the file reads");
@@ -124,19 +127,19 @@ fn a_dropped_session_ends_its_streamer_and_tells_the_stream() {
     let (stream, _reader) = open(&mut s, &path);
     assert_ne!(
         stream.status().phase,
-        StreamPhase::Faulted(StreamFault::StreamerGone)
+        StreamPhase::Faulted(StreamFailure::StreamerGone)
     );
     drop(s);
     // A hang guard by deadline: the streamer's thread is woken by the bell.
     let deadline = Instant::now() + Duration::from_secs(10);
-    while stream.status().phase != StreamPhase::Faulted(StreamFault::StreamerGone)
+    while stream.status().phase != StreamPhase::Faulted(StreamFailure::StreamerGone)
         && Instant::now() < deadline
     {
         std::thread::park_timeout(Duration::from_millis(1));
     }
     assert_eq!(
         stream.status().phase,
-        StreamPhase::Faulted(StreamFault::StreamerGone),
+        StreamPhase::Faulted(StreamFailure::StreamerGone),
         "the woken streamer never ended and dropped the stream"
     );
 }

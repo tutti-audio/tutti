@@ -655,6 +655,30 @@ pub enum News {
         /// Why the state was not restored.
         reason: String,
     },
+    /// The plugin did not take the render mode the host asked for
+    /// ([`ControlRequest::SetRenderMode`]): it runs in the mode it had. Not
+    /// sent for a plugin that has no render-mode capability, which the host
+    /// already knows.
+    RenderModeNotApplied {
+        /// The mode that was asked for.
+        mode: tutti_plugin_types::RenderMode,
+    },
+    /// A restart the host asked for (a rate or a render mode) did not happen:
+    /// the plugin would not stop and runs as it was.
+    PluginWouldNotStop {
+        /// Why the plugin would not stop.
+        reason: String,
+    },
+    /// What the server's own work lost, over its life, sent when either count
+    /// has moved since it was last sent (at most once per control tick). The
+    /// figures are cumulative: a later one replaces an earlier one.
+    ServerLosses {
+        /// Commands the server could not give its render thread.
+        commands_refused: u64,
+        /// One-way edits the plugin refused: an automation state, a track's
+        /// info or a parameter write.
+        edits_refused: u64,
+    },
 }
 
 /// One frame the server sends on the control connection: an answer, a sign of

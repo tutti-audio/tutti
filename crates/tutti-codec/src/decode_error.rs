@@ -56,6 +56,17 @@ pub enum DecodeError {
         /// The view's width.
         view: ChannelLayout,
     },
+
+    /// A packet holds another channel count than the width the file opened
+    /// with: the stream changed mid-file, and a read at one width cannot
+    /// carry it.
+    #[error("a packet has {packet} channels where the file opened with {file}")]
+    ChannelsChanged {
+        /// The channel count the file opened with.
+        file: usize,
+        /// The channel count of the offending packet.
+        packet: usize,
+    },
 }
 
 impl Clone for DecodeError {
@@ -72,6 +83,10 @@ impl Clone for DecodeError {
             Self::Width { file, view } => Self::Width {
                 file: *file,
                 view: *view,
+            },
+            Self::ChannelsChanged { file, packet } => Self::ChannelsChanged {
+                file: *file,
+                packet: *packet,
             },
         }
     }

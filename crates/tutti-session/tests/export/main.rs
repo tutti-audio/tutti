@@ -35,6 +35,9 @@ mod export_parallel;
 // What a bounce keeps past its range for the sampler's nodes, and a voice pool's fork.
 #[cfg(all(feature = "export", feature = "sampler"))]
 mod bounce_sampler;
+// A bounce at a rate a node does not run at is refused.
+#[cfg(feature = "export")]
+mod bounce_rates;
 // A disk stream: opened, primed and bounced, and ended by the session's drop.
 #[cfg(all(feature = "export", feature = "sampler"))]
 mod streaming;

@@ -160,14 +160,6 @@ impl<S: Sample> PacketDecoder<S> {
         &self.planes
     }
 
-    /// The last packet's planes, made `width` channels wide: a plane past it
-    /// is dropped and a missing one is silence.
-    pub(super) fn planes_of_width(&mut self, width: usize, frames: usize) -> &[Vec<S>] {
-        self.planes.truncate(width);
-        self.planes.resize_with(width, || vec![S::SILENCE; frames]);
-        &self.planes
-    }
-
     /// The format of the last decoded packet.
     pub(super) fn spec(&self) -> AudioSpec {
         self.decoder.last_decoded().spec().clone()

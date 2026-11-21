@@ -30,8 +30,8 @@ use tutti_buffers::{
 };
 use tutti_codec::{FileEncoder, FinalizedFile, IntDepth, Spec};
 use tutti_dsp::{
-    DitherSink, FftFloat, StreamingResampler, StreamingResamplerConfig, needs_resampling,
-    resampled_frames,
+    DitherSink, FftFloat, NoiseShaping, StreamingResampler, StreamingResamplerConfig,
+    needs_resampling, resampled_frames,
 };
 use tutti_platform::Staged;
 use tutti_units::{Amplitude, SampleRate, Samples};
@@ -136,6 +136,7 @@ pub(crate) fn written(
         gain: None,
         measured: None,
         placement,
+        spill_left: None,
     }
 }
 
@@ -212,16 +213,35 @@ enum Quantized<F> {
 }
 
 impl<F: Float> Quantized<F> {
-    fn new(encoder: FileEncoder, layout: ChannelLayout, target: &FileTarget) -> Self {
+    /// The quantizer for blocks at `rate`, the file's rate: the shaping filter
+    /// is designed for the rate of the blocks it is fed.
+    fn new(
+        encoder: FileEncoder,
+        layout: ChannelLayout,
+        target: &FileTarget,
+        rate: SampleRate,
+    ) -> Self {
         let shape = dither_shape(target);
+        let shaping = target.noise_shaping.then(|| NoiseShaping::new(rate));
+        fn quantizer<K: Sink, F: Float>(
+            sink: DitherSink<K, F>,
+            shaping: Option<&NoiseShaping>,
+        ) -> DitherSink<K, F> {
+            match shaping {
+                Some(shaping) => sink.shaped(shaping),
+                None => sink,
+            }
+        }
         match target.format().int_depth() {
             None => Self::Float(EncoderSink::new(encoder, layout)),
-            Some(IntDepth::Int16) => {
-                Self::Int16(DitherSink::new(EncoderSink::new(encoder, layout), shape))
-            }
-            Some(IntDepth::Int24) => {
-                Self::Int24(DitherSink::new(EncoderSink::new(encoder, layout), shape))
-            }
+            Some(IntDepth::Int16) => Self::Int16(quantizer(
+                DitherSink::new(EncoderSink::new(encoder, layout), shape),
+                shaping.as_ref(),
+            )),
+            Some(IntDepth::Int24) => Self::Int24(quantizer(
+                DitherSink::new(EncoderSink::new(encoder, layout), shape),
+                shaping.as_ref(),
+            )),
         }
     }
 
@@ -334,7 +354,7 @@ impl<F: FftFloat> Chain<F> {
         let resampler = resampler_for(target, source_rate, layout)?;
         Ok(Self {
             layout,
-            sink: Quantized::new(encoder, layout, target),
+            sink: Quantized::new(encoder, layout, target, output_rate(target, source_rate)),
             staging: Vec::new(),
             gain: None,
             resampler,

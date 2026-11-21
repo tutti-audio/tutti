@@ -618,7 +618,7 @@ fn a_host_removed_node_ends_a_retiring_output() {
     drop(out);
     let _ = s.update();
     assert_eq!(fake.connected_outputs().len(), 1, "it is retiring");
-    let _ = s.graph().remove(node);
+    let _ = s.remove(node);
     let _ = s.update();
     assert!(fake.connected_outputs().is_empty(), "the device closed");
 }
@@ -634,7 +634,7 @@ fn a_retiring_output_survives_a_re_rate() {
         .expect("queued");
     drop(out);
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let _ = s.update();
     // The re-prepare's second half lands on a render, then the commit.
     blocks(&s, 8);

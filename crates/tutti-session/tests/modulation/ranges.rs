@@ -299,7 +299,7 @@ fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
     let depth = tutti_session::DepthTarget::of(source, lp.cutoff());
     s.set(depth.to(Depth::of(0.25))).unwrap();
 
-    s.graph().remove(lp).unwrap();
+    s.remove(lp).unwrap();
     let range = s.set(lp.cutoff().range().to(Hz::new(1.0)..Hz::new(2.0)));
     assert_eq!(range.unwrap_err().kind, ValueErrorKind::NoSuchTarget);
     let depth = s.set(depth.to(Depth::of(0.1)));

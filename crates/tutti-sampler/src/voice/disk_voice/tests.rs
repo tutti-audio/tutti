@@ -543,11 +543,11 @@ fn clip_reader_stopped_transport_is_silent() {
 //
 // The integration-test gate `tests/rt_no_alloc.rs` cannot reach the
 // crate-private ring / `Cells` needed to build a streaming reader, so the streaming-variant no-alloc guard lives here, in-crate, with
-// a module-local `AllocDisabler`. The disabler only aborts inside an
+// a module-local `RtAllocCheck`. The disabler only aborts inside an
 // `assert_no_alloc` region; every other unit test allocates normally.
 
 #[global_allocator]
-static ALLOC: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 /// A clip reader inside its window, driven by hand (`Direct`) at 48 kHz
 /// in `frames`-frame blocks, warmed up: the enter-window edge settled and

@@ -598,7 +598,7 @@ mod vst2 {
         let (mut s, _catalog, _id, plugin, node, _env, _dir) = declared();
         let third = plugin.info().presets().iter().nth(2).unwrap();
         let load = s.load_preset(&node, &third).unwrap();
-        s.graph().remove(node).expect("the node is removed");
+        s.remove(node).expect("the node is removed");
         let run = load.perform(tutti_fixtures::main_thread());
         assert!(matches!(run, Err(PresetError::Lost)), "{run:?}");
     }
@@ -612,7 +612,7 @@ mod vst2 {
         let main = tutti_fixtures::main_thread();
         let third = plugin.info().presets().iter().nth(2).unwrap();
         let loaded = s.load_preset(&node, &third).unwrap().perform(main).unwrap();
-        s.graph().remove(node).expect("the node is removed");
+        s.remove(node).expect("the node is removed");
         assert_eq!(s.apply(loaded).unwrap_err(), PluginApplyError::Gone);
     }
 }

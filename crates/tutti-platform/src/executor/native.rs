@@ -281,6 +281,7 @@ fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
             continue;
         }
         if let Err(running) = worker.handle.stop_within(deadline.left(Instant::now())) {
+            // Teardown: no caller is left to tell, so the overrun is logged.
             tracing::warn!(
                 thread = running.name(),
                 "a stopped thread still runs past the stop bound; it is detached"
@@ -289,6 +290,9 @@ fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
         }
     }
 }
+
+/// No value: a native target has threads, so nothing builds a [`super::PageDriver`].
+pub(super) enum Page {}
 
 /// The native half of [`super::Threads`]: the started threads and the executor they drive.
 pub(super) struct Threads {
@@ -313,8 +317,8 @@ impl Drop for Threads {
 
 impl Executor {
     /// Starts `n` threads that drive this executor's queue, until the returned [`Threads`](super::Threads)
-    /// drops. Native targets only: a web page starts no threads, and its caller drives with
-    /// [`run_until_stalled`](Self::run_until_stalled).
+    /// drops. Native targets only: a web page starts no threads, and the browser's queue drives with
+    /// `drive_on_page`.
     ///
     /// # Errors
     ///

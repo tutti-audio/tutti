@@ -17,7 +17,7 @@ use tutti_graph::{
 
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{MidiChannel, NoteVelocity, U7};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -32,7 +32,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    Settings::new().build(font()).expect("builds")
+    SoundFontUnit::try_from(SoundFontConfig::new(font())).expect("builds")
 }
 
 /// A clip playing middle C at `frame` into the unit, both at key 1 and 2,

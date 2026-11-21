@@ -30,7 +30,7 @@ use super::interp::{
 };
 use super::loop_span::{Loop, LoopSpan};
 use super::slot::Piece;
-use super::types::Direction;
+use super::types::PlayDirection;
 use crate::PlaceError;
 use crate::lanes::{Gather, Lane, UNPREPARED_FRAMES, audible_gain, scale};
 use tutti_buffers::MAX_CHANNELS;
@@ -212,7 +212,7 @@ pub struct MemorySource<F: Float> {
     clock: Clock,
 
     /// The project's tempo map, when this source reads one: lent once per
-    /// block to its clock ([`with_tempo`](Self::with_tempo)).
+    /// block to its clock ([`tempo`](Self::tempo)).
     tempo: Option<TempoReader>,
 
     /// Output width — the node's audio outputs, fixed at construction.
@@ -608,7 +608,7 @@ impl<F: Float> MemorySource<F> {
     }
 
     /// Sets the loop, or clears it with `None` (one-shot playback). In-memory
-    /// only: a stream's loop is the stream's (`Stream::looping_cell`), which is
+    /// only: a stream's loop is the stream's (`StreamHandle::looping_cell`), which is
     /// why this is inherent rather than a shared trait method.
     ///
     /// The loop plays whole frames, and the fade leads into the loop's start:
@@ -695,25 +695,27 @@ impl<F: Float> MemorySource<F> {
     pub(crate) fn read_placed_into(
         &self,
         pos: SamplePosition,
-        direction: Direction,
+        direction: PlayDirection,
         out: &mut [F],
     ) {
         let len = self.wave.len().get() as f64;
         match direction {
-            Direction::Reverse => {
+            PlayDirection::Reverse => {
                 if pos.get() >= len {
                     out.fill(F::ZERO);
                     return;
                 }
                 self.sample_raw_into(mirrored(self.wave.len(), pos), out);
             }
-            Direction::Forward => match LoopSpan::from_setting(self.loop_, self.wave.len().get()) {
-                Some(span) => {
-                    let (p, looped) = span.place(pos.get());
-                    self.read_looped_raw_into(&span, SamplePosition::new(p), looped, out);
+            PlayDirection::Forward => {
+                match LoopSpan::from_setting(self.loop_, self.wave.len().get()) {
+                    Some(span) => {
+                        let (p, looped) = span.place(pos.get());
+                        self.read_looped_raw_into(&span, SamplePosition::new(p), looped, out);
+                    }
+                    None => self.sample_raw_into(pos, out),
                 }
-                None => self.sample_raw_into(pos, out),
-            },
+            }
         }
     }
 
@@ -829,7 +831,7 @@ impl<F: Float> MemorySource<F> {
     pub(crate) fn read_placed_lanes<L: AsMut<[F]>>(
         &self,
         positions: &[Option<SamplePosition>],
-        direction: Direction,
+        direction: PlayDirection,
         lanes: &mut [L],
         n: usize,
         gather: &mut Gather<F>,
@@ -859,8 +861,8 @@ impl<F: Float> MemorySource<F> {
             return;
         }
         let span = match direction {
-            Direction::Forward => LoopSpan::from_setting(self.loop_, len),
-            Direction::Reverse => None,
+            PlayDirection::Forward => LoopSpan::from_setting(self.loop_, len),
+            PlayDirection::Reverse => None,
         };
         let Gather {
             index,
@@ -887,12 +889,12 @@ impl<F: Float> MemorySource<F> {
                 // The reversed mirror, the loop's placement, and the end:
                 // `read_placed_into`.
                 let p = match (direction, &span) {
-                    (Direction::Reverse, _) if p >= flen => return None,
-                    (Direction::Reverse, _) => {
+                    (PlayDirection::Reverse, _) if p >= flen => return None,
+                    (PlayDirection::Reverse, _) => {
                         mirrored(Samples::new(len), SamplePosition::new(p)).get()
                     }
-                    (Direction::Forward, Some(span)) => span.place(p).0,
-                    (Direction::Forward, None) => p,
+                    (PlayDirection::Forward, Some(span)) => span.place(p).0,
+                    (PlayDirection::Forward, None) => p,
                 };
                 if p >= flen { None } else { Some(p) }
             });
@@ -1124,7 +1126,7 @@ impl<F: Float> MemorySource<F> {
         &self,
         clock: &BlockClock<'_>,
         range: Range<usize>,
-        direction: Direction,
+        direction: PlayDirection,
         gain: F,
         n: usize,
         positions: &mut [Option<SamplePosition>],
@@ -1186,7 +1188,7 @@ impl<F: Float> MemorySource<F> {
             out.fill(F::ZERO);
             return;
         }
-        self.read_placed_into(SamplePosition::new(pos), Direction::Reverse, out);
+        self.read_placed_into(SamplePosition::new(pos), PlayDirection::Reverse, out);
         self.apply_gain(out);
         let next = pos + self.read_rate().advance(Samples::new(1)).get();
         self.position.store(SamplePosition::new(next));
@@ -1200,7 +1202,7 @@ impl<F: Float> MemorySource<F> {
     /// cursor is stopped (nothing is written, and the cursor stays).
     pub(crate) fn render_free<H: AsMut<[F]>>(
         &mut self,
-        direction: Direction,
+        direction: PlayDirection,
         frames: usize,
         n: usize,
         head: &mut [H],
@@ -1211,8 +1213,8 @@ impl<F: Float> MemorySource<F> {
         let mut frame = [F::ZERO; MAX_CHANNELS];
         for i in 0..frames {
             match direction {
-                Direction::Forward => self.free_frame_into(&mut frame[..n]),
-                Direction::Reverse => self.free_frame_reversed_into(&mut frame[..n]),
+                PlayDirection::Forward => self.free_frame_into(&mut frame[..n]),
+                PlayDirection::Reverse => self.free_frame_reversed_into(&mut frame[..n]),
             }
             for (lane, &sample) in head.iter_mut().zip(&frame[..n]) {
                 lane.as_mut()[i] = sample;
@@ -1259,7 +1261,7 @@ impl<F: Float> MemorySource<F> {
                 let piece = self.render_placed(
                     clock,
                     range,
-                    Direction::Forward,
+                    PlayDirection::Forward,
                     gain,
                     n,
                     positions,
@@ -1287,7 +1289,7 @@ impl<F: Float> MemorySource<F> {
                 match pos {
                     None => frame[..n].fill(F::ZERO),
                     Some(pos) => {
-                        self.read_placed_into(*pos, Direction::Forward, &mut frame[..n]);
+                        self.read_placed_into(*pos, PlayDirection::Forward, &mut frame[..n]);
                         self.apply_gain(&mut frame[..n]);
                     }
                 }
@@ -1449,10 +1451,10 @@ impl<F: Float> MemorySource<F> {
     /// Over a map whose tempo changes, how long a placed voice has played is
     /// the map's seconds between its start and the playhead, not the beats
     /// over the tempo of the moment; see
-    /// [`VoicePool::with_tempo`](super::VoicePool::with_tempo). It matters
+    /// [`VoicePool::tempo`](super::VoicePool::tempo). It matters
     /// only when the source is a graph node of its own (a voice in a pool or a `VoiceNode` reads its owner's). A fork reads the same map.
     #[must_use]
-    pub fn with_tempo(mut self, tempo: TempoReader) -> Self {
+    pub fn tempo(mut self, tempo: TempoReader) -> Self {
         self.tempo = Some(tempo);
         self
     }

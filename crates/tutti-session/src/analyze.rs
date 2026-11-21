@@ -27,7 +27,7 @@ use std::task::{Context, Poll};
 
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, Wave};
-use tutti_measure::{Measure, Meter};
+use tutti_measure::{Measure, StreamMeter};
 #[cfg(codec)]
 use tutti_platform::Asset;
 use tutti_platform::WeakExecutor;
@@ -145,7 +145,7 @@ impl Unanswered for AnalyzeError {
 /// An analysis of one audio, built by [`Session::analyze`]. It is `Send` when
 /// the analysis is, and it is a [`Future`] through [`IntoFuture`]: awaiting it
 /// folds the audio through the meter as a task on the session's executor and
-/// resolves to the meter's [`Output`](Meter::Output). There is no blocking
+/// resolves to the meter's [`Output`](StreamMeter::Output). There is no blocking
 /// form.
 ///
 /// It holds the audio, the analysis and a weak handle to the session's
@@ -164,14 +164,14 @@ where
     S: Float,
     A: Measure<S>,
     A::Context: AudioContext,
-    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
+    for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, S>,
 {
     /// Folds the audio through the meter the analysis builds and returns the
     /// meter's output.
     ///
     /// The cost is a full read of the audio: a file is decoded a chunk at a
     /// time, so its length is not held in memory.
-    fn run(self) -> Result<<A::Meter as Meter>::Output, AnalyzeError> {
+    fn run(self) -> Result<<A::Meter as StreamMeter>::Output, AnalyzeError> {
         let mut reader = Reader::open(&self.audio)?;
         let topology = reader.topology();
         let context = A::Context::from_audio(reader.sample_rate(), topology.width());
@@ -183,7 +183,7 @@ where
                 return Ok(meter.finish());
             }
             meter.push(
-                <<A::Meter as Meter>::Input<'_> as View<'_, S>>::view(&mut chunk)?,
+                <<A::Meter as StreamMeter>::Input<'_> as View<'_, S>>::view(&mut chunk)?,
                 &mut Discard,
             )?;
         }
@@ -195,10 +195,10 @@ where
     S: Float,
     A: Measure<S> + Send + 'static,
     A::Context: AudioContext,
-    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
-    <A::Meter as Meter>::Output: Send + 'static,
+    for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, S>,
+    <A::Meter as StreamMeter>::Output: Send + 'static,
 {
-    type Output = Result<<A::Meter as Meter>::Output, AnalyzeError>;
+    type Output = Result<<A::Meter as StreamMeter>::Output, AnalyzeError>;
     type IntoFuture = Analyzing<A, S>;
 
     fn into_future(self) -> Analyzing<A, S> {
@@ -240,7 +240,7 @@ where
     S: Float,
     A: Measure<S>,
 {
-    analysis: Unblocked<Analyze<A, S>, <A::Meter as Meter>::Output, AnalyzeError>,
+    analysis: Unblocked<Analyze<A, S>, <A::Meter as StreamMeter>::Output, AnalyzeError>,
 }
 
 impl<A, S> Future for Analyzing<A, S>
@@ -248,10 +248,10 @@ where
     S: Float,
     A: Measure<S> + Send + 'static,
     A::Context: AudioContext,
-    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
-    <A::Meter as Meter>::Output: Send + 'static,
+    for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, S>,
+    <A::Meter as StreamMeter>::Output: Send + 'static,
 {
-    type Output = Result<<A::Meter as Meter>::Output, AnalyzeError>;
+    type Output = Result<<A::Meter as StreamMeter>::Output, AnalyzeError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.analysis).poll(cx)
@@ -284,7 +284,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// is defined over floats. A path names no format, so a call that passes
     /// one states `S` (`analyze::<f32, _>`).
     ///
-    /// The analysis is generic, never boxed: [`Meter`] is not object-safe.
+    /// The analysis is generic, never boxed: [`StreamMeter`] is not object-safe.
     pub fn analyze<S, A>(&self, audio: impl Into<Audio<S>>, analysis: A) -> Analyze<A, S>
     where
         S: Float,

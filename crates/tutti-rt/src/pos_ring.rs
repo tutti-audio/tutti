@@ -301,7 +301,7 @@ impl<S: RingSample> std::fmt::Debug for PosRing<S> {
 impl<S: RingSample> PosRing<S> {
     /// Creates an empty ring and returns its one writer and its one reader.
     ///
-    /// `frames` is the slot count, clamped to `1..=`[`MAX_POS_RING_FRAMES`];
+    /// `frames` is the slot count, within `1..=`[`MAX_POS_RING_FRAMES`];
     /// `layout` the width of a frame. The writer never reuses the slot of a
     /// position less than `keep_behind` behind where the reader plays (for a
     /// reader that taps positions behind the one it plays). Allocates the
@@ -309,7 +309,9 @@ impl<S: RingSample> PosRing<S> {
     ///
     /// # Errors
     ///
-    /// [`BufferError::ZeroWidth`] for the empty layout.
+    /// [`BufferError::ZeroWidth`] for the empty layout;
+    /// [`BufferError::CapacityOutOfRange`] for a `frames` of zero or past
+    /// [`MAX_POS_RING_FRAMES`].
     #[allow(clippy::new_ret_no_self)] // the ring is its two ends
     #[must_use = "the ring's two ends are the result"]
     pub fn new(
@@ -320,7 +322,12 @@ impl<S: RingSample> PosRing<S> {
         if layout.count() == 0 {
             return Err(BufferError::ZeroWidth);
         }
-        let frames = frames.clamp(1, MAX_POS_RING_FRAMES);
+        if !(1..=MAX_POS_RING_FRAMES).contains(&frames) {
+            return Err(BufferError::CapacityOutOfRange {
+                frames,
+                max: MAX_POS_RING_FRAMES,
+            });
+        }
         let ring = Arc::new(Self {
             layout,
             frames,

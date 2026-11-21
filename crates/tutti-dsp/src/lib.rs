@@ -74,14 +74,14 @@
 //!   Freeverb's); and the frequency shifter ([`FrequencyShifterBank`]: a Hilbert network of two
 //!   all-pass chains, [`QUADRATURE_ERROR`] over [`quadrature_band`], and single-sideband
 //!   modulation by a signed shift).
-//! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
+//! - **Reverb** (`reverb/`): the model, a [`Network`] of [`NetworkStage`]s with analytic queries
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
 //!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
 //!   feedback delay network, over an [`FdnLayout`]) and
 //!   [`PlateBank`] (Dattorro's plate), [`SpringReverb`] (Valimaki, Parker and Abel's spring:
 //!   stretched all-pass cascades in a loop with a delay and a low-pass), their parameters [`Ramp`]s in [`FreeverbRamps`],
 //!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
-//!   given gain; [`EarlyReflections`] (the model's [`Taps`] stage: a sparse multi-tap delay
+//!   given gain; [`EarlyReflections`] (the model's [`TapSet`] stage: a sparse multi-tap delay
 //!   per output channel), whose taps a [`ShoeboxRoom`] makes by the image-source method; and the velvet-noise [`Decorrelator`] over a [`VelvetNoise`] sequence.
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
@@ -307,7 +307,9 @@ pub use fm::{
 pub use frequency_shifter::{
     FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
 };
-pub use granular::{GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset};
+pub use granular::{
+    GrainScheduler, GrainSettings, GrainStart, Granular, MaxGrains, MaxGrainsError,
+};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use karplus_strong::{KarplusStrong, KarplusStrongBank, KarplusStrongControls};
 pub use level::rms;
@@ -354,7 +356,7 @@ pub(crate) use reverb::network::loop_gain;
 pub use reverb::network::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
-    NetworkOutputMap, Stage, Tap, Taps, rt60_from_gain,
+    NetworkOutputMap, NetworkStage, Tap, TapSet, rt60_from_gain,
 };
 pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};

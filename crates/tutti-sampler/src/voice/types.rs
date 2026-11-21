@@ -37,7 +37,7 @@ pub struct SlotId(pub u128);
 /// A named pair rather than a `reverse: bool`, so the intent reads at the call
 /// site instead of at the declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Direction {
+pub enum PlayDirection {
     /// Read the source from its start toward its end.
     #[default]
     Forward,
@@ -45,7 +45,7 @@ pub enum Direction {
     Reverse,
 }
 
-impl Direction {
+impl PlayDirection {
     /// Returns `true` for [`Reverse`](Self::Reverse).
     #[inline]
     #[must_use]
@@ -54,7 +54,7 @@ impl Direction {
     }
 }
 
-impl From<bool> for Direction {
+impl From<bool> for PlayDirection {
     /// `true` is [`Reverse`](Self::Reverse), `false` [`Forward`](Self::Forward).
     #[inline]
     fn from(reverse: bool) -> Self {
@@ -219,7 +219,7 @@ pub struct Playback {
     /// Varispeed. Couples pitch to rate; unity is `PlaybackRate::UNITY`.
     pub speed: PlaybackRate,
     /// Whether the source is read forward or reversed.
-    pub direction: Direction,
+    pub direction: PlayDirection,
     /// Loop mode and, where looping, its bounds and crossfade.
     pub loop_: Option<Loop>,
     /// Time-stretch factor (`1.0` = no stretch), driving the phase vocoder.
@@ -236,7 +236,7 @@ impl Default for Playback {
         Self {
             gain: Amplitude::new(1.0),
             speed: PlaybackRate::UNITY,
-            direction: Direction::Forward,
+            direction: PlayDirection::Forward,
             loop_: None,
             stretch: StretchFactor::UNITY,
             pitch: Cents::new(0.0),

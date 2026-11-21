@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
-use crate::streamer::{ControlCell, Stream};
+use crate::streamer::{ControlCell, StreamHandle};
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
@@ -23,7 +23,7 @@ use super::loop_span::Loop;
 use super::memory_source::VoiceWindow;
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::stretched;
-use super::types::{Direction, Playback, Reach, SlotId, Voice, VoiceSource};
+use super::types::{PlayDirection, Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::{PlaceError, SamplerFloat};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
@@ -67,7 +67,7 @@ pub enum VoiceNodeError {
 ///   node lends once per block, latest wins, allocation-free.
 /// - loop, speed and play state: not scalars, so the handle publishes
 ///   them to a `Publisher` cell the node reads once per block, latest wins,
-///   allocation-free. A disk voice's loop is its [`Stream`]'s, which the
+///   allocation-free. A disk voice's loop is its [`StreamHandle`]'s, which the
 ///   handle owns ([`VoiceNode::streaming`]).
 ///
 /// # Forks
@@ -109,9 +109,9 @@ pub struct VoiceNode<F: SamplerFloat> {
     /// The loop last applied.
     applied_loop: Option<Loop>,
     /// A reader of the direction the handle publishes, lent once per block.
-    direction: Reader<Direction>,
+    direction: Reader<PlayDirection>,
     /// The direction last applied.
-    applied_direction: Direction,
+    applied_direction: PlayDirection,
     /// A reader of the speed the handle publishes, lent once per block.
     speed: Reader<PlaybackRate>,
     /// The speed last applied.
@@ -119,14 +119,14 @@ pub struct VoiceNode<F: SamplerFloat> {
     /// The disk stream of a streaming node, until [`with_handle`](Self::with_handle)
     /// hands it to the handle: a stream is control-thread only (its drop
     /// sends on a bounded queue), so the node never keeps one it plays with.
-    stream: Option<Stream<F>>,
+    stream: Option<StreamHandle<F>>,
     /// The gain the handle writes; read once per block.
     gain: Param<Amplitude>,
     /// The transport as the voice reads it, kept across blocks so a jump is
     /// flushed where it happens.
     clock: Clock,
     /// The project's tempo map, when the node reads one: lent once per block
-    /// to its clock ([`with_tempo`](Self::with_tempo)).
+    /// to its clock ([`tempo`](Self::tempo)).
     tempo: Option<TempoReader>,
     /// The block read's lanes (`PlaybackSlot::render_into`), built here and
     /// sized from `Prepare::max_block` in `prepare`, on the control thread.
@@ -199,7 +199,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
         })
     }
 
-    /// A node over a streaming voice, and the [`Stream`] that feeds it: the
+    /// A node over a streaming voice, and the [`StreamHandle`] that feeds it: the
     /// handle ([`with_handle`](Self::with_handle), or the graph's insert)
     /// takes the stream, so the voice sounds for as long as the handle lives,
     /// and its loop and direction are the stream's cells, through the handle.
@@ -216,7 +216,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// stream is dropped with the error.
     pub fn streaming(
         mut voice: DiskVoice<F>,
-        stream: Stream<F>,
+        stream: StreamHandle<F>,
         play: Playback,
     ) -> Result<Self, VoiceNodeError> {
         GainError::check(play.gain)?;
@@ -241,10 +241,10 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// Over a map whose tempo changes, how long a placed voice has played is
     /// the map's seconds between its start and the playhead, not the beats
     /// over the tempo of the moment; see
-    /// [`VoicePool::with_tempo`](super::VoicePool::with_tempo). It matters
+    /// [`VoicePool::tempo`](super::VoicePool::tempo). It matters
     /// only when the voice is placed on the transport. A fork reads the same map.
     #[must_use]
-    pub fn with_tempo(mut self, tempo: TempoReader) -> Self {
+    pub fn tempo(mut self, tempo: TempoReader) -> Self {
         self.tempo = Some(tempo);
         self
     }
@@ -588,7 +588,7 @@ struct VoiceNodeFork<F: SamplerFloat> {
     /// The live node's window, loop, direction and speed cells, read the same way.
     window: Publisher<Option<VoiceWindow>>,
     looping: ControlCell<Option<Loop>>,
-    direction: ControlCell<Direction>,
+    direction: ControlCell<PlayDirection>,
     speed: Publisher<PlaybackRate>,
     /// The node's params: a fork starts from the gain cell, which holds the
     /// gain last set (a modulation lane sends its composite to the

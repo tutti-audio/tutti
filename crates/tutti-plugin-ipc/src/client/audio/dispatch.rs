@@ -1357,7 +1357,7 @@ pub(super) fn apply_rate_reply(
             inbox.rate_refusal(Some(refusal));
         }
         None => {
-            if lifecycle.rate_refusal().is_some() {
+            if lifecycle.is_rate_refused() {
                 lifecycle.set_rate_refusal(None);
                 inbox.rate_refusal(None);
             }
@@ -1381,6 +1381,12 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         }
         News::PluginReloaded => inbox.resync(ResyncKind::Reloaded),
         News::PluginStateNotRestored { reason } => inbox.state_not_restored(reason),
+        News::RenderModeNotApplied { mode } => inbox.render_mode_not_applied(mode),
+        News::PluginWouldNotStop { reason } => inbox.would_not_stop(reason),
+        News::ServerLosses {
+            commands_refused,
+            edits_refused,
+        } => inbox.server_losses(commands_refused, edits_refused),
         News::ProcessRequested => inbox.process_requested(),
         News::TransportRequested { request } => inbox.transport(request),
         // The server's editor is the remote editor's to hear of: no event of

@@ -153,13 +153,13 @@ fn tapped_frames_reach_the_wav_in_order_through_the_whole_chain() {
         "the tap has two lanes; the sink below is built to match"
     );
 
-    let sink = FileOut::create(
+    let sink = FileOut::new(
         &Spec::of_width(
             Format::Wav(Pcm::Float32),
             ChannelLayout::STEREO,
             SampleRate::SR_48K,
         ),
-        &path,
+        std::fs::File::create(&path).expect("file opens"),
     )
     .expect("sink opens");
 
@@ -230,13 +230,13 @@ fn interleaved_pushes_and_pumps_lose_no_frames() {
 
     let (mut graph, reader) = graph_tap(2 * 512);
     let src = reader;
-    let sink = FileOut::create(
+    let sink = FileOut::new(
         &Spec::of_width(
             Format::Wav(Pcm::Float32),
             ChannelLayout::STEREO,
             SampleRate::SR_48K,
         ),
-        &path,
+        std::fs::File::create(&path).expect("file opens"),
     )
     .expect("sink opens");
 
@@ -282,13 +282,13 @@ fn a_gap_in_a_take_is_counted_and_the_file_closes_up_over_it() {
     let path = dir.path().join("gappy.wav");
     let (mut graph, reader) = graph_tap(512);
     let src = reader;
-    let sink = FileOut::create(
+    let sink = FileOut::new(
         &Spec::of_width(
             Format::Wav(Pcm::Float32),
             ChannelLayout::STEREO,
             SampleRate::SR_48K,
         ),
-        &path,
+        std::fs::File::create(&path).expect("file opens"),
     )
     .expect("sink opens");
     let mut pump = PumpLoop::new(src, sink, Samples::new(1024)).expect("pairs");

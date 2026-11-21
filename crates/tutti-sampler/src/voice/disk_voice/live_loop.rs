@@ -34,7 +34,7 @@ use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};
 
 use super::DiskVoice;
 use crate::testing::{MockTransport, block};
-use crate::{DiskStreamer, DiskStreamerConfig, Loop, Manual, MemorySource, Stream};
+use crate::{DiskStreamer, DiskStreamerConfig, Loop, Manual, MemorySource, StreamHandle};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -131,9 +131,9 @@ struct Live {
     streamer: DiskStreamer<Manual<f32>, f32>,
     voice: DiskVoice<f32>,
     /// The voice's stream.
-    stream: Stream<f32>,
+    stream: StreamHandle<f32>,
     /// The neighbours' streams and readers, held so their rings stay read.
-    _neighbours: Vec<(Stream<f32>, crate::StreamReader<f32>)>,
+    _neighbours: Vec<(StreamHandle<f32>, crate::StreamReader<f32>)>,
     clock: Arc<MockTransport>,
 }
 
@@ -142,7 +142,7 @@ impl Live {
         Self::with(path, Setup::looped(loop_, speed))
     }
 
-    /// Stream `path` from where the clock starts, with the setup's loop, under
+    /// StreamHandle `path` from where the clock starts, with the setup's loop, under
     /// the streamer's default config (its seek crossfade included), and build
     /// a live voice placed at beat 0 from the first stream's reader.
     fn with(path: &Path, setup: Setup) -> Self {
@@ -462,7 +462,7 @@ fn a_reversed_voice_ignores_its_loop_and_mirrors_the_file() {
         );
         live.stream
             .direction_cell()
-            .publish(crate::Direction::Reverse);
+            .publish(crate::PlayDirection::Reverse);
         let _ = live.streamer.step_until_idle(1_000);
         live
     };
@@ -931,7 +931,7 @@ fn a_seek_inside_a_block_is_a_jump_on_its_frame() {
 fn pool_with(
     id: crate::SlotId,
     voice: DiskVoice<f32>,
-    stream: Stream<f32>,
+    stream: StreamHandle<f32>,
 ) -> (crate::VoicePool<f32>, crate::VoicePoolHandle<f32>) {
     let (mut pool, handle) = crate::VoicePool::new().with_handle();
     pool.prepare(&Prepare::new(
@@ -950,7 +950,7 @@ fn streaming(
     path: &Path,
 ) -> (
     DiskStreamer<Manual<f32>, f32>,
-    Stream<f32>,
+    StreamHandle<f32>,
     crate::StreamReader<f32>,
 ) {
     let mut streamer =
@@ -1089,7 +1089,9 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
         .expect("a finite gain and a nonempty width");
     a.set_speed(PlaybackRate::of(2.0));
     a.set_stretch_rate(tutti_units::ReadRate::new(0.5));
-    stream_a.direction_cell().publish(crate::Direction::Reverse);
+    stream_a
+        .direction_cell()
+        .publish(crate::PlayDirection::Reverse);
     assert!(streamer.step_until_idle(1_000) < 1_000);
 
     // What was written, on the voice it was written to.
@@ -1101,20 +1103,20 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     );
     let direction =
         |voice: &mut DiskVoice<f32>| voice.inner.read.lent_control().map(|c| c.direction);
-    assert_eq!(direction(&mut a), Some(crate::Direction::Reverse));
+    assert_eq!(direction(&mut a), Some(crate::PlayDirection::Reverse));
 
     // And nothing of it on the other.
     assert_eq!(b.gain(), tutti_units::Amplitude::new(1.0));
     assert_eq!(b.shared_state.speed(), PlaybackRate::UNITY);
     assert_eq!(b.shared_state.stretch_rate(), tutti_units::ReadRate::UNITY);
-    assert_eq!(direction(&mut b), Some(crate::Direction::Forward));
+    assert_eq!(direction(&mut b), Some(crate::PlayDirection::Forward));
     assert!(
         !Arc::ptr_eq(&a.shared_state, &b.shared_state),
         "the two voices hold one cell"
     );
 }
 
-/// **Direction is published once, with the map, and read from the lent
+/// **PlayDirection is published once, with the map, and read from the lent
 /// control.** The stream's direction cell is a request: the streamer turns the
 /// ring's mapping and publishes one `RingControl` whose direction is the
 /// map's newest arrangement's, so the voice's lend (the value its block reads
@@ -1131,27 +1133,27 @@ fn direction_is_published_once_and_read_from_the_lent_control() {
     let lent = |live: &mut Live| live.voice.inner.read.lent_control().expect("a live voice");
 
     let forward = lent(&mut live);
-    assert_eq!(forward.direction, crate::Direction::Forward);
+    assert_eq!(forward.direction, crate::PlayDirection::Forward);
     assert!(!forward.map.after.reverse());
 
     live.stream
         .direction_cell()
-        .publish(crate::Direction::Reverse);
+        .publish(crate::PlayDirection::Reverse);
     let _ = live.streamer.step();
     let reversed = lent(&mut live);
-    assert_eq!(reversed.direction, crate::Direction::Reverse);
+    assert_eq!(reversed.direction, crate::PlayDirection::Reverse);
     assert!(
         reversed.map.after.reverse(),
         "the direction and the map it was published with agree"
     );
     assert_eq!(reversed.map.epoch, forward.map.epoch + 1, "published once");
-    assert_eq!(live.stream.direction(), crate::Direction::Reverse);
+    assert_eq!(live.stream.direction(), crate::PlayDirection::Reverse);
 
     live.stream
         .direction_cell()
-        .publish(crate::Direction::Forward);
+        .publish(crate::PlayDirection::Forward);
     let _ = live.streamer.step();
     let back = lent(&mut live);
-    assert_eq!(back.direction, crate::Direction::Forward);
+    assert_eq!(back.direction, crate::PlayDirection::Forward);
     assert_eq!(back.map.epoch, reversed.map.epoch + 1);
 }

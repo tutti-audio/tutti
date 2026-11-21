@@ -58,7 +58,7 @@ fn primed(
 ) -> (
     DiskStreamer<Running, f32>,
     Rig,
-    Stream<f32>,
+    StreamHandle<f32>,
     StreamReader<f32>,
     u64,
 ) {

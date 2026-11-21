@@ -71,16 +71,25 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// The master meter: the level of each graph output channel, one
     /// [`Level`](tutti_graph::Level) per channel, with the peak held since
-    /// the last read. It is an op of the plan on the outputs (see
-    /// [`Meters::master`](crate::Meters::master)), declared and on
-    /// from the build, so every render feeds it: a device callback,
+    /// the last read. It is an op of the plan on the outputs, declared and **on**
+    /// from the build, so a host that reads it needs to ask for nothing, and every
+    /// render feeds it: a device callback,
     /// [`render`](Self::render), and a detached session's
     /// `render_frame`. It reads before the engine's fold
     /// to the device and its declick, aligned to the outputs' time. A block
     /// the engine refuses (rendered silent because the control side held the
     /// graph for that callback) runs no op, so it does not touch the meter:
     /// the meter holds what it held and counts no frames for it. `None` once
-    /// a host has taken it.
+    /// a host has taken it ([`take_master_meter`](Self::take_master_meter)).
+    ///
+    /// It follows the outputs as they are re-wired or widened (up to
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)). **A declared root of
+    /// another width replaces it**
+    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)):
+    /// the one the session holds is swapped in place, and one a host took is
+    /// announced by [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened),
+    /// claimed with [`Session::take_reopened`](crate::Session::take_reopened),
+    /// and reads closed ([`is_closed`](MeterReader::is_closed)).
     pub fn master_meter(&mut self) -> Option<&mut MeterReader> {
         self.graph.meters().master()
     }
@@ -98,9 +107,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.graph.take_reopened(id)
     }
 
-    /// Hands the master meter's reader to its one consumer; see
-    /// [`master_meter`](Self::master_meter) and
-    /// [`Meters::take_master`](crate::Meters::take_master).
+    /// Hands the master meter's reader to its one consumer, which owns it
+    /// from here: dropping it closes the meter at the next
+    /// [`Reclaim`](crate::Phase::Reclaim) phase. See
+    /// [`master_meter`](Self::master_meter).
     pub fn take_master_meter(&mut self) -> Option<MeterReader> {
         self.graph.meters().take_master()
     }

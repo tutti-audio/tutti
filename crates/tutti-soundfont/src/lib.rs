@@ -3,7 +3,7 @@
 //!
 //! The crate has one type, `SoundFontUnit`: a graph node (`tutti_graph::Node`)
 //! with no audio inputs, five outputs and one MIDI event input. Build it from a
-//! decoded `SoundFont` and a `Settings` (a `Polyphony` and a `MidiGroup`: the rate
+//! decoded `SoundFont` and a `SoundFontConfig` (a `Polyphony` and a `MidiGroup`: the rate
 //! is the graph's), choose a preset with `select(channel, &Preset)` (its bank and
 //! program) or `program_change`, insert it into a graph, and wire a MIDI source (a clip node, a keyboard queue, a hardware
 //! input) to its event input. Each event is
@@ -19,7 +19,7 @@
 //! (`tutti_nodes::ModDelayConfig::general_midi_chorus`, and
 //! `tutti_nodes::FreeverbNode`), summed with the dry pair by the graph (the fader's ports take all three);
 //! `tutti-session`'s `Session::add_general_midi` wires the three, and a host that
-//! wants other effects wires the sends itself. `Settings` has no switch for
+//! wants other effects wires the sends itself. `SoundFontConfig` has no switch for
 //! them: a dry instrument is one whose sends are left unconnected.
 //!
 //! Use it when you want General MIDI or sampled-instrument playback from a
@@ -38,11 +38,11 @@
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_ump::{MidiChannel, U7};
 //! use tutti_sf2::SoundFont;
-//! use tutti_soundfont::{Settings, SoundFontUnit};
+//! use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 //!
 //! let soundfont = SoundFont::open("piano.sf2")?;
 //!
-//! let mut unit = Settings::new().build::<f32>(soundfont)?;
+//! let mut unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(soundfont))?;
 //! unit.program_change(MidiChannel::FIRST, U7::of(0)); // channel 0 → program 0
 //!
 //! // Into the graph: no audio input, five outputs, one MIDI event input (wire a
@@ -61,7 +61,7 @@
 //! ## Sample rate
 //!
 //! The voices are built against one rate and cannot be re-rated, and the unit
-//! has none of its own: `Settings` carries no rate. Until a graph prepares it the
+//! has none of its own: `SoundFontConfig` carries no rate. Until a graph prepares it the
 //! unit is at 44.1 kHz; when the graph is prepared at another rate, the node's
 //! `prepare` (on the control thread) replaces its player with one built at the
 //! graph's rate over the same shared SoundFont, keeping the presets and channel
@@ -75,7 +75,7 @@
 //! inside the same 8-frame window sound together. A voice computes its
 //! envelopes, LFOs and gains once for a chunk of 8 frames and fills the chunk
 //! whole, so an event cannot take effect part-way into one
-//! (`SYNTH_BLOCK_FRAMES`); `Settings` has no block size.
+//! (`SYNTH_BLOCK_FRAMES`); `SoundFontConfig` has no block size.
 //!
 //! At 44.1 kHz that is 0.18 ms. An event at offset N (a multiple of 8) produces
 //! exactly the offset-0 render shifted by N frames. The smaller chunk costs about
@@ -175,11 +175,12 @@
 //! - [`SoundFontUnit`]: the player, a graph node with one MIDI event input and
 //!   five outputs: the dry pair and the effect sends.
 //! - [`SYNTH_BLOCK_FRAMES`]: the 8-frame MIDI timing resolution.
-//! - [`Settings`]: what a unit is built with, and [`Polyphony`], its voice count.
+//! - [`SoundFontConfig`]: what a unit is made from, and [`Polyphony`], its voice count.
 //! - [`enum@Error`] and [`Result`]: this crate's failure type.
 
 mod array_math;
 mod channel;
+mod config;
 mod error;
 mod lfo;
 mod modulation_envelope;
@@ -189,15 +190,14 @@ mod player;
 mod region_ex;
 mod region_pair;
 mod render;
-mod settings;
 mod soundfont_math;
 mod voice;
 mod voices;
 mod volume_envelope;
 
+pub use config::{Polyphony, PolyphonyError, SoundFontConfig};
 pub use error::{Error, Result};
 pub use player::MissingPresets;
-pub use settings::{Polyphony, PolyphonyError, Settings};
 
 // `SoundFontUnit::fork_instance`: the unit in a fork of the graph
 // (an export), with its clip.
@@ -238,7 +238,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// `tutti_nodes::FreeverbNode`) summed back with the dry pair by the graph's
 /// fan-in (the setup's fader holds all three as sources); `tutti-session`'s `Session::add_general_midi` wires all of
 /// that. A send with nothing to send is reported silent in the block's status
-/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Build it with [`Settings::build`](crate::Settings::build), pick a preset with
+/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Make it from a [`SoundFontConfig`] with `try_from`, pick a preset with
 /// [`select`](Self::select) (a preset's bank and program) or
 /// [`program_change`](Self::program_change), then insert it into a graph
 /// (it implements `tutti_graph::Node` and `tutti_graph::IntoNode`, with no
@@ -277,10 +277,10 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// ```no_run
 /// use tutti_ump::{MidiChannel, U7};
 /// use tutti_sf2::SoundFont;
-/// use tutti_soundfont::{Settings, SoundFontUnit};
+/// use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 ///
 /// let soundfont = SoundFont::open("piano.sf2")?;
-/// let mut unit = Settings::new().build::<f32>(soundfont)?;
+/// let mut unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(soundfont))?;
 /// unit.program_change(MidiChannel::FIRST, U7::of(0));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -307,7 +307,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// # The rate
 ///
 /// A player's voices are built against a rate and cannot be re-rated in place.
-/// [`Settings::build`](crate::Settings::build) builds at 44.1 kHz; the node's `prepare` swaps in a
+/// `SoundFontUnit::try_from` builds at 44.1 kHz; the node's `prepare` swaps in a
 /// player at the graph's rate (control thread, keeping the presets and
 /// channel state), and a rate outside 16 to 192 kHz leaves it at its own. The
 /// rate is the graph's: nothing here names one.
@@ -343,14 +343,14 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
         }
     }
 
-    /// Returns the rate this unit renders at: its settings' rate at
+    /// Returns the rate this unit renders at: its config's rate at
     /// construction, or the rate its graph prepared it at.
     pub fn sample_rate(&self) -> SampleRate {
         self.sample_rate
     }
 
     /// A copy of this unit that renders at `sample_rate`, or `None` outside
-    /// 16 to 192 kHz: the same SoundFont (shared, not reloaded), settings,
+    /// 16 to 192 kHz: the same SoundFont (shared, not reloaded), config,
     /// presets and channel state, and no voice sounding. The rate is rounded to
     /// whole hertz. Allocates a new player's voices; the node's `prepare` calls
     /// it on the control thread when its graph runs at another rate.
@@ -484,13 +484,13 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
     ///
     /// A MIDI 1.0 channel voice message is read as the MIDI 2.0 one it means
     /// ([`channel_voice`]), so the player reads one form. Only the unit's own
-    /// Group is read ([`Settings::group`]): a message in another Group
+    /// Group is read ([`SoundFontConfig::group`]): a message in another Group
     /// addresses another channel space (M2-104 Appendix B.1), so it is not
     /// this unit's, whichever channel it names.
     ///
     /// The Group's System Exclusive is read too
     /// ([`Player::universal`](crate::player::Player)): a Universal message
-    /// addressed to this unit ([`Settings::device`]) or to all of them is
+    /// addressed to this unit ([`SoundFontConfig::device`]) or to all of them is
     /// the note logic's. This is a sink, so a message that is neither (a clock,
     /// a manufacturer's sysex, one `decode` cannot frame) is unused, not an
     /// error.

@@ -106,7 +106,7 @@ impl SourceId {
 
 /// The clock a layer's phase runs on.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Clock {
+pub enum LayerClock {
     /// `cycles = beat / per_cycle + phase`: bar-locked; follows seeks and
     /// loop wraps; holds while the transport is stopped.
     Beats {
@@ -228,7 +228,7 @@ pub struct Layer {
     /// Its identity and sum order.
     pub id: LayerId,
     /// The clock its phase runs on.
-    pub clock: Clock,
+    pub clock: LayerClock,
     /// Its raw value over one cycle.
     pub wave: Waveform,
     /// How the raw value becomes an offset.
@@ -253,7 +253,7 @@ pub struct Layer {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DepthBy {
     /// The clock the scaling wave runs on.
-    pub clock: Clock,
+    pub clock: LayerClock,
     /// The scaling wave.
     pub wave: Waveform,
     /// How its raw value becomes the scale.
@@ -374,7 +374,7 @@ pub enum ProgramError {
 ///
 /// ```
 /// use tutti_modulation::{
-///     Amount, Clock, ControlProgramBuilder, ControlProgram, Law, Layer, LayerId, LfoShape, Polarity,
+///     Amount, LayerClock, ControlProgramBuilder, ControlProgram, Law, Layer, LayerId, LfoShape, Polarity,
 ///     ProgramTime, Waveform,
 /// };
 /// use tutti_units::{Beat, BeatsPerCycle, Depth, PhaseIncrement, SamplePosition, SampleRate};
@@ -382,7 +382,7 @@ pub enum ProgramError {
 /// // A bar-locked square, a quarter of the range deep, on a knob of 1000.
 /// let square = Layer {
 ///     id: LayerId(1),
-///     clock: Clock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
+///     clock: LayerClock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
 ///     wave: Waveform::Shape { shape: LfoShape::Square, seed: 0 },
 ///     amount: Amount { depth: Depth::of(0.25), polarity: Polarity::Bipolar, curve: Law::Linear },
 ///     depth_by: None,
@@ -907,9 +907,9 @@ impl Layer {
 
     /// Whether a NaN is anywhere in the layer.
     fn has_nan(&self) -> bool {
-        let clock = |c: &Clock| match *c {
-            Clock::Beats { phase, .. } => phase.get().is_nan(),
-            Clock::Seconds {
+        let clock = |c: &LayerClock| match *c {
+            LayerClock::Beats { phase, .. } => phase.get().is_nan(),
+            LayerClock::Seconds {
                 rate,
                 phase,
                 anchor,
@@ -929,7 +929,7 @@ impl Layer {
     }
 }
 
-impl Clock {
+impl LayerClock {
     /// The position at `at`, in unwrapped cycles; `None` when the clock
     /// gives none (a rate that is not finite).
     pub fn cycles(&self, at: &ProgramTime) -> Option<f64> {
@@ -1033,7 +1033,7 @@ pub(crate) fn hash_bipolar(n: i64) -> f64 {
 impl Waveform {
     /// The raw value on `clock` at `at` (just before it for [`Limit::Before`]);
     /// `None` when the clock gives no position. A constant needs none.
-    fn raw_on(&self, clock: &Clock, at: &ProgramTime, limit: Limit) -> Option<f64> {
+    fn raw_on(&self, clock: &LayerClock, at: &ProgramTime, limit: Limit) -> Option<f64> {
         match self {
             Self::Const(v) => Some(*v),
             _ => Some(self.raw_limit(clock.cycles(at)?, limit)),

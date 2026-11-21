@@ -11,7 +11,7 @@
 //! **The network.** The tank is one [`Fdn`] of four lines in a ring, `A_L -> B_L -> A_R ->
 //! B_R -> A_L` (a permutation matrix): line `A` is the modulated lattice, the first delay and
 //! the damping with its decay gain, line `B` the second lattice, the second delay and the decay
-//! gain. The four input diffusers are four [`Stage::AllPass`] stages. The output taps (table 2,
+//! gain. The four input diffusers are four [`NetworkStage::AllPass`] stages. The output taps (table 2,
 //! read inside the tank) are the bank's alone: the network's output map is empty, so only its
 //! `tail` and `rt60` queries are meaningful for the plate; its frequency-response and density
 //! queries describe no output.
@@ -33,7 +33,7 @@ use tutti_units::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Secon
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{
     Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, LineModulation, MAX_DENSE,
-    MAX_LINES, MAX_STAGES, Matrix, Network, NetworkCapacity, NetworkOutputMap, Stage,
+    MAX_LINES, MAX_STAGES, Matrix, Network, NetworkCapacity, NetworkOutputMap, NetworkStage,
     pre_delay_frames,
 };
 use crate::{MIN_DECAY, TAIL_FLOOR, loop_gain};
@@ -274,7 +274,7 @@ impl PlateControls {
             let stage = Inline::from_slice(&[lattice(span(n), scale(g), LineModulation::NONE)])
                 .expect("one all-pass fits a stage");
             out.stages
-                .push(Stage::AllPass(stage))
+                .push(NetworkStage::AllPass(stage))
                 .expect("five stages fit MAX_STAGES");
         }
 
@@ -318,7 +318,7 @@ impl PlateControls {
         input.as_mut_slice()[0] = Gain::new(1.0);
         input.as_mut_slice()[2] = Gain::new(1.0);
         out.stages
-            .push(Stage::Fdn(Fdn {
+            .push(NetworkStage::Fdn(Fdn {
                 lines,
                 matrix: Matrix::Dense(ring),
                 input,

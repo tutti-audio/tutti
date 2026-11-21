@@ -55,8 +55,9 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use thiserror::Error;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Interleaved, InterleavedMut, Sink, SinkFailed};
-use tutti_codec::{FileEncoder, Format, Spec};
+use tutti_buffers::{Float, I24, Interleaved, InterleavedMut, Sample, Sink, SinkFailed};
+use tutti_codec::{FileEncoder, Format, IntDepth, Spec};
+use tutti_dsp::{DitherShape, DitherSink, NoiseShaping};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
 use tutti_platform::{Staged, StagedCommitError};
@@ -177,66 +178,74 @@ pub struct Window {
     pub end: Option<Frame>,
 }
 
-/// Where a take goes: a file, or a sink of the caller's.
-///
-/// A file is encoded in the format given and staged: it is written to a
-/// temporary file beside its path and put in place when the take ends, so the
-/// path holds either what it held before or the whole take. A take that fails
-/// before then removes the temporary. A commit that fails ends the take with
-/// [`TakeError::Commit`], which keeps the whole file at
+/// A file a take is written to: encoded in the format given and staged, so it
+/// is written to a temporary file beside its path and put in place when the
+/// take ends, and the path holds either what it held before or the whole take.
+/// A take that fails before then removes the temporary. A commit that fails
+/// ends the take with [`TakeError::Commit`], which keeps the whole file at
 /// [`kept`](StagedCommitError::kept) and leaves the path alone; the app owns
-/// the kept file, and nothing removes it. To dither, wrap a
-/// file's sink yourself ([`DitherSink`](crate::DitherSink)) and give it to
-/// [`sink`](Self::sink); such a take has no path, so no
-/// [`clip`](Recorded::clip).
-pub struct TakeTarget<F: Float = f32> {
-    kind: TargetKind<F>,
+/// the kept file, and nothing removes it.
+///
+/// A file of an integer width is quantized through a [`DitherSink`]: triangular
+/// dither unless [`dither`](Self::dither) or [`no_dither`](Self::no_dither)
+/// says otherwise, and error feedback with [`noise_shaping`](Self::noise_shaping).
+/// A float format has nothing to quantize and takes the frames as they are.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TakeFile {
+    path: PathBuf,
+    format: Format,
+    create_new: bool,
+    dither: Option<DitherShape>,
+    noise_shaping: bool,
 }
 
-enum TargetKind<F: Float> {
-    File {
-        path: PathBuf,
-        format: Format,
-        create_new: bool,
-    },
-    Sink(Box<dyn DynSink<F>>),
-}
-
-impl<F: Float> fmt::Debug for TakeTarget<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            TargetKind::File {
-                path,
-                format,
-                create_new,
-            } => f
-                .debug_struct("TakeTarget::File")
-                .field("path", path)
-                .field("format", format)
-                .field("create_new", create_new)
-                .finish(),
-            TargetKind::Sink(_) => f.debug_struct("TakeTarget::Sink").finish_non_exhaustive(),
-        }
-    }
-}
-
-impl<F: Float> TakeTarget<F> {
+impl TakeFile {
     /// A file at `path`, in `format`, as wide as the input and at the graph's
-    /// rate.
-    pub fn file(path: impl Into<PathBuf>, format: Format) -> Self {
+    /// rate, with triangular dither when `format` has an integer width.
+    #[must_use]
+    pub fn new(path: impl Into<PathBuf>, format: Format) -> Self {
         Self {
-            kind: TargetKind::File {
-                path: path.into(),
-                format,
-                create_new: false,
-            },
+            path: path.into(),
+            format,
+            create_new: false,
+            dither: Some(DitherShape::Triangular),
+            noise_shaping: false,
         }
     }
 
     /// A WAV file of 32-bit float at `path`. An `f64` session keeps its frames
-    /// whole in [`file`](Self::file) with `Pcm::Float64`.
+    /// whole with [`new`](Self::new) and `Pcm::Float64`.
+    #[must_use]
     pub fn wav(path: impl Into<PathBuf>) -> Self {
-        Self::file(path, Format::Wav(tutti_codec::Pcm::Float32))
+        Self::new(path, Format::Wav(tutti_codec::Pcm::Float32))
+    }
+
+    /// The noise added when an integer width is quantized: triangular unless
+    /// this or [`no_dither`](Self::no_dither) says otherwise. A float format
+    /// ignores it.
+    #[must_use]
+    pub fn dither(mut self, shape: DitherShape) -> Self {
+        self.dither = Some(shape);
+        self
+    }
+
+    /// No dither when an integer width is quantized: the rounding error is
+    /// left as it falls. A float format ignores it.
+    #[must_use]
+    pub fn no_dither(mut self) -> Self {
+        self.dither = None;
+        self
+    }
+
+    /// Shapes the quantization error of an integer width
+    /// ([`NoiseShaping`], designed for the graph's rate, which is the file's):
+    /// off unless this says so, independent of the dither (with
+    /// [`no_dither`](Self::no_dither) the rounding error alone is fed back).
+    /// A float format ignores it.
+    #[must_use]
+    pub fn noise_shaping(mut self) -> Self {
+        self.noise_shaping = true;
+        self
     }
 
     /// Refuses a path that already exists instead of replacing it: the take
@@ -244,16 +253,46 @@ impl<F: Float> TakeTarget<F> {
     /// taken ends the take with [`TakeError::Commit`] of kind
     /// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists). The path is left
     /// alone and the whole take is kept at the error's
-    /// [`kept`](StagedCommitError::kept), the app's to move or delete. A sink
-    /// target writes no file, so this does nothing to it.
+    /// [`kept`](StagedCommitError::kept), the app's to move or delete.
     #[must_use]
     pub fn create_new(mut self) -> Self {
-        if let TargetKind::File { create_new, .. } = &mut self.kind {
-            *create_new = true;
-        }
+        self.create_new = true;
         self
     }
+}
 
+/// Where a take goes: a [`TakeFile`], or a sink of the caller's.
+///
+/// A sink dithers itself: wrap a [`DitherSink`] yourself and give it to
+/// [`sink`](Self::sink). Such a take has no path, so no
+/// [`clip`](Recorded::clip).
+pub struct TakeTarget<F: Float = f32> {
+    kind: TargetKind<F>,
+}
+
+enum TargetKind<F: Float> {
+    File(TakeFile),
+    Sink(Box<dyn DynSink<F>>),
+}
+
+impl<F: Float> fmt::Debug for TakeTarget<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            TargetKind::File(file) => f.debug_tuple("TakeTarget::File").field(file).finish(),
+            TargetKind::Sink(_) => f.debug_struct("TakeTarget::Sink").finish_non_exhaustive(),
+        }
+    }
+}
+
+impl<F: Float> From<TakeFile> for TakeTarget<F> {
+    fn from(file: TakeFile) -> Self {
+        Self {
+            kind: TargetKind::File(file),
+        }
+    }
+}
+
+impl<F: Float> TakeTarget<F> {
     /// A sink of the caller's. It must be as wide as the input and at the
     /// graph's rate (a sink carries no rate to check); a width that differs is
     /// [`TakeError::Width`].
@@ -655,7 +694,7 @@ pub enum TakeError {
     #[error("the take's file could not be created: {0}")]
     Open(#[source] Arc<tutti_codec::Error>),
     /// The finished file could not be put in place (the path exists under
-    /// [`TakeTarget::create_new`], or the file system refused the move). The
+    /// [`TakeFile::create_new`], or the file system refused the move). The
     /// whole take is kept at [`kept`](StagedCommitError::kept) and the path is
     /// untouched; the file is the app's to move or delete.
     #[error(transparent)]
@@ -848,7 +887,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
     /// pump into `target` on the session's executor. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the
-    /// device does; the module docs say where it is placed.
+    /// device does; the module docs say where it is placed. `target` is a
+    /// [`TakeFile`] (an integer format triangular-dithered unless it says
+    /// otherwise) or a sink ([`TakeTarget::sink`]).
     ///
     /// The pump is a future that awaits the tap's bell: the audio thread rings it as it
     /// writes each block, so the pump runs only when there are frames. It runs on a
@@ -872,7 +913,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         &mut self,
         input: &Input<C::Float>,
         punch: Punch,
-        target: TakeTarget<C::Float>,
+        target: impl Into<TakeTarget<C::Float>>,
     ) -> Result<Take<Armed>, TakeError> {
         let node = input.node();
         let held = self
@@ -933,7 +974,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .map_err(|error| TakeError::NotStarted(error.kind()))?;
         let stop = StopOnDrop { stop, bell };
 
-        let (sink, path) = open_target(target, layout, rate)?;
+        let (sink, path) = open_target(target.into(), layout, rate)?;
 
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
@@ -1029,11 +1070,13 @@ fn open_target<F: Float>(
     rate: SampleRate,
 ) -> Result<(Box<dyn DynSink<F>>, Option<PathBuf>), TakeError> {
     match target.kind {
-        TargetKind::File {
+        TargetKind::File(TakeFile {
             path,
             format,
             create_new,
-        } => {
+            dither,
+            noise_shaping,
+        }) => {
             let staged = Staged::new(&path);
             let staged = if create_new {
                 staged.create_new()
@@ -1042,13 +1085,21 @@ fn open_target<F: Float>(
             };
             let encoder = FileEncoder::create(&Spec::of_width(format, layout, rate), staged)
                 .map_err(|e| TakeError::Open(Arc::new(e)))?;
-            let file = StagedSink {
-                encoder,
-                layout,
-                failed: false,
-                sample: PhantomData,
+            let shaping = noise_shaping.then(|| NoiseShaping::new(rate));
+            let file: Box<dyn DynSink<F>> = match format.int_depth() {
+                None => Box::new(StagedSink::<F>::new(encoder, layout)),
+                Some(IntDepth::Int16) => Box::new(quantizer(
+                    StagedSink::<i16>::new(encoder, layout),
+                    dither,
+                    shaping.as_ref(),
+                )),
+                Some(IntDepth::Int24) => Box::new(quantizer(
+                    StagedSink::<I24>::new(encoder, layout),
+                    dither,
+                    shaping.as_ref(),
+                )),
             };
-            Ok((Box::new(file), Some(path)))
+            Ok((file, Some(path)))
         }
         TargetKind::Sink(sink) => {
             if sink.layout() != layout {
@@ -1062,16 +1113,42 @@ fn open_target<F: Float>(
     }
 }
 
-/// A staged file as the [`Sink`] a take writes: whole frames at the take's
+/// `sink` behind the quantizer a file of an integer width gets: `dither`'s
+/// noise, and the error feedback of `shaping` when it is given.
+fn quantizer<F: Float, K: Sink>(
+    sink: K,
+    dither: Option<DitherShape>,
+    shaping: Option<&NoiseShaping>,
+) -> DitherSink<K, F> {
+    let sink = DitherSink::new(sink, dither);
+    match shaping {
+        Some(shaping) => sink.shaped(shaping),
+        None => sink,
+    }
+}
+
+/// A staged file as the [`Sink`] a take writes, of samples `S` (the float
+/// the take records, or the integer its quantizer writes): whole frames at the take's
 /// width, the encoder keeping the first write failure for
 /// [`finalize`](Sink::finalize), which closes the file and puts it in place.
-struct StagedSink<F> {
+struct StagedSink<S> {
     encoder: FileEncoder,
     layout: ChannelLayout,
     /// A write failed: later writes are refused, and the encoder reports the
     /// first failure at [`finalize`](Sink::finalize), keeping the file.
     failed: bool,
-    sample: PhantomData<fn(F)>,
+    sample: PhantomData<fn(S)>,
+}
+
+impl<S> StagedSink<S> {
+    fn new(encoder: FileEncoder, layout: ChannelLayout) -> Self {
+        Self {
+            encoder,
+            layout,
+            failed: false,
+            sample: PhantomData,
+        }
+    }
 }
 
 /// How a [`StagedSink`] ended without its file in place.
@@ -1089,15 +1166,15 @@ enum StagedClosed {
     },
 }
 
-impl<F: Float> Sink for StagedSink<F> {
-    type Sample = F;
+impl<S: Sample> Sink for StagedSink<S> {
+    type Sample = S;
     type Error = StagedClosed;
 
     fn layout(&self) -> ChannelLayout {
         self.layout
     }
 
-    fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
+    fn write(&mut self, frames: Interleaved<'_, S>) -> Result<(), SinkFailed> {
         if self.failed {
             return Err(SinkFailed);
         }

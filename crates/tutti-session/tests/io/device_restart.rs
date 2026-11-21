@@ -325,7 +325,7 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
     s.graph()
         .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();
-    s.graph().remove(loop_back).unwrap();
+    s.remove(loop_back).unwrap();
     let _ = s.update();
     let (driver, back) = ManualStreamDriver::new();
     s.restart_on(spec_at(OLD), driver, None, None)

@@ -8,7 +8,7 @@
 //! # Why it is here and not in `src/`
 //!
 //! `assert_no_alloc` observes nothing unless `#[global_allocator] =
-//! AllocDisabler` is installed, and that can only be declared at the root of a
+//! RtAllocCheck` is installed, and that can only be declared at the root of a
 //! *binary*. The crate's unit-test binary declares none, so an
 //! `assert_no_alloc` gate written in `src/` passes whether or not the callback
 //! allocated. This binary is therefore the allocation gate on

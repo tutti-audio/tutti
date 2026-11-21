@@ -287,7 +287,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
         .unwrap();
     let clip = s.midi().clip(old).expect("the target's clip");
     let mut live = s.midi().input(old).unwrap();
-    let inlet = s.graph_ref().feed(old, Feeder::LiveInput)[0].node();
+    let inlet = s.graph_ref().feed(old, Feeder::LiveInput).unwrap()[0].node();
     let _ = s.update();
 
     s.remove(old).unwrap();
@@ -299,7 +299,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
     let _ = s.update();
     assert_eq!(s.midi().clip(new), Some(clip), "the same clip");
     assert_eq!(
-        s.graph_ref().feed(new, Feeder::LiveInput)[0].node(),
+        s.graph_ref().feed(new, Feeder::LiveInput).unwrap()[0].node(),
         inlet,
         "the same inlet"
     );
@@ -310,7 +310,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
     let mut fed = s.graph_ref().sources(EventInPort::new(new, 0)).unwrap();
     fed.sort_by_key(|e| e.node());
     // The clip feeds the target through its MPE transform.
-    let transform = s.graph_ref().feed(new, Feeder::Sequencer)[0];
+    let transform = s.graph_ref().feed(new, Feeder::Sequencer).unwrap()[0];
     let mut want = vec![transform, EventOutPort::new(inlet, 0)];
     want.sort_by_key(|e| e.node());
     assert_eq!(fed, want);
@@ -389,6 +389,7 @@ fn route_rules_wire_the_hardware_input() {
         let mut p: Vec<u16> = s
             .graph_ref()
             .feed(n, Feeder::Routes)
+            .unwrap()
             .iter()
             .map(|e| {
                 assert_eq!(e.node(), input);
@@ -443,6 +444,7 @@ fn a_route_rule_names_a_group() {
         let mut p: Vec<u16> = s
             .graph_ref()
             .feed(n, Feeder::Routes)
+            .unwrap()
             .iter()
             .map(|e| {
                 assert_eq!(e.node(), input);
@@ -492,7 +494,7 @@ fn the_routes_have_one_declarer() {
     let (mut s, input) = with_input(None);
     let (a, _) = tap(&mut s);
     let (b, _) = tap(&mut s);
-    let fed = |s: &Session, n: NodeKey| !s.graph_ref().feed(n, Feeder::Routes).is_empty();
+    let fed = |s: &Session, n: NodeKey| !s.graph_ref().feed(n, Feeder::Routes).unwrap().is_empty();
 
     let own = s.midi().route(MidiRouteRule::new().to(a)).unwrap();
     let host = [MidiRouteRule::<u8>::new().to(1)];
@@ -970,7 +972,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     let clip = s.midi().clip(synth).expect("the target's clip");
     let _ = s.update();
     // The clip feeds the target through its MPE transform.
-    let transform = s.graph_ref().feed(synth, Feeder::Sequencer)[0];
+    let transform = s.graph_ref().feed(synth, Feeder::Sequencer).unwrap()[0];
     assert_eq!(
         sorted(s.graph_ref().sources(input(synth)).unwrap()),
         sorted(vec![hand.events_out(), transform]),

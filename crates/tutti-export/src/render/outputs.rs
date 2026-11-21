@@ -393,7 +393,7 @@ fn finish<F: FftFloat>(
         for &i in &own {
             control.set_output(i);
             let w = waiting_of(&lanes[i]);
-            let normalize = w.spec.mode().within(&w.target);
+            let normalize = w.spec.mode().within(&w.target, rate);
             let Outcome::Finished((reading, at)) =
                 measure(w, i, lanes[i].layout, rate, normalize, done, total, control)?
             else {
@@ -460,6 +460,7 @@ fn finish<F: FftFloat>(
     // Finalizing.
     let mut produced: Vec<Option<Produced<F>>> = Vec::with_capacity(lanes.len());
     let mut files: Vec<PendingFile<F>> = Vec::new();
+    let mut spill_left: Vec<Option<PathBuf>> = vec![None; lanes.len()];
     let placements: Vec<tutti_buffers::Placement> = lanes.iter().map(|l| l.placement).collect();
     for (i, lane) in lanes.into_iter().enumerate() {
         match lane.sink {
@@ -468,7 +469,16 @@ fn finish<F: FftFloat>(
                     planes, rate, lost,
                 ))));
             }
-            Sink::Stream { chain } | Sink::Spill { chain, .. } => {
+            Sink::Spill { chain, mut waiting } => {
+                spill_left[i] = waiting.spill.remove().map(|(path, _)| path);
+                files.push(PendingFile {
+                    index: i,
+                    path: lane.path.expect("a file lane has a path"),
+                    chain: *chain,
+                });
+                produced.push(None);
+            }
+            Sink::Stream { chain } => {
                 files.push(PendingFile {
                     index: i,
                     path: lane.path.expect("a file lane has a path"),
@@ -483,6 +493,7 @@ fn finish<F: FftFloat>(
     };
     for (index, path, file) in landed {
         let mut w = written(&path, file, lost, placements[index]);
+        w.spill_left = spill_left[index].take();
         if let Some(c) = chosen[index] {
             w.gain = Some(c.gain);
             w.measured = c.measured;

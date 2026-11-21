@@ -18,7 +18,6 @@ use tutti_buffers::Planes;
 use tutti_graph::testing as common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 
 use tutti_buffers::ChannelLayout;
@@ -333,7 +332,7 @@ fn a_row_cannot_pass_what_it_does_not_run() {
 }
 
 /// Records the first UMP word of every event it is handed, in order.
-struct Tags(Arc<Mutex<Vec<(u64, u32)>>>);
+struct Tags(tutti_fixtures::Record<(u64, u32)>);
 
 impl Node for Tags {
     fn shape(&self) -> Shape {
@@ -358,9 +357,9 @@ impl Node for Tags {
 fn a_fan_in_tie_goes_by_source_order() {
     for k in OFFSETS {
         let at = Frame::new(512 + k as u64);
-        let log = Arc::new(Mutex::new(Vec::new()));
+        let log = tutti_fixtures::Record::new();
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-        let sink = g.add(Unforkable(Tags(Arc::clone(&log))));
+        let sink = g.add(Unforkable(Tags(log.clone())));
         for tag in [3u32, 1, 2] {
             let e = g.add(Unforkable(Emitter::new(
                 at,
@@ -377,7 +376,7 @@ fn a_fan_in_tie_goes_by_source_order() {
             .expect("builds");
         r.render(1_024);
         assert_eq!(
-            *log.lock().unwrap(),
+            log.lock().unwrap().to_vec(),
             vec![(at.get(), 3), (at.get(), 1), (at.get(), 2)],
             "offset {k}: the order the sources were connected in"
         );

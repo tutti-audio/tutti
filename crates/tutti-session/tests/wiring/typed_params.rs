@@ -116,7 +116,7 @@ fn a_write_to_a_missing_node_or_param_is_no_such_target() {
     );
 
     let cutoff = lp.cutoff();
-    s.graph().remove(lp).unwrap();
+    s.remove(lp).unwrap();
     let refused = s.set(cutoff.to(Hz::new(5.0))).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
     assert_eq!(refused.at, 0);

@@ -1,5 +1,5 @@
 //! Declicked wiring (doc 030 section 4): the session graph's `connect` fades a
-//! new edge in over `DECLICK`, and `disconnect`, `disconnect_all`,
+//! new edge in over `DECLICK`, and `disconnect`,
 //! `set_sources` removals and the edges of a removed node fade out over the same
 //! span, leaving the plan when the fade has ended. `Connection::unfaded` and
 //! `Disconnection::unfaded` opt out.

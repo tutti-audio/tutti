@@ -71,6 +71,8 @@ thiserror = { workspace = true, features = ["std"] }
 rgb.workspace = true
 
 [dev-dependencies]
+# The `Answer` tests block on one.
+futures-lite = { workspace = true }
 # Turns `contract` on for this crate's own tests (the pattern `tutti-dsp` uses).
 tutti-plugin-types = { path = ".", features = ["contract"] }
 # The no-alloc gates on the point storage (`PointBuf`, `ParameterChanges`).

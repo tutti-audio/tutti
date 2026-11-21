@@ -27,8 +27,8 @@ use tutti_music::{FrameClock, LoopRange};
 use tutti_platform::Asset;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Loop, Manual, Playback, Stream, StreamReader, StreamStart, Voice,
-    VoiceNode, VoiceSource,
+    DiskStreamer, DiskVoice, Loop, Manual, Playback, StreamHandle, StreamReader, StreamStart,
+    Voice, VoiceNode, VoiceSource,
 };
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
@@ -61,7 +61,7 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 /// held while the voice plays (dropping the handle ends the stream).
 struct Rig {
     streamer: DiskStreamer<Manual<f32>, f32>,
-    stream: Stream<f32>,
+    stream: StreamHandle<f32>,
 }
 
 /// A hand-stepped disk streamer streaming `path`, primed, and the stream's
@@ -82,12 +82,12 @@ fn streamer_with(
 }
 
 /// Turns the rig's stream to reverse and lets the streamer apply it: the
-/// direction is the stream's (`Stream::direction_cell`), published with its
+/// direction is the stream's (`StreamHandle::direction_cell`), published with its
 /// ring's control, where a fork reads it.
 fn reverse(rig: &mut Rig) {
     rig.stream
         .direction_cell()
-        .publish(tutti_sampler::Direction::Reverse);
+        .publish(tutti_sampler::PlayDirection::Reverse);
     assert!(
         rig.streamer.step_until_idle(1_000) < 1_000,
         "the reversed ring settles"
@@ -792,7 +792,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
                     Voice {
                         source: VoiceSource::Memory(source),
                         play: Playback {
-                            direction: tutti_sampler::Direction::Reverse,
+                            direction: tutti_sampler::PlayDirection::Reverse,
                             ..Playback::default()
                         },
                     },

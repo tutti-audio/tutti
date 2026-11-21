@@ -510,7 +510,7 @@ fn a_track_meter_reads_a_nodes_port_and_goes_with_the_node() {
     let o = other.read();
     assert_eq!((o[0].peak.get(), o[1].peak.get()), (0.5, 0.25));
 
-    s.graph().remove(b).unwrap();
+    s.remove(b).unwrap();
     let _ = s.update();
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     let o = other.read();

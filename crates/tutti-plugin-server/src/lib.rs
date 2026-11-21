@@ -75,7 +75,9 @@
 //! [`EXIT_PLUGIN_LEAKED`] when a plugin had to be leaked (its render thread never
 //! returned the processor), [`EXIT_TASKS_DETACHED`] when every plugin was
 //! destroyed but a task of the server did not stop in time and was left
-//! running, and 1 on an error.
+//! running, [`EXIT_RENDER_LANE_LOST`] when a render lane panicked or was
+//! dropped, [`EXIT_HOST_UNWATCHED`] when the thread that watches the host could
+//! not start, and 1 on any other error ([`failure_status`]).
 //!
 //! ## Isolation
 //!
@@ -131,14 +133,17 @@ mod session;
 mod ties;
 mod transport;
 
-pub use server::{EXIT_PLUGIN_LEAKED, EXIT_TASKS_DETACHED, Ended, PluginServer};
+pub use server::{
+    EXIT_HOST_UNWATCHED, EXIT_PLUGIN_LEAKED, EXIT_RENDER_LANE_LOST, EXIT_TASKS_DETACHED, Ended,
+    PluginServer, failure_status,
+};
 
 // Test-only global allocator for the audio-pipeline RT-safety regression
 // test (`audio_pipeline::tests::process_is_alloc_free`). Active only in the
 // test build; normal builds use the system allocator.
 #[cfg(test)]
 #[global_allocator]
-static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static RT_NO_ALLOC_HARNESS: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 /// Plugin-loading tests across the crate serialize on this lock: format
 /// modules keep process globals of their own, and plugins' `main` may too.

@@ -25,7 +25,7 @@ use tutti_dsp::{
     DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, InterpolationMode,
     LadderType, ShapeKind, Stages, SvfType,
 };
-use tutti_dsp::{Inline, Tap, Taps};
+use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::Direct;
@@ -395,7 +395,7 @@ fn the_linear_nodes_satisfy_superposition() {
         || {
             EarlyReflectionsNode::<f64>::try_from(EarlyReflectionsConfig::new(
                 ChannelLayout::MONO,
-                Taps {
+                TapSet {
                     taps: Inline::from_slice(&[
                         Tap {
                             delay: SampleSpan::new(37.5).unwrap(),
