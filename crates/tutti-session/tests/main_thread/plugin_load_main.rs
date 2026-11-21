@@ -58,7 +58,7 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
         match catalog.try_apply(&mut task) {
             ScanPoll::Running => {
                 assert!(Instant::now() < deadline, "the probe never ended");
-                thread::sleep(Duration::from_millis(2));
+                thread::yield_now();
             }
             ScanPoll::Done(result) => {
                 assert!(result.failures().is_empty(), "{:?}", result.failures());
@@ -164,7 +164,7 @@ fn a_node_keeps_an_in_process_plugin_open_after_its_handle_drops() {
             &mut tutti_buffers::InterleavedMut::new(&mut out, tutti_buffers::ChannelLayout::STEREO)
                 .unwrap(),
         );
-        thread::sleep(Duration::from_millis(2));
+        thread::yield_now();
     }
     let closed = deactivation();
     assert!(closed.observed && closed.is_main, "{closed:?}");

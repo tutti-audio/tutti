@@ -76,7 +76,7 @@ fn render_until(s: &mut Session, what: &str, mut done: impl FnMut(&[f32]) -> boo
             return;
         }
         assert!(Instant::now() < deadline, "{what} never happened");
-        std::thread::sleep(Duration::from_millis(2));
+        std::thread::yield_now();
     }
 }
 
