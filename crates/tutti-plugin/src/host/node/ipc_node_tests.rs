@@ -21,7 +21,7 @@ use tutti_units::{Beat, Bpm, Frame, Samples};
 
 use super::mock_server::{
     BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, ReplyGate, SR, STEP_BEAT, STEP_FRAME, Said, at,
-    beat_at, new_node, rig, rig_gated, tempo,
+    beat_at, new_node, rig, rig_gated, rig_unlisted, served, tempo,
 };
 
 use tutti_ump::{Message, NoteNumber, NoteVelocity, U7, Voice2};
@@ -635,5 +635,19 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
         (chunk.transport.timing.tempo_inc - want).abs() < 1e-12,
         "tempo_inc {} against the ramp's {want}",
         chunk.transport.timing.tempo_inc
+    );
+}
+
+/// **A server that does not list the plugin's parameters fails the load**,
+/// with the error that says so, rather than loading with an empty list. (A
+/// plugin with no parameters lists none: that is an answer, not this.)
+#[test]
+fn a_server_that_does_not_list_its_parameters_fails_the_load() {
+    let _machine = machine_lock();
+    let (ipc, _record, _threads) = served(rig_unlisted());
+    let err = super::PluginClient::over(ipc).expect_err("the load has no parameter list");
+    assert!(
+        matches!(err, tutti_plugin_types::IpcError::ParametersUnlisted),
+        "got {err:?}"
     );
 }
