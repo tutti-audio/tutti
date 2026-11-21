@@ -16,6 +16,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -48,6 +49,8 @@ pub(crate) enum Arrival {
         token: Arc<()>,
         values: ParamValues,
     },
+    /// A parameter read ended without a result: its task panicked. The record reads again.
+    ParamsLost { node: NodeKey, token: Arc<()> },
     /// A state snapshot ended with its state.
     Snapshot {
         node: NodeKey,
@@ -59,8 +62,8 @@ pub(crate) enum Arrival {
 
 /// The session's end of the plugin loops: the receiver `Phase::Plugins` drains.
 pub(crate) struct Inbox {
-    pub(super) rx: Receiver<Arrival>,
-    pub(super) tx: Sender<Arrival>,
+    rx: Receiver<Arrival>,
+    tx: Sender<Arrival>,
 }
 
 impl std::fmt::Debug for Inbox {
@@ -101,6 +104,11 @@ impl Post {
         });
     }
 
+    /// A parameter read's end when its task panicked.
+    pub(crate) fn params_lost(&self, node: NodeKey, token: Arc<()>) {
+        let _ = self.0.send(Arrival::ParamsLost { node, token });
+    }
+
     /// A state snapshot's end.
     pub(crate) fn snapshot(
         &self,
@@ -123,12 +131,14 @@ impl Post {
         node: NodeKey,
         token: Arc<()>,
         snapshot_age: Option<Duration>,
+        started: Arc<AtomicBool>,
     ) -> ReloadPost {
         ReloadPost {
             tx: self.0.clone(),
             node,
             token,
             snapshot_age,
+            started,
             sent: false,
         }
     }
@@ -142,6 +152,8 @@ pub(crate) struct ReloadPost {
     node: NodeKey,
     token: Arc<()>,
     snapshot_age: Option<Duration>,
+    /// Raised when the task begins to run: a reload queued behind a full pool has not.
+    started: Arc<AtomicBool>,
     sent: bool,
 }
 
@@ -149,6 +161,7 @@ impl ReloadPost {
     /// Runs `load` and sends what it returned, or [`RecoveryFailure::ReloadPanicked`]
     /// when it panicked.
     pub(crate) fn run(mut self, load: impl FnOnce() -> PluginLoaded) {
+        self.started.store(true, Ordering::Release);
         let arrival = match catch_unwind(AssertUnwindSafe(load)) {
             Ok(loaded) => Arrival::Reload {
                 node: self.node,

@@ -760,7 +760,8 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The [`Executor`](tutti_platform::Executor) that runs the session's background
-    /// work: its jobs (a file load, a plugin round trip), its disk streamer, a
+    /// work: its jobs (a file load), the plugin loops' blocking round trips (a snapshot, a
+    /// parameter read, a reload), its disk streamer, a
     /// recording's pump and the MIDI hardware's (an input's pump, the device watch,
     /// Active Sensing, the legacy poll). Each is a future, and what a job reports lands in
     /// [`Session::update`].
@@ -776,8 +777,11 @@ impl<C: Clock> SessionBuilder<C> {
     ///
     /// Dropping the session drops its clone of the executor: every task still queued is
     /// dropped unrun, and its job ends `Dropped` for whoever awaits it. Dropping the
-    /// session joins its own threads, so a job still running then holds the drop until
-    /// it returns; every blocking plugin job is bounded by its own deadline.
+    /// session joins its own threads, so a file load still running then holds the drop until
+    /// it returns. It also waits for the plugin round trips in flight (a snapshot, a
+    /// parameter read, a reload), each bounded by its own IPC deadline (the state, param
+    /// and load `Timeouts`), and warns of any that outlives it; those tasks share the
+    /// executor's blocking pool with other blocking work, so one may wait in its queue.
     ///
     /// ```
     /// # use tutti_session::Session;

@@ -63,36 +63,17 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     Key::new(node)
 }
 
-/// Blocks until every plugin loop task the session started has sent its end, and leaves
-/// the ends in the inbox for the next update: each task holds a token of its plugin's
-/// record, so the tokens held beyond the records' own count the ends owed.
+/// Waits until the session has no plugin task in flight ([`Session::plugin_tasks`]): the
+/// ends the tasks sent are in the inbox for the next update. The guard only bounds a hang.
 pub(super) fn await_tasks<K: crate::AppKey, C: Clock<Float = f32>>(session: &Session<K, C>) {
-    let owed: usize = session
-        .graph
-        .plugins
-        .values()
-        .map(|hosted| {
-            [
-                &hosted.mirror_token,
-                &hosted.snapshot_token,
-                &hosted.reload.token,
-            ]
-            .into_iter()
-            .map(|token| Arc::strong_count(token) - 1)
-            .sum::<usize>()
-        })
-        .sum();
-    let inbox = &session.plugins.inbox;
-    let ends: Vec<_> = (0..owed)
-        .map(|_| {
-            inbox
-                .rx
-                .recv_timeout(std::time::Duration::from_secs(60))
-                .expect("a plugin task sent its end")
-        })
-        .collect();
-    for end in ends {
-        inbox.tx.send(end).expect("the inbox holds both ends");
+    let guard = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while session.plugin_tasks() > 0 {
+        assert!(
+            std::time::Instant::now() < guard,
+            "{} plugin task(s) never ended",
+            session.plugin_tasks()
+        );
+        std::thread::yield_now();
     }
 }
 

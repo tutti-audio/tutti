@@ -3,12 +3,13 @@
 //! main thread.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tutti_platform::{Executor, Instant, WeakExecutor};
 
 use tutti_buffers::Float;
-use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle};
+use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle, Timeouts};
 use tutti_rt::LockExt;
 
 use crate::graph::Graph;
@@ -37,6 +38,133 @@ impl Default for PluginOptions {
     }
 }
 
+/// A loop the session runs for a hosted plugin: which round trip a task is inside.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Loop {
+    /// A crash recovery's reload: a server launch and the state restore.
+    Reload,
+    /// A parameter mirror's read.
+    ParamRead,
+    /// A state snapshot.
+    Snapshot,
+}
+
+impl Loop {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Reload => "reload",
+            Self::ParamRead => "parameter read",
+            Self::Snapshot => "state snapshot",
+        }
+    }
+
+    /// The round trip's own IPC deadline: how long a session's close waits for a task of
+    /// this loop (`Timeouts::load`, `param`, `state`).
+    fn deadline(self) -> Duration {
+        let timeouts = Timeouts::default();
+        match self {
+            Self::Reload => timeouts.load,
+            Self::ParamRead => timeouts.param,
+            Self::Snapshot => timeouts.state,
+        }
+    }
+}
+
+/// How long a close that is pumping the main thread's work sleeps on its condvar between
+/// two pumps: an in-process plugin's task waits for the main thread to run its call.
+const PUMP_SLICE: Duration = Duration::from_millis(5);
+
+/// The plugin tasks in flight, from the spawn that queued one to the end of its closure.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Tasks(Arc<TaskCount>);
+
+#[derive(Debug, Default)]
+struct TaskCount {
+    state: Mutex<InFlight>,
+    /// Notified as a task ends.
+    idle: Condvar,
+    /// Spawns the executor refused, since the session began.
+    refused: AtomicU64,
+}
+
+#[derive(Debug, Default)]
+struct InFlight {
+    count: usize,
+    /// The latest of the in-flight tasks' deadlines, each counted from its spawn.
+    until: Option<Instant>,
+}
+
+/// A task's place in the count: dropped when its closure ends, however it ends, and with
+/// the closure when the executor drops it unrun.
+#[must_use]
+pub(crate) struct TaskGuard(Tasks);
+
+impl Tasks {
+    fn enter(&self, kind: Loop) -> TaskGuard {
+        let mut state = self.0.state.lock_recover();
+        state.count += 1;
+        let deadline = Instant::now() + kind.deadline();
+        state.until = Some(state.until.map_or(deadline, |until| until.max(deadline)));
+        TaskGuard(self.clone())
+    }
+
+    /// How many tasks are queued or running.
+    pub(crate) fn in_flight(&self) -> usize {
+        self.0.state.lock_recover().count
+    }
+
+    /// How many spawns the executor refused.
+    pub(crate) fn refused(&self) -> u64 {
+        self.0.refused.load(Ordering::Relaxed)
+    }
+
+    /// Waits for every task in flight to end, or until the latest of their deadlines:
+    /// whether it did. `pump` runs between waits when the caller is on the main thread, so
+    /// an in-process plugin's task, which waits for the main thread, can end.
+    pub(crate) fn wait_idle(&self, mut pump: Option<&mut dyn FnMut()>) -> bool {
+        let mut state = self.0.state.lock_recover();
+        loop {
+            if state.count == 0 {
+                return true;
+            }
+            let left = state.until.map_or(Duration::ZERO, |until| {
+                until.saturating_duration_since(Instant::now())
+            });
+            if left.is_zero() {
+                return false;
+            }
+            let slice = if pump.is_some() {
+                left.min(PUMP_SLICE)
+            } else {
+                left
+            };
+            state = self
+                .0
+                .idle
+                .wait_timeout(state, slice)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+            if let Some(pump) = pump.as_mut() {
+                drop(state);
+                pump();
+                state = self.0.state.lock_recover();
+            }
+        }
+    }
+}
+
+impl Drop for TaskGuard {
+    fn drop(&mut self) {
+        let mut state = (self.0).0.state.lock_recover();
+        state.count -= 1;
+        if state.count == 0 {
+            state.until = None;
+        }
+        drop(state);
+        (self.0).0.idle.notify_all();
+    }
+}
+
 /// Plugin hosting: what runs a hosted plugin's phases and what its closes hand over.
 #[derive(Debug)]
 pub(crate) struct PluginPart {
@@ -62,6 +190,8 @@ pub(crate) struct PluginPart {
     pub(crate) executor: WeakExecutor,
     /// What the plugin loops sent back, drained by `Phase::Plugins`.
     pub(crate) inbox: Inbox,
+    /// The loops' tasks in flight, which a close waits for.
+    pub(crate) tasks: Tasks,
     /// The receiving end of `work`, drained on the main thread by the session's
     /// update. Declared last, so it drops after everything the part holds: a
     /// close handed over while the session drops is still collected, and
@@ -78,7 +208,8 @@ impl PluginPart {
     pub(crate) fn new(options: &PluginOptions, executor: &Executor) -> (Self, EarlyWork) {
         let (main_work, work) = MainWork::new();
         let main_work = SharedWork::new(main_work);
-        let early = EarlyWork(main_work.clone());
+        let tasks = Tasks::default();
+        let early = EarlyWork(main_work.clone(), tasks.clone());
         (
             Self {
                 snapshot_interval: options.snapshot_interval,
@@ -90,26 +221,74 @@ impl PluginPart {
                 work,
                 executor: executor.downgrade(),
                 inbox: Inbox::new(),
+                tasks,
                 main_work,
             },
             early,
         )
     }
 
-    /// Runs `task`, a blocking round trip of the loop `what`, on the session's executor.
+    /// Starts `task`, a blocking round trip of `kind`, on the session's executor, and
+    /// says whether it started.
     ///
-    /// The executor is upgraded for this call only; the task holds none. A task the
-    /// executor refuses (it shut down, or the OS refused a thread) is dropped unrun, which
-    /// is how each loop's task answers a refusal: the token it holds frees the plugin for
-    /// the next ask, and a reload ends as dropped.
-    pub(crate) fn spawn(&self, what: &str, task: impl FnOnce() + Send + 'static) {
+    /// The task runs on the executor's blocking pool, which the session's other blocking work
+    /// shares and which holds 32 threads: past them a task waits in the pool's queue, so a
+    /// task starts when a thread is free, not when it is spawned. It counts in
+    /// [`Tasks::in_flight`] from here to its end, queued or running.
+    ///
+    /// The executor is upgraded for this call only; the task holds none. A refused task
+    /// (the executor shut down, or the OS refused a thread) is dropped unrun, which is how
+    /// each loop's task answers a refusal: its tokens free the plugin for the next ask, a
+    /// reload ends as dropped, and the refusal is counted in [`Tasks::refused`].
+    #[must_use = "a refused task is the loop's to ask again"]
+    pub(crate) fn spawn(&self, kind: Loop, task: impl FnOnce() + Send + 'static) -> bool {
+        let guard = self.tasks.enter(kind);
         let Some(executor) = self.executor.upgrade() else {
-            tracing::warn!("a plugin {what} was not started: the executor has shut down");
-            return;
+            self.tasks.0.refused.fetch_add(1, Ordering::Relaxed);
+            return false;
         };
-        match executor.unblock(task) {
-            Ok(running) => running.detach(),
-            Err(error) => tracing::warn!("a plugin {what} was not started: {error}"),
+        let started = executor.unblock(move || {
+            // The task's own captures drop when it returns, before the count does.
+            task();
+            drop(guard);
+        });
+        match started {
+            Ok(running) => {
+                running.detach();
+                true
+            }
+            Err(error) => {
+                if self.tasks.0.refused.fetch_add(1, Ordering::Relaxed) == 0 {
+                    tracing::warn!(
+                        "a plugin {} was not started: {error}; refusals are counted, not repeated",
+                        kind.name()
+                    );
+                }
+                false
+            }
+        }
+    }
+
+    /// Waits for the plugin tasks in flight to end, each bounded by its round trip's
+    /// deadline ([`Loop::deadline`]), pumping the main thread's work when `main` proves the
+    /// caller is on it; past the bound it warns and goes on. What a task still holds then is
+    /// dropped by the task, and an in-process plugin's close it hands over is counted in
+    /// `MainWork::stranded()` if the collector has gone.
+    pub(crate) fn drain_tasks(&self, main: Option<MainThreadMarker>) {
+        let work = &self.main_work;
+        let mut pump = main.map(|main| {
+            move || {
+                let _ = work.run(main);
+            }
+        });
+        let drained = self
+            .tasks
+            .wait_idle(pump.as_mut().map(|p| p as &mut dyn FnMut()));
+        if !drained {
+            tracing::warn!(
+                "{} plugin task(s) outlived their deadline; the session closes without them",
+                self.tasks.in_flight()
+            );
         }
     }
 
@@ -165,11 +344,28 @@ impl PluginPart {
 /// process-wide readings. It is a field, not a `Drop` of the session, so a
 /// session moves to another clock field by field.
 #[derive(Debug)]
-pub(crate) struct EarlyWork(SharedWork);
+pub(crate) struct EarlyWork(SharedWork, Tasks);
 
 impl Drop for EarlyWork {
     fn drop(&mut self) {
-        if let Some(main) = MainThreadMarker::new() {
+        let main = MainThreadMarker::new();
+        let work = &self.0;
+        let mut pump = main.map(|main| {
+            move || {
+                let _ = work.run(main);
+            }
+        });
+        // A close has waited already, and this returns at once. A plain drop waits here,
+        // before any plugin closes: a task holds clones of its plugin's handle.
+        if !self
+            .1
+            .wait_idle(pump.as_mut().map(|p| p as &mut dyn FnMut()))
+        {
+            tracing::warn!(
+                "plugin task(s) outlived their deadline; the session drops without them"
+            );
+        }
+        if let Some(main) = main {
             self.0.run(main);
         }
     }
