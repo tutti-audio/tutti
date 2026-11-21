@@ -26,7 +26,7 @@ use tutti_polysynth::{
     Adsr, FilterType, OscillatorType, PolySynth, SvfMode, SynthConfig, UnisonConfig,
 };
 use tutti_ump::{MidiChannel, NoteVelocity, U7, Ump};
-use tutti_units::{Amplitude, CentsSpan, Hz, Normalized, Q, Samples, Seconds, Spread};
+use tutti_units::{Amplitude, CentsSpan, Hz, Normalized, Samples, Seconds, Spread};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -149,7 +149,7 @@ fn main() {
         let mut cfg = base(OscillatorType::Saw);
         cfg.filter = FilterType::Svf {
             cutoff: Hz::new(cutoff),
-            q: Q::new(0.707),
+            q: tutti_polysynth::SvfQ::BUTTERWORTH,
             mode: SvfMode::Lowpass,
         };
         let (l, r) = render(cfg, &[45]);
@@ -166,7 +166,7 @@ fn main() {
         let mut cfg = base(OscillatorType::Saw);
         cfg.filter = FilterType::Svf {
             cutoff: Hz::new(cutoff),
-            q: Q::new(0.707),
+            q: tutti_polysynth::SvfQ::BUTTERWORTH,
             mode: SvfMode::Highpass,
         };
         let (l, r) = render(cfg, &[45]);
