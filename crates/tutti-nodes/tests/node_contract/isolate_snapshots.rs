@@ -47,6 +47,9 @@ use tutti_nodes::{
     SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
     TiltFilterNode,
 };
+use tutti_nodes::{
+    KarplusStrongConfig, KarplusStrongNode, WaveguideStringConfig, WaveguideStringNode,
+};
 use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
 use tutti_units::{
     Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Gain, Hz, Metres, Normalized,
@@ -491,6 +494,34 @@ fn comb_filter() {
         })
         .check();
     }
+}
+
+#[test]
+fn karplus_strong() {
+    IsolateRow::new("KarplusStrongNode (stereo)", || {
+        KarplusStrongNode::from(KarplusStrongConfig::new(ChannelLayout::STEREO))
+    })
+    .control("frequency", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, 330.0))
+    })
+    .control("decay", |r| {
+        assert!(r.param_set().set(UnitParam::Decay, 0.3))
+    })
+    .check();
+}
+
+#[test]
+fn waveguide_string() {
+    IsolateRow::new("WaveguideStringNode (stereo)", || {
+        WaveguideStringNode::from(WaveguideStringConfig::new(ChannelLayout::STEREO))
+    })
+    .control("frequency", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, 330.0))
+    })
+    .control("decay", |r| {
+        assert!(r.param_set().set(UnitParam::Decay, 0.3))
+    })
+    .check();
 }
 
 #[test]

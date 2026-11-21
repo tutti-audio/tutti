@@ -415,6 +415,17 @@ pub use tutti_dsp::{
     AutoPanControls, NoiseColour, OscillatorWave, PanLaw, RingModControls, TremoloControls,
 };
 
+// Physical models: a plucked string and a waveguide string.
+mod karplus_strong;
+mod waveguide_string;
+pub use karplus_strong::{
+    KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
+};
+pub use waveguide_string::{
+    WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,
+};
+// The controls those start at and the positions on a string.
+pub use tutti_dsp::{KarplusStrongControls, WaveguideControls, WaveguidePositions};
 // A modal bank: damped resonators excited by the input.
 mod modal_bank;
 pub use modal_bank::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
