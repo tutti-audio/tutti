@@ -11,7 +11,8 @@ use tutti_plugin_types::Control;
 use crate::Format;
 use crate::spec::Mode;
 pub use tutti_shared_plugin::transcript::{
-    Kind, Logged, MAGIC, Told, Transcript, find_blob, replace_blob,
+    CLOSED_ON_CREATOR, Kind, Logged, MAGIC, Told, Transcript, close_record_path, find_blob,
+    replace_blob,
 };
 
 /// The transcript of what `c`'s plugin has been sent.

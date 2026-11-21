@@ -231,10 +231,11 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         if let Some(state) = state {
             load = load.initial_state(state).expect("a state of the plugin");
         }
-        let plugin = load.run(main)?;
+        let opened = load.run(main)?;
+        let handle = opened.handle();
         let node = self
-            .add_plugin(plugin.node())
+            .add_plugin(opened)
             .expect("a plugin just loaded enters");
-        Ok((plugin, node))
+        Ok((handle, node))
     }
 }

@@ -15,10 +15,10 @@ impl Format for Clap {
     const PARAM_TIMING: ParamTiming = ParamTiming::SampleAccurate;
     const GAPS: &'static [(&'static str, Gap)] = &[CLAP_LISTS_NO_PRESET];
 
-    fn load() -> Self::L {
+    fn load_with(work: &tutti_plugin_types::MainWorkHandle) -> Self::L {
         tutti_clap_host::ClapLoaded::load(
             main_thread(),
-            &tutti_fixtures::detached_work(),
+            work,
             plugin::clap(),
             tutti_clap_host::LoadOptions::new(),
         )
@@ -75,20 +75,19 @@ impl Format for Vst2 {
     const PARAM_TIMING: ParamTiming = ParamTiming::BlockHead;
     const GAPS: &'static [(&'static str, Gap)] = &[NO_TRANSPORT_EVENT, VST2_NO_BYPASS];
 
-    fn load() -> Self::L {
-        tutti_vst2_host::Vst2Loaded::load(
-            main_thread(),
-            &tutti_fixtures::detached_work(),
-            plugin::library(),
-        )
-        .expect("the plugin loads")
+    fn load_with(work: &tutti_plugin_types::MainWorkHandle) -> Self::L {
+        tutti_vst2_host::Vst2Loaded::load(main_thread(), work, plugin::library())
+            .expect("the plugin loads")
     }
 }
 
-fn vst3(module: std::path::PathBuf) -> tutti_vst3_host::Vst3Loaded {
+fn vst3(
+    work: &tutti_plugin_types::MainWorkHandle,
+    module: std::path::PathBuf,
+) -> tutti_vst3_host::Vst3Loaded {
     tutti_vst3_host::Vst3Loaded::load(
         main_thread(),
-        &tutti_fixtures::detached_work(),
+        work,
         module,
         tutti_vst3_host::LoadOptions::new(),
     )
@@ -108,8 +107,8 @@ impl Format for Vst3 {
     const PARAM_TIMING: ParamTiming = ParamTiming::SampleAccurate;
     const GAPS: &'static [(&'static str, Gap)] = &[NO_TRANSPORT_EVENT];
 
-    fn load() -> Self::L {
-        vst3(plugin::vst3_module())
+    fn load_with(work: &tutti_plugin_types::MainWorkHandle) -> Self::L {
+        vst3(work, plugin::vst3_module())
     }
 }
 
@@ -127,8 +126,8 @@ impl Format for Vst3Cpp {
     const PARAM_TIMING: ParamTiming = ParamTiming::SampleAccurate;
     const GAPS: &'static [(&'static str, Gap)] = &[NO_TRANSPORT_EVENT];
 
-    fn load() -> Self::L {
-        vst3(plugin::vst3_cpp_module())
+    fn load_with(work: &tutti_plugin_types::MainWorkHandle) -> Self::L {
+        vst3(work, plugin::vst3_cpp_module())
     }
 }
 
@@ -184,10 +183,10 @@ impl Format for Au {
         ),
     ];
 
-    fn load() -> Self::L {
+    fn load_with(work: &tutti_plugin_types::MainWorkHandle) -> Self::L {
         tutti_au_host::AuLoaded::load(
             main_thread(),
-            &tutti_fixtures::detached_work(),
+            work,
             &tutti_plugin_types::PluginRef::new(
                 plugin::au_bundle(),
                 tutti_shared_plugin::AU_ID

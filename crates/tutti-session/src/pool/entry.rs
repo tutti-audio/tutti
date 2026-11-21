@@ -402,6 +402,10 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error(transparent)]
     Plugin(Arc<tutti_plugin_types::IpcError>),
+    /// The plugin is in a bundle that holds no module this target can load.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Module(Arc<tutti_plugin_types::PluginError>),
     /// The plugin's id names no plugin of the catalog, or several.
     #[cfg(feature = "plugin")]
     #[error(transparent)]

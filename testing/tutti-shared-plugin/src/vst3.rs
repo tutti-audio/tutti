@@ -75,23 +75,6 @@ fn put_cstring(src: &str, dst: &mut [c_char]) {
     }
 }
 
-#[cfg(target_os = "linux")]
-/// The calling thread, by `pthread_self`. Not `std::thread::current`: that
-/// registers a thread-local destructor in this library, which crashes the
-/// thread when it exits after the host has unloaded the library.
-fn this_thread() -> usize {
-    unsafe extern "C" {
-        fn pthread_self() -> usize;
-    }
-    // SAFETY: `pthread_self` takes nothing and cannot fail.
-    unsafe { pthread_self() }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn this_thread() -> usize {
-    0
-}
-
 struct Plugin {
     core: std::sync::Arc<Core>,
     dsp: Mutex<Dsp>,
@@ -173,7 +156,7 @@ impl IPluginBaseTrait for Plugin {
         if self.refuses_initialize {
             return kInternalError;
         }
-        self.init_thread.store(this_thread(), SeqCst);
+        self.init_thread.store(crate::core::this_thread(), SeqCst);
         self.initialized.store(true, SeqCst);
         kResultOk
     }
@@ -185,7 +168,7 @@ impl IPluginBaseTrait for Plugin {
         );
         assert_eq!(
             self.init_thread.load(SeqCst),
-            this_thread(),
+            crate::core::this_thread(),
             "terminate off the thread that initialized"
         );
         kResultOk
@@ -1211,7 +1194,7 @@ mod view {
             if same { kResultTrue } else { kResultFalse }
         }
         unsafe fn attached(&self, _parent: *mut c_void, _kind: FIDString) -> tresult {
-            *self.thread.lock().unwrap() = Some(this_thread());
+            *self.thread.lock().unwrap() = Some(crate::core::this_thread());
             let result = match self.editor {
                 // Registers lazily, in `onSize`, as VSTGUI does on its first layout.
                 core::EDITOR_LATE => kResultOk,
@@ -1262,7 +1245,7 @@ mod view {
             // A panic cannot unwind out of an `extern "system"` call: it aborts.
             assert_eq!(
                 *self.thread.lock().unwrap(),
-                Some(this_thread()),
+                Some(crate::core::this_thread()),
                 "removed off the thread that attached"
             );
             let Some(registered) = self.registered.lock().unwrap().take() else {

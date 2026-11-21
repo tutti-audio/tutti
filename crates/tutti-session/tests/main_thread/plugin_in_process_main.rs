@@ -70,7 +70,7 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
         match catalog.try_apply(&mut task) {
             ScanPoll::Running => {
                 assert!(Instant::now() < deadline, "the probe never ended");
-                thread::sleep(Duration::from_millis(2));
+                thread::yield_now();
             }
             ScanPoll::Done(result) => {
                 assert!(result.failures().is_empty(), "{:?}", result.failures());
@@ -111,7 +111,7 @@ fn a_swap_replaces_an_in_process_nodes_plugin() {
         .hosting(Hosting::InProcess)
         .run(main)
         .unwrap();
-    s.swap_plugin(node, next.node(), main).unwrap();
+    s.swap_plugin(node, next, main).unwrap();
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         second
@@ -121,7 +121,7 @@ fn a_swap_replaces_an_in_process_nodes_plugin() {
     while !deactivation().observed {
         assert!(Instant::now() < deadline, "the first plugin never closed");
         let _ = s.update();
-        thread::sleep(Duration::from_millis(2));
+        thread::yield_now();
     }
     assert!(deactivation().is_main, "{:?}", deactivation());
     s.close(main);
@@ -147,11 +147,10 @@ fn an_in_process_swap_to_other_ports_is_refused() {
         .hosting(Hosting::InProcess)
         .run(main)
         .unwrap();
-    let refused = s.swap_plugin(node, other.node(), main);
-    assert!(
-        matches!(refused, Err(tutti_session::SwapPluginError::Ports { .. })),
-        "{refused:?}"
-    );
+    let refused = s.swap_plugin(node, other, main);
+    let Err(tutti_session::SwapPluginError::Ports { node: other, .. }) = refused else {
+        panic!("other ports are refused: {refused:?}");
+    };
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         before
@@ -253,7 +252,7 @@ fn restore_round_trip(hosting: Hosting) {
             knob(&s)
         );
         blocks(&mut s);
-        thread::sleep(Duration::from_millis(2));
+        thread::yield_now();
     }
     s.close(tutti_fixtures::main_thread());
 }
@@ -337,7 +336,7 @@ impl Rebound {
                 return events;
             }
             assert!(Instant::now() < deadline, "{what} never happened");
-            thread::sleep(Duration::from_millis(2));
+            thread::yield_now();
         }
     }
 
@@ -406,7 +405,7 @@ fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
     while !r.renders() {
         assert!(Instant::now() < deadline, "the new node never rendered");
         let _ = r.s.update();
-        thread::sleep(Duration::from_millis(2));
+        thread::yield_now();
     }
     assert_eq!(
         probe().activation_count(),
@@ -446,7 +445,7 @@ fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
     while !r.renders() {
         assert!(Instant::now() < deadline, "the new node never rendered");
         let _ = r.s.update();
-        thread::sleep(Duration::from_millis(2));
+        thread::yield_now();
     }
     let events = r.s.update();
     assert!(unwired_of(&events).is_empty(), "reported once");
@@ -590,7 +589,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
         assert!(Instant::now() < deadline, "the wider node never came");
         side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
         events.extend(s.update());
-        thread::sleep(Duration::from_millis(2));
+        thread::yield_now();
     }
     assert!(
         !events.iter().any(|event| matches!(
@@ -686,7 +685,7 @@ fn render_until(
             return refused;
         }
         assert!(Instant::now() < deadline, "{what} never happened");
-        thread::sleep(Duration::from_millis(2));
+        thread::yield_now();
     }
 }
 

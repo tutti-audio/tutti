@@ -1,11 +1,13 @@
-//! A plugin opened and not yet in a graph: what a [`LoadedPlugin`](crate::LoadedPlugin)
-//! shares, and the readings of it that outlive its node.
+//! What a [`LoadedPlugin`](crate::LoadedPlugin) observes of a plugin, and the
+//! plugin itself.
 //!
-//! [`Shared`] holds the plugin ([`Install`], taken once by the node that hosts
-//! it), the parameter mirror read at the load, what the load says of the plugin
-//! ([`PluginInfo`]), and its [`Standing`]: whether its live part is gone. The
-//! parts that only the main thread may drop (an in-process plugin) go to the
-//! main thread when they are dropped on another ([`Affine`]).
+//! [`Shared`] is the observer's half: what the load says of the plugin
+//! ([`PluginInfo`]), its ports, and its [`Standing`]: whether its live part is
+//! gone, or it has no plugin behind it. [`Install`] is the plugin and its
+//! parameter mirror, owned by one [`PluginNode`](crate::PluginNode). The parts
+//! that only the main thread may drop (an in-process plugin) go to the main
+//! thread when they are dropped on another: the format's own handle defers its
+//! close to the session's main-work collector.
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +25,7 @@ use tutti_units::SampleRate;
 
 use super::{HostPlugin, Mirror, Open, Origin};
 use crate::PluginPresets;
+use crate::apply::SessionId;
 use crate::loaded::Stamp;
 use crate::peer::ResourceIds;
 use crate::{GiveUp, LoadError, ResourceId};
@@ -35,6 +38,8 @@ pub(super) struct Context {
     /// The session's executor, which a served plugin's exit watch runs on.
     pub(super) executor: tutti_platform::WeakExecutor,
     pub(super) ids: ResourceIds,
+    /// The session that built the load: the one the plugin may be added to.
+    pub(super) session: SessionId,
     /// Whether the session recovers a plugin that dies at its node.
     pub(super) recovery: bool,
 }
@@ -46,51 +51,6 @@ pub(super) struct Install {
     pub(super) origin: Origin,
 }
 
-/// A value that drops on the main thread when it must.
-///
-/// Dropped on another thread while `main_only`, its value is handed to the
-/// session's main-work collector to drop at the next tick on the main thread
-/// ([`MainWorkHandle::defer_drop`]); otherwise it drops where it is. The last
-/// clone of a [`LoadedPlugin`](crate::LoadedPlugin) drops its plugin through
-/// one, on whatever thread drops the clone.
-pub(super) struct Affine<T: Send + 'static> {
-    value: Option<T>,
-    work: MainWorkHandle,
-    main_only: bool,
-}
-
-impl<T: Send + 'static> Affine<T> {
-    pub(super) fn new(value: T, work: &MainWorkHandle, main_only: bool) -> Self {
-        Self {
-            value: Some(value),
-            work: work.clone(),
-            main_only,
-        }
-    }
-
-    pub(super) fn get(&self) -> &T {
-        self.value.as_ref().expect("held until dropped")
-    }
-
-    /// The value, which now drops where its new owner says.
-    pub(super) fn into_inner(mut self) -> T {
-        self.value.take().expect("held until taken")
-    }
-}
-
-impl<T: Send + 'static> Drop for Affine<T> {
-    fn drop(&mut self) {
-        let Some(value) = self.value.take() else {
-            return;
-        };
-        if self.main_only && MainThreadMarker::new().is_none() {
-            self.work.defer_drop(move |_main| drop(value));
-        } else {
-            drop(value);
-        }
-    }
-}
-
 /// The reading of whether a loaded plugin's live part is gone, shared by the
 /// opened plugin, the node's record and every clone of the handle.
 ///
@@ -98,7 +58,7 @@ impl<T: Send + 'static> Drop for Affine<T> {
 /// node takes it out ([`release_handle`](Self::release_handle)), so a clone of
 /// the handle never keeps a server alive past its node.
 pub(super) struct Standing {
-    pub(super) handle: Mutex<Option<Affine<PluginHandle>>>,
+    pub(super) handle: Mutex<Option<PluginHandle>>,
     /// The session recovers a plugin that dies at its node.
     pub(super) recovery: bool,
     /// A node hosts the plugin (and so recovery can act on it).
@@ -107,6 +67,9 @@ pub(super) struct Standing {
     pub(super) dead: Mutex<Option<PluginFailure>>,
     /// Recovery gave up on it, and why.
     pub(super) gave_up: Mutex<Option<GiveUp>>,
+    /// No plugin is behind the handle any more: its node was dropped before it
+    /// was added, its node's record retired, or a swap replaced it.
+    pub(super) retired: AtomicBool,
 }
 
 impl Standing {
@@ -118,7 +81,7 @@ impl Standing {
                 .handle
                 .lock_recover()
                 .as_ref()
-                .is_some_and(|handle| handle.get().is_crashed())
+                .is_some_and(|handle| handle.is_crashed())
     }
 
     /// The bridge's lifecycle: recovery gave up, or the server is dead and
@@ -140,7 +103,7 @@ impl Standing {
             self.handle
                 .lock_recover()
                 .as_ref()
-                .and_then(|handle| handle.get().status().cause().cloned())
+                .and_then(|handle| handle.status().cause().cloned())
         });
         PluginCause::Died(failure.unwrap_or(PluginFailure::Unreported))
     }
@@ -209,12 +172,8 @@ pub enum PluginCause {
     GaveUp(GiveUp),
 }
 
-/// A plugin opened and not yet in a graph: what a [`LoadedPlugin`](crate::LoadedPlugin)
-/// shares.
-///
-/// An opened plugin that no graph holds yet, its parameter mirror, and what
-/// the handles read of it. The parts that only the main thread may drop
-/// (an in-process plugin) go to the main thread when it is dropped on another.
+/// What a [`LoadedPlugin`](crate::LoadedPlugin) shares: the readings of one
+/// opened plugin.
 pub struct Shared {
     pub(super) id: ResourceId,
     pub(super) stamp: Stamp,
@@ -222,8 +181,6 @@ pub struct Shared {
     pub(super) standing: Arc<Standing>,
     /// The plugin's ports as a node over it would have them.
     pub(super) ports: PluginPorts,
-    /// What the node takes, once.
-    install: Mutex<Option<Affine<Install>>>,
 }
 
 impl fmt::Debug for Shared {
@@ -246,7 +203,7 @@ impl Shared {
         loadable: Loadable,
         config: AudioConfig,
         main: MainThreadMarker,
-    ) -> Result<Self, LoadError> {
+    ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,
             restore: _,
@@ -257,7 +214,6 @@ impl Shared {
             ResolvedHosting::OutOfProcess => Hosting::OutOfProcess,
             ResolvedHosting::InProcess => Hosting::InProcess,
         };
-        let served = hosting == Hosting::OutOfProcess;
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
         let id = cx.ids.mint();
@@ -272,39 +228,26 @@ impl Shared {
             server_pid: handle.server_pid(),
             presets,
         };
-        let main_only = !served;
-        Ok(Self {
+        let shared = Self {
             id,
             stamp,
             info: Arc::new(info),
             standing: Arc::new(Standing {
-                handle: Mutex::new(Some(Affine::new(handle, &cx.work, main_only))),
+                handle: Mutex::new(Some(handle)),
                 recovery: cx.recovery,
                 hosted: AtomicBool::new(false),
                 dead: Mutex::new(None),
                 gave_up: Mutex::new(None),
+                retired: AtomicBool::new(false),
             }),
             ports,
-            install: Mutex::new(Some(Affine::new(
-                Install {
-                    plugin,
-                    mirror,
-                    origin: Origin { config, loadable },
-                },
-                &cx.work,
-                main_only,
-            ))),
-        })
-    }
-
-    /// The plugin and what opened it, once: `None` after a node took it.
-    pub(super) fn take_install(&self) -> Option<Install> {
-        self.install.lock_recover().take().map(Affine::into_inner)
-    }
-
-    /// Whether a node has not taken the plugin yet.
-    pub(super) fn has_install(&self) -> bool {
-        self.install.lock_recover().is_some()
+        };
+        let install = Install {
+            plugin,
+            mirror,
+            origin: Origin { config, loadable },
+        };
+        Ok((shared, install))
     }
 }
 

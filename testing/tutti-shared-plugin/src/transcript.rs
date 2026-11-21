@@ -6,6 +6,19 @@
 //! every format and every process boundary has: nothing here depends on an
 //! environment variable or a symbol of the plugin image.
 
+/// The close record's byte when the plugin closed on the thread that created it.
+pub const CLOSED_ON_CREATOR: u8 = b'1';
+/// The close record's byte when the plugin closed on another thread.
+pub const CLOSED_OFF_CREATOR: u8 = b'0';
+
+/// The file a plugin told to record its close (`core`, "Faults") writes, named
+/// by the process so a plugin and the host in one process agree on it without
+/// being told.
+#[must_use]
+pub fn close_record_path() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("tutti-shared-plugin-close-{}", std::process::id()))
+}
+
 /// The blob's first four bytes.
 pub const MAGIC: [u8; 4] = *b"TSP1";
 
