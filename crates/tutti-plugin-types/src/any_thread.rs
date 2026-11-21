@@ -153,13 +153,10 @@ pub trait AnyThread: Send + Sync {
 
     /// Whether the plugin's own bypass is on now, read back from the plugin
     /// without waiting: `None` when the plugin did not answer or the backend
-    /// does not read it. The default is `None`: a backend that reaches the
-    /// plugin without a round trip (in-process) overrides it, and a served
+    /// does not read it. An in-process backend reads it live; a served
     /// plugin's bypass is compared through its mirrored parameter values
-    /// instead.
-    fn bypassed(&self, _site: OwnBypass) -> Option<bool> {
-        None
-    }
+    /// instead, so its backend answers `None`.
+    fn bypassed(&self, site: OwnBypass) -> Option<bool>;
 
     /// Announces the host's automation mode, for the editor's UI feedback
     /// (VST3 `IAutomationState`). Applies to the whole plugin. `Ok(())` means
@@ -229,6 +226,9 @@ mod tests {
         fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
             self.written.lock().unwrap().push((id, value.get()));
             Ok(())
+        }
+        fn bypassed(&self, _: OwnBypass) -> Option<bool> {
+            None
         }
         fn parameter_plain(&self, _: ParamId, _: Normalized) -> Option<f64> {
             None

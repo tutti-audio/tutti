@@ -146,6 +146,9 @@ impl AnyThread for Fake {
         }
         Ok(())
     }
+    fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
+        None
+    }
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         let (min, max) = self.range(id)?;
         Some(min + (max - min) * value.get())

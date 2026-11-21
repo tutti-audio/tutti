@@ -899,8 +899,8 @@ impl PluginHandle {
     /// Whether the plugin's own bypass is on now, read from the plugin: `None`
     /// when it has none or did not answer, or the instance is busy (an
     /// in-process read never waits for it). An out-of-process plugin reads
-    /// `None`: its bypass is compared through its mirrored parameter values
-    /// ([`PluginParamValues`](crate::PluginParamValues)).
+    /// `None`: the handle holds no mirror, so its bypass is read from the
+    /// session's [`PluginParamValues`](crate::PluginParamValues) instead.
     #[must_use]
     pub fn bypassed(&self) -> Option<bool> {
         self.any_thread.bypassed(self.loaded.own_bypass?)
@@ -1134,6 +1134,9 @@ mod tests {
                 _value: Normalized,
             ) -> Result<(), tutti_plugin_types::UnknownParam> {
                 Ok(())
+            }
+            fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
+                None
             }
             fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
                 None

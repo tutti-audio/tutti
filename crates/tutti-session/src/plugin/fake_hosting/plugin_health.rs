@@ -48,6 +48,9 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
     ) -> Result<(), tutti_plugin_types::UnknownParam> {
         Ok(())
     }
+    fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
+        None
+    }
     fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
         None
     }

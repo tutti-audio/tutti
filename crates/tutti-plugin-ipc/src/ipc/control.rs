@@ -39,6 +39,12 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameter_answer(id)
             }
 
+            /// `None`: the session compares a served plugin's bypass through its
+            /// mirrored parameter values.
+            fn bypassed(&self, _site: OwnBypass) -> Option<bool> {
+                None
+            }
+
             fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
                 self.link
                     .bridge
