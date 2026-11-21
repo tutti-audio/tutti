@@ -262,8 +262,8 @@ impl Browser {
         Ok(Self { daemon, events })
     }
 
-    /// The next Host event: a future the daemon's thread wakes when a Host
-    /// appears, changes or goes. It resolves to `None` once the daemon has
+    /// The next Host event, fed by the mDNS daemon's thread, which wakes it when
+    /// a Host appears, changes or goes. It resolves to `None` once the daemon has
     /// stopped and nothing more will arrive.
     pub async fn next_event(&self) -> Option<HostEvent> {
         loop {
