@@ -838,7 +838,7 @@ fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
     while !is_quarter(param(&s, node.erase(), gain)) {
         assert!(Instant::now() < deadline, "the probe never took the value");
         let _ = s.update();
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::yield_now();
     }
     snapshot_now(&mut s, node.erase());
     let mut drive = Drive::new();
@@ -881,7 +881,7 @@ fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
             "the revived node never rendered with its state"
         );
         let _ = s.update();
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::yield_now();
     }
     assert!(matches!(
         s.plugin_view(node).unwrap().health(),
