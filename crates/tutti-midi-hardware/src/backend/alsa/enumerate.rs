@@ -2,7 +2,7 @@
 
 use crate::capability::{Described, OsEndpoint, from_os, legacy};
 use tutti_alsa_ffi::{Client, PortCaps, PortEntry, UmpEndpoint};
-use tutti_midi_device::{Identity, PortDirection};
+use tutti_midi_device::{OsEndpointIdentity, PortDirection};
 
 /// Whether a port allows `direction`: a port that is readable but not
 /// *subscribe*-readable cannot be connected to, so listing it would offer the
@@ -96,7 +96,7 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
     let described = capability_of(ump.as_deref());
     OsEndpoint {
         id: super::handle_of(address),
-        identity: Identity::alsa(client_name.as_str(), port_name.as_str()),
+        identity: OsEndpointIdentity::alsa(client_name.as_str(), port_name.as_str()),
         // "Client: Port" is how `aconnect -l` presents them, and a
         // bare port name ("MIDI 1") is ambiguous across devices.
         name: if port_name.starts_with(&client_name) {

@@ -1,8 +1,8 @@
 //! What the file tests share: a track of events and a note.
 
 use tutti_midi_file::{
-    FileEvent, Layout, LeadTrack, Meta, MetricalSequences, MetricalView, MidiFile, Normalized,
-    Pattern, SmfDivision, SysEx, Tick, Timebase, Track, TracksError,
+    FileEvent, Layout, LeadTrack, Meta, MetricalSequences, MetricalView, MidiFile, Pattern,
+    ReadRepair, SmfDivision, SysEx, Tick, Timebase, Track, TracksError,
 };
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Voice1};
 
@@ -158,13 +158,13 @@ pub fn without_defaults(bytes: &[u8]) -> Vec<u8> {
 
 /// `file`'s changes a read made other than giving it the default tempo and
 /// time signature.
-pub fn placed(file: &MidiFile) -> Vec<Normalized> {
-    file.normalized()
+pub fn placed(file: &MidiFile) -> Vec<ReadRepair> {
+    file.repairs()
         .iter()
         .filter(|n| {
             !matches!(
                 n,
-                Normalized::DefaultTempo { .. } | Normalized::DefaultTimeSignature { .. }
+                ReadRepair::DefaultTempo { .. } | ReadRepair::DefaultTimeSignature { .. }
             )
         })
         .cloned()
@@ -172,12 +172,12 @@ pub fn placed(file: &MidiFile) -> Vec<Normalized> {
 }
 
 /// The events of track `track` of `file`, a read file, without the Set Tempo and
-/// Time Signature the read inserted there ([`Normalized::DefaultTempo`],
-/// [`Normalized::DefaultTimeSignature`]): the first of each kind at tick 0.
+/// Time Signature the read inserted there ([`ReadRepair::DefaultTempo`],
+/// [`ReadRepair::DefaultTimeSignature`]): the first of each kind at tick 0.
 pub fn unspecified(file: &MidiFile, track: usize) -> Vec<(Tick, FileEvent)> {
-    let inserted = |wanted: Normalized| file.normalized().contains(&wanted);
-    let mut tempo = inserted(Normalized::DefaultTempo { track });
-    let mut meter = inserted(Normalized::DefaultTimeSignature { track });
+    let inserted = |wanted: ReadRepair| file.repairs().contains(&wanted);
+    let mut tempo = inserted(ReadRepair::DefaultTempo { track });
+    let mut meter = inserted(ReadRepair::DefaultTimeSignature { track });
     let events = file.tracks()[track].events();
     let opening = events
         .iter()

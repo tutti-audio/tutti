@@ -62,7 +62,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ),
     (
         "crates/tutti-midi-device/src/id.rs",
-        "DeviceId",
+        "MidiDeviceId",
         "permanent: the OS mints the identity and ordinal, and any pair names a device; new has no check",
     ),
     (

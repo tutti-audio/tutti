@@ -37,7 +37,7 @@ use std::task::{Context, Poll};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
-use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
+use tutti_midi_device::{DeviceInfo, Learned, Match, MidiDeviceId, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch,
     PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
@@ -114,11 +114,11 @@ pub enum MidiPortError {
     Ambiguous(Vec<DeviceInfo>),
     /// Another port of this session holds the device open already.
     #[error("another port of this session holds {0:?} open")]
-    InUse(DeviceId),
+    InUse(MidiDeviceId),
     /// The device's previous connection still holds the port's cells (timing and
     /// losses), so the new one would report nothing.
     #[error("the previous connection of {0:?} still holds the port's cells")]
-    CellsHeld(DeviceId),
+    CellsHeld(MidiDeviceId),
     /// The OS layer refused to open the device.
     #[error("MIDI hardware: {0}")]
     Hardware(Arc<tutti_midi_hardware::MidiHardwareError>),
@@ -888,7 +888,7 @@ struct InputPort {
     /// What the port was opened with: what a returning device is matched on.
     saved: DeviceInfo,
     /// The device the port holds open.
-    open: Option<DeviceId>,
+    open: Option<MidiDeviceId>,
     /// The requests sent to the device's peers that they have not answered.
     pending: Pending,
     /// The proof the open brought, which every reopen of the port's device takes.
@@ -1132,7 +1132,7 @@ impl Ports {
     /// Takes the MPE Profile zones the peers of `device` have enabled (M2-120) as
     /// what its input node follows: the zones of every peer on a Group
     /// together, or none where no peer has the Profile enabled.
-    fn sync_mpe_profiles(&self, io: &MidiSession, device: &DeviceId) {
+    fn sync_mpe_profiles(&self, io: &MidiSession, device: &MidiDeviceId) {
         let Some(port) = self.inputs.iter().find(|p| p.open.as_ref() == Some(device)) else {
             return;
         };
@@ -1401,7 +1401,7 @@ impl Ports {
     }
 
     /// The open input port that holds `device`.
-    fn port_of(&mut self, device: &DeviceId) -> Option<&mut InputPort> {
+    fn port_of(&mut self, device: &MidiDeviceId) -> Option<&mut InputPort> {
         self.inputs
             .iter_mut()
             .find(|port| port.open.as_ref() == Some(device))
@@ -1411,7 +1411,7 @@ impl Ports {
     fn answer(
         &mut self,
         io: &mut MidiSession,
-        device: &DeviceId,
+        device: &MidiDeviceId,
         peer: tutti_midi_hardware::PeerId,
         answer: &Answer,
     ) {
@@ -1431,8 +1431,8 @@ impl Ports {
     ) -> Edits {
         let mut edits = Edits::default();
         out.append(&mut self.notices);
-        let mut touched: Vec<DeviceId> = Vec::new();
-        let mut profile_devices: Vec<DeviceId> = Vec::new();
+        let mut touched: Vec<MidiDeviceId> = Vec::new();
+        let mut profile_devices: Vec<MidiDeviceId> = Vec::new();
         for polled in io.poll(now) {
             // The output follows what its device settled, at once: the
             // `MidiOut` phase that drains next stamps by it.
@@ -1617,7 +1617,7 @@ impl OutputPort {
 fn open_device_output(
     io: &MidiSession,
     started: Started,
-    id: &DeviceId,
+    id: &MidiDeviceId,
     active_sensing: bool,
 ) -> Result<tutti_midi_hardware::OpenOutput, MidiPortError> {
     let mut device = io
@@ -1850,7 +1850,7 @@ impl Ports {
     /// is free to open again at once.
     fn release_device<F: tutti_buffers::Float>(
         &mut self,
-        device: &DeviceId,
+        device: &MidiDeviceId,
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&crate::midi::OutputTiming>,
     ) {

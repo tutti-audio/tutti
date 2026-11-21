@@ -3,7 +3,7 @@
 
 /// One thing that happened in the session's MIDI, reported once.
 ///
-/// A variant about one device carries its `DeviceId`
+/// A variant about one device carries its `MidiDeviceId`
 /// as a field; a count over every input or the output has no device, and is its
 /// own variant. What happens to a port (its device gone or back, what it
 /// learned) is a [`ResourceChanged`](crate::SessionEvent::ResourceChanged) of
@@ -43,7 +43,7 @@ pub enum MidiReport {
     #[cfg(feature = "midi-hardware")]
     CiProfiles {
         /// The device.
-        device: tutti_midi_device::DeviceId,
+        device: tutti_midi_device::MidiDeviceId,
         /// The peer.
         peer: tutti_midi_hardware::PeerId,
         /// What happened.
@@ -58,7 +58,7 @@ pub enum MidiReport {
     #[cfg(feature = "midi-hardware")]
     CiProcess {
         /// The device.
-        device: tutti_midi_device::DeviceId,
+        device: tutti_midi_device::MidiDeviceId,
         /// The peer.
         peer: tutti_midi_hardware::PeerId,
         /// What happened.

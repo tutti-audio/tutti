@@ -20,7 +20,7 @@ use tutti_rt::LockExt;
 
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{
-    DeviceEvent, DeviceId, DeviceInfo, DeviceTable, Endpoint, EndpointId, OsChange, OsDevice,
+    DeviceEvent, DeviceInfo, DeviceTable, Endpoint, EndpointId, MidiDeviceId, OsChange, OsDevice,
     PortDirection, Resolved,
 };
 use tutti_midi_runtime::{DeviceWriters, InputId, Outgoing, Taken};
@@ -388,7 +388,7 @@ impl Devices {
     pub(crate) fn open_input(
         &self,
         started: Started,
-        id: &DeviceId,
+        id: &MidiDeviceId,
         ports: &Arc<HardwareMidiInputs>,
         writers: DeviceWriters,
     ) -> Result<(OpenInput, EventInletNode)> {
@@ -413,7 +413,7 @@ impl Devices {
     ///
     /// [`MidiHardwareError::NotFound`] when `id` is not present, [`MidiHardwareError::WrongDirection`]
     /// when it is not an output, or the platform error from opening it.
-    pub fn open_output(&self, started: Started, id: &DeviceId) -> Result<OpenOutput> {
+    pub fn open_output(&self, started: Started, id: &MidiDeviceId) -> Result<OpenOutput> {
         let (info, handle) = self.present(id, PortDirection::is_output)?;
         // What the OS says it speaks, until a negotiation says better.
         let described = described(&self.capability(id)?.unwrap_or_else(legacy)).active();
@@ -434,7 +434,7 @@ impl Devices {
     /// its direction.
     fn present(
         &self,
-        id: &DeviceId,
+        id: &MidiDeviceId,
         wanted: fn(PortDirection) -> bool,
     ) -> Result<(DeviceInfo, EndpointId)> {
         let state = self.state();
@@ -470,7 +470,7 @@ impl Devices {
     /// # Errors
     ///
     /// The backend's error when the OS cannot be asked ([`MidiEndpoints::inputs`]).
-    pub fn capability(&self, id: &DeviceId) -> Result<Option<Endpoint>> {
+    pub fn capability(&self, id: &MidiDeviceId) -> Result<Option<Endpoint>> {
         Ok(self.os_endpoint(id)?.map(|e| e.capability))
     }
 
@@ -482,12 +482,12 @@ impl Devices {
     /// # Errors
     ///
     /// As [`capability`](Self::capability).
-    pub fn blocks_left_out(&self, id: &DeviceId) -> Result<Option<usize>> {
+    pub fn blocks_left_out(&self, id: &MidiDeviceId) -> Result<Option<usize>> {
         Ok(self.os_endpoint(id)?.map(|e| e.blocks_left_out))
     }
 
     /// The backend's description of `id` now, `None` when `id` is not present.
-    fn os_endpoint(&self, id: &DeviceId) -> Result<Option<OsEndpoint>> {
+    fn os_endpoint(&self, id: &MidiDeviceId) -> Result<Option<OsEndpoint>> {
         let Some(handle) = self.state().table.handle(id) else {
             return Ok(None);
         };
@@ -680,7 +680,7 @@ impl core::fmt::Debug for OpenInput {
 impl OpenInput {
     /// The device this input is open on.
     #[must_use]
-    pub fn id(&self) -> &DeviceId {
+    pub fn id(&self) -> &MidiDeviceId {
         &self.info.id
     }
 
@@ -814,7 +814,7 @@ impl OpenOutput {
 
     /// The device this output is open on.
     #[must_use]
-    pub fn id(&self) -> &DeviceId {
+    pub fn id(&self) -> &MidiDeviceId {
         &self.info.id
     }
 
