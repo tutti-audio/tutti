@@ -331,6 +331,7 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
     assert_eq!(who, device(2));
     let port = &ports.input;
     assert_eq!(port.info().peers().len(), 1, "the peer was found");
+    let old_id = port.info().peers()[0].id();
     let _ = clock.profile_changes();
 
     s.set(s.policy::<MidiPolicy>().to(policy(9, "My App")))
@@ -359,6 +360,11 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
         port.info().peers().len(),
         1,
         "found again under the new MUID"
+    );
+    assert_ne!(
+        port.info().peers()[0].id(),
+        old_id,
+        "a peer that was dropped and is found again is listed anew, with a new id"
     );
     let _ = clock.profile_changes();
     s.set(s.policy::<MidiPolicy>().to(MidiPolicy::default()))

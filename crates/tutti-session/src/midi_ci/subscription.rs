@@ -7,23 +7,17 @@ use tutti_midi_ci::{PeData, PeResource, SubscribeId};
 use tutti_midi_hardware::{PeerId, PropertyAsk, PropertyCall, PropertyPeer};
 use tutti_rt::LockExt;
 
+use super::reply::peer_future;
 use super::{PeFailure, PortLink, ResourcePeer, listed_peer};
-use crate::job::job_kind;
 use crate::midi_port::InputRequest;
 use crate::peer::sealed::Sealed;
-use crate::{Job, PeerError};
 use crate::{Presence, Resource, ResourceFact, ResourceId, SessionEvent};
 
-job_kind!(
-    /// A Subscription to a peer's Resource: the lease, landing once the peer
-    /// accepts. The first Property Data follows it into
+peer_future!(
+    /// A Subscription to a peer's Resource in flight: it resolves to the lease
+    /// once the peer accepts. The first Property Data follows it into
     /// [`ResourcePeer::property`](crate::ResourcePeer::property).
-    pub Subscribe => Subscription, PeerError<PeFailure>
-);
-
-job_kind!(
-    /// The end of a Subscription, asked of the peer when its lease drops.
-    pub(crate) EndSubscription => (), PeerError<PeFailure>
+    Subscribe => Subscription, PeFailure, "a Subscription is answered only when it is awaited"
 );
 
 /// Why a [`Subscription`] is not live.
@@ -122,11 +116,9 @@ impl Drop for Subscription {
             let ask = self
                 .peer
                 .ask(PropertyCall::Unsubscribe(self.subscribe_id.clone()));
-            let ended: Job<EndSubscription> =
-                self.link
-                    .submit(ask, listed_peer, InputRequest::Unsubscribe);
             // Nothing waits for the peer's reply.
-            drop(ended);
+            self.link
+                .send(ask, listed_peer, |ask, ()| InputRequest::Unsubscribe(ask));
         }
     }
 }
@@ -284,7 +276,7 @@ impl ResourcePeer {
     /// `None` while none holds it (before its first Get, after it ended).
     ///
     /// After a `notify`, or an update that does not decode, the session Gets the
-    /// Resource, and this reads the data held before until that Get lands or
+    /// Resource, and this reads the data held before until that Get resolves or
     /// times out (an `Updated` replaces it, a failed Get clears it): the window is
     /// bounded by the Get's timeout.
     #[must_use]

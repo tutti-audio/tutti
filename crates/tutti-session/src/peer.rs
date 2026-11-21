@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::{WaitError, WorkerError};
+use crate::WorkerError;
 
 /// A resource's identity in one session: unique among every token the session
 /// has handed out, and never reused.
@@ -168,9 +168,8 @@ pub enum ResourceFact {
 
 /// Why a request to a [`Peer`] failed. `E` is the request's own refusal.
 ///
-/// A request that returns a [`Job`](crate::Job) and is made of a peer that is
-/// `Lost` fails at the call: the job is already ended with
-/// [`Disconnected`](Self::Disconnected), and lands in the next update.
+/// A request made of a peer that is `Lost` answers
+/// [`Disconnected`](Self::Disconnected).
 ///
 /// # Examples
 ///
@@ -205,9 +204,6 @@ pub enum PeerError<E> {
     /// panicked).
     #[error(transparent)]
     Worker(#[from] WorkerError),
-    /// [`Job::wait`](crate::Job::wait) could not wait for the answer.
-    #[error(transparent)]
-    Wait(#[from] WaitError),
 }
 
 #[cfg(test)]

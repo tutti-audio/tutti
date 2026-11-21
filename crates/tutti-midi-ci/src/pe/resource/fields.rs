@@ -11,6 +11,7 @@ use super::super::limits::{PeTextError, PropertyName, PropertyNameError, text_ty
 use super::super::tree::{PeJson, PeJsonError, PeObject};
 use super::controllers::ListedTwice;
 use super::entry::EntryError;
+use super::kind::PeResource;
 use super::state::NotUnixSeconds;
 
 tutti_units::ranged! {
@@ -361,6 +362,9 @@ pub enum PeDataFault {
     /// The entry of a list is not an object.
     #[error("not an object")]
     NotAnObject,
+    /// The Property Data is another Resource's.
+    #[error("the Property Data is of {0}")]
+    OfResource(PeResource),
 }
 
 /// Why a value of the right JSON type is not valid: the error of the type that

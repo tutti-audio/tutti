@@ -7,7 +7,7 @@
 //! session's own, read at load and read again when the plugin announces a
 //! rescan ([`PluginChange::ParamsRescanned`](crate::PluginChange::ParamsRescanned),
 //! [`ParamTitlesChanged`](crate::PluginChange::ParamTitlesChanged)); the read
-//! is a job on the session's executor and lands in [`Session::update`](crate::Session::update), which
+//! is handed to the plugin host and answered in [`Session::update`](crate::Session::update), which
 //! takes `&mut Session`. So **a handle cannot be stale**: holding one across
 //! an update is a borrow error, and what a host keeps across updates is the
 //! `ParamId`, resolved again with [`PluginParams::get`] (which refuses an id the
@@ -136,8 +136,8 @@ impl<'a> PluginParams<'a> {
 
     /// Whether the plugin's parameters have been read. A plugin loaded through
     /// the session is read at load; one the host inserted itself
-    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)) is read by a job
-    /// on the session's executor, landed in [`Session::update`](crate::Session::update).
+    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)) is read by the
+    /// plugin host and answered in [`Session::update`](crate::Session::update).
     #[must_use]
     pub fn is_ready(&self) -> bool {
         self.hosted.mirror.is_ready()
