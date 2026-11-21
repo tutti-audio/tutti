@@ -200,7 +200,7 @@ impl<'a> Diagnostics<'a> {
     /// Whether the node follows the project's meter (the time signature and bar
     /// it tells the plugin). True for every plugin the session added; false for
     /// one a host inserted itself
-    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)), whose node the
+    /// ([`Graph::add_plugin`](crate::Graph::add_plugin)), whose node the
     /// session did not give a meter.
     pub fn follows_project_meter(&self) -> bool {
         self.hosted.node.has_meter()

@@ -26,7 +26,7 @@ use tutti_platform::Instant;
 
 use tutti_plugin_types::{IpcError, PluginFailure};
 
-use crate::CrossfadeRefused;
+use crate::ReplaceRefused;
 
 /// When to reload a plugin and when to give up. Times are measured on the
 /// `now` each [`Recovery::step`] is given.
@@ -191,7 +191,7 @@ pub enum RecoveryFailure {
     /// The graph refused the swap that installs the replacement.
     ReplacementRefused {
         /// The graph's refusal.
-        source: CrossfadeRefused,
+        source: ReplaceRefused,
     },
     /// The reload's job was dropped by the session's executor before it ran.
     ReloadDropped,

@@ -94,7 +94,7 @@ fn a_clip_is_as_wide_as_its_wave_unless_placed() {
     let mut s = offline();
     let outputs = |s: &mut Session, clip: Clip<f32>| {
         let node = s.graph().add(clip);
-        s.graph().buses(node).expect("in the graph").1.width()
+        s.graph().node_buses(node).expect("in the graph").1.width()
     };
     assert_eq!(outputs(&mut s, Clip::new(level(0.5)).unwrap()), 1);
     let wide = Clip::new(level(0.5))

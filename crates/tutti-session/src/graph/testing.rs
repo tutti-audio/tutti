@@ -62,7 +62,7 @@ impl<F: Float> Testing<'_, F> {
 
     /// The audio wiring as it stands: the nodes, the edges into every input
     /// port, the root's output sources and its input width, including edits
-    /// no commit has sent yet ([`Graph::is_edited`]). A read-only
+    /// no commit has sent yet ([`Graph::has_uncommitted_edits`]). A read-only
     /// view of what [`Graph::connect`] and its kin write; the
     /// graph's other declarations (event edges, params, modes) are not part
     /// of it.
@@ -116,8 +116,8 @@ impl<F: Float> Testing<'_, F> {
             .map(crate::plugin::RebindState::is_settling)
     }
 
-    /// How many crossfades wait for a re-prepare to resume.
-    pub fn waiting_crossfades(&self) -> usize {
+    /// How many replacements wait for a re-prepare to resume.
+    pub fn waiting_replacements(&self) -> usize {
         self.graph.parked.len()
     }
 

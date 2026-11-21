@@ -59,7 +59,7 @@ fn a_sine_of_half_amplitude_yields_a_peak_of_half_per_item() {
     let mut analyzer = s
         .graph()
         .taps()
-        .analyzer(&[osc.out(0)], peak_blocks(48), tap(4096))
+        .open_analyzer(&[osc.out(0)], peak_blocks(48), tap(4096))
         .expect("the source exists");
     let _ = s.update();
     render(&mut s, 10);
@@ -85,7 +85,7 @@ fn live_and_offline_finish_at_the_constants_peak() {
     let analyzer: Analyzer<_> = s
         .graph()
         .taps()
-        .analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(4096))
+        .open_analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(4096))
         .expect("the source exists");
     let _ = s.update();
     render(&mut s, 10);
@@ -109,7 +109,7 @@ fn a_source_missing_at_open_is_missing_source() {
     let refused = s
         .graph()
         .taps()
-        .analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(64))
+        .open_analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(64))
         .unwrap_err();
     assert!(
         matches!(refused, AnalyzerError::MissingSource(_)),
@@ -126,19 +126,19 @@ fn a_config_the_context_refuses_opens_no_tap() {
     let refused = s
         .graph()
         .taps()
-        .analyzer(&[src.out(0)], peak_blocks(0), tap(64))
+        .open_analyzer(&[src.out(0)], peak_blocks(0), tap(64))
         .unwrap_err();
     assert!(
         matches!(refused, AnalyzerError::Measure(MeasureError::ZeroBlock)),
         "{refused:?}"
     );
-    let next = s.graph().taps().open_output(Samples::new(64)).unwrap().id();
+    let next = s.graph().taps().open_root(Samples::new(64)).unwrap().id();
 
     let mut fresh = offline();
     let first = fresh
         .graph()
         .taps()
-        .open_output(Samples::new(64))
+        .open_root(Samples::new(64))
         .unwrap()
         .id();
     assert_eq!(next, first, "the refused open minted no tap");
@@ -154,18 +154,18 @@ fn a_view_the_tap_width_cannot_make_opens_no_tap() {
     let refused = s
         .graph()
         .taps()
-        .analyzer(&[src.out(0)], scope, tap(64))
+        .open_analyzer(&[src.out(0)], scope, tap(64))
         .unwrap_err();
     assert!(
         matches!(refused, AnalyzerError::Bind(BindError::Width { .. })),
         "{refused:?}"
     );
-    let next = s.graph().taps().open_output(Samples::new(64)).unwrap().id();
+    let next = s.graph().taps().open_root(Samples::new(64)).unwrap().id();
     let mut fresh = offline();
     let first = fresh
         .graph()
         .taps()
-        .open_output(Samples::new(64))
+        .open_root(Samples::new(64))
         .unwrap()
         .id();
     assert_eq!(next, first);
@@ -188,7 +188,7 @@ fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
     let mut analyzer = s
         .graph()
         .taps()
-        .analyzer(&[through.out(0)], loudness, tap(4096))
+        .open_analyzer(&[through.out(0)], loudness, tap(4096))
         .expect("the source exists");
     let _ = s.update();
     render(&mut s, 1);
@@ -222,7 +222,7 @@ fn lost_counts_the_frames_rendered_past_the_capacity() {
     let mut analyzer = s
         .graph()
         .taps()
-        .analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(BLOCK))
+        .open_analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(BLOCK))
         .expect("the source exists");
     let _ = s.update();
     render(&mut s, 10);
@@ -243,7 +243,7 @@ fn the_analyzer_ends_after_its_source_is_removed() {
     let mut analyzer = s
         .graph()
         .taps()
-        .analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(4096))
+        .open_analyzer(&[src.out(0)], peak_blocks(BLOCK), tap(4096))
         .expect("the source exists");
     let _ = s.update();
     render(&mut s, 2);

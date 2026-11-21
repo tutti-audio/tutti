@@ -136,7 +136,7 @@ impl<'a> PluginParams<'a> {
 
     /// Whether the plugin's parameters have been read. A plugin loaded through
     /// the session is read at load; one the host inserted itself
-    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)) is read by the
+    /// ([`Graph::add_plugin`](crate::Graph::add_plugin)) is read by the
     /// plugin host and answered in [`Session::update`](crate::Session::update).
     #[must_use]
     pub fn is_ready(&self) -> bool {
