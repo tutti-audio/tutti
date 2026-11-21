@@ -66,10 +66,10 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
 /// Waits until the session has no plugin task in flight ([`Session::plugin_tasks`]): the
 /// ends the tasks sent are in the inbox for the next update. The guard only bounds a hang.
 pub(super) fn await_tasks<K: crate::AppKey, C: Clock<Float = f32>>(session: &Session<K, C>) {
-    let guard = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let guard = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
     while session.plugin_tasks() > 0 {
         assert!(
-            std::time::Instant::now() < guard,
+            tutti_platform::Instant::now() < guard,
             "{} plugin task(s) never ended",
             session.plugin_tasks()
         );

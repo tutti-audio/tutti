@@ -2862,10 +2862,10 @@ mod tests {
             let _ = release_second.send(());
         }
         // Wait for the second to end by landing until its values are in.
-        let guard = std::time::Instant::now() + HANG_GUARD;
+        let guard = tutti_platform::Instant::now() + HANG_GUARD;
         while rig.session.graph.plugins[&rig.node].param_value(param) != Some(Some(0.75)) {
             assert!(
-                std::time::Instant::now() < guard,
+                tutti_platform::Instant::now() < guard,
                 "the new read never landed"
             );
             let _ = rig.land();
