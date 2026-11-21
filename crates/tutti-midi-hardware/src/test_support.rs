@@ -51,6 +51,7 @@ pub struct FakeBackend {
     sent: Arc<AtomicUsize>,
     opens: Arc<AtomicUsize>,
     watchers: Arc<AtomicUsize>,
+    outputs: OutputConnections,
     /// The producer of each open input: the fake device's side of the wire.
     producers: Producers,
     /// What the sinks were handed, for [`FakeCounters::take_sent`].
@@ -138,6 +139,7 @@ pub struct FakeCounters {
     /// Watch threads running. Zero once every `Devices` over this backend has
     /// dropped: the leak check.
     pub watchers: Arc<AtomicUsize>,
+    outputs: OutputConnections,
     devices: Arc<Mutex<FakeDevices>>,
     producers: Producers,
     log: SentLog,
@@ -182,6 +184,19 @@ impl FakeCounters {
             .iter()
             .map(|(device, _)| *device)
             .collect()
+    }
+
+    /// The devices whose output connection is open now, oldest first: a
+    /// connection closes when its output is dropped.
+    #[must_use]
+    pub fn connected_outputs(&self) -> Vec<EndpointId> {
+        self.outputs.lock_recover().live.clone()
+    }
+
+    /// The most output connections to one device that were open at once.
+    #[must_use]
+    pub fn most_output_connections(&self) -> usize {
+        self.outputs.lock_recover().most
     }
 
     /// Events handed to the sink so far.
@@ -337,6 +352,15 @@ impl Drop for FakeConn {
     }
 }
 
+/// The open output connections, and the most one device held at once.
+#[derive(Debug, Default)]
+struct OutputLedger {
+    live: Vec<EndpointId>,
+    most: usize,
+}
+
+type OutputConnections = Arc<Mutex<OutputLedger>>;
+
 /// A sink that counts what it was handed and accepts `accepts` of each batch.
 ///
 /// `accepts` is what lets a test express a device that refuses. A
@@ -348,6 +372,16 @@ struct FakeSink {
     refusing: Arc<AtomicBool>,
     id: EndpointId,
     log: SentLog,
+    connections: OutputConnections,
+}
+
+impl Drop for FakeSink {
+    fn drop(&mut self) {
+        let mut ledger = self.connections.lock_recover();
+        if let Some(at) = ledger.live.iter().position(|id| *id == self.id) {
+            ledger.live.remove(at);
+        }
+    }
 }
 
 impl DeviceOut for FakeSink {}
@@ -443,6 +477,7 @@ impl FakeBackend {
             sent: Arc::new(AtomicUsize::new(0)),
             opens: Arc::new(AtomicUsize::new(0)),
             watchers: Arc::new(AtomicUsize::new(0)),
+            outputs: OutputConnections::default(),
             devices: Arc::new(Mutex::new(FakeDevices {
                 inputs,
                 outputs,
@@ -454,6 +489,7 @@ impl FakeBackend {
             sent: Arc::clone(&counters.sent),
             opens: Arc::clone(&counters.opens),
             watchers: Arc::clone(&counters.watchers),
+            outputs: Arc::clone(&counters.outputs),
             producers,
             log,
             accepts,
@@ -550,12 +586,19 @@ impl MidiEndpoints for FakeBackend {
             return Err(NotFound::Endpoint(id).into());
         }
         drop(devices);
+        {
+            let mut ledger = self.outputs.lock_recover();
+            ledger.live.push(id);
+            let held = ledger.live.iter().filter(|open| **open == id).count();
+            ledger.most = ledger.most.max(held);
+        }
         Ok(Box::new(FakeSink {
             sent: Arc::clone(&self.sent),
             accepts: self.accepts,
             refusing: Arc::clone(&self.refusing),
             id,
             log: Arc::clone(&self.log),
+            connections: Arc::clone(&self.outputs),
         }))
     }
 }
