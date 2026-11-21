@@ -112,6 +112,17 @@ pub enum PresetError {
     /// The plugin is gone, so nothing was asked.
     #[error("the plugin is lost")]
     Lost,
+    /// The request could not be queued: the bridge's command queue is full. The
+    /// plugin was not asked, so a retry is reasonable.
+    #[error("the plugin bridge is busy; the request was not sent")]
+    Busy,
+    /// The plugin server did not answer within the preset deadline. The load
+    /// may still have happened: the plugin was asked.
+    #[error("the plugin did not answer the preset request within {}ms", after.as_millis())]
+    Stalled {
+        /// The deadline that expired.
+        after: std::time::Duration,
+    },
 }
 
 /// Why restoring a plugin's saved state failed.

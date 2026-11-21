@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
+use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -167,12 +168,12 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
     let state = s
         .save_state(&key, tutti_plugin_types::StateUse::Project)
         .expect("hosted")
-        .run(main)
+        .perform(main)
         .expect("saves");
     let restored = s
         .restore_state(&key, state)
         .expect("its own plugin's")
-        .run(main)
+        .perform(main)
         .expect("restores");
     s.apply(restored).expect("the node hosts the plugin");
     assert!(

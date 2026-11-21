@@ -9,6 +9,7 @@
 //! without it every test here fails, naming that command. They must fail
 //! rather than skip.
 
+use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
 use crate::support;
@@ -517,7 +518,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     let loaded = s
         .load_preset_file(&node, "/nowhere/bright.tutti-preset")
         .expect("the node hosts a plugin")
-        .run(tutti_fixtures::main_thread())
+        .perform(tutti_fixtures::main_thread())
         .expect("the plugin takes the preset");
     s.apply(loaded).expect("the node hosts the plugin");
     let deadline = Instant::now() + Duration::from_secs(10);

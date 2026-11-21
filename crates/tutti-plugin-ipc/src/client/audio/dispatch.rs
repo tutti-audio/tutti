@@ -20,7 +20,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_types::MidiIntake;
-use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
+use tutti_plugin_types::{IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -934,7 +934,16 @@ pub(super) fn handle_control(
                 ControlRequest::SetTrackInfo { info: *info },
             )?;
         }
-        ControlCommand::SaveState { state_use, reply } => {
+        ControlCommand::SaveState {
+            state_use,
+            flush,
+            reply,
+        } => {
+            // The host's writes no block carried are applied first, so the state
+            // holds them: this lane waits for the audio lane, not the asker.
+            if let Some(applied) = flush {
+                let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
+            }
             let Lane { stream, state } = lane;
             let window = lifecycle.timeouts().state;
             // The server's `Working` while it saves restarts the window, up to the
@@ -1010,11 +1019,16 @@ pub(super) fn handle_control(
             reply.send(value);
         }
         ControlCommand::LoadPreset { id, reply } => {
-            let ok = matches!(
-                query(lane, inbox, lifecycle, ControlRequest::LoadPreset { id })?,
-                Some(ControlReply::PresetLoaded { ok: true })
-            );
-            reply.send(ok);
+            // No answer within the window: the plugin was asked and may have
+            // loaded it, which is not a refusal.
+            let loaded = match query(lane, inbox, lifecycle, ControlRequest::LoadPreset { id })? {
+                Some(ControlReply::PresetLoaded { ok: true }) => Ok(()),
+                Some(_) => Err(PresetError::Refused),
+                None => Err(PresetError::Stalled {
+                    after: lifecycle.timeouts().param,
+                }),
+            };
+            reply.send(loaded);
         }
         ControlCommand::SetupSharedMemory {
             slab,

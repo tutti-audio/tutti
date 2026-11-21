@@ -182,4 +182,11 @@ impl PluginBridge {
         self.editor.mirror_state(main, data);
         audio
     }
+
+    /// Loads `data` into the in-process editor instance alone, best effort, so
+    /// its display follows a state the audio instance took
+    /// ([`AudioBridge::load_state_answer`]).
+    pub fn mirror_state(&self, main: MainThreadMarker, data: &[u8]) {
+        self.editor.mirror_state(main, data);
+    }
 }
