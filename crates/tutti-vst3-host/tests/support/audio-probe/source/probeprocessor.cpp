@@ -59,7 +59,8 @@ tresult PLUGIN_API AudioProbeProcessor::initialize (FUnknown* context)
 	addAudioOutput (STR16 ("Main Out"), SpeakerArr::kStereo, kMain, 0);
 	addAudioOutput (STR16 ("Aux Out"), SpeakerArr::kMono, kAux, 0);
 
-	addEventInput (STR16 ("Event In"), 1);
+	if (mMisbehaviour != kMisbehaveNoEventInput)
+		addEventInput (STR16 ("Event In"), 1);
 	addEventOutput (STR16 ("Event Out"), 1);
 
 	mInitialized = true;

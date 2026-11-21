@@ -215,7 +215,10 @@ impl IntoFuture for LoadOutOfProcess {
 /// module's [`Identity`](tutti_platform::Identity), opens the plugin, and sends
 /// the node or the error when the open ends, which wakes the future. Nothing
 /// else drives it and no caller waits on code the app does not run: a poll
-/// never blocks, and `Session::update` is not needed.
+/// never blocks, and `Session::update` is not needed. Once the plugin is open the
+/// future awaits the read of its parameters, which the server's replies feed, so the
+/// node arrives with its parameters read; a plugin that cannot list them in time
+/// arrives with the read left to the session, which starts it again.
 ///
 /// Dropped before it resolves, the future drops the receiver. A launch that has
 /// not begun then sees the receiver gone and opens nothing; one in flight
@@ -250,6 +253,9 @@ type Reply = oneshot::Receiver<Result<PluginNode, LoadError>>;
 enum Stage {
     Unstarted(Request),
     Running(Reply),
+    /// The plugin is open and its node made; its parameters are being read, which the
+    /// plugin's replies fill.
+    Reading(Option<PluginNode>, Box<tutti_plugin_host::ReadingParams>),
     Finished,
 }
 
@@ -309,14 +315,36 @@ impl Future for LoadingOutOfProcess {
                 Err(refused) => return Poll::Ready(Err(refused)),
             }
         }
-        let Stage::Running(receiver) = &mut this.stage else {
+        if let Stage::Running(receiver) = &mut this.stage {
+            let answered = std::task::ready!(Pin::new(receiver).poll(cx));
+            // A sender dropped unanswered: the executor dropped the launch task
+            // before it ran (the open is `caught`, so a panic answers).
+            let mut node = match answered.unwrap_or_else(|_| Err(plugin_failed(IpcError::ShutDown)))
+            {
+                Ok(node) => node,
+                Err(error) => {
+                    this.stage = Stage::Finished;
+                    return Poll::Ready(Err(error));
+                }
+            };
+            // The plugin arrives with its parameters read, as an app's first look finds
+            // them: the read is awaited here, not left for the session's updates.
+            let Some(read) = node.take_param_read() else {
+                this.stage = Stage::Finished;
+                return Poll::Ready(Ok(node));
+            };
+            this.stage = Stage::Reading(Some(node), Box::new(read.into_future()));
+        }
+        let Stage::Reading(node, reading) = &mut this.stage else {
             panic!("a load future is polled after it resolved");
         };
-        let answered = std::task::ready!(Pin::new(receiver).poll(cx));
+        let values = std::task::ready!(Pin::new(reading).poll(cx));
+        let mut node = node.take().expect("the node waits for its read");
+        // A list the plugin did not give leaves the read with the node, for the session's
+        // next update to start again.
+        node.land_params(values);
         this.stage = Stage::Finished;
-        // A sender dropped unanswered: the executor dropped the launch task
-        // before it ran (the open is `caught`, so a panic answers).
-        Poll::Ready(answered.unwrap_or_else(|_| Err(plugin_failed(IpcError::ShutDown))))
+        Poll::Ready(Ok(node))
     }
 }
 
@@ -441,6 +469,23 @@ impl fmt::Debug for PluginNode {
 }
 
 impl PluginNode {
+    /// The parameter read the open left for its caller to await, when it has one.
+    fn take_param_read(&mut self) -> Option<tutti_plugin_host::ParamRead> {
+        self.install.as_mut()?.mirror.as_mut()?.unread.take()
+    }
+
+    /// Lands what that read gave, or keeps the read when the plugin's list was
+    /// unavailable.
+    fn land_params(&mut self, values: super::ParamValues) {
+        let Some(mirror) = self.install.as_mut().and_then(|i| i.mirror.as_mut()) else {
+            return;
+        };
+        match values {
+            Ok(snapshot) => mirror.values.land(snapshot),
+            Err(read) => mirror.unread = Some(*read),
+        }
+    }
+
     /// The observer of this plugin: a clone of it outlives the node.
     pub fn handle(&self) -> LoadedPlugin {
         self.handle.clone()

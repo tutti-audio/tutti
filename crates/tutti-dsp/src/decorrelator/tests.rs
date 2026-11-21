@@ -18,6 +18,7 @@ fn bank(width: u16, seed: u64) -> Decorrelator<f64> {
         RATE,
         seed,
     )
+    .unwrap()
 }
 
 /// Channel `c`'s dense impulse response from the closed form: tap `k` is `s_k e(m_k) / sqrt(sum
@@ -186,7 +187,7 @@ fn the_energy_gain_is_the_sum_of_the_squared_taps() {
     );
 }
 
-/// The tail is the latest impulse of any channel, and a density past the rate is one impulse
+/// The tail is the latest impulse of any channel, and a density equal to the rate is one impulse
 /// a frame: the positions are then the frames themselves.
 #[test]
 fn the_tail_is_the_latest_impulse_and_a_dense_sequence_fills_every_frame() {
@@ -199,9 +200,31 @@ fn the_tail_is_the_latest_impulse_and_a_dense_sequence_fills_every_frame() {
     let dense = VelvetNoise::new(
         VelvetDensity::new(Hz::new(20_000.0)).unwrap(),
         VelvetLength::new(Seconds::new(0.01)).unwrap(),
-        SampleRate::of(8_000.0),
+        SampleRate::of(20_000.0),
         1,
-    );
+    )
+    .unwrap();
     let positions: Vec<usize> = dense.pulses().iter().map(|p| p.position.get()).collect();
-    assert_eq!(positions, (0..80).collect::<Vec<_>>());
+    assert_eq!(positions, (0..200).collect::<Vec<_>>());
+}
+
+/// A density above the rate is refused, whole, by the sequence and the decorrelator; one at the
+/// rate is taken; and `clamped_to_rate` lowers a density to the rate and leaves a lower one.
+#[test]
+fn a_density_past_the_rate_is_refused_and_one_at_the_rate_is_not() {
+    let density = VelvetDensity::new(Hz::new(20_000.0)).unwrap();
+    let length = VelvetLength::new(Seconds::new(0.01)).unwrap();
+    let under = SampleRate::of(19_999.0);
+    let refused = VelvetNoiseError::DensityPastRate {
+        density,
+        rate: under,
+    };
+    assert_eq!(VelvetNoise::new(density, length, under, 1), Err(refused));
+    assert_eq!(
+        Decorrelator::<f64>::new(ChannelLayout::STEREO, density, length, under, 1).err(),
+        Some(refused)
+    );
+    assert!(VelvetNoise::new(density, length, SampleRate::of(20_000.0), 1).is_ok());
+    assert_eq!(density.clamped_to_rate(under).get(), Hz::new(19_999.0));
+    assert_eq!(density.clamped_to_rate(RATE), density);
 }

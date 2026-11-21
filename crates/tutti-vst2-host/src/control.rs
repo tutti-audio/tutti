@@ -151,7 +151,8 @@ impl Control for Vst2Loaded {
     }
 
     /// Applied now, with `setParameter`, which the SDK allows from either thread.
-    /// A write to a plugin that exposes no `setParameter` is discarded.
+    /// A plugin that exposes no `setParameter` takes no write:
+    /// [`ParamWriteError::ReadOnly`], as [`parameter_writable`](Self::parameter_writable).
     fn set_parameter(
         &mut self,
         main: MainThreadMarker,
@@ -159,18 +160,27 @@ impl Control for Vst2Loaded {
         value: Normalized,
     ) -> Result<(), ParamWriteError> {
         self.parameter_writable(main, id)?;
-        let _ = self.write_parameter(id, value);
-        Ok(())
+        self.write_parameter(id, value)
+            .then_some(())
+            .ok_or(ParamWriteError::ReadOnly(id))
     }
 
-    /// Declared when `id` addresses a parameter. VST2 has no opcode for a
-    /// read-only one, so a declared parameter is writable.
+    /// Declared when `id` addresses a parameter, and the plugin exposes a
+    /// `setParameter`: a plugin that does not takes no host write, so each of
+    /// its parameters is read-only to the host. VST2 has no opcode for a
+    /// parameter the plugin alone writes, so with a setter a declared
+    /// parameter is writable.
     fn parameter_writable(
         &self,
         _main: MainThreadMarker,
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
-        ParamWriteError::check(id, self.param_index(id).map(|_| ParamAccess::Unreported))
+        let access = if self.instance.exposes_set_parameter() {
+            ParamAccess::Unreported
+        } else {
+            ParamAccess::ReadOnly
+        };
+        ParamWriteError::check(id, self.param_index(id).map(|_| access))
     }
 
     fn parameter_plain(

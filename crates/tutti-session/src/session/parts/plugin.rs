@@ -2,6 +2,7 @@
 //! clock its phase was last run at, and the collector of the work other threads hand to the
 //! main thread.
 
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -309,6 +310,37 @@ impl PluginPart {
                 false
             }
         }
+    }
+
+    /// Starts `task`, a future an answer wakes (it never blocks a thread), of `kind` on the
+    /// session's executor, and says whether it started. It counts in [`Tasks::in_flight`]
+    /// from here to its end, and a close waits for it up to `kind`'s deadline, as for
+    /// [`spawn`](Self::spawn); a close that began before its first poll ends it unrun.
+    ///
+    /// The executor is upgraded for this call only. A refused task is dropped unrun, and the
+    /// refusal is counted in [`Tasks::refused`].
+    #[must_use = "a refused task is the loop's to ask again"]
+    pub(crate) fn spawn_future(
+        &self,
+        kind: Loop,
+        timeouts: &Timeouts,
+        task: impl Future<Output = ()> + Send + 'static,
+    ) -> bool {
+        let guard = self.tasks.enter(kind.deadline(timeouts));
+        let Some(executor) = self.executor.upgrade() else {
+            self.tasks.0.refused.fetch_add(1, Ordering::Relaxed);
+            return false;
+        };
+        executor
+            .spawn(async move {
+                let mut guard = guard;
+                if guard.begin() {
+                    task.await;
+                }
+                drop(guard);
+            })
+            .detach();
+        true
     }
 
     /// Waits for the plugin tasks in flight to end, each bounded by its round trip's

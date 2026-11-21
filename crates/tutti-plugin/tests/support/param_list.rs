@@ -13,7 +13,8 @@ pub(crate) trait ParamList {
 impl ParamList for PluginHandle {
     fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
         let (mut values, read) = PluginParamValues::start(self);
-        values.land(read.run().ok()?);
+        values
+            .land(futures_lite::future::block_on(std::future::IntoFuture::into_future(read)).ok()?);
         Some(values.descriptors().to_vec())
     }
 }

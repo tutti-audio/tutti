@@ -147,7 +147,8 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // The hardware input, routed by Group: Group 2's channel 3 to the synth. A
     // rule is an id for `unroute`; nothing arrives with no device, and the
     // call refuses only on a session built with no input node.
-    let rule = MidiRouteRule::for_channel(MidiChannel::of(3))
+    let rule = MidiRouteRule::new()
+        .channel(MidiChannel::of(3))
         .in_group(MidiGroup::of(1))
         .to(synth.node());
     let route = s.midi().route(rule)?;
