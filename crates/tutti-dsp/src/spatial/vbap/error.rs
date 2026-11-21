@@ -35,3 +35,13 @@ pub enum SpeakerGeometryError {
     #[error("no valid speaker pair or triplet can be formed from these positions")]
     NoValidTuples,
 }
+
+/// An output of the wrong length for [`SpeakerLayout::gains_into`](super::SpeakerLayout::gains_into).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("{len} output gains for a layout of {speakers} speakers")]
+pub struct GainsLengthMismatch {
+    /// The length of the output given.
+    pub len: usize,
+    /// The speakers of the layout, the length the output must have.
+    pub speakers: usize,
+}

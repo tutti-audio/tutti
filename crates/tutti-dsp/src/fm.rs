@@ -27,7 +27,7 @@ use tutti_units::{
     SampleRate, SampleSpan,
 };
 
-use crate::{FirError, Oversampler, Oversampling, OversamplingPlan};
+use crate::{BlockTooLong, FirError, Oversampler, Oversampling, OversamplingPlan};
 
 /// The most operators an algorithm has.
 pub const MAX_OPERATORS: usize = 6;
@@ -430,13 +430,17 @@ impl<F: Float> FmVoice<F> {
         self.oversampler.reset();
     }
 
-    /// Renders `output.frames()` frames (at most the prepared block). No allocation.
-    pub fn process(&mut self, mut output: MonoMut<'_, F>) {
-        let mut high = self.oversampler.source(output.frames());
+    /// Renders `output.frames()` frames. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockTooLong`] when `output` is longer than the prepared block; nothing is rendered.
+    pub fn process(&mut self, mut output: MonoMut<'_, F>) -> Result<(), BlockTooLong> {
+        let mut high = self.oversampler.source(output.frames())?;
         for y in high.samples_mut() {
             *y = self.stack.step();
         }
-        self.oversampler.downsample(output.reborrow());
+        self.oversampler.downsample(output.reborrow())
     }
 }
 
