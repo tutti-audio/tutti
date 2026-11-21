@@ -342,3 +342,29 @@ impl Perform for tutti_session::LoadPreset {
         }
     }
 }
+
+/// A node's parameters, read by the task the session's updates start and land.
+pub trait AwaitParams {
+    /// Updates until `node`'s parameters are read. The guard only bounds a hang.
+    fn await_params(&mut self, node: impl Into<tutti_graph::NodeKey>);
+}
+
+impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> AwaitParams for Session<K, C> {
+    fn await_params(&mut self, node: impl Into<tutti_graph::NodeKey>) {
+        let node = node.into();
+        let guard = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
+        while !self
+            .plugin_view(node)
+            .expect("the node is a plugin")
+            .params()
+            .is_ready()
+        {
+            assert!(
+                tutti_platform::Instant::now() < guard,
+                "the plugin's parameters were never read"
+            );
+            let _ = self.update();
+            std::thread::yield_now();
+        }
+    }
+}

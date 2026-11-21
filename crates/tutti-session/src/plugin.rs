@@ -40,9 +40,11 @@
 //!
 //! # Plugin tasks
 //!
-//! The loops below (a reload, a parameter read, a snapshot) each run a blocking round trip
-//! as a task on the session's executor, on its blocking pool (32 threads, shared with other
-//! blocking work: a task may wait in the pool's queue). [`Session::plugin_tasks`] counts the
+//! The loops below (a reload, a parameter read, a snapshot) each run as a task on the
+//! session's executor. A reload and a snapshot run a blocking round trip on its blocking pool
+//! (32 threads, shared with other blocking work: a task may wait in the pool's queue); a
+//! parameter read is a future the plugin's replies wake, and holds no thread while it
+//! waits. [`Session::plugin_tasks`] counts the
 //! ones queued or running. A task holds clones of its plugin's handle, so
 //! dropping or [closing](Session::close) a session waits for them first: each is bounded by
 //! its round trip's IPC deadline (the `Timeouts` load for a reload, param for a read, state
@@ -134,7 +136,9 @@
 //! plugin is told per `tutti_plugin_host::needs_notify`: on a change of
 //! mode, or if it was never told.
 
+use std::future::{Future as _, IntoFuture as _};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 
 use std::time::Duration;
 
@@ -358,15 +362,25 @@ impl PluginLoad {
         }
         let mirror = plugin.as_ref().ok().map(|plugin| {
             let (mut values, read) = tutti_plugin_host::PluginParamValues::start(plugin.handle());
-            // A read the plugin did not answer (its list unavailable) leaves
-            // the mirror not ready and goes to the hosted record, to be handed
-            // out as a task.
-            let unread = match read.run() {
-                Ok(read) => {
-                    values.land(read);
-                    None
+            // An in-process plugin on its main thread answers at once, so its read lands
+            // here, after the state. An out-of-process plugin's answers come from its
+            // bridge's threads: its read goes to the hosted record, to be handed out as
+            // a task. So does a read the plugin did not answer (its list unavailable),
+            // which leaves the mirror not ready.
+            let unread = match at {
+                Opening::OnMain(_) => {
+                    let mut reading = std::pin::pin!(read.into_future());
+                    let cx = &mut Context::from_waker(Waker::noop());
+                    match reading.as_mut().poll(cx) {
+                        Poll::Ready(Ok(snapshot)) => {
+                            values.land(snapshot);
+                            None
+                        }
+                        Poll::Ready(Err(read)) => Some(*read),
+                        Poll::Pending => Some(tutti_plugin_host::ParamRead::of(plugin.handle())),
+                    }
                 }
-                Err(read) => Some(*read),
+                Opening::OutOfProcess => Some(read),
             };
             Mirror { values, unread }
         });
@@ -416,7 +430,7 @@ impl Open {
     }
 }
 
-/// What a parameter read gave: the values, or the read itself back to be run
+/// What a parameter read gave: the values, or the read itself back to be awaited
 /// again (the plugin's list was unavailable).
 pub(crate) type ParamValues =
     Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
@@ -2574,11 +2588,21 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if let Some(read) = hosted.param_read.take() {
                 let token = Arc::clone(&hosted.mirror_token);
                 let post = self.plugins.inbox.post();
-                // blocks: the parameter read is an IPC round trip, bounded by `param_wait`.
                 let timeouts = hosted.timeouts();
-                let started =
-                    self.plugins.spawn(Loop::ParamRead, &timeouts, move || {
-                        match contained("parameter read", node, move || read.run()) {
+                // The read is awaited on the executor: the plugin's replies wake it, and
+                // no thread waits for them (each query is bounded by its own deadline).
+                let started = self
+                    .plugins
+                    .spawn_future(Loop::ParamRead, &timeouts, async move {
+                        let mut reading = Box::pin(read.into_future());
+                        let values = std::future::poll_fn(|cx| {
+                            match contained("parameter read", node, || reading.as_mut().poll(cx)) {
+                                Some(polled) => polled.map(Some),
+                                None => Poll::Ready(None),
+                            }
+                        })
+                        .await;
+                        match values {
                             Some(values) => post.params(node, token, values),
                             None => post.params_lost(node, token),
                         }
@@ -2951,11 +2975,13 @@ mod tests {
         );
     }
 
-    /// **A parameter read whose task panicked is asked for again.** The panic is contained,
-    /// the task sends that the read was lost, and the landing makes the record read afresh
-    /// (a new token), where the read would otherwise be lost for good.
+    /// **A parameter read whose plugin dropped its answer is asked for again.** The
+    /// plugin's round trip panics when the test's end of its hold goes, which drops the
+    /// answer's sender: the read resolves, as an unavailable list, to the read itself, and
+    /// the landing makes the record read afresh (a new token), where the read would
+    /// otherwise be lost for good.
     #[test]
-    fn a_parameter_read_that_panicked_is_asked_again() {
+    fn a_parameter_read_whose_answer_was_dropped_is_asked_again() {
         let mut rig = rig(None);
         let (incoming, release) = held_handle(vec![(ParamId::new(3), 0.5)]);
         rig.session
@@ -2965,8 +2991,49 @@ mod tests {
             .unwrap()
             .adopt(incoming, Placement::InProcess);
         let _ = rig.events_at(0);
-        // The plugin's round trip panics when the test's end of its hold goes.
         drop(release);
+        rig.settle();
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_none(),
+            "the read was consumed by the task"
+        );
+        let _ = rig.land();
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_some(),
+            "the lost read is made again"
+        );
+    }
+
+    /// **A parameter read whose poll panicked is asked for again.** The backend fails inside
+    /// the call that queues its question, which runs in the read's poll on the executor:
+    /// the panic is contained, the task sends that the read was lost, and the landing makes
+    /// the record read afresh.
+    #[test]
+    fn a_parameter_read_whose_poll_panicked_is_asked_again() {
+        let mut rig = rig(None);
+        let incoming = PluginHandle::from_backend(
+            Arc::new(Fake {
+                state: None,
+                saves: Arc::default(),
+                dead: Arc::default(),
+                params: vec![(ParamId::new(3), 0.5)],
+                unlisted: Arc::default(),
+                hold: None,
+                panics: true,
+                main: None,
+            }),
+            None,
+            tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
+            Default::default(),
+            Default::default(),
+        );
+        rig.session
+            .graph
+            .plugins
+            .get_mut(&rig.node)
+            .unwrap()
+            .adopt(incoming, Placement::InProcess);
+        let _ = rig.events_at(0);
         rig.settle();
         assert!(
             rig.session.graph.plugins[&rig.node].param_read.is_none(),
@@ -3049,7 +3116,10 @@ mod tests {
         unlisted: Arc<AtomicBool>,
         /// While it holds one, a state save or a parameter list waits for a token on it:
         /// the round trip stays in flight until the test sends one.
-        hold: Option<Mutex<std::sync::mpsc::Receiver<()>>>,
+        hold: Option<Arc<Mutex<std::sync::mpsc::Receiver<()>>>>,
+        /// While set, asking for the parameter list panics (a backend that fails inside
+        /// the call that queues the question).
+        panics: bool,
         /// Models an in-process plugin: a state save waits for the main thread to run two
         /// pieces of its work, the second handed over by the first, and the plugin's close
         /// is handed to the collector, setting the flag when the main thread runs it.
@@ -3069,6 +3139,19 @@ mod tests {
     const HANG_GUARD: Duration = Duration::from_secs(60);
 
     impl Fake {
+        /// What the plugin lists, with no round trip to wait for.
+        fn listing(&self) -> Option<Vec<ParameterInfo>> {
+            if self.unlisted.load(Ordering::SeqCst) {
+                return None;
+            }
+            Some(
+                self.params
+                    .iter()
+                    .map(|&(id, _)| ParameterInfo::new(id, "p"))
+                    .collect(),
+            )
+        }
+
         /// Waits for the test to release the round trip, when it holds them.
         fn held(&self) {
             if let Some((work, _)) = &self.main {
@@ -3094,21 +3177,47 @@ mod tests {
     impl tutti_plugin_types::AnyThread for Fake {
         fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
             self.held();
-            if self.unlisted.load(Ordering::SeqCst) {
-                return None;
-            }
-            Some(
-                self.params
-                    .iter()
-                    .map(|&(id, _)| ParameterInfo::new(id, "p"))
-                    .collect(),
-            )
+            self.listing()
         }
         fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
             self.params
                 .iter()
                 .find(|(a, _)| *a == id)
                 .map(|&(_, v)| Normalized::clamped(f64::from(v)))
+        }
+        /// A held list is a round trip in flight: a thread of its own waits for the test's
+        /// token and then answers, so no executor thread waits on it. A dropped sender
+        /// (the thread panicked when the test's end of the hold went) cancels the answer.
+        fn parameter_descriptors_answer(
+            &self,
+        ) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+            assert!(!self.panics, "the backend failed while asked for its list");
+            let Some(hold) = self.hold.clone() else {
+                return tutti_plugin_types::answered(self.parameter_descriptors());
+            };
+            let listed = self.listing();
+            let (tx, answer) = futures_channel::oneshot::channel();
+            std::thread::spawn(move || {
+                hold.lock()
+                    .unwrap()
+                    .recv_timeout(HANG_GUARD)
+                    .expect("the test released the round trip");
+                drop(tx.send(listed));
+            });
+            answer
+        }
+        fn parameter_value_answer(
+            &self,
+            id: ParamId,
+        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::answered(self.parameter_value(id))
+        }
+        fn parameter_normalized_answer(
+            &self,
+            id: ParamId,
+            plain: f64,
+        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::answered(self.parameter_normalized(id, plain))
         }
         fn set_parameter_value(
             &self,
@@ -3213,7 +3322,7 @@ mod tests {
         let dead = Arc::new(AtomicBool::new(false));
         let (release, hold) = if mode == Mode::Held {
             let (tx, rx) = std::sync::mpsc::channel();
-            (Some(tx), Some(Mutex::new(rx)))
+            (Some(tx), Some(Arc::new(Mutex::new(rx))))
         } else {
             (None, None)
         };
@@ -3222,6 +3331,7 @@ mod tests {
             (mode == Mode::InProcess).then(|| (session.plugins.work.clone(), Arc::clone(&closed)));
         let handle = PluginHandle::from_backend(
             Arc::new(Fake {
+                panics: false,
                 state,
                 saves: Arc::clone(&saves),
                 dead: Arc::clone(&dead),
@@ -3271,6 +3381,7 @@ mod tests {
         let sink = tutti_plugin_host::ParameterChangeSink::default();
         let handle = PluginHandle::from_backend(
             Arc::new(Fake {
+                panics: false,
                 state,
                 saves: Arc::default(),
                 dead: Arc::default(),
@@ -3293,12 +3404,13 @@ mod tests {
         let (release, hold) = std::sync::mpsc::channel();
         let handle = PluginHandle::from_backend(
             Arc::new(Fake {
+                panics: false,
                 state: None,
                 saves: Arc::default(),
                 dead: Arc::default(),
                 params,
                 unlisted: Arc::default(),
-                hold: Some(Mutex::new(hold)),
+                hold: Some(Arc::new(Mutex::new(hold))),
                 main: None,
             }),
             None,
@@ -3612,6 +3724,7 @@ mod tests {
             let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(control);
             let outgoing = PluginHandle::from_backend(
                 Arc::new(Fake {
+                    panics: false,
                     state: None,
                     saves: Arc::default(),
                     dead: Arc::default(),
@@ -3781,7 +3894,10 @@ mod tests {
         let mut rig = rig(None);
         let (outgoing, _) = fake_handle(None, vec![(param, 0.25)]);
         let (mut mirror, read) = tutti_plugin_host::PluginParamValues::start(&outgoing);
-        mirror.land(read.run().expect("the read lands"));
+        mirror.land(
+            futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+                .expect("the read lands"),
+        );
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.mirror = mirror;
         assert_eq!(
@@ -3854,13 +3970,17 @@ mod tests {
         let mut rig = rig(None);
         let (outgoing, _) = fake_handle(None, vec![(param, 0.25)]);
         let (mut mirror, read) = tutti_plugin_host::PluginParamValues::start(&outgoing);
-        mirror.land(read.run().expect("the read lands"));
+        mirror.land(
+            futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+                .expect("the read lands"),
+        );
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.mirror = mirror;
 
         let unlisted = Arc::new(AtomicBool::new(true));
         let incoming = PluginHandle::from_backend(
             Arc::new(Fake {
+                panics: false,
                 state: None,
                 saves: Arc::default(),
                 dead: Arc::default(),

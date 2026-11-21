@@ -701,8 +701,7 @@ impl std::fmt::Debug for PluginAnswers {
     }
 }
 
-/// An answer a bridge thread fills.
-pub type Answer<T> = futures_channel::oneshot::Receiver<T>;
+pub use tutti_plugin_types::Answer;
 
 impl PluginAnswers {
     /// Queues the save of the plugin's state for `state_use`.

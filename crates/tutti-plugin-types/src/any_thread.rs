@@ -11,8 +11,22 @@ use crate::{
     PluginFailure, RenderMode, StateError, StateUse, TerminationReason, UnknownParam, bypass_value,
     is_bypassed,
 };
+use futures_channel::oneshot;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
+
+/// An answer a plugin's hosting fills: the receiver of a oneshot whose sender
+/// the thread that learns the answer holds. A sender dropped unanswered (the
+/// hosting ended) cancels it.
+pub type Answer<T> = oneshot::Receiver<T>;
+
+/// An [`Answer`] that is already filled with `value`.
+pub fn answered<T>(value: T) -> Answer<T> {
+    let (tx, rx) = oneshot::channel();
+    // The receiver is alive: the send cannot fail.
+    drop(tx.send(value));
+    rx
+}
 
 /// What a loaded plugin answers from any thread, without a main-thread token.
 ///
@@ -51,6 +65,24 @@ pub trait AnyThread: Send + Sync {
     /// `None` if unavailable, including when `id` uses the other addressing
     /// model, which addresses no parameter of this plugin. See [`ParamId`].
     fn parameter_value(&self, id: ParamId) -> Option<Normalized>;
+
+    /// [`parameter_descriptors`](Self::parameter_descriptors) as an [`Answer`]:
+    /// queued, and the call returns without waiting. **In-process** the main
+    /// thread fills it when it runs the queued work (at once when this is the
+    /// main thread); **served** the bridge's control lane fills it with the
+    /// server's reply, or with `None` at its query deadline. `None` is
+    /// unavailable, as for the blocking call; a dropped sender cancels the
+    /// answer, which the caller reads as unavailable too.
+    fn parameter_descriptors_answer(&self) -> Answer<Option<Vec<ParameterInfo>>>;
+
+    /// [`parameter_value`](Self::parameter_value) as an [`Answer`], filled as
+    /// [`parameter_descriptors_answer`](Self::parameter_descriptors_answer) is.
+    fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>>;
+
+    /// [`parameter_normalized`](Self::parameter_normalized) as an [`Answer`],
+    /// filled as [`parameter_descriptors_answer`](Self::parameter_descriptors_answer)
+    /// is.
+    fn parameter_normalized_answer(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>>;
 
     /// Writes one parameter value, for a UI knob or an initial value.
     ///
@@ -219,6 +251,15 @@ mod tests {
         }
         fn parameter_value(&self, _: ParamId) -> Option<Normalized> {
             None
+        }
+        fn parameter_descriptors_answer(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+            answered(self.parameter_descriptors())
+        }
+        fn parameter_value_answer(&self, _: ParamId) -> Answer<Option<Normalized>> {
+            answered(None)
+        }
+        fn parameter_normalized_answer(&self, _: ParamId, _: f64) -> Answer<Option<Normalized>> {
+            answered(None)
         }
         fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
             self.written.lock().unwrap().push((id, value.get()));

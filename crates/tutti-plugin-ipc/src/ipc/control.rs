@@ -8,7 +8,7 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
+    Answer, AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
     Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
     LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor, PluginError,
     PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RateRefusal, RenderMode,
@@ -37,6 +37,25 @@ macro_rules! served_control {
 
             fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
                 self.link.bridge.audio().parameter(id)
+            }
+
+            fn parameter_descriptors_answer(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+                self.link.bridge.audio().parameters_answer()
+            }
+
+            fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
+                self.link.bridge.audio().parameter_answer(id)
+            }
+
+            fn parameter_normalized_answer(
+                &self,
+                id: ParamId,
+                plain: f64,
+            ) -> Answer<Option<Normalized>> {
+                self.link
+                    .bridge
+                    .audio()
+                    .parameter_normalized_answer(id, plain)
             }
 
             /// Stored in the parameter's slot and sent with the next block as a

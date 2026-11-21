@@ -55,7 +55,10 @@ fn through_server<F: Format>(path: PathBuf) {
     assert_eq!(after.mode, Mode::Level.index(), "the mode crossed");
     // The mirror a session reads: its load-time read of the served plugin's values.
     let (mut mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
-    mirror.land(read.run().expect("the served plugin lists its parameters"));
+    mirror.land(
+        futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+            .expect("the served plugin lists its parameters"),
+    );
     let level = mirror
         .get(ParamId::new(Param::Level.id().get()))
         .flatten()

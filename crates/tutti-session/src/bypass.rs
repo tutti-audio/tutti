@@ -265,6 +265,24 @@ pub(crate) mod tests {
                 .load(SeqCst)
                 .then(|| bypass_value(self.held.load(SeqCst)))
         }
+        fn parameter_descriptors_answer(
+            &self,
+        ) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+            tutti_plugin_types::answered(self.parameter_descriptors())
+        }
+        fn parameter_value_answer(
+            &self,
+            id: ParamId,
+        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::answered(self.parameter_value(id))
+        }
+        fn parameter_normalized_answer(
+            &self,
+            id: ParamId,
+            plain: f64,
+        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::answered(self.parameter_normalized(id, plain))
+        }
         fn set_parameter_value(
             &self,
             _id: ParamId,
@@ -354,7 +372,10 @@ pub(crate) mod tests {
         )
         .with_server_pid(served.then_some(1234));
         let (mut mirror, read) = PluginParamValues::start(&handle);
-        mirror.land(read.run().expect("the fake answers"));
+        mirror.land(
+            futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+                .expect("the fake answers"),
+        );
         (handle, plugin, mirror)
     }
 

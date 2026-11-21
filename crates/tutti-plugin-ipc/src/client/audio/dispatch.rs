@@ -1051,7 +1051,14 @@ pub(super) fn handle_control(
             };
             reply.send(value);
         }
-        ControlCommand::GetParameter { param_id, reply } => {
+        ControlCommand::GetParameter {
+            param_id,
+            flush,
+            reply,
+        } => {
+            if let Some(applied) = flush {
+                let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
+            }
             let value = match query(
                 lane,
                 inbox,

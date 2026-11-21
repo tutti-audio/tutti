@@ -40,6 +40,24 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
     fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
         None
     }
+    fn parameter_descriptors_answer(
+        &self,
+    ) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+        tutti_plugin_types::answered(self.parameter_descriptors())
+    }
+    fn parameter_value_answer(
+        &self,
+        id: ParamId,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        tutti_plugin_types::answered(self.parameter_value(id))
+    }
+    fn parameter_normalized_answer(
+        &self,
+        id: ParamId,
+        plain: f64,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        tutti_plugin_types::answered(self.parameter_normalized(id, plain))
+    }
     fn set_parameter_value(
         &self,
         _id: ParamId,

@@ -12,7 +12,7 @@ use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 
-use crate::loading::Perform as _;
+use crate::loading::{AwaitParams as _, Perform as _};
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -317,6 +317,7 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     let second = load.block().expect("the plugin loads");
     let second_handle = second.handle();
     let b = s.add_plugin(second).unwrap();
+    s.await_params(b);
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -472,6 +473,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     load.initial_state(state).expect("its own plugin's state");
     let b = load.block().expect("the plugin loads");
     let b = s.add_plugin(b).unwrap();
+    s.await_params(b);
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -686,6 +688,7 @@ fn in_a_node<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     let opened = load(s, catalog, id);
     let plugin = opened.handle();
     let node = s.add_plugin(opened).expect("the plugin enters");
+    s.await_params(node);
     (plugin, node)
 }
 
@@ -1059,6 +1062,7 @@ fn a_save_awaited_on_a_spawned_thread_returns_the_plugins_state() {
     let b = s
         .add_plugin(load.block().expect("the plugin loads"))
         .unwrap();
+    s.await_params(b);
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -1143,6 +1147,7 @@ fn a_restore_dropped_before_it_is_awaited_sends_nothing() {
     let mut loaded = s.load_out_of_process(&first_id(), &catalog);
     loaded.initial_state(after).unwrap();
     let c = s.add_plugin(loaded.block().unwrap()).unwrap();
+    s.await_params(c);
     let held = s
         .plugin_view(c)
         .unwrap()

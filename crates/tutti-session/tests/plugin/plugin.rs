@@ -13,7 +13,7 @@
 //! it every test here fails, naming that command. They must fail rather than
 //! skip.
 
-use crate::loading::{Block as _, LoadFrom as _, LoadPlugin, Spec};
+use crate::loading::{AwaitParams as _, Block as _, LoadFrom as _, LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
 use crate::support;
 use tutti_plugin_db::Hosting;
@@ -174,6 +174,7 @@ fn wired_probe(s: &mut Session) -> (NodeKey, Samples) {
     let node = add_probe(s);
     s.graph().connect(node, Root).unwrap();
     let _ = s.update();
+    s.await_params(node);
     // Told Realtime by that update (it was never told): the latency it
     // reports realtime.
     let base = latency(s, node);
@@ -825,6 +826,7 @@ fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
         .expect("the reference plugin loads");
     s.graph().connect(node, Root).unwrap();
     let _ = s.update();
+    s.await_params(node);
     let gain = gain_param(&s, node.erase());
     let target = s
         .plugin_view(node)

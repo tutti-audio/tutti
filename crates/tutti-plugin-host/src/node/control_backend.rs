@@ -42,8 +42,8 @@ use super::off_main_wait::{OffMainWait, await_answer};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
-    OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
+    Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health,
+    InProcess, OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
 use tutti_units::Normalized;
@@ -157,6 +157,32 @@ where
         )
     }
 
+    /// `work` on the plugin on the main thread, answered into an [`Answer`]
+    /// and never waited for: at once when this is the main thread, else by the
+    /// main-thread job queued here, which the main thread's next tick runs. `None`
+    /// when `work` has no answer, and when the collector has never run (no main
+    /// thread to hop to); a job dropped unrun cancels the answer.
+    fn on_main_answer<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> Option<R> + Send + 'static,
+    ) -> Answer<Option<R>> {
+        let (tx, answer) = futures_channel::oneshot::channel();
+        if let Some(main) = MainThreadMarker::new() {
+            // The receiver is held here: the send cannot fail.
+            drop(tx.send(self.flushed(main, work)));
+        } else if self.work.is_pumped() {
+            let inner = Arc::clone(&self.inner);
+            let post = self.edits.clone();
+            self.work.defer(move |main| {
+                // A dropped receiver has no one to tell.
+                drop(tx.send(flushed(&post, main, &mut inner.lock(), work)));
+            });
+        } else {
+            drop(tx.send(None));
+        }
+        answer
+    }
+
     /// Queues the main-thread job that tells the plugin's edit controller of
     /// the host's writes, unless one is queued: the controller hears each
     /// parameter's newest value when the main thread runs, the way the
@@ -262,6 +288,20 @@ where
     /// for an id it does not have, and when the main thread does not answer.
     fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
         self.on_main(move |main, instance| instance.control()?.parameter(main, id))?
+    }
+
+    fn parameter_descriptors_answer(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+        self.on_main_answer(|main, instance| Some(instance.control()?.parameters(main)))
+    }
+
+    fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
+        self.on_main_answer(move |main, instance| instance.control()?.parameter(main, id))
+    }
+
+    fn parameter_normalized_answer(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
+        self.on_main_answer(move |main, instance| {
+            instance.control()?.parameter_normalized(main, id, plain)
+        })
     }
 
     /// Stored in the parameter's slot, from any thread, with no instance lock
