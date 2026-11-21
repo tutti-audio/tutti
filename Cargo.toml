@@ -116,7 +116,6 @@ futures-channel = { version = "0.3.34", default-features = false, features = ["a
 async-executor = "1.14.1"
 async-task = "4.7.1"
 # `yield_now` between slices of a task's work, and `tutti-platform`'s `join`'s `block_on`.
-futures-core = { version = "0.3.34", default-features = false }
 futures-lite = "2.6.1"
 # `Stream`: the receivers of many values over time (device events, mDNS hosts).
 futures-core = { version = "0.3.34", default-features = false }

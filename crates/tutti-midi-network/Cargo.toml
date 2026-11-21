@@ -14,12 +14,11 @@ categories = ["multimedia::audio", "network-programming"]
 workspace = true
 
 [dependencies]
-futures-core = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
 mdns-sd = { workspace = true }
-# `Stream`: `Browser` is one.
+# `Stream`: `Browser` and a link's `NetworkEvents` are ones.
 futures-core = { workspace = true }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
