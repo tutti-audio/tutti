@@ -434,7 +434,8 @@ impl Landed {
     }
 }
 
-/// A state the plugin took ([`RestoreState::run`]), which [`Session::apply`]
+/// A state the plugin took ([`RestoreStateInProcess::run`] or
+/// [`RestoreStateOutOfProcess`]), which [`Session::apply`]
 /// takes back.
 ///
 /// It names the node and the plugin instance it was cut from.

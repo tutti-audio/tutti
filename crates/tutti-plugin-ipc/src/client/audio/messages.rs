@@ -547,6 +547,27 @@ impl ControlCommand {
 mod tests {
     use super::*;
 
+    /// **A request the queue refused is answered `Busy`, not left to read as a
+    /// dead plugin**: the answer is filled, where a dropped reply would cancel it.
+    #[test]
+    fn a_refused_request_answers_busy() {
+        let (mut save, reply) = super::super::ask::awaited();
+        ControlCommand::SaveState {
+            state_use: StateUse::Project,
+            flush: None,
+            reply,
+        }
+        .refuse();
+        assert_eq!(save.try_recv(), Ok(Some(Err(StateError::Busy))));
+        let (mut preset, reply) = super::super::ask::awaited();
+        ControlCommand::LoadPreset {
+            id: PresetId::Location("/x".into()),
+            reply,
+        }
+        .refuse();
+        assert_eq!(preset.try_recv(), Ok(Some(Err(PresetError::Busy))));
+    }
+
     /// Each drained event as a short label, for whole-sequence asserts.
     fn labels(inbox: &mut Unsolicited) -> Vec<String> {
         inbox
