@@ -28,10 +28,6 @@ tutti-plugin-db  spawn  crates/tutti-plugin-db/src/catalog.rs::Catalog::save_in_
 tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin
 
 # midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/alsa/input.rs::start  midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/alsa/watch.rs::start  midi
 tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/coremidi/watch.rs::start_hub  midi
-tutti-midi-hardware  spawn  crates/tutti-midi-hardware/src/backend/legacy_port/poll.rs::start  midi
 tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/winmm/output.rs::open  midi
-tutti-midi-hardware  spawn  crates/tutti-midi-hardware/src/sensing.rs::Heartbeat::start  midi
 tutti-winmm-ffi  spawn_dedicated  crates/tutti-winmm-ffi/src/os/input.rs::MidiIn::open  midi

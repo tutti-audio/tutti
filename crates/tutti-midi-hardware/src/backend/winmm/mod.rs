@@ -46,6 +46,7 @@ use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
 use tutti_midi_device::{EndpointId, OsDevice, WinMmDevice};
+use tutti_platform::Executor;
 
 use super::legacy_port::poll;
 use super::legacy_port::ports::{PortInfo, Side, endpoints, locate, slot_of};
@@ -53,13 +54,17 @@ use tutti_winmm_ffi::{Input, InputPort, Output, OutputPort, Port, PortKind, port
 
 /// The Windows [`MidiEndpoints`] implementation. Holds nothing: winmm is
 /// asked afresh at each call.
-#[derive(Debug, Default)]
-pub struct WinMmEndpoints;
+#[derive(Debug)]
+pub struct WinMmEndpoints {
+    executor: Executor,
+}
 
 impl WinMmEndpoints {
-    /// The winmm backend.
-    pub fn new() -> Self {
-        Self
+    /// The winmm backend, whose device poll is a task on `executor`.
+    pub fn new(executor: &Executor) -> Self {
+        Self {
+            executor: executor.clone(),
+        }
     }
 }
 
@@ -153,7 +158,12 @@ fn in_use_if_allocated(id: EndpointId, error: MidiHardwareError) -> MidiHardware
 
 impl MidiEndpoints for WinMmEndpoints {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        Ok(Box::new(poll::start(sink, devices, poll::INTERVAL)?))
+        Ok(Box::new(poll::start(
+            &self.executor,
+            sink,
+            devices,
+            poll::INTERVAL,
+        )?))
     }
 
     fn inputs(&self) -> Vec<OsEndpoint> {

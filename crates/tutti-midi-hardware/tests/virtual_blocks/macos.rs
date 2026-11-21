@@ -9,7 +9,7 @@ use tutti_midi_hardware::{
     MidiHardwareConfig, MidiHardwareError, MidiSession, VirtualEndpoint, VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Executor, MainThreadMarker};
 use tutti_ump::{BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port, UiHint, Ump};
 use tutti_ump::{BlockName, EndpointName};
 
@@ -79,11 +79,15 @@ fn listed(block: &str) -> tutti_coremidi_ffi::UmpEndpointInfo {
 
 /// An endpoint of `spec` whose input goes to an inlet of `session`.
 fn open(
+    executor: &Executor,
     spec: &VirtualSpec,
     session: &MidiSession,
 ) -> (Result<VirtualEndpoint, MidiHardwareError>, EventInletNode) {
     let (producer, inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
-    (VirtualEndpoint::open(spec, producer, main_thread()), inlet)
+    (
+        VirtualEndpoint::open(executor, spec, producer, main_thread()),
+        inlet,
+    )
 }
 
 /// **A spec's Function Blocks are the blocks other apps read from CoreMIDI**
@@ -94,8 +98,10 @@ fn open(
 pub fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
     let name = &unique_name("tutti-vend-blocks");
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
-    let session = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
-    let (opened, _inlet) = open(&two_blocks(name), &session);
+    let executor = Executor::new();
+    let session =
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let (opened, _inlet) = open(&executor, &two_blocks(name), &session);
     if !has_ump_endpoints() {
         assert!(matches!(
             opened,
@@ -156,10 +162,12 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     )
     .block(block);
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
-    let session = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
+    let executor = Executor::new();
+    let session =
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
     let (producer, _inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
     assert!(matches!(
-        VirtualEndpoint::open(&spec, producer, main_thread()),
+        VirtualEndpoint::open(&executor, &spec, producer, main_thread()),
         Err(MidiHardwareError::Os(Error::Block(
             BlockRefusal::MidiCiVersion { id: 0, version: 2 }
         )))
@@ -179,8 +187,10 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
     let name = &unique_name("tutti-vend-input");
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over(&inlets);
-    let session = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
-    let (opened, inlet) = open(&two_blocks(name), &session);
+    let executor = Executor::new();
+    let session =
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let (opened, inlet) = open(&executor, &two_blocks(name), &session);
     if !has_ump_endpoints() {
         assert!(matches!(
             opened,
@@ -215,8 +225,14 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
 /// lived was accepted.
 pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
-    let session = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
-    let (opened, _inlet) = open(&two_blocks(&unique_name("tutti-vend-sender")), &session);
+    let executor = Executor::new();
+    let session =
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let (opened, _inlet) = open(
+        &executor,
+        &two_blocks(&unique_name("tutti-vend-sender")),
+        &session,
+    );
     if !has_ump_endpoints() {
         assert!(matches!(
             opened,

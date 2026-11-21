@@ -42,8 +42,9 @@ fn open() -> Loopback {
     // 256 events, each placed 20 ms after it arrived.
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let mut graph = Listener::over(&inlets);
-    let mut io =
-        MidiSession::open(Arc::clone(&inlets), MidiHardwareConfig::new()).expect("open MIDI");
+    let executor = tutti_platform::Executor::new();
+    let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
+        .expect("open MIDI");
     let inputs = io.inputs();
     let outputs = io.outputs();
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
@@ -167,5 +168,49 @@ fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
         m.mine(&heard),
         burst,
         "all ten of the burst came back, in order"
+    );
+}
+
+/// An input closed and the same device reopened at once reopens, and the
+/// reopened port hears a note sent afterwards.
+#[test]
+fn an_input_reopened_at_once_hears_a_note() {
+    let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
+    let executor = tutti_platform::Executor::new();
+    let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
+        .expect("open MIDI");
+    let (inputs, outputs) = (io.inputs(), io.outputs());
+    let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
+        panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
+    };
+    let (input_id, output_id) = (inp.id.clone(), out.id.clone());
+    let mut sink = io.connect_output(&output_id).expect("connect output");
+
+    let first = io.connect_input(&input_id).expect("connect input");
+    assert!(matches!(first, tutti_midi_hardware::Connected::Opened(_)));
+    drop(first);
+    assert!(io.disconnect_input(&input_id), "the input was open");
+    let tutti_midi_hardware::Connected::Opened(inlet) =
+        io.connect_input(&input_id).expect("reconnects at once")
+    else {
+        panic!("a closed input opens anew");
+    };
+    let mut graph = Listener::over(&inlets);
+    graph.attach(inlet);
+    graph.ready(
+        || {
+            let _ = sink.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8100))]);
+        },
+        PATIENCE,
+    );
+
+    let m = Marker::of_this_process();
+    let on = note_on(m.channel, m.base, 0x8000);
+    assert_eq!(sink.queue(&[(Offset::ZERO, on)]).packets(), 1);
+    let heard = m.hear(&mut graph, &[(true, m.base)]);
+    assert_eq!(
+        m.mine(&heard),
+        [(true, m.base)],
+        "the reopened port hears it"
     );
 }

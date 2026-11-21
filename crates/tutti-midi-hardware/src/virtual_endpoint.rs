@@ -46,7 +46,7 @@ use tutti_rt::LockExt;
 
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Executor, MainThreadMarker};
 use tutti_ump::{DeviceIdentity, EndpointName, FunctionBlockId, Message, ProductInstanceId, Ump};
 
 use crate::InputProducerHandle;
@@ -276,7 +276,8 @@ impl core::fmt::Debug for VirtualEndpoint {
 
 impl VirtualEndpoint {
     /// Publishes the endpoint `spec` describes, delivering what peers write to it
-    /// into `producer`. `main` proves the caller is on the main thread, where macOS
+    /// into `producer`; a backend that reads on a thread of its own starts it on
+    /// `executor`. `main` proves the caller is on the main thread, where macOS
     /// requires an endpoint with Function Blocks to be made and dropped.
     ///
     /// # Errors
@@ -286,11 +287,12 @@ impl VirtualEndpoint {
     /// when `spec` declares Function Blocks the platform cannot publish, and the
     /// platform's own error when the OS refuses the endpoint.
     pub fn open(
+        executor: &Executor,
         spec: &VirtualSpec,
         producer: InputProducerHandle,
         main: MainThreadMarker,
     ) -> Result<Self> {
-        let (backend, protocol) = backend::open_virtual_endpoint(spec, producer, main)?;
+        let (backend, protocol) = backend::open_virtual_endpoint(executor, spec, producer, main)?;
         let conversion = match protocol {
             VirtualProtocol::Midi1 => {
                 Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new())))
