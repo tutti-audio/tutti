@@ -1346,6 +1346,72 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
     );
 }
 
+/// **Two parked replaces of one node, the first refused when it lands, leave
+/// the second's controls under the key**: while a re-prepare is between its
+/// commits a replace over another shape (refused at landing) and a replace
+/// that cuts both wait. The refusal passes the outgoing controls to the
+/// second, which lands: a write through its key reaches it, and the outgoing
+/// node's controls are held until its unit has left, then dropped.
+#[test]
+fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
+    let mut s = detached(1);
+    let mut side = s.graph().take_audio_side();
+    let (published, outgoing) = Published::new();
+    let node = s.graph().add(published);
+    s.graph()
+        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap()
+        .unfaded();
+    assert!(s.update().is_empty());
+    let mut out = [0.0f32];
+    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph()
+        .replace(node, Replacement::new(ForkByClone(Events::<0, 1>)))
+        .expect("accepted: the shape is checked when it lands");
+    let knob = s
+        .graph()
+        .replace(
+            node,
+            Replacement::new(Params(Knob::at(3.0))).fade(Fade::new(Samples::ZERO)),
+        )
+        .expect("accepted");
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 2);
+
+    let mut events = Vec::new();
+    for _ in 0..8 {
+        events.extend(s.update());
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ReplaceFailed { .. })),
+        "the first was refused: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Replaced { .. })),
+        "the second landed: {events:?}"
+    );
+
+    s.set(knob.drive().to(Drive::new(7.0)))
+        .expect("the key addresses the node that landed");
+    for _ in 0..8 {
+        let _ = s.update();
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    }
+    assert_eq!(out[0], 7.0, "the write reached the second node");
+    assert_eq!(
+        Arc::strong_count(&outgoing.token),
+        1,
+        "the outgoing controls were dropped, once its unit had left"
+    );
+}
+
 /// A pool's voice added and then removed, rendered through, so the pool's
 /// audio side parks the removed slot in its retire ring.
 #[cfg(feature = "sampler")]

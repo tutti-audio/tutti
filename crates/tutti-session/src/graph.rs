@@ -1801,8 +1801,14 @@ impl<F: Float> Graph<F> {
     /// `Busy` goes back on the queue, in order.
     pub(crate) fn retry_replacements(&mut self) -> Vec<Retried> {
         let mut out = Vec::new();
-        for parked in std::mem::take(&mut self.parked) {
+        let mut pending = std::mem::take(&mut self.parked);
+        while let Some(parked) = pending.pop_front() {
             let (node, fade) = (parked.node, parked.fade);
+            if self.parked.iter().any(|p| p.node == node) {
+                // An earlier one of the same node is still waiting.
+                self.parked.push_back(parked);
+                continue;
+            }
             let Parked { swap, stash, .. } = parked;
             match swap.swap(self, node, fade) {
                 Ok(()) => {
@@ -1820,7 +1826,7 @@ impl<F: Float> Graph<F> {
                 Err(SwapRefused::Failed(refused)) => {
                     tracing::error!("graph: replacement of {node:?} refused: {refused}");
                     if let Some(stash) = stash {
-                        self.give_back(node, stash);
+                        self.give_back(node, stash, &mut pending);
                     }
                     out.push(Retried::Failed { node, refused });
                 }
@@ -1831,11 +1837,12 @@ impl<F: Float> Graph<F> {
 
     /// A parked replacement of `node` that failed: its incoming node is
     /// dropped, and the controls it stashed go to the next waiting one of the
-    /// node or, with none, back under the key.
-    fn give_back(&mut self, node: NodeKey, stash: Stash) {
-        if let Some(next) = self
-            .parked
+    /// node (in `pending`, the ones this pass has yet to try, or parked again)
+    /// or, with none, back under the key.
+    fn give_back(&mut self, node: NodeKey, stash: Stash, pending: &mut VecDeque<Parked<F>>) {
+        if let Some(next) = pending
             .iter_mut()
+            .chain(self.parked.iter_mut())
             .filter(|p| p.node == node)
             .find_map(|p| p.stash.as_mut())
         {
