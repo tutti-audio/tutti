@@ -366,14 +366,18 @@ impl<F: Float> Commit<F> {
     /// each was leaked, not freed on the audio thread. Control side, once
     /// the box is back.
     pub(crate) fn refused(&self) -> usize {
-        self.retired.refused()
-            + self.spare_params.refused()
-            + self.spare_modes.refused()
-            + self.spare_lines.refused()
-            + self.spare_held.refused()
-            + self.parked.refused()
-            + self.gone.refused()
-            + self.staged.as_ref().map_or(0, |s| s.refused())
+        [
+            self.retired.refused(),
+            self.spare_params.refused(),
+            self.spare_modes.refused(),
+            self.spare_lines.refused(),
+            self.spare_held.refused(),
+            self.parked.refused(),
+            self.gone.refused(),
+            self.staged.as_ref().map_or(0, |s| s.refused()),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
     }
 
     /// Whether this box is a re-prepare's first half.

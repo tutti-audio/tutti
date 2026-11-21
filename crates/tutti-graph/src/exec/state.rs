@@ -95,11 +95,15 @@ pub(super) struct Gone {
 impl Gone {
     /// Items its lists refused: the ones the apply leaked.
     pub(super) fn refused(&self) -> usize {
-        self.held.refused()
-            + self.spare.refused()
-            + self.replaced.refused()
-            + self.chased.refused()
-            + self.held_refused.refused()
+        [
+            self.held.refused(),
+            self.spare.refused(),
+            self.replaced.refused(),
+            self.chased.refused(),
+            self.held_refused.refused(),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
     }
 }
 
