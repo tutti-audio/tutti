@@ -33,9 +33,7 @@ use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
 use symphonia::core::units::Timestamp;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Placement};
-use tutti_buffers::{
-    FiniteSource, Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave,
-};
+use tutti_buffers::{Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave};
 use tutti_units::{SampleRate, Samples};
 
 use super::error::convert;
@@ -547,8 +545,6 @@ impl<S: Sample> FileIn<S> {
 /// [`topology`](FileIn::topology).
 ///
 /// A file is synchronous, so it never answers [`Pull::Starved`].
-impl<S: Sample> FiniteSource for FileIn<S> {}
-
 impl<S: Sample> Source for FileIn<S> {
     type Sample = S;
 

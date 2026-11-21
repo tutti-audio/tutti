@@ -598,8 +598,8 @@ impl<F: Float> TapReader<F> {
     }
 }
 
-/// A tap's reader is a [`Source`], so a recorder (`tutti-session`'s
-/// `Recorder`) takes it as it is: record what the graph is producing.
+/// A tap's reader is a [`Source`], so a recording pump (`tutti-session`'s
+/// `PumpLoop`) takes it as it is: record what the graph is producing.
 ///
 /// Drain it from a thread of your own, never from the audio thread. It is as
 /// wide as the tap: a stereo output tap is stereo, a six-lane tap six

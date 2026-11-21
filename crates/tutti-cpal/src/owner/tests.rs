@@ -1,7 +1,9 @@
 use super::*;
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, ThreadId};
+use tutti_platform::Executor;
 
 /// A `!Send` value that records the thread it is created and dropped on.
 struct Probe {
@@ -22,10 +24,11 @@ impl Drop for Probe {
 /// drop returns.
 #[test]
 fn the_value_is_dropped_on_its_creating_thread() {
+    let executor = Executor::new();
     let created = Arc::new(Mutex::new(None));
     let dropped = Arc::new(Mutex::new(None));
     let (c, d) = (Arc::clone(&created), Arc::clone(&dropped));
-    let owned = Owned::spawn("probe", move || {
+    let owned = Owned::spawn(&executor, "probe", move || {
         *c.lock().unwrap() = Some(thread::current().id());
         Ok(Probe {
             _not_send: Rc::new(()),
@@ -50,6 +53,7 @@ fn the_value_is_dropped_on_its_creating_thread() {
 /// build closure (and what it captured) has been dropped on the owner thread.
 #[test]
 fn a_failed_build_is_reported() {
+    let executor = Executor::new();
     struct Guard(Arc<Mutex<Option<ThreadId>>>);
     impl Drop for Guard {
         fn drop(&mut self) {
@@ -59,7 +63,7 @@ fn a_failed_build_is_reported() {
     }
     let dropped = Arc::new(Mutex::new(None));
     let guard = Guard(Arc::clone(&dropped));
-    let r = Owned::spawn::<()>("probe", move || {
+    let r = Owned::spawn::<()>(&executor, "probe", move || {
         let _guard = guard;
         Err(DeviceError::InvalidConfig("no".into()))
     });
@@ -74,6 +78,32 @@ fn a_failed_build_is_reported() {
 /// A panicking build is an error, not a hang.
 #[test]
 fn a_panicking_build_is_an_error() {
-    let r = Owned::spawn::<()>("probe", || panic!("boom"));
+    let executor = Executor::new();
+    let r = Owned::spawn::<()>(&executor, "probe", || panic!("boom"));
     assert!(matches!(r, Err(DeviceError::Io(_))));
+}
+
+/// A value is dropped even when its handle drops on a thread that drives an
+/// executor: that drop detaches instead of joining (a join there panics), and
+/// the owner thread still drops the value once it has the stop.
+#[test]
+fn a_drop_on_an_executor_thread_detaches_and_the_value_still_drops() {
+    struct Notify(mpsc::Sender<()>);
+    impl Drop for Notify {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    let executor = Executor::new();
+    let (dropped, wait) = mpsc::channel();
+    let owned = Owned::spawn(&executor, "probe", move || Ok(Notify(dropped))).expect("opens");
+    let dropper = executor
+        .spawn_dedicated("dropper", None, async move { drop(owned) })
+        .expect("spawns");
+    // A real-time limit that only guards a hang.
+    wait.recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the owner thread dropped the value");
+    tutti_platform::join_within(dropper, std::time::Duration::from_secs(60))
+        .unwrap_or_else(|_| panic!("the dropping task ended"));
 }

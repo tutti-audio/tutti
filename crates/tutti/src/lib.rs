@@ -97,7 +97,7 @@
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
 //! - `codec` — `tutti::codec`, `Wave`. Implied by every decode and encode feature.
-//! - `record` — the session's `Recorder` and its pump loop, device-free. Implied by `capture`.
+//! - `record` — the session's pump loop, device-free. Implied by `capture`.
 //! - `capture` — live audio input from the sound card: `Session::add_input`, takes, mic capture
 //!   (implies `device` and `record`).
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
@@ -371,9 +371,9 @@ pub mod types {
         PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_buffers::{
-        BufferError, FiniteSource, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel,
-        FoldLevels, FoldSpec, NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed,
-        Source, StereoPlanes, Stop,
+        BufferError, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec,
+        NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes,
+        Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
@@ -550,8 +550,7 @@ pub mod session {
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{
-        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, NoiseShaping, PumpLoop, PumpPass,
-        Recorder, RecorderError,
+        DitherSink, FinalizeError, NoiseShaping, PumpLoop, PumpLoopError, PumpPass,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
