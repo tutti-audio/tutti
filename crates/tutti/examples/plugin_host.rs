@@ -18,8 +18,9 @@
 //! Work is a value the app runs. A load, a state or a preset is `InProcess` (a
 //! plugin that lives in this process: `run(main)` on the main thread) or
 //! `OutOfProcess` (a plugin in a `plugin-server` process: a `Send` future the
-//! server's reply fills). This app awaits the second kind with `block_on`, a
-//! few lines of std; a host with a frame loop hands it to its own executor.
+//! server's reply fills). This app awaits the second kind with
+//! `futures_lite::future::block_on`; a host with a frame loop hands it to its own
+//! executor.
 //!
 //! The plugin is a [`Plugin`](tutti::Plugin) view (`session.plugin_view(node)`), and what happens to
 //! it is a [`PluginEvent`] in `update()`'s events. The host makes the token on its
@@ -32,12 +33,10 @@
 //! above built); `cargo build -p tutti --features clap,export --examples`
 //! compiles it.
 
-use std::future::{Future, IntoFuture};
+use std::future::IntoFuture as _;
 use std::path::PathBuf;
-use std::pin::pin;
-use std::sync::Arc;
-use std::task::{Context, Poll, Wake, Waker};
-use std::thread::{self, Thread};
+
+use futures_lite::future::block_on;
 
 use tutti::midi::{Address, Message, MidiChannel, NoteNumber, TimedMidiEvent, U7, Ump, Voice1};
 use tutti::plugin::PresetSupport;
@@ -50,29 +49,6 @@ use tutti::{
 use tutti_units::Normalized;
 
 const RATE: SampleRate = SampleRate::SR_48K;
-
-/// Wakes the thread that waits on a future.
-struct Unpark(Thread);
-
-impl Wake for Unpark {
-    fn wake(self: Arc<Self>) {
-        self.0.unpark();
-    }
-}
-
-/// Awaits an out-of-process value on this thread: polls, and parks until the
-/// server's reply wakes it. An app with an executor spawns the future there.
-fn block_on<F: IntoFuture>(work: F) -> F::Output {
-    let waker = Waker::from(Arc::new(Unpark(thread::current())));
-    let mut cx = Context::from_waker(&waker);
-    let mut work = pin!(work.into_future());
-    loop {
-        if let Poll::Ready(output) = work.as_mut().poll(&mut cx) {
-            return output;
-        }
-        thread::park();
-    }
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1);
@@ -130,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("the scan could not read the plugin's id")?;
     let opened = match session.load_plugin(&id, &catalog)? {
         LoadPlugin::InProcess(load) => load.run(main)?,
-        LoadPlugin::OutOfProcess(load) => block_on(load)?,
+        LoadPlugin::OutOfProcess(load) => block_on(load.into_future())?,
     };
     let loaded = opened.handle();
     let node = session.add_plugin(opened)?;
@@ -195,7 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    no other (`restore_state`, run, then `apply`).
     let state = match session.save_state(&node, StateUse::Project)? {
         SaveState::InProcess(save) => save.run(main)?,
-        SaveState::OutOfProcess(save) => block_on(save)?,
+        SaveState::OutOfProcess(save) => block_on(save.into_future())?,
     };
     let state_path = out.with_extension("state");
     std::fs::write(&state_path, state.bytes())?;
@@ -207,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let restored = match session.restore_state(&node, state)? {
         RestoreState::InProcess(restore) => restore.run(main)?,
-        RestoreState::OutOfProcess(restore) => block_on(restore)?,
+        RestoreState::OutOfProcess(restore) => block_on(restore.into_future())?,
     };
     session.apply(restored)?;
 
@@ -228,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(first) = presets.iter().next() {
                     let loaded = match session.load_preset(&node, &first)? {
                         LoadPreset::InProcess(load) => load.run(main)?,
-                        LoadPreset::OutOfProcess(load) => block_on(load)?,
+                        LoadPreset::OutOfProcess(load) => block_on(load.into_future())?,
                     };
                     session.apply(loaded)?;
                     eprintln!(
