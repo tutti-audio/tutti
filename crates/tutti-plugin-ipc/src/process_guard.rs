@@ -13,12 +13,12 @@
 //! exit task. The guard's drop does not poll the process: it waits for an
 //! event, the exit task having ended (the process reaped, or told to stop).
 
-use crate::yield_now::yield_now;
 use crate::{IpcConfig, IpcThread, ServerWatch};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tutti_platform::yield_now;
 use tutti_platform::{
     Executor, Instant, Task, WeakExecutor, join_within, monotonic_ns, sleep_until_ns,
 };

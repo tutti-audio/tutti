@@ -54,7 +54,6 @@ mod server_watch;
 mod subprocess;
 mod transport;
 mod wake;
-mod yield_now;
 
 #[cfg(test)]
 mod process_pipeline_tests;
