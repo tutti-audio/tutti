@@ -172,6 +172,9 @@ pub enum UnitParam {
     /// A source's distance from the listener (`Metres`, at least zero): how far a distance
     /// node places its input, which sets its delay and its level.
     Distance = 41,
+    /// A position within a source, 0 at its start and 1 at its end (`Normalized`): a
+    /// wavetable's frame position, a granular source's read point.
+    Position = 42,
     /// The length of a grain in a granular cloud (`Seconds`, above zero).
     GrainLength = 43,
     /// Random deviation as a fraction of its range (`Normalized`). A granular cloud's index 0 is
@@ -238,6 +241,7 @@ impl TryFrom<u16> for UnitParam {
             39 => Semitones,
             40 => Pitch,
             41 => Distance,
+            42 => Position,
             43 => GrainLength,
             44 => Jitter,
             other => return Err(UnitParamOutOfRange(other)),
@@ -777,6 +781,8 @@ param_keys! {
         DISTANCE = Distance;
     }
     Normalized {
+        /// A position within a source: a wavetable's frame position.
+        POSITION = Position;
         /// Random deviation as a fraction of its range.
         JITTER = Jitter;
     }
@@ -832,6 +838,22 @@ mod tests {
             UnitAddr::from(UnitParam::Balance)
         );
         assert_ne!(ParamKey::<Hz>::CUTOFF, ParamKey::<Hz>::RATE);
+    }
+
+    /// The frame position is keyed as a `Normalized`, whose `from_raw` saturates onto `0..=1`
+    /// and sends NaN to 0, as a parameter cell holding any float needs.
+    #[test]
+    fn the_position_key_is_a_normalized_whose_from_raw_saturates() {
+        use crate::Unit;
+        assert_eq!(
+            ParamKey::<Normalized>::POSITION.addr(),
+            UnitAddr::from(UnitParam::Position)
+        );
+        assert_eq!(Normalized::from_raw(0.25), Normalized::of(0.25));
+        assert_eq!(Normalized::from_raw(7.0), Normalized::of(1.0));
+        assert_eq!(Normalized::from_raw(-7.0), Normalized::of(0.0));
+        assert_eq!(Normalized::from_raw(f64::NAN), Normalized::of(0.0));
+        assert_eq!(Normalized::of(0.25).to_raw(), 0.25);
     }
 
     /// Every keyed param has exactly one key: no id appears twice (under the
@@ -922,7 +944,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 43] = [
+    const PINNED: [(UnitParam, u16); 44] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -964,6 +986,7 @@ mod tests {
         (UnitParam::Semitones, 39),
         (UnitParam::Pitch, 40),
         (UnitParam::Distance, 41),
+        (UnitParam::Position, 42),
         (UnitParam::GrainLength, 43),
         (UnitParam::Jitter, 44),
     ];

@@ -37,7 +37,8 @@ fn a_fork_shares_no_cell() {
 }
 
 #[test]
-fn the_shape_is_a_source_of_the_sources_channels_declaring_density_pitch_length_and_jitters() {
+fn the_shape_is_a_source_of_the_sources_channels_declaring_density_pitch_length_jitters_and_position()
+ {
     let node = one_grain(&[0.5, 0.25], 8);
     let shape = Node::<f32>::shape(&node);
     assert_eq!(shape.audio_in().count(), 0);
@@ -49,7 +50,8 @@ fn the_shape_is_a_source_of_the_sources_channels_declaring_density_pitch_length_
             UnitAddr::new(UnitParam::Pitch, 0),
             UnitAddr::new(UnitParam::GrainLength, 0),
             UnitAddr::new(UnitParam::Jitter, 0),
-            UnitAddr::new(UnitParam::Jitter, 1)
+            UnitAddr::new(UnitParam::Jitter, 1),
+            UnitAddr::new(UnitParam::Position, 0)
         ][..]
     );
     assert_eq!(Node::<f32>::param_base(&node, 0), Some(1.0));

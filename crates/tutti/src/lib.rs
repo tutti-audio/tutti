@@ -314,6 +314,9 @@ pub mod nodes {
         SpringLengthError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
+    pub use tutti_dsp::{
+        TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
+    };
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
@@ -366,6 +369,7 @@ pub mod nodes {
         SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
         SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
         TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        WavetableConfig, WavetableNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,

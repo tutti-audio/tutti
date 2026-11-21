@@ -121,6 +121,8 @@
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
+//! - **Wavetable** (`wavetable.rs`): [`Wavetable`], single-cycle frames mipmapped by FFT bin
+//!   zeroing, played by a [`WavetableOscillator`] with the level crossfaded from the frequency.
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
 //!   channels a block inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a ramped
 //!   [`StereoWidth`](tutti_units::StereoWidth)); [`PanLaw`] and [`pan_gains`].
@@ -209,6 +211,7 @@ mod shoebox;
 mod stereo;
 mod tremolo;
 mod waveshape;
+mod wavetable;
 
 mod mel;
 mod mfcc;
@@ -360,3 +363,6 @@ pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
 pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
+pub use wavetable::{
+    TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
+};

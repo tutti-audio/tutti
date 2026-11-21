@@ -84,7 +84,8 @@ units! {
         tutti_nodes::PitchShifterNode<f32> { Pitch => Cents }
         tutti_nodes::DistanceNode<f32> { Distance => Metres }
         tutti_nodes::GranularNode<f32> {
-            Rate => Hz, Pitch => Cents, GrainLength => Seconds, Jitter => Normalized
+            Rate => Hz, Pitch => Cents, GrainLength => Seconds, Jitter => Normalized,
+            Position => Normalized
         }
         tutti_nodes::TransientShaperNode<f32> { GainDb => Db }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
@@ -101,6 +102,7 @@ units! {
         tutti_nodes::LfoNode { Depth => Depth, Rate => Hz }
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
         tutti_nodes::NoiseNode<f32> { Volume => Amplitude }
+        tutti_nodes::WavetableNode<f32> { Frequency => Hz, Volume => Amplitude, Position => Normalized }
         tutti_nodes::FreeverbNode<f32> { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode<f32> { Volume => Amplitude }
         tutti_nodes::PlateReverbNode<f32> {

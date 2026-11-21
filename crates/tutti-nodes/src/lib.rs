@@ -58,6 +58,9 @@
 //!   transport beat (a span fixed at build); its depth and rate are read per frame.
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
+//! - **Wavetable** — [`WavetableNode`], a source playing a mipmapped `tutti_dsp::Wavetable` (frames
+//!   morphed by position, the mip level crossfaded from the frequency); its frequency (`Frequency`),
+//!   level (`Volume`) and frame position (`Position`) are read per frame.
 //! - **Noise** — [`NoiseNode`], a mono source of white, pink or brown noise
 //!   (`tutti_dsp::Noise`) from a seed; its level (`Volume`) is read per frame.
 //! - **Granular** — [`GranularNode`], a cloud of Hann-windowed grains of a shared source
@@ -315,6 +318,9 @@ mod granular;
 pub use granular::{GranularConfig, GranularError, GranularNode};
 mod noise;
 pub use noise::{NoiseConfig, NoiseNode};
+
+mod wavetable;
+pub use wavetable::{WavetableConfig, WavetableNode};
 
 mod delay;
 pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};

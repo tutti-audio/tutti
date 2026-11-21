@@ -1,7 +1,7 @@
 //! [`Normalized`], a neutral value on `0..=1`.
 
-// `Normalized` is a `Unit` (below), which is already a `Quantity`, so it takes the type and
-// its error without the macro's own `Quantity` impl.
+// `Normalized` is a `Unit` (below), which is already a `Quantity`, so it takes the type
+// and its error without the macro's own `Quantity` impl.
 crate::ranged! {
     @items []
     /// A position on the unit interval, `0..=1`, with no meaning beyond it.
@@ -47,7 +47,7 @@ impl crate::Unit for Normalized {
     }
     #[inline]
     fn to_raw(self) -> f64 {
-        self.0
+        self.get()
     }
 }
 

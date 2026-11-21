@@ -33,4 +33,5 @@ mod rt_no_alloc_reverb;
 mod rt_no_alloc_shimmer;
 mod rt_no_alloc_transient;
 mod rt_no_alloc_utility;
+mod rt_no_alloc_wavetable;
 mod spatial_rt_no_alloc;

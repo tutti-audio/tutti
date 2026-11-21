@@ -26,8 +26,10 @@ use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam
 /// - the jitter (`UnitParam::Jitter`, [`Normalized`]): index 0 the position's, a fraction of
 ///   the source, and index 1 the timing's, a fraction of the interval between grains.
 ///
-/// The position the grains start from is a cell with no port ([`position`](Self::position)),
-/// `0` the start of the source and `1` its end. Every param is read when a grain starts.
+/// - the position the grains start from (`UnitParam::Position`, [`Normalized`]), `0` the
+///   start of the source and `1` its end.
+///
+/// Every param is read when a grain starts.
 ///
 /// The cloud is built when the graph prepares the node at the device rate; before that it
 /// renders silence. It has no inputs and no ring-out ([`Tail::None`]): what it emits is a
@@ -80,13 +82,13 @@ pub struct GranularNode<F: Float> {
     cloud: Option<Granular<F>>,
 }
 
-// The params a [`GranularNode`] lets the graph modulate, in port order. The position has no
-// kind: it is a cell with no port.
+// The params a [`GranularNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([F: Float] GranularNode<F>, n {
     Rate => Hz = &n.density,
     Pitch => Cents = &n.rate,
     GrainLength => Seconds = &n.length,
     [i in 0..2u8] { Jitter => Normalized = &n.jitter[usize::from(i)] },
+    Position => Normalized = &n.position,
 });
 
 /// What a [`GranularNode`] is made from: the shared source and the starting values of its
@@ -238,13 +240,6 @@ impl<F: Float> TryFrom<GranularConfig<F>> for GranularNode<F> {
 }
 
 impl<F: Float> GranularNode<F> {
-    /// A handle on the position cell, for a UI or automation to share: where in the source
-    /// grains start, `0` its start and `1` its end.
-    #[must_use]
-    pub fn position(&self) -> Param<Normalized> {
-        self.position.handle()
-    }
-
     /// The settings of this block: each param's driven last frame, else its cell, held at its
     /// last finite value.
     fn settings(&mut self, io: &Io<'_, F>) -> GrainSettings {
@@ -283,7 +278,11 @@ impl<F: Float> GranularNode<F> {
             self.declared_param_at::<{ UnitParam::Jitter as u16 }, _>(io, 1),
             &mut self.good[4],
         );
-        let position = Normalized::from_raw(self.good[5].read(self.position.load().to_raw()));
+        let position = value(
+            &self.position,
+            self.declared_param::<{ UnitParam::Position as u16 }, _>(io),
+            &mut self.good[5],
+        );
         GrainSettings::new(density, length)
             .position(position)
             .rate(rate)
