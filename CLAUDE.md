@@ -207,7 +207,8 @@ touched.
 - A refusable push returns `tutti_rt::PushError { Full, Disconnected }`.
 - A thread's wake-up is `tutti_rt::parker()`: any number of `Unparker`s unpark one
   `Parker`. A future's wake-up is a `tutti_rt::Bell` from the session's `Bells`: the audio
-  thread rings it, and the future awaits its `Listener::rung()`.
+  thread rings it, and the future awaits its `Listener::rung()`. An app never names either:
+  a session's tap carries one, and the app awaits `TapReader::notified()`.
 - A value the audio thread must never drop holds a `tutti_rt::ControlDrop`.
 - A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at

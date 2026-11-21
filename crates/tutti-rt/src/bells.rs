@@ -3,7 +3,8 @@
 //!
 //! The audio thread must not allocate, lock or wait, and an executor's
 //! `Waker::wake` may do any of them. A [`Bell`] is the audio thread's half:
-//! [`ring`](Bell::ring) sets a flag and unparks one control-side [`Parker`]. A
+//! [`ring`](Bell::ring) sets a flag and, when a future is waiting on the bell,
+//! unparks one control-side [`Parker`]. A
 //! [`Listener`] is the control side's half: a future resolves once its bell has
 //! rung. Between them, [`Bells`], one per session, runs the **tick** that
 //! notices a ring and wakes the waiting future's `Waker`.
@@ -22,8 +23,10 @@
 //!
 //! Each bell has a flag (`rung`) and a slot for one `Waker`.
 //!
-//! - **ring** (audio thread): set `rung` (a swap), then [`Unparker::unpark`], which
-//!   fences (the parker's publish-then-unpark protocol, `parker.rs`).
+//! - **ring** (audio thread): set `rung` (a swap), fence, then, only if
+//!   `waiting` is set, [`Unparker::unpark_after_fence`] (the parker's
+//!   publish-then-unpark protocol, `parker.rs`). A bell nobody waits on costs a
+//!   swap, a fence and a load: it never wakes the tick.
 //! - **tick pass**: for each bell, if `rung` is set **and** a waker is stored,
 //!   take the waker and wake it. A pass never clears `rung`: only the wait side
 //!   does. The tick task parks with a pending check, "some bell is rung and
@@ -35,9 +38,10 @@
 //!   3. fence, then check `rung` again: if it is set, take the waker back,
 //!      clear `rung` and return `Ready`; otherwise `Pending`.
 //!
-//! The wait poll's fence and the ring's (inside `unpark`) are the store-load
-//! pair: either the poll sees the ring in step 3, or the ring (hence the tick
-//! pass after it) lands after the waker is stored and wakes it. A ring and a
+//! The wait poll's fence and the ring's are the store-load pair (the poll
+//! stores `waiting`, fences, loads `rung`; the ring stores `rung`, fences, loads
+//! `waiting`): either the poll sees the ring in step 3, or the ring sees
+//! `waiting` and unparks the tick, whose pass after it wakes the waker. A ring and a
 //! pass that both land before step 2 are the case step 3 closes. A wake that
 //! finds the flag already cleared is a spurious wake, which the future absorbs
 //! by polling again. Two rings before one resolve resolve once: the flag is one
@@ -238,13 +242,52 @@ impl Bells {
     /// A new bell in the set: the ring side for the audio thread and the wait
     /// side for the control-side future.
     pub fn bell(&self) -> (Bell, Listener) {
+        self.handle().bell()
+    }
+
+    /// A handle that makes bells in this set without owning it: the part of
+    /// the session that opens taps holds one, the set stays with its owner.
+    pub fn handle(&self) -> BellsHandle {
+        BellsHandle {
+            shared: Arc::clone(&self.shared),
+        }
+    }
+
+    /// Runs one pass where the set has no tick task (wasm), and does nothing
+    /// where it has one: call it unconditionally, once per `Session::update`.
+    /// It wakes the waker of every rung bell that has one.
+    pub fn tick(&self) {
+        self.tick.run(&self.shared);
+    }
+}
+
+/// A handle that makes bells in a [`Bells`] it does not own. Made by
+/// [`Bells::handle`]; `Clone`.
+///
+/// It does not keep the set running: once the [`Bells`] is dropped, a bell it
+/// makes is never woken, and a future waiting on its listener stays pending.
+#[derive(Clone)]
+pub struct BellsHandle {
+    shared: Arc<Shared>,
+}
+
+impl BellsHandle {
+    /// A new bell in the set ([`Bells::bell`]). It forgets the bells whose both
+    /// sides are gone first, as a pass does: a ring nobody waits on runs no
+    /// pass, so the set stays as large as its live bells only if the make does
+    /// this too.
+    pub fn bell(&self) -> (Bell, Listener) {
         let state = Arc::new(State {
             rung: AtomicBool::new(false),
             waker: Mutex::new(None),
             waiting: AtomicBool::new(false),
             shut: Arc::clone(&self.shared.shut),
         });
-        self.shared.bells().push(Arc::clone(&state));
+        {
+            let mut bells = self.shared.bells();
+            bells.retain(|state| Arc::strong_count(state) > 1);
+            bells.push(Arc::clone(&state));
+        }
         (
             Bell {
                 _control: ControlDrop::new(),
@@ -254,12 +297,11 @@ impl Bells {
             Listener { state },
         )
     }
+}
 
-    /// Runs one pass where the set has no tick task (wasm), and does nothing
-    /// where it has one: call it unconditionally, once per `Session::update`.
-    /// It wakes the waker of every rung bell that has one.
-    pub fn tick(&self) {
-        self.tick.run(&self.shared);
+impl std::fmt::Debug for BellsHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BellsHandle").finish_non_exhaustive()
     }
 }
 
@@ -295,14 +337,19 @@ pub struct Bell {
 }
 
 impl Bell {
-    /// Ring: set the bell's flag, then unpark the tick. Real-time safe: a
-    /// swap, a fence and a load, plus a futex wake when the tick is parked
-    /// (the wake-up, never a wait on it). It never allocates, locks, waits or
-    /// touches a `Waker`.
+    /// Ring: set the bell's flag, and unpark the tick if a future is waiting on
+    /// the bell. Real-time safe: a swap, a fence and a load, plus a futex wake
+    /// when a future waits and the tick is parked (the wake-up, never a wait on
+    /// it). It never allocates, locks, waits or touches a `Waker`.
     #[inline]
     pub fn ring(&self) {
         self.state.rung.swap(true, Ordering::Release);
-        self.unparker.unpark();
+        // Pairs with the wait poll's fence: the poll stored `waiting` before it,
+        // so either this load sees it or the poll sees `rung`.
+        fence(Ordering::SeqCst);
+        if self.state.waiting.load(Ordering::Acquire) {
+            self.unparker.unpark_after_fence();
+        }
     }
 }
 
@@ -363,8 +410,8 @@ impl Listener {
             return Self::after_shut(state);
         }
         state.store_waker(cx.waker().clone());
-        // Pairs with the fence in the ring's `unpark`: a ring after this fence
-        // finds the waker stored; one before it is seen here.
+        // Pairs with the fence in the ring: a ring after this fence finds
+        // `waiting` set; one before it is seen here.
         fence(Ordering::SeqCst);
         if state.rung.load(Ordering::Acquire) {
             state.take_waker();
