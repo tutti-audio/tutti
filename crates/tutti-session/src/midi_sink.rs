@@ -72,11 +72,11 @@ impl MidiSink {
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// A request to open `sink` as an output: wire what it should receive to
     /// its [`node`](MidiSink::node). Nothing opens until
-    /// [`run`](OpenMidiSink::run) is called, and the sink
+    /// [`open`](OpeningMidiSink::open) is called, and the sink
     /// ends when every clone of the handle is dropped, once the graph has
     /// rendered past the drop ([`update`](Self::update) ends it).
-    pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpenMidiSink<'_, K, C> {
-        OpenMidiSink {
+    pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpeningMidiSink<'_, K, C> {
+        OpeningMidiSink {
             session: self,
             sink,
             stamping: Stamping::Off,
@@ -85,23 +85,23 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 }
 
 /// A sink to open, built by [`Session::open_midi_sink`]: it borrows the session
-/// until [`run`](Self::run) opens the sink.
-#[must_use = "the sink opens when the request runs"]
-pub struct OpenMidiSink<'s, K: crate::AppKey, C: crate::Clock> {
+/// until [`open`](Self::open) opens the sink.
+#[must_use = "the sink opens when `open` is called"]
+pub struct OpeningMidiSink<'s, K: crate::AppKey, C: crate::Clock> {
     session: &'s mut Session<K, C>,
     sink: Arc<dyn MidiOut>,
     stamping: Stamping,
 }
 
-impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpenMidiSink<'_, K, C> {
+impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpeningMidiSink<'_, K, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenMidiSink")
+        f.debug_struct("OpeningMidiSink")
             .field("stamping", &self.stamping)
             .finish_non_exhaustive()
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> OpenMidiSink<'_, K, C> {
+impl<K: crate::AppKey, C: crate::Clock> OpeningMidiSink<'_, K, C> {
     /// Whether the sink is sent JR Timestamps. It gates timestamps, not
     /// delivery: with it off (the default) the events still go out, unstamped.
     pub const fn stamping(mut self, stamping: Stamping) -> Self {
@@ -111,7 +111,7 @@ impl<K: crate::AppKey, C: crate::Clock> OpenMidiSink<'_, K, C> {
 
     /// Opens the sink: its output node joins the graph (the next
     /// [`update`](Session::update) commits it).
-    pub fn run(self) -> MidiSink {
+    pub fn open(self) -> MidiSink {
         self.session.midi().open_sink(self.sink, self.stamping)
     }
 }
