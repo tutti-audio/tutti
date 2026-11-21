@@ -258,7 +258,7 @@ pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub use dct::{Dct2, TooManyOutputs};
 pub use decorrelator::{
     Decorrelator, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise,
-    VelvetPulse,
+    VelvetNoiseError, VelvetPulse,
 };
 pub(crate) use delay::delay_step;
 pub use delay::{
@@ -281,7 +281,7 @@ pub use dynamics::{
     LevellerBank, LevellerControls, LimiterBank, LimiterControls, LimiterCurve, LimiterSignals,
     Lookahead, LookaheadError, MultibandBands, MultibandBandsError, MultibandBank,
     MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
-    TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use early_reflections::{EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY};
 pub use envelope::{
