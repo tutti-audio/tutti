@@ -58,7 +58,7 @@ pub(super) fn end_fades<F: Float>(
                     .iter_mut()
                     .find(|i| i.unit == rec.unit && i.port == 0)
             {
-                inj.events.extend_from_slice(&next.chase);
+                inj.events.extend_from_slice(next.chase.as_slice());
                 inj.events.rotate_right(next.chase.len());
                 inj.live = true;
                 has_inject[rec.unit as usize] = true;
