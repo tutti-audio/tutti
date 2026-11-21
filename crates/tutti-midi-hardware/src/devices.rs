@@ -27,7 +27,7 @@ use tutti_midi_runtime::{DeviceWriters, InputId, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
 use crate::backend;
-use crate::capability::{described, legacy};
+use crate::capability::{OsEndpoint, described, legacy};
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::sensing::Heartbeat;
@@ -416,7 +416,7 @@ impl Devices {
     pub fn open_output(&self, started: Started, id: &DeviceId) -> Result<OpenOutput> {
         let (info, handle) = self.present(id, PortDirection::is_output)?;
         // What the OS says it speaks, until a negotiation says better.
-        let described = described(&self.capability(id).unwrap_or_else(legacy)).active();
+        let described = described(&self.capability(id)?.unwrap_or_else(legacy)).active();
         let sink = self.inner.backend.open_output(started, handle)?;
         sink.follow(described.protocol);
         Ok(OpenOutput {
@@ -424,6 +424,7 @@ impl Devices {
             sink: Arc::from(sink),
             wire: Wire::new(described),
             refused: 0,
+            unrepresentable: 0,
             heartbeat: None,
             executor: self.inner.executor.clone(),
         })
@@ -465,16 +466,35 @@ impl Devices {
     /// What the OS says `id` is, asked of the backend now: the Endpoint it
     /// describes, with its protocol in use, the protocols it supports and its
     /// Function Blocks. `None` when `id` is not present.
-    #[must_use]
-    pub fn capability(&self, id: &DeviceId) -> Option<Endpoint> {
-        let handle = self.state().table.handle(id)?;
+    ///
+    /// # Errors
+    ///
+    /// The backend's error when the OS cannot be asked ([`MidiEndpoints::inputs`]).
+    pub fn capability(&self, id: &DeviceId) -> Result<Option<Endpoint>> {
+        Ok(self.os_endpoint(id)?.map(|e| e.capability))
+    }
+
+    /// How many Function Blocks the OS declares for `id` that the spec cannot
+    /// hold, which [`capability`](Self::capability) therefore leaves out: a
+    /// device that declared more blocks than its Endpoint lists. `None` when
+    /// `id` is not present.
+    ///
+    /// # Errors
+    ///
+    /// As [`capability`](Self::capability).
+    pub fn blocks_left_out(&self, id: &DeviceId) -> Result<Option<usize>> {
+        Ok(self.os_endpoint(id)?.map(|e| e.blocks_left_out))
+    }
+
+    /// The backend's description of `id` now, `None` when `id` is not present.
+    fn os_endpoint(&self, id: &DeviceId) -> Result<Option<OsEndpoint>> {
+        let Some(handle) = self.state().table.handle(id) else {
+            return Ok(None);
+        };
         let backend = &self.inner.backend;
-        backend
-            .inputs()
-            .into_iter()
-            .chain(backend.outputs())
-            .find(|e| e.id == handle)
-            .map(|e| e.capability)
+        let mut found = backend.inputs()?;
+        found.extend(backend.outputs()?);
+        Ok(found.into_iter().find(|e| e.id == handle))
     }
 }
 
@@ -515,7 +535,7 @@ impl DeviceEvents {
 
     /// The changes queued now, oldest first, taking each as it is iterated.
     /// Never blocks. `for event in &events` is the same.
-    pub fn try_iter(&self) -> Pending<'_> {
+    pub fn pending(&self) -> Pending<'_> {
         Pending { events: self }
     }
 
@@ -604,7 +624,7 @@ impl Drop for Recv<'_> {
 }
 
 /// The changes of a [`DeviceEvents`] queued now, taken as they are read:
-/// [`DeviceEvents::try_iter`], and `&DeviceEvents`' `IntoIterator`.
+/// [`DeviceEvents::pending`], and `&DeviceEvents`' `IntoIterator`.
 #[derive(Debug)]
 pub struct Pending<'a> {
     events: &'a DeviceEvents,
@@ -623,7 +643,7 @@ impl<'a> IntoIterator for &'a DeviceEvents {
     type IntoIter = Pending<'a>;
 
     fn into_iter(self) -> Pending<'a> {
-        self.try_iter()
+        self.pending()
     }
 }
 
@@ -716,6 +736,9 @@ pub struct OpenOutput {
     wire: Wire,
     /// The packets the sink had no room for, for [`losses`](Self::losses).
     refused: u64,
+    /// The events that became no packet in the device's wire form, for
+    /// [`unrepresentable`](Self::unrepresentable).
+    unrepresentable: u64,
     /// What the heartbeat is spawned on. Declared after `sink`: the sink ends its
     /// sender and frees the port before the last clone of the executor can shut
     /// it down.
@@ -770,6 +793,18 @@ impl OpenOutput {
         self.sink.losses() + Losses::refused(self.refused)
     }
 
+    /// How many events the output took as sent that have no form on the wire of
+    /// its device, and so went nowhere: a JR Timestamp the device does not take,
+    /// a per-note controller for a MIDI 1.0 device, a message a byte port cannot
+    /// carry ([`DeviceOut::unrepresentable`]). The drop is the spec's (M2-104
+    /// Appendix D.2.8, M2-115); this is the count of it, apart from
+    /// [`losses`](Self::losses), which counts only what the device had no room
+    /// for.
+    #[must_use]
+    pub fn unrepresentable(&self) -> u64 {
+        self.unrepresentable + self.sink.unrepresentable()
+    }
+
     /// How many events the output has taken and not yet sent; see
     /// [`DeviceOut::pending`].
     #[must_use]
@@ -822,7 +857,8 @@ impl OpenOutput {
     /// Queues `events` in the device's wire form, each to go now, and returns
     /// what the device [`Taken`]. An event that has no form on the wire (a JR
     /// Timestamp the device does not take, a per-note controller for MIDI 1.0)
-    /// counts as taken. What is taken ends between two messages, so a System
+    /// counts as taken, and is counted in [`unrepresentable`](Self::unrepresentable).
+    /// What is taken ends between two messages, so a System
     /// Exclusive message goes whole or not at all; what is not taken is
     /// counted in [`losses`](Self::losses). For a control thread: it allocates
     /// the batch it converts, and never blocks.
@@ -853,7 +889,9 @@ impl OpenOutput {
         {
             heartbeat.sent();
         }
-        (self.wire.accepted(taken, events), refused)
+        let accepted = self.wire.accepted(taken, events);
+        self.unrepresentable += self.wire.unrepresentable_in(accepted.packets());
+        (accepted, refused)
     }
 
     /// Counts `packets` the device had no room for ([`offer`](Self::offer)).

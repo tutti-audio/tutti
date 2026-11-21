@@ -15,11 +15,11 @@ impl MidiEndpoints for Refuses {
     fn watch(&self, _: ChangeSink) -> tutti_midi_hardware::Result<Box<dyn Watch>> {
         Err(MidiHardwareError::Unsupported("test"))
     }
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> tutti_midi_hardware::Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> tutti_midi_hardware::Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
     fn open_input(
         &self,

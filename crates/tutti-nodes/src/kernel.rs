@@ -178,6 +178,8 @@ pub struct KernelNode<K: Kernel> {
     out: OutBus,
     /// The input width.
     inputs: usize,
+    /// Whether the shape declares no input bus: a source, rendered from no input planes.
+    source: bool,
     /// The side-chain key bus: the input bus the kernel's shape gives the
     /// [`Sidechain`](BusRole::Sidechain) role, if any.
     key: Option<InBus>,
@@ -322,6 +324,7 @@ impl<K: Kernel> KernelNode<K> {
         let shape = kernel.shape();
         let out = shape.output_bus(0).expect("a kernel has an output");
         let inputs = shape.input_bus(0).map_or(0, |b| b.width());
+        let source = shape.input_bus(0).is_none();
         let key = shape
             .buses_in()
             .iter()
@@ -333,6 +336,7 @@ impl<K: Kernel> KernelNode<K> {
             params,
             out,
             inputs,
+            source,
             key,
             tuned: None,
         }
@@ -418,8 +422,13 @@ impl<K: Kernel> KernelNode<K> {
                 output.plane_mut(c).samples_mut().fill(K::Float::ZERO);
             }
         };
-        let Ok(input) = Planes::new(&input[..self.inputs]) else {
-            return silence(output);
+        let input = if self.source {
+            Planes::default()
+        } else {
+            let Ok(input) = Planes::new(&input[..self.inputs]) else {
+                return silence(output);
+            };
+            input
         };
         let mut signals = ControlSignals::<K::Float>::NONE;
         for (slot, signal) in signals.0.iter_mut().zip(driven) {
@@ -744,6 +753,7 @@ impl<K: Kernel> Clone for KernelNode<K> {
             params,
             out: self.out,
             inputs: self.inputs,
+            source: self.source,
             key: self.key,
             tuned: self.tuned.map(|t| Tuned {
                 position: 0,

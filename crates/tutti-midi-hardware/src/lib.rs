@@ -168,7 +168,7 @@
 //!     let _inlet = session.connect_input(started, &first.id)?;
 //! }
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
-//! session.disconnect_input("keystep");
+//! session.disconnect_input("keystep")?;
 //!
 //! // Outbound: the output is a value the caller owns; `queue` returns what the
 //! // device took of them, always whole messages.
@@ -336,7 +336,9 @@ pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{MidiHardwareError, MidiThread, NotFound, Result};
 pub use fault::{Errno, ErrnoOutOfRange, InputFault};
 pub use peer::{PeerError, PeerRef};
-pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
+pub use port::{
+    Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StaleInput, StreamDrain,
+};
 pub use process::{ProcessChange, ReportAsk, Reporter};
 pub use profiles::{
     ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,

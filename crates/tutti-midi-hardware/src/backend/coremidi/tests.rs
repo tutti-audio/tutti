@@ -13,7 +13,8 @@ use tutti_ump::EndpointName;
 #[test]
 fn enumeration_yields_well_formed_records() {
     let backend = CoreMidiEndpoints::new();
-    for info in backend.inputs().into_iter().chain(backend.outputs()) {
+    let (inputs, outputs) = (backend.inputs().unwrap(), backend.outputs().unwrap());
+    for info in inputs.into_iter().chain(outputs) {
         assert!(
             !info.name.is_empty(),
             "every endpoint must carry a name, even a synthesised one"
@@ -30,7 +31,7 @@ fn an_unknown_id_does_not_open() {
     let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let unknown = EndpointId::from_raw(u64::from(u32::MAX));
     assert!(
-        !backend.outputs().iter().any(|e| e.id == unknown),
+        !backend.outputs().unwrap().iter().any(|e| e.id == unknown),
         "precondition: the sentinel id must not belong to a real endpoint"
     );
     assert!(backend.open_output(started, unknown).is_err());
@@ -58,7 +59,7 @@ fn capability_is_read_from_the_endpoint_not_assumed() {
         .into_iter()
         .find(|source| source.name().as_deref() == Some(name.as_str()))
         .expect("the source is listed");
-    let cap = endpoint_capability(&endpoint, None);
+    let cap = endpoint_capability(&endpoint, None).endpoint;
     assert_eq!(
         cap.active().protocol,
         Protocol::Midi1,
@@ -80,8 +81,9 @@ fn a_midi2_endpoint_is_covered_by_enumeration() {
     let backend = CoreMidiEndpoints::new();
     let any_midi2 = backend
         .inputs()
+        .unwrap()
         .into_iter()
-        .chain(backend.outputs())
+        .chain(backend.outputs().unwrap())
         .any(|e| e.capability.active().protocol == Protocol::Midi2);
 
     // Not an assertion: a machine with no MIDI-2.0 endpoint is legitimate,
@@ -117,6 +119,7 @@ fn a_scheduled_packet_arrives_after_the_one_sent_now() {
     let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let id = backend
         .outputs()
+        .expect("the OS lists its endpoints")
         .into_iter()
         .find(|e| e.name.contains("tutti-sched-out"))
         .expect("the virtual endpoint is listed")

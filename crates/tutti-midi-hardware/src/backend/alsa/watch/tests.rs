@@ -165,11 +165,11 @@ impl crate::MidiEndpoints for Capture {
         *self.0.lock().unwrap() = Some(sink);
         Ok(Box::new(crate::endpoints::NoWatch))
     }
-    fn inputs(&self) -> Vec<crate::OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> Result<Vec<crate::OsEndpoint>> {
+        Ok(Vec::new())
     }
-    fn outputs(&self) -> Vec<crate::OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> Result<Vec<crate::OsEndpoint>> {
+        Ok(Vec::new())
     }
     fn open_input(
         &self,
@@ -295,7 +295,7 @@ impl World {
 
     fn shape(&self) -> Vec<(&'static str, String)> {
         self.events
-            .try_iter()
+            .pending()
             .map(|e| match e {
                 DeviceEvent::Added(i) => ("added", i.name),
                 DeviceEvent::Removed(i) => ("removed", i.name),
