@@ -1743,14 +1743,13 @@ push `Resample` and `Dither` together and accept the Ogg change.
    part of a voice, and dropping it only sends a close; the ring frees in the
    streamer's step that handles it, and only if the voice's reader is already
    gone (`dropping_a_stream_frees_the_ring_in_the_streamers_step`). **The ring's
-   last holder can still be a voice**, and then the answer is the pool's
-   (`PoolDrops::freed_in_callback`): on the remove path the drain frees nothing
-   and the control thread's `collect_retired` frees the ring
-   (`a_removed_disk_voice_frees_its_ring_on_the_control_thread`); on the
-   degraded path, a full retirement channel, the callback frees it, counted
-   (`a_removed_disk_voice_on_a_full_retirement_channel_frees_its_ring_in_the_callback`).
-   So the two comments each held half: "never on the audio thread" is true
-   except on that one counted path, and neither is about `Stream`. The same
+   last holder can still be a voice**, and then the answer is the pool's: the
+   drain frees nothing and the control thread's `collect_retired` frees the ring
+   (`a_removed_disk_voice_frees_its_ring_on_the_control_thread`); a full
+   retirement channel refuses the command at the handle
+   (`a_full_retirement_channel_refuses_a_remove_and_the_callback_frees_nothing`),
+   so "never on the audio thread" holds without exception, and neither is about
+   `Stream`. The same
    holds for `StreamReader`, the voice's own part (cut 7's test is then the
    `Block`'s).
 5. **Does stage 3 fold export's `FrameSource` into `Source`?** (§5.4.) Settle by
