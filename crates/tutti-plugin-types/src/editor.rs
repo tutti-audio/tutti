@@ -456,11 +456,11 @@ pub enum EditorError {
     #[error("the plugin-server failed the editor request: {0}")]
     Server(#[from] crate::ServerError),
 
-    /// The plugin-server did not answer the editor request within `within`.
-    #[error("the plugin-server did not answer the editor request within {within:?}")]
+    /// The plugin-server did not answer the editor request within `after`.
+    #[error("the plugin-server did not answer the editor request within {after:?}")]
     NoAnswer {
         /// How long the host waited.
-        within: std::time::Duration,
+        after: std::time::Duration,
     },
 
     /// The plugin-server answered an editor request with another request's reply.

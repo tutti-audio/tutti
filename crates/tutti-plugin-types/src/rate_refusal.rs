@@ -30,12 +30,12 @@ pub enum RateRefusalCause {
         /// The plugin's own message.
         reason: String,
     },
-    /// The plugin did not answer the rate change within `within`; its late
+    /// The plugin did not answer the rate change within `after`; its late
     /// answer settles the state when it comes.
-    #[error("the plugin did not answer the rate change within {within:?}")]
+    #[error("the plugin did not answer the rate change within {after:?}")]
     NoAnswer {
         /// How long the host waited.
-        within: std::time::Duration,
+        after: std::time::Duration,
     },
 }
 

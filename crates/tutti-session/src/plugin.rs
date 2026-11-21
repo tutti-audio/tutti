@@ -340,9 +340,12 @@ impl PluginLoad {
             // restores the state it was staged (`StateRestore`; a failure
             // before that step is a load failure and blames nothing): the state
             // is what the load is held against (the reload's landing withholds it).
-            Err(e @ tutti_plugin_types::IpcError::StateRestore { .. }) if self.state.is_some() => {
-                let refusal = restore_ended(&e);
-                (Err(e), Some(Err(refusal)))
+            Err(tutti_plugin_types::IpcError::StateRestore { cause }) if self.state.is_some() => {
+                let refusal = restore_ended(&cause);
+                (
+                    Err(tutti_plugin_types::IpcError::StateRestore { cause }),
+                    Some(Err(refusal)),
+                )
             }
             Err(e) => (Err(e), None),
         };
@@ -383,14 +386,13 @@ struct Mirror {
     unread: Option<tutti_plugin_host::ParamRead>,
 }
 
-/// What a bridge failure inside a state restore says of the state: the server
-/// did not answer within its window, or it died.
-fn restore_ended(e: &tutti_plugin_types::IpcError) -> StateError {
-    match e {
-        tutti_plugin_types::IpcError::StateRestore { cause } => match **cause {
-            tutti_plugin_types::IpcError::Timeout { after, .. } => StateError::Stalled { after },
-            _ => StateError::PluginCrashed,
-        },
+/// What the `cause` of a bridge failure inside a state restore says of the
+/// state: the server did not answer within its window, or the plugin is gone.
+/// Every other cause (a disconnect, a protocol violation) is `PluginCrashed`:
+/// a bridge failure mid-launch ends the server, so the plugin is gone.
+fn restore_ended(cause: &tutti_plugin_types::IpcError) -> StateError {
+    match *cause {
+        tutti_plugin_types::IpcError::Timeout { after, .. } => StateError::Stalled { after },
         _ => StateError::PluginCrashed,
     }
 }

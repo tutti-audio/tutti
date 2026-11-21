@@ -1130,7 +1130,7 @@ pub(super) fn handle_control(
                 Waited::Reply(ControlReply::EditorOpened { result }) => result,
                 Waited::Reply(ControlReply::Error { error }) => Err(EditorError::Server(error)),
                 Waited::Reply(_) => Err(EditorError::UnexpectedReply),
-                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { within: window }),
+                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { after: window }),
             };
             reply.send(value);
         }
@@ -1156,7 +1156,7 @@ pub(super) fn handle_control(
                 Waited::Reply(ControlReply::EditorSized { result }) => result,
                 Waited::Reply(ControlReply::Error { error }) => Err(EditorError::Server(error)),
                 Waited::Reply(_) => Err(EditorError::UnexpectedReply),
-                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { within: window }),
+                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { after: window }),
             };
             reply.send(value);
         }
@@ -1225,7 +1225,7 @@ pub(super) fn handle_setting(
                             lifecycle,
                             inbox,
                             rate,
-                            Some(RateRefusalCause::NoAnswer { within: budget }),
+                            Some(RateRefusalCause::NoAnswer { after: budget }),
                         );
                         break;
                     }

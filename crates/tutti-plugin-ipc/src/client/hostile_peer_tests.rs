@@ -1996,7 +1996,7 @@ fn an_editor_request_that_goes_wrong_names_how() {
     );
     assert!(matches!(
         audio.open_editor_in_server(None, ContentScale::IDENTITY),
-        Err(EditorError::NoAnswer { within }) if within == Duration::from_millis(100)
+        Err(EditorError::NoAnswer { after }) if after == Duration::from_millis(100)
     ));
 }
 
