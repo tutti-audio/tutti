@@ -83,6 +83,10 @@ units! {
         }
         tutti_nodes::PitchShifterNode<f32> { Pitch => Cents }
         tutti_nodes::DistanceNode<f32> { Distance => Metres }
+        tutti_nodes::GranularNode<f32> {
+            Rate => Hz, Pitch => Cents, GrainLength => Seconds, Jitter => Normalized,
+            Position => Normalized
+        }
         tutti_nodes::TransientShaperNode<f32> { GainDb => Db }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
         tutti_nodes::CrossoverNode<f32> { Cutoff => Hz }
