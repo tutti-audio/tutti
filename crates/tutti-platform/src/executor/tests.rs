@@ -1010,6 +1010,20 @@ fn a_cancelled_local_dedicated_future_is_dropped_on_its_own_thread() {
     drop(executor);
 }
 
+/// **A local dedicated future whose `make` panics ends its task as `None`**, as a
+/// panicking dedicated future does: `make` runs inside the task on its thread, so a failed
+/// build (a stream that cannot open, say) is the task's panic, and `join` reads `None`.
+#[test]
+fn a_local_dedicated_make_that_panics_joins_as_none() {
+    let executor = Executor::new();
+    let task = executor
+        .spawn_dedicated_local("local-panics", None, || -> std::future::Ready<u8> {
+            panic!("the stream did not open")
+        })
+        .unwrap();
+    assert_eq!(joined_off_thread(task), None);
+}
+
 /// **The executor's shutdown ends a local dedicated thread too**: a pending local future
 /// is dropped and its task joins as `None`.
 #[test]
