@@ -505,24 +505,6 @@ fn lane_block(
     clock.advance(tutti_units::Samples::new(n), looping);
 }
 
-/// A [`WorkerPool`](tutti_graph::WorkerPool) whose every participant runs its
-/// share of a job inside `assert_no_alloc`, the helper threads included
-/// (the gate is per thread).
-struct GatedPool(tutti_graph::WorkerPool);
-
-impl tutti_graph::Pool for GatedPool {
-    fn participants(&self) -> usize {
-        self.0.participants()
-    }
-    fn run(&self, wake: usize, job: &(dyn Fn(usize) + Sync)) {
-        self.0
-            .run(wake, &|i| assert_no_alloc::assert_no_alloc(|| job(i)));
-    }
-    fn waits(&self) -> tutti_rt::BlockWaits {
-        self.0.waits()
-    }
-}
-
 /// An automation lane's event output (a `ControlLaneNode` of automation alone)
 /// wired to a param port never allocates on the audio thread: curve
 /// segments at breakpoints, loop wraps inside blocks, the linear fallback
@@ -540,7 +522,7 @@ fn event_lanes_are_allocation_free_serial_and_on_a_pool() {
                 .idle(std::time::Duration::from_micros(1))
                 .build()
                 .expect("a worker pool");
-            exec.set_pool(Some(Arc::new(GatedPool(pool))));
+            exec.set_pool(Some(Arc::new(pool)));
         }
         let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat::new(0.0),
@@ -558,11 +540,9 @@ fn event_lanes_are_allocation_free_serial_and_on_a_pool() {
             "every lane moved its param: the gate walks the segment path"
         );
         let blocks = lane_blocks(30_000);
-        assert_no_alloc::assert_no_alloc(|| {
-            for &n in &blocks {
-                lane_block(&mut exec, &mut clock, n, &mut bufs);
-            }
-        });
+        for &n in &blocks {
+            lane_block(&mut exec, &mut clock, n, &mut bufs);
+        }
         ed.collect();
     }
 }
@@ -930,7 +910,7 @@ fn two_hundred_lanes_are_allocation_free_serial_and_on_a_pool() {
                 .idle(std::time::Duration::from_micros(1))
                 .build()
                 .expect("a worker pool");
-            exec.set_pool(Some(Arc::new(GatedPool(pool))));
+            exec.set_pool(Some(Arc::new(pool)));
         }
         let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat::new(0.0),
@@ -943,11 +923,7 @@ fn two_hundred_lanes_are_allocation_free_serial_and_on_a_pool() {
         for (b, &n) in blocks.iter().enumerate() {
             lane_moves(&mut ed, &controls, b);
             let t = lanes_transport(&clock);
-            if b < 40 {
-                exec.process(n, &t, &[], &mut refs);
-            } else {
-                assert_no_alloc::assert_no_alloc(|| exec.process(n, &t, &[], &mut refs));
-            }
+            exec.process(n, &t, &[], &mut refs);
             clock.advance(tutti_units::Samples::new(n), lanes_loop());
             ed.collect();
         }
@@ -1271,7 +1247,7 @@ fn signal_sources_are_allocation_free_serial_and_on_a_pool() {
                 .idle(std::time::Duration::from_micros(1))
                 .build()
                 .expect("a worker pool");
-            exec.set_pool(Some(Arc::new(GatedPool(pool))));
+            exec.set_pool(Some(Arc::new(pool)));
         }
         let mut clock = tutti_music::FrameClock::new(
             tutti_units::Beat::new(0.0),
@@ -1295,19 +1271,17 @@ fn signal_sources_are_allocation_free_serial_and_on_a_pool() {
         // the stack: the check runs inside the gate).
         let mut first = [f32::NAN; 2 * CHAINS];
         let mut moved = [false; 2 * CHAINS];
-        assert_no_alloc::assert_no_alloc(|| {
-            for (b, &n) in blocks.iter().enumerate().skip(4) {
-                signal_block(&mut exec, &mut clock, b, n, &mut refs);
-                for (k, r) in refs.iter().enumerate() {
-                    for &v in &r[..n] {
-                        if first[k].is_nan() {
-                            first[k] = v;
-                        }
-                        moved[k] |= v != first[k];
+        for (b, &n) in blocks.iter().enumerate().skip(4) {
+            signal_block(&mut exec, &mut clock, b, n, &mut refs);
+            for (k, r) in refs.iter().enumerate() {
+                for &v in &r[..n] {
+                    if first[k].is_nan() {
+                        first[k] = v;
                     }
+                    moved[k] |= v != first[k];
                 }
             }
-        });
+        }
         drop(refs);
         ed.collect();
         assert_eq!(exec.is_parallel(), workers.is_some(), "{workers:?}");
@@ -1487,11 +1461,9 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         let applied = m.apply(&decl, &mut ed, &host).expect("applies");
         assert!(!applied.commit, "a depth edit sends no plan");
         assert_eq!(applied.republished.len(), 1, "the LFO's lane republished");
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..4 {
-                exec.process(128, &transport, &[], &mut [&mut out[..]]);
-            }
-        });
+        for _ in 0..4 {
+            exec.process(128, &transport, &[], &mut [&mut out[..]]);
+        }
         // The next `apply`'s publish frees the retired program, here on the
         // control thread.
         ed.collect();

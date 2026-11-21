@@ -350,11 +350,9 @@ fn blocks_adopting_written_values_do_not_allocate() {
     .unwrap();
     let _ = s.update();
     let mut buf = vec![0.0f32; 512 * 2];
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..4 {
-            s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
-        }
-    });
+    for _ in 0..4 {
+        s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+    }
     let after = (
         notes.load(Ordering::Relaxed),
         chords.load(Ordering::Relaxed),

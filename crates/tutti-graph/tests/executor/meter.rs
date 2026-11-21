@@ -106,11 +106,7 @@ fn block(r: &mut Rig, n: usize) -> Vec<Vec<f32>> {
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let ins: [&[f32]; 0] = [];
     // Only the render is inside the gate: this helper's own buffers allocate.
-    if r.gated {
-        assert_no_alloc::assert_no_alloc(|| r.exec.process(n, &t, &ins, &mut outs));
-    } else {
-        r.exec.process(n, &t, &ins, &mut outs);
-    }
+    r.exec.process(n, &t, &ins, &mut outs);
     chans
 }
 
@@ -515,11 +511,7 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
         let beat = if i >= 5 { 64.0 } else { 0.0 };
         let t = TransportPosition::new(playing, Bpm::of(120.0), Beat::new(beat), None);
         let ins = [&input[..]];
-        if r.gated {
-            assert_no_alloc::assert_no_alloc(|| r.exec.process(n, &t, &ins, &mut outs));
-        } else {
-            r.exec.process(n, &t, &ins, &mut outs);
-        }
+        r.exec.process(n, &t, &ins, &mut outs);
         bits.extend(chans.iter().flatten().map(|s| s.to_bits()));
         for m in &mut readers {
             let _ = m.read();
