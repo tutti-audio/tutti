@@ -3,7 +3,8 @@
 
 use std::time::Duration;
 
-use tutti_platform::{Executor, Task, Timer, yield_now};
+use futures_lite::future::yield_now;
+use tutti_platform::{Executor, Task, Timer};
 
 use super::Waited;
 use super::platform::Imp;

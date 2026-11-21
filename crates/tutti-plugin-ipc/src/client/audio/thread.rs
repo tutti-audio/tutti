@@ -29,11 +29,11 @@ use super::messages::{AudioCommand, AudioResponse, ControlCommand, IpcEvent, Uns
 use super::payload_pool::PayloadPool;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
 use crate::{AudioReply, ControlFrame, ControlRequest};
+use futures_lite::future::yield_now;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
-use tutti_platform::yield_now;
 use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor, join_within};
 use tutti_plugin_types::{IpcError, IpcResult, PluginFailure, Timeouts};
 use tutti_rt::Parker;
