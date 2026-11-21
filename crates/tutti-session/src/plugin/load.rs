@@ -27,8 +27,8 @@ use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginId};
 use tutti_rt::LockExt;
 
-use super::entry::ports_of;
-use super::entry::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
+use super::opened::ports_of;
+use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
 use super::{AnyPlugin, HostPlugin, Origin, PluginLoad};
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;

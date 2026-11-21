@@ -160,21 +160,21 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 
-mod entry;
 #[cfg(test)]
 mod fake_hosting;
 mod inbox;
 mod load;
 mod lost;
+mod opened;
 mod rebind;
 pub use rebind::PortsRefusal;
 mod preset;
 mod state;
 pub(crate) use lost::Lost;
 
-pub use entry::{PluginCause, PluginInfo, PluginPorts};
 use load::NodeLink;
 pub use load::{AddPluginError, LoadPlugin, LoadedPlugin, PluginNode, SwapPluginError};
+pub use opened::{PluginCause, PluginInfo, PluginPorts};
 pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
 pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
