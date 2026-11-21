@@ -129,10 +129,10 @@ pub(super) struct Staged<F: Float = f32> {
     /// The store index and the lane state of each unit whose mix a plan
     /// drives and that may have none.
     pub(super) drives: Vec<(u32, ParamState<F>)>,
-    pub(super) spare_rings: Vec<Ring<F>>,
+    pub(super) spare_rings: CappedVec<Ring<F>>,
     /// Tables of owed closes merged away, to be freed on the control side.
-    pub(super) spare_tables: Vec<Held>,
-    pub(super) spare_drives: Vec<ParamState<F>>,
+    pub(super) spare_tables: CappedVec<Held>,
+    pub(super) spare_drives: CappedVec<ParamState<F>>,
     /// The parallel state a pool set since this was staged left unused.
     pub(super) spare_par: Option<Par>,
     /// The executor's chase buffer from this plan on.
@@ -434,10 +434,10 @@ impl Stager {
             gone_feedback: std::mem::take(&mut flush.gone_feedback),
             closers: std::mem::take(&mut flush.closers),
             queued: std::mem::take(&mut flush.queued),
-            spare_drives: Vec::with_capacity(spare_drives),
+            spare_drives: CappedVec::with_capacity(spare_drives),
             drives,
-            spare_rings: Vec::with_capacity(moved),
-            spare_tables: Vec::with_capacity(tables),
+            spare_rings: CappedVec::with_capacity(moved),
+            spare_tables: CappedVec::with_capacity(tables),
             spare_par: None,
             chase: Vec::with_capacity(wanted),
             store,
@@ -1206,15 +1206,14 @@ fn reserve_returns<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) {
     };
     let held = c.delta.retire.len() + replaces + c.delta.cuts.len() + parked;
     c.gone = Gone {
-        held: Vec::with_capacity(held),
-        spare: Vec::with_capacity(2 * (c.delta.retire.len() + replaces + parked)),
-        replaced: Vec::with_capacity(replaces),
-        chased: Vec::with_capacity(replaces),
-        held_refused: Vec::with_capacity(replaces),
+        held: CappedVec::with_capacity(held),
+        spare: CappedVec::with_capacity(2 * (c.delta.retire.len() + replaces + parked)),
+        replaced: CappedVec::with_capacity(replaces),
+        chased: CappedVec::with_capacity(replaces),
+        held_refused: CappedVec::with_capacity(replaces),
         chase_events: Vec::new(),
     };
-    c.spare_held
-        .reserve_exact(held + c.gone.spare.capacity() + 4 * c.incoming.len());
+    c.spare_held = CappedVec::with_capacity(held + c.gone.spare.capacity() + 4 * c.incoming.len());
 }
 
 /// Stable sort of `events` by offset, in place and without allocating: the

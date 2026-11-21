@@ -124,12 +124,21 @@ impl Fake {
 }
 
 impl AnyThread for Fake {
-    fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        Some(self.infos.lock_recover().clone())
+    fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+        let read = || Some(self.infos.lock_recover().clone());
+        tutti_plugin_types::answered(read())
     }
     fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
         self.values.lock_recover().get(&id).copied()
     }
+
+    fn parameter_value_answer(
+        &self,
+        id: ParamId,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        tutti_plugin_types::answered(self.parameter_value(id))
+    }
+
     fn set_parameter_value(
         &self,
         id: ParamId,
@@ -149,9 +158,16 @@ impl AnyThread for Fake {
         let (min, max) = self.range(id)?;
         Some(min + (max - min) * value.get())
     }
-    fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized> {
-        let (min, max) = self.range(id)?;
-        Some(Normalized::clamped((plain - min) / (max - min)))
+    fn parameter_normalized(
+        &self,
+        id: ParamId,
+        plain: f64,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        let read = || {
+            let (min, max) = self.range(id)?;
+            Some(Normalized::clamped((plain - min) / (max - min)))
+        };
+        tutti_plugin_types::answered(read())
     }
     fn parameter_text(&self, _id: ParamId, value: Normalized) -> Option<String> {
         Some(format!("{:.2} units", value.get()))

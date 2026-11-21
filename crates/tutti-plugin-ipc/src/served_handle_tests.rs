@@ -570,6 +570,43 @@ fn handle_get_parameter_value() {
     );
 }
 
+/// **A served plugin's read is filled by the control lane's replies.** The mirror's
+/// read lists the parameters and asks each value; the one the server does not answer
+/// (`None`) reads as its declared default, and the answered one as the server's value.
+#[test]
+fn a_served_read_resolves_through_the_control_lane_and_defaults_an_unanswered_value() {
+    let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
+        ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
+            parameters: vec![
+                ParameterInfo::new(ParamId::new(1), "Answered".to_string()),
+                ParameterInfo::new(ParamId::new(2), "Silent".to_string())
+                    .with_normalized_default(0.25),
+            ],
+        }),
+        ControlRequest::GetParameter { param_id } if param_id == ParamId::new(1) => {
+            Some(ControlReply::ParameterValue {
+                value: Some(Normalized::of(0.75)),
+            })
+        }
+        ControlRequest::GetParameter { .. } => Some(ControlReply::ParameterValue { value: None }),
+        _ => None,
+    });
+
+    let (mut mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
+    let snapshot = futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+        .expect("the server lists its parameters");
+    mirror.land(snapshot);
+    assert_eq!(
+        mirror.get(ParamId::new(1)),
+        Some(Some(Normalized::of(0.75)))
+    );
+    assert_eq!(
+        mirror.get(ParamId::new(2)),
+        Some(Some(Normalized::of(0.25))),
+        "an unanswered value reads as the declared default (0.25), not 0"
+    );
+}
+
 #[test]
 fn handle_open_editor_errors_for_missing_plugin() {
     // open_editor loads the plugin GUI in-process (not via IPC), so with

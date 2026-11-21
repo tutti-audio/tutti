@@ -19,6 +19,7 @@
 //! replacement: past about 72 held keys (what a block's slot takes) it can end a
 //! note the new unit started on the same key.
 
+use tutti_rt::CappedVec;
 use tutti_ump::Ump;
 
 use crate::event::{Event, EventKind};
@@ -240,15 +241,17 @@ impl Keys {
     }
 
     /// Hands every table to `spare`, to be freed on the control side.
-    pub(crate) fn retire_into(self, spare: &mut Vec<Tables>) {
-        spare.extend([self.held, self.staged, self.owed]);
+    pub(crate) fn retire_into(self, spare: &mut CappedVec<Tables>) {
+        for tables in [self.held, self.staged, self.owed] {
+            crate::exec::place(spare, tables);
+        }
     }
 
     /// A replace with a crossfade departed the running unit's keys (it
     /// stays in the store, fading out, and its keys are closed at the
     /// commit): take the tables of `fresh`, sized for the unit, where it has
     /// none now. Every table not used goes to `spare`. Allocates nothing.
-    pub(crate) fn refill(&mut self, mut fresh: Keys, spare: &mut Vec<Tables>) {
+    pub(crate) fn refill(&mut self, mut fresh: Keys, spare: &mut CappedVec<Tables>) {
         if self.held.len() < fresh.held.len() {
             std::mem::swap(&mut self.held, &mut fresh.held);
         }
@@ -337,11 +340,11 @@ impl Keys {
 
     /// The unit is gone: returns every key it held or owed, to close at the
     /// commit, and pushes the emptied tables to `spare`.
-    pub(crate) fn depart(&mut self, spare: &mut Vec<Tables>) -> Tables {
+    pub(crate) fn depart(&mut self, spare: &mut CappedVec<Tables>) -> Tables {
         let mut gone = std::mem::take(&mut self.held);
         absorb(&mut gone, &mut self.owed);
-        spare.push(std::mem::take(&mut self.staged));
-        spare.push(std::mem::take(&mut self.owed));
+        crate::exec::place(spare, std::mem::take(&mut self.staged));
+        crate::exec::place(spare, std::mem::take(&mut self.owed));
         self.closing = false;
         gone
     }

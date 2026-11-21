@@ -137,6 +137,10 @@ pub(super) enum ControlCommand {
     },
     GetParameter {
         param_id: ParamId,
+        /// The audio lane's answer to the flush of the host's writes, when the
+        /// caller asked for one: the control lane waits for it, as a blocking
+        /// caller does itself, so the value read holds the writes made before.
+        flush: Option<Ask<bool>>,
         reply: Reply<Option<Normalized>>,
     },
     GetPresetList {
