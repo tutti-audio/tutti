@@ -43,7 +43,7 @@ fn session(executor: &Executor) -> (MidiSession, Listener) {
 /// The device `spec` published, as the session's input (`input`) or output,
 /// once the session lists it.
 fn listed(io: &MidiSession, spec: &VirtualSpec, input: bool) -> DeviceInfo {
-    super::opening::listed(io, spec.name().as_str(), |d| {
+    super::listing::listed(io, spec.name().as_str(), |d| {
         let way = if input {
             d.direction.is_input()
         } else {

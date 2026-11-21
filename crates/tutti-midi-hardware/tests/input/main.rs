@@ -14,6 +14,7 @@ mod hardware_poll_no_alloc;
     target_os = "macos"
 ))]
 mod listener;
+mod listing;
 #[cfg(any(
     all(target_os = "linux", feature = "sequencer-tests"),
     target_os = "macos"
