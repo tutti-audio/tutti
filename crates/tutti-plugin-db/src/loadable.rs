@@ -38,7 +38,7 @@ pub enum Hosting {
     InProcess,
     /// In a `plugin-server` process, with its editor here. Refused with
     /// [`IpcError::NotOutOfProcess`](tutti_plugin_types::IpcError::NotOutOfProcess)
-    /// for VST2, which cannot be served.
+    /// for VST2, which cannot be hosted out of process.
     OutOfProcess,
 }
 
@@ -53,8 +53,8 @@ pub enum Hosting {
 /// **The blacklist gates every load and reload that goes through a
 /// `Loadable`**: `tutti_plugin`'s `Plugin::open`, `PluginClient`'s
 /// open and a session's crash reload ask it. Two reloads of a plugin that was
-/// already admitted do not: the relaunch of a served plugin for a fork
-/// (`LaunchSpec::reopen`) and the in-process editor instance of a served plugin
+/// already admitted do not: the relaunch of an out-of-process plugin for a fork
+/// (`LaunchSpec::reopen`) and the in-process editor instance of an out-of-process plugin
 /// load the same file again from the origin the first load recorded, without
 /// the view.
 #[derive(Debug, Clone)]

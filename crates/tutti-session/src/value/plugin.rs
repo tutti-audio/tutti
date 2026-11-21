@@ -34,7 +34,7 @@ use crate::plugin_params::Driven;
 /// [`ValueErrorKind::NoSuchTarget`](crate::ValueErrorKind::NoSuchTarget). A
 /// read-only parameter refuses a write with [`SetRefusal::Plugin`]. A write lands in the session's mirror under the value
 /// lock, so a read answers it at once, and is then sent to the plugin. A write
-/// the plugin's transport cannot take (a served plugin's full command queue, an
+/// the plugin's transport cannot take (an out-of-process plugin's full command queue, an
 /// in-process plugin busy in an editor call) is counted in
 /// [`Plugin::losses`](crate::Plugin::losses) and does not refuse the call; so is
 /// a write to a parameter the plugin dropped after the session read its

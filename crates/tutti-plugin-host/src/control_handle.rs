@@ -31,8 +31,8 @@ use tutti_units::ParamId;
 /// How a [`PluginHandle`] reaches a plugin's main-thread [`Control`].
 ///
 /// A `Control` call takes the token and `&mut self`, and the plugin sits
-/// behind a lock (in-process) or in the bridge (served), so it is lent to a
-/// closure rather than handed out. A served plugin's control is `Clone` and
+/// behind a lock (in-process) or in the bridge (out-of-process), so it is lent to a
+/// closure rather than handed out. An out-of-process plugin's control is `Clone` and
 /// holds no lock, which is the blanket impl; an in-process plugin's is
 /// `ControlBackend`, which locks the instance and pumps on
 /// [`editor_idle`](Self::editor_idle).
@@ -45,7 +45,7 @@ pub trait MainThreadControl: Send + Sync {
     /// parameter writes so far were made against: those writes are made stale,
     /// so none lands after the load. Called before the load runs; the default
     /// is for a control whose writes are not held apart from the plugin (a
-    /// served plugin's `Control` resets its own).
+    /// out-of-process plugin's `Control` resets its own).
     fn before_restore(&self) {}
 
     /// The editor's tick, which an in-process plugin pairs with the pump of
@@ -198,7 +198,7 @@ impl PluginStatus {
 /// [`load_state`](Self::load_state), [`AnyThread::parameter_descriptors`],
 /// [`AnyThread::parameter_value`], [`presets`](Self::presets),
 /// [`load_preset`](Self::load_preset), [`current_preset`](Self::current_preset)
-/// and [`AnyThread::set_render_mode`] wait for the reply. A served plugin's answer is bounded by five seconds
+/// and [`AnyThread::set_render_mode`] wait for the reply. An out-of-process plugin's answer is bounded by five seconds
 /// for the parameter and preset calls and ten for state, a wedged plugin
 /// spending the whole timeout before returning `None`. An in-process plugin
 /// answers at once on the main thread; off it the call waits up to two
@@ -251,7 +251,7 @@ impl std::fmt::Debug for PluginHandle {
 
 impl PluginHandle {
     /// Creates a handle over a backend: an in-process one, or the client of a
-    /// served plugin, which adds its refresh sink and server pid below.
+    /// out-of-process plugin, which adds its refresh sink and server pid below.
     ///
     /// `backend` is the plugin's [`AnyThread`] and [`Health`] (one object
     /// serves both). `control` is how the main-thread calls reach the plugin;
@@ -287,7 +287,7 @@ impl PluginHandle {
     /// an in-process backend that re-reads its plugin raises
     /// [`PluginInvalidation`]s.
     ///
-    /// Public for `tutti-plugin`'s served-plugin handle, which also hears invalidations over its wire.
+    /// Public for `tutti-plugin`'s out-of-process-plugin handle, which also hears invalidations over its wire.
     pub fn with_invalidate_sink(mut self, sink: InvalidateSink) -> Self {
         self.invalidate_sink = sink;
         self
@@ -296,7 +296,7 @@ impl PluginHandle {
     /// This handle with `sink` as the one `subscribe` hears: how a backend
     /// delivers the plugin's [`TransportRequest`]s.
     ///
-    /// Public for `tutti-plugin`'s served-plugin handle, which hears them over its wire.
+    /// Public for `tutti-plugin`'s out-of-process-plugin handle, which hears them over its wire.
     pub fn with_transport_sink(mut self, sink: TransportSink) -> Self {
         self.transport_sink = sink;
         self
@@ -306,7 +306,7 @@ impl PluginHandle {
     /// backend whose plugin raises cosmetic refreshes (the out-of-process
     /// client, over its wire) delivers [`PluginRefresh`]es.
     ///
-    /// Public for `tutti-plugin`'s served-plugin handle, which hears refreshes over its wire.
+    /// Public for `tutti-plugin`'s out-of-process-plugin handle, which hears refreshes over its wire.
     pub fn with_refresh_sink(mut self, sink: RefreshSink) -> Self {
         self.refresh_sink = sink;
         self
@@ -316,7 +316,7 @@ impl PluginHandle {
     /// ([`server_pid`](Self::server_pid)): for a backend that hosts the plugin
     /// in a process of its own.
     ///
-    /// Public for `tutti-plugin`'s served-plugin handle, the only one with a subprocess to name.
+    /// Public for `tutti-plugin`'s out-of-process-plugin handle, the only one with a subprocess to name.
     pub fn with_server_pid(mut self, pid: Option<u32>) -> Self {
         self.server_pid = pid;
         self
@@ -340,7 +340,7 @@ impl PluginHandle {
     }
 
     /// Serializes the plugin's state for `state_use` on the main thread
-    /// ([`Control::save_state`]): a served plugin's round trip runs on this
+    /// ([`Control::save_state`]): an out-of-process plugin's round trip runs on this
     /// thread, an in-process plugin's is a direct call. Unlike
     /// [`save_state`](Self::save_state) it never waits for another thread.
     ///
@@ -892,7 +892,7 @@ impl PluginHandle {
 
     /// Whether the plugin's own bypass is on now, read from the plugin: `None`
     /// when it has none or did not answer, or the instance is busy (an
-    /// in-process read never waits for it). A served plugin's read is a round
+    /// in-process read never waits for it). An out-of-process plugin's read is a round
     /// trip, which the session never makes: it compares the plugin's mirrored
     /// parameter values instead.
     #[must_use]
@@ -916,7 +916,7 @@ impl PluginHandle {
     /// colour and width). The plugin is told when it differs from the last
     /// call. [`PluginDead`](Delivered::PluginDead) when the handle has no
     /// route to the plugin or the plugin is lost, [`Dropped`](Delivered::Dropped)
-    /// when a served plugin's queue was full; a format with no place for it
+    /// when an out-of-process plugin's queue was full; a format with no place for it
     /// takes it and drops it, which is [`Yes`](Delivered::Yes).
     pub fn set_track_info(&self, main: MainThreadMarker, info: &TrackInfo) -> Delivered {
         let Some(control) = self.control.as_deref() else {
@@ -932,7 +932,7 @@ impl PluginHandle {
     /// plugin; nothing is replaced and nothing is cleared.
     ///
     /// `f` runs on the thread that heard the plugin: the bridge thread for a
-    /// served plugin, the GUI thread (during the editor's service) for an
+    /// out-of-process plugin, the GUI thread (during the editor's service) for an
     /// in-process one. Move heavy work elsewhere before touching graph state.
     /// The session's `SessionEvent::Plugin` is built on this; a host that needs
     /// a push of its own subscribes through the session.

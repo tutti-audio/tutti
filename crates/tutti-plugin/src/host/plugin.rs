@@ -30,7 +30,7 @@ use tutti_units::SampleRate;
 /// depends on it).
 ///
 /// Every arm is boxed. An enum is as large as its largest variant, and these
-/// differ by ~9 KiB (a served client is ~15 KiB, an in-process one ~6 KiB), so
+/// differ by ~9 KiB (an out-of-process client is ~15 KiB, an in-process one ~6 KiB), so
 /// an unboxed enum would make every `Plugin` (and every `IpcResult`
 /// carrying one) pay the larger figure.
 enum Placed {
@@ -107,7 +107,7 @@ pub enum RestoreRefused {
     /// An in-process plugin's refusal.
     #[error(transparent)]
     State(#[from] StateError),
-    /// A served plugin's: the server's account of it, as the wire carries it.
+    /// An out-of-process plugin's: the server's account of it, as the wire carries it.
     #[error("{0}")]
     Served(String),
 }
@@ -115,7 +115,7 @@ pub enum RestoreRefused {
 impl Plugin {
     /// Opens a plugin where its load resolves ([`placement`]) with the default
     /// bridge settings, holding the proof of the main thread an in-process load
-    /// needs. A caller off the main thread opens a served plugin with
+    /// needs. A caller off the main thread opens an out-of-process plugin with
     /// [`open_served`](Self::open_served).
     ///
     /// ```no_run
@@ -145,14 +145,14 @@ impl Plugin {
     /// a `plugin-server` subprocess with an IPC bridge. This call blocks while
     /// the subprocess starts and the plugin loads, so call it off the audio
     /// thread. `executor` runs the subprocess's exit watch, and a fork of the
-    /// served plugin keeps it for its own.
+    /// out-of-process plugin keeps it for its own.
     ///
     /// The load asks `plugin`'s blacklist where it opens the plugin, so a plugin
     /// blacklisted since it was resolved is refused.
     ///
     /// # Errors
     ///
-    /// As [`open_served`](Self::open_served) for a served plugin and
+    /// As [`open_served`](Self::open_served) for an out-of-process plugin and
     /// [`open_in_process`](Self::open_in_process) for an in-process one, and the
     /// refusals of [`placement`].
     pub fn open(
@@ -552,7 +552,7 @@ pub struct BoundPlugin {
 /// Builds the node that replaces a plugin's node when the plugin changes its
 /// audio ports ([`Plugin::bind_with_rebinder`]): an in-process plugin's successor
 /// is over the same instance, and the Processor moves to it with no
-/// restart. A served plugin's launch fixed its shared-memory slab, so ports
+/// restart. An out-of-process plugin's launch fixed its shared-memory slab, so ports
 /// of other widths are refused by name and nothing is built.
 ///
 /// `Clone`: every clone drives the same plugin.
@@ -570,7 +570,7 @@ pub struct PluginRebinder {
 #[must_use = "a node renders nothing until its move is committed"]
 pub struct Rebuilt {
     bound: BoundPlugin,
-    /// The in-process node's controls; a served node shares the cells of the
+    /// The in-process node's controls; an out-of-process node shares the cells of the
     /// client's [`PluginControls`](tutti_plugin_host::PluginControls), which stay.
     controls: Option<tutti_plugin_host::NodeControls>,
     commit: Commit,
@@ -617,8 +617,8 @@ impl Rebind for InProcessRebind {
     }
 }
 
-/// A served plugin's rebinder. The node it builds goes into the graph with the
-/// served fork source of the node it replaces (which reopens the plugin from
+/// An out-of-process plugin's rebinder. The node it builds goes into the graph with the
+/// out-of-process fork source of the node it replaces (which reopens the plugin from
 /// where it came, whatever its buses are now).
 struct ServedRebind {
     rebinder: tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>,
@@ -689,7 +689,7 @@ impl PluginRebinder {
         self.lock().layout()
     }
 
-    /// Ticks the plugin's lifecycle where its handle does not (a served
+    /// Ticks the plugin's lifecycle where its handle does not (an out-of-process
     /// plugin's): the restart a change of buses plans runs from here. Main
     /// thread.
     pub fn tick(&self, main: MainThreadMarker) {
@@ -717,7 +717,7 @@ impl PluginRebinder {
 
 enum BoundPlaced {
     Served(Box<PluginClient<crate::host::node::Bound>>),
-    /// A node rebuilt over a served plugin's new buses, and the fork source of
+    /// A node rebuilt over an out-of-process plugin's new buses, and the fork source of
     /// the node it replaces.
     ServedNode(
         Box<tutti_plugin_host::PluginNode<tutti_plugin_ipc::Ipc>>,

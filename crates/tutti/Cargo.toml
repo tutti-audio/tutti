@@ -65,6 +65,8 @@ tutti-measure = { version = "0.0.1", path = "../tutti-measure", optional = true 
 # doctest build graphs from. Dev-only: the umbrella exports none of them.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 tempfile = "3.8"
+# `plugin_host` awaits an out-of-process plugin value with its `block_on`.
+futures-lite = { workspace = true }
 # The loudness measurement `headless_export` reports; the umbrella does not export
 # `tutti-measure` outside feature `analyze`.
 tutti-measure = { path = "../tutti-measure" }

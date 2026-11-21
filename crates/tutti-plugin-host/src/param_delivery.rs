@@ -175,7 +175,7 @@ pub struct ParamDeliveryStats {
 /// its controls, and the `DeliveredRecord`. Written on the audio thread,
 /// read anywhere.
 ///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
+/// Public for `tutti-plugin`'s node of an out-of-process plugin, which drives the same piece.
 #[derive(Debug)]
 pub struct DeliveryCounters {
     sent: AtomicU64,
@@ -484,7 +484,7 @@ impl GridBits {
 
 /// A plugin node's per-parameter delivery. See the module docs.
 ///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
+/// Public for `tutti-plugin`'s node of an out-of-process plugin, which drives the same piece.
 pub struct ParamDelivery {
     /// Sorted by address; capacity reserved in [`new`](Self::new).
     slots: Vec<Slot>,

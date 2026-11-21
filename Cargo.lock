@@ -2482,6 +2482,7 @@ dependencies = [
 name = "tutti"
 version = "0.0.1"
 dependencies = [
+ "futures-lite",
  "tempfile",
  "tutti-buffers",
  "tutti-codec",

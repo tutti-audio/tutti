@@ -82,7 +82,7 @@
 //!   [`PluginChange::LatencyChanged`].
 //! - **Parameters.** The values the plugin reported (or the host set) go into
 //!   its mirror, and (`modulation`) into the knob of the lane on that
-//!   parameter when it has one (doc 014 §8.2). A mirror rebuilt by a crossfade
+//!   parameter when it has one. A mirror rebuilt by a crossfade
 //!   to another plugin, or by a rescan the plugin announced, is read by a task
 //!   on the session's executor: one round trip
 //!   per parameter, landed through the plugin inbox in a later [`Session::update`]. Until then the
@@ -130,7 +130,7 @@
 //!
 //! # `Phase::RenderMode` (with `export`)
 //!
-//! Offline while an export token lives (§4.3), Realtime otherwise; each
+//! Offline while an export token lives, Realtime otherwise; each
 //! plugin is told per `tutti_plugin_host::needs_notify`: on a change of
 //! mode, or if it was never told.
 
@@ -836,7 +836,7 @@ pub(crate) struct HostedPlugin {
     plugin: PluginRef,
     pub(crate) handle: PluginHandle,
     pub(crate) controls: Option<PluginControls>,
-    /// The state and preset requests of a plugin served from a plugin server:
+    /// The state and preset requests of an out-of-process plugin:
     /// what makes its work values awaited.
     answers: Option<tutti_plugin::PluginAnswers>,
     /// What the node counts and holds (its meter cell and delivery counters).
@@ -1077,7 +1077,7 @@ impl HostedPlugin {
         Self::placed(Placement::InProcess, handle, plugin, node)
     }
 
-    /// The record of a plugin served from a plugin server, with its `controls`.
+    /// The record of an out-of-process plugin, with its `controls`.
     pub(crate) fn served(
         handle: PluginHandle,
         plugin: PluginRef,

@@ -1,7 +1,7 @@
 //! [`Rebinder`]: a new node over the plugin a node already drives, with the
 //! ports the plugin now declares.
 //!
-//! A plugin that changes its audio ports (`IoChanged`) cannot be served by a
+//! A plugin that changes its audio ports (`IoChanged`) cannot be hosted out of process by a
 //! node whose shape is fixed when it is inserted. The control side builds a
 //! successor over the same instance instead, in two steps so the plugin is
 //! touched last: [`Rebinder::prepare`] builds the node and a [`Pending`] and
@@ -69,7 +69,7 @@ pub struct Rebinder<L: Loaded, F: Float = f32> {
     sample_rate: tutti_units::SampleRate,
     pending_sample_rate: Arc<PendingSampleRate>,
     /// Where a tick delivers what its pump finds: the handle's listeners.
-    /// `None` for a served plugin, whose own listener reports it.
+    /// `None` for an out-of-process plugin, whose own listener reports it.
     reporting: Option<Reporting>,
     /// The host's writes' reader, which every successor node claims too.
     edits: Option<super::host_edits::EditPort>,
@@ -216,12 +216,12 @@ where
 
     /// Runs the plugin's lifecycle once: takes what the plugin asked for (a
     /// restart for new buses among it) and carries it out. What a handle's
-    /// `editor_idle` does for an in-process plugin; a served plugin's handle
+    /// `editor_idle` does for an in-process plugin; an out-of-process plugin's handle
     /// has no instance to tick, so its rebinder does. What it finds (a
     /// latency or tail that moved, a request of the transport, a refused rate,
     /// the plugin's death) is delivered to the handle's listeners as the
     /// handle's own `editor_idle` delivers it, so what the plugin raised while
-    /// that ran is not lost to this pump; a served plugin's own listener
+    /// that ran is not lost to this pump; an out-of-process plugin's own listener
     /// reports its changes already. Main thread.
     pub fn tick(&self, main: MainThreadMarker) {
         let changes = self.inner.lock().pump(main);
@@ -365,7 +365,7 @@ mod tests {
         ))
     }
 
-    /// A fake plugin hosted as a served one is, with a rebinder over it, and
+    /// A fake plugin hosted as an out-of-process one is, with a rebinder over it, and
     /// the node it replaces, prepared.
     fn rig() -> (
         FakePlugin,

@@ -910,7 +910,7 @@ impl Graph {
     /// the plugin is out of reach once inserted.
     ///
     /// The session ticks the plugin's rebinder at each update, as a loaded
-    /// plugin's: when the plugin changes its audio ports, a served one
+    /// plugin's: when the plugin changes its audio ports, an out-of-process one
     /// restarts into a new slab and the node at this key is replaced by one
     /// over the new ports.
     #[cfg(feature = "plugin")]
@@ -2921,7 +2921,7 @@ impl<F: Float> Graph<F> {
     /// Makes every healthy hosted plugin's own bypass the node's mode, on the
     /// control tick and with no round trip (`BypassSync::reconcile`): an
     /// in-process plugin's bypass is read, without waiting for its instance, and
-    /// a served plugin's is compared with its mirrored parameter values. A
+    /// an out-of-process plugin's is compared with its mirrored parameter values. A
     /// plugin that differs, or whose write never reached it, is written again,
     /// each episode counted once
     /// ([`Plugin::bypass_writes_unapplied`](crate::Plugin::bypass_writes_unapplied)).
@@ -2931,9 +2931,9 @@ impl<F: Float> Graph<F> {
     ///
     /// Until a plugin is back in the node's mode the executor does not bypass its
     /// node, so it plays processed audio under `Bypassed` for that long: a tick
-    /// or two for an in-process plugin; for a served one until the plugin
+    /// or two for an in-process plugin; for an out-of-process one until the plugin
     /// reports its change, or a dropped write is retried (the wait doubles up to
-    /// 32 ticks). A served plugin that refuses a delivered write is not seen. An
+    /// 32 ticks). An out-of-process plugin that refuses a delivered write is not seen. An
     /// in-process plugin's bypass is kept only on a session ticked on the main
     /// thread (its write and read are the main thread's); an in-process plugin on
     /// another thread's tick is not refused, and its node stays unbypassed under

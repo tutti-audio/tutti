@@ -8,7 +8,7 @@
 //! sets ([`report`](PluginParamValues::report)). A value reads as the latest of
 //! those at once, before the control thread drains them.
 //!
-//! **The read is a job, and nothing here spawns it.** [`PluginParamValues::start`]
+//! **The read is a value, and nothing here spawns it.** [`PluginParamValues::start`]
 //! installs the report callback and hands back the mirror plus a `Send`
 //! [`ParamRead`]; the host runs [`ParamRead::run`] on whatever thread or pool
 //! it owns, and hands the result to [`PluginParamValues::land`]. A host
