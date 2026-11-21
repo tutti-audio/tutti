@@ -162,17 +162,19 @@
 //!     println!("{}: {:?}", device.name, session.devices().capability(&device.id));
 //! }
 //!
-//! // Connect by id when the choice matters (see "Matching by name" below).
-//! if let Some(first) = session.inputs().first() {
+//! // A device is connected by its id. Names are not unique, so finding one by
+//! // name is the app's own search over the listing.
+//! let keystep = session.inputs().into_iter().find(|d| d.name == "Keystep Pro");
+//! if let Some(keystep) = keystep {
 //!     // The inlet node of a newly opened input is the graph's to add and wire.
-//!     let _inlet = session.connect_input(started, &first.id)?;
+//!     let _inlet = session.connect_input(started, &keystep.id)?;
+//!     session.disconnect_input(&keystep.id)?;
 //! }
-//! // Or by name: one `DeviceQuery` form for connect and disconnect.
-//! session.disconnect_input("keystep")?;
 //!
 //! // Outbound: the output is a value the caller owns; `queue` returns what the
 //! // device took of them, always whole messages.
-//! let mut output = session.connect_output(started, "iac")?;
+//! let iac = session.outputs().into_iter().find(|d| d.name == "IAC Driver Bus 1");
+//! let mut output = session.connect_output(started, &iac.expect("an IAC bus").id)?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
 //! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
 //! # Ok(())
@@ -184,8 +186,7 @@
 //! - [`Devices`]: the devices present, and the changes to them.
 //! - [`MidiSession`]: connect and disconnect inputs; owns a [`Devices`] and the
 //!   [`HardwareMidiInputs`] over the inlets it was opened with. `connect_input`,
-//!   `disconnect_input` and `connect_output` take a [`DeviceQuery`] (a
-//!   `&DeviceId` or a `&str`); `connect_output` returns the [`OpenOutput`], which
+//!   `disconnect_input` and `connect_output` take a `&DeviceId`; `connect_output` returns the [`OpenOutput`], which
 //!   the caller owns and sends through.
 //! - [`HardwareMidiInputs`]: the open input ports, each named by its
 //!   [`InputId`](tutti_midi_runtime::InputId) and the [`InputProducerHandle`] its driver thread pushes through,
@@ -198,16 +199,6 @@
 //! - [`MidiEndpoints`]: the backend trait; [`MidiSession::open`] picks this
 //!   platform's implementation.
 //! - [`MidiHardwareError`]: what opening, connecting and sending can fail with.
-//!
-//! ## Matching by name picks a device you did not choose
-//!
-//! A name query ([`DeviceQuery`] from a `&str`) matches **case-insensitive
-//! substring, first hit wins**, in id order. So `"iac"` matches `"IAC Driver
-//! Bus 1"`, and a name matching two devices takes the one with the lowest id; for
-//! a disconnect the match is over the open inputs, and the lowest id among them is
-//! the one closed. Connect by [`DeviceId`](tutti_midi_device::DeviceId) when the choice matters, and
-//! [`MidiSession::disconnect_all_inputs`] closes every one. A name that matches
-//! nothing is [`MidiHardwareError::NoDeviceNamed`], listing the names it searched.
 //!
 //! ## Backends
 //!
@@ -345,7 +336,7 @@ pub use profiles::{
     ProfilesChange, Switcher, WholeSwitcher,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
-pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
+pub use session::{Connected, MidiHardwareConfig, MidiSession, Polled, Presented};
 pub use start::{Start, StartFailed, Started};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{

@@ -82,7 +82,8 @@ fn placed(
         .and_then(|c| c.channels(ChannelLayout::STEREO))
         .expect("a placeable wave")
         .at(at)
-        .gain(Amplitude::new(1.0));
+        .gain(Amplitude::new(1.0))
+        .expect("a finite gain");
     let key = s.graph().add(clip);
     let handle = handle_of(s, &key);
     wire(s, key.erase());

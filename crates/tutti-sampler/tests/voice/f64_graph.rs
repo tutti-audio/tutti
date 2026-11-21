@@ -149,7 +149,8 @@ fn a_placed_memory_voice_in_an_f64_graph_plays_forward() {
     let node = VoiceNode::new(Voice {
         source: VoiceSource::Memory(memory(&write_file(dir.path()))),
         play: Playback::default(),
-    });
+    })
+    .expect("a finite gain and a nonempty width");
     let mut solo = Standalone::<_, f64>::new(node, prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| i, "forward");
@@ -166,7 +167,8 @@ fn a_reversed_memory_voice_in_an_f64_graph_reads_the_mirrored_frames() {
             direction: Direction::Reverse,
             ..Playback::default()
         },
-    });
+    })
+    .expect("a finite gain and a nonempty width");
     let mut solo = Standalone::<_, f64>::new(node, prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| FRAMES - 1 - i, "reverse");
@@ -268,7 +270,8 @@ fn a_streamed_node_in_an_f64_graph_plays_the_files_values() {
     let opening = streamer.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
-    let node = VoiceNode::streaming(voice, stream, Playback::default());
+    let node = VoiceNode::streaming(voice, stream, Playback::default())
+        .expect("a finite gain and a nonempty width");
     let mut solo = Standalone::<_, f64>::new(node, prepare());
     roll(&mut solo);
     let got = render_stepped(&mut solo, &mut streamer, RENDERED);

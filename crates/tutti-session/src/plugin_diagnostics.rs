@@ -157,6 +157,15 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::mirror_writes_refused)
     }
 
+    /// Host-side tasks of the plugin's server that did not stop in time and were
+    /// left running. Zero for a plugin that runs in this process.
+    pub fn detached_tasks(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::detached_tasks)
+    }
+
     /// The latency the graph compensates for this plugin's node, as of the last
     /// update: the plugin's own, and out of process one chunk of the pipeline
     /// that carries its audio.

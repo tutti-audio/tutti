@@ -301,7 +301,8 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
                         }
                     }
                 },
-            );
+            )
+            .expect("a finite gain");
         }
         let pool = s.graph().add(pool);
         strips.push(pool.erase());

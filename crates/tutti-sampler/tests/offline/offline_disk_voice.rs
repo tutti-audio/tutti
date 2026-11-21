@@ -224,7 +224,8 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
             play: Playback::default(),
         },
         2u16,
-    );
+    )
+    .expect("a finite gain and a nonempty width");
 
     let mut node_fork = fork_unprepared(node);
     node_fork.node.prepare(
@@ -786,16 +787,19 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         source.set_speed(tutti_units::PlaybackRate::of(case.speed));
         source.set_loop(case.loop_);
         let mut memory: Box<dyn Node> = if case.reverse {
-            Box::new(VoiceNode::with_channels(
-                Voice {
-                    source: VoiceSource::Memory(source),
-                    play: Playback {
-                        direction: tutti_sampler::Direction::Reverse,
-                        ..Playback::default()
+            Box::new(
+                VoiceNode::with_channels(
+                    Voice {
+                        source: VoiceSource::Memory(source),
+                        play: Playback {
+                            direction: tutti_sampler::Direction::Reverse,
+                            ..Playback::default()
+                        },
                     },
-                },
-                2u16,
-            ))
+                    2u16,
+                )
+                .expect("a finite gain and a nonempty width"),
+            )
         } else {
             Box::new(source)
         };

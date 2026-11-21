@@ -88,7 +88,8 @@ fn solo_voice() -> Standalone<VoiceNodeHandle<f32>> {
         play: Playback::default(),
     };
     let mut solo = Standalone::new(
-        VoiceNode::with_channels(voice, ChannelLayout::MONO),
+        VoiceNode::with_channels(voice, ChannelLayout::MONO)
+            .expect("a finite gain and a nonempty width"),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
     solo.renderer_mut().set_transport_fn(rolling);
@@ -146,7 +147,9 @@ fn a_gain_set_through_the_controls_reaches_the_running_voice() {
         all_at(&block(&mut s), 0.25),
         "the value did not survive the commit"
     );
-    s.controls().set_gain(Amplitude::new(0.5));
+    s.controls()
+        .set_gain(Amplitude::new(0.5))
+        .expect("a finite gain");
     assert!(all_at(&block(&mut s), 0.5), "the typed door");
     assert_eq!(s.controls().gain(), Amplitude::new(0.5));
 }
@@ -350,7 +353,8 @@ fn a_voices_gain_port_reads_its_cell_as_its_base() {
             ..Playback::default()
         },
     };
-    let node = VoiceNode::with_channels(voice, ChannelLayout::MONO);
+    let node = VoiceNode::with_channels(voice, ChannelLayout::MONO)
+        .expect("a finite gain and a nonempty width");
     assert_eq!(
         node.shape().params.as_slice(),
         &[tutti_units::UnitParam::Volume][..]

@@ -121,7 +121,8 @@ fn voice_graph(stretch: f64, cents: f64) -> (RenderGraph, Arc<OfflineTimeline>) 
     // `insert_voice` directly rather than through the handle: this is the
     // control thread, there is no audio thread to hand a command to, and going
     // through the channel would need a pump step that proves nothing here.
-    pool.insert(SlotId(1), source, play);
+    pool.insert(SlotId(1), source, play)
+        .expect("a finite gain and a nonempty width");
 
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let (id, _handle) = g.add_with_controls(pool);

@@ -69,11 +69,11 @@ fn watch(f: impl FnOnce()) -> (usize, usize) {
     (FREES.with(|c| c.get()), BIGGEST.with(|c| c.get()))
 }
 
-/// Adding voices, and replacing one, frees nothing in the drain. Three
-/// `AddVoice`s — two stretched (their filters built by the sender), then a
-/// second add at the first one's id, which replaces that slot — are drained
-/// by one `process`, counting frees on this thread. The replaced slot comes
-/// back through the retirement channel, where the control thread frees it.
+/// Adding voices, and removing one, frees nothing in the drain. Two stretched
+/// adds (their filters built by the sender), a remove of the first and an add
+/// at its id again are drained by one `process`, counting frees on this
+/// thread. The removed slot comes back through the retirement channel, where
+/// the control thread frees it.
 #[test]
 fn the_add_voice_drain_frees_nothing() {
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
@@ -94,19 +94,26 @@ fn the_add_voice_drain_frees_nothing() {
             },
         )
     };
-    for id in [1, 2, 1] {
+    for id in [1, 2] {
         let (source, play) = voice();
         handle
             .add(SlotId(id), source, play)
             .expect("the command queue has room");
     }
+    handle
+        .remove(SlotId(1))
+        .expect("the command queue has room");
+    let (source, play) = voice();
+    handle
+        .add(SlotId(1), source, play)
+        .expect("the command queue has room");
     let frees = frees_during(|| {
         rig.block_in(&env);
     });
     assert_eq!(
         rig.node.voice_count(),
         2,
-        "the third add replaced the first"
+        "the last add took the id the remove freed"
     );
     assert_eq!(
         frees, 0,
@@ -116,7 +123,7 @@ fn the_add_voice_drain_frees_nothing() {
     assert_eq!(
         handle.collect_retired(),
         1,
-        "the replaced slot is retired to the control thread"
+        "the removed slot is retired to the control thread"
     );
 }
 
@@ -296,13 +303,14 @@ fn a_removed_disk_voice_on_a_full_retirement_channel_frees_its_ring_in_the_callb
         MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave")
     };
-    // 65 adds at one id: the first makes the slot, the next 64 each retire the
-    // one before. Two drains: a drain takes at most 64 commands.
-    for batch in [33, 32] {
-        for _ in 0..batch {
+    // 64 add and remove pairs at one id: each remove retires the slot its add
+    // made. Two drains: a drain takes at most 64 commands.
+    for _ in 0..2 {
+        for _ in 0..32 {
             handle
                 .add(SlotId(2), memory(), Playback::default())
                 .expect("room");
+            handle.remove(SlotId(2)).expect("room");
         }
         rig.block_in(&env);
     }
