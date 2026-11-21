@@ -31,6 +31,7 @@ use crate::history::TransportHistory;
 use crate::io::Io;
 use crate::param::ParamPorts;
 use crate::play::PlayClock;
+use crate::rates::SampleRates;
 use crate::render_mode::RenderMode;
 use crate::time::Offset;
 use crate::wake::Wake;
@@ -218,6 +219,8 @@ pub struct Shape {
     /// needs no pass to be bypassed. `false` unless set with
     /// [`with_own_bypass`](Self::with_own_bypass).
     pub own_bypass: bool,
+    /// The sample rates the node runs at. Read with [`rates`](Self::rates).
+    rates: SampleRates,
 }
 
 /// Where a node writes its state for its successor ([`Node::chase`]): a
@@ -358,6 +361,7 @@ impl Shape {
             note_events: true,
             chase: None,
             own_bypass: false,
+            rates: SampleRates::ALL,
         }
     }
 
@@ -685,6 +689,30 @@ impl Shape {
     /// latency, then its tail. The executor's silence skip waits this long.
     pub(crate) fn park_after(&self) -> Tail {
         Tail::Finite(self.latency.samples()).then(self.tail)
+    }
+
+    /// This shape for a node that runs at `rates` only: a session's
+    /// `Graph::set_sample_rate` and a fork (a bounce or an export) refuse a
+    /// rate outside them and change nothing. A node's rates do not depend on its `prepare`. Every rate
+    /// unless set.
+    ///
+    /// ```
+    /// use tutti_graph::{SampleRates, Shape};
+    /// use tutti_units::SampleRate;
+    /// let rates = SampleRates::of(SampleRate::SR_8K, SampleRate::SR_192K);
+    /// assert_eq!(Shape::EMPTY.with_rates(rates).rates(), rates);
+    /// assert_eq!(Shape::EMPTY.rates(), SampleRates::ALL);
+    /// ```
+    #[must_use]
+    pub const fn with_rates(mut self, rates: SampleRates) -> Self {
+        self.rates = rates;
+        self
+    }
+
+    /// The sample rates the node runs at. See [`with_rates`](Self::with_rates).
+    #[must_use]
+    pub const fn rates(&self) -> SampleRates {
+        self.rates
     }
 
     /// This shape, accepting in-place channels.

@@ -88,7 +88,10 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("builds");
-    session.graph().set_sample_rate(SampleRate::of(RATE));
+    session
+        .graph()
+        .set_sample_rate(SampleRate::of(RATE))
+        .unwrap();
     let side = session.graph().take_audio_side();
 
     let g = session.graph();
