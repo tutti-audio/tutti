@@ -200,6 +200,11 @@ pub use graph::{
     Committed, Crossfade, CrossfadeId, CrossfadeRefused, Feeder, Graph, LIVE_MAX_BLOCK, Meters,
     NotReopened, Reopened, ReplaceRefused, RootReader, Taps,
 };
+#[cfg(feature = "plugin")]
+#[cfg(feature = "plugin")]
+use hang::HangDetector;
+#[cfg(feature = "plugin")]
+pub use hang::HangPolicy;
 #[cfg(feature = "capture")]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
@@ -226,6 +231,8 @@ pub use midi_ci::{
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
+#[cfg(feature = "midi-hardware")]
+pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "midi")]
 pub use midi_load::{
     DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, NoCommonTimelineError, TrackError,
@@ -250,27 +257,11 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    AddPluginError, AddPooledPluginError, AnyPlugin, LoadPlugin, LoadPreset, LoadedPlugin,
-    LoadedPreset, Plugin, PluginApplyError, PluginCause, PluginChange, PluginDeclaration,
-    PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PoolPluginEntry, PooledPlugin,
-    PortsRefusal, PresetStartError, RestoreState, RestoredState, SaveState, StateRestore,
-    StateStartError, StateView, SwapPluginError,
+    AddPluginError, AnyPlugin, LoadPlugin, LoadPreset, LoadedPlugin, LoadedPreset, Plugin,
+    PluginApplyError, PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginPorts, PortsRefusal, PresetStartError, RestoreState, RestoredState, SaveState,
+    StateRestore, StateStartError, StateView, SwapPluginError,
 };
-pub(crate) use pool::Pool;
-pub use pool::{
-    Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
-    PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
-};
-#[cfg(feature = "plugin")]
-pub(crate) use pool::{Hold, HoldKind};
-
-#[cfg(feature = "plugin")]
-use hang::HangDetector;
-#[cfg(feature = "plugin")]
-pub use hang::HangPolicy;
-#[cfg(feature = "midi-hardware")]
-pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
@@ -278,6 +269,12 @@ pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
+pub(crate) use pool::Pool;
+pub use pool::{
+    Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
+    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
+    PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
+};
 #[cfg(feature = "record")]
 pub use recorder::{
     FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError,

@@ -1,47 +1,38 @@
-//! One enumeration of the output devices, on a thread of its own.
+//! One enumeration of the output devices, a value with one blocking step.
 //!
 //! Enumeration can block for good (ALSA opens every PCM, and one inside a
 //! sound server's plugin can wait on that server's thread forever), so it
 //! never runs on the thread that builds a frame. [`DeviceListing`] is the
-//! one-shot counterpart of [`DevicePoller`](crate::DevicePoller): it looks
-//! once and the result is taken without blocking.
+//! one-shot counterpart of [`DevicePoller`](crate::DevicePoller): it holds no
+//! thread or task, and [`list`](DeviceListing::list) is the step a caller
+//! runs off its queue (the session runs it on the executor's blocking pool).
 
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::fmt;
 
-use crate::error::{DeviceError, Result};
+use crate::error::Result;
 use crate::host::{AudioHost, DeviceHost};
 use crate::roster::{DeviceDirection, DeviceId};
 
-/// What [`DeviceListing::poll`] found.
-#[derive(Debug)]
-pub enum Listed {
-    /// The worker has not answered.
-    Pending,
-    /// The host's output devices.
-    Devices(Vec<DeviceId>),
-    /// The enumeration failed, or its thread ended without an answer.
-    Failed(DeviceError),
+type ListFn = Box<dyn FnOnce() -> Result<Vec<DeviceId>> + Send>;
+
+/// A description of one enumeration of a host's output devices.
+///
+/// Building it touches no host; [`list`](Self::list) opens one.
+pub struct DeviceListing {
+    list: ListFn,
 }
 
-/// A thread enumerating a host's output devices once.
-///
-/// Dropping the listing never waits for the thread: one stuck in the host
-/// stays stuck, detached, until the process ends, and holds nothing of the
-/// caller's. Its answer, if it ever comes, is discarded.
-#[derive(Debug)]
-pub struct DeviceListing {
-    result: Receiver<Result<Vec<DeviceId>>>,
-    done: bool,
+impl fmt::Debug for DeviceListing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceListing").finish_non_exhaustive()
+    }
 }
 
 impl DeviceListing {
-    /// Lists `host`'s output devices on a new thread, which opens its own
-    /// host (no host crosses a thread).
-    ///
-    /// # Errors
-    /// [`DeviceError::InvalidConfig`] when the thread cannot be spawned.
-    pub fn outputs(host: AudioHost) -> Result<Self> {
-        Self::spawn_with(move || {
+    /// A listing of `host`'s output devices.
+    #[must_use]
+    pub fn new(host: AudioHost) -> Self {
+        Self::from_fn(move || {
             Ok(DeviceHost::open(host)?
                 .snapshot()?
                 .devices(DeviceDirection::Output)
@@ -49,116 +40,49 @@ impl DeviceListing {
         })
     }
 
-    /// Runs `list` once on a new thread: the seam a test enumerates through.
-    ///
-    /// # Errors
-    /// [`DeviceError::InvalidConfig`] when the thread cannot be spawned.
-    pub fn spawn_with(
-        list: impl FnOnce() -> Result<Vec<DeviceId>> + Send + 'static,
-    ) -> Result<Self> {
-        let (tx, result) = mpsc::channel();
-        // Detached: dropping the listing never waits on a host that may never answer.
-        tutti_platform::spawn_named("tutti-device-list", None, move |_| {
-            // The receiver may be gone by now; nobody wants the answer.
-            let _ = tx.send(list());
-        })
-        .map_err(|e| DeviceError::InvalidConfig(format!("cannot start the device listing: {e}")))?
-        .detach();
-        Ok(Self {
-            result,
-            done: false,
-        })
+    /// A listing that runs `list`: the fake a test enumerates through.
+    #[must_use]
+    pub fn from_fn(list: impl FnOnce() -> Result<Vec<DeviceId>> + Send + 'static) -> Self {
+        Self {
+            list: Box::new(list),
+        }
     }
 
-    /// The answer if the worker has given it. Never blocks. After the answer
-    /// has been returned once, [`Listed::Pending`] again.
-    pub fn poll(&mut self) -> Listed {
-        if self.done {
-            return Listed::Pending;
-        }
-        let listed = match self.result.try_recv() {
-            Ok(Ok(devices)) => Listed::Devices(devices),
-            Ok(Err(e)) => Listed::Failed(e),
-            Err(TryRecvError::Empty) => return Listed::Pending,
-            Err(TryRecvError::Disconnected) => Listed::Failed(DeviceError::ListingEnded),
-        };
-        self.done = true;
-        listed
+    /// Opens the host and returns its output devices.
+    ///
+    /// **Blocks** for one enumeration, which can wait on a sound server for
+    /// good: run it off any queue thread (the session runs it on the
+    /// executor's blocking pool).
+    ///
+    /// # Errors
+    /// [`DeviceError::HostUnavailable`](crate::DeviceError::HostUnavailable)
+    /// when the host cannot be opened,
+    /// [`DeviceError::DevicesError`](crate::DeviceError::DevicesError) when it
+    /// cannot enumerate.
+    pub fn list(self) -> Result<Vec<DeviceId>> {
+        (self.list)()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc;
-    use std::time::Duration;
 
-    /// A worker that is still enumerating leaves `poll` pending, and its
-    /// answer arrives once it finishes.
+    /// A fake's answer is what `list` returns.
     #[test]
-    fn a_blocked_worker_leaves_poll_pending_until_it_answers() {
-        let (release, held) = mpsc::channel::<()>();
-        let mut listing = DeviceListing::spawn_with(move || {
-            held.recv().ok();
-            Ok(DeviceId::list(["A"]))
-        })
-        .unwrap();
-        assert!(matches!(listing.poll(), Listed::Pending));
-        release.send(()).unwrap();
-        let deadline = tutti_platform::Instant::now() + Duration::from_secs(20);
-        let listed = loop {
-            match listing.poll() {
-                Listed::Pending => {
-                    assert!(tutti_platform::Instant::now() < deadline, "no answer");
-                    std::thread::yield_now();
-                }
-                other => break other,
-            }
-        };
-        assert!(
-            matches!(&listed, Listed::Devices(d) if *d == DeviceId::list(["A"])),
-            "{listed:?}"
-        );
-        assert!(
-            matches!(listing.poll(), Listed::Pending),
-            "the answer is taken once"
-        );
+    fn from_fn_lists_what_the_fake_answers() {
+        let listing = DeviceListing::from_fn(|| Ok(DeviceId::list(["A", "B"])));
+        assert_eq!(listing.list().unwrap(), DeviceId::list(["A", "B"]));
     }
 
-    /// A worker that panics is a failure, not a pending that never ends.
+    /// A fake's failure is returned as it is.
     #[test]
-    fn a_worker_that_panics_is_a_failure() {
-        let mut listing = DeviceListing::spawn_with(|| panic!("host exploded")).unwrap();
-        let deadline = tutti_platform::Instant::now() + Duration::from_secs(20);
-        let listed = loop {
-            match listing.poll() {
-                Listed::Pending => {
-                    assert!(tutti_platform::Instant::now() < deadline, "still pending");
-                    std::thread::yield_now();
-                }
-                other => break other,
-            }
-        };
-        assert!(
-            matches!(listed, Listed::Failed(DeviceError::ListingEnded)),
-            "{listed:?}"
-        );
-    }
-
-    /// Dropping a listing whose worker never answers does not wait for it,
-    /// and the process ends with that thread still stuck (the test process
-    /// exits under nextest with the worker parked on a channel nobody will
-    /// send on).
-    #[test]
-    fn dropping_a_listing_does_not_wait_for_a_stuck_worker() {
-        let (stuck, held) = mpsc::channel::<()>();
-        let listing = DeviceListing::spawn_with(move || {
-            held.recv().ok();
-            Ok(Vec::new())
-        })
-        .unwrap();
-        drop(listing);
-        // The sender outlives the test: the worker stays parked to the end.
-        std::mem::forget(stuck);
+    fn from_fn_returns_the_fakes_failure() {
+        let listing =
+            DeviceListing::from_fn(|| Err(crate::DeviceError::InvalidDevice("no card".into())));
+        assert!(matches!(
+            listing.list(),
+            Err(crate::DeviceError::InvalidDevice(_))
+        ));
     }
 }

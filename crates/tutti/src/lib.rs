@@ -185,11 +185,10 @@ pub use tutti_session::PluginParams;
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, AddPooledPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPlugin,
-    LoadPreset, LoadedPlugin, LoadedPreset, Opened, Plugin, PluginApplyError, PluginBuses,
-    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginNode,
-    PluginPresets, PooledPlugin, PortCounts, PresetStartError, RestoreState, RestoredState,
-    SaveState, StateStartError, SwapPluginError,
+    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPlugin, LoadPreset, LoadedPlugin,
+    LoadedPreset, Opened, Plugin, PluginApplyError, PluginBuses, PluginChange, PluginEvent,
+    PluginHealth, PluginInfo, PluginNode, PluginPresets, PortCounts, PresetStartError,
+    RestoreState, RestoredState, SaveState, StateStartError, SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -450,7 +449,7 @@ pub mod session {
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
         DeviceChange, DeviceDirection, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
-        Listed, OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
+        OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
@@ -546,8 +545,8 @@ pub mod session {
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, ParamGesture, PluginCause, PluginParam,
-        PluginPorts, PoolPluginEntry, PortsRefusal, Recovery, RecoveryAction, RecoveryEvent,
-        RecoveryFailure, RecoveryPolicy, ReloadCause, StateRestore, StateView,
+        PluginPorts, PortsRefusal, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure,
+        RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};

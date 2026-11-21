@@ -4,7 +4,7 @@
 //! event input into audio and names its main output pair. The session adds one
 //! ([`Session::add_instrument`]), makes one of a node already in the graph
 //! ([`Session::instrument`]), or of a hosted plugin whose format says it is one
-//! (a pooled plugin's node, through [`Session::instrument`]), and hands back an [`InstrumentHandle`]: an
+//! (a loaded plugin's node, through [`Session::instrument`]), and hands back an [`InstrumentHandle`]: an
 //! event inlet before the event input, and a strip after the main pair (the
 //! gain no two instruments agree on).
 //!

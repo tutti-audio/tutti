@@ -30,7 +30,7 @@
 1 crates/tutti-session/src/lib.rs
 8 crates/tutti-session/src/modulation.rs
 1 crates/tutti-session/src/node.rs
-2 crates/tutti-session/src/plugin.rs
+1 crates/tutti-session/src/plugin.rs
 2 crates/tutti-session/src/session/event.rs
 1 crates/tutti-session/src/session/mod.rs
 1 crates/tutti-session/src/take.rs

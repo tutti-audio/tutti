@@ -2,7 +2,6 @@
 //! clock its phase was last run at, and the collector of the work other threads hand to the
 //! main thread.
 
-use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -15,7 +14,7 @@ use tutti_rt::LockExt;
 use crate::graph::Graph;
 use crate::plugin::{Inbox, RenderModeState, SNAPSHOT_INTERVAL};
 use crate::pool::Defer;
-use crate::{HangPolicy, PoolKey, RecoveryPolicy};
+use crate::{HangPolicy, RecoveryPolicy};
 
 /// The plugin policies a builder sets.
 #[derive(Debug)]
@@ -208,7 +207,7 @@ impl Drop for TaskGuard {
 pub(crate) struct PluginPart {
     /// How often a healthy plugin's state is captured.
     pub(crate) snapshot_interval: Duration,
-    /// What a hosted plugin's death or hang does; `None`: a pooled plugin's
+    /// What a hosted plugin's death or hang does; `None`: a loaded plugin's
     /// node stays silent at its key, a host-inserted plugin's is removed.
     pub(crate) recovery: Option<RecoveryPolicy>,
     /// When a hosted plugin's unanswered blocks are a hang.
@@ -218,8 +217,6 @@ pub(crate) struct PluginPart {
     pub(crate) now: Instant,
     /// The render mode last announced.
     pub(crate) render_mode: RenderModeState,
-    /// The plugin entries whose node waits to swap to a reloaded plugin.
-    pub(crate) pooled_swaps: BTreeSet<PoolKey>,
     /// What every plugin this session loads hands to the main thread: the closes of
     /// a drop off the main thread. The handle is cloned into each load.
     pub(crate) work: MainWorkHandle,
@@ -255,7 +252,6 @@ impl PluginPart {
                 hang: options.hang,
                 now: Instant::now(),
                 render_mode: RenderModeState::default(),
-                pooled_swaps: BTreeSet::new(),
                 work,
                 executor: executor.downgrade(),
                 inbox: Inbox::new(),

@@ -767,45 +767,6 @@ fn a_refused_set_applies_nothing_while_a_release_is_pending() {
     );
 }
 
-/// **A refusal of a landing that something newer superseded records nothing**:
-/// the kind that refuses a landed value names the landing's generation, and an
-/// entry with a load in flight (or a newer landing) is left to that load.
-#[cfg(feature = "plugin")]
-#[test]
-fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
-    let (mut s, spawned) = session();
-    let runs = Arc::new(AtomicUsize::new(0));
-    let key = PoolKey::new(&"a");
-    s.pool(entry("a", probe(1, &runs))).unwrap();
-    spawned.run_until_stalled();
-    let _ = events(&mut s);
-    let (landing, _) = s.pool.entries.landing_of::<Probe>(&key).expect("loaded");
-    let refusal = || LoadError::Job(WorkerError::Dropped);
-
-    // A new declaration is in flight: the refusal of the old landing is stale.
-    s.pool(entry("a", probe(2, &runs))).unwrap();
-    assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
-    assert!(!s.pool.entries.refuse_landed(&key, landing, refusal()));
-    assert_eq!(state(&s, "a").as_deref(), Some("reloading"), "untouched");
-    spawned.run_until_stalled();
-    assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
-
-    // The newer landing is refused by its own generation, and a refusal of
-    // the old one (a second time over) still records nothing.
-    assert!(!s.pool.entries.refuse_landed(&key, landing, refusal()));
-    let (newer, _) = s.pool.entries.landing_of::<Probe>(&key).expect("loaded");
-    assert_ne!(newer, landing);
-    assert!(s.pool.entries.refuse_landed(&key, newer, refusal()));
-    assert_eq!(state(&s, "a").as_deref(), Some("failed"));
-    assert!(handle(&s, "a").is_err(), "its value is gone");
-    assert_eq!(events(&mut s).len(), 1, "one failure");
-
-    // A failed entry loads again as a first landing.
-    s.retry(&"a").unwrap();
-    spawned.run_until_stalled();
-    assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
-}
-
 /// A clock switch, with loads of the session's own in flight (the pool's loads
 /// run as jobs on the session's executor).
 #[cfg(feature = "device")]

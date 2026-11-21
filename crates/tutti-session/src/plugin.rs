@@ -1,21 +1,21 @@
-//! Hosted plugins in the session (feature `plugin`; design 015 §4.2-§4.4):
-//! the pool entry that loads one ([`Session::plugin_entry`]), the add
-//! ([`Session::add_pooled_plugin`]),
-//! the view of the record the session keeps for each one ([`Plugin`]), and the
-//! work of [`Phase::Plugins`](crate::Phase::Plugins) and
+//! Hosted plugins in the session (feature `plugin`): the load that opens one
+//! ([`Session::load_plugin`]), the add that puts it in the graph
+//! ([`Session::add_plugin`]), the swap that replaces the plugin at a node
+//! ([`Session::swap_plugin`]), the view of the record the session keeps for each
+//! one ([`Plugin`]), and the work of [`Phase::Plugins`](crate::Phase::Plugins) and
 //! [`Phase::RenderMode`](crate::Phase::RenderMode).
 //!
-//! # The pool
+//! # The load
 //!
-//! A plugin may also be a pool entry ([`Session::plugin_entry`]): the pool
-//! loads it, [`Session::add_pooled_plugin`] puts its node in the graph through
-//! the one install, and the node's record holds the entry until the record
-//! retires.
+//! A plugin is a value the app runs ([`LoadPlugin`]) on the main thread, which
+//! returns a refcounted handle ([`LoadedPlugin`]); [`Session::add_plugin`] puts
+//! its node in the graph through the one install, and the node's record holds a
+//! clone of the handle until the record retires.
 //!
 //! # The record
 //!
 //! Each plugin the graph holds (`Graph::insert_plugin`,
-//! [`Session::add_pooled_plugin`]) has a record,
+//! [`Session::add_plugin`]) has a record,
 //! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::plugin_view`]): the [`PluginRef`] it is, its handle, its
 //! controls (an out-of-process plugin's latency and meter cells), its
 //! liveness, whether it was told the render mode, its last good state
@@ -67,8 +67,8 @@
 //!
 //! - **Health.** `tutti_plugin_host::Liveness` observes the handle's status at
 //!   `PhaseCx::now`: dead after at least `Liveness::DEATHS` consecutive
-//!   unhealthy observations spanning at least the window. A dead pooled
-//!   plugin's node stays at its key, silent in its place, and the entry reads
+//!   unhealthy observations spanning at least the window. A dead loaded
+//!   plugin's node stays at its key, silent in its place, and its handle reads
 //!   lost; a node of a plugin the host inserted itself (`Graph::insert_plugin`)
 //!   is removed ([`Session::remove`]). Either is reported once,
 //!   [`PluginChange::Died`].
@@ -121,7 +121,7 @@
 //!   one that panics [`RecoveryFailure::ReloadPanicked`]: a failed attempt.
 //! - **Reported.** [`PluginChange::Recovered`] says whether the state
 //!   came back and how old it was; a spent budget is
-//!   [`PluginChange::GaveUp`], and the node is silenced (a pooled plugin's) or
+//!   [`PluginChange::GaveUp`], and the node is silenced (a loaded plugin's) or
 //!   removed (a host-inserted one).
 //!
 //! An in-process plugin (VST2) is not recovered: a crash in it takes the
@@ -160,24 +160,21 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 
-mod entry;
 #[cfg(test)]
 mod fake_hosting;
 mod inbox;
 mod load;
 mod lost;
+mod opened;
 mod rebind;
 pub use rebind::PortsRefusal;
 mod preset;
 mod state;
 pub(crate) use lost::Lost;
 
-pub use entry::{
-    AddPooledPluginError, PluginCause, PluginDeclaration, PluginInfo, PluginPorts, PoolPluginEntry,
-    PooledPlugin,
-};
 use load::NodeLink;
 pub use load::{AddPluginError, LoadPlugin, LoadedPlugin, PluginNode, SwapPluginError};
+pub use opened::{PluginCause, PluginInfo, PluginPorts};
 pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
 pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
@@ -195,9 +192,10 @@ use inbox::{Arrival, contained};
 /// sets another.
 pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 
-/// A plugin load: what the pool's plugin entry runs, and what a recovery reload
-/// runs again. [`run`](Self::run) blocks (a `plugin-server` launch, half a
-/// second to fifteen), so it runs on a worker, never on the control thread.
+/// A plugin load: what [`LoadPlugin::run`] runs on the main thread, and what a
+/// recovery reload runs again on a task. [`run`](Self::run) and
+/// [`run_on`](Self::run_on) block (a `plugin-server` launch, half a second to
+/// fifteen).
 #[must_use = "a load does nothing until it is run"]
 pub(crate) struct PluginLoad {
     /// The plugin, under the blacklist of the catalog that resolved it, asked
@@ -225,35 +223,42 @@ impl std::fmt::Debug for PluginLoad {
 }
 
 impl PluginLoad {
-    /// Opens the plugin, restores the request's state, and (`modulation`)
-    /// reads its parameter values, after the state: those are what a
-    /// modulation lane's knob starts at. Any thread; it blocks.
-    ///
-    /// A plugin hosted in process is not opened here: an in-process load is
-    /// confined to the main thread, so the task returns it unopened and the
-    /// pool's main-thread stage opens it there (a library load and an
-    /// instance's init, with no subprocess to wait for).
+    /// Opens the plugin on the main thread `main` proves, restores the request's
+    /// state, and reads its parameter values, after the state: those are what a
+    /// modulation lane's knob starts at. A served plugin's server is launched
+    /// here, which blocks; an in-process plugin opens on `main` (a library load
+    /// and an instance's init, with no subprocess to wait for).
     ///
     /// A load the catalog refuses, or whose hosting the format cannot have
     /// ([`IpcError::NotOutOfProcess`] for VST2 asked to be served), is
     /// refused here, before anything is opened.
+    fn run_on(self, main: MainThreadMarker) -> Open {
+        match self
+            .loadable
+            .check()
+            .and_then(|()| tutti_plugin::catalog::placement(&self.loadable))
+        {
+            Err(refusal) => Open::refused(refusal),
+            Ok(ResolvedHosting::OutOfProcess) => self.open(Opening::Served),
+            Ok(ResolvedHosting::InProcess) => self.open(Opening::OnMain(main)),
+        }
+    }
+
+    /// [`run_on`](Self::run_on) for a load that runs where no main thread is
+    /// proved (a recovery reload's task): a served plugin opens, and one that
+    /// resolves in process is not opened ([`Opened::InProcess`]), since it is
+    /// confined to the main thread. Any thread; it blocks.
     pub(crate) fn run(self) -> PluginLoaded {
-        let loadable = self.loadable.clone();
-        let config = self.config.clone();
         let opened = match self
             .loadable
             .check()
             .and_then(|()| tutti_plugin::catalog::placement(&self.loadable))
         {
             Err(refusal) => Opened::Done(Box::new(Open::refused(refusal))),
-            Ok(ResolvedHosting::InProcess) => Opened::OnMain(Box::new(self)),
+            Ok(ResolvedHosting::InProcess) => Opened::InProcess,
             Ok(ResolvedHosting::OutOfProcess) => Opened::Done(Box::new(self.open(Opening::Served))),
         };
-        PluginLoaded {
-            loadable,
-            config,
-            opened,
-        }
+        PluginLoaded { opened }
     }
 
     /// The session's executor while it lives: a load that runs once the
@@ -393,13 +398,13 @@ enum Opening {
     OnMain(MainThreadMarker),
 }
 
-/// What a `PluginLoad`'s run did.
+/// What a `PluginLoad`'s [`run`](PluginLoad::run) did.
 enum Opened {
     /// Opened (or failed to) on the task's thread. Boxed: a plugin is far
     /// larger than an unopened load.
     Done(Box<Open>),
-    /// Hosted in process: opened on the main thread.
-    OnMain(Box<PluginLoad>),
+    /// Resolves in process, which only the main thread opens: nothing was opened.
+    InProcess,
 }
 
 /// What became of the state a reload was to restore.
@@ -434,38 +439,12 @@ pub enum StateRestore {
 /// A finished `PluginLoad`: the plugin, or why it did not load. `Send`.
 #[must_use = "a loaded plugin goes into the graph"]
 pub(crate) struct PluginLoaded {
-    loadable: Loadable,
-    config: AudioConfig,
     opened: Opened,
 }
 
 impl std::fmt::Debug for PluginLoaded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PluginLoaded")
-            .field("plugin", self.loadable.plugin())
-            .finish_non_exhaustive()
-    }
-}
-
-impl PluginLoaded {
-    /// Opens what the run left: nothing for a plugin opened on the task's
-    /// thread, the plugin itself for one hosted in process, which opens on
-    /// `main` (without it the open is refused).
-    fn finish(self, main: Option<MainThreadMarker>) -> (Loadable, AudioConfig, Open) {
-        let open = match self.opened {
-            Opened::Done(open) => *open,
-            Opened::OnMain(load) => match main {
-                Some(main) => (*load).open(Opening::OnMain(main)),
-                None => Open::refused(IpcError::LoadFailed {
-                    path: Some(load.loadable.plugin().path().to_path_buf()),
-                    stage: tutti_plugin_types::LoadStage::Opening,
-                    reason: "a plugin hosted in the host process loads on the main thread and \
-                             needs it"
-                        .into(),
-                }),
-            },
-        };
-        (self.loadable, self.config, open)
+        f.debug_struct("PluginLoaded").finish_non_exhaustive()
     }
 }
 
@@ -486,7 +465,7 @@ pub(crate) enum PluginLiveness {
         /// Why it needs a replacement.
         cause: ReloadCause,
     },
-    /// Written off (recovery off, or its budget spent): a pooled plugin's node
+    /// Written off (recovery off, or its budget spent): a loaded plugin's node
     /// stays at its key, silent; a host-inserted plugin's node is being
     /// removed.
     Dead {
@@ -502,7 +481,7 @@ pub(crate) enum PluginLiveness {
 /// The verdicts that remove a host-inserted plugin's node (written off with
 /// recovery off, or recovery's budget spent) are not here: the node and its
 /// view are gone in the update that reaches them, and the events say so
-/// ([`PluginChange::Died`], [`PluginChange::GaveUp`]). A pooled plugin's node
+/// ([`PluginChange::Died`], [`PluginChange::GaveUp`]). A loaded plugin's node
 /// stays at its key, silent, and reads [`Died`](Self::Died) for good.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -515,7 +494,7 @@ pub enum PluginHealth {
     Stalled,
     /// The engine reports it dead, and the session has not yet written it off
     /// (it waits out a debounce first). It then becomes
-    /// [`Reloading`](Self::Reloading), or, with recovery off, a pooled
+    /// [`Reloading`](Self::Reloading), or, with recovery off, a loaded
     /// plugin's node stays at its key, silent, and a host-inserted one's is
     /// removed.
     Died {
@@ -615,7 +594,7 @@ pub enum PluginChange {
         why: PortsRefusal,
     },
     /// A hosted plugin was declared dead
-    /// (`tutti_plugin_host::Liveness`) with recovery off: a pooled plugin's
+    /// (`tutti_plugin_host::Liveness`) with recovery off: a loaded plugin's
     /// node stays at its key, silent, and a host-inserted plugin's node was
     /// removed. Reported once. With recovery on the death is
     /// [`Reloading`](Self::Reloading), and the node's end
@@ -649,7 +628,7 @@ pub enum PluginChange {
         /// Attempts it took.
         attempts: u32,
     },
-    /// Recovery stopped: the failures spent the budget. A pooled plugin's node
+    /// Recovery stopped: the failures spent the budget. A loaded plugin's node
     /// stays at its key, silent; a host-inserted plugin's node is removed.
     GaveUp {
         /// Why.
@@ -908,8 +887,8 @@ pub(crate) struct HostedPlugin {
     /// The node of a plugin that is gone renders silence in the plugin's
     /// place ([`lost`]); until the graph takes the swap it is not.
     pub(crate) silenced: bool,
-    /// The pool entry this plugin's node is over, `None` for a plugin added
-    /// outside the pool. Dropped when the record retires, which ends the hold.
+    /// The handle this plugin was loaded as, `None` for a plugin the host inserted
+    /// itself. Dropped when the record retires.
     pub(crate) link: Option<NodeLink>,
     /// What re-inserts this plugin's node when it changes its ports. `None` for
     /// a plugin that reported no ports.
@@ -1194,7 +1173,7 @@ impl HostedPlugin {
     /// thread, a served plugin's drops here.
     pub(crate) fn retire(mut self) -> Retired {
         self.gate.end();
-        // The node over a pool entry is gone: the entry is no longer held.
+        // The node over a loaded plugin is gone: the link to its handle goes.
         self.link = None;
         Retired::of(self.placement, self)
     }
@@ -1418,7 +1397,7 @@ impl HostedPlugin {
     }
 }
 
-/// The type of a hosted plugin's [`Key`]: what [`Session::add_pooled_plugin`]
+/// The type of a hosted plugin's [`Key`]: what [`Session::add_plugin`]
 /// and [`Graph::insert_plugin`](crate::Graph::insert_plugin) return, so a plugin's
 /// ports and parameters are methods of its key as a native node's are.
 ///
@@ -1700,7 +1679,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
     /// Puts an opened plugin in the graph, unwired, and hosts it: the one
     /// place a plugin enters the session, through
-    /// [`add_pooled_plugin`](Self::add_pooled_plugin).
+    /// [`add_plugin`](Self::add_plugin).
     /// Its meter is the metronome's, an out-of-process plugin keeps how it
     /// was loaded for a reload (`origin`) and the session's recovery, and a
     /// parameter read that finished at the load is its mirror.
@@ -1747,7 +1726,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
     /// The view of the plugin hosted at `node`, a borrow of its record: its
     /// params, state, diagnostics, buses and health. It reads the
-    /// node's plugin; the entry's handle ([`plugin`](Self::plugin)) is the
+    /// node's plugin; the handle it was loaded as ([`LoadedPlugin`]) is the
     /// plugin's, whether or not a node has it.
     ///
     /// # Errors
@@ -1904,7 +1883,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         hosted.reload.in_flight = false;
         let opened = match loaded.opened {
             Opened::Done(open) => *open,
-            Opened::OnMain(_) => {
+            Opened::InProcess => {
                 self.fail_reload(
                     node,
                     RecoveryFailure::ReplacementInProcess,
@@ -2184,10 +2163,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// A plugin's node after the plugin ended for good (it died with recovery
-    /// off, or recovery gave up). The node of a pooled plugin stays at its
-    /// key, silent in the plugin's place, and the entry reads lost
-    /// ([`PluginCause`]) until a `retry` brings a plugin to it; any other
-    /// plugin's node goes.
+    /// off, or recovery gave up). The node of a loaded plugin stays at its
+    /// key, silent in the plugin's place, and its handle reads lost
+    /// ([`PluginCause`]) until a swap ([`Session::swap_plugin`]) brings a plugin to
+    /// it; any other plugin's node goes.
     fn end_node(&mut self, node: NodeKey) {
         if self
             .graph
@@ -3951,7 +3930,7 @@ mod tests {
     /// **A reload of a plugin whose load resolves in process is refused as
     /// `ReplacementInProcess`, with no main thread and nothing opened.** The
     /// decision is `Loadable::placement` (a pure resolve, no module
-    /// read): `PluginLoad::run` returns such a load unopened (`Opened::OnMain`),
+    /// read): `PluginLoad::run` returns such a load unopened (`Opened::InProcess`),
     /// and the landing does not open it. No thread of this process claimed the
     /// main thread, so an open (which takes the token) could not have happened.
     #[cfg(feature = "clap")]

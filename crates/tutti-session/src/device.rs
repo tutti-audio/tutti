@@ -247,6 +247,36 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
         self.start_watch(source, policy, want, running_on);
     }
 
+    /// Starts watching `host`'s devices: [`watch_devices`](Self::watch_devices)
+    /// over a [`DevicePoller`](tutti_cpal::DevicePoller) of `host` that looks every
+    /// `interval` (at least [`MIN_POLL_INTERVAL`](tutti_cpal::MIN_POLL_INTERVAL)). The
+    /// loop is a task on the session's executor, each look a step on its blocking pool;
+    /// a look that fails is tried again at the next tick, and dropping or replacing the
+    /// watch cancels the loop without waiting on a look in progress.
+    ///
+    /// # Errors
+    ///
+    /// [`DeviceError::HostUnavailable`](tutti_cpal::DeviceError::HostUnavailable) when
+    /// `host` cannot be opened (the loop opens its own), and
+    /// [`DeviceError::InvalidConfig`](tutti_cpal::DeviceError::InvalidConfig) when
+    /// the session's executor has shut down.
+    pub fn watch_host(
+        &mut self,
+        host: tutti_cpal::AudioHost,
+        interval: Duration,
+        policy: DevicePolicy,
+    ) -> Result<()> {
+        tutti_cpal::DeviceHost::open(host)?;
+        let poller = tutti_cpal::DevicePoller::new(host, interval);
+        let source = self.devices.poll_source(poller).ok_or_else(|| {
+            tutti_cpal::DeviceError::InvalidConfig(
+                "cannot watch the devices: the executor has shut down".into(),
+            )
+        })?;
+        self.watch_devices(source, policy);
+        Ok(())
+    }
+
     /// Runs a restart on the session's device.
     pub(crate) fn run_restart(
         &mut self,
@@ -815,36 +845,27 @@ impl From<DeviceEvent> for SessionEvent {
 }
 
 impl<K: crate::AppKey, C: RealTime> Session<K, C> {
-    /// Starts listing the host's output devices on a thread of its own:
-    /// enumeration can block for good, so it never runs here.
-    /// The answer is taken without blocking by a later
+    /// Starts `listing` (a [`DeviceListing::new`](tutti_cpal::DeviceListing::new) of a
+    /// host, or a [`from_fn`](tutti_cpal::DeviceListing::from_fn) fake): enumeration can
+    /// block for good, so it runs as one step on the session executor's blocking pool and
+    /// never here. The answer is taken without blocking by a later
     /// [`Phase::Poll`](crate::Phase::Poll) and reported once, as
     /// [`DeviceEvent::OutputsListed`] or [`DeviceEvent::OutputsListFailed`];
     /// [`DeviceEvent::OutputsListSlow`] is reported once if it takes 5 s.
-    /// Replaces a listing still waiting, whose thread is left to end on its
+    /// Replaces a listing still waiting, whose step is left to end on its
     /// own.
     pub fn list_outputs(&mut self, listing: tutti_cpal::DeviceListing) {
         self.devices.start(listing);
     }
 
-    /// [`list_outputs`](Self::list_outputs), once: `make` builds the listing
-    /// the first time this is called and is not called again. A `make` that
-    /// fails starts nothing and is asked again by the next call; its error
-    /// is returned.
-    ///
-    /// # Errors
-    ///
-    /// What `make` reports.
-    pub fn list_outputs_once(
-        &mut self,
-        make: impl FnOnce() -> tutti_cpal::Result<tutti_cpal::DeviceListing>,
-    ) -> Result<()> {
+    /// [`list_outputs`](Self::list_outputs), once: the first call starts `listing` and
+    /// later calls drop theirs unrun.
+    pub fn list_outputs_once(&mut self, listing: tutti_cpal::DeviceListing) {
         if self.devices.listed() {
-            return Ok(());
+            return;
         }
-        self.list_outputs(make()?);
+        self.list_outputs(listing);
         self.devices.mark_listed();
-        Ok(())
     }
 }
 
