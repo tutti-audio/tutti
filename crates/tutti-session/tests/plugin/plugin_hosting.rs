@@ -83,7 +83,7 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     let load = s.load_plugin(&id, &catalog);
     catalog.blacklist(&path, "hung in its load");
     assert!(catalog.unblacklist(&path));
-    load.run(main).expect("an unblacklisted plugin was refused");
+    let _admitted = load.run(main).expect("an unblacklisted plugin was refused");
 }
 
 /// **A hosting the format cannot have is refused at load**: VST2 asked to be

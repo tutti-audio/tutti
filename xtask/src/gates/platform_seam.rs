@@ -148,7 +148,7 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
     ("testing/tutti-plugin-contract/src/lib.rs", 2, PLUGINS),
     ("testing/tutti-plugin-contract/src/plugin.rs", 1, PLUGINS),
     ("testing/tutti-shared-plugin/src/lib.rs", 1, PLUGINS),
-    ("testing/tutti-shared-plugin/src/vst3.rs", 18, PLUGINS),
+    ("testing/tutti-shared-plugin/src/vst3.rs", 16, PLUGINS),
     ("testing/tutti-vst2-author/src/lib.rs", 4, PLUGINS),
     ("testing/tutti-vst2-test-plugin/src/lib.rs", 2, PLUGINS),
 ];

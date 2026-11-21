@@ -270,6 +270,9 @@ pub const RINGS_LATE: u32 = 4;
 pub const FAULT_CRASH: u32 = 1;
 /// The fault that never returns from the first `process` (`FAULT_HANG`).
 pub const FAULT_HANG: u32 = 2;
+/// The behaviour that is no fault: the plugin records on which thread it closed
+/// (`FAULT_RECORD_CLOSE`).
+pub const FAULT_RECORD_CLOSE: u32 = 3;
 /// How long a ring lasts after an impulse at frame 0: its last frame is this one.
 /// It equals [`TAIL`] on purpose, so the plugin is honest unless a case says not.
 pub const RING: Samples = Samples::new(8191);

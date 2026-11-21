@@ -84,8 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    names the catalog's answer for the plugin's id, so a plugin the catalog
     //    blacklisted does not resolve and fails, before any server starts. The
     //    thread that runs the load is the main thread: make the token once. The
-    //    handle is the plugin as loaded; the node is made from it, and holds
-    //    its own clone.
+    //    load gives the node the session takes; its handle observes the plugin.
     let mut session = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(512)))
@@ -95,8 +94,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .id
         .cloned()
         .ok_or("the scan could not read the plugin's id")?;
-    let loaded = session.load_plugin(&id, &catalog).run(main)?;
-    let node = session.add_plugin(loaded.node())?;
+    let opened = session.load_plugin(&id, &catalog).run(main)?;
+    let loaded = opened.handle();
+    let node = session.add_plugin(opened)?;
 
     // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
     //    `Key<AnyPlugin>`: ports come from it as from any node's key

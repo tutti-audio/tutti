@@ -81,7 +81,7 @@ fn load(
         load = load.initial_state(PeerState::of_plugin(plugin, bytes))?;
     }
     let loaded = load.run(main)?;
-    Ok(s.add_plugin(loaded.node())?)
+    Ok(s.add_plugin(loaded)?)
 }
 
 /// Plays `plugin` (restored from `state`, if any)

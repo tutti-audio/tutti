@@ -183,6 +183,17 @@ impl Error {
             description,
         }
     }
+
+    /// The `OSStatus` of the failure when it carries one: a call's status, the
+    /// refusal `kMIDINotPermitted`, or an `NSError` code that fits one.
+    pub(crate) fn os_status(&self) -> Option<OsStatus> {
+        match self {
+            Self::Call { status, .. } => Some(*status),
+            Self::NotPermitted(_) => Some(OsStatus::NOT_PERMITTED),
+            Self::Objc { code, .. } => i32::try_from(*code).ok().map(OsStatus::new),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -202,5 +213,25 @@ mod tests {
             Error::from_ns_error(op, -10843, "d".into(), "x".into()),
             Error::Objc { code: -10843, .. }
         ));
+    }
+
+    #[test]
+    fn os_status_is_the_status_a_failure_carries() {
+        let op = Operation::EnableUmpEndpoint;
+        let status = OsStatus::new(-10843);
+        assert_eq!(Error::call(op, status).os_status(), Some(status));
+        assert_eq!(
+            Error::NotPermitted(op).os_status(),
+            Some(OsStatus::NOT_PERMITTED)
+        );
+        assert_eq!(
+            Error::from_ns_error(op, -10843, "d".into(), "x".into()).os_status(),
+            Some(status)
+        );
+        assert_eq!(
+            Error::from_ns_error(op, isize::MAX, "d".into(), "x".into()).os_status(),
+            None
+        );
+        assert_eq!(Error::EndpointGone.os_status(), None);
     }
 }

@@ -69,6 +69,11 @@
 //! `process` fail, for a probe that measures a plugin which dies rendering:
 //! `FAULT_CRASH` aborts the process in the first block,
 //! `FAULT_HANG` never returns from it. Loading and describing are untouched.
+//! `FAULT_RECORD_CLOSE` is no fault: the plugin renders, and when it closes it
+//! writes one byte to `transcript::close_record_path()` that says whether the
+//! thread that closed it is the thread that created it
+//! (`transcript::CLOSED_ON_CREATOR`, `transcript::CLOSED_OFF_CREATOR`), the
+//! witness a host's close has when the plugin is gone.
 //!
 //! # Rings
 //!
@@ -355,8 +360,11 @@ pub const FAULT_NONE: u32 = 0;
 pub const FAULT_CRASH: u32 = 1;
 /// The first `process` never returns: a plugin that hangs while rendering.
 pub const FAULT_HANG: u32 = 2;
+/// Not a fault: `process` renders, and the plugin records its close (see
+/// [`Core`]'s `Drop`).
+pub const FAULT_RECORD_CLOSE: u32 = 3;
 /// Number of fault behaviours.
-pub const FAULTS: u32 = 3;
+pub const FAULTS: u32 = 4;
 /// The plugin renders its modes (the tag and all), the default.
 pub const RINGS_NONE: u32 = 0;
 /// The plugin rings [`RING_FRAMES`] after its trigger.
@@ -604,11 +612,61 @@ pub struct Core {
     told: [[AtomicU64; 4]; LOG_TRANSPORTS],
     automation_n: AtomicU32,
     automation_last: AtomicU32,
+    creator: usize,
 }
 
 impl Default for Core {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub use thread::this_thread;
+
+/// The calling thread, by the OS's own call. Not `std::thread::current`: that
+/// registers a thread-local destructor in this library, which crashes the
+/// thread when it exits after the host has unloaded the library.
+#[cfg(unix)]
+mod thread {
+    /// The calling thread's `pthread_self`.
+    pub fn this_thread() -> usize {
+        unsafe extern "C" {
+            fn pthread_self() -> usize;
+        }
+        // SAFETY: `pthread_self` takes nothing and cannot fail.
+        unsafe { pthread_self() }
+    }
+}
+
+/// The calling thread, by the OS's own call (see the unix module).
+#[cfg(windows)]
+mod thread {
+    /// The calling thread's `GetCurrentThreadId`.
+    pub fn this_thread() -> usize {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetCurrentThreadId() -> u32;
+        }
+        // SAFETY: `GetCurrentThreadId` takes nothing and cannot fail.
+        unsafe { GetCurrentThreadId() as usize }
+    }
+}
+
+impl Drop for Core {
+    /// With `FAULT_RECORD_CLOSE` selected, writes whether the closing thread is
+    /// the creating one.
+    fn drop(&mut self) {
+        if *self.fault.get_mut() != FAULT_RECORD_CLOSE {
+            return;
+        }
+        let same = this_thread() == self.creator;
+        let byte = if same {
+            crate::transcript::CLOSED_ON_CREATOR
+        } else {
+            crate::transcript::CLOSED_OFF_CREATOR
+        };
+        // A plugin cannot report a failed write; the reader finds no record.
+        let _ = std::fs::write(crate::transcript::close_record_path(), [byte]);
     }
 }
 
@@ -691,6 +749,7 @@ impl Core {
             told: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU64::new(0))),
             automation_n: z(),
             automation_last: z(),
+            creator: this_thread(),
         }
     }
 
