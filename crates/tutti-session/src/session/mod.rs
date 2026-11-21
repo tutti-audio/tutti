@@ -324,8 +324,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 }
 
 impl<K: AppKey, C: Clock> Session<K, C> {
-    /// Ends the session on the main thread: runs the work other threads handed to
-    /// it, drops the session's plugins (each closes on `main`, or hands its close
+    /// Ends the session on the main thread: waits for the plugin round trips in
+    /// flight (a snapshot, a parameter read, a reload), each bounded by its own IPC
+    /// deadline and past it warned about, while running the work they hand to the main
+    /// thread; runs the work other threads handed to it, drops the session's plugins (each closes on `main`, or hands its close
     /// to the session's collector), and runs what that handed over. Nothing a
     /// plugin owes the main thread is left undone.
     ///
@@ -339,6 +341,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     #[cfg(feature = "plugin")]
     pub fn close(self, main: tutti_plugin_types::MainThreadMarker) {
         let mut session = self;
+        session.plugins.drain_tasks(Some(main));
         let collected = session.plugins.take_collector(main);
         drop(session);
         collected.run(main);

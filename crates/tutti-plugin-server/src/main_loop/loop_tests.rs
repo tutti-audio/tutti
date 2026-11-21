@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant};
 
 use tutti_buffers::FloatWidth;
 use tutti_clap_test_plugin::{ClapSwitch, Site};
@@ -265,7 +265,9 @@ fn run(fixture: &mut Fixture, script: &mut Script) {
 /// loop serves without it.
 fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
     let main = main_thread();
+    let executor = Executor::new();
     let render = RenderThread::spawn(
+        &executor,
         fixture.side.take().expect("run once"),
         Some(Box::new(fixture.audio.take().expect("run once"))),
     )
@@ -276,6 +278,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
         &mut Native::default(),
         main,
         &render,
+        &executor,
         tick,
     );
     // As the server ends: the plugin goes home, then the render thread stops.
@@ -416,7 +419,9 @@ fn a_lost_plugin_ends_the_server_abnormally() {
         crate::session::Reaction::Reply(ControlReply::PluginLoaded { .. })
     ));
     fixture.session.lose_plugin();
+    let executor = Executor::new();
     let render = RenderThread::spawn(
+        &executor,
         fixture.side.take().expect("run once"),
         Some(Box::new(fixture.audio.take().expect("run once"))),
     )
@@ -428,6 +433,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
         &mut Native::default(),
         main,
         &render,
+        &executor,
         TICK,
     );
     fixture.session.drop_plugin(main);
@@ -452,7 +458,9 @@ fn an_undecodable_audio_frame_ends_the_session() {
     let (mut fixture, _slab) = session();
     let host = fixture.host();
     let main = main_thread();
+    let executor = Executor::new();
     let render = RenderThread::spawn(
+        &executor,
         fixture.side.take().expect("run once"),
         Some(Box::new(fixture.audio.take().expect("run once"))),
     )
@@ -476,6 +484,7 @@ fn an_undecodable_audio_frame_ends_the_session() {
         &mut Native::default(),
         main,
         &render,
+        &executor,
         TICK,
     );
     fixture.session.drop_plugin(main);

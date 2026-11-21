@@ -240,10 +240,11 @@ fn plugin_events(events: Vec<SessionEvent>) -> Vec<PluginEvent> {
         .collect()
 }
 
-/// An update that submits a parameter read (the next update polls it) and
-/// one that lands it; the plugin events both reported.
+/// An update that starts a parameter read, the wait for its task to end, and an update
+/// that lands it; the plugin events both reported.
 fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
     let mut reported = plugin_events(s.update());
+    super::await_tasks(s);
     reported.extend(plugin_events(s.update()));
     reported
 }
@@ -550,6 +551,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
         s.plugin_view(node).unwrap().params().get(MODE).is_ok(),
         "not yet"
     );
+    super::await_tasks(&s);
     events.extend(plugin_events(s.update()));
     assert!(
         changes(events)

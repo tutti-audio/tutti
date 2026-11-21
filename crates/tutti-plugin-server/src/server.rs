@@ -5,13 +5,16 @@
 //! which the render thread serves (`ProcessAudio` and `Reset`, nothing else),
 //! and the control connection, which the main thread's event loop serves.
 
+use crate::latch::{Finish, Latch};
 use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
+use crate::transport::Pulser;
 use crate::transport::{ControlTransport, Incoming, Transport, TransportListener};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tutti_platform::{Executor, StopToken, Task};
+use tutti_platform::{Executor, Task, Timer};
 use tutti_plugin_ipc::{
     AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
@@ -19,8 +22,9 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{IpcError, IpcResult};
 
 /// Ask the OS for the highest priority it grants this thread, now that it is
-/// about to do nothing but per-block audio work (the render thread, and a
-/// plugin's thread-pool helpers), and log what it got once.
+/// about to do nothing but per-block audio work (a plugin's thread-pool helpers;
+/// the render thread gets its priority from `spawn_dedicated`), and log what it
+/// got once.
 /// That is not real time: on Linux it is nice -20 at best, and a refusal
 /// (`EPERM`) is common (`tutti_platform::request_priority`).
 ///
@@ -37,6 +41,7 @@ use tutti_plugin_types::{IpcError, IpcResult};
 ///
 /// Failure is logged and ignored — elevation needs privileges a sandbox or CI
 /// runner may not grant, and degraded quality beats refusing to run.
+#[cfg(feature = "clap")]
 pub(crate) fn request_audio_priority(what: &str) {
     let outcome = tutti_platform::request_priority(tutti_platform::PriorityRequest::Highest);
     if outcome.is_granted() {
@@ -81,15 +86,17 @@ pub struct PluginServer {
     /// The thread that built the server: the one the plugin's main-thread
     /// calls run on, claimed once at startup.
     main: MainThreadMarker,
-    /// Stopped once the shutdown is under way: a host that ends then finds the
+    /// Raised once the shutdown is under way: a host that ends then finds the
     /// teardown, itself bounded, and is let finish ([`watch_host`]).
-    served: StopToken,
+    served: Arc<Latch>,
     /// The watch on the host, held for the life of the server; a drop cancels it.
     _host_watch: Option<Task<()>>,
     /// Where this process's background work runs: built on the main thread and
-    /// held until the server drops. Its drop joins the host watch's thread, which
-    /// can take up to one watch slice (a quarter of a second).
-    _executor: Executor,
+    /// held until the server drops, so every task on it (the render lane, a
+    /// beat, the host watch) is stopped before it goes. No task holds it: they
+    /// hold its liveness or its timer. Its drop joins the host watch's thread,
+    /// which ends within a watch slice (a quarter of a second).
+    executor: Executor,
 }
 
 impl std::fmt::Debug for PluginServer {
@@ -119,14 +126,14 @@ impl PluginServer {
             "the plugin server must be built on the process's main thread",
         ))?;
         let (session, render) = Session::new()?;
-        let served = StopToken::new();
+        let served = Arc::new(Latch::default());
         let executor = Executor::new();
         let host_watch = watch_host(
             &executor,
             socket.clone(),
-            session.ties().host_gone.clone(),
+            Arc::clone(&session.ties().host_gone),
             session.ties().bell.clone(),
-            served.clone(),
+            Arc::clone(&served),
         );
         Ok(Self {
             socket,
@@ -135,7 +142,7 @@ impl PluginServer {
             main,
             served,
             _host_watch: host_watch,
-            _executor: executor,
+            executor,
         })
     }
 
@@ -152,9 +159,9 @@ impl PluginServer {
     ///    Returns early if the host asks for shutdown before any audio flows.
     /// 2. **Audio**: `ProcessAudio` and `Reset`, in order, answered one by one.
     ///    The **render thread** serves it (`render`): it owns the
-    ///    plugin's `Processor`, asks for the highest priority on entry
-    ///    (`request_audio_priority`), and shares nothing with the main thread
-    ///    but queues, so an editor's paint can never delay a block.
+    ///    plugin's `Processor`, runs at the highest priority the OS grants (the
+    ///    executor's `spawn_dedicated` asks for it), and shares nothing with the
+    ///    main thread but queues, so an editor's paint can never delay a block.
     /// 3. **Control**: every other request and the plugin's unsolicited news,
     ///    for the rest of the session. The **main thread** serves it in its
     ///    event loop (`main_loop`), which keeps the plugin's
@@ -173,7 +180,7 @@ impl PluginServer {
     pub fn run(mut self) -> IpcResult<Ended> {
         let served = self.serve();
         // Idempotent: the paths that never reached the control phase.
-        self.served.stop();
+        self.served.raise();
         self.release();
         // The plugin and the session go with the server: what they leak, they
         // leak here.
@@ -214,16 +221,17 @@ impl PluginServer {
             .render
             .take()
             .ok_or(IpcError::ProtocolError("the audio phase runs once"))?;
-        let render = RenderThread::spawn(side, Some(Box::new(audio))).map_err(|failed| {
-            // Whole again, for the release.
-            self.render = Some(failed.side);
-            failed.error
-        })?;
+        let render =
+            RenderThread::spawn(&self.executor, side, Some(Box::new(audio))).map_err(|failed| {
+                // Whole again, for the release.
+                self.render = Some(failed.side);
+                failed.error
+            })?;
         let served = self.control_phase(&mut control, &render);
         // The teardown below is bounded by the Processor's homecoming patience,
         // so the host watch has nothing left to guard: a host that ends now is
         // let finish it.
-        self.served.stop();
+        self.served.raise();
         // The plugin goes home before the render thread stops: its Processor
         // is returned by that thread's poll, and the plugin is destroyed only
         // once it has it back.
@@ -248,9 +256,12 @@ impl PluginServer {
             Err(NotHome::Panicked(panicked)) => {
                 tracing::error!("plugin-server: {panicked}");
             }
+            Err(NotHome::Dropped) => {
+                tracing::error!("plugin-server: the render lane was dropped with its state");
+            }
             Err(NotHome::Stuck) => {
                 tracing::error!(
-                    "plugin-server: the render thread is stuck in the plugin; ending the process"
+                    "plugin-server: the render lane is stuck in the plugin; ending the process"
                 );
                 crate::leak::note();
                 let _ = std::fs::remove_file(&self.socket);
@@ -272,7 +283,7 @@ impl PluginServer {
         let Some(side) = self.render.take() else {
             return;
         };
-        match RenderThread::spawn(side, None) {
+        match RenderThread::spawn(&self.executor, side, None) {
             Ok(thread) => {
                 self.session.drop_plugin(self.main);
                 self.take_home(thread);
@@ -295,7 +306,7 @@ impl PluginServer {
                     let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
                         self.load_working(transport, id, body)?
                     } else if matches!(body, ControlRequest::SaveState { .. }) {
-                        working(transport, id, false, || {
+                        working(&self.executor, transport, id, false, || {
                             self.session.handle_with(self.main, body, &mut |_| {})
                         })?
                     } else {
@@ -312,7 +323,7 @@ impl PluginServer {
                     state,
                 }) => (
                     id,
-                    working(transport, id, true, || {
+                    working(&self.executor, transport, id, true, || {
                         self.session.load_state(self.main, &state, state_use)
                     }),
                 ),
@@ -351,20 +362,27 @@ impl PluginServer {
         id: ReqId,
         body: ControlRequest,
     ) -> IpcResult<Reaction> {
-        let restoring = AtomicBool::new(false);
+        let restoring = Arc::new(AtomicBool::new(false));
         let pulse = transport.pulser();
         let _ = transport.send(&ControlFrame::Working {
             id,
             stage: Working::Opening,
         });
-        beat_while(pulse.as_deref(), WORKING_PERIOD, id, &restoring, || {
-            self.session.handle_with(self.main, body, &mut |stage| {
-                if stage == Working::Restoring {
-                    restoring.store(true, Ordering::Release);
-                }
-                let _ = transport.send(&ControlFrame::Working { id, stage });
-            })
-        })
+        beat_while(
+            &self.executor,
+            pulse,
+            WORKING_PERIOD,
+            id,
+            &restoring,
+            || {
+                self.session.handle_with(self.main, body, &mut |stage| {
+                    if stage == Working::Restoring {
+                        restoring.store(true, Ordering::Release);
+                    }
+                    let _ = transport.send(&ControlFrame::Working { id, stage });
+                })
+            },
+        )
     }
 
     fn control_phase(
@@ -373,7 +391,7 @@ impl PluginServer {
         render: &RenderThread,
     ) -> IpcResult<()> {
         let main = self.main;
-        crate::main_loop::serve(&mut self.session, transport, main, render)
+        crate::main_loop::serve(&mut self.session, transport, main, render, &self.executor)
     }
 }
 
@@ -383,14 +401,16 @@ impl PluginServer {
 /// call that tells nothing, and the host's wait for the answer restarts on each
 /// beat.
 pub(crate) fn working<R>(
+    executor: &Executor,
     transport: &ControlTransport,
     id: ReqId,
     restoring: bool,
     work: impl FnOnce() -> R,
 ) -> R {
-    let restoring = AtomicBool::new(restoring);
+    let restoring = Arc::new(AtomicBool::new(restoring));
     beat_while(
-        transport.pulser().as_deref(),
+        executor,
+        transport.pulser(),
         WORKING_PERIOD,
         id,
         &restoring,
@@ -398,48 +418,106 @@ pub(crate) fn working<R>(
     )
 }
 
-/// Ends a beat when it goes out of scope, however the scope is left.
-struct StopOnDrop<'a>(&'a StopToken);
+/// The beat of a request: a task on a thread of the executor's of its own that
+/// sends the host `Working` every period. Dropping it ends the task and waits for
+/// it, so nothing is sent after the drop returns.
+///
+/// The wait lasts as long as the pulse in flight, which is a blocking
+/// `write_frame` on the control socket: a host that stops reading hangs the
+/// pulse and the main reply alike, and the wait with them. It has no write
+/// timeout.
+struct Beat {
+    task: Option<Task<()>>,
+    over: Arc<Latch>,
+}
 
-impl Drop for StopOnDrop<'_> {
-    fn drop(&mut self) {
-        self.0.stop();
+impl Beat {
+    /// Starts the beat of request `id` on `executor`, through `pulse`: as
+    /// [`Working::Restoring`] once `restoring` is set, as [`Working::Opening`]
+    /// before. `None` when the thread could not start: the host's wait then
+    /// restarts on nothing, and is logged.
+    fn start(
+        executor: &Executor,
+        pulse: Pulser<ControlFrame>,
+        period: Duration,
+        id: ReqId,
+        restoring: &Arc<AtomicBool>,
+    ) -> Option<Self> {
+        let over = Arc::new(Latch::default());
+        // Held from the task's creation: raised by every way out of it.
+        let finish = Finish::new(&over);
+        let beating = beat(
+            executor.timer(),
+            pulse,
+            period,
+            id,
+            Arc::clone(restoring),
+            finish,
+        );
+        match executor.spawn_dedicated("plugin-beat", None, beating) {
+            Ok(task) => Some(Self {
+                task: Some(task),
+                over,
+            }),
+            Err(error) => {
+                tracing::warn!(
+                    "plugin-server: the host cannot be told the load is at work: {error}"
+                );
+                None
+            }
+        }
     }
 }
 
-/// Runs `work` while a thread of its own sends the host `Working` for request
+impl Drop for Beat {
+    fn drop(&mut self) {
+        // Cancelled at its sleep, or after the frame it is sending: the wait is
+        // for that frame, which the host reads, and never for a period.
+        drop(self.task.take());
+        self.over.wait(Duration::MAX);
+    }
+}
+
+/// The beat's task: every `period`, tells the host `Working` for request `id`
+/// until the host cannot be written to, or the executor ends (`Err(Shutdown)`).
+async fn beat(
+    timer: Timer,
+    pulse: Pulser<ControlFrame>,
+    period: Duration,
+    id: ReqId,
+    restoring: Arc<AtomicBool>,
+    _finish: Finish,
+) {
+    while timer.sleep(period).await.is_ok() {
+        let stage = if restoring.load(Ordering::Acquire) {
+            Working::Restoring
+        } else {
+            Working::Opening
+        };
+        if pulse(&ControlFrame::Working { id, stage }).is_err() {
+            break;
+        }
+    }
+}
+
+/// Runs `work` while a task of its own sends the host `Working` for request
 /// `id` every `period` (as [`Working::Restoring`] once `restoring` is set),
 /// through `pulse`; without one, `work` runs alone.
 ///
-/// The thread has ended when this returns, and it ends on every exit of
-/// `work`, a panic included: the scope waits for it, and a beat that outlived
-/// a failed load would tell the host for ever that it is alive.
+/// The task has ended when this returns, and it ends on every exit of `work`, a
+/// panic included: the beat is dropped on the way out, which waits for it, and a
+/// beat that outlived a failed load would tell the host for ever that it is
+/// alive.
 fn beat_while<R>(
-    pulse: Option<&(dyn Fn(&ControlFrame) -> IpcResult<()> + Send + Sync)>,
+    executor: &Executor,
+    pulse: Option<Pulser<ControlFrame>>,
     period: Duration,
     id: ReqId,
-    restoring: &AtomicBool,
+    restoring: &Arc<AtomicBool>,
     work: impl FnOnce() -> R,
 ) -> R {
-    let done = StopToken::new();
-    std::thread::scope(|scope| {
-        let _ends = StopOnDrop(&done);
-        if let Some(pulse) = pulse {
-            scope.spawn(|| {
-                while !done.wait(period) {
-                    let stage = if restoring.load(Ordering::Acquire) {
-                        Working::Restoring
-                    } else {
-                        Working::Opening
-                    };
-                    if pulse(&ControlFrame::Working { id, stage }).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-        work()
-    })
+    let _beat = pulse.and_then(|pulse| Beat::start(executor, pulse, period, id, restoring));
+    work()
 }
 
 impl Drop for PluginServer {
@@ -453,27 +531,27 @@ impl Drop for PluginServer {
 /// How often the server tells the host it is at work on a load.
 pub(crate) const WORKING_PERIOD: Duration = Duration::from_secs(1);
 
-const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
+pub(crate) const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// How long a server is given to shut down after its host ended, before it is
 /// ended outright: a bound on a wait for the shutdown, never a delay to it.
 const HOST_GONE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Starts the watch on the host. When the host ends, `host_gone` is stopped and
-/// `bell` rung so the main loop shuts down; if `served` is not stopped within
+/// Starts the watch on the host. When the host ends, `host_gone` is raised and
+/// `bell` rung so the main loop shuts down; if `served` is not raised within
 /// [`HOST_GONE_GRACE`] the socket file at `socket_path` is removed and the
 /// process ended outright. A server whose host is unknown cannot watch it: that
 /// is logged, and only the host's connections end it.
 fn watch_host(
     executor: &Executor,
     socket_path: std::path::PathBuf,
-    host_gone: StopToken,
+    host_gone: Arc<Latch>,
     bell: crate::main_loop::Bell,
-    served: StopToken,
+    served: Arc<Latch>,
 ) -> Option<Task<()>> {
     let watch = tutti_plugin_ipc_ffi::watch_spawner(executor, move || {
         tracing::info!("the host process is gone; shutting the server down");
-        host_gone.stop();
+        host_gone.raise();
         bell.ring();
         // A shutdown already under way is let finish; one that does not come is
         // ended: a plugin library's exit handlers must not run on an orphan
@@ -517,20 +595,25 @@ mod beat_tests {
         }
     }
 
+    fn restoring(on: bool) -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(on))
+    }
+
     /// **The beat repeats while the work runs, as `Opening` until the work says
     /// it is restoring and as `Restoring` after**: the work waits for three
     /// beats, flips the stage, and waits for three more, so a beat that sent
     /// once, or never changed its stage, leaves it waiting.
     #[test]
     fn the_beat_repeats_and_follows_the_stage() {
+        let executor = Executor::new();
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
-        let pulse = move |frame: &ControlFrame| {
+        let pulse: Pulser<ControlFrame> = Box::new(move |frame| {
             let _ = tx.lock().unwrap().send(stage_of(frame));
             Ok(())
-        };
-        let restoring = AtomicBool::new(false);
-        let seen = beat_while(Some(&pulse), PACE, ID, &restoring, || {
+        });
+        let restoring = restoring(false);
+        let seen = beat_while(&executor, Some(pulse), PACE, ID, &restoring, || {
             let mut seen = Vec::new();
             for _ in 0..3 {
                 seen.push(rx.recv_timeout(HANG_GUARD).expect("a beat"));
@@ -546,58 +629,70 @@ mod beat_tests {
         assert!(seen.iter().filter(|s| **s == Working::Restoring).count() >= 3);
     }
 
-    /// **The beat has ended when the work's result is returned**: nothing is
-    /// sent after `beat_while` returns, which is what keeps a `Working` from
-    /// following the answer to the load it describes.
+    /// **The beat has ended before the work's result is returned, though a frame
+    /// is in flight when the work ends**: the beat's send is held open until the
+    /// work has said it is done, so the work ends with a `Working` still being
+    /// written, and `beat_while` must wait for that send to finish. What the
+    /// caller sends next is the answer, and a `Working` after it would describe a
+    /// request that is over.
     #[test]
-    fn no_beat_follows_the_return() {
-        let returned = AtomicBool::new(false);
-        let after = AtomicUsize::new(0);
-        let beats = AtomicUsize::new(0);
-        let pulse = |_: &ControlFrame| {
-            if returned.load(Ordering::SeqCst) {
-                after.fetch_add(1, Ordering::SeqCst);
-            }
-            beats.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+    fn the_beat_ends_before_the_result_is_returned() {
+        let executor = Executor::new();
+        let (sending, in_flight) = mpsc::channel::<()>();
+        let (release, released) = mpsc::channel::<()>();
+        let (work_done, done) = mpsc::channel::<()>();
+        let sent = Arc::new(AtomicUsize::new(0));
+        let pulse: Pulser<ControlFrame> = {
+            let (sending, released, sent) =
+                (Mutex::new(sending), Mutex::new(released), Arc::clone(&sent));
+            Box::new(move |_| {
+                let _ = sending.lock().unwrap().send(());
+                let _ = released.lock().unwrap().recv();
+                sent.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
         };
-        let restoring = AtomicBool::new(false);
-        beat_while(Some(&pulse), PACE, ID, &restoring, || {
-            while beats.load(Ordering::SeqCst) < 3 {
-                std::thread::yield_now();
+        let finished = std::thread::spawn({
+            let (sent, restoring) = (Arc::clone(&sent), restoring(false));
+            move || {
+                beat_while(&executor, Some(pulse), PACE, ID, &restoring, || {
+                    in_flight.recv_timeout(HANG_GUARD).expect("a beat begins");
+                    let _ = work_done.send(());
+                });
+                // The send that was in flight has finished, and no other began.
+                sent.load(Ordering::SeqCst)
             }
         });
-        returned.store(true, Ordering::SeqCst);
-        // Were the beat still running, it would send within a few paces; a
-        // joined one cannot, whatever the pace.
-        let seen = beats.load(Ordering::SeqCst);
-        for _ in 0..1_000 {
-            std::thread::yield_now();
-        }
+        done.recv_timeout(HANG_GUARD).expect("the work is done");
+        drop(release);
         assert_eq!(
-            beats.load(Ordering::SeqCst),
-            seen,
-            "a beat ran after the return"
+            finished.join().expect("beat_while returned"),
+            1,
+            "beat_while returned with a frame still being sent"
         );
-        assert_eq!(after.load(Ordering::SeqCst), 0);
     }
 
     /// **A panic in the work ends the beat, and the panic still propagates**: the
-    /// scope waits for the beat thread, so a beat that only the work's own
-    /// ending stopped would keep the host told for ever that the load lives.
-    /// The test completes, within the hang guard, only if the beat was stopped.
+    /// beat is dropped on the way out, which waits for it, so a beat that only the
+    /// work's own ending stopped would keep the host told for ever that the load
+    /// lives. The test completes, within the hang guard, only if the beat was
+    /// stopped.
     #[test]
     fn a_panic_in_the_work_ends_the_beat() {
         let (done_tx, done_rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let beats = AtomicUsize::new(0);
-            let pulse = |_: &ControlFrame| {
-                beats.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+            let executor = Executor::new();
+            let beats = Arc::new(AtomicUsize::new(0));
+            let pulse: Pulser<ControlFrame> = {
+                let beats = Arc::clone(&beats);
+                Box::new(move |_| {
+                    beats.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                })
             };
-            let restoring = AtomicBool::new(false);
+            let restoring = restoring(false);
             let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                beat_while(Some(&pulse), PACE, ID, &restoring, || {
+                beat_while(&executor, Some(pulse), PACE, ID, &restoring, || {
                     while beats.load(Ordering::SeqCst) < 2 {
                         std::thread::yield_now();
                     }
@@ -609,14 +704,38 @@ mod beat_tests {
         assert_eq!(
             done_rx.recv_timeout(HANG_GUARD),
             Ok(true),
-            "the scope never ended, or the panic was swallowed"
+            "the beat never ended, or the panic was swallowed"
         );
+    }
+
+    /// **A beat stops when the host cannot be written to**: the pulse fails, the
+    /// task ends by itself, and the work (which waits for that) goes on.
+    #[test]
+    fn a_failed_pulse_ends_the_beat() {
+        let executor = Executor::new();
+        let beats = Arc::new(AtomicUsize::new(0));
+        let pulse: Pulser<ControlFrame> = {
+            let beats = Arc::clone(&beats);
+            Box::new(move |_| {
+                beats.fetch_add(1, Ordering::SeqCst);
+                Err(IpcError::ProcessCrashed)
+            })
+        };
+        beat_while(&executor, Some(pulse), PACE, ID, &restoring(false), || {
+            while beats.load(Ordering::SeqCst) < 1 {
+                std::thread::yield_now();
+            }
+        });
+        assert_eq!(beats.load(Ordering::SeqCst), 1, "a beat after the failure");
     }
 
     /// Without a pulse the work runs alone and its result is returned.
     #[test]
     fn without_a_pulse_the_work_runs_alone() {
-        let restoring = AtomicBool::new(false);
-        assert_eq!(beat_while(None, PACE, ID, &restoring, || 7), 7);
+        let executor = Executor::new();
+        assert_eq!(
+            beat_while(&executor, None, PACE, ID, &restoring(false), || 7),
+            7
+        );
     }
 }
