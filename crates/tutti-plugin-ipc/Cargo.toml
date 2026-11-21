@@ -63,10 +63,12 @@ tutti-plugin-host = { path = "../tutti-plugin-host" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 tutti-graph = { path = "../tutti-graph" }
 tempfile = "3"
-# Reaps a server's process behind its guard's back (the exit status then cannot be read).
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
 assert_no_alloc = { version = "1", default-features = false }
 # The reference CLAP plugin the launch tests serve: a dev-dependency for the
 # artifact, which cargo builds beside the test binary.
 tutti-clap-test-plugin = { path = "../../testing/tutti-clap-test-plugin" }
+
+[target.'cfg(unix)'.dev-dependencies]
+# Reaps a server's process behind its guard's back (the exit status then cannot be read).
+rustix = { version = "1.1.6", default-features = false, features = ["std", "process"] }
