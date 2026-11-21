@@ -641,7 +641,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// fit the graph's check, else a plain swap, at the same key, so the node's
     /// wiring and lanes stay. The record at the key is carried over to the
     /// incoming plugin with nothing of the outgoing plugin's state, so a node
-    /// that was recovering reads healthy again, and a host-inserted node has the
+    /// that was recovering reads healthy again, its way back is the incoming
+    /// plugin's kind's (an out-of-process plugin is reloaded when it dies, one
+    /// hosted in process is not, whatever the outgoing plugin was), and a host-inserted node has the
     /// loaded kind's death behaviour afterwards: it stays silent at its key
     /// rather than being removed.
     ///
