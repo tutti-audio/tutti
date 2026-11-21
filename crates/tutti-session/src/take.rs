@@ -43,17 +43,15 @@
 //! ([`Recorded::lost`]). A dropout in the capture itself reaches the take as the
 //! silence the inlet played.
 
-use std::any::Any;
 use std::fmt;
-use std::future::Future;
 use std::marker::PhantomData;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::AssertUnwindSafe;
+
+use futures_lite::FutureExt;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use std::task::{Context, Poll};
 
 use thiserror::Error;
 use tutti_buffers::ChannelLayout;
@@ -493,21 +491,6 @@ impl Drop for Report {
     }
 }
 
-/// A future whose panic is its output: what a pump is polled as.
-struct Contained<F>(Pin<Box<F>>);
-
-impl<F: Future> Future for Contained<F> {
-    type Output = Result<F::Output, Box<dyn Any + Send>>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match catch_unwind(AssertUnwindSafe(|| self.0.as_mut().poll(cx))) {
-            Ok(Poll::Pending) => Poll::Pending,
-            Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
-            Err(payload) => Poll::Ready(Err(payload)),
-        }
-    }
-}
-
 /// What the pump shares with the take's handle.
 #[derive(Debug, Default)]
 struct Shared {
@@ -931,7 +914,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
                 else {
                     return;
                 };
-                let ended = Contained(Box::pin(pump.run(&report, &mut listener)))
+                let ended = AssertUnwindSafe(pump.run(&report, &mut listener))
+                    .catch_unwind()
                     .await
                     .unwrap_or_else(|payload| {
                         Err(TakeError::Panicked {

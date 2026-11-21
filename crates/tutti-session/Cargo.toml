@@ -41,6 +41,8 @@ tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = f
 thiserror = { workspace = true, features = ["std"] }
 # `oneshot`: the reply of an out-of-process plugin load, and of a MIDI-CI peer request.
 futures-channel = { workspace = true, optional = true }
+# `FutureExt::catch_unwind`: a take's pump reports its panic as its end.
+futures-lite = { workspace = true, optional = true }
 tracing.workspace = true
 serde = { version = "1", optional = true, features = ["derive"] }
 
@@ -93,7 +95,7 @@ device = ["dep:tutti-cpal"]
 record = ["dep:tutti-dsp"]
 # Live audio input from the sound card: `Session::add_input`, takes, mic capture;
 # implies `device` and `record`.
-capture = ["device", "record", "tutti-cpal/capture", "encode-wav"]
+capture = ["device", "record", "tutti-cpal/capture", "encode-wav", "dep:futures-lite"]
 midi = [
     "dep:tutti-midi-protocol",
     "dep:tutti-midi-runtime",
