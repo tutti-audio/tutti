@@ -495,7 +495,7 @@ impl InProcessEditor {
                     state.len()
                 );
                 gui.set_state(main, &state)
-                    .map_err(|e| EditorMirrorError::Refused(e.to_string()))
+                    .map_err(|e| EditorMirrorError::Refused(std::sync::Arc::new(e)))
             }
             Err(e) => Err(EditorMirrorError::Unread(e)),
         };

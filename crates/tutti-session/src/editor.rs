@@ -225,7 +225,7 @@ pub enum EditorCallError {
 /// it shows the plugin at its defaults, and the plugin keeps its own state.
 /// The failure is counted too
 /// (`mirror_writes_refused` of the plugin's diagnostics).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Opened {
     /// Embedded in the parent window, at this size: the host sizes the parent

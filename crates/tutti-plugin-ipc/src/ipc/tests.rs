@@ -932,10 +932,10 @@ fn a_remote_editor_opens_resizes_and_closes_over_the_wire() {
         .open_editor(main, host_window(0x40_0001), scale)
         .expect("the server opens it");
     assert_eq!(size.window, MOCK_EDITOR);
-    assert_eq!(
-        size.mirrored,
-        Ok(()),
-        "a served editor has nothing to mirror"
+    assert!(
+        size.mirrored.is_ok(),
+        "a served editor has nothing to mirror ({:?})",
+        size.mirrored
     );
     let wanted = dpi::Size::Physical(dpi::PhysicalSize::new(801, 601));
     assert_eq!(ipc.set_editor_size(main, wanted).expect("resized"), wanted);
@@ -1869,7 +1869,7 @@ mod editor_mirror {
             .editor()
             .open_floating_editor(main_thread())
             .expect("opens");
-        assert_eq!(opened.mirrored, Ok(()));
+        assert!(opened.mirrored.is_ok(), "{:?}", opened.mirrored);
         assert_eq!(refused(&ipc), 0);
     }
 

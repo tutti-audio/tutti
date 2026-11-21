@@ -383,7 +383,7 @@ impl WindowHandle {
 
 /// Why an editor opened without the audio instance's state: the editor shows
 /// the plugin at its defaults until the user changes something.
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone)]
 #[non_exhaustive]
 pub enum EditorMirrorError {
     /// The audio instance's state could not be read, so the editor instance
@@ -392,7 +392,7 @@ pub enum EditorMirrorError {
     Unread(crate::StateError),
     /// The editor instance refused the audio instance's state.
     #[error("the editor instance refused the audio instance's state: {0}")]
-    Refused(String),
+    Refused(#[source] std::sync::Arc<crate::PluginError>),
 }
 
 /// What an editor open returns: the window, and whether the editor instance
@@ -401,7 +401,7 @@ pub enum EditorMirrorError {
 /// An editor that could not be mirrored still opens (the user would have no
 /// window at all otherwise); `mirrored` says the editor shows the plugin at its
 /// defaults and the audio instance stays the source of truth.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[must_use]
 pub struct EditorOpened<W> {
     /// What the open produced: the editor's [`Size`], or `()` for a floating
