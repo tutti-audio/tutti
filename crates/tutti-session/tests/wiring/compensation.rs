@@ -216,7 +216,7 @@ fn a_re_prepare_republishes_the_figures_once_it_resumes() {
     let mut out = [0.0f32; 2];
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
 
-    s.graph().set_sample_rate(SampleRate::SR_48K);
+    s.graph().set_sample_rate(SampleRate::SR_48K).unwrap();
     for _ in 0..3 {
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
         let _ = s.update();

@@ -150,6 +150,7 @@ fn an_instrument_has_its_handles_keys_and_no_second_live_input() {
     assert!(
         s.graph_ref()
             .feed(key, tutti_session::Feeder::LiveInput)
+            .unwrap()
             .is_empty(),
         "no second inlet was opened"
     );
@@ -175,6 +176,7 @@ fn a_node_whose_live_input_has_its_keys_is_not_made_an_instrument() {
     assert!(
         s.graph_ref()
             .feed(key, tutti_session::Feeder::Instrument)
+            .unwrap()
             .is_empty(),
         "no instrument queue was opened"
     );

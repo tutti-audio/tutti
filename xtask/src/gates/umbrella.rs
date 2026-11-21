@@ -14,7 +14,11 @@
 //!    Two different items that share a name in different modules are fine: a
 //!    module is a namespace, and the compiler refuses a name twice in one.
 //!
-//! Each finding names the file and line. The rule reads source paths, so one item
+//! 3. **One noun per concept**: a name exported for items of more than one crate, or an
+//!    item at two paths, is a finding unless a row of `xtask/umbrella-collisions-baseline.txt`
+//!    or `-allow.txt` covers it ([`super::umbrella_collisions`]).
+//!
+//! Each finding of 1 and 2 names the file and line. The rule reads source paths, so one item
 //! reached through two crates (a type `tutti_nodes` re-exports from `tutti_dsp`,
 //! exported from both) is not seen.
 //!
@@ -26,14 +30,14 @@ use super::Tree;
 use super::use_tree::placed_uses;
 use std::collections::BTreeMap;
 
-const SRC: &str = "crates/tutti/src";
+pub(super) const SRC: &str = "crates/tutti/src";
 
-fn skipped(dir: &str) -> bool {
+pub(super) fn skipped(dir: &str) -> bool {
     matches!(dir, "target" | ".git")
 }
 
 /// The module path of a file under the umbrella's `src`, as segments.
-fn file_module(path: &str) -> Vec<String> {
+pub(super) fn file_module(path: &str) -> Vec<String> {
     let rel = path
         .strip_prefix(SRC)
         .unwrap_or(path)
@@ -54,6 +58,14 @@ struct At {
 }
 
 pub(super) fn check(tree: &dyn Tree) -> Report {
+    let mut r = items(tree);
+    let c = super::umbrella_collisions::check(tree);
+    r.out.extend(c.out);
+    r.findings.extend(c.findings);
+    r
+}
+
+fn items(tree: &dyn Tree) -> Report {
     let mut r = Report::default();
     let files: Vec<String> = tree
         .files(SRC, &skipped)
@@ -144,6 +156,29 @@ mod tests {
     use super::*;
 
     const LIB: &str = "crates/tutti/src/lib.rs";
+
+    /// The item rules alone; the collision lists have their own tests.
+    fn check(tree: &dyn Tree) -> Report {
+        items(tree)
+    }
+
+    #[test]
+    fn the_entry_point_adds_the_collision_findings() {
+        let mut m = Mem::with(&[(LIB, "pub use tutti_a::Hz;\npub use tutti_b::Hz;\n")]);
+        m.files.insert(
+            "xtask/umbrella-collisions-baseline.txt".into(),
+            String::new(),
+        );
+        m.files
+            .insert("xtask/umbrella-collisions-allow.txt".into(), String::new());
+        assert!(items(&m).passed());
+        let r = super::check(&m);
+        assert!(
+            r.findings
+                .iter()
+                .any(|f| f.contains("crates  Hz  tutti_a,tutti_b"))
+        );
+    }
 
     fn lib(src: &str) -> Report {
         check(&Mem::with(&[(LIB, src)]))

@@ -6,6 +6,7 @@ use core::fmt;
 use std::num::NonZeroUsize;
 
 use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMode};
+use tutti_dsp::SvfControls;
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_music::Adsr;
 use tutti_ump::MidiGroup;
@@ -45,6 +46,30 @@ pub enum OscillatorType {
     /// oscillator reads it, so note number only selects which voice sounds.
     /// `Display` renders this as "Pink Noise".
     Noise,
+}
+
+tutti_units::ranged! {
+    /// A synth's starting master gain: finite and at least zero, a linear
+    /// [`Amplitude`]. Above unity boosts.
+    MasterVolume(Amplitude), MasterVolumeOutOfRange, "a finite gain of at least zero",
+    |raw| raw.get() >= 0.0 && raw.get() <= f64::MAX
+}
+
+impl MasterVolume {
+    /// Unity gain, the [`SynthConfig`] default.
+    pub const UNITY: Self = Self(Amplitude::UNITY);
+}
+
+tutti_units::ranged! {
+    /// The [`Q`] of a synth's state-variable filter: from [`SvfControls::MIN_Q`]
+    /// to [`SvfControls::MAX_Q`], the range its poles are solved and stable in.
+    SvfQ(Q), SvfQOutOfRange, "a Q from 0.01 to 1000",
+    |raw| raw.get() >= SvfControls::MIN_Q && raw.get() <= SvfControls::MAX_Q
+}
+
+impl SvfQ {
+    /// The maximally flat response, `1/sqrt(2)`.
+    pub const BUTTERWORTH: Self = Self(Q::BUTTERWORTH);
 }
 
 /// Which response of the state-variable filter [`FilterType::Svf`] taps.
@@ -96,13 +121,13 @@ pub enum FilterType {
         /// Corner (or center, for [`SvfMode::Bandpass`]/[`SvfMode::Notch`])
         /// frequency in [`Hz`]. Base value, modulated multiplicatively as above.
         cutoff: Hz,
-        /// Filter [`Q`]. Around 0.707 is maximally flat; higher values put a
+        /// Filter [`SvfQ`]. Around 0.707 is maximally flat; higher values put a
         /// resonant peak at cutoff and narrow the band of the band tabs.
         ///
         /// Unlike `cutoff`, this one is fixed for the life of the synth —
         /// the SVF's output mix depends on it and is shared by every voice, so
         /// resonance modulation (CC71) reaches only [`Moog`](Self::Moog).
-        q: Q,
+        q: SvfQ,
         /// Which response is tapped.
         mode: SvfMode,
     },
@@ -258,11 +283,10 @@ pub struct SynthConfig {
     /// arrives on the all-call (M1 p.57). Default [`SysexDeviceId::DEFAULT`].
     pub device: SysexDeviceId,
     /// The master output gain the synth starts at, a linear [`Amplitude`]: `1.0` (the
-    /// default) is unity, `0.0` silence, and values above unity boost; a negative one
-    /// reads as 0. Applied once per block to the summed mix, not per voice. Once the synth
+    /// default) is unity, `0.0` silence, and values above unity boost. Applied once per block to the summed mix, not per voice. Once the synth
     /// is in a graph its gain is its `ParamSet` entry, `Volume`, which a host writes and a
     /// modulation lane takes as its knob.
-    pub volume: Amplitude,
+    pub volume: MasterVolume,
 }
 
 impl SynthConfig {
@@ -286,7 +310,10 @@ impl Default for SynthConfig {
             filter_mod: FilterModConfig::default(),
             group: MidiGroup::FIRST,
             device: SysexDeviceId::DEFAULT,
-            volume: Amplitude::UNITY,
+            volume: MasterVolume::UNITY,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

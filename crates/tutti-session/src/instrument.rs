@@ -300,10 +300,18 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         if !self.graph_ref().contains(node) {
             return Err(why(NotInstrument::Missing));
         }
-        if !self.graph_ref().feed(node, Feeder::Instrument).is_empty() {
+        if self
+            .graph_ref()
+            .feed(node, Feeder::Instrument)
+            .is_ok_and(|fed| !fed.is_empty())
+        {
             return Err(why(NotInstrument::AlreadyInstrument));
         }
-        if !self.graph_ref().feed(node, Feeder::LiveInput).is_empty() {
+        if self
+            .graph_ref()
+            .feed(node, Feeder::LiveInput)
+            .is_ok_and(|fed| !fed.is_empty())
+        {
             return Err(why(NotInstrument::LiveInput));
         }
         if self.graph_ref().node_event_inputs(node) == Ok(0) {
@@ -327,7 +335,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         }
         let graph = self.graph();
         let (queue, keys) = open_keys(graph);
-        graph.set_feed(node, Feeder::Instrument, vec![queue.events_out()]);
+        // `contains` above found the node, so it is in the graph.
+        let fed = graph.set_feed(node, Feeder::Instrument, vec![queue.events_out()]);
+        debug_assert!(fed.is_ok(), "the instrument is in the graph");
         let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         graph.connect(OutPort::new(node, usize::from(main[0])), strip.input(0))?;
         graph.connect(OutPort::new(node, usize::from(main[1])), strip.input(1))?;

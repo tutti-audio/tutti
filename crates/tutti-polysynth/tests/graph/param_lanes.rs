@@ -39,7 +39,7 @@ fn synth(unison: bool, detune: f64) -> PolySynth<f32> {
 /// [`synth`] starting at master volume `volume`.
 fn synth_at(unison: bool, detune: f64, volume: tutti_units::Amplitude) -> PolySynth<f32> {
     PolySynth::<f32>::new(SynthConfig {
-        volume,
+        volume: tutti_polysynth::MasterVolume::of(volume),
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
             attack: Seconds::new(0.0),

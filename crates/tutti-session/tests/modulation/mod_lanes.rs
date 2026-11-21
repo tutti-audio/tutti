@@ -57,7 +57,7 @@ pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
         .expect("builds");
-    s.graph().set_sample_rate(SampleRate::of(RATE));
+    s.graph().set_sample_rate(SampleRate::of(RATE)).unwrap();
     let side = s.graph().take_audio_side();
     (s, side)
 }

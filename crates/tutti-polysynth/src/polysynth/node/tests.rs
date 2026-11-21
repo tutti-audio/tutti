@@ -13,7 +13,7 @@ fn the_shape_declares_volume_and_the_unison_params() {
     use tutti_units::UnitParam;
 
     let plain = PolySynth::new(SynthConfig {
-        volume: tutti_units::Amplitude::new(0.5),
+        volume: crate::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
         ..Default::default()
     });
     assert_eq!(plain.shape().params.as_slice(), &[UnitParam::Volume][..]);
