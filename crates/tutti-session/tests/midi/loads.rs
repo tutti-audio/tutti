@@ -251,7 +251,7 @@ fn a_missing_file_is_an_io_read_error() {
 mod soundfont {
     use super::*;
     use tutti_session::LoadError;
-    use tutti_soundfont::Settings;
+    use tutti_soundfont::SoundFontConfig;
 
     /// The record count of the `phdr` chunk of the SoundFont `bytes` (SF2 2.04
     /// section 7.2): a 38-byte record per preset, and a terminal record.
@@ -287,7 +287,9 @@ mod soundfont {
         assert!(declared > 0);
         let font = session().load_soundfont(path).run().unwrap();
         assert_eq!(font.font().presets().len(), declared);
-        let unit = Settings::new().build::<f32>(std::sync::Arc::clone(font.font()));
+        let unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(std::sync::Arc::clone(
+            font.font(),
+        )));
         assert!(unit.is_ok(), "{:?}", unit.err());
     }
 

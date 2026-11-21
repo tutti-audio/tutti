@@ -30,7 +30,7 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Polyphony, Settings};
+use tutti_soundfont::{Polyphony, SoundFontConfig};
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, Data128, Flex, Message, MidiChannel, MidiGroup, NoteNumber,
     NoteVelocity, PerNoteManagement, RegisteredPerNoteController, Stream, Sysex7Packet,
@@ -50,10 +50,8 @@ fn load_test_soundfont() -> Arc<SoundFont> {
 
 /// A unit at 44.1 kHz, prepared (outside any gate) and driven by hand.
 fn unit() -> Hand {
-    let settings = Settings::new();
     Hand::new(
-        settings
-            .build(load_test_soundfont())
+        SoundFontUnit::try_from(SoundFontConfig::new(load_test_soundfont()))
             .expect("create SoundFontUnit"),
     )
 }
@@ -391,8 +389,8 @@ fn drum(key: u8, offset: usize) -> UmpAt {
 fn soundfont_note_logic_is_allocation_free() {
     let font = load_test_soundfont();
     let (open, closed) = two_drums_of_a_class(&font);
-    let settings = Settings::new().polyphony(Polyphony::of(8));
-    let mut unit = Hand::new(settings.build(font).expect("create SoundFontUnit"));
+    let config = SoundFontConfig::new(font).polyphony(Polyphony::of(8));
+    let mut unit = Hand::new(SoundFontUnit::try_from(config).expect("create SoundFontUnit"));
 
     let ons: Vec<UmpAt> = (0..24usize).map(|f| note_on(36 + f as u8, f * 2)).collect();
     let offs: Vec<UmpAt> = (0..24usize)

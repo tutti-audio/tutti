@@ -2,10 +2,9 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate. In this file: the settings follow rustysynth's synthesizer_settings.rs.
 
-//! How a unit is built.
+//! What a unit is made from.
 
 use std::num::NonZeroUsize;
-
 use std::sync::Arc;
 
 use crate::SoundFontUnit;
@@ -27,7 +26,7 @@ pub struct Polyphony(NonZeroUsize);
 impl Polyphony {
     /// The most voices a unit can be built with.
     pub const MAX: usize = 4096;
-    /// The polyphony of [`Settings::new`]: 64 voices.
+    /// The polyphony of [`SoundFontConfig::new`]: 64 voices.
     pub const DEFAULT: Self = Self(NonZeroUsize::new(64).unwrap());
 
     /// `voices` voices, or `None` for none or more than [`MAX`](Self::MAX).
@@ -97,9 +96,9 @@ impl From<Polyphony> for usize {
     }
 }
 
-/// What a [`SoundFontUnit`] is built with: start from [`new`](Self::new), change what differs
-/// with [`polyphony`](Self::polyphony), [`group`](Self::group) and [`device`](Self::device), and
-/// finish with [`build`](Self::build), which makes the unit over a decoded SoundFont.
+/// What a [`SoundFontUnit`] is made from: the decoded SoundFont, and what differs from the
+/// defaults, [`polyphony`](Self::polyphony), [`group`](Self::group) and
+/// [`device`](Self::device). Convert it with `SoundFontUnit::try_from`, which makes the unit.
 ///
 /// The rate is not here: a unit renders at the rate its graph prepares it at.
 ///
@@ -107,77 +106,78 @@ impl From<Polyphony> for usize {
 /// Group is a channel space of its own (M2-104 section 2.1.2, Appendix B.1), so another
 /// Group's messages are not this unit's.
 ///
-/// ```
-/// use tutti_soundfont::{Polyphony, Settings};
+/// ```no_run
+/// use tutti_sf2::SoundFont;
+/// use tutti_soundfont::{Polyphony, SoundFontConfig, SoundFontUnit};
 ///
-/// let settings = Settings::new().polyphony(Polyphony::of(16));
-/// assert_ne!(settings, Settings::new());
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let font = SoundFont::open("piano.sf2")?;
+/// let config = SoundFontConfig::new(font).polyphony(Polyphony::of(16));
+/// let unit = SoundFontUnit::<f32>::try_from(config)?;
+/// # Ok(())
+/// # }
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Settings {
+#[derive(Debug, Clone)]
+pub struct SoundFontConfig {
+    pub(crate) font: Arc<SoundFont>,
     pub(crate) polyphony: Polyphony,
     pub(crate) group: MidiGroup,
     pub(crate) device: SysexDeviceId,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Settings {
-    /// Settings with 64 voices, playing the first Group.
+impl SoundFontConfig {
+    /// A config over `font` with 64 voices, playing the first Group. An `Arc` is shared
+    /// rather than copied.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new(font: impl Into<Arc<SoundFont>>) -> Self {
         Self {
+            font: font.into(),
             polyphony: Polyphony::DEFAULT,
             group: MidiGroup::FIRST,
             device: SysexDeviceId::DEFAULT,
         }
     }
 
-    /// These settings with `polyphony` voices at most sounding at once.
+    /// This config with `polyphony` voices at most sounding at once.
     #[must_use]
-    pub const fn polyphony(mut self, polyphony: Polyphony) -> Self {
+    pub fn polyphony(mut self, polyphony: Polyphony) -> Self {
         self.polyphony = polyphony;
         self
     }
 
-    /// These settings playing the channels of `group`, and no other Group's.
+    /// This config playing the channels of `group`, and no other Group's.
     #[must_use]
-    pub const fn group(mut self, group: MidiGroup) -> Self {
+    pub fn group(mut self, group: MidiGroup) -> Self {
         self.group = group;
         self
     }
 
-    /// These settings answering to the Universal System Exclusive device id
+    /// This config answering to the Universal System Exclusive device id
     /// `device` besides the all-call (M1 p.40): a message addressed to it, or to
     /// all, is read (Master Volume, Balance and Tuning, General MIDI System On
     /// and Off). Master Volume and Balance keep what arrives on this id apart
     /// from what arrives on the all-call (M1 p.57).
     #[must_use]
-    pub const fn device(mut self, device: SysexDeviceId) -> Self {
+    pub fn device(mut self, device: SysexDeviceId) -> Self {
         self.device = device;
         self
     }
+}
 
-    /// A unit of float `F` over a decoded `SoundFont`, sharing it when given an `Arc` rather
-    /// than copying it.
-    ///
-    /// The unit renders at 44.1 kHz until its graph prepares it at the graph's rate ("The
-    /// rate" on [`SoundFontUnit`]). Allocates the voices and reads every zone of the font
-    /// once (for the tail), so call it off the audio thread.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NoPlayablePreset`](crate::Error::NoPlayablePreset) for a font none of whose presets has a MIDI bank
-    /// and program.
-    pub fn build<F: Float + SimdLanes>(
-        self,
-        soundfont: impl Into<Arc<SoundFont>>,
-    ) -> crate::Result<SoundFontUnit<F>> {
-        let player = Player::new(&soundfont.into(), self)?;
-        Ok(SoundFontUnit::from_player(player, 0))
+/// A unit of float `F` over the config's SoundFont, which it shares rather than copies.
+///
+/// The unit renders at 44.1 kHz until its graph prepares it at the graph's rate ("The
+/// rate" on [`SoundFontUnit`]). Allocates the voices and reads every zone of the font
+/// once (for the tail), so convert off the audio thread.
+///
+/// # Errors
+///
+/// [`Error::NoPlayablePreset`](crate::Error::NoPlayablePreset) for a font none of whose
+/// presets has a MIDI bank and program.
+impl<F: Float + SimdLanes> TryFrom<SoundFontConfig> for SoundFontUnit<F> {
+    type Error = crate::Error;
+
+    fn try_from(config: SoundFontConfig) -> crate::Result<Self> {
+        Ok(Self::from_player(Player::new(config)?, 0))
     }
 }

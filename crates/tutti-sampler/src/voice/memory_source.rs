@@ -212,7 +212,7 @@ pub struct MemorySource<F: Float> {
     clock: Clock,
 
     /// The project's tempo map, when this source reads one: lent once per
-    /// block to its clock ([`with_tempo`](Self::with_tempo)).
+    /// block to its clock ([`tempo`](Self::tempo)).
     tempo: Option<TempoReader>,
 
     /// Output width — the node's audio outputs, fixed at construction.
@@ -1449,10 +1449,10 @@ impl<F: Float> MemorySource<F> {
     /// Over a map whose tempo changes, how long a placed voice has played is
     /// the map's seconds between its start and the playhead, not the beats
     /// over the tempo of the moment; see
-    /// [`VoicePool::with_tempo`](super::VoicePool::with_tempo). It matters
+    /// [`VoicePool::tempo`](super::VoicePool::tempo). It matters
     /// only when the source is a graph node of its own (a voice in a pool or a `VoiceNode` reads its owner's). A fork reads the same map.
     #[must_use]
-    pub fn with_tempo(mut self, tempo: TempoReader) -> Self {
+    pub fn tempo(mut self, tempo: TempoReader) -> Self {
         self.tempo = Some(tempo);
         self
     }

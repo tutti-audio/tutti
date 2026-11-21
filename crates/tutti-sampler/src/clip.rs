@@ -187,8 +187,8 @@ impl<F: SamplerFloat> Clip<F> {
     }
 
     /// This clip reading the project's tempo map through `tempo`, as
-    /// [`VoiceNode::with_tempo`].
-    pub fn with_tempo(mut self, tempo: TempoReader) -> Self {
+    /// [`VoiceNode::tempo`].
+    pub fn tempo(mut self, tempo: TempoReader) -> Self {
         self.tempo = Some(tempo);
         self
     }
@@ -231,7 +231,7 @@ impl<F: SamplerFloat> Clip<F> {
         // The clip's gain was checked when set, and its width when it was made.
         .expect("a clip's gain and width are checked at the call that sets them");
         match tempo {
-            Some(tempo) => node.with_tempo(tempo),
+            Some(tempo) => node.tempo(tempo),
             None => node,
         }
     }

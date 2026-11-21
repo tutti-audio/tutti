@@ -386,7 +386,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// the new tempo. A voice with no map (and a constant one) keeps the
     /// transport's tempo, bit for bit. A fork reads the same map.
     #[must_use]
-    pub fn with_tempo(mut self, tempo: TempoReader) -> Self {
+    pub fn tempo(mut self, tempo: TempoReader) -> Self {
         self.tempo = Some(tempo);
         self
     }
