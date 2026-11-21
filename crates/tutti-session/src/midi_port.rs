@@ -1091,7 +1091,8 @@ fn disconnect<F: tutti_buffers::Float>(
     graph: &mut crate::graph::Graph<F>,
 ) {
     if let Some(id) = port.open.take() {
-        io.disconnect_input(&id);
+        // An input the session no longer holds is closed already.
+        let _ = io.disconnect_input(&id);
     }
     if let Some(key) = port.inlet.take() {
         // A host that removed the inlet itself leaves nothing to take.

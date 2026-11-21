@@ -146,40 +146,113 @@ fn disconnecting_closes_only_the_named_input() {
     let _ = s
         .connect_input(crate::testing::started(), &input(&s, "IAC Bus 1"))
         .unwrap();
-    s.disconnect_input("iac");
+    s.disconnect_input("iac").unwrap();
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
     s.disconnect_all_inputs();
     assert!(!s.is_any_input_connected());
 }
 
 /// **A name and an id pick the same device**: one `connect` and one
-/// `disconnect` take either, and a name that matches several devices
-/// disconnects the lowest id among the open ones (the choice is not the map's
-/// order).
+/// `disconnect` take either, and a disconnect that names no open input is the
+/// named error, not a no-op.
 #[test]
 fn a_query_by_id_and_by_name_reach_the_same_device() {
     let (mut s, _, _) = session();
     let keystep = input(&s, "Keystep Pro");
     let _ = s.connect_input(crate::testing::started(), "pro").unwrap();
     assert!(s.is_input_connected(&keystep), "by name");
-    assert!(s.disconnect_input(&keystep), "by id");
-    assert!(!s.disconnect_input("pro"), "nothing is open to close");
+    s.disconnect_input(&keystep).expect("by id");
+    assert!(!s.is_input_connected(&keystep));
 
-    // Both open inputs' names contain an "s"; the disconnect closes the
-    // lowest id.
+    let Err(MidiHardwareError::NotConnected(id)) = s.disconnect_input(&keystep) else {
+        panic!("an id that is not open is NotConnected");
+    };
+    assert_eq!(id, keystep);
+    let Err(MidiHardwareError::NoDeviceNamed { name, searched }) = s.disconnect_input("pro") else {
+        panic!("a name matching no open input is NoDeviceNamed");
+    };
+    assert_eq!(
+        (name.as_str(), searched.len()),
+        ("pro", 0),
+        "nothing is open"
+    );
+}
+
+/// **A name matching several devices picks none**: connect and disconnect both
+/// refuse it with the devices it matched, and change nothing. Both inputs'
+/// names contain an "s".
+#[test]
+fn a_name_matching_several_devices_is_ambiguous() {
+    let (mut s, _, _) = session();
+    let Err(MidiHardwareError::AmbiguousDeviceName { name, matches }) =
+        s.connect_input(crate::testing::started(), "s")
+    else {
+        panic!("a name matching two inputs is AmbiguousDeviceName");
+    };
+    assert_eq!(name, "s");
+    assert_eq!(matches, ["IAC Bus 1", "Keystep Pro"], "by id");
+    assert!(!s.is_any_input_connected(), "nothing opened");
+
+    let keystep = input(&s, "Keystep Pro");
     let iac = input(&s, "IAC Bus 1");
     let _ = s
         .connect_input(crate::testing::started(), &keystep)
         .unwrap();
     let _ = s.connect_input(crate::testing::started(), &iac).unwrap();
+    let Err(MidiHardwareError::AmbiguousDeviceName { matches, .. }) = s.disconnect_input("s")
+    else {
+        panic!("a name matching two open inputs is AmbiguousDeviceName");
+    };
+    assert_eq!(matches, ["IAC Bus 1", "Keystep Pro"]);
     assert!(
-        iac < keystep,
-        "the fixture's ids: {iac:?} below {keystep:?}"
+        s.is_input_connected(&keystep) && s.is_input_connected(&iac),
+        "neither closed"
     );
-    assert!(s.disconnect_input("s"));
+    let Err(MidiHardwareError::AmbiguousDeviceName { .. }) =
+        s.connect_output(crate::testing::started(), "s")
+    else {
+        panic!("a name matching two outputs is AmbiguousDeviceName");
+    };
+}
+
+/// **An output that is there and will not open fails the connect**, and the
+/// input it was opened with closes; a device with no output direction opens
+/// none and connects, whatever the outputs do.
+#[test]
+fn an_output_that_will_not_open_fails_the_input_connect() {
+    let (backend, fake) = FakeBackend::build();
+    let mut s = MidiSession::open_over(
+        &tutti_platform::Executor::new(),
+        backend,
+        inlets(),
+        crate::MidiHardwareConfig::new(),
+    )
+    .unwrap();
+    let events = s.devices().subscribe();
+    fake.plug(
+        crate::test_support::endpoint(20, "Duplex Box"),
+        tutti_midi_device::PortDirection::Duplex,
+    );
+    let _ = events.pending().count();
+    fake.refuse_output_opens(true);
+
+    let duplex = input(&s, "Duplex Box");
+    let Err(MidiHardwareError::InUse(held)) = s.connect_input(crate::testing::started(), &duplex)
+    else {
+        panic!("the output's refusal is the connect's");
+    };
+    assert_eq!(held, EndpointId::from_raw(20));
+    assert!(!s.is_any_input_connected(), "the input is closed again");
+    assert!(fake.connected_inputs().is_empty());
+    assert_eq!(s.ports().port_count(), 0, "its port is retired");
+
+    let keystep = input(&s, "Keystep Pro");
+    let _ = s
+        .connect_input(crate::testing::started(), &keystep)
+        .unwrap();
     assert!(
-        s.is_input_connected(&keystep) && !s.is_input_connected(&iac),
-        "the lowest id went"
+        s.is_input_connected(&keystep),
+        "an input-only device has none to open"
     );
 }
 
@@ -224,7 +297,7 @@ fn an_input_that_is_not_held_reads_no_fault() {
     let _ = s
         .connect_input(crate::testing::started(), &keystep)
         .unwrap();
-    assert!(s.disconnect_input(&keystep));
+    s.disconnect_input(&keystep).unwrap();
     assert_eq!(s.input_fault(&keystep), None);
 }
 
@@ -421,7 +494,7 @@ fn hot_plug_cycles_keep_the_port_set_bounded() {
         .connect_input(crate::testing::started(), &input(&s, "IAC Bus 1"))
         .unwrap();
     for cycle in 0..100 {
-        s.disconnect_input(&input(&s, "Keystep Pro"));
+        s.disconnect_input(&input(&s, "Keystep Pro")).unwrap();
         assert_eq!(s.ports().list_input_ports().len(), 1, "cycle {cycle}");
         let _ = s
             .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
@@ -468,14 +541,14 @@ impl Drop for LoggingBackend {
 
 impl MidiEndpoints for LoggingBackend {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        sink.seed(os_devices(&self.inputs(), &[]))?;
+        sink.seed(os_devices(&self.inputs()?, &[]))?;
         Ok(Box::new(NoWatch))
     }
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        vec![crate::test_support::endpoint(1, "Logged")]
+    fn inputs(&self) -> crate::Result<Vec<OsEndpoint>> {
+        Ok(vec![crate::test_support::endpoint(1, "Logged")])
     }
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> crate::Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
     fn open_input(
         &self,

@@ -185,12 +185,14 @@ impl core::fmt::Debug for MidiSession {
 ///
 /// # Matching a name
 ///
-/// **Case-insensitive substring, first hit wins.** The name is lowercased and
-/// tested with `contains` against each device's lowercased name, in the order
-/// [`inputs`](MidiSession::inputs) or [`outputs`](MidiSession::outputs)
-/// returns them: by id. So `"iac"` matches `"IAC Driver Bus 1"`, and a name
-/// matching two devices picks the one with the lowest id. Connect by
-/// [`DeviceId`] when that matters.
+/// **Case-insensitive substring, exactly one device.** The name is lowercased
+/// and tested with `contains` against each device's lowercased name, among the
+/// devices [`inputs`](MidiSession::inputs) or [`outputs`](MidiSession::outputs)
+/// returns (the open inputs, for a disconnect). So `"iac"` matches
+/// `"IAC Driver Bus 1"`; a name matching no device is
+/// [`MidiHardwareError::NoDeviceNamed`], and one matching several is
+/// [`MidiHardwareError::AmbiguousDeviceName`], which lists them: name one by
+/// its [`DeviceId`] or by more of its name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceQuery(Query);
 
@@ -223,23 +225,41 @@ impl DeviceQuery {
         }
     }
 
-    /// The device this picks among `list`, or the error naming what was
-    /// searched. An id is taken as it is (the open reports a stale one).
-    fn pick(&self, list: Vec<DeviceInfo>) -> Result<DeviceId> {
-        match &self.0 {
-            Query::Id(id) => Ok(id.clone()),
-            Query::Name(name) => {
-                let needle = name.to_lowercase();
-                match list
-                    .iter()
-                    .find(|d| d.name.to_lowercase().contains(&needle))
-                {
-                    Some(found) => Ok(found.id.clone()),
-                    None => Err(MidiHardwareError::NoDeviceNamed {
-                        name: name.clone(),
-                        searched: list.into_iter().map(|d| d.name).collect(),
-                    }),
-                }
+    /// The device this picks among `candidates`, each a device's id and name,
+    /// or the error naming what was searched. An id is taken as it is (the
+    /// open reports a stale one).
+    fn pick<'a>(
+        &self,
+        candidates: impl IntoIterator<Item = (&'a DeviceId, &'a str)>,
+    ) -> Result<DeviceId> {
+        let name = match &self.0 {
+            Query::Id(id) => return Ok(id.clone()),
+            Query::Name(name) => name,
+        };
+        let needle = name.to_lowercase();
+        let mut searched = Vec::new();
+        let mut matched = Vec::new();
+        for (id, candidate) in candidates {
+            if candidate.to_lowercase().contains(&needle) {
+                matched.push((id, candidate));
+            }
+            searched.push((id, candidate));
+        }
+        match matched.as_slice() {
+            [(id, _)] => Ok((*id).clone()),
+            [] => {
+                searched.sort();
+                Err(MidiHardwareError::NoDeviceNamed {
+                    name: name.clone(),
+                    searched: searched.into_iter().map(|(_, n)| n.to_owned()).collect(),
+                })
+            }
+            _ => {
+                matched.sort();
+                Err(MidiHardwareError::AmbiguousDeviceName {
+                    name: name.clone(),
+                    matches: matched.into_iter().map(|(_, n)| n.to_owned()).collect(),
+                })
             }
         }
     }
@@ -388,8 +408,8 @@ impl MidiSession {
     /// (the UMP Stream negotiation, or a MIDI 1.0 port's Identity Request, then
     /// MIDI-CI when the session has an identity, all stepped by [`poll`](Self::poll)): it is not an output a caller holds, which
     /// [`connect_output`](Self::connect_output) opens, and it closes with the
-    /// input. An output that will not open
-    /// leaves the input connected and the device as the OS describes it.
+    /// input. A device with no output direction opens none; an output that is
+    /// there and will not open fails the call, and the input is closed.
     ///
     /// The source of the input's event times is the session's
     /// [`MidiHardwareConfig::input_timing`]:
@@ -405,8 +425,10 @@ impl MidiSession {
     /// inputs it searched; an absent device is an error, never a silent
     /// no-op). [`MidiHardwareError::NotFound`] when an id names no present device — the
     /// shape a stale id takes after a hot-plug — and [`MidiHardwareError::WrongDirection`]
-    /// when it is not an input. Otherwise whatever the backend raises while
-    /// opening the port.
+    /// when it is not an input.
+    /// [`MidiHardwareError::AmbiguousDeviceName`] when a name matches several
+    /// inputs. Otherwise whatever the backend raises while opening the port or
+    /// the device's output, or while describing the device.
     pub fn connect_input(
         &mut self,
         started: Started,
@@ -435,7 +457,9 @@ impl MidiSession {
     ) -> Result<Connected> {
         let (writers, ci_refused) = writers.split();
         let timing = self.config.input_timing;
-        let id = device.into().pick(self.inputs())?;
+        let id = device
+            .into()
+            .pick(self.inputs().iter().map(|d| (&d.id, d.name.as_str())))?;
         // An input whose reader died is replaced, not kept: it is silent.
         if self
             .inputs
@@ -455,9 +479,15 @@ impl MidiSession {
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.
-        let os = self.devices.capability(&id).unwrap_or_else(legacy);
-        // A MIDI 1.0 port with an output is asked for its identity instead.
-        let out = self.devices.open_output(started, &id).ok();
+        let os = self.devices.capability(&id)?.unwrap_or_else(legacy);
+        // A MIDI 1.0 port with an output is asked for its identity instead. A
+        // device with no output direction is asked nothing; an output that is
+        // there and will not open fails the connect.
+        let out = match self.devices.open_output(started, &id) {
+            Ok(out) => Some(out),
+            Err(MidiHardwareError::WrongDirection { .. }) => None,
+            Err(error) => return Err(error),
+        };
         let stream = Negotiation::new(id.clone(), os, out, timing, ci_refused);
         let held = Held {
             stream,
@@ -472,43 +502,33 @@ impl MidiSession {
     }
 
     /// Closes an open input and retires the port its events landed in, by
-    /// [`DeviceId`] or by name. Returns whether one was open; closing one that
-    /// is not is a no-op.
+    /// [`DeviceId`] or by name.
     ///
-    /// A name is matched against the **open** inputs' names, case-insensitively
-    /// as a substring, and the lowest [`DeviceId`] among those matching is the
-    /// one closed (at most one: use [`disconnect_all_inputs`](Self::disconnect_all_inputs)
-    /// to close every one).
+    /// A name is matched against the **open** inputs' names as a
+    /// [`DeviceQuery`] matches one; use
+    /// [`disconnect_all_inputs`](Self::disconnect_all_inputs) to close every one.
     ///
     /// Events still queued in that port are discarded with it. MIDI-CI devices
     /// running on it send an Invalidate MUID for their own MUID first (best
     /// effort), and no [`CiChange::Lost`] is reported: the caller closed it.
     /// Dropping the session sends nothing.
-    pub fn disconnect_input(&mut self, device: impl Into<DeviceQuery>) -> bool {
-        let id = match device.into().0 {
-            Query::Id(id) => id,
-            Query::Name(name) => {
-                let needle = name.to_lowercase();
-                let Some(id) = self
-                    .inputs
-                    .iter()
-                    .filter(|(_, held)| held.input.name().to_lowercase().contains(&needle))
-                    .map(|(id, _)| id)
-                    .min()
-                    .cloned()
-                else {
-                    return false;
-                };
-                id
-            }
-        };
-        match self.inputs.remove(&id) {
-            Some(mut held) => {
-                held.stream.close();
-                true
-            }
-            None => false,
-        }
+    ///
+    /// # Errors
+    ///
+    /// [`MidiHardwareError::NotConnected`] when an id names no open input,
+    /// [`MidiHardwareError::NoDeviceNamed`] when a name matches none (listing
+    /// the open inputs it searched), and
+    /// [`MidiHardwareError::AmbiguousDeviceName`] when it matches several.
+    pub fn disconnect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<()> {
+        let id = device
+            .into()
+            .pick(self.inputs.iter().map(|(id, held)| (id, held.input.name())))?;
+        let mut held = self
+            .inputs
+            .remove(&id)
+            .ok_or(MidiHardwareError::NotConnected(id))?;
+        held.stream.close();
+        Ok(())
     }
 
     /// Closes every open input, retiring each one's port.
@@ -560,7 +580,9 @@ impl MidiSession {
         started: Started,
         device: impl Into<DeviceQuery>,
     ) -> Result<OpenOutput> {
-        let id = device.into().pick(self.outputs())?;
+        let id = device
+            .into()
+            .pick(self.outputs().iter().map(|d| (&d.id, d.name.as_str())))?;
         let mut output = self.devices.open_output(started, &id)?;
         if let Some(stream) = self.inputs.get(&id).and_then(|held| held.stream.settled()) {
             output.set_config(stream.config());
@@ -936,7 +958,8 @@ fn follow_timing(ports: &HardwareMidiInputs, held: &Held) {
         .map_or(InputTiming::Arrival, |stream| {
             held.timing.applied(stream.config())
         });
-    ports.set_input_timing(held.input.port(), source);
+    // The port is the held input's own, so it is open while `held` is.
+    let _ = ports.set_input_timing(held.input.port(), source);
 }
 
 /// Makes the port's copy of SysEx7 packets what the negotiation wants.

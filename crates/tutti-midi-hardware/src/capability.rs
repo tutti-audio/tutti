@@ -30,16 +30,28 @@ pub struct OsEndpoint {
     /// per-note messages a MIDI 1.0 endpoint cannot carry, while assuming MIDI 1.0
     /// only costs resolution.
     pub capability: Endpoint,
+    /// How many Function Blocks the OS declared that the spec cannot hold, and
+    /// that [`capability`](Self::capability) leaves out.
+    pub blocks_left_out: usize,
+}
+
+/// What an OS describes ([`from_os`]): the Endpoint, and how many of its
+/// declared Function Blocks the Endpoint leaves out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Described {
+    pub(crate) endpoint: Endpoint,
+    pub(crate) blocks_left_out: usize,
 }
 
 /// The Endpoint of a MIDI 1.0 port the OS describes no further: the MIDI 1.0
 /// Protocol in use, with no JR Timestamps and no blocks.
 pub(crate) fn legacy() -> Endpoint {
-    from_os(Protocol::Midi1, None, std::iter::empty())
+    from_os(Protocol::Midi1, None, std::iter::empty()).endpoint
 }
 
 /// The Endpoint an OS describes: in `protocol`, supporting what `offered` says,
-/// with JR Timestamps off, and the blocks it declares ([`blocks_of`]).
+/// with JR Timestamps off, and the blocks it declares ([`blocks_of`]), with how
+/// many of those it leaves out.
 ///
 /// A reserved protocol is one nobody can speak, so it reads as MIDI 1.0 in use;
 /// the Endpoint supports what `offered` says, and only when that is neither
@@ -48,7 +60,7 @@ pub(crate) fn from_os<'a>(
     protocol: Protocol,
     offered: Option<&EndpointInfoNotification>,
     blocks: impl IntoIterator<Item = (FunctionBlockInfo, Option<&'a str>)>,
-) -> Endpoint {
+) -> Described {
     let supported = Capabilities {
         midi1: protocol == Protocol::Midi1 || offered.is_some_and(|o| o.midi1),
         midi2: protocol == Protocol::Midi2 || offered.is_some_and(|o| o.midi2),
@@ -68,10 +80,14 @@ pub(crate) fn from_os<'a>(
         rx_jr: false,
         tx_jr: false,
     });
-    for block in blocks_of(blocks) {
+    let (kept, blocks_left_out) = blocks_of(blocks);
+    for block in kept {
         endpoint = endpoint.block(block);
     }
-    endpoint
+    Described {
+        endpoint,
+        blocks_left_out,
+    }
 }
 
 /// The Function Blocks an OS declares: each as the OS describes it, in the
@@ -81,24 +97,27 @@ pub(crate) fn from_os<'a>(
 /// port, an over-long name is cut and a name with a NUL or a Byte Order Mark
 /// dropped, the block kept. A block that is still out of range (a number above
 /// 31, a Group span off the end, a reserved direction) is left out, never
-/// clamped, and logged at `warn` with its fields.
+/// clamped, and logged at `warn` with its fields. Returns the blocks kept and
+/// how many were left out.
 fn blocks_of<'a>(
     blocks: impl IntoIterator<Item = (FunctionBlockInfo, Option<&'a str>)>,
-) -> Vec<FunctionBlock> {
-    blocks
-        .into_iter()
-        .filter_map(|(info, name)| {
-            let block = FunctionBlock::received(&info, name);
-            if block.is_none() {
+) -> (Vec<FunctionBlock>, usize) {
+    let mut kept = Vec::new();
+    let mut left_out = 0;
+    for (info, name) in blocks {
+        match FunctionBlock::received(&info, name) {
+            Some(block) => kept.push(block),
+            None => {
+                left_out += 1;
                 tracing::warn!(
                     ?info,
                     ?name,
                     "an OS Function Block the spec cannot hold is left out"
                 );
             }
-            block
-        })
-        .collect()
+        }
+    }
+    (kept, left_out)
 }
 
 /// Whether the endpoint an OS describes is a UMP Endpoint that can be asked

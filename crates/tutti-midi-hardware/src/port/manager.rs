@@ -18,6 +18,12 @@ use tutti_units::Resyncs;
 use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};
 use crate::InputTiming;
 
+/// An [`InputId`] that names no open port: the port closed, or the id came from
+/// another list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("input port {0:?} is not open")]
+pub struct StaleInput(pub InputId);
+
 /// A snapshot view of one port, computed on demand from the underlying
 /// `HardwareMidiInput`. The port is the single source of truth for `name` and
 /// `active` — `PortInfo` just bundles them with the port's id/type for
@@ -184,19 +190,17 @@ impl HardwareMidiInputs {
         StreamDrain::new(self.port(id))
     }
 
-    /// Sets whether the port `id` names delivers. Returns `false`, and changes
-    /// nothing, when `id` names no live port.
+    /// Sets whether the port `id` names delivers.
+    ///
+    /// # Errors
+    ///
+    /// [`StaleInput`], changing nothing, when `id` names no live port.
     ///
     /// An inactive port discards what the driver pushes: nothing is queued
     /// while it is paused, so there is no burst when it is active again.
-    pub fn set_port_active(&self, id: InputId, active: bool) -> bool {
-        match self.port(id) {
-            Some(port) => {
-                port.set_active(active);
-                true
-            }
-            None => false,
-        }
+    pub fn set_port_active(&self, id: InputId, active: bool) -> Result<(), StaleInput> {
+        self.port(id).ok_or(StaleInput(id))?.set_active(active);
+        Ok(())
     }
 
     /// Sets where the event times of the port `id` names come from:
@@ -204,15 +208,14 @@ impl HardwareMidiInputs {
     /// the device sends, [`InputTiming::Arrival`] by the OS's arrival stamp
     /// (the port's state until this is called). A [`MidiSession`](crate::MidiSession)
     /// sets it as an input's device settles; a port fed without a session sets
-    /// it itself. `false` for a stale id.
-    pub fn set_input_timing(&self, id: InputId, timing: InputTiming) -> bool {
-        match self.port(id) {
-            Some(port) => {
-                port.set_timing(timing);
-                true
-            }
-            None => false,
-        }
+    /// it itself.
+    ///
+    /// # Errors
+    ///
+    /// [`StaleInput`], changing nothing, when `id` names no live port.
+    pub fn set_input_timing(&self, id: InputId, timing: InputTiming) -> Result<(), StaleInput> {
+        self.port(id).ok_or(StaleInput(id))?.set_timing(timing);
+        Ok(())
     }
 
     /// Whether the stream ring of the port `id` names also takes a copy of the

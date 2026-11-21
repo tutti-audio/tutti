@@ -61,10 +61,10 @@ fn test_port_active_state() {
     let port_id = manager.open_input_port("Test").0.port();
     assert!(manager.port_info(port_id).unwrap().active);
 
-    manager.set_port_active(port_id, false);
+    manager.set_port_active(port_id, false).unwrap();
     assert!(!manager.port_info(port_id).unwrap().active);
 
-    manager.set_port_active(port_id, true);
+    manager.set_port_active(port_id, true).unwrap();
     assert!(manager.port_info(port_id).unwrap().active);
 }
 
@@ -155,13 +155,13 @@ fn an_inactive_port_discards_its_events() {
     let id = port.port();
     rig.attach(inlet);
 
-    manager.set_port_active(id, false);
+    manager.set_port_active(id, false).unwrap();
     assert_eq!(
         port.push(note(60), rig.time_of(100)),
         Ok(Delivered::Diverted),
         "discarded, not lost"
     );
-    manager.set_port_active(id, true);
+    manager.set_port_active(id, true).unwrap();
     assert_eq!(port.push(note(61), rig.time_of(120)), Ok(Delivered::Sent));
     rig.run(4);
     assert_eq!(rig.take(), vec![(0, 120, note(61))]);
@@ -270,7 +270,12 @@ fn a_stale_id_cannot_reach_the_port_opened_after_it() {
     let b_id = b.port();
     assert_ne!(b_id, a);
 
-    assert!(!manager.set_port_active(a, false));
+    assert_eq!(manager.set_port_active(a, false), Err(StaleInput(a)));
+    assert_eq!(
+        manager.set_input_timing(a, InputTiming::JitterReduction),
+        Err(StaleInput(a))
+    );
+    assert!(manager.port_info(b_id).unwrap().active, "B is untouched");
     assert!(manager.port_info(a).is_none());
     assert!(!manager.remove_input_port(a), "a stale id removes nothing");
 

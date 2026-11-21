@@ -346,12 +346,12 @@ impl crate::MidiEndpoints for OverRegistry {
             .register(sink, present, move || client.load(Ordering::SeqCst)))
     }
 
-    fn inputs(&self) -> Vec<crate::OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
+        Ok(Vec::new())
     }
 
-    fn outputs(&self) -> Vec<crate::OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
+        Ok(Vec::new())
     }
 
     fn open_input(
@@ -435,7 +435,7 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
         .unwrap()
         .push(crate::test_support::endpoint(2, "Pads"));
     registry.look_all();
-    let seen: Vec<_> = events.try_iter().collect();
+    let seen: Vec<_> = events.pending().collect();
     assert!(
         seen.iter().any(|event| matches!(
             event,
