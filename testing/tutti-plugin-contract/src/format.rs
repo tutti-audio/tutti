@@ -61,8 +61,14 @@ pub trait Format {
     /// What the format's control surface answers for the shared plugin (the
     /// spec's row for it).
     const SURFACE: crate::spec::Surface;
-    /// Loads a fresh instance of the shared plugin.
-    fn load() -> Self::L;
+    /// Loads a fresh instance of the shared plugin, whose off-thread close goes
+    /// to `work`.
+    fn load_with(work: &tutti_plugin_types::MainWorkHandle) -> Self::L;
+
+    /// Loads a fresh instance of the shared plugin, with a collector nothing runs.
+    fn load() -> Self::L {
+        Self::load_with(&tutti_fixtures::detached_work())
+    }
 
     /// The plugin's own bytes (they begin with its magic) inside the state the
     /// host saved. The default assumes the host stores the plugin's bytes

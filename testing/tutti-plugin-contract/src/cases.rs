@@ -21,6 +21,7 @@ use crate::{
     Active, BLOCK, Format, Kind, ParamTiming, RATE, Render, prepare, select, set_level, set_mode,
     transcript,
 };
+use crate::{CLOSED_ON_CREATOR, close_record_path, state_with_fault};
 use tutti_fixtures::midi;
 
 use tutti_ump::U7;
@@ -1558,4 +1559,58 @@ pub fn process_does_not_allocate<F: Format>() {
             a.processor().process(&mut io).expect("renders");
         }
     });
+}
+
+/// The last handle dropped off the main thread does not close the plugin
+/// there: its close waits for the owner's main-thread tick and runs on the
+/// thread that loaded it, and nothing is stranded.
+///
+/// The plugin is told through its state to record its close (the thread that
+/// closed it against the thread that created it), the only witness once it is
+/// gone.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+pub fn the_last_handle_dropped_off_the_main_thread_closes_on_the_main_thread<F: Format>()
+where
+    F::L: 'static,
+{
+    let record = close_record_path();
+    let _ = std::fs::remove_file(&record);
+    let (work, handle) = tutti_plugin_types::MainWork::new();
+    let mut loaded = F::load_with(&handle);
+    loaded
+        .load_state(
+            main_thread(),
+            &state_with_fault::<F>(spec::FAULT_RECORD_CLOSE),
+            tutti_plugin_types::StateUse::Project,
+        )
+        .expect("the plugin takes its configuration");
+    let stranded = tutti_plugin_types::MainWork::stranded();
+
+    std::thread::spawn(move || drop(loaded))
+        .join()
+        .expect("the drop does not panic");
+    assert!(
+        !record.exists(),
+        "the plugin closed before the main thread ran"
+    );
+
+    assert!(
+        work.run(main_thread()) > 0,
+        "the close was handed to the collector"
+    );
+    let closed = std::fs::read(&record).expect("the plugin recorded its close");
+    let _ = std::fs::remove_file(&record);
+    assert_eq!(
+        closed,
+        [CLOSED_ON_CREATOR],
+        "the plugin closed on the thread that loaded it"
+    );
+    assert_eq!(
+        tutti_plugin_types::MainWork::stranded(),
+        stranded,
+        "nothing stranded"
+    );
 }
