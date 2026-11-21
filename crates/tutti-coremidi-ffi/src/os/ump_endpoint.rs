@@ -18,7 +18,7 @@
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
 use super::client::SharedClient;
-use super::error::{Error, Operation};
+use super::error::{Error, Operation, OsStatus};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
 use super::retry::{Backoff, retry};
