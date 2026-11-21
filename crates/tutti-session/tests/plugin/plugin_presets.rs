@@ -161,7 +161,7 @@ mod clap {
         while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
             assert!(tutti_platform::Instant::now() < deadline, "no read landed");
             let _ = s.update_on(main);
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            std::thread::yield_now();
         }
         let before = cutoff(&s, node).expect("Cutoff is read");
 
@@ -184,7 +184,7 @@ mod clap {
                 "the mirror still reads {before} after the preset moved Cutoff"
             );
             let _ = s.update_on(main);
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            std::thread::yield_now();
         }
     }
 
