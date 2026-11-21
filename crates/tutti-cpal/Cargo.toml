@@ -67,7 +67,6 @@ futures-channel = { workspace = true }
 tutti-graph = { path = "../tutti-graph", features = ["contract"] }
 # The RT gates render a real graph under a disabled allocator.
 assert_no_alloc = { version = "1", default-features = false }
-tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 criterion.workspace = true
 # Stimulus nodes (`tutti_nodes::testing`) and a real filter for the fixture
 # graphs. `tutti-nodes` does not depend on this crate.
@@ -77,7 +76,7 @@ tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["
 tutti-codec = { path = "../tutti-codec", features = ["encode-wav"] }
 hound = "3.5"
 tempfile = "3.10"
-# `check_range_contract`, for the poll interval.
+# `RtAllocCheck`, the area binaries' allocator; `check_range_contract`, for the poll interval.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [[bench]]
