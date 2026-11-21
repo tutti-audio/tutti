@@ -1,4 +1,4 @@
-//! `Graph::open_inlet`: audio a thread of your own pushes into the graph, the
+//! `Graph::add_inlet`: audio a thread of your own pushes into the graph, the
 //! mirror of the tap.
 
 use tutti_buffers::ChannelLayout;
@@ -22,16 +22,19 @@ fn offline() -> Session {
 #[test]
 fn pushed_frames_reach_the_outputs_in_order() {
     let mut s = offline();
-    let (key, mut producer) = s
+    let (ring, mut producer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(256), RATE);
+    let key = s
         .graph()
-        .open_inlet(ChannelLayout::STEREO, Samples::new(256), RATE)
+        .add_inlet(ring)
         .expect("the producer runs at the graph's rate");
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(key, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(key, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(key, 1)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(key, 1)])
+        .unwrap()
+        .unfaded();
     let mut tap = s
         .graph()
         .taps()
@@ -67,13 +70,14 @@ fn pushed_frames_reach_the_outputs_in_order() {
 fn a_producer_at_another_rate_is_refused() {
     let mut s = offline();
     let _ = s.update();
+    let (ring, _producer) = InletRing::pair(
+        ChannelLayout::STEREO,
+        Samples::new(256),
+        SampleRate::SR_44K1,
+    );
     let err = s
         .graph()
-        .open_inlet(
-            ChannelLayout::STEREO,
-            Samples::new(256),
-            SampleRate::SR_44K1,
-        )
+        .add_inlet(ring)
         .expect_err("an inlet does not resample");
     assert_eq!(
         err,
@@ -124,13 +128,15 @@ fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
         .sample_rate(RATE)
         .build()
         .expect("an f64 session builds");
-    let (key, mut producer) = s
+    let (ring, mut producer) = InletRing::pair(ChannelLayout::MONO, Samples::new(256), RATE);
+    let key = s
         .graph()
-        .open_inlet(ChannelLayout::MONO, Samples::new(256), RATE)
+        .add_inlet(ring)
         .expect("the producer runs at the graph's rate");
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(key, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(key, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
 
     producer.push_interleaved(Interleaved::new(&[FINE; 8], producer.layout()).unwrap());

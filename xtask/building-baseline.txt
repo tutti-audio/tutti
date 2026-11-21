@@ -278,7 +278,6 @@ tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_feed
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources_unfaded
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source

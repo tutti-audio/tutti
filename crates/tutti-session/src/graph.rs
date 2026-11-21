@@ -55,7 +55,6 @@ use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
     InletRing, IntoNode, MeterReader, NodeMode, ParamIn, ParamMod, ParamRange, Prepare, RenderMode,
-    TapWriter,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, PortSink, PortSource,
@@ -79,7 +78,9 @@ pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
 
-use crate::key::{Bus, BusSink, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Wire};
+use crate::key::{
+    Bus, BusSink, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, SetSources, Wire,
+};
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
     ConnectError, Connection, DeclarationError, Edge, EventInPort, EventOutPort, InPort,
@@ -346,7 +347,7 @@ pub struct Graph<F: Float = f32> {
     /// Names every tap, event tap, meter and crossfade of this graph.
     ids: Mint,
     /// Each open event tap as it was opened (its port, alignment and
-    /// capacity), so [`Taps::reopen_events`] can open it
+    /// capacity), so [`Taps::reopen_event`] can open it
     /// again.
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, tutti_graph::EventTapOptions)>,
     /// The master meter's reader until a host takes it.
@@ -600,13 +601,13 @@ impl<F: Float> Graph<F> {
         *self.editor.prepare()
     }
 
+    pub(crate) fn set_render_workers(&mut self, workers: crate::Workers) {
+        self.render_workers = workers;
+    }
+
     /// Makes every tap the graph opens from now on carry a bell from `bells`.
     pub(crate) fn notify_with(&mut self, bells: tutti_rt::BellsHandle) {
         self.editor.notify_with(bells);
-    }
-
-    pub(crate) fn set_render_workers(&mut self, workers: crate::Workers) {
-        self.render_workers = workers;
     }
 
     pub(crate) fn set_render_worker_start(&mut self, start: Option<RenderWorkerStart>) {
@@ -856,17 +857,18 @@ impl<F: Float> Graph<F> {
 }
 
 impl<F: Float> Graph<F> {
-    /// Opens an inlet: audio a thread of your own pushes into the graph. A
-    /// ring of `capacity` frames and `width` channels is read by an
-    /// [`InletNode`] (unwired; declare what it feeds like any node), and the
-    /// writer is the producer's end: push whole frames with
-    /// [`push_interleaved`](TapWriter::push_interleaved) from any one thread. The
-    /// mirror of [`Taps::open`], which copies the other way.
+    /// Adds an inlet: audio a thread of your own pushes into the graph. The
+    /// ring comes from the producer's layer ([`InletRing::pair`], which
+    /// states the width, the capacity and the rate its producer fills it at);
+    /// an [`InletNode`] (unwired; declare what it feeds like any node) reads
+    /// it, and the writer [`InletRing::pair`] returned is the producer's end:
+    /// push whole frames with
+    /// [`push_interleaved`](tutti_graph::TapWriter::push_interleaved) from any one thread.
+    /// The mirror of [`Taps::open`], which copies the other way.
     ///
     /// An inlet **does not resample**, and its clock is not the graph's: the
-    /// producer must run at the graph's rate, checked here, once, as
-    /// `producer_rate` (a producer that makes its own ring states its rate
-    /// there, [`InletRing::pair`], and takes it to [`add_inlet`](Self::add_inlet)). After that two clocks drift however slowly, and
+    /// producer must run at the graph's rate, checked here, once. After that
+    /// two clocks drift however slowly, and
     /// nothing corrects it: a producer ahead of the graph finds the ring full
     /// and its writer refuses whole frames, counting them; one behind leaves
     /// the ring empty and the node writes silence for the frames it lacks.
@@ -875,25 +877,6 @@ impl<F: Float> Graph<F> {
     ///
     /// The node is unforkable: an export of a graph that holds it is refused,
     /// naming its key.
-    ///
-    /// # Errors
-    ///
-    /// [`InletError::RateMismatch`] when `producer_rate` is not the graph's
-    /// rate; nothing is opened.
-    pub fn open_inlet(
-        &mut self,
-        width: ChannelLayout,
-        capacity: Samples,
-        producer_rate: SampleRate,
-    ) -> Result<(Key<InletNode<F>>, TapWriter<F>), InletError> {
-        let (ring, writer) = InletRing::pair(width, capacity, producer_rate);
-        Ok((self.add_inlet(ring)?, writer))
-    }
-
-    /// [`open_inlet`](Self::open_inlet) over a ring the producer's layer
-    /// already built ([`InletRing::pair`], which states the rate its producer
-    /// fills it at), for a producer that must choose its width and rate before
-    /// the graph sees it (a capture device).
     ///
     /// # Errors
     ///
@@ -947,14 +930,7 @@ impl<F: Float> Graph<F> {
         capacity: EventCapacity,
     ) -> (Key<EventInletNode>, EventInletWriter) {
         let (node, writer) = EventInletNode::pair(capacity);
-        (self.add_event_inlet(node), writer)
-    }
-
-    /// [`open_event_inlet`](Self::open_event_inlet) over a node the producer's
-    /// layer already built ([`EventInletNode::pair`]), for a producer
-    /// that must hold its writer before the graph sees the node.
-    pub fn add_event_inlet(&mut self, node: EventInletNode) -> Key<EventInletNode> {
-        self.add(node)
+        (self.add(node), writer)
     }
 
     /// The table the node's params are addressed in: the session's value
@@ -2452,6 +2428,11 @@ impl<F: Float> Graph<F> {
     /// the sink already holds. An empty set clears the sink
     /// ([`disconnect_all`](Self::disconnect_all)): silence is the empty set.
     ///
+    /// What is added fades in and what is taken out fades out;
+    /// [`SetSources::unfaded`] makes the change step at the next block
+    /// boundary instead (as [`Connection::unfaded`](crate::Connection::unfaded)
+    /// does for [`connect`](Self::connect)).
+    ///
     /// # Errors
     ///
     /// [`ConnectError`], with nothing changed: a node or port that does not
@@ -2460,24 +2441,10 @@ impl<F: Float> Graph<F> {
         &mut self,
         to: P,
         from: impl IntoIterator<Item = P::Source>,
-    ) -> Result<(), ConnectError> {
-        to.set_sources(self, from.into_iter().collect(), false)
-    }
-
-    /// [`set_sources`](Self::set_sources) with no fades: what is added steps
-    /// in and what is taken out is cut, at the next block boundary (as
-    /// [`Connection::unfaded`](crate::Connection::unfaded) and
-    /// [`disconnect_unfaded`](Self::disconnect_unfaded)).
-    ///
-    /// # Errors
-    ///
-    /// As [`set_sources`](Self::set_sources).
-    pub fn set_sources_unfaded<P: Fanin>(
-        &mut self,
-        to: P,
-        from: impl IntoIterator<Item = P::Source>,
-    ) -> Result<(), ConnectError> {
-        to.set_sources(self, from.into_iter().collect(), true)
+    ) -> Result<SetSources<'_, P, F>, ConnectError> {
+        let from: Vec<P::Source> = from.into_iter().collect();
+        let cut = to.set_sources(self, from.clone(), false)?;
+        Ok(SetSources::new(self, to, from, cut))
     }
 
     pub(crate) fn set_channel_sources(
@@ -2485,7 +2452,7 @@ impl<F: Float> Graph<F> {
         to: InPort,
         from: Vec<OutPort>,
         hard: bool,
-    ) -> Result<(), ConnectError> {
+    ) -> Result<Vec<EdgeId>, ConnectError> {
         let mut want: Vec<(PortSource, OutPort)> = Vec::new();
         for port in from {
             self.check_wire(port, to)?;
@@ -2502,10 +2469,12 @@ impl<F: Float> Graph<F> {
         // has been heard); what it is asked for and lacks comes (fading in).
         // What it already holds is left alone, so a set of what is there
         // touches nothing.
+        let mut cut = Vec::new();
         for id in self.live_edges(to) {
             let keep = matches!(id.from, RawEdge::Direct(s) if want.iter().any(|(w, _)| *w == s));
             if !keep {
                 self.drop_edge(id, hard);
+                cut.push(id);
             }
         }
         for (_, port) in want {
@@ -2514,7 +2483,15 @@ impl<F: Float> Graph<F> {
                 self.harden_edge(Edge::new(port, to));
             }
         }
-        Ok(())
+        Ok(cut)
+    }
+
+    /// Takes the edges `ids` out at the next block boundary, ones already
+    /// fading out included: the step [`SetSources::unfaded`] takes.
+    pub(crate) fn cut_edges(&mut self, ids: &[EdgeId]) {
+        for &id in ids {
+            self.drop_edge(id, true);
+        }
     }
 
     /// Takes every source out of `to`, their gains with them: whether it fed
@@ -2567,8 +2544,8 @@ impl<F: Float> Graph<F> {
     /// - an [`EventOutPort`] into an [`EventInPort`] (`key.events_out()`,
     ///   `key.events_in()`): **an event edge**. Events merge by offset at the
     ///   sink, and an event edge is never faded (a note-off is a message, not
-    ///   a level), so `.unfaded()` and [`disconnect_unfaded`](Self::disconnect_unfaded)
-    ///   change nothing for it.
+    ///   a level), so `.unfaded()` on a [`Connection`] or a
+    ///   [`Disconnection`] changes nothing for it.
     ///
     /// It **adds**: what already feeds the sink stays (the graph sums them),
     /// and an edge already connected is kept once. To replace what feeds a
@@ -2592,9 +2569,11 @@ impl<F: Float> Graph<F> {
     }
 
     /// Takes the edge `from -> to` out, its gain with it (for a bus edge, its
-    /// lanes and weights; the edges and gains the author set stay). Returns
-    /// whether it was connected, and marks the graph edited when it was. For a
-    /// main bus it takes out the edges [`connect`](Self::connect) adds.
+    /// lanes and weights; the edges and gains the author set stay). The
+    /// returned [`Disconnection`] says whether it was connected
+    /// ([`was_connected`](Disconnection::was_connected)), and the graph is
+    /// marked edited when it was. For a main bus it takes out the edges
+    /// [`connect`](Self::connect) adds.
     ///
     /// **The edge fades out** over [`DECLICK`](tutti_graph::DECLICK),
     /// from the weight it has, and leaves the graph when the fade
@@ -2603,35 +2582,23 @@ impl<F: Float> Graph<F> {
     /// ([`sources`](Self::sources)), and connecting it again brings it back
     /// from where the fade has got to. An edge no plan has heard (connected
     /// since the last commit) has nothing to fade and goes at once.
-    /// [`disconnect_unfaded`](Self::disconnect_unfaded) cuts at a block boundary.
+    /// [`Disconnection::unfaded`] cuts at a block boundary, as
+    /// `tutti_graph::Editor` does: for a test, or an analysis graph nobody
+    /// listens to.
     ///
     /// # Errors
     ///
     /// [`ConnectError`] for a node or port that does not exist; nothing
-    /// changes. An edge that is not there is `Ok(false)`.
-    #[must_use = "the call refuses a node or port that does not exist"]
+    /// changes. An edge that is not there is not an error:
+    /// [`was_connected`](Disconnection::was_connected) is false.
     pub fn disconnect<O: Outlet, T: Inlet<O::Wire>>(
         &mut self,
         from: O,
         to: T,
-    ) -> Result<bool, ConnectError> {
-        <O::Wire as Wire>::disconnect(self, from.out(), to.sink(), false)
-    }
-
-    /// [`disconnect`](Self::disconnect) with no fade: the edge is cut at the
-    /// next block boundary, as `tutti_graph::Editor` does. For a test, or an
-    /// analysis graph nobody listens to.
-    ///
-    /// # Errors
-    ///
-    /// As [`disconnect`](Self::disconnect).
-    #[must_use = "the call refuses a node or port that does not exist"]
-    pub fn disconnect_unfaded<O: Outlet, T: Inlet<O::Wire>>(
-        &mut self,
-        from: O,
-        to: T,
-    ) -> Result<bool, ConnectError> {
-        <O::Wire as Wire>::disconnect(self, from.out(), to.sink(), true)
+    ) -> Result<Disconnection<'_, O::Wire, F>, ConnectError> {
+        let (from, to) = (from.out(), to.sink());
+        let was_connected = <O::Wire as Wire>::disconnect(self, from, to, false)?;
+        Ok(Disconnection::new(self, was_connected, from, to))
     }
 
     pub(crate) fn add_bus_edge(
@@ -2824,29 +2791,6 @@ impl<F: Float> Graph<F> {
                 Ok(wires)
             }
         }
-    }
-
-    /// [`connect`](Self::connect)s each node to the next: `chain([a, b, c])`
-    /// is `connect(a, b)` and `connect(b, c)`. Every link is checked before
-    /// any is made, so a refusal stores nothing. Fewer than two nodes connect
-    /// nothing.
-    ///
-    /// # Errors
-    ///
-    /// As [`connect`](Self::connect), for the first link that fails.
-    pub fn chain<K: Into<NodeKey>>(
-        &mut self,
-        nodes: impl IntoIterator<Item = K>,
-    ) -> Result<(), ConnectError> {
-        let nodes: Vec<NodeKey> = nodes.into_iter().map(Into::into).collect();
-        let mut all = Vec::new();
-        for pair in nodes.windows(2) {
-            all.extend(self.main_wires(pair[0], MainSink::Node(pair[1]))?);
-        }
-        for (out, input) in all {
-            self.add_edge(out, input)?;
-        }
-        Ok(())
     }
 
     /// Gives `edge` a gain lane at `gain`: the declaration of a weighted

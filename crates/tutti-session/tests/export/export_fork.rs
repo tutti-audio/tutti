@@ -136,14 +136,17 @@ fn chain(session: &mut DetachedSession) -> NodeKey {
             .q(Q::new(1.0)),
     ));
     graph
-        .set_sources_unfaded(InPort::new(filter, 0), [OutPort::new(osc, 0)])
-        .unwrap();
+        .set_sources(InPort::new(filter, 0), [OutPort::new(osc, 0)])
+        .unwrap()
+        .unfaded();
     graph
-        .set_sources_unfaded(Root::output(0), [OutPort::new(filter, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(filter, 0)])
+        .unwrap()
+        .unfaded();
     graph
-        .set_sources_unfaded(Root::output(1), [OutPort::new(osc, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(osc, 0)])
+        .unwrap()
+        .unfaded();
     filter.erase()
 }
 
@@ -719,12 +722,14 @@ fn an_unforkable_node_refuses_the_export_by_key() {
     let osc = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(mic, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(mic, 0)])
+        .unwrap()
+        .unfaded();
     session
         .graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(osc, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(osc, 0)])
+        .unwrap()
+        .unfaded();
 
     match refused(&mut session, buffers(0.05)) {
         BounceError::NotForkable { node: key } => {
@@ -926,12 +931,14 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
     let other = session.graph().add(ForkByClone(Const::mono(9.0)));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(slow_node, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(slow_node, 0)])
+        .unwrap()
+        .unfaded();
     session
         .graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(level, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(level, 0)])
+        .unwrap()
+        .unfaded();
 
     let job = session
         .bounce_start(buffers(0.05))
@@ -1070,12 +1077,14 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
     let slow_node = session.graph().add(node);
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(slow_node, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(slow_node, 0)])
+        .unwrap()
+        .unfaded();
     session
         .graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(pinned, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(pinned, 0)])
+        .unwrap()
+        .unfaded();
     drop(release); // the slow build goes straight through
 
     let job = session
@@ -1110,12 +1119,14 @@ fn a_dropped_export_job_drops_its_fork_on_the_main_thread() {
     let pinned = session.graph().add(PinnedNode(Arc::clone(&threads)));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(pinned, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(pinned, 0)])
+        .unwrap()
+        .unfaded();
     session
         .graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(pinned, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(pinned, 0)])
+        .unwrap()
+        .unfaded();
 
     let job = session
         .bounce_start(buffers(0.05))
@@ -1201,12 +1212,14 @@ fn a_fork_build_that_fails_names_its_node_and_drops_on_the_main_thread() {
     let broken = session.graph().add(Broken);
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(pinned, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(pinned, 0)])
+        .unwrap()
+        .unfaded();
     session
         .graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(broken, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(broken, 0)])
+        .unwrap()
+        .unfaded();
 
     let job = session
         .bounce_start(buffers(0.05))
