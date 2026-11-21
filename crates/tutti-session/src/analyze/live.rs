@@ -1,6 +1,6 @@
 //! Live analysis: an [`Analyzer`] is a tap with a meter's state.
 //!
-//! [`Taps::analyzer`](crate::Taps::analyzer) opens a tap on the graph and binds
+//! [`Taps::open_analyzer`](crate::Taps::open_analyzer) opens a tap on the graph and binds
 //! the analysis to the graph's rate and the tap's width, through the same
 //! [`AudioContext`] and [`AudioInput`]
 //! the offline [`Session::analyze`](crate::Session::analyze) binds a wave
@@ -38,7 +38,7 @@ pub enum AnalyzerError {
 
 /// A tap with a meter's state: the app drains it with
 /// [`try_iter`](Self::try_iter) and reads what the tap lost
-/// ([`lost`](Self::lost)). Opened by [`Taps::analyzer`](crate::Taps::analyzer).
+/// ([`lost`](Self::lost)). Opened by [`Taps::open_analyzer`](crate::Taps::open_analyzer).
 ///
 /// Generic over the analysis `A`, never boxed: [`Meter`] is not object-safe.
 /// Drain it from a thread of your own, never the audio thread. Dropping it

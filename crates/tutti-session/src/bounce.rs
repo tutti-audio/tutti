@@ -2198,7 +2198,7 @@ mod tests {
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
         session.graph().connect(half, Root).unwrap();
-        assert!(session.graph().is_edited(), "no update has run");
+        assert!(session.graph().has_uncommitted_edits(), "no update has run");
         let out = planes(session.bounce(short()));
         assert!(out[0].iter().all(|&s| s == 0.5), "the edit is heard");
     }
