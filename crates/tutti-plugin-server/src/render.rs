@@ -283,6 +283,13 @@ pub(crate) struct Losses {
     /// Hand-backs the main thread's queue refused, so the render thread
     /// dropped them itself (an abandoned session).
     pub back_refused: u64,
+    /// Commands the main thread could not queue for the render thread (it had
+    /// ended, or took none within its patience): an unseat, a mode, a rate or a
+    /// barrier that never reached it.
+    pub commands_refused: u64,
+    /// One-way edits the plugin refused: an automation state, a track's info
+    /// or a parameter write.
+    pub edits_refused: u64,
 }
 
 impl Losses {
@@ -295,6 +302,8 @@ impl Losses {
             || grew(self.failed_blocks, logged.failed_blocks)
             || grew(self.midi_dropped, logged.midi_dropped)
             || grew(self.back_refused, logged.back_refused)
+            || grew(self.commands_refused, logged.commands_refused)
+            || grew(self.edits_refused, logged.edits_refused)
     }
 }
 
@@ -331,6 +340,8 @@ pub(crate) struct RenderLink {
     to: RingWriter<ToRender>,
     back: RingReader<Back>,
     losses: LossReaders,
+    /// Adds to [`Losses::commands_refused`].
+    refused_commands: TallyWriter<u64>,
     /// What [`report_losses`](Self::report_losses) last logged.
     logged: Losses,
     /// The format blocks are rendered in, which scratch is built for.
@@ -421,6 +432,8 @@ impl RenderLink {
             failed_blocks: self.losses.failed_blocks.get(),
             midi_dropped: self.losses.midi_dropped.get(),
             back_refused: self.losses.back_refused.get(),
+            commands_refused: self.ties.commands_refused.get(),
+            edits_refused: self.ties.edits_refused.get(),
         }
     }
 
@@ -450,11 +463,14 @@ impl RenderLink {
         self.logged = now;
         tracing::warn!(
             "plugin-server: the render thread lost {} block(s) refused, {} block(s) the plugin \
-             failed, {} MIDI event(s) past the cap, {} hand-back(s) the main thread did not take",
+             failed, {} MIDI event(s) past the cap, {} hand-back(s) the main thread did not take, \
+             {} command(s) the render thread was not given, {} one-way edit(s) the plugin refused",
             now.refused_blocks,
             now.failed_blocks,
             now.midi_dropped,
             now.back_refused,
+            now.commands_refused,
+            now.edits_refused,
         );
     }
 
@@ -492,10 +508,11 @@ impl RenderLink {
     }
 
     /// [`send`](Self::send) for a command nothing answers for: a refusal is
-    /// logged, and the host learns of it from the commands that are answered.
+    /// logged and counted ([`Losses::commands_refused`]).
     pub(crate) fn tell(&mut self, command: ToRender) {
         if let Err(e) = self.send(command) {
             tracing::error!("plugin-server: {e}");
+            self.refused_commands.add(1);
         }
     }
 
@@ -649,6 +666,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
     let loads = tally();
     Ok((
         RenderLink {
+            refused_commands: ties.commands_refused.writer(),
             ties,
             to,
             back,
@@ -1871,6 +1889,7 @@ mod tests {
                     failed_blocks: 5,
                     midi_dropped: 7,
                     back_refused: filled + 3 + 1,
+                    ..Losses::default()
                 }
             );
             // The main thread says it once, with the totals.
@@ -2086,5 +2105,18 @@ mod tests {
         assert_eq!(losses.failed_blocks, STEPS as u64 / 2);
         assert_eq!(losses.refused_blocks, 0);
         assert_eq!(losses.back_refused, 0);
+    }
+    /// **A command nothing could take is counted** in the losses: with the render
+    /// side gone, each command the main thread tells is refused, and none of
+    /// them is counted twice.
+    #[test]
+    fn a_command_the_render_thread_was_not_given_is_counted() {
+        let (mut link, side) = link().expect("bells");
+        assert_eq!(link.losses().commands_refused, 0);
+        drop(side);
+        link.tell(ToRender::DropSlab);
+        link.tell(ToRender::DropSlab);
+        assert_eq!(link.losses().commands_refused, 2);
+        assert_eq!(link.losses().edits_refused, 0, "another count");
     }
 }
