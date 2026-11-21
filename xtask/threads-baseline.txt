@@ -24,4 +24,3 @@ tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/poller.rs::DevicePoller::spaw
 tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  core-engine
 
 # plugin
-tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin

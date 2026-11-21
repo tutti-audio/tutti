@@ -60,18 +60,12 @@ fn load(
     plugin: &Path,
     state: Option<Vec<u8>>,
 ) -> Result<tutti::Key<tutti::AnyPlugin>, Box<dyn std::error::Error>> {
-    use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
+    use tutti::plugin::catalog::{CatalogConfig, PluginDb};
     let dir = tempfile::TempDir::new()?;
     let mut catalog =
         tutti::Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
-    let mut probe = catalog.register(plugin)?;
-    let scanned = loop {
-        match catalog.try_apply(&mut probe) {
-            ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(5)),
-            ScanPoll::Done(result) => break result,
-            ScanPoll::Died => return Err("the probe's worker died".into()),
-        }
-    };
+    let scanned = catalog.register(plugin)?.run();
+    let scanned = catalog.apply(scanned)?;
     catalog.save().run()?;
     if let Some(failure) = scanned.failures().first() {
         return Err(format!("the plugin did not probe: {failure:?}").into());

@@ -684,10 +684,9 @@ pub mod soundfont {
 /// spawns; build it with `cargo build -p tutti-plugin-server`.
 #[cfg(feature = "plugin")]
 pub mod plugin {
-    pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        Mtime, PluginEntry, ProbeFailure, RowChange, ScanError, ScanOutcome, ScanProgress,
+        Mtime, PluginEntry, ProbeFailure, RowChange, ScanBusy, ScanOutcome, ScanProgress,
         ScannedFile,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
@@ -721,8 +720,8 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin_db::{
-            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, Scan, ScanPoll,
-            ScanResult,
+            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, ScanCanceller,
+            ScanPlugins, ScanProgressReader, ScanReport, ScannedPlugins, StaleScan,
         };
         pub use tutti_plugin_ipc::AudioConfig;
         pub use tutti_plugin_types::{

@@ -13,8 +13,8 @@ use tutti_platform::Instant;
 use tutti_clap_test_plugin::{ClapProbe, Site, ThreadAnswer};
 
 use tutti_buffers::MaxBlock;
+use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
-use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::{Locator, PluginId};
 use tutti_session::{Peer, Presence, Session};
 use tutti_units::Samples;
@@ -52,21 +52,11 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
     let config =
         CatalogConfig::new(dir.path()).probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
-    let mut task = catalog.register(clap_probe()).expect("a plugin file");
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        match catalog.try_apply(&mut task) {
-            ScanPoll::Running => {
-                assert!(Instant::now() < deadline, "the probe never ended");
-                thread::yield_now();
-            }
-            ScanPoll::Done(result) => {
-                assert!(result.failures().is_empty(), "{:?}", result.failures());
-                break;
-            }
-            ScanPoll::Died => panic!("the probe's worker died"),
-        }
-    }
+    let task = catalog.register(clap_probe()).expect("a plugin file");
+    let result = catalog
+        .apply(task.run())
+        .expect("the output of this catalog's own scan");
+    assert!(result.failures().is_empty(), "{:?}", result.failures());
     (catalog, dir)
 }
 
