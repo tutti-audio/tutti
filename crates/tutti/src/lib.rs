@@ -424,12 +424,13 @@ pub mod types {
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
-        Moment, NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep,
-        PlayReading, PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate,
-        Resonance, RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan,
-        SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
-        StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        Drive, Elevation, Feedback, FrequencyRatio, FrequencyRatioOutOfRange, Gain, HoldFactor,
+        Latency, Metres, MetresOutOfRange, Mix, ModulationIndex, ModulationIndexOutOfRange, Moment,
+        NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading,
+        PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
+        RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
+        Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
+        Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }
