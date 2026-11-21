@@ -234,7 +234,7 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
-    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget,
+    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeFile, TakeTarget,
 };
 #[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
 pub use tutti_session::{

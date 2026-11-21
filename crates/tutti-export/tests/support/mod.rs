@@ -74,6 +74,7 @@ pub struct ExportConfig {
     pub encode: EncodeConfig,
     pub resample: Option<Resample>,
     pub dither: Option<DitherShape>,
+    pub noise_shaping: bool,
 }
 
 impl Default for ExportConfig {
@@ -83,6 +84,7 @@ impl Default for ExportConfig {
             encode: EncodeConfig::default(),
             resample: None,
             dither: Some(DitherShape::Triangular),
+            noise_shaping: false,
         }
     }
 }
@@ -124,6 +126,11 @@ impl ExportConfig {
         let target = match self.dither {
             Some(shape) => target.dither(shape),
             None => target.no_dither(),
+        };
+        let target = if self.noise_shaping {
+            target.noise_shaping()
+        } else {
+            target
         };
         match normalize {
             Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
