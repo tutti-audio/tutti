@@ -58,10 +58,9 @@ impl Loop {
         }
     }
 
-    /// The round trip's own IPC deadline: how long a session's close waits for a task of
-    /// this loop (`Timeouts::load`, `param`, `state`).
-    fn deadline(self) -> Duration {
-        let timeouts = Timeouts::default();
+    /// The round trip's own IPC deadline in `timeouts`, the plugin's configured ones: how
+    /// long a session's close waits for a task of this loop (`load`, `param`, `state`).
+    pub(crate) fn deadline(self, timeouts: &Timeouts) -> Duration {
         match self {
             Self::Reload => timeouts.load,
             Self::ParamRead => timeouts.param,
@@ -71,7 +70,9 @@ impl Loop {
 }
 
 /// How long a close that is pumping the main thread's work sleeps on its condvar between
-/// two pumps: an in-process plugin's task waits for the main thread to run its call.
+/// two pumps: an in-process plugin's task waits for the main thread to run its call. The
+/// main thread's work queue cannot notify the condvar, so the wait wakes on a slice; it
+/// runs only during a close or drop with a task running.
 const PUMP_SLICE: Duration = Duration::from_millis(5);
 
 /// The plugin tasks in flight, from the spawn that queued one to the end of its closure.
@@ -89,23 +90,56 @@ struct TaskCount {
 
 #[derive(Debug, Default)]
 struct InFlight {
+    /// Tasks queued or running.
     count: usize,
-    /// The latest of the in-flight tasks' deadlines, each counted from its spawn.
+    /// Tasks that began to run and have not ended: what a close waits for.
+    running: usize,
+    /// The latest of the running tasks' deadlines, each counted from when it began.
     until: Option<Instant>,
+    /// Set when a close or drop begins: a task that starts after it returns at once.
+    closing: bool,
 }
 
 /// A task's place in the count: dropped when its closure ends, however it ends, and with
 /// the closure when the executor drops it unrun.
 #[must_use]
-pub(crate) struct TaskGuard(Tasks);
+pub(crate) struct TaskGuard {
+    tasks: Tasks,
+    /// How long a close waits for the task once it runs: its round trip's IPC deadline.
+    bound: Duration,
+    running: bool,
+}
+
+impl TaskGuard {
+    /// The task's first step: whether it may run. A close that began before the task was
+    /// picked up from the pool's queue ends it here, unrun; otherwise the task counts as
+    /// running, with its deadline counted from now.
+    fn begin(&mut self) -> bool {
+        let mut state = self.tasks.0.state.lock_recover();
+        if state.closing {
+            return false;
+        }
+        state.running += 1;
+        let deadline = Instant::now() + self.bound;
+        state.until = Some(state.until.map_or(deadline, |until| until.max(deadline)));
+        self.running = true;
+        true
+    }
+}
 
 impl Tasks {
-    fn enter(&self, kind: Loop) -> TaskGuard {
-        let mut state = self.0.state.lock_recover();
-        state.count += 1;
-        let deadline = Instant::now() + kind.deadline();
-        state.until = Some(state.until.map_or(deadline, |until| until.max(deadline)));
-        TaskGuard(self.clone())
+    fn enter(&self, bound: Duration) -> TaskGuard {
+        self.0.state.lock_recover().count += 1;
+        TaskGuard {
+            tasks: self.clone(),
+            bound,
+            running: false,
+        }
+    }
+
+    /// Marks a close begun: a task not yet running never runs.
+    pub(crate) fn close(&self) {
+        self.0.state.lock_recover().closing = true;
     }
 
     /// How many tasks are queued or running.
@@ -118,13 +152,14 @@ impl Tasks {
         self.0.refused.load(Ordering::Relaxed)
     }
 
-    /// Waits for every task in flight to end, or until the latest of their deadlines:
-    /// whether it did. `pump` runs between waits when the caller is on the main thread, so
+    /// Waits for every running task to end, or until the latest of their deadlines:
+    /// whether it did. A task still queued is not waited for: it ends unrun once
+    /// [`close`](Self::close) was called. `pump` runs between waits when the caller is on the main thread, so
     /// an in-process plugin's task, which waits for the main thread, can end.
     pub(crate) fn wait_idle(&self, mut pump: Option<&mut dyn FnMut()>) -> bool {
         let mut state = self.0.state.lock_recover();
         loop {
-            if state.count == 0 {
+            if state.running == 0 {
                 return true;
             }
             let left = state.until.map_or(Duration::ZERO, |until| {
@@ -155,13 +190,16 @@ impl Tasks {
 
 impl Drop for TaskGuard {
     fn drop(&mut self) {
-        let mut state = (self.0).0.state.lock_recover();
+        let mut state = self.tasks.0.state.lock_recover();
         state.count -= 1;
-        if state.count == 0 {
+        if self.running {
+            state.running -= 1;
+        }
+        if state.running == 0 {
             state.until = None;
         }
         drop(state);
-        (self.0).0.idle.notify_all();
+        self.tasks.0.idle.notify_all();
     }
 }
 
@@ -228,8 +266,8 @@ impl PluginPart {
         )
     }
 
-    /// Starts `task`, a blocking round trip of `kind`, on the session's executor, and
-    /// says whether it started.
+    /// Starts `task`, a blocking round trip of `kind` bounded by the plugin's `timeouts`, on
+    /// the session's executor, and says whether it started.
     ///
     /// The task runs on the executor's blocking pool, which the session's other blocking work
     /// shares and which holds 32 threads: past them a task waits in the pool's queue, so a
@@ -241,15 +279,24 @@ impl PluginPart {
     /// each loop's task answers a refusal: its tokens free the plugin for the next ask, a
     /// reload ends as dropped, and the refusal is counted in [`Tasks::refused`].
     #[must_use = "a refused task is the loop's to ask again"]
-    pub(crate) fn spawn(&self, kind: Loop, task: impl FnOnce() + Send + 'static) -> bool {
-        let guard = self.tasks.enter(kind);
+    pub(crate) fn spawn(
+        &self,
+        kind: Loop,
+        timeouts: &Timeouts,
+        task: impl FnOnce() + Send + 'static,
+    ) -> bool {
+        let guard = self.tasks.enter(kind.deadline(timeouts));
         let Some(executor) = self.executor.upgrade() else {
             self.tasks.0.refused.fetch_add(1, Ordering::Relaxed);
             return false;
         };
         let started = executor.unblock(move || {
-            // The task's own captures drop when it returns, before the count does.
-            task();
+            let mut guard = guard;
+            // A close that began while the task queued ends it unrun: its captures drop here.
+            if guard.begin() {
+                // The task's own captures drop when it returns, before the count does.
+                task();
+            }
             drop(guard);
         });
         match started {
@@ -275,6 +322,7 @@ impl PluginPart {
     /// dropped by the task, and an in-process plugin's close it hands over is counted in
     /// `MainWork::stranded()` if the collector has gone.
     pub(crate) fn drain_tasks(&self, main: Option<MainThreadMarker>) {
+        self.tasks.close();
         let work = &self.main_work;
         let mut pump = main.map(|main| {
             move || {
@@ -348,6 +396,7 @@ pub(crate) struct EarlyWork(SharedWork, Tasks);
 
 impl Drop for EarlyWork {
     fn drop(&mut self) {
+        self.1.close();
         let main = MainThreadMarker::new();
         let work = &self.0;
         let mut pump = main.map(|main| {

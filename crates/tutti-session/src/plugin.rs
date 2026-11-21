@@ -1398,6 +1398,14 @@ impl HostedPlugin {
         table.provide_plugin(node, entry, mode);
     }
 
+    /// The IPC timeouts the plugin was loaded with, which bound its loops' round trips; the
+    /// defaults for a plugin with no origin (one the host inserted in process).
+    fn timeouts(&self) -> tutti_plugin_types::Timeouts {
+        self.origin
+            .as_ref()
+            .map_or_else(Default::default, |origin| origin.config.timeouts)
+    }
+
     /// Asks for the parameters to be read again (the plugin announced a
     /// rescan): a fresh read, handed to the host at the next
     /// `Phase::Plugins`, and a fresh token, so a read still in flight lands
@@ -2291,6 +2299,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         }
         hosted.reload.due = None;
         hosted.reload.in_flight = true;
+        let timeouts = origin.config.timeouts;
         let load = PluginLoad {
             loadable: origin.loadable.retargeted(hosted.plugin.clone()),
             rate,
@@ -2312,9 +2321,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         // blocks: a plugin load is an IPC round trip, bounded by the load deadlines. The task
         // holds the post and the load's weak executor, never an executor. A refused task is
         // dropped unrun, which ends the reload as dropped through its post.
-        let _ = self
-            .plugins
-            .spawn(Loop::Reload, move || post.run(move || load.run()));
+        let _ = self.plugins.spawn(Loop::Reload, &timeouts, move || {
+            post.run(move || load.run());
+        });
     }
 
     /// The reload's task ended without a result (it was dropped, or it panicked): a
@@ -2504,19 +2513,25 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             };
             let snapshot = due.then(|| {
                 hosted.snapshot_at = Some(now);
-                (hosted.handle.clone(), Arc::clone(&hosted.snapshot_token))
+                (
+                    hosted.handle.clone(),
+                    Arc::clone(&hosted.snapshot_token),
+                    hosted.timeouts(),
+                )
             });
 
             if let Some(read) = hosted.param_read.take() {
                 let token = Arc::clone(&hosted.mirror_token);
                 let post = self.plugins.inbox.post();
                 // blocks: the parameter read is an IPC round trip, bounded by `param_wait`.
-                let started = self.plugins.spawn(Loop::ParamRead, move || {
-                    match contained("parameter read", node, move || read.run()) {
-                        Some(values) => post.params(node, token, values),
-                        None => post.params_lost(node, token),
-                    }
-                });
+                let timeouts = hosted.timeouts();
+                let started =
+                    self.plugins.spawn(Loop::ParamRead, &timeouts, move || {
+                        match contained("parameter read", node, move || read.run()) {
+                            Some(values) => post.params(node, token, values),
+                            None => post.params_lost(node, token),
+                        }
+                    });
                 if !started {
                     // The read went with the refused task: ask the plugin for a fresh one.
                     hosted.reread_params();
@@ -2545,12 +2560,12 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                     },
                 ));
             }
-            if let Some((handle, token)) = snapshot {
+            if let Some((handle, token, timeouts)) = snapshot {
                 let asked = now;
                 let post = self.plugins.inbox.post();
                 // blocks: the state save is an IPC round trip, bounded by `state_wait`.
                 // A refused task drops its token, which frees the plugin for the next ask.
-                let _ = self.plugins.spawn(Loop::Snapshot, move || {
+                let _ = self.plugins.spawn(Loop::Snapshot, &timeouts, move || {
                     if let Some(state) = contained("state snapshot", node, move || {
                         handle.save_state(StateUse::Project)
                     }) {
@@ -2609,7 +2624,7 @@ mod tests {
     use crate::RecoveryPolicy;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tutti_platform::Executor;
-    use tutti_plugin_types::ParameterInfo;
+    use tutti_plugin_types::{ParameterInfo, Timeouts};
     use tutti_units::Normalized;
     use tutti_units::ParamId;
 
@@ -2661,7 +2676,7 @@ mod tests {
                 &executor,
             );
             let (release, hold) = std::sync::mpsc::channel::<()>();
-            assert!(part.spawn(kind, move || {
+            assert!(part.spawn(kind, &Timeouts::default(), move || {
                 let _ = hold.recv_timeout(HANG_GUARD);
             }));
             assert_eq!(part.tasks.in_flight(), 1, "{kind:?}: queued or running");
@@ -2677,6 +2692,80 @@ mod tests {
         }
     }
 
+    /// **A loop's bound is the plugin's own configured timeout.** A close waits for a
+    /// reload as long as its `load` timeout, a read its `param` and a snapshot its
+    /// `state`, as the plugin was loaded with (`Origin::config`), the defaults only for a
+    /// plugin with no origin: an app that raised a timeout is not given up on early.
+    #[test]
+    fn a_loops_bound_is_the_plugins_configured_timeout() {
+        let mut timeouts = Timeouts::default();
+        timeouts.load = Duration::from_secs(101);
+        timeouts.param = Duration::from_secs(102);
+        timeouts.state = Duration::from_secs(103);
+        assert_eq!(Loop::Reload.deadline(&timeouts), timeouts.load);
+        assert_eq!(Loop::ParamRead.deadline(&timeouts), timeouts.param);
+        assert_eq!(Loop::Snapshot.deadline(&timeouts), timeouts.state);
+
+        let mut rig = rig(None);
+        let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
+        assert_eq!(hosted.timeouts(), Timeouts::default(), "no origin");
+        hosted.origin = Some(Origin {
+            config: AudioConfig::default().timeouts(timeouts),
+            loadable: Loadable::uncatalogued(PluginRef::file("fake.clap")),
+        });
+        assert_eq!(hosted.timeouts(), timeouts);
+    }
+
+    /// **A task still queued when a close begins never runs.** The pool is full, so the
+    /// snapshot waits in its queue; a piece of main-thread work frees a pool thread during
+    /// the close, after it was marked begun, and the freed thread takes the snapshot: it
+    /// ends at its first step, unrun (no save was asked), and the plugin's close reaches
+    /// the main thread with nothing stranded.
+    #[test]
+    fn a_task_queued_when_a_close_begins_never_runs() {
+        let mut rig = in_process_rig(Some(vec![1]));
+        let executor = rig.executor.upgrade().expect("the session's executor");
+        let held: Vec<_> = (0..32)
+            .map(|_| {
+                let (release, hold) = std::sync::mpsc::channel::<()>();
+                let task = executor
+                    .unblock(move || {
+                        let _ = hold.recv_timeout(HANG_GUARD);
+                    })
+                    .expect("a pool thread starts");
+                (release, task)
+            })
+            .collect();
+        drop(executor);
+        let _ = rig.events_at(0);
+        let _ = rig.events_at(1_000);
+        assert_eq!(rig.session.plugin_tasks(), 1, "the snapshot is queued");
+
+        // The close runs this on the main thread, once it has begun: it frees a thread and
+        // waits for the queued snapshot to end, which only its first step can do quickly.
+        let tasks = rig.session.plugins.tasks.clone();
+        let (first, _) = &held[0];
+        let first = first.clone();
+        rig.session.plugins.work.defer(move |_| {
+            let _ = first.send(());
+            let guard = tutti_platform::Instant::now() + HANG_GUARD;
+            while tasks.in_flight() > 0 && tutti_platform::Instant::now() < guard {
+                std::thread::yield_now();
+            }
+        });
+        let closed = Arc::clone(&rig.closed);
+        let saves = Arc::clone(&rig.saves);
+        let stranded = tutti_plugin_types::MainWork::stranded();
+        rig.session.close(tutti_fixtures::main_thread());
+        for (release, task) in held {
+            let _ = release.send(());
+            task.detach();
+        }
+        assert_eq!(saves.load(Ordering::SeqCst), 0, "the snapshot never ran");
+        assert!(closed.load(Ordering::SeqCst), "the plugin's close ran");
+        assert_eq!(tutti_plugin_types::MainWork::stranded(), stranded);
+    }
+
     /// **A refused spawn is counted, starts nothing and leaves no task in flight.**
     #[test]
     fn a_refused_spawn_is_counted_and_leaves_nothing_in_flight() {
@@ -2687,7 +2776,11 @@ mod tests {
         );
         drop(executor);
         for refused in 1..=3 {
-            assert!(!part.spawn(Loop::Snapshot, || unreachable!("the task never runs")));
+            assert!(
+                !part.spawn(Loop::Snapshot, &Timeouts::default(), || unreachable!(
+                    "the task never runs"
+                ))
+            );
             assert_eq!(part.tasks.refused(), refused);
         }
         assert_eq!(part.tasks.in_flight(), 0);
