@@ -79,9 +79,9 @@ fn session_built(
     for (key, value) in extra {
         set_env(key, value);
     }
-    // The executor is polled: a job runs in the `Collect` that polls it and lands
-    // there, in a deterministic order. A test that wants another executor says so
-    // in `build`.
+    // The executor is polled: a queued job runs in the `Collect` that polls it and lands
+    // there, in a deterministic order (the plugin tasks run on its blocking pool). A test
+    // that wants another executor says so in `build`.
     build(Session::builder().executor(tutti_platform::Executor::new()))
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
@@ -476,8 +476,8 @@ fn renders_sound(s: &mut Session) -> bool {
 }
 
 /// A virtual clock for the session's phases, and every event they reported
-/// (the jobs' landings included: the session's executor is polled, so a job
-/// submitted in a frame runs and lands in that frame's `Phase::Collect`).
+/// (the plugin tasks' ends included: a task started in a frame runs on a pool thread, and
+/// its end lands in the `Phase::Plugins` of a later frame).
 struct Drive {
     now: Instant,
     events: Vec<SessionEvent>,
@@ -499,7 +499,7 @@ impl Drive {
     }
 
     /// One frame: a block rendered (the server gets real time to act), the
-    /// plugins' phase at the clock 20 ms on, and what its jobs sent landing.
+    /// plugins' phase at the clock 20 ms on, landing what the tasks sent.
     fn step(&mut self, s: &mut Session) {
         let _ = renders_sound(s);
         std::thread::sleep(Duration::from_millis(5));
@@ -521,7 +521,6 @@ impl Drive {
             check();
         }
         self.events.extend(out);
-        // The jobs it submitted run, and what they sent lands.
         s.run_phase(Phase::Collect, PhaseCx::at(self.now), &mut self.events);
         // The commit that puts a replacement into the executor's plan, and the
         // collect that frees the plan's old unit on this thread.
@@ -595,13 +594,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
         std::thread::sleep(Duration::from_millis(5));
     }
     let t0 = Instant::now();
-    for at in [0, 2_000] {
-        let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs in the collect's poll, and lands there.
-        s.run_phase(Phase::Plugins, cx, &mut Vec::new());
-        s.run_phase(Phase::Collect, cx, &mut Vec::new());
-    }
-    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
+    snapshot_now(&mut s, node);
     let total_before = s.latency();
 
     // Render into the crash, then through the recovery.
@@ -1185,16 +1178,19 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
 }
 
 /// Captures a snapshot of `node` at once, as a host's worker would (the
-/// session's snapshot cadence is 1 s here, driven by the virtual clock).
+/// session's snapshot cadence is 1 s here, driven by the virtual clock). The first phase
+/// starts the cadence, the second, a virtual 2 s on, asks the plugin, and the phases after
+/// it land the task's end; a hang guard bounds the wait.
 fn snapshot_now(s: &mut Session, node: NodeKey) {
     let t0 = Instant::now();
-    for at in [0, 2_000] {
-        let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs in the collect's poll, and lands there.
+    s.run_phase(Phase::Plugins, PhaseCx::at(t0), &mut Vec::new());
+    let cx = PhaseCx::at(t0 + Duration::from_millis(2_000));
+    let guard = Instant::now() + Duration::from_secs(30);
+    while s.plugin_view(node).unwrap().state().last_good().is_none() {
+        assert!(Instant::now() < guard, "the snapshot never landed");
         s.run_phase(Phase::Plugins, cx, &mut Vec::new());
-        s.run_phase(Phase::Collect, cx, &mut Vec::new());
+        std::thread::yield_now();
     }
-    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
 }
 
 fn recovered_state(drive: &Drive) -> Vec<tutti_session::StateRestore> {
