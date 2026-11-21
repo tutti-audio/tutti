@@ -3,6 +3,8 @@
 
 use super::types::*;
 use crate::component::{AuComponentInfo, AuType};
+use crate::error::Result;
+pub use tutti_au_ffi::ComponentKey;
 pub use tutti_au_ffi::ComponentRef as AuComponentRef;
 use tutti_plugin_types::PluginVersion;
 
@@ -87,11 +89,15 @@ pub fn enumerate_components_of_type(au_type: AuType) -> Vec<AuComponentInfo> {
     })
 }
 
-/// Looks up the first component matching an exact [`AudioComponentDescription`].
+/// Looks up the component with exactly this [`ComponentKey`]: type, subtype and
+/// manufacturer, all set, so at most one component matches. A search over a
+/// type or a manufacturer is [`enumerate_components_of_type`], filtered by the
+/// caller.
 ///
-/// Returns `None` if no matching AU is installed.
-pub fn find_component(desc: &AudioComponentDescription) -> Option<AuComponentRef> {
-    AuComponentRef::first_matching(desc)
+/// # Errors
+/// [`AuError::ComponentNotRegistered`](crate::AuError::ComponentNotRegistered) when no installed Audio Unit has the key.
+pub fn find_component(key: ComponentKey) -> Result<AuComponentRef> {
+    Ok(AuComponentRef::find(key)?)
 }
 
 pub(crate) fn component_info(component: AuComponentRef) -> Option<AuComponentInfo> {
@@ -188,13 +194,12 @@ mod tests {
 
     #[test]
     fn test_find_apple_au_delay() {
-        let desc = AudioComponentDescription {
-            componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-            componentSubType: u32::from_be_bytes(*b"dely"),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        assert!(find_component(&desc).is_some());
+        let desc = ComponentKey::new(
+            K_AUDIO_UNIT_TYPE_EFFECT,
+            u32::from_be_bytes(*b"dely"),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        assert!(find_component(desc).is_ok());
     }
 }

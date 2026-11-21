@@ -7,10 +7,10 @@
 //! steps audibly.
 
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::{
-    COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals, DelayTiming,
-    GAIN_RAMP, Lerp,
+    BlockMismatch, COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals,
+    DelayTiming, GAIN_RAMP, Lerp,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
@@ -247,10 +247,10 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         let signals = DelaySignals {
             time: signals.get(DelaySet::TIME_SIGNAL),
             feedback: signals.get(DelaySet::FEEDBACK_SIGNAL),
@@ -260,6 +260,7 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         }
         // A design after a render is a move, which ramps.
         self.applied = true;
+        Ok(())
     }
 
     /// A recirculating line rings for as long as its feedback says: unknown, so the graph
@@ -271,6 +272,7 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
 
 #[cfg(test)]
 mod tests {
+    use tutti_buffers::Planes;
     // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
     // format, so their tolerances are `f32`'s.
     use super::*;

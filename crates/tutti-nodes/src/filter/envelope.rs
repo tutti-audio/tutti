@@ -1,9 +1,10 @@
 //! [`EnvelopeFilterNode`]: a state-variable filter whose cutoff follows the signal's level.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
-    COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lerp, SimdLanes, SvfType,
+    BlockMismatch, COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lerp, SimdLanes,
+    SvfType,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
@@ -175,12 +176,12 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        if let Some(bank) = &mut self.bank {
-            bank.process(input, output);
+    ) -> Result<(), BlockMismatch> {
+        match &mut self.bank {
+            Some(bank) => bank.process(block),
+            None => Ok(()),
         }
     }
 
@@ -192,7 +193,9 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::InputOutput;
     use tutti_fixtures::signal::wide_signal;
+    use tutti_units::Samples;
 
     /// An `f64` kernel keeps the filter in `f64`: a constant `c` of more than 24 bits through a
     /// low-pass at depth 0 (a fixed filter of unit DC gain) settles on `c` to 1e-12 (an `f32`
@@ -212,10 +215,11 @@ mod tests {
         let x = vec![c; 4_000];
         let mut y = vec![0.0f64; x.len()];
         k.render(
-            Planes::new(&[&x[..]]).unwrap(),
+            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut [&mut y[..]])
+                .unwrap(),
             ControlSignals::NONE,
-            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-        );
+        )
+        .unwrap();
         assert!((y[3_999] - c).abs() < 1e-12, "{} against {c}", y[3_999]);
     }
 }

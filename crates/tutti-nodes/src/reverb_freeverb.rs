@@ -3,9 +3,9 @@
 //! [`FreeverbBank`] is the combs and all-passes over buffers views (the lines, the ramps);
 //! this file holds the kernel that retargets it, the cells and how the graph reaches them.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbRamps, Lerp};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, FreeverbBank, FreeverbControls, FreeverbRamps, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Mix, SampleRate, Tail};
 
@@ -199,15 +199,16 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         if let Some(r) = &mut self.running {
             r.bank.process(&mut r.ramps, input, output);
         }
         // A design after a render is a move, which ramps.
         self.applied = true;
+        Ok(())
     }
 
     /// The bank's ceiling (the room at its largest), or the room's own for a send, or

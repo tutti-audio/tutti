@@ -819,14 +819,13 @@ mod tests {
         name: &str,
         work: &tutti_plugin_types::MainWorkHandle,
     ) -> Unit {
-        let desc = AudioComponentDescription {
-            componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-            componentSubType: u32::from_be_bytes(sub_type),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = find_component(&desc).unwrap_or_else(|| panic!("{name} should be present"));
+        let desc = ComponentKey::new(
+            K_AUDIO_UNIT_TYPE_EFFECT,
+            u32::from_be_bytes(sub_type),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        let comp = find_component(desc).unwrap_or_else(|e| panic!("{name} should be present: {e}"));
         let unit = Unit::new(comp, work).expect("instantiate");
         unit.initialize().expect("initialize");
         unit

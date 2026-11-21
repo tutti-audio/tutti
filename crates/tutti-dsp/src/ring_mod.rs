@@ -5,7 +5,9 @@
 //! jumps it. The output is `y = x c`, whose spectrum for a sine input at `f1` holds
 //! `f1 + fc` and `f1 - fc` and nothing at `f1`. A dry/wet blend is the graph's, per node.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_same_width;
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Hz, SampleRate};
 
 use crate::{Oscillator, OscillatorStep, OscillatorWave};
@@ -56,11 +58,18 @@ impl RingModulator {
         self.carrier.reset();
     }
 
-    /// Runs `input` into `output`. The channels rendered are the fewer of the two views',
-    /// the frames the fewer of the two views'. No allocation.
-    pub fn process<F: Float>(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input.channels().min(output.channels());
+    /// Runs `input` into `output`, every channel on the one carrier. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the output has other channels than the input.
+    pub fn process<F: Float>(
+        &mut self,
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = expect_same_width(block)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let RingModControls { frequency } = self.controls;
         let step = OscillatorStep::<F>::new(frequency, self.rate);
         let start = self.carrier;
@@ -76,6 +85,7 @@ impl RingModulator {
             end = carrier;
         }
         self.carrier = end;
+        Ok(())
     }
 }
 

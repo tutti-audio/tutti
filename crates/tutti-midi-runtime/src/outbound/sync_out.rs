@@ -29,7 +29,9 @@
 //! packets in one run, whole or not at all: a block with no room for all of a
 //! message's packets counts it lost, so an output never carries half a SysEx
 //! run. A transport time no time code names (before zero, NaN, a day or more) is
-//! counted refused and sends no MMC LOCATE ([`SyncOutControls::losses`]).
+//! counted refused and sends no MMC LOCATE ([`SyncOutControls::losses`]); a beat
+//! the Song Position Pointer cannot name (before the start, or past its 14-bit
+//! field, 4096 beats) is counted refused and sends no pointer.
 //!
 //! **A follower and a sender on one machine forward**: a transport that a
 //! follower moved is sent on like any other move. That is a relay, not guarded
@@ -96,7 +98,9 @@ impl SyncOutControls {
     /// What the node could not send, since it was made. `refused` counts the
     /// events a block produced past [`SYNC_OUT_EVENT_CAPACITY`] and the looks
     /// at a transport that moved to a time no time code names
-    /// ([`NoTimeCode`](crate::NoTimeCode)); `lost` counts the Machine Control
+    /// ([`NoTimeCode`](crate::NoTimeCode)), and the Song Position Pointers
+    /// and MTC positions of a beat their fields cannot hold (past 4096 beats
+    /// or before the start); `lost` counts the Machine Control
     /// messages the block had no room for. A host polls it: nonzero means a
     /// receiver missed something and should be resynced.
     #[must_use]
@@ -277,6 +281,10 @@ impl<F: Float> Node<F> for SyncOut {
                     }
                 },
             );
+            let refused = self.clock.take_refused();
+            if refused > 0 {
+                self.losses.add(Losses::refused(refused));
+            }
             let at = Offset::clamped(base, block_len);
             match messages.mmc {
                 None => self.sender.reset(),

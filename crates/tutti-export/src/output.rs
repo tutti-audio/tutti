@@ -204,7 +204,7 @@ impl FileTarget {
 
     /// Refuses a path that already exists instead of replacing it. The file is
     /// still written beside the path; the refusal is the commit's, which fails
-    /// with a [`tutti_codec::Error::Commit`] of kind `AlreadyExists`, leaves
+    /// with a [`tutti_codec::EncodeError::Commit`] of kind `AlreadyExists`, leaves
     /// what is at the path alone and keeps the complete file at the error's
     /// `kept` path for the caller.
     #[must_use]

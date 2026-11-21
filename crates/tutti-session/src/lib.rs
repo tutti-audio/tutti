@@ -154,13 +154,16 @@ mod take;
 #[cfg(all(feature = "midi", feature = "analyze"))]
 mod transcribe;
 mod transport_handle;
+#[cfg(any(feature = "sampler", feature = "analyze", feature = "midi"))]
+mod unblocked;
 mod value;
 #[cfg(feature = "device")]
 mod watch;
 
 #[cfg(feature = "analyze")]
 pub use analyze::{
-    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
+    BindError,
 };
 pub use apply::Apply;
 #[cfg(feature = "export")]
@@ -211,11 +214,12 @@ pub use key::{
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
 #[cfg(all(feature = "sampler", codec))]
-pub use load_audio::{AudioData, LoadAudio, LoadedAudio, Tier};
+pub use load_audio::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
 #[cfg(feature = "soundfont")]
-pub use load_soundfont::{LoadSoundFont, LoadedSoundFont};
+pub use load_soundfont::{LoadSoundFont, LoadedSoundFont, LoadingSoundFont};
 #[cfg(any(
-    all(feature = "sampler", codec),
+    feature = "sampler",
+    feature = "midi",
     feature = "soundfont",
     feature = "plugin"
 ))]
@@ -232,7 +236,8 @@ pub use midi_ci::{
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
 #[cfg(feature = "midi")]
 pub use midi_load::{
-    DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, NoCommonTimelineError, TrackError,
+    DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
+    NoCommonTimelineError, TrackError,
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
@@ -286,7 +291,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{OpenStream, OpenStreamError, OpenedStream, SamplerError};
+pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, SamplerError};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;

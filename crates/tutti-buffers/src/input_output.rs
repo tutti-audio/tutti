@@ -143,6 +143,24 @@ impl<'data, S: Sample> InputOutput<'data, S> {
         })
     }
 
+    /// The block of `input` and `output`, at the frame count of whichever has channels (the
+    /// input's when both do).
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError::BlockLengthMismatch`] when the two have different frame counts.
+    pub fn paired(
+        input: Planes<'data, S>,
+        output: PlanesMut<'data, 'data, S>,
+    ) -> Result<Self, BufferError> {
+        let frames = if input.channels() > 0 {
+            input.frames()
+        } else {
+            output.frames()
+        };
+        Self::new(frames, input, output)
+    }
+
     /// The block's frame count.
     #[must_use]
     pub const fn frames(&self) -> Samples {

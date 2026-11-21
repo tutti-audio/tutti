@@ -4,9 +4,10 @@
 //! ramps); this file holds the kernel that retargets it, the cells and how the graph reaches
 //! them.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Planes, PlanesMut};
-use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp};
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_dsp::{
+    BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
@@ -195,13 +196,14 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         if let Some(r) = &mut self.running {
             r.bank.process(&mut r.ramps, input, output);
         }
+        Ok(())
     }
 
     /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a

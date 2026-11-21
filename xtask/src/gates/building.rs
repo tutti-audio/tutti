@@ -299,6 +299,12 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-buffers/src/input_output.rs",
+        "InputOutput::paired",
+        CTOR,
+        "the same validity as `InputOutput::new` with the frame count taken from the views: they must agree",
+    ),
+    ty(
+        "crates/tutti-buffers/src/input_output.rs",
         "InputOutput::from_slices",
         CTOR,
         "the same validity as `InputOutput::new` over two slice tables: their frame counts must agree",
@@ -332,6 +338,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "Vst3Loaded::load",
         CTOR,
         "loading a VST3 module the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-runtime/src/schedule/harmony_node.rs",
+        "HarmonyChanges::new",
+        CTOR,
+        "the changes are valid together (no chord, and no scale, shares a beat with another): no single change's type holds it",
     ),
     ty(
         "crates/tutti-dsp/src/spatial/hrtf/sphere.rs",
@@ -431,7 +443,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-platform/",
-        "Stamp::of",
+        "FileStamp::of",
         CTOR,
         "stamping a file: the failure is the file's metadata, not a value's",
     ),

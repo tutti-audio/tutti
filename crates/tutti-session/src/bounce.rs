@@ -572,7 +572,7 @@ impl<N, M, F: Float> Bounce<N, M, F> {
     ///
     /// Each file is written beside its path and put in place when the bounce
     /// finishes. A path that exists then fails the commit with
-    /// [`tutti_codec::Error::Commit`] of kind `AlreadyExists`, reported as
+    /// [`tutti_codec::EncodeError::Commit`] of kind `AlreadyExists`, reported as
     /// [`BounceError::Export`] (or inside
     /// [`NotCommitted`](tutti_export::RenderError::NotCommitted) when earlier files
     /// had landed). What is at the path is left alone and the complete file is

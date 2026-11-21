@@ -1,9 +1,9 @@
 //! [`CombFilterNode`]: a delay summed with the signal, forward or back.
 
 use core::num::NonZeroUsize;
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, CombBank, CombControls, CombForm};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, CombBank, CombControls, CombForm};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Feedback, SampleRate, Seconds, Tail};
 
@@ -153,12 +153,12 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        if let Some(bank) = &mut self.bank {
-            bank.process(input, output);
+    ) -> Result<(), BlockMismatch> {
+        match &mut self.bank {
+            Some(bank) => bank.process(block),
+            None => Ok(()),
         }
     }
 

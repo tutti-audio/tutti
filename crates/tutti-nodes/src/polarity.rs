@@ -1,7 +1,7 @@
 //! [`PolarityNode`]: a polarity flip of chosen channels, from a [`PolarityConfig`].
 
 use tutti_buffers::{ChannelIndex, ChannelLayout, MAX_CHANNELS};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::{ChannelOutOfRange, Polarity};
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
 
@@ -99,14 +99,9 @@ impl<F: Float> Node<F> for PolarityNode {
 
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let width = usize::from(self.polarity.width().count());
-        through_planes(
-            &mut io,
-            width,
-            width,
-            |input: Planes<'_, F>, output: PlanesMut<'_, '_, F>| {
-                self.polarity.process(input, output);
-            },
-        );
+        through_planes(&mut io, width, width, |block: &mut InputOutput<'_, F>| {
+            self.polarity.process(block)
+        });
         Status::Modified
     }
 

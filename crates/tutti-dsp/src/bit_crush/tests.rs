@@ -1,12 +1,18 @@
 use super::*;
+use tutti_buffers::InputOutput;
 use tutti_buffers::{Planes, PlanesMut};
 
 fn run(crusher: &mut BitCrusher<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut out = vec![vec![0.0; input[0].len()]; input.len()];
-    crusher.process(
-        Planes::from_vecs(input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+    crusher
+        .process(
+            &mut InputOutput::paired(
+                Planes::from_vecs(input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     out
 }
 
@@ -148,9 +154,13 @@ fn thirty_two_bits_is_the_identity_within_the_step() {
     );
     let mut out = vec![vec![0.0f32; x.len()]];
     c.process(
-        Planes::from_vecs(std::slice::from_ref(&x)).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::from_vecs(std::slice::from_ref(&x)).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let mut small = 0;
     for (&x, &y) in x.iter().zip(&out[0]) {
         assert!((f64::from(y) - f64::from(x)).abs() <= 2f64.powi(-32), "{x}");

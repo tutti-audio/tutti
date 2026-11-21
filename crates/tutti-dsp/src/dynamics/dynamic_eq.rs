@@ -35,8 +35,10 @@
 //! The bank has no latency (the detector is on the signal and the key, never ahead of them).
 //! Its tail is the bell's ring-out, which follows the Q.
 
+use crate::BlockMismatch;
+use crate::block::{expect_key_frames, expect_widths};
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Planes};
 use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::curves::{gain_reduction, level_db, upward_gain_lift};
@@ -338,21 +340,22 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
     /// `key` is the signal the detector listens to: the side-chain bus, or `input` itself for
     /// a band on its own signal, always through the band-pass at the centre and Q (the signal
     /// the gain is applied to is never filtered but by the bell). Channel `c` of `input` feeds
-    /// channel `c` of `output`; a channel past the narrower of the two views, or past the
-    /// bank's width, is not touched, and the frames rendered are the fewest of the three
-    /// views'. A NaN key sample reads as quiet and an infinite one as the largest finite
-    /// level. No allocation.
+    /// channel `c` of `output`. A NaN key sample reads as quiet and an infinite one as the
+    /// largest finite level. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels, or the key is not at the block's frame count.
     pub fn process(
         &mut self,
         key: Planes<'_, F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input
-            .frames()
-            .get()
-            .min(output.frames().get())
-            .min(key.frames().get());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = self.bell.channels();
+        expect_widths(block, width, width)?;
+        expect_key_frames(block, &key)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let mut levels = [F::ZERO; PERIOD.get()];
         let mut start = 0;
         while start < frames {
@@ -367,14 +370,15 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
                 self.frame(level);
             }
             let span = Samples::new(start)..Samples::new(end);
-            self.bell.process(
+            self.bell.run(
                 &mut self.coefficients,
-                input.slice(span.clone()),
-                output.slice_mut(span),
+                &input.slice(span.clone()),
+                &mut output.slice_mut(span),
             );
             self.phase = (self.phase + Samples::new(n)) % PERIOD;
             start = end;
         }
+        Ok(())
     }
 }
 

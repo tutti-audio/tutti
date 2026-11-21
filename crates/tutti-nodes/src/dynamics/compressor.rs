@@ -1,11 +1,11 @@
 //! The feed-forward [`CompressorNode`] with an external side-chain, soft knee and
 //! makeup gain.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
-    COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorSignals, KeyFilter, KeySource,
-    Lerp, SimdLanes,
+    BlockMismatch, COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorSignals,
+    KeyFilter, KeySource, Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
@@ -261,25 +261,25 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.render_keyed(input, input, signals, output);
+    ) -> Result<(), BlockMismatch> {
+        let input = block.input();
+        self.render_keyed(block, input, signals)
     }
 
     fn render_keyed(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         key: Planes<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
         let signals = CompressorSignals {
             threshold: signals.get(CompressorSet::THRESHOLD_SIGNAL),
         };
-        if let Some(bank) = &mut self.bank {
-            bank.process(signals, key, input, output);
+        match &mut self.bank {
+            Some(bank) => bank.process(signals, key, block),
+            None => Ok(()),
         }
     }
 

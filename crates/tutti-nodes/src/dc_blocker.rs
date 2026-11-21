@@ -1,8 +1,8 @@
 //! [`DcBlockerNode`]: a first-order high-pass that removes a constant offset.
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, DcBlocker, DcBlockerControls, Lerp, MIN_DC_CORNER};
+use tutti_buffers::Float;
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, DcBlocker, DcBlockerControls, Lerp, MIN_DC_CORNER};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
@@ -141,13 +141,13 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.blocker.process(input, output);
+    ) -> Result<(), BlockMismatch> {
+        let rendered = self.blocker.process(block);
         // A design after a render is a move, which ramps.
         self.applied = true;
+        rendered
     }
 
     /// The ring-out at the lowest corner: the longest over every control.

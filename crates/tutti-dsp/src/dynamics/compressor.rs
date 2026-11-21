@@ -19,8 +19,10 @@
 //! of them) and no tail (the gain only scales, so a silent signal is a silent output
 //! whatever the follower is doing).
 
+use crate::BlockMismatch;
+use crate::block::{expect_key_frames, expect_same_width};
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Mono, Planes};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gain_reduction, level_db};
@@ -267,23 +269,23 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     /// `key` is the signal the detector listens to: the side-chain bus, or `input` itself
     /// for a compressor on its own signal, through the key filter if the bank has one (the
     /// signal it gains is never filtered). Channel `c` of `input` feeds channel `c` of
-    /// `output`; a channel past the narrower of the two views is not touched, and the frames
-    /// rendered are the fewest of the three views'. A NaN key sample reads as quiet and an
-    /// infinite one as the largest finite level. Frame `i` reads the makeup at the ramp's
-    /// step `taken + 1 + i`, then the block's steps are taken. No allocation.
+    /// `output`. A NaN key sample reads as quiet and an infinite one as the largest finite
+    /// level. Frame `i` reads the makeup at the ramp's step `taken + 1 + i`, then the block's
+    /// steps are taken. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the output has other channels than the input, or the key is not at the block's frame count.
     pub fn process(
         &mut self,
         signals: CompressorSignals<'_, F>,
         key: Planes<'_, F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input
-            .frames()
-            .get()
-            .min(output.frames().get())
-            .min(key.frames().get());
-        let width = input.channels().min(output.channels());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = expect_same_width(block)?;
+        expect_key_frames(block, &key)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let d = self.detector;
         let threshold_set = F::from_unit(d.threshold);
         let blended = self.makeup.blended_frames(frames);
@@ -328,6 +330,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         }
         self.makeup
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

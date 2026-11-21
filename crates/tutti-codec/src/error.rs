@@ -10,7 +10,7 @@ use tutti_buffers::ChannelLayout;
 /// own failure modes, so a caller keeps a wildcard arm.
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum Error {
+pub enum EncodeError {
     /// The sink failed: a full disk, a closed file, a failed seek. Also the
     /// codec libraries' own I/O faults.
     #[error("I/O error: {0}")]
@@ -69,7 +69,7 @@ pub enum Error {
     },
 }
 
-impl Clone for Error {
+impl Clone for EncodeError {
     /// A copy that keeps an I/O error's kind and message, not its source.
     fn clone(&self) -> Self {
         match self {
@@ -95,19 +95,19 @@ impl Clone for Error {
     }
 }
 
-impl From<Error> for io::Error {
-    /// The `io::Error` itself for [`Error::Io`], else the error wrapped, for a
+impl From<EncodeError> for io::Error {
+    /// The `io::Error` itself for [`EncodeError::Io`], else the error wrapped, for a
     /// sink that speaks `io::Result`.
-    fn from(error: Error) -> Self {
+    fn from(error: EncodeError) -> Self {
         match error {
-            Error::Io(e) => e,
+            EncodeError::Io(e) => e,
             other => io::Error::other(other),
         }
     }
 }
 
 /// A [`Spec`](crate::Spec) the format cannot be written for
-/// ([`Error::Spec`]).
+/// ([`EncodeError::Spec`]).
 #[derive(Error, Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum SpecError {
@@ -128,7 +128,7 @@ pub enum SpecError {
     },
 }
 
-/// The codec behind an [`Error::Encoding`].
+/// The codec behind an [`EncodeError::Encoding`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Codec {
@@ -147,7 +147,7 @@ impl std::fmt::Display for Codec {
     }
 }
 
-impl Error {
+impl EncodeError {
     #[cfg_attr(
         not(any(feature = "encode-flac", feature = "encode-aiff")),
         expect(dead_code, reason = "only the flac and aiff encoders report this")
@@ -160,5 +160,5 @@ impl Error {
     }
 }
 
-/// `std::result::Result` with this crate's [`Error`](enum@Error).
-pub type Result<T> = std::result::Result<T, Error>;
+/// `std::result::Result` with this crate's [`EncodeError`](enum@EncodeError).
+pub type Result<T> = std::result::Result<T, EncodeError>;

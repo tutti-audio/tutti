@@ -12,7 +12,9 @@
 //! is ignored wherever it comes from (the node keeps the last ceiling for a NaN
 //! cell, and a NaN frame on the control signal clamps at the set ceiling).
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_same_width;
+use tutti_buffers::{Float, InputOutput, Mono};
 use tutti_units::Db;
 
 use super::curves::db_gain;
@@ -92,16 +94,19 @@ impl<F: Float> BrickwallBank<F> {
     /// Runs `input` into `output`, every frame clamped at the ceiling: its own on a driven
     /// frame, the set one on any other (a NaN is not a level).
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the narrower of
-    /// the two views is not touched. No allocation.
+    /// Channel `c` of `input` feeds channel `c` of `output`. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the output has other channels than the input.
     pub fn process(
         &self,
         signals: BrickwallSignals<'_, F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input.channels().min(output.channels());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = expect_same_width(block)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let base = self.ceiling;
         match signals.ceiling {
             // Each frame's ceiling is found once, for every channel.
@@ -126,6 +131,7 @@ impl<F: Float> BrickwallBank<F> {
                 }
             }
         }
+        Ok(())
     }
 }
 

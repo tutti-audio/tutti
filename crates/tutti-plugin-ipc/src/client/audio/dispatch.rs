@@ -22,7 +22,7 @@ use tutti_platform::Instant;
 use tutti_plugin_types::{
     EditorError, IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError,
 };
-use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause};
+use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause, ServerLosses};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -1386,7 +1386,12 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         News::ServerLosses {
             commands_refused,
             edits_refused,
-        } => inbox.server_losses(commands_refused, edits_refused),
+            refused_off_thread_calls,
+        } => inbox.server_losses(ServerLosses {
+            commands_refused,
+            edits_refused,
+            refused_off_thread_calls,
+        }),
         News::ProcessRequested => inbox.process_requested(),
         News::TransportRequested { request } => inbox.transport(request),
         // The server's editor is the remote editor's to hear of: no event of

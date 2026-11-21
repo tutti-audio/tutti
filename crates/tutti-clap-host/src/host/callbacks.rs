@@ -66,6 +66,10 @@ impl HostCallbacks for HostState {
         self.log_dropped.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn refused_off_thread_call(&self) {
+        self.refused_off_thread.add(1);
+    }
+
     fn request_restart(&self) {
         Request::Restart.raise(&self.requests);
     }
@@ -227,6 +231,20 @@ impl HostCallbacks for HostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A refused off-thread call counts on the instance's own host state, and
+    /// on no other.
+    #[test]
+    fn a_refused_off_thread_call_counts_on_its_own_instance() {
+        let (one, other) = (
+            HostState::new(tutti_fixtures::main_thread()),
+            HostState::new(tutti_fixtures::main_thread()),
+        );
+        one.refused_off_thread_call();
+        one.refused_off_thread_call();
+        assert_eq!(one.refused_off_thread.get(), 2);
+        assert_eq!(other.refused_off_thread.get(), 0);
+    }
 
     /// An audio-ports rescan asks for a restart only when a flag that changes a
     /// buffer's shape is set; a cosmetic name change asks for nothing.

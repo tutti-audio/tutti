@@ -1,15 +1,14 @@
-//! The session's sampler: a disk stream opened by work the app runs, and
+//! The session's sampler: a disk stream opened by work the app awaits, and
 //! taken back as a value.
 //!
 //! Reading a file takes as long as the file's header and its first reads, and
-//! the app's thread is the one that waits: [`Session::open_stream`] cuts the
-//! work ([`OpenStream`]), [`run`](OpenStream::run) does it anywhere without the
-//! session, and [`Session::apply`] puts what it read in service, answering the
-//! stream's control side and the reader its voice is built from, in the
-//! session's float:
+//! a task on the session's executor does it: [`Session::open_stream`] cuts the
+//! work ([`OpenStream`]), awaiting it reads the file without the session, and
+//! [`Session::apply`] puts what it read in service, answering the stream's
+//! control side and the reader its voice is built from, in the session's float:
 //!
 //! ```ignore
-//! let opened = session.open_stream("take_1.wav", StreamStart::HEAD)?.run()?;
+//! let opened = session.open_stream("take_1.wav", StreamStart::HEAD)?.await?;
 //! let (stream, reader) = session.apply(opened)?;
 //! ```
 //!
@@ -17,10 +16,17 @@
 //! `tutti-codec` decoder on): a [`LoadedAudio`](crate::LoadedAudio) holds the
 //! wave or names the file [`open_stream`](Session::open_stream) opens.
 
-use tutti_platform::Asset;
-use tutti_sampler::{AdoptError, OpenError, StreamHandle, StreamReader, StreamStart};
+use std::fmt;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tutti_platform::{Asset, WeakExecutor};
+use tutti_sampler::{AdoptError, StreamHandle, StreamReader, StreamStart};
 
+use crate::LoadError;
 use crate::apply::{Cut, Sealed};
+use crate::unblocked::Unblocked;
 use crate::{AppKey, Clock, Session, SessionFloat};
 
 /// Why a sampler call did not go through.
@@ -77,34 +83,89 @@ fn adopt_refusal<F: SessionFloat>(cut: Cut, error: AdoptError<F>) -> OpenStreamE
 }
 
 /// The reading of a file as a disk stream, cut from the session by
-/// [`Session::open_stream`].
+/// [`Session::open_stream`]. It is `Send`, and it is a [`Future`] through
+/// [`IntoFuture`]: awaiting it reads the file as a task on the session's
+/// executor and resolves to an [`OpenedStream`], which the app hands to
+/// [`Session::apply`](crate::Session::apply). There is no blocking form.
 ///
-/// It holds the asset and nothing of the session: run it on any thread, then
-/// hand the result to [`Session::apply`](crate::Session::apply).
+/// It holds the asset and a weak handle to the session's executor, and nothing
+/// else of the session. Dropping it unawaited reads nothing.
 #[derive(Debug)]
-#[must_use = "an open does nothing until it runs"]
+#[must_use = "an open does nothing unless it is awaited"]
 pub struct OpenStream<F: SessionFloat> {
     cut: Cut,
     read: tutti_sampler::OpenStream<F>,
+    executor: WeakExecutor,
 }
 
 impl<F: SessionFloat> OpenStream<F> {
     /// Reads the file: a seeking decoder when the file can seek, else the
-    /// whole file decoded, on this thread. The session is not touched.
-    ///
-    /// # Errors
-    ///
-    /// [`OpenError::Io`] when the file cannot be opened, [`OpenError::Format`]
-    /// when it is not audio this build decodes.
-    pub fn run(self) -> Result<OpenedStream<F>, OpenError> {
+    /// whole file decoded. The session is not touched.
+    fn run(self) -> Result<OpenedStream<F>, LoadError> {
         Ok(OpenedStream {
             cut: self.cut,
-            opened: self.read.run()?,
+            opened: self
+                .read
+                .run()
+                .map_err(|error| LoadError::Stream(Arc::new(error)))?,
         })
     }
 }
 
-/// A file read for a disk stream ([`OpenStream::run`]), which the session takes
+impl<F: SessionFloat> IntoFuture for OpenStream<F> {
+    type Output = Result<OpenedStream<F>, LoadError>;
+    type IntoFuture = OpeningStream<F>;
+
+    fn into_future(self) -> OpeningStream<F> {
+        OpeningStream {
+            open: Unblocked::new(self.executor.clone(), self, Self::run),
+        }
+    }
+}
+
+/// A stream's file being read ([`OpenStream`]): resolves to the
+/// [`OpenedStream`] once the file is opened.
+///
+/// The first poll starts the read as a task on the session's executor (the
+/// session's weak handle, upgraded for the spawn only) and awaits the receiver
+/// of a oneshot. **The task fills the sender**: it opens the file and sends the
+/// value or the error, which wakes the future. A poll never blocks, and
+/// `Session::update` is not needed.
+///
+/// Dropped before it resolves, the future drops the receiver: a read that has
+/// not begun reads nothing, and one in flight finishes and its value is dropped.
+/// Dropped before its first poll it starts nothing.
+///
+/// # Errors
+///
+/// The output is [`LoadError::Stream`] when the file cannot be opened
+/// ([`tutti_sampler::OpenError::Io`]) or is not audio this build decodes ([`tutti_sampler::OpenError::Format`]),
+/// [`LoadError::Panicked`] when a decoder panicked, and
+/// [`LoadError::ShutDown`] when the session is gone.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+#[must_use = "an open does nothing unless it is awaited"]
+pub struct OpeningStream<F: SessionFloat> {
+    open: Unblocked<OpenStream<F>, OpenedStream<F>, LoadError>,
+}
+
+impl<F: SessionFloat> Future for OpeningStream<F> {
+    type Output = Result<OpenedStream<F>, LoadError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.open).poll(cx)
+    }
+}
+
+impl<F: SessionFloat> fmt::Debug for OpeningStream<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpeningStream").finish_non_exhaustive()
+    }
+}
+
+/// A file read for a disk stream (an awaited [`OpenStream`]), which the session takes
 /// back with [`Session::apply`](crate::Session::apply): the stream's control
 /// side and the reader its voice is built from, in the session's float. The
 /// reader is the voice's (`DiskVoice::from_reader`); the stream is the control
@@ -167,7 +228,7 @@ impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Cuts the reading of `asset` as a disk stream, its reader starting at
-    /// `start`: the work the app runs ([`OpenStream::run`]) and hands back to
+    /// `start`: the work the app awaits ([`OpenStream`]) and hands back to
     /// [`apply`](Self::apply). The voice is as wide as the file
     /// (`tutti_sampler::voice_width`). The session is not touched until the
     /// apply, which never waits: a full streamer queue gives the output back in
@@ -195,6 +256,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         Ok(OpenStream {
             cut: Cut::of(self),
             read: streamer.open_stream(asset, start),
+            executor: self.background.executor().downgrade(),
         })
     }
 }

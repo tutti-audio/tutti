@@ -43,8 +43,10 @@
 /// the peak (floored at -144 dB), stays finite in `f32`, and so at any width.
 const SIGNAL_DB_LIMIT: Db = Db::new(300.0);
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Mono};
 use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 
 use super::curves::{FloatCurve, LimiterCurve, level_db, limiter_gain};
@@ -433,21 +435,21 @@ impl<F: Float> LimiterBank<F> {
 
     /// Runs `input` into `output`, delayed by the lookahead and scaled by the linked gain.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's
-    /// width, or past the narrower of the two views, is not output (the linked peak is the
-    /// loudest of every input channel). No allocation.
+    /// Channel `c` of `input` feeds channel `c` of `output` (the linked peak is the loudest of
+    /// every input channel). No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
     pub fn process(
         &mut self,
         signals: LimiterSignals<'_, F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = self
-            .ring
-            .width()
-            .min(input.channels())
-            .min(output.channels());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        let width = self.ring.width();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
         while start < frames {
@@ -497,6 +499,7 @@ impl<F: Float> LimiterBank<F> {
             }
             start = end;
         }
+        Ok(())
     }
 }
 

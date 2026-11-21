@@ -71,7 +71,9 @@ pub use note::{NotOnMidiScale, Note, NoteNumberOutOfRange, PitchClass};
 
 // The frame is the source of truth for time: the one frame↔beat conversion,
 // and the one rule for which frame a beat lands on.
-pub use frame_clock::{FrameClock, LoopRange, LoopRangeError, Pass, PassEnd, SegmentOrigin};
+pub use frame_clock::{
+    ClockPass, ClockPassEnd, FrameClock, LoopRange, LoopRangeError, SegmentOrigin,
+};
 pub use timeline::{
     FRAME_TOLERANCE, TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
     snap_to_whole_frame,

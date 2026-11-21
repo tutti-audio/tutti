@@ -2,9 +2,11 @@
 //!
 //! The algorithm is `tutti_dsp::FmVoice`; the node holds the controls and the shape.
 
-use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, FmControls, FmPatch, FmVoice, Oversampling, OversamplingFactor};
+use tutti_buffers::Float;
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{
+    BlockMismatch, COEFF_INTERVAL, FmControls, FmPatch, FmVoice, Oversampling, OversamplingFactor,
+};
 use tutti_graph::Shape;
 use tutti_units::{Amplitude, Hz, ModulationIndex, SampleRate, Tail};
 
@@ -154,10 +156,10 @@ impl<F: Float> Kernel for FmKernel<F> {
 
     fn render(
         &mut self,
-        _: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (_, mut output) = block.split();
         let mut out = output.plane_mut(0);
         match &mut self.voice {
             // A block is at most the `max_block` the voice was prepared for.
@@ -166,6 +168,7 @@ impl<F: Float> Kernel for FmKernel<F> {
                 .expect("a rendered block is at most the prepared max block"),
             None => out.samples_mut().fill(F::ZERO),
         }
+        Ok(())
     }
 
     fn tail(&self) -> Tail {

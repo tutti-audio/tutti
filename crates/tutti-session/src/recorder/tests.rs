@@ -496,8 +496,8 @@ fn a_failed_sink_fails_the_take() {
             &err,
             FinalizeError::Sink(io)
                 if matches!(
-                    io.get_ref().and_then(|e| e.downcast_ref::<tutti_codec::Error>()),
-                    Some(tutti_codec::Error::WavTooLarge { limit_frames: 4 })
+                    io.get_ref().and_then(|e| e.downcast_ref::<tutti_codec::EncodeError>()),
+                    Some(tutti_codec::EncodeError::WavTooLarge { limit_frames: 4 })
                 )
         ),
         "{err:?}"

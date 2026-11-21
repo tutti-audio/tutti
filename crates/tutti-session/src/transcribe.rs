@@ -13,7 +13,9 @@
 use tutti_graph::Harmony;
 use tutti_measure::{ChordQuality, ChordSpan, NoteEvent, VelocityRange};
 use tutti_midi_protocol::PitchBendSensitivity;
-use tutti_midi_runtime::{ClipEvents, HarmonyChanges, TimedHarmony, TimedMidiEvent};
+use tutti_midi_runtime::{
+    ClipEvents, HarmonyChanges, HarmonyChangesError, TimedHarmony, TimedMidiEvent,
+};
 use tutti_tempo::TempoView;
 use tutti_ump::{
     Address, BendValue, ControlValue, Message, NoteNumber, NoteVelocity, Rpn, U7, Voice2,
@@ -170,19 +172,29 @@ fn beat_at(tempo: &mut TempoView<'_>, at: Samples) -> Beat {
 /// A chord is a triad on its root in the octave from middle C (C is note 60),
 /// its bass the root. A span whose quality has no triad here (the quality enum
 /// is open) is left out. No spans give no changes.
-#[must_use]
-pub fn harmony_from_chords(spans: &[ChordSpan], tempo: &mut TempoView<'_>) -> HarmonyChanges {
-    spans
-        .iter()
-        .filter_map(|chord| {
-            let degrees = degrees(chord.quality)?;
-            let root = MIDDLE_C + chord.root.semitones_above_c();
-            Some(TimedHarmony::new(
-                beat_at(tempo, chord.span.start()),
-                Harmony::chord(root, root, degrees),
-            ))
-        })
-        .collect()
+///
+/// # Errors
+///
+/// [`HarmonyChangesError::SameBeat`] for two chords that start at one beat,
+/// and [`HarmonyChangesError::NonFiniteBeat`] for a start the tempo gives no
+/// finite beat.
+pub fn harmony_from_chords(
+    spans: &[ChordSpan],
+    tempo: &mut TempoView<'_>,
+) -> Result<HarmonyChanges, HarmonyChangesError> {
+    HarmonyChanges::new(
+        spans
+            .iter()
+            .filter_map(|chord| {
+                let degrees = degrees(chord.quality)?;
+                let root = MIDDLE_C + chord.root.semitones_above_c();
+                Some(TimedHarmony::new(
+                    beat_at(tempo, chord.span.start()),
+                    Harmony::chord(root, root, degrees),
+                ))
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// The MIDI note number of middle C, the octave a chord's root is placed in.

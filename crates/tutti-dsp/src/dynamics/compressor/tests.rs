@@ -6,6 +6,7 @@ use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 use super::*;
 use crate::compute_compressor_gain_reduction;
 use crate::testing::noise;
+use tutti_buffers::InputOutput;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -141,9 +142,10 @@ fn run_in<F: Float + SimdLanes + Lerp>(
         bank.process(
             signals,
             Planes::new(&kk).unwrap(),
-            Planes::new(&a).unwrap(),
-            PlanesMut::new(&mut outs).unwrap(),
-        );
+            &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -787,9 +789,13 @@ fn run_f64(c: &CompressorControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
     bank.process(
         CompressorSignals::default(),
         Planes::new(&[key]).unwrap(),
-        Planes::new(&[audio]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[audio]).unwrap(),
+            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     out
 }
 

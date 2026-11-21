@@ -7,6 +7,7 @@ use tutti_units::{CompressionRatio, Seconds};
 use super::*;
 use crate::testing::{amplitude_at, lock_in};
 use crate::{Complex32, Complex64, Lti, RealFft};
+use tutti_buffers::InputOutput;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -87,9 +88,10 @@ fn run_in<F: Float + SimdLanes + Lerp>(
         }
         k.process(
             driven,
-            Planes::new(&a).unwrap(),
-            PlanesMut::new(&mut outs).unwrap(),
-        );
+            &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -624,9 +626,13 @@ fn a_band_reads_its_own_threshold_signal() {
     let mut outs = [&mut out[..]];
     k.process(
         signals,
-        Planes::new(&planes).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&planes).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let d0 = k.take_reading().band(0).unwrap().get();
     assert!((d0 - want).abs() < 0.05, "f64: {d0} vs {want}");
 }
@@ -763,9 +769,13 @@ fn a_signal_that_ends_inside_a_chunk_drives_its_own_frames() {
     let (ins, mut outs) = ([&x[..]], [&mut out[..]]);
     k.process(
         driven,
-        Planes::new(&ins).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&ins).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let reduced = 0.5 * linear(-hard(db(0.5), -30.0, 4.0));
     for (i, &y) in out.iter().enumerate().take(70) {
         assert!((f64::from(y) - reduced).abs() < 1e-4, "frame {i}: {y}");
@@ -859,8 +869,12 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     let mut out = vec![0.0f64; n];
     k.process(
         MultibandSignals::default(),
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_close_f64(&out, &butterworth_all_pass(&x, 1_000.0, RATE.get()), 1e-12);
 }

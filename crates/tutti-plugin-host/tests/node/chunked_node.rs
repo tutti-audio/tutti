@@ -208,6 +208,9 @@ macro_rules! rec_control {
             fn dropped_reported_edits(&self) -> u64 {
                 0
             }
+            fn refused_off_thread_calls(&self) -> u64 {
+                0
+            }
             /// The control side's idle flush, which a test makes panic.
             fn flush_edits(&mut self, _: MainThreadMarker) {
                 assert!(

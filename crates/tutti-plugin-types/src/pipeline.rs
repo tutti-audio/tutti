@@ -32,6 +32,19 @@ pub struct BlockCounts {
     pub replies: u64,
 }
 
+/// What a plugin's server lost of its own work, cumulative over the server's
+/// life, as it last told the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ServerLosses {
+    /// Commands the server could not give its render thread.
+    pub commands_refused: u64,
+    /// One-way edits the plugin refused.
+    pub edits_refused: u64,
+    /// Callbacks the plugin made from a thread its format forbids, which the
+    /// server refused.
+    pub refused_off_thread_calls: u64,
+}
+
 /// What the pipeline reports to its controls
 /// (`PluginControls::missed_chunks`, `late_chunks`, `refused_chunks`, `skipped_chunks`, `unanswered_chunks` and `chunk_in_flight_answered`
 /// in `tutti-plugin-host`):
@@ -95,6 +108,7 @@ pub struct ChunkCounters {
     /// ([`note_server_losses`](Self::note_server_losses)).
     server_refused_commands: AtomicU64,
     server_refused_edits: AtomicU64,
+    server_refused_off_thread_calls: AtomicU64,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -197,16 +211,26 @@ impl ChunkCounters {
     }
 
     /// Takes the server's cumulative counts, as it last told them.
-    pub fn note_server_losses(&self, commands_refused: u64, edits_refused: u64) {
+    pub fn note_server_losses(&self, losses: ServerLosses) {
+        self.server_refused_off_thread_calls
+            .store(losses.refused_off_thread_calls, Ordering::Relaxed);
         self.server_refused_commands
-            .store(commands_refused, Ordering::Relaxed);
+            .store(losses.commands_refused, Ordering::Relaxed);
         self.server_refused_edits
-            .store(edits_refused, Ordering::Relaxed);
+            .store(losses.edits_refused, Ordering::Relaxed);
     }
 
     /// See `PluginControls::server_refused_commands`.
     pub fn server_refused_commands(&self) -> u64 {
         self.server_refused_commands.load(Ordering::Relaxed)
+    }
+
+    /// The callbacks the plugin made from a thread its format forbids, which
+    /// its server refused, as the server last told them
+    /// ([`Control::refused_off_thread_calls`](crate::Control::refused_off_thread_calls)
+    /// of a served plugin).
+    pub fn server_refused_off_thread_calls(&self) -> u64 {
+        self.server_refused_off_thread_calls.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::server_refused_edits`.

@@ -1,5 +1,6 @@
 use super::*;
 use crate::testing::{amplitude_at, noise};
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 /// The curves, pinned.
 ///
@@ -131,9 +132,9 @@ fn run(
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     bank.process(
         signal.map(Mono::new),
-        planes,
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+        &mut InputOutput::paired(planes, PlanesMut::new(&mut outs).unwrap()).unwrap(),
+    )
+    .unwrap();
     out
 }
 
@@ -1033,9 +1034,13 @@ fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> V
     let mut out = vec![0.0f64; x.len()];
     bank.process(
         None,
-        Planes::new(&[x]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[x]).unwrap(),
+            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     out
 }
 

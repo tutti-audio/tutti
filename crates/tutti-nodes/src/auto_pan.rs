@@ -1,8 +1,8 @@
 //! [`AutoPanNode`]: an LFO places a stereo pair between left and right.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{AutoPan, AutoPanControls, COEFF_INTERVAL, OscillatorWave, PanLaw};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_dsp::{AutoPan, AutoPanControls, BlockMismatch, COEFF_INTERVAL, OscillatorWave, PanLaw};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Depth, Hz, SampleRate, Tail};
 
@@ -147,11 +147,10 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.pan.process(input, output);
+    ) -> Result<(), BlockMismatch> {
+        self.pan.process(block)
     }
 
     fn tail(&self) -> Tail {

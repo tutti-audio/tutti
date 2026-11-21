@@ -865,7 +865,8 @@ fn the_servers_losses_are_told_to_the_host_when_they_change() {
                 News::ServerLosses {
                     commands_refused,
                     edits_refused,
-                } => Some((*commands_refused, *edits_refused)),
+                    refused_off_thread_calls,
+                } => Some((*commands_refused, *edits_refused, *refused_off_thread_calls)),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -876,7 +877,7 @@ fn the_servers_losses_are_told_to_the_host_when_they_change() {
     );
     instance.ties.commands_refused.writer().add(2);
     instance.edits_refused.add(1);
-    assert_eq!(losses(&instance.poll(main_thread())), [(2, 1)]);
+    assert_eq!(losses(&instance.poll(main_thread())), [(2, 1, 0)]);
     assert!(
         losses(&instance.poll(main_thread())).is_empty(),
         "told once"
@@ -884,7 +885,7 @@ fn the_servers_losses_are_told_to_the_host_when_they_change() {
     instance.edits_refused.add(1);
     assert_eq!(
         losses(&instance.poll(main_thread())),
-        [(2, 2)],
+        [(2, 2, 0)],
         "cumulative"
     );
 }

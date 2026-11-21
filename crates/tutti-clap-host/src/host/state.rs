@@ -271,6 +271,9 @@ pub struct HostState {
     /// The `clap.log` lines refused on the audio thread: counted, not
     /// emitted, since emitting allocates.
     pub log_dropped: AtomicU32,
+    /// The `[main-thread]` callbacks the plugin made from another thread,
+    /// refused. Added to from any thread.
+    pub refused_off_thread: tutti_rt::TallyWriter<u64>,
     /// The id `clap.log` lines are tagged with. Set once, at load, from the
     /// descriptor; a line before then carries an empty id.
     pub plugin_id: OnceLock<String>,
@@ -298,6 +301,7 @@ impl HostState {
             flush_requested: AtomicBool::new(false),
             gui: GuiState::new(),
             log_dropped: AtomicU32::new(0),
+            refused_off_thread: tutti_rt::tally().writer(),
             plugin_id: OnceLock::new(),
             timer: TimerState::new(),
             posix_fds: PosixFdState::new(),

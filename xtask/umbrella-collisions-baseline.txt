@@ -12,16 +12,14 @@ crates  BlockCounts  tutti_engine,tutti_plugin_types
 crates  Bus  tutti_graph,tutti_session
 crates  Channel  tutti_graph,tutti_session
 crates  Edge  tutti_graph,tutti_session
-crates  Error  tutti_codec,tutti_measure,tutti_sampler,tutti_session,tutti_sf2
+crates  Error  tutti_measure,tutti_sampler,tutti_session,tutti_sf2
 crates  Event  tutti_graph,tutti_session
 crates  Instrument  tutti_graph,tutti_sf2
 crates  NoteNumberOutOfRange  tutti_music,tutti_ump
 crates  ParamRange  tutti_graph,tutti_plugin_types
 crates  ParamUnit  tutti_graph,tutti_plugin_types
-crates  Pass  tutti_graph,tutti_music
 crates  Preset  tutti_plugin_types,tutti_sf2
 crates  RecoveryFailure  tutti_plugin_db,tutti_session
 crates  ResourceId  tutti_midi_ci,tutti_session
-crates  Stamp  tutti_graph,tutti_platform
 crates  System  tutti_dsp,tutti_ump
 crates  TempoError  tutti_session,tutti_tempo

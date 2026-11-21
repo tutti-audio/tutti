@@ -935,6 +935,10 @@ pub(crate) struct HostedPlugin {
     /// Periodic state snapshots the plugin failed:
     /// [`Diagnostics::failed_snapshots`].
     pub(crate) failed_snapshots: u64,
+    /// What the plugins before the held one had refused off their thread:
+    /// banked when a plugin is replaced, so
+    /// [`Diagnostics::refused_off_thread_calls`] only grows.
+    banked_off_thread: u64,
     liveness: Liveness,
     hang: HangDetector,
     status: PluginLiveness,
@@ -1203,6 +1207,7 @@ impl HostedPlugin {
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
             failed_snapshots: 0,
+            banked_off_thread: 0,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
@@ -1362,6 +1367,13 @@ impl HostedPlugin {
         self.banked_blocks + self.node.block_losses()
     }
 
+    /// The callbacks the plugin made from a thread its format forbids, which
+    /// the host refused, over the record's life: the held plugin's and the
+    /// ones before it.
+    pub(crate) fn refused_off_thread_calls(&self) -> u64 {
+        self.banked_off_thread + self.handle.refused_off_thread_calls()
+    }
+
     /// What the plugin lost, over the record's life: what the held handle and
     /// node counted, and what the ones before them did.
     pub(crate) fn losses(&self) -> tutti_graph::Losses {
@@ -1397,6 +1409,7 @@ impl HostedPlugin {
     /// controls.
     fn adopt(&mut self, handle: PluginHandle, placement: Placement) -> Outgoing {
         self.banked += tutti_graph::Losses::lost(self.handle.dropped_parameter_events());
+        self.banked_off_thread += self.handle.refused_off_thread_calls();
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
         self.mirror = mirror;
         self.param_read = Some(read);
