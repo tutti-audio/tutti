@@ -10,6 +10,7 @@ use tutti_buffers::MaxBlock;
 use crate::common;
 use tutti_graph::{Stamp, UmpAt};
 
+use std::sync::Arc;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -411,6 +412,291 @@ fn the_midi_out_node_counts_the_events_it_cannot_pass() {
         "every event passed or counted: {passed} + {lost}"
     );
     assert!(lost >= 1_200 - tutti_midi_runtime::MIDI_OUT_EVENT_CAPACITY as u64);
+}
+
+/// **A following output node handles a generation two blocks after the block
+/// that read it**: the first block reads the departure, and only the block after
+/// that one has begun is the node known to have run, sources to taps, after the
+/// departure; the generation is idle at the start of the second block after it.
+#[test]
+fn a_following_midi_out_node_handles_a_generation_two_blocks_after_reading_it() {
+    let (mut writer, generation) = DeviceGeneration::new();
+    writer.arrive();
+    let (_ed, mut exec, (), _seen) = rig_with(
+        tutti_graph::ForkByClone(MidiOutNode::new().following(&generation)),
+        1,
+        512,
+        |_| {},
+    );
+    block(&mut exec, 512);
+    block(&mut exec, 512);
+    assert!(generation.is_idle(), "the arrival is handled");
+    writer.depart();
+    assert!(!generation.is_idle(), "the departure is owed blocks");
+    block(&mut exec, 512);
+    assert!(
+        !generation.is_idle(),
+        "the block that read it is not enough"
+    );
+    block(&mut exec, 512);
+    assert!(!generation.is_idle(), "one block after it is not enough");
+    block(&mut exec, 512);
+    assert!(
+        generation.is_idle(),
+        "two blocks after the one that read it"
+    );
+}
+
+/// `node` declaring a heavy cost, so the plan spreads its lanes over a pool.
+struct Heavy<N>(N);
+
+impl<N: tutti_graph::Node> tutti_graph::Node for Heavy<N> {
+    fn shape(&self) -> tutti_graph::Shape {
+        self.0.shape().with_cost(tutti_graph::Cost::Heavy)
+    }
+    fn prepare(&mut self, prepare: &tutti_graph::Prepare) {
+        self.0.prepare(prepare);
+    }
+    fn process(
+        &mut self,
+        cx: &tutti_graph::Cx<'_>,
+        io: tutti_graph::Io<'_>,
+    ) -> tutti_graph::Status {
+        self.0.process(cx, io)
+    }
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+}
+
+/// `lanes` retiring output nodes, each fed by an inlet of its own into one input
+/// of the sink (lane `k` is sink input `k`), on a pool of four workers when
+/// `pooled`: the inlets' writers and the generations' writers.
+fn retiring_lanes(
+    lanes: u64,
+    pooled: bool,
+) -> (
+    EventRig,
+    Vec<(
+        tutti_graph::EventInletWriter,
+        tutti_midi_runtime::GenerationWriter,
+    )>,
+    Vec<DeviceGeneration>,
+) {
+    let mut rig = EventRig::new(RATE, 512, lanes as u16);
+    if pooled {
+        rig.exec.set_pool(Some(Arc::new(
+            tutti_graph::WorkerPool::builder()
+                .num_threads(4)
+                .build()
+                .expect("a worker pool"),
+        )));
+    }
+    let mut writers = Vec::new();
+    let mut generations = Vec::new();
+    for lane in 0..lanes {
+        let (mut generation_writer, generation) = DeviceGeneration::new();
+        generation_writer.arrive();
+        let (inlet, writer) = EventInletNode::pair(EventCapacity::of(1024));
+        rig.editor.insert(NodeKey(10 + lane), "source", inlet);
+        rig.editor.insert(
+            NodeKey(100 + lane),
+            "out",
+            tutti_graph::Unforkable(Heavy(MidiOutNode::new().following(&generation))),
+        );
+        rig.editor.spec_mut().connect_events(
+            EventIn {
+                node: NodeKey(100 + lane),
+                port: 0,
+            },
+            EventEdge::Direct(EventOut {
+                node: NodeKey(10 + lane),
+                port: 0,
+            }),
+        );
+        rig.feed(NodeKey(100 + lane), 0, lane as u16);
+        writers.push((writer, generation_writer));
+        generations.push(generation);
+    }
+    rig.commit();
+    (rig, writers, generations)
+}
+
+/// What sink input `lane` received: `(note, is_off)` of each note message.
+fn notes_at(seen: &Seen, lane: usize) -> Vec<(u8, bool)> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter(|(port, ..)| *port == lane)
+        .filter_map(|(_, _, ump)| {
+            let note = note_of(*ump)?;
+            Some((
+                note,
+                matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(_))),
+            ))
+        })
+        .collect()
+}
+
+/// A Note On of `note` on the first Group and Channel at `frame`.
+fn on_at(writer: &mut tutti_graph::EventInletWriter, frame: u64, note: u8) {
+    writer
+        .push(
+            Stamp::Frame(Frame::new(frame)),
+            midi::note_on(MidiChannel::FIRST, note, 0x8000),
+        )
+        .expect("room");
+}
+
+/// **A retiring output node ends the notes it passed, in the last block that
+/// passes events, and then passes nothing**: a note started before the
+/// departure, one in the block that read it and one in the block after are each
+/// ended by an explicit Note Off in that last block; a note sent after is
+/// dropped and counted.
+#[test]
+fn a_retiring_out_node_ends_the_notes_it_passed_and_then_passes_nothing() {
+    let (mut rig, mut lanes, _) = retiring_lanes(1, false);
+    let (writer, departure) = &mut lanes[0];
+    on_at(writer, 10, 60);
+    rig.block(512);
+    departure.depart();
+    on_at(writer, 512 + 10, 61);
+    rig.block(512);
+    on_at(writer, 1024 + 10, 62);
+    rig.block(512);
+    let passed = notes_at(&rig.seen, 0);
+    for note in [60, 61, 62] {
+        assert!(
+            passed.contains(&(note, false)),
+            "{note} started: {passed:?}"
+        );
+        assert!(passed.contains(&(note, true)), "{note} ended: {passed:?}");
+    }
+    on_at(writer, 1536 + 10, 63);
+    rig.block(512);
+    assert_eq!(passed, notes_at(&rig.seen, 0), "nothing passes once closed");
+    assert_eq!(rig.exec.dropped_event_count(), 1, "the note it dropped");
+}
+
+/// **The same on a worker pool, with a source feeding each node in the block**:
+/// every lane's note sent in the block after the departure is ended, whichever
+/// thread ran the lane, and no lane is idle early.
+#[test]
+#[cfg_attr(miri, ignore = "spawns a worker pool")]
+fn a_retiring_out_node_ends_the_notes_it_passed_on_a_pool() {
+    const LANES: u64 = 8;
+    let (mut rig, mut lanes, _) = retiring_lanes(LANES, true);
+    rig.block(512);
+    assert!(
+        matches!(
+            rig.exec.plan().expect("a plan").schedule(4),
+            tutti_graph::Schedule::Parallel { .. }
+        ),
+        "the lanes are spread over the pool"
+    );
+    for (_, departure) in &mut lanes {
+        departure.depart();
+    }
+    rig.block(512);
+    for (lane, (writer, _)) in lanes.iter_mut().enumerate() {
+        on_at(writer, 1024 + 10, 40 + lane as u8);
+    }
+    rig.block(512);
+    rig.block(512);
+    for lane in 0..LANES as usize {
+        let note = 40 + lane as u8;
+        let passed = notes_at(&rig.seen, lane);
+        assert_eq!(passed, [(note, false), (note, true)], "lane {lane}");
+    }
+}
+
+/// **A retiring out node whose port has no room for every off keeps ending notes
+/// until none is left, and is idle only then**: 2 500 notes are held, more than
+/// a block's room for Note Offs, so the offs take several blocks, every one
+/// reaches the sink, and the generation is not handled before the last.
+#[test]
+fn a_retiring_out_node_ends_every_held_note_across_blocks_and_is_idle_after() {
+    const HELD: u64 = 2_500;
+    let (mut rig, mut lanes, generations) = retiring_lanes(1, false);
+    let (writer, departure) = &mut lanes[0];
+    for block in 0..3u64 {
+        for i in (block * 900)..((block + 1) * 900).min(HELD) {
+            let address = Address::new(
+                MidiGroup::all().nth((i / 2048) as usize).unwrap(),
+                MidiChannel::of(((i / 128) % 16) as u8),
+            );
+            writer
+                .push(
+                    Stamp::Frame(Frame::new(block * 512 + i % 512)),
+                    midi::note_on(address, (i % 128) as u8, 0x8000),
+                )
+                .expect("room");
+        }
+        rig.block(512);
+    }
+    departure.depart();
+    // The block that reads it, and the one that ends what fits.
+    rig.block(512);
+    rig.block(512);
+    let ended = |rig: &EventRig| {
+        rig.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, _, ump)| matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(_))))
+            .count()
+    };
+    let first = ended(&rig);
+    assert!(0 < first && first < HELD as usize, "some offs fit: {first}");
+    rig.block(512);
+    assert!(!generations[0].is_idle(), "offs are still owed");
+    for _ in 0..4 {
+        rig.block(512);
+    }
+    assert_eq!(ended(&rig), HELD as usize, "every note was ended");
+    // A refused off is deferred, so each refusal is given back and nothing is
+    // lost: the counts match, not merely lost = dropped - recovered saturating at 0.
+    assert_eq!(
+        rig.exec.dropped_event_count(),
+        rig.exec.recovered_event_count(),
+        "every refusal was given back, and no more"
+    );
+    assert_eq!(rig.exec.lost_event_count(), 0);
+    rig.block(512);
+    assert!(generations[0].is_idle(), "nothing is owed");
+}
+
+/// **A MIDI 1.0 Note On at velocity 0 ends the note the node tracks**: no off is
+/// owed for it when the node retires.
+#[test]
+fn a_velocity_zero_note_on_is_not_held_by_a_retiring_out_node() {
+    let (mut rig, mut lanes, _) = retiring_lanes(1, false);
+    let (writer, departure) = &mut lanes[0];
+    let on = |note: u8, velocity: u8| -> Ump {
+        Message::midi1(
+            Address::first(MidiChannel::FIRST),
+            tutti_ump::Voice1::note_on(NoteNumber::of(note), U7::new(velocity).unwrap()),
+        )
+        .into()
+    };
+    for (at, ump) in [(10, on(70, 100)), (11, on(70, 0)), (12, on(71, 100))] {
+        writer
+            .push(Stamp::Frame(Frame::new(at)), ump)
+            .expect("room");
+    }
+    rig.block(512);
+    departure.depart();
+    for _ in 0..4 {
+        rig.block(512);
+    }
+    let offs: Vec<u8> = notes_at(&rig.seen, 0)
+        .into_iter()
+        .filter(|(_, off)| *off)
+        .map(|(note, _)| note)
+        .collect();
+    // The one off of 70 is the velocity-0 message itself, passed on; the node adds none.
+    assert_eq!(offs.iter().filter(|n| **n == 70).count(), 1, "{offs:?}");
+    assert_eq!(offs.iter().filter(|n| **n == 71).count(), 1, "{offs:?}");
 }
 
 fn note_on_ump(i: u64) -> Ump {

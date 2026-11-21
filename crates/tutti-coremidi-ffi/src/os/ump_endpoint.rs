@@ -12,11 +12,12 @@
 //! # Main thread
 //!
 //! Apple documents every interaction with a `MIDIUMPMutableEndpoint` as
-//! main-thread only. [`UmpEndpoint::new`] takes a [`MainThreadMarker`] and the
-//! endpoint is `!Send` and `!Sync`, so creating, enabling, disabling and
+//! main-thread only. [`UmpEndpoint::new`] takes a [`MainThreadMarker`] (and the
+//! process's [`SharedClient`], see its docs) and the endpoint is `!Send` and `!Sync`, so creating, enabling, disabling and
 //! releasing it all happen on the main thread. What may cross threads is the
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
+use super::client::SharedClient;
 use super::error::{Error, Operation};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
@@ -136,11 +137,18 @@ impl UmpSender {
 }
 
 impl UmpEndpoint {
-    /// Creates the endpoint `name` carrying `protocol`, identified as `device`
+    /// Creates the endpoint `name` on `client`, carrying `protocol`, identified as `device`
     /// (the Device Identity, M2-104 §7.1.3) with Product Instance Id `instance`
     /// (§7.1.5, `None` for none), registers `blocks` as its static Function Blocks
     /// and enables it. `on_ump` gets each message sent to it, on CoreMIDI's
     /// delivery thread. `main` proves the caller is on the main thread.
+    ///
+    /// `client` proves that [`SharedClient::start`] succeeded, so the process has
+    /// connected to the MIDI server. The endpoint API takes no client, and with no
+    /// connection and the server gone, CoreMIDI raises an exception that the crate's
+    /// exception catch cannot catch: the process aborts. A process whose start
+    /// failed has no way to call this. The proof does not cover a server that
+    /// dies after the start.
     ///
     /// CoreMIDI numbers the blocks itself, in registration order. `blocks` are
     /// given in number order with their numbers running from 0 without a gap, and
@@ -151,15 +159,18 @@ impl UmpEndpoint {
     ///
     /// Before any call into CoreMIDI: [`Error::ReservedProtocol`] for a reserved
     /// `protocol`, [`Error::Block`] for a block CoreMIDI cannot carry (checked
-    /// before the class lookup, so it is the same on every macOS), and
-    /// Then [`Error::UmpEndpointUnsupported`] before
-    /// macOS 15, [`Error::Exception`] when CoreMIDI raises an Objective-C
-    /// exception, [`Error::Objc`] or [`Error::NoObject`] when CoreMIDI refuses
-    /// the endpoint, [`Error::BlockNumber`] for a number the spec cannot hold, and
-    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the registered ones.
+    /// before the class lookup, so it is the same on every macOS). Then
+    /// [`Error::UmpEndpointUnsupported`] before macOS 15, [`Error::Exception`] when
+    /// CoreMIDI raises an Objective-C exception, [`Error::NotPermitted`] when it
+    /// answers a call with `kMIDINotPermitted`, [`Error::Objc`] or
+    /// [`Error::NoObject`] when it refuses the endpoint otherwise,
+    /// [`Error::BlockNumber`] for a number the spec cannot hold, and
+    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the
+    /// registered ones.
     /// An `Err` leaves no endpoint published.
     pub fn new<F>(
         main: MainThreadMarker,
+        _client: SharedClient,
         name: &str,
         protocol: Protocol,
         device: &DeviceIdentity,
@@ -332,12 +343,12 @@ fn function_block(block: &PlatformBlock) -> Result<Retained<MIDIUMPMutableFuncti
 
 /// `operation` failed with `error`. Called inside [`catch`].
 fn objc(operation: Operation, error: &NSError) -> Error {
-    Error::Objc {
+    Error::from_ns_error(
         operation,
-        code: error.code(),
-        domain: error.domain().to_string(),
-        description: error.localizedDescription().to_string(),
-    }
+        error.code(),
+        error.domain().to_string(),
+        error.localizedDescription().to_string(),
+    )
 }
 
 /// Disables `endpoint` and releases it, each in its own [`catch`] (releasing runs the
