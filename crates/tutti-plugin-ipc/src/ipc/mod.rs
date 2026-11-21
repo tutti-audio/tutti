@@ -473,9 +473,9 @@ impl std::fmt::Debug for Ipc {
 pub struct Launched {
     /// The fresh instance, not activated.
     pub ipc: Ipc,
-    /// `None` when no state was given, else the plugin's refusal as text (the
+    /// `None` when no state was given, else the refusal (the
     /// plugin is then loaded at its defaults, which beats no plugin).
-    pub restored: Option<std::result::Result<(), String>>,
+    pub restored: Option<std::result::Result<(), StateError>>,
 }
 
 impl Ipc {

@@ -42,8 +42,8 @@ fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(OLD), driver)
         .expect("builds with no device");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
-    let (lim, _) = s.graph().add(LimiterNode::<f32>::from(
+    let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
+    let lim = s.graph().add(LimiterNode::<f32>::from(
         LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
             threshold: Db::new(0.0),
             ceiling: Db::new(0.0),
@@ -307,7 +307,7 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
 #[test]
 fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
     let (mut s, old, osc, lim) = engine();
-    let (loop_back, ()) = s.graph().add(ForkByClone(Through::mono()));
+    let loop_back = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
         .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])
         .unwrap();
@@ -348,7 +348,7 @@ fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
     let (mut s, _old, _osc, lim) = engine();
     let before = s.output_device().expect("an engine renders it");
     assert_eq!(before.placement, Placement::Default);
-    let (loop_back, ()) = s.graph().add(ForkByClone(Through::mono()));
+    let loop_back = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
         .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])
         .unwrap();

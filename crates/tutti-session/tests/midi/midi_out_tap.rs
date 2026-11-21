@@ -231,7 +231,7 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
         .sync_controls
         .messages()
         .store(tutti_midi_runtime::SyncMessages::OFF);
-    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+    let clip = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
         Beat::new(1.0),
@@ -357,7 +357,7 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
     let _ = s.update();
     let _ = wire.batches();
 
-    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+    let clip = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
         Beat::new(1.0),

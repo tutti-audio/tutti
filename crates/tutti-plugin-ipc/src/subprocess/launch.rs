@@ -19,7 +19,7 @@ use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{Helper, Locator, PluginFormat, PluginId, PluginRef};
-use tutti_plugin_types::{IpcError, IpcResult, ServerError};
+use tutti_plugin_types::{IpcError, IpcResult, ServerError, StateError};
 use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
 use tutti_units::SampleRate;
 
@@ -51,7 +51,7 @@ pub struct LaunchedServer {
     pub slab: SlabWriter,
     /// What became of the state the launch was given: `None` when it had none,
     /// else the plugin's refusal as text (`Ok` when it took it).
-    pub state_restore: Option<std::result::Result<(), String>>,
+    pub state_restore: Option<std::result::Result<(), StateError>>,
 }
 
 impl std::fmt::Debug for LaunchedServer {
@@ -508,7 +508,7 @@ fn load_plugin(
     Box<PluginDescriptor>,
     LoadedPlugin,
     FloatWidth,
-    Option<String>,
+    Option<StateError>,
 )> {
     // The open (library, instance, init) runs under the bridge's load window,
     // and the server's signs of life restart it. When the server says it has
@@ -559,17 +559,20 @@ fn stage_state(
     launch: &mut Launch<'_>,
     config: &IpcConfig,
     state: &[u8],
-) -> IpcResult<std::result::Result<(), String>> {
+) -> IpcResult<std::result::Result<(), StateError>> {
     if state.len() > tutti_plugin_types::MAX_STATE_BYTES {
-        return Ok(Err(format!(
-            "state is {} bytes, over the {}-byte limit",
-            state.len(),
-            tutti_plugin_types::MAX_STATE_BYTES
-        )));
+        return Ok(Err(StateError::TooLarge {
+            bytes: state.len(),
+            limit: tutti_plugin_types::MAX_STATE_BYTES,
+        }));
     }
     let blob = match Blob::create(state) {
         Ok(blob) => blob,
-        Err(e) => return Ok(Err(format!("state could not be made into an object: {e}"))),
+        Err(e) => {
+            return Ok(Err(StateError::NotShared {
+                reason: e.to_string(),
+            }));
+        }
     };
     let call = config.timeouts.call;
     let id = launch.open(call, call);

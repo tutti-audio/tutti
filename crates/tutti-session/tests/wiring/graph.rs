@@ -206,8 +206,8 @@ fn every_source_reads_back_as_written() {
         .build_detached(RATE)
         .expect("builds");
     let graph = s.graph();
-    let (stereo, _) = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
-    let (sink, _) = graph.add(ForkByClone(Through::mono()));
+    let stereo = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
+    let sink = graph.add(ForkByClone(Through::mono()));
     for source in [
         OutPort::new(stereo, 1),
         OutPort::new(stereo, 0),
@@ -240,8 +240,8 @@ fn every_source_reads_back_as_written() {
 fn every_setter_stores_silence_as_the_empty_set() {
     let mut s = detached(2);
     let graph = s.graph();
-    let (sink, _) = graph.add(ForkByClone(Through::mono()));
-    let (src, _) = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
+    let sink = graph.add(ForkByClone(Through::mono()));
+    let src = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
     assert!(
         graph.testing().planned_compensation().is_some(),
         "fresh root"
@@ -285,7 +285,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
 #[test]
 fn removing_a_node_twice_names_what_was_not_there() {
     let mut s = detached(1);
-    let (node, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let node = s.graph().add(ForkByClone(Const::mono(1.0)));
     assert!(s.graph_ref().contains(node));
     assert_eq!(s.remove(node), Ok(()));
     assert!(!s.graph_ref().contains(node));
@@ -374,7 +374,7 @@ fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
 #[test]
 fn an_edit_between_updates_is_committed_by_the_next() {
     let mut s = detached(1);
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
         .unwrap();
@@ -386,7 +386,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
         .sent_plan()
         .expect("the first update sent a plan");
 
-    let (b, _) = s.graph().add(ForkByClone(Const::mono(2.0)));
+    let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(b, 0)])
         .unwrap();
@@ -410,7 +410,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
 #[test]
 fn an_update_with_no_edit_sends_no_plan() {
     let mut s = detached(1);
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
         .unwrap();
@@ -436,7 +436,7 @@ fn an_update_with_no_edit_sends_no_plan() {
 #[test]
 fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
     let mut s = detached(1);
-    let (knob, _) = s.graph().add(Params(Knob::new()));
+    let knob = s.graph().add(Params(Knob::new()));
     s.graph().remove(knob).unwrap();
     let refused = s
         .graph()
@@ -451,7 +451,7 @@ fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
 }
 
 /// **A crossfade refused `Busy` during a re-prepare lands on a later
-/// update**, and its controls come with the landing: the graph an engine
+/// update**, its params addressed under the key: the graph an engine
 /// runs (the audio side is taken) changing rate, and a crossfade before the
 /// executor has handed its units back.
 ///
@@ -461,7 +461,7 @@ fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
 fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     let mut s = detached(1);
     let mut side = s.graph().take_audio_side();
-    let (knob, _) = s.graph().add(Params(Knob::new()));
+    let knob = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(knob, 0)])
         .unwrap();
@@ -498,27 +498,20 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     );
 
     let events = s.update();
-    let controls = match events.as_slice() {
-        [SessionEvent::CrossfadeLanded { node, id, controls }] => {
+    match events.as_slice() {
+        [SessionEvent::CrossfadeLanded { node, id }] => {
             assert_eq!((*node, *id), (knob.erase(), waiting));
-            controls
-                .downcast_ref::<ParamSet>()
-                .expect("the incoming knob's controls")
-                .clone()
         }
         other => panic!("landed once the graph resumed: {other:?}"),
-    };
+    }
     assert_eq!(s.graph_ref().testing().waiting_crossfades(), 0);
     for _ in 0..512 {
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(out[0], 3.0, "the incoming knob is what sounds");
-    assert!(controls.set(UnitParam::Drive, 8.0));
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
-    assert_eq!(out[0], 8.0, "its controls steer it");
     s.set(knob.drive().to(Drive::new(9.0))).unwrap();
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
-    assert_eq!(out[0], 9.0, "and its params are addressed");
+    assert_eq!(out[0], 9.0, "its params are addressed under the key");
 }
 
 /// **Removing a node purges the crossfades parked on it**: the graph
@@ -532,7 +525,7 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
 
     let mut s = detached(1);
     let mut side = s.graph().take_audio_side();
-    let (knob, _) = s.graph().add(Params(Knob::new()));
+    let knob = s.graph().add(Params(Knob::new()));
     assert!(s.update().is_empty());
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     let token = Arc::new(());
@@ -567,7 +560,7 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
 #[test]
 fn a_crossfade_on_a_poisoned_graph_is_refused() {
     let mut s = detached(1);
-    let (knob, _) = s.graph().add(Params(Knob::new()));
+    let knob = s.graph().add(Params(Knob::new()));
     s.graph().add(Unforkable(Grenade));
     let _ = s.update();
     // Both halves run here (the executor is local); the second panics in
@@ -598,8 +591,8 @@ fn a_crossfade_on_a_poisoned_graph_is_refused() {
 #[test]
 fn every_param_write_path_reaches_a_fork() {
     let mut s = detached(2);
-    let (k0, _) = s.graph().add(Params(Knob::new()));
-    let (k1, _) = s.graph().add(Params(Knob::new()));
+    let k0 = s.graph().add(Params(Knob::new()));
+    let k1 = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(k0, 0)])
         .unwrap();
@@ -633,10 +626,10 @@ fn every_param_write_path_reaches_a_fork() {
 fn move_feeds_moves_every_feeders_sources() {
     let mut s = detached(1);
     let g = s.graph();
-    let (old, _) = g.add(ForkByClone(Events::<1, 0>));
-    let (new, _) = g.add(ForkByClone(Events::<1, 0>));
-    let (clip, _) = g.add(ForkByClone(Events::<0, 1>));
-    let (route, _) = g.add(ForkByClone(Events::<0, 1>));
+    let old = g.add(ForkByClone(Events::<1, 0>));
+    let new = g.add(ForkByClone(Events::<1, 0>));
+    let clip = g.add(ForkByClone(Events::<0, 1>));
+    let route = g.add(ForkByClone(Events::<0, 1>));
     g.set_feed(old, Feeder::Sequencer, vec![clip.events_out()]);
     g.set_feed(old, Feeder::Routes, vec![route.events_out()]);
     let both = {
@@ -702,7 +695,7 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("builds");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
+    let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     for c in 0..s.graph_ref().outputs() {
         s.graph()
             .connect(osc.out(0), Root::output(c))
@@ -739,8 +732,8 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
         .max_block(MaxBlock::of(Samples::new(256)))
         .build()
         .expect("builds");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
-    let (late, _) = s.graph().add(ForkByClone(Late::<N>::new()));
+    let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
+    let late = s.graph().add(ForkByClone(Late::<N>::new()));
     s.graph()
         .set_sources_unfaded(InPort::new(late, 0), [OutPort::new(osc, 0)])
         .unwrap();
@@ -786,7 +779,7 @@ fn a_removal_a_commit_and_an_update_run_on_any_thread() {
     // The test thread is the process's main thread; the work below is not on it.
     let _main = tutti_fixtures::main_thread();
     let mut s = detached(1);
-    let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     let _ = s.update();
 
     let (s, driven) = std::thread::spawn(move || {
@@ -901,7 +894,7 @@ fn replace_under_a_held_borrow(controls: &PublishedControls) {
 fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     let mut s = detached(1);
     let (published, first) = Published::new();
-    let (node, _) = s.graph().add(published);
+    let node = s.graph().add(published);
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
@@ -971,7 +964,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     );
 
     let (published, third) = Published::new();
-    let (other, _) = s.graph().add(published);
+    let other = s.graph().add(published);
     let _ = s.update();
     s.remove(other).unwrap();
     assert_eq!(
@@ -1000,7 +993,7 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
         .build()
         .expect("builds");
     let (published, controls) = Published::new();
-    let (node, _) = s.graph().add(published);
+    let node = s.graph().add(published);
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
@@ -1055,14 +1048,14 @@ fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoo
 #[test]
 fn the_update_frees_the_slots_a_graph_pool_retired() {
     let mut s = detached(1);
-    let (pool, _) = s.graph().add(tutti_sampler::VoicePool::new());
+    let pool = s.graph().add(tutti_sampler::VoicePool::new());
     let handle = s
         .graph_ref()
         .handle(&pool)
         .expect("the pool is in the graph")
         .clone();
     let (bare, bare_handle) = tutti_sampler::VoicePool::new().with_handle();
-    let (bare, ()) = s.graph().add(tutti_graph::Unforkable(bare));
+    let bare = s.graph().add(tutti_graph::Unforkable(bare));
     s.graph()
         .set_sources_unfaded(
             Root::output(0),
@@ -1097,22 +1090,22 @@ fn the_update_frees_the_slots_a_graph_pool_retired() {
 #[test]
 fn a_handle_is_none_once_its_node_is_removed() {
     let mut s = detached(1);
-    let (pool, _) = s.graph().add(tutti_sampler::VoicePool::new());
+    let pool = s.graph().add(tutti_sampler::VoicePool::new());
     assert!(s.graph_ref().handle(&pool).is_some(), "in the graph");
     s.remove(pool).unwrap();
     assert!(s.graph_ref().handle(&pool).is_none(), "removed");
 }
 
-/// **A streamed voice keeps sounding after the host drops the handle `add`
-/// returned, and the graph's handle still commands it**: the pool's handle
+/// **A streamed voice keeps sounding after the host drops its clone of the
+/// pool's handle, and the graph's handle still commands it**: the pool's handle
 /// holds each streaming voice's `Stream`, and the last handle dropped closes
-/// it. The graph keeps a clone for the node's life, so the file (a constant
+/// it. The graph owns one for the node's life, so the file (a constant
 /// 0.25) still renders at unity gain on the root's left channel (the file is
 /// mono) after the streamer has stepped past the drop, and a removal queued
 /// through `Graph::handle` silences it.
 #[cfg(feature = "sampler")]
 #[test]
-fn a_streamed_voice_keeps_sounding_after_the_host_drops_the_handle_add_returned() {
+fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
     use tutti_sampler::{DiskStreamer, DiskVoice, Playback, SlotId, StreamStart, VoiceWindow};
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("level.wav");
@@ -1126,7 +1119,12 @@ fn a_streamed_voice_keeps_sounding_after_the_host_drops_the_handle_add_returned(
         .sample_rate(RATE)
         .build()
         .expect("builds");
-    let (pool, host) = s.graph().add(tutti_sampler::VoicePool::new());
+    let pool = s.graph().add(tutti_sampler::VoicePool::new());
+    let host = s
+        .graph()
+        .handle(&pool)
+        .expect("the pool is in the graph")
+        .clone();
     s.graph().connect(pool, Root).unwrap().unfaded();
     host.add_streaming(
         SlotId(1),

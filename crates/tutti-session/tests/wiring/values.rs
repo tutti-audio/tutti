@@ -26,32 +26,26 @@ fn detached() -> DetachedSession {
 }
 
 fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
-    s.graph()
-        .add(SvfFilterNode::from(
-            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
-                .freq(Hz::new(cutoff))
-                .q(Q::new(0.75)),
-        ))
-        .0
+    s.graph().add(SvfFilterNode::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(cutoff))
+            .q(Q::new(0.75)),
+    ))
 }
 
 fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>> {
-    s.graph()
-        .add(CompressorNode::from(
-            CompressorConfig::new(BusTopology::MONO)
-                .key(KeySource::Sidechain)
-                .controls(CompressorControls::DEFAULT),
-        ))
-        .0
+    s.graph().add(CompressorNode::from(
+        CompressorConfig::new(BusTopology::MONO)
+            .key(KeySource::Sidechain)
+            .controls(CompressorControls::DEFAULT),
+    ))
 }
 
 /// A node whose `Seconds` params are `f64` cells.
 fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode<f32>> {
-    s.graph()
-        .add(MultibandCompressorNode::from(
-            MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
-        ))
-        .0
+    s.graph().add(MultibandCompressorNode::from(
+        MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
+    ))
 }
 
 fn plus_one(h: &Hz) -> Hz {
@@ -298,7 +292,7 @@ fn a_seconds_param_keeps_its_full_width() {
 #[test]
 fn a_read_answers_the_last_write_to_the_nodes_cell() {
     let mut s = detached();
-    let (lp, _) = s.graph().add(SvfFilterNode::from(
+    let lp = s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),

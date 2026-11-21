@@ -21,7 +21,7 @@ fn session() -> Session {
 #[test]
 fn a_write_reaches_the_decay_it_names() {
     let mut s = session();
-    let (node, _) = s
+    let node = s
         .graph()
         .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new().layout(
             FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
@@ -41,7 +41,7 @@ fn a_write_reaches_the_decay_it_names() {
     );
     assert!(s.get(node.freeze()).unwrap());
 
-    let (plain, _) = s
+    let plain = s
         .graph()
         .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new()));
     assert_eq!(
@@ -60,10 +60,10 @@ fn a_write_reaches_the_decay_it_names() {
 #[test]
 fn the_graph_sees_each_reverbs_ceiling() {
     let mut s = session();
-    let (plain, _) = s
+    let plain = s
         .graph()
         .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new()));
-    let (frozen, _) = s
+    let frozen = s
         .graph()
         .add::<FdnNode<f32>>(FdnNode::<f32>::from(FdnConfig::new().layout(
             FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
@@ -82,7 +82,7 @@ fn the_graph_sees_each_reverbs_ceiling() {
 #[test]
 fn the_plate_is_a_session_node_with_its_params_and_ceiling() {
     let mut s = session();
-    let (node, _) = s
+    let node = s
         .graph()
         .add::<PlateReverbNode<f32>>(PlateReverbNode::<f32>::from(PlateReverbConfig::new()));
     s.set(node.decay().to(Seconds::new(5.0))).unwrap();

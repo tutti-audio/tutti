@@ -1,8 +1,4 @@
-//! [`SessionEvent`], what an [`update`](crate::Session::update) found for the host, and
-//! [`CrossfadeControls`], the incoming node's controls a landed crossfade carries.
-
-use std::any::Any;
-use std::fmt::{self, Formatter};
+//! [`SessionEvent`], what an [`update`](crate::Session::update) found for the host.
 
 use tutti_buffers::ChannelTopology;
 use tutti_engine::StreamFault;
@@ -14,34 +10,6 @@ use crate::{
     BusSink, CrossfadeRefused, Edge, EventEdge, Problem, ResourceFact, ResourceId, RootReader,
 };
 
-/// The controls a landed crossfade hands the app: the incoming node's
-/// `IntoNode::Controls`, boxed (`()` for a plugin), its params already addressed.
-pub struct CrossfadeControls(Box<dyn Any + Send>);
-
-impl CrossfadeControls {
-    pub(crate) fn new(controls: Box<dyn Any + Send>) -> Self {
-        Self(controls)
-    }
-
-    /// The controls as `T`, or `None` when they are another type.
-    #[must_use]
-    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-        self.0.downcast_ref()
-    }
-
-    /// The boxed controls.
-    #[must_use]
-    pub fn into_inner(self) -> Box<dyn Any + Send> {
-        self.0
-    }
-}
-
-impl std::fmt::Debug for CrossfadeControls {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str("CrossfadeControls(..)")
-    }
-}
-
 /// Something an [`update`](crate::Session::update) found for the host.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -52,14 +20,12 @@ pub enum SessionEvent {
     CommitRefused(CommitError),
     /// A crossfade that waited out a re-prepare
     /// ([`Crossfade::Waiting`](crate::Crossfade::Waiting)) swapped its node
-    /// in: `controls` are the incoming node's [`CrossfadeControls`].
+    /// in; its key reaches the incoming node's values.
     CrossfadeLanded {
         /// The node it swapped behind.
         node: NodeKey,
         /// The id [`crate::Graph::crossfade`] returned.
         id: CrossfadeId,
-        /// The incoming node's controls.
-        controls: CrossfadeControls,
     },
     /// A crossfade that waited out a re-prepare was refused when it was
     /// retried (the graph is poisoned, or the node went): the incoming node

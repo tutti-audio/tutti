@@ -18,10 +18,10 @@ use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{BlockStatus, ContentScale, PluginId, StateUse};
+use tutti_plugin_types::{EditorError, MidiEventVec, RateRefusalCause, ServerError, StateError};
 use tutti_plugin_types::{
     LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
 };
-use tutti_plugin_types::{MidiEventVec, RateRefusalCause, ServerError};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -434,7 +434,7 @@ pub enum ControlReply {
         /// ([`ControlRequest::StageState`]): it loaded at its defaults. `None`
         /// when it took the state, and when none was staged.
         #[serde(default)]
-        state_error: Option<String>,
+        state_error: Option<StateError>,
     },
     /// One parameter's normalized value, or `None` if the plugin declined.
     ParameterValue {
@@ -521,11 +521,11 @@ pub enum ControlReply {
     ///
     /// A caller awaits this frame, so the answer reports that the state was
     /// *loaded* rather than merely that the request was sent. It carries the
-    /// message rather than a bool because the subprocess has already formatted
-    /// it and a caller wants to show the user *why* their preset did not load.
+    /// refusal rather than a bool because a caller wants to show the user *why*
+    /// their preset did not load, and whether another blob may do.
     StateLoaded {
-        /// The plugin's refusal, or `None` on success.
-        error: Option<String>,
+        /// The refusal, or `None` on success.
+        error: Option<StateError>,
     },
     /// Answers a `ControlRequest::SetSampleRate`: the plugin runs at the rate, or
     /// it does not.
@@ -560,16 +560,16 @@ pub enum ControlReply {
     /// Answers a [`ControlRequest::OpenEditor`]: the editor's size when it
     /// embedded, `None` for a floating one, or why it did not open.
     EditorOpened {
-        /// The size, or the refusal as the server formatted it.
+        /// The size, or why the editor did not open.
         #[serde(with = "super::wire::size_opt_result")]
-        result: Result<Option<Size>, String>,
+        result: Result<Option<Size>, EditorError>,
     },
     /// Answers a [`ControlRequest::SetEditorSize`]: the size the editor took, or
     /// why it did not.
     EditorSized {
-        /// The size taken, or the refusal as the server formatted it.
+        /// The size taken, or why the editor did not take one.
         #[serde(with = "super::wire::size_result")]
-        result: Result<Size, String>,
+        result: Result<Size, EditorError>,
     },
 }
 

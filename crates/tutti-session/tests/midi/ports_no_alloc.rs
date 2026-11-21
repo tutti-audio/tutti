@@ -47,7 +47,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
         .expect("builds");
     let _ = s.update();
     let heard = Arc::new(AtomicUsize::new(0));
-    let (synth, _) = s.graph().add(ForkByClone(Sink(Arc::clone(&heard))));
+    let synth = s.graph().add(ForkByClone(Sink(Arc::clone(&heard))));
     let synth = synth.erase();
     s.midi()
         .route(MidiRouteRule::any_channel().to(synth))

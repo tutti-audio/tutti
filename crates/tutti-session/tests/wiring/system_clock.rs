@@ -32,7 +32,7 @@ fn system() -> SystemSession {
 fn a_system_session_renders_its_graph_with_no_device() {
     let mut system = system();
     let s = &mut system;
-    let (level, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let level = s.graph().add(ForkByClone(Const::mono(0.25)));
     for port in 0..2 {
         s.graph()
             .set_sources_unfaded(Root::output(port), [OutPort::new(level, 0)])
@@ -105,7 +105,7 @@ impl Node for AlwaysPanics {
 #[test]
 fn a_panic_on_the_timer_thread_is_reported_once_as_a_fault_event() {
     let mut system = system();
-    let (node, _) = system.graph().add(ForkByClone(AlwaysPanics));
+    let node = system.graph().add(ForkByClone(AlwaysPanics));
     system
         .graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])

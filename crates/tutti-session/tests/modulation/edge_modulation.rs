@@ -73,8 +73,8 @@ fn mixer(s: &mut Session) -> Edge {
             level,
         })
     };
-    let (a, _) = s.graph().add(level(A));
-    let (b, _) = s.graph().add(level(B));
+    let a = s.graph().add(level(A));
+    let b = s.graph().add(level(B));
     s.graph()
         .connect(OutPort::new(a, 0), Root::output(0))
         .unwrap()

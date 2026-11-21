@@ -964,7 +964,7 @@ impl<C: Clock> SessionBuilder<C> {
         // and the meter from its block's `Env`.
         // It is not wired to the output: what it feeds is the host's
         // declaration, like every other node's.
-        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(Arc::clone(
+        let click = graph.add(ClickNode::from(ClickNodeConfig::new(Arc::clone(
             &click_settings,
         ))));
 
@@ -975,10 +975,14 @@ impl<C: Clock> SessionBuilder<C> {
         #[cfg(feature = "midi")]
         let midi = {
             let meter = transport.settings().project_meter().clone();
-            let (sync, sync_controls) = graph.add(
+            let sync = graph.add(
                 tutti_midi_runtime::SyncOut::new(tutti_ump::MidiGroup::FIRST)
                     .meter(move || meter.reader()),
             );
+            let sync_controls = graph
+                .controls(&sync)
+                .cloned()
+                .expect("the sync node was added a moment ago");
             Some(crate::MidiNodes {
                 input_ports: self.opts.midi_ports,
                 sync: sync.erase(),

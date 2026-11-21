@@ -118,7 +118,7 @@ impl Node for Hear {
 fn an_export_fork_is_accepted_and_silent() {
     let mut s = session();
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(8));
-    let (hear, ()) = s.graph().add(ForkByClone(Hear));
+    let hear = s.graph().add(ForkByClone(Hear));
     s.graph()
         .connect(key.events_out(), hear.events_in())
         .unwrap();
@@ -149,7 +149,7 @@ fn an_export_fork_is_accepted_and_silent() {
 fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
     let mut s = session();
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(8));
-    let (hear, ()) = s.graph().add(ForkByClone(Hear));
+    let hear = s.graph().add(ForkByClone(Hear));
     s.graph()
         .connect(key.events_out(), hear.events_in())
         .unwrap();

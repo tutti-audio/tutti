@@ -43,7 +43,7 @@ fn plugin() -> PluginRef {
 fn hosted() -> (DetachedSession, Key<AnyPlugin>, FakePlugin) {
     let mut s = session();
     let (handle, fake) = handle();
-    let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
+    let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     let key = host(&mut s, node, handle, plugin());
     s.commit();
     (s, key, fake)

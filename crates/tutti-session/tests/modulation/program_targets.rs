@@ -26,7 +26,7 @@ fn scene(
     source: impl FnOnce(&mut tutti_session::Mods<'_>) -> ModSourceId,
     depth: f64,
 ) -> (ParamRef, ModSourceId, ModRouteId) {
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     master(s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
@@ -367,7 +367,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
         .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples::new(128)))
         .build()
         .expect("builds");
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
         .set_sources(
             tutti_session::Root::output(0),
@@ -434,7 +434,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
 #[test]
 fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
     let (mut s, _) = rig(1);
-    let (probe, _) = s.graph().add(ProbeUnit::new(300.0));
+    let probe = s.graph().add(ProbeUnit::new(300.0));
     master(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let target = probe.cutoff().automation();

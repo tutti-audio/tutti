@@ -90,7 +90,7 @@ fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
 #[test]
 fn over_budget_alone_is_no_event() {
     let mut s = offline();
-    let (slow, _) = s.graph().add(ForkByClone(Slow));
+    let slow = s.graph().add(ForkByClone(Slow));
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(slow, 0)])
         .unwrap();
