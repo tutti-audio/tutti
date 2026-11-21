@@ -106,7 +106,9 @@
 //!   shifts the pitch of any width on a [`ColaGeometry`], one phase solution for all channels,
 //!   pulled by its output (`input_needed`, then `process`) under [`PhaseVocoderControls`].
 //! - **Resampling** (`resample/`): [`WindowedSinc`] and [`StreamingResampler`] (made from a
-//!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]).
+//!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]);
+//!   [`VariableResampler`], a windowed-sinc reader whose ratio is set per call, and the
+//!   [`FillController`] that steers it from a buffer's fill.
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
@@ -121,6 +123,10 @@
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
+//! - **Phase modulation** (`fm.rs`): [`FmVoice`], operators that modulate one another's phase
+//!   as an [`Algorithm`] says, run oversampled, with two-sample-average feedback.
+//! - **Additive** (`additive.rs`): [`AdditiveBank`], sine [`Partials`] as ratios of a frequency,
+//!   a partial at or above the Nyquist dropped.
 //! - **Wavetable** (`wavetable.rs`): [`Wavetable`], single-cycle frames mipmapped by FFT bin
 //!   zeroing, played by a [`WavetableOscillator`] with the level crossfaded from the frequency.
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
@@ -167,6 +173,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod additive;
 mod all_pass;
 mod bands;
 mod beat;
@@ -188,6 +195,7 @@ mod envelope;
 mod fft;
 mod filter;
 mod fir;
+mod fm;
 mod follower;
 mod frequency_shifter;
 mod granular;
@@ -232,6 +240,10 @@ mod stft;
 mod testing;
 mod viterbi;
 
+pub use additive::{
+    AdditiveBank, AdditiveControls, MAX_PARTIALS, Partial, PartialCount, PartialCountError,
+    Partials,
+};
 pub use all_pass::AllPassFilter;
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
@@ -285,6 +297,10 @@ pub use fir::{
     Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,
     kaiser_beta,
 };
+pub use fm::{
+    Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice, MAX_OPERATORS, Operator,
+    OperatorCount, OperatorCountError, OperatorError, OperatorFrequency, OperatorSpec, Route,
+};
 pub use frequency_shifter::{
     FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
 };
@@ -322,8 +338,9 @@ pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
-    ChunkSize, ResampleError, StreamingResampler, StreamingResamplerConfig, WindowedSinc,
-    needs_resampling, resampled_frames,
+    ChunkSize, FillController, LoopBandwidth, LoopBandwidthError, ResampleError,
+    StreamingResampler, StreamingResamplerConfig, VariableRate, VariableRateError,
+    VariableResampler, WindowedSinc, needs_resampling, resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnRamps};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, FreezeMode, MAX_PRE_DELAY, MIN_DECAY};

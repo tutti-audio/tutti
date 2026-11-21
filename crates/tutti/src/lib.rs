@@ -282,6 +282,11 @@ pub mod nodes {
         SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
+        AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice,
+        MAX_OPERATORS, MAX_PARTIALS, Operator, OperatorCount, OperatorCountError, OperatorError,
+        OperatorFrequency, OperatorSpec, Partial, PartialCount, PartialCountError, Partials, Route,
+    };
+    pub use tutti_dsp::{
         AllPassFilter, CombBank, CombControls, CombFilter, CombForm, FrequencyShifterBank,
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
@@ -306,6 +311,10 @@ pub mod nodes {
         EnvelopeStages, EnvelopeStep,
     };
     pub use tutti_dsp::{
+        FillController, LoopBandwidth, LoopBandwidthError, VariableRate, VariableRateError,
+        VariableResampler,
+    };
+    pub use tutti_dsp::{
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
     pub use tutti_dsp::{
@@ -318,7 +327,8 @@ pub mod nodes {
         SpringLengthError,
     };
     pub use tutti_dsp::{
-        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes, Oversampler,
+        Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_dsp::{
@@ -331,6 +341,10 @@ pub mod nodes {
         AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
+    };
+    pub use tutti_nodes::{
+        AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet, FmConfig, FmKernel, FmNode,
+        FmSet,
     };
     pub use tutti_nodes::{
         AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
@@ -368,15 +382,15 @@ pub mod nodes {
         MetronomeMode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder,
         ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
         MultibandControls, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
-        NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
-        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
-        SpringControls, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
-        SpringStagesError, Stages, StagesError, Stagger, StaggerError, SvfControls,
-        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
-        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
-        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
-        WavetableConfig, WavetableNode,
+        NoteTimesError, OscillatorConfig, OscillatorNode, PhaserConfig, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind,
+        ShimmerConfig, ShimmerNode, SourceNode, SourcePorts, SpringControls, SpringLayout,
+        SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError, Stages, StagesError,
+        Stagger, StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep,
+        SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
+        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode, WavetableConfig,
+        WavetableNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,

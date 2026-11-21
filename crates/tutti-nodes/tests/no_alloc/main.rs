@@ -33,6 +33,7 @@ mod rt_no_alloc_pitch_shifter;
 mod rt_no_alloc_reflections;
 mod rt_no_alloc_reverb;
 mod rt_no_alloc_shimmer;
+mod rt_no_alloc_synthesis;
 mod rt_no_alloc_transient;
 mod rt_no_alloc_utility;
 mod rt_no_alloc_wavetable;

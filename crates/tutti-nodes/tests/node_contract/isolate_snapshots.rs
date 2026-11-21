@@ -20,8 +20,13 @@ use tutti_buffers::Mono;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
 use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::Wavetable;
+use tutti_dsp::{
+    Algorithm, FmPatch, Operator, OperatorCount, OperatorFrequency, OperatorSpec, Partial,
+    Partials, Route,
+};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
+use tutti_nodes::{AdditiveConfig, AdditiveNode, FmConfig, FmNode};
 use tutti_nodes::{
     AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicRotatorConfig, AmbisonicRotatorNode,
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
@@ -53,8 +58,9 @@ use tutti_nodes::{
 };
 use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
 use tutti_units::{
-    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Gain, Hz, Metres, Normalized,
-    Q, Resonance, SampleRate, Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
+    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, FrequencyRatio, Gain, Hz,
+    Metres, Normalized, Q, Resonance, SampleRate, Samples, Seconds, Semitones, StereoWidth,
+    UnitAddr, UnitParam,
 };
 
 #[test]
@@ -584,6 +590,53 @@ fn distance() {
     })
     .control("distance", |r| {
         assert!(r.param_set().set(UnitParam::Distance, 30.0))
+    })
+    .check();
+}
+
+#[test]
+fn fm() {
+    let operator = Operator::of(0);
+    let route = Route {
+        modulator: operator,
+        target: operator,
+    };
+    let algorithm =
+        Algorithm::try_from((OperatorCount::of(1), &[route][..], &[operator][..])).unwrap();
+    let ratio = OperatorFrequency::Ratio(FrequencyRatio::UNISON);
+    let patch = FmPatch::new(algorithm).operators(&[OperatorSpec::new(ratio)]);
+    IsolateRow::new("FmNode", move || {
+        FmNode::<f32>::from(FmConfig::new(patch).frequency(Hz::new(300.0)))
+    })
+    .control("frequency", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, 900.0))
+    })
+    .control("level", |r| {
+        assert!(r.param_set().set(UnitParam::Volume, 0.5))
+    })
+    .control("feedback", |r| {
+        assert!(r.param_set().set(UnitAddr::new(UnitParam::Index, 1), 1.5))
+    })
+    .check();
+}
+
+#[test]
+fn additive() {
+    let partial = |ratio: f64, amplitude: f64| {
+        Partial::new(
+            FrequencyRatio::new(ratio).unwrap(),
+            Amplitude::new(amplitude),
+        )
+    };
+    let partials = Partials::try_from(&[partial(1.0, 0.5), partial(2.5, 0.25)][..]).unwrap();
+    IsolateRow::new("AdditiveNode", move || {
+        AdditiveNode::<f32>::from(AdditiveConfig::new(partials.clone()).frequency(Hz::new(300.0)))
+    })
+    .control("frequency", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, 900.0))
+    })
+    .control("level", |r| {
+        assert!(r.param_set().set(UnitParam::Volume, 0.5))
     })
     .check();
 }
