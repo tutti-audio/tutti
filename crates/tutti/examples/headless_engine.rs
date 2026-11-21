@@ -16,7 +16,7 @@ fn report(events: Vec<SessionEvent>) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut live = SessionBuilder::default()
-        .device(Default::default())
+        .device(tutti::session::DeviceSelector::Default)
         .build()?;
     let tone = Osc::sine(Hz::new(440.0)).with_amplitude(Amplitude::new(0.2));
     let (tone, _) = live.graph().add(ForkByClone(tone));

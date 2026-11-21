@@ -13,9 +13,9 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, IntoNode, Io, Law, Node, NodeKey, NodeParts, OutPort,
-    ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, PortSource, Prepare, Shape,
-    Status, TransportPosition, declare_params, param_parts,
+    Cx, Editor, EventOut, Executor, IntoNode, Io, Node, NodeKey, NodeParts, OutPort, ParamEvent,
+    ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, PortSource, Prepare, Shape, Status,
+    TransportPosition, declare_params, param_parts,
 };
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Db, Hz, Q, Samples, UnitAddr, UnitParam};
@@ -108,7 +108,7 @@ impl Node for Steps {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
-            let seg = ParamSegment::unit(addr, v, v, Samples::new(0), Law::Linear);
+            let seg = ParamSegment::unit(addr, v, v, Samples::new(0));
             let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent

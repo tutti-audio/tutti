@@ -18,7 +18,7 @@
 //! which this test catches only for the nodes it runs.
 
 use tutti_graph::testing as common;
-use tutti_graph::{Curvature, Exponent};
+use tutti_graph::{Curvature, EventTapOptions, Exponent};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -422,7 +422,7 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     ed.collect();
 
     // A long fade, one queued behind it, and one on the event node.
-    let fade = |n| Fade::new(Samples::new(n), FadeLaw::EqualPower);
+    let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(gain(2.0)), fade(3_000))
         .expect("fits");
     ed.commit().expect("commits");
@@ -534,7 +534,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
         exec.process(64, &transport, &[], &mut slices);
     };
     block(&mut exec);
-    let fade = |n| Fade::new(Samples::new(n), FadeLaw::EqualPower);
+    let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
     for k in 0..KEYS {
         ed.replace(
             NodeKey(k + 1),
@@ -863,8 +863,8 @@ impl Node for RampEvery {
                             tutti_units::Hz::new((f % 3) as f64),
                             tutti_units::Hz::new((f % 7) as f64),
                             Samples::new(50),
-                            shape,
-                        );
+                        )
+                        .law(shape);
                         let seg = if k == 2 {
                             seg.resumed(Samples::new(3), Samples::new(41))
                         } else {
@@ -1148,13 +1148,7 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
         let kind: ParamKind = if k % 2 == 0 {
             ParamKind::Ramp(ParamRamp::by_id(id, 0.5, Samples::new(16)))
         } else {
-            ParamKind::Segment(ParamSegment::by_id(
-                id,
-                0.0,
-                1.0,
-                Samples::new(50),
-                Law::Linear,
-            ))
+            ParamKind::Segment(ParamSegment::by_id(id, 0.0, 1.0, Samples::new(50)))
         };
         ed.schedule(
             At::Frame(Frame::new(2_000 + k * 700)),
@@ -1272,13 +1266,9 @@ impl Node for SeamEvery {
                 };
                 let shape = [Law::Linear, Law::PowerIn(Exponent::of(2.0)), Law::Hold]
                     [(f / 87) as usize % 3];
-                let seg = ParamSegment::unit(
-                    tutti_units::UnitParam::Azimuth,
-                    from,
-                    to,
-                    Samples::new(40),
-                    shape,
-                );
+                let seg =
+                    ParamSegment::unit(tutti_units::UnitParam::Azimuth, from, to, Samples::new(40))
+                        .law(shape);
                 let _ = io
                     .event_out(0)
                     .push_param(tutti_graph::ParamEvent::segment(o, seg));
@@ -2365,7 +2355,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             Unforkable(Chaser {
                 seen: Arc::clone(second),
             }),
-            Fade::new(Samples::new(0), FadeLaw::EqualPower),
+            Fade::new(Samples::new(0)).law(FadeLaw::EqualPower),
         )
         .expect("fits");
     }
@@ -2686,8 +2676,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         .open_event_tap(
             EventTapId::of(1),
             ev(20, 0),
-            TapAlign::Raw,
-            EventCapacity::of(256),
+            EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     ed.commit().expect("commits");
@@ -2863,7 +2852,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.replace(
         NodeKey(25),
         Unforkable(Holder::new(0)),
-        Fade::new(Samples::new(0), FadeLaw::EqualPower),
+        Fade::new(Samples::new(0)).law(FadeLaw::EqualPower),
     )
     .expect("fits");
     ed.commit().expect("commits");
@@ -2939,7 +2928,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.replace(
         NodeKey(700),
         Unforkable(Holder::paced(0, 64)),
-        Fade::new(Samples::new(0), FadeLaw::EqualPower),
+        Fade::new(Samples::new(0)).law(FadeLaw::EqualPower),
     )
     .expect("fits");
     ed.commit().expect("commits");
@@ -2996,7 +2985,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     applied(&mut exec);
     blocks(&mut exec, 4, 64);
     ed.collect();
-    let fade = |n| Fade::new(Samples::new(n), FadeLaw::EqualPower);
+    let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
     ed.replace(NodeKey(500), Unforkable(chaser(1)), fade(1_000))
         .expect("fits");
     ed.commit().expect("commits");
@@ -3166,7 +3155,7 @@ fn closing_pedals_and_bends_allocates_nothing_on(workers: usize) {
     apply(&mut exec);
     blocks(&mut exec, 4);
     ed.collect();
-    let fade = Fade::new(Samples::new(128), FadeLaw::EqualPower);
+    let fade = Fade::new(Samples::new(128)).law(FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(Latch { sent: false }), fade)
         .expect("fits");
     ed.commit().expect("commits");

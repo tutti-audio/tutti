@@ -108,7 +108,7 @@ fn a_system_session_switches_to_a_device_and_its_graph_plays_there() {
 fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut live = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
     wire_constant(&mut live, 0.25);
@@ -301,7 +301,7 @@ fn a_poisoned_graph_comes_back_stopped() {
 fn the_transport_resumes_where_the_last_block_ended_going_to_the_timer() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut live = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
     let _ = live.update();
@@ -514,7 +514,7 @@ fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_t
 fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
     let (driver, stream) = ManualStreamDriver::new();
     let live = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
     let before = live.device().spec().clone();
@@ -575,7 +575,7 @@ fn a_fault_no_update_read_is_reported_after_the_switch() {
 fn a_restart_report_no_update_read_is_reported_after_the_switch() {
     let (driver, _stream) = ManualStreamDriver::new();
     let mut live = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
     let (driver, _new) = ManualStreamDriver::new();

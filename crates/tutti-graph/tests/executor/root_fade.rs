@@ -187,7 +187,7 @@ fn check_fade(law: FadeLaw, n: usize, first: usize, mixed: &[(f32, f32, f32)], f
 
 /// The fade's length: [`DECLICK`] frames, three blocks.
 fn fade(law: FadeLaw) -> Fade {
-    Fade::new(Samples::new(declick()), law)
+    Fade::new(Samples::new(declick())).law(law)
 }
 
 const LAWS: [FadeLaw; 2] = [FadeLaw::EqualAmplitude, FadeLaw::EqualPower];

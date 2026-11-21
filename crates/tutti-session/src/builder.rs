@@ -331,7 +331,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     ///
     /// // The device's rate is the session's: there is nothing to set.
     /// let _ = Session::builder()
-    ///     .device(Default::default())
+    ///     .device(tutti_cpal::DeviceSelector::Default)
     ///     .sample_rate(SampleRate::SR_44K1);
     /// ```
     #[cfg(feature = "device")]

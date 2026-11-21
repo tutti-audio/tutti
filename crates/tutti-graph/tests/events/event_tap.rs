@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use common::{Kind, TestNode, prepare};
 
 use tutti_fixtures::midi;
-use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapReader};
+use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapOptions, EventTapReader};
 use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone,
     ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InPort, IntoNode, Io, MissingSource, Node,
@@ -299,8 +299,7 @@ fn every_event_lands_at_its_frame_across_block_sizes() {
             r.ed.open_event_tap(
                 EventTapId::of(1),
                 port(1, 0),
-                TapAlign::Raw,
-                EventCapacity::of(256),
+                EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
             )
             .expect("the port exists");
         assert_eq!(tap.rate(), common::RATE, "frames are on the graph's rate");
@@ -329,8 +328,7 @@ fn a_slow_reader_loses_events_counted_and_a_note_off_is_kept() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(8),
+            EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     commit(&mut r);
@@ -365,8 +363,7 @@ fn drain_yields_what_was_written_in_order_and_leaves_nothing() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(256),
+            EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     commit(&mut r);
@@ -398,8 +395,7 @@ fn drain_leaves_the_loss_count_to_take_lost() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(8),
+            EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     commit(&mut r);
@@ -423,8 +419,7 @@ fn a_drain_dropped_early_leaves_the_rest() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(256),
+            EventTapOptions::new(EventCapacity::of(256)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     commit(&mut r);
@@ -448,16 +443,14 @@ fn a_narrowed_port_reads_nothing_and_the_stream_resumes() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 1),
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     let mut first =
         r.ed.open_event_tap(
             EventTapId::of(2),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     commit(&mut r);
@@ -496,8 +489,7 @@ fn a_removed_node_reads_nothing_and_a_reused_key_is_not_read() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     commit(&mut r);
@@ -533,8 +525,7 @@ fn aligned_against_raw_on_a_latent_path() {
             r.ed.open_event_tap(
                 EventTapId::of(id),
                 port(node, 0),
-                align,
-                EventCapacity::of(64),
+                EventTapOptions::new(EventCapacity::of(64)).align(align),
             )
             .expect("the port exists")
         };
@@ -570,8 +561,7 @@ fn closed_fork_reopen_and_prune() {
         r.ed.open_event_tap(
             EventTapId::of(id),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists")
     };
@@ -646,8 +636,7 @@ fn a_reader_dropped_on_the_audio_thread_panics() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(8),
+            EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     let _inside = tutti_rt::RtScope::enter();
@@ -668,8 +657,7 @@ fn only_midi_is_copied() {
         r.ed.open_event_tap(
             EventTapId::of(1),
             port(1, 0),
-            TapAlign::Raw,
-            EventCapacity::of(2),
+            EventTapOptions::new(EventCapacity::of(2)).align(TapAlign::Raw),
         )
         .expect("the port exists");
     commit(&mut r);
@@ -689,8 +677,12 @@ fn opening_refuses_a_port_that_does_not_exist_now() {
     let mut r = rig(1, false, 0);
     script(&mut r, 1, Script::new(vec![]).ports(2));
     let open = |r: &mut Rig, p: EventOut| {
-        r.ed.open_event_tap(EventTapId::of(9), p, TapAlign::Raw, EventCapacity::of(8))
-            .err()
+        r.ed.open_event_tap(
+            EventTapId::of(9),
+            p,
+            EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw),
+        )
+        .err()
     };
     assert_eq!(
         open(&mut r, port(1, 2)),
@@ -810,16 +802,14 @@ fn an_input_tap_reads_what_the_node_heard() {
             r.ed.open_event_tap(
                 EventTapId::of(1),
                 input,
-                TapAlign::Raw,
-                EventCapacity::of(64),
+                EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
             )
             .expect("the input exists");
         let mut aligned =
             r.ed.open_event_tap(
                 EventTapId::of(2),
                 input,
-                TapAlign::ToOutput,
-                EventCapacity::of(64),
+                EventTapOptions::new(EventCapacity::of(64)),
             )
             .expect("the input exists");
         commit(&mut r);
@@ -857,8 +847,7 @@ fn an_input_tap_of_one_source_and_of_none() {
                 node: NodeKey(3),
                 port: 0,
             },
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");
     let mut none =
@@ -868,8 +857,7 @@ fn an_input_tap_of_one_source_and_of_none() {
                 node: NodeKey(3),
                 port: 1,
             },
-            TapAlign::Raw,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");
     commit(&mut r);
@@ -920,8 +908,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
                 node: NodeKey(3),
                 port: 0,
             },
-            TapAlign::ToOutput,
-            EventCapacity::of(64),
+            EventTapOptions::new(EventCapacity::of(64)),
         )
         .expect("the input exists");
     commit(&mut r);
@@ -950,8 +937,7 @@ fn opening_an_input_tap_refuses_a_port_that_does_not_exist_now() {
                 node: NodeKey(node),
                 port,
             },
-            TapAlign::Raw,
-            EventCapacity::of(8),
+            EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw),
         )
         .err()
     };
@@ -996,8 +982,12 @@ fn busy(r: &mut Rig) -> Vec<EventTapReader> {
             };
             let id = EventTapId::of(k * 2 + u64::from(p) + 1);
             taps.push(
-                r.ed.open_event_tap(id, port(k, p), align, EventCapacity::of(1 << 10))
-                    .expect("the port exists"),
+                r.ed.open_event_tap(
+                    id,
+                    port(k, p),
+                    EventTapOptions::new(EventCapacity::of(1 << 10)).align(align),
+                )
+                .expect("the port exists"),
             );
         }
     }

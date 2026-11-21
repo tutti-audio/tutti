@@ -174,7 +174,7 @@ fn blocks(exec: &mut Executor, outputs: usize) -> Vec<Vec<f32>> {
 }
 
 fn cut() -> Fade {
-    Fade::new(Samples::new(0), FadeLaw::EqualPower)
+    Fade::new(Samples::new(0)).law(FadeLaw::EqualPower)
 }
 
 /// A CC and its value set on the outgoing node sound from the incoming
@@ -225,7 +225,7 @@ fn a_crossfade_chases_the_incoming_node_alone() {
     let set = cc(7, 90);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &old_log));
     block(&mut exec);
-    let fade = Fade::new(Samples::new(4 * BLOCK), FadeLaw::EqualPower);
+    let fade = Fade::new(Samples::new(4 * BLOCK)).law(FadeLaw::EqualPower);
     ed.replace(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &new_log)),
@@ -370,7 +370,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
             let fade = if k % 2 == 0 {
                 cut()
             } else {
-                Fade::new(Samples::new(3 * BLOCK), FadeLaw::EqualPower)
+                Fade::new(Samples::new(3 * BLOCK)).law(FadeLaw::EqualPower)
             };
             ed.replace(
                 NodeKey(k),
@@ -387,7 +387,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
             ed.replace(
                 NodeKey(k),
                 Unforkable(Keeper::new(None, true, 8, &log)),
-                Fade::new(Samples::new(2 * BLOCK), FadeLaw::EqualPower),
+                Fade::new(Samples::new(2 * BLOCK)).law(FadeLaw::EqualPower),
             )
             .expect("fits");
         }
@@ -416,7 +416,7 @@ fn a_replace_queued_behind_a_fade_is_chased_when_the_fade_ends() {
     let set = cc(7, 90);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &a));
     block(&mut exec);
-    let fade = || Fade::new(Samples::new(8 * BLOCK), FadeLaw::EqualPower);
+    let fade = || Fade::new(Samples::new(8 * BLOCK)).law(FadeLaw::EqualPower);
     ed.replace(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &b)),
@@ -493,7 +493,7 @@ fn a_held_chase_counts_what_the_successor_cannot_take() {
         })]);
     ed.commit().expect("commits");
     block(&mut exec);
-    let fade = || Fade::new(Samples::new(4 * BLOCK), FadeLaw::EqualPower);
+    let fade = || Fade::new(Samples::new(4 * BLOCK)).law(FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(Mute), fade())
         .expect("fits");
     ed.commit().expect("commits");

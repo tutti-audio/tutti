@@ -1287,7 +1287,7 @@ impl<F: Float> Pump<F> {
     fn place(&self, first: Frame) -> TakePlacement {
         let (input, output) = self.probe.read(self.anchor.rate);
         let (lead, offset) = self.terms;
-        let latency = TakeLatency::new(input, output, lead, offset);
+        let latency = TakeLatency::new(input, output, lead).offset(offset);
         let start = latency.place(first);
         TakePlacement {
             first,

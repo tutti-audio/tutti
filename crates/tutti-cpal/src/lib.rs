@@ -61,7 +61,7 @@
 //!
 //! // The engine owns the executor and the transport's clock; the editor stays
 //! // with the host.
-//! let engine = Engine::new(&transport, &mut editor, executor, tutti_engine::BlockDates::Os)?;
+//! let engine = Engine::new(&transport, &mut editor, executor)?;
 //! let state = Arc::new(AudioCallbackState::new(engine));
 //!
 //! audio_engine.start(Arc::clone(&state))?;

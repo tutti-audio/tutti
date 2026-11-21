@@ -137,9 +137,9 @@ pub use tutti_session::Error;
 // The graph's vocabulary a session hands out.
 pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
-    EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
-    InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
-    TapOptions, TapReader, TapWriter,
+    EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapOptions, EventTapReader,
+    FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent,
+    TapId, TapOptions, TapReader, TapWriter,
 };
 pub use tutti_rt::PushError;
 // The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
@@ -293,8 +293,9 @@ pub mod nodes {
     };
     pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
     pub use tutti_dsp::{
-        Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, VelvetDensity,
-        VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise, VelvetPulse,
+        Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, ReflectionOrder,
+        ShoeboxConfig, ShoeboxError, ShoeboxRoom, VelvetDensity, VelvetDensityError, VelvetLength,
+        VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
     };
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,

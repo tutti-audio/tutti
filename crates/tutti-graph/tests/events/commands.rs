@@ -11,9 +11,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Law, Node, ParamKind,
-    ParamRamp, ParamSegment, Prepare, Reference, ScheduleError, Scheduled, Shape, Status,
-    TransportPosition, Unforkable,
+    COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Node, ParamKind, ParamRamp,
+    ParamSegment, Prepare, Reference, ScheduleError, Scheduled, Shape, Status, TransportPosition,
+    Unforkable,
 };
 use tutti_graph::{OutPort, PortSource};
 use tutti_music::LoopRange;
@@ -97,13 +97,7 @@ fn ramp(target: f64) -> ParamKind {
 
 /// The same as a zero-length segment.
 fn segment(target: f64) -> ParamKind {
-    ParamKind::Segment(ParamSegment::by_id(
-        ID,
-        target,
-        target,
-        Samples::new(0),
-        Law::Linear,
-    ))
+    ParamKind::Segment(ParamSegment::by_id(ID, target, target, Samples::new(0)))
 }
 
 fn to() -> EventIn {

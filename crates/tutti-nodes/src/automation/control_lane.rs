@@ -432,7 +432,7 @@ impl From<UnitLaneConfig> for ControlLaneNode {
             config.range.map_or(RangeSource::None, RangeSource::Port),
             Some(param.param),
             Arc::new(move |from, to, shape| {
-                ParamSegment::unit(param, from, to, Samples::new(0), shape)
+                ParamSegment::unit(param, from, to, Samples::new(0)).law(shape)
             }),
             true,
         )
@@ -482,7 +482,7 @@ impl From<ForeignLaneConfig> for ControlLaneNode {
             RangeSource::Own(Publisher::new(config.range)),
             None,
             Arc::new(move |from, to, shape| {
-                ParamSegment::by_id(id, from, to, Samples::new(0), shape)
+                ParamSegment::by_id(id, from, to, Samples::new(0)).law(shape)
             }),
             false,
         )

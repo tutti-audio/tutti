@@ -110,8 +110,7 @@ fn rolling_state_with(
         .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // Every commit is sent; the editor only has to outlive the engine's
     // setup. Leaked like the fixtures in `support`, for the same reason.
     Box::leak(Box::new(ed));

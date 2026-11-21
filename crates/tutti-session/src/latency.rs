@@ -63,20 +63,22 @@ pub struct TakeLatency {
 }
 
 impl TakeLatency {
-    /// The latency of a placement.
+    /// The latency of a placement, with no manual trim.
     #[must_use]
-    pub fn new(
-        input: Option<Samples>,
-        output: Option<Samples>,
-        lead: Samples,
-        offset: Trim,
-    ) -> Self {
+    pub fn new(input: Option<Samples>, output: Option<Samples>, lead: Samples) -> Self {
         Self {
             input,
             output,
             lead,
-            offset,
+            offset: Trim::default(),
         }
+    }
+
+    /// The input's manual trim.
+    #[must_use]
+    pub fn offset(mut self, offset: Trim) -> Self {
+        self.offset = offset;
+        self
     }
 
     /// Whether both latencies were reported. When they were not, the start is
@@ -126,7 +128,6 @@ mod tests {
             Some(Samples::new(240)),
             Some(Samples::new(480)),
             Samples::new(7),
-            Trim::NONE,
         );
         assert_eq!(latency.place(Frame::new(1_000)), Start::At(Frame::new(273)));
         assert_eq!(
@@ -139,7 +140,7 @@ mod tests {
             ..latency
         };
         assert_eq!(trimmed.place(Frame::new(1_000)), Start::At(Frame::new(283)));
-        let partial = TakeLatency::new(Some(Samples::new(240)), None, Samples::new(0), Trim::NONE);
+        let partial = TakeLatency::new(Some(Samples::new(240)), None, Samples::new(0));
         assert!(!partial.is_complete());
         assert_eq!(partial.place(Frame::new(1_000)), Start::At(Frame::new(760)));
         assert_eq!(

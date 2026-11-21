@@ -27,8 +27,7 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
         SampleRate::SR_44K1,
         MaxBlock::of(Samples::new(512)),
     ));
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("an empty graph");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("an empty graph");
     let state = Arc::new(AudioCallbackState::new(engine));
     let mut driver = TuttiDriver::new(AudioEngine::from_spec(spec_at(44_100.0)), state);
     let graph = SampleRate::SR_44K1;

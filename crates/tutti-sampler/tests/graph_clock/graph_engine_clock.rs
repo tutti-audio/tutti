@@ -95,8 +95,7 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, E
             })
         }));
     ed.commit().expect("commits");
-    let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, ed)
 }
 
@@ -252,7 +251,7 @@ fn a_crossfaded_voice_plays_on_through_the_fade() {
                 ed.replace(
                     NodeKey(1),
                     spare.take().expect("once"),
-                    Fade::new(Samples::new(4096), FadeLaw::EqualAmplitude),
+                    Fade::new(Samples::new(4096)),
                 )
                 .expect("same shape");
                 ed.commit().expect("commits");

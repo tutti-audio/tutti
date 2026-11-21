@@ -119,8 +119,7 @@ fn render_with(
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let map = TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {
         beat: Beat::new(beat),
         tempo: Bpm::of(bpm),

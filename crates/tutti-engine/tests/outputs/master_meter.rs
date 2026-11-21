@@ -64,14 +64,7 @@ fn engine(
         .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
     ed.commit().expect("commits");
-    let engine = Engine::with_capacity(
-        &transport,
-        &mut ed,
-        exec,
-        capacity,
-        tutti_engine::BlockDates::Os,
-    )
-    .expect("within limits");
+    let engine = Engine::with_capacity(&transport, &mut ed, exec, capacity).expect("within limits");
     // The engine's editor half outlives the test; nothing commits again.
     Box::leak(Box::new((ed, transport)));
     (engine, meter)
@@ -209,14 +202,8 @@ fn the_master_reads_before_the_declick() {
         .expect("the sources exist");
     meter.enable();
     ed.commit().expect("commits");
-    let engine = Engine::with_capacity(
-        &transport,
-        &mut ed,
-        exec,
-        Samples::new(512),
-        tutti_engine::BlockDates::Os,
-    )
-    .expect("limits");
+    let engine =
+        Engine::with_capacity(&transport, &mut ed, exec, Samples::new(512)).expect("limits");
     let _ = transport.motion().try_send(MotionCommand::Play);
     render(&engine, 512, 1);
     assert_eq!(meter.read()[0].peak.get(), 0.5);
@@ -296,14 +283,8 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
         .expect("the sources exist");
     meter.enable();
     ed.commit().expect("commits");
-    let engine = Engine::with_capacity(
-        &transport,
-        &mut ed,
-        exec,
-        Samples::new(64),
-        tutti_engine::BlockDates::Os,
-    )
-    .expect("within limits");
+    let engine =
+        Engine::with_capacity(&transport, &mut ed, exec, Samples::new(64)).expect("within limits");
     render(&engine, 1500, 6);
     let r = meter.read();
     let rms = ((100.0 + 1400.0 * 0.01) / 1500.0f64).sqrt();

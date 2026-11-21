@@ -238,7 +238,7 @@ fn a_crossfade_between_fonts_chases_the_incoming_unit() {
         .replace(
             NodeKey(2),
             Unforkable(unit()),
-            Fade::new(Samples::new(2 * BLOCK), FadeLaw::EqualPower),
+            Fade::new(Samples::new(2 * BLOCK)).law(FadeLaw::EqualPower),
         )
         .expect("fits");
     rig.ed.commit().expect("commits");

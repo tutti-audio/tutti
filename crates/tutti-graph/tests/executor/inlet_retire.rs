@@ -7,7 +7,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
-use tutti_graph::{Editor, Fade, FadeLaw, InletNode, Prepare, TapReader, TransportPosition};
+use tutti_graph::{Editor, Fade, InletNode, Prepare, TapReader, TransportPosition};
 use tutti_graph::{OutPort, PortSource};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -51,10 +51,7 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     ed.collect();
 
     // A cut, then a crossfade, each over a fresh ring.
-    for fade in [
-        Fade::new(Samples::new(0), FadeLaw::default()),
-        Fade::new(Samples::new(96), FadeLaw::default()),
-    ] {
+    for fade in [Fade::new(Samples::new(0)), Fade::new(Samples::new(96))] {
         let (next, mut w) = inlet();
         ed.replace(KEY, next, fade).expect("replaces");
         ed.commit().expect("compiles");

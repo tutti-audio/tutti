@@ -715,7 +715,7 @@ fn a_fade_keeps_the_params_it_declares() {
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 512, 64);
 
-    let fade = tutti_graph::Fade::new(Samples::new(128), tutti_graph::FadeLaw::EqualAmplitude);
+    let fade = tutti_graph::Fade::new(Samples::new(128));
     assert!(
         matches!(
             ed.replace(NodeKey(PROBE), Unforkable(CutoffOnly), fade),
@@ -1317,15 +1317,16 @@ fn a_segment_hits_its_analytic_values_per_frame() {
     let segs = vec![
         (
             100,
-            ParamSegment::new(key, Hz::new(a.1), Hz::new(a.2), Samples::new(a.3), a.0),
+            ParamSegment::new(key, Hz::new(a.1), Hz::new(a.2), Samples::new(a.3)).law(a.0),
         ),
         (
             1300,
-            ParamSegment::new(key, Hz::new(b.1), Hz::new(b.2), Samples::new(b.3), b.0),
+            ParamSegment::new(key, Hz::new(b.1), Hz::new(b.2), Samples::new(b.3)).law(b.0),
         ),
         (
             1700,
-            ParamSegment::new(key, Hz::new(c.1), Hz::new(c.2), Samples::new(0), c.0)
+            ParamSegment::new(key, Hz::new(c.1), Hz::new(c.2), Samples::new(0))
+                .law(c.0)
                 .resumed(Samples::new(c.3), Samples::new(c.4)),
         ),
     ];
@@ -1367,23 +1368,13 @@ fn an_interrupted_segment_hands_over_on_the_frame() {
     let segs = vec![
         (
             100,
-            ParamSegment::new(
-                key,
-                Hz::new(0.0),
-                Hz::new(1.0),
-                Samples::new(1000),
-                Law::PowerIn(Exponent::of(2.0)),
-            ),
+            ParamSegment::new(key, Hz::new(0.0), Hz::new(1.0), Samples::new(1000))
+                .law(Law::PowerIn(Exponent::of(2.0))),
         ),
         (
             437,
-            ParamSegment::new(
-                key,
-                Hz::new(2.0),
-                Hz::new(3.0),
-                Samples::new(50),
-                Law::PowerOut(Exponent::of(3.0)),
-            ),
+            ParamSegment::new(key, Hz::new(2.0), Hz::new(3.0), Samples::new(50))
+                .law(Law::PowerOut(Exponent::of(3.0))),
         ),
     ];
     let plan = vec![(611, UnitParam::Cutoff, 0.0, 10)];
@@ -1511,13 +1502,7 @@ fn an_interrupted_shaped_ramp_hands_over_on_the_frame() {
     ];
     let segs = vec![(
         340,
-        ParamSegment::new(
-            key,
-            Hz::new(4.0),
-            Hz::new(6.0),
-            Samples::new(1000),
-            Law::Linear,
-        ),
+        ParamSegment::new(key, Hz::new(4.0), Hz::new(6.0), Samples::new(1000)),
     )];
     for blocks in segment_schedules(600) {
         let out = render_moves(Vec::new(), shaped.clone(), segs.clone(), &blocks);
@@ -1564,8 +1549,8 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
         Hz::new(0.0),
         Hz::new(2.0),
         Samples::new(640),
-        shape,
-    );
+    )
+    .law(shape);
     ed.insert(
         NodeKey(1),
         "ramps",
@@ -1650,7 +1635,6 @@ impl Node for SegmentThenRamp {
                 Hz::new(5.0),
                 Hz::new(9.0),
                 Samples::new(20),
-                Law::Linear,
             );
             let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(4));
             let _ = io.event_out(0).push_param(ParamEvent::segment(o, seg));
@@ -1798,8 +1782,8 @@ fn a_segment_replaces_the_base() {
         Hz::new(0.0),
         Hz::new(0.5),
         Samples::new(200),
-        shape,
-    );
+    )
+    .law(shape);
     ed.insert(
         NodeKey(1),
         "ramps",
@@ -1955,7 +1939,7 @@ fn a_range_move_reaches_a_unit_that_faded_in() {
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 128, 64);
 
-    let fade = tutti_graph::Fade::new(Samples::new(128), tutti_graph::FadeLaw::EqualAmplitude);
+    let fade = tutti_graph::Fade::new(Samples::new(128));
     let (c2, q2) = (Cell::new(0.0), Cell::new(0.0));
     ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
         .expect("the same params fade");
@@ -2217,15 +2201,15 @@ fn gen_segment() -> impl Strategy<Value = (u64, ParamSegment)> {
                     Q::new(from),
                     Q::new(to),
                     Samples::new(len),
-                    shape,
-                ),
+                )
+                .law(shape),
                 _ => ParamSegment::new(
                     ParamKey::<Hz>::CUTOFF,
                     Hz::new(from),
                     Hz::new(to),
                     Samples::new(len),
-                    shape,
-                ),
+                )
+                .law(shape),
             };
             let seg = match resumed {
                 Some((pos, l)) => seg.resumed(Samples::new(pos), Samples::new(l)),
@@ -2591,21 +2575,9 @@ fn a_range_cell_handle_is_the_ports_own() {
 #[test]
 fn corners_skip_a_resend_at_any_block_size() {
     let key = ParamKey::<Hz>::CUTOFF;
-    let a = ParamSegment::new(
-        key,
-        Hz::new(100.0),
-        Hz::new(500.0),
-        Samples::new(40),
-        Law::Linear,
-    );
+    let a = ParamSegment::new(key, Hz::new(100.0), Hz::new(500.0), Samples::new(40));
     let along = |frames: usize| a.resumed(a.position() + Samples::new(frames), a.length());
-    let b = ParamSegment::new(
-        key,
-        Hz::new(500.0),
-        Hz::new(200.0),
-        Samples::new(8),
-        Law::Linear,
-    );
+    let b = ParamSegment::new(key, Hz::new(500.0), Hz::new(200.0), Samples::new(8));
     let source = || Ramps {
         plan: Vec::new(),
         segs: vec![

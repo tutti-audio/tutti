@@ -43,11 +43,10 @@ mod jack;
 /// `HostId` is generated per target). Asking for a host this build cannot
 /// reach fails at runtime with [`DeviceError::HostUnavailable`]; use
 /// [`available_hosts`] to list the ones that work.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AudioHost {
     /// Whatever cpal calls the platform default: ALSA, WASAPI, CoreAudio.
-    #[default]
     Default,
     /// JACK, on Linux and the BSDs.
     ///
@@ -73,10 +72,9 @@ impl std::fmt::Display for AudioHost {
 ///
 /// An id that matches nothing is an error ([`DeviceError::InvalidDevice`]), never a
 /// fallback to the default device.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeviceSelector {
     /// The host's default device.
-    #[default]
     Default,
     /// A device by identity.
     Id(DeviceId),

@@ -47,8 +47,7 @@ fn dc_state(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
         outputs
     ]);
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     Box::leak(Box::new(ed));
     Arc::new(AudioCallbackState::new(engine))
 }

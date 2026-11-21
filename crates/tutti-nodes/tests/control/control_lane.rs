@@ -1113,8 +1113,8 @@ fn an_input_offset_is_exact_from_its_frame() {
         .expect("valid");
     let lane = native(&ed, 2, p, Some(10.0));
     wire(&mut ed, 1, lane, 2);
-    let step = |v| ParamSegment::by_id(ParamId::new(7), v, v, Samples::new(0), Law::Linear);
-    let ramp = ParamSegment::by_id(ParamId::new(7), 0.25, 1.0, Samples::new(200), Law::Linear);
+    let step = |v| ParamSegment::by_id(ParamId::new(7), v, v, Samples::new(0));
+    let ramp = ParamSegment::by_id(ParamId::new(7), 0.25, 1.0, Samples::new(200));
     let arrive = 600 + ramp.arrives_after().get();
     ed.insert(
         NodeKey(5),
@@ -1178,9 +1178,7 @@ fn a_republished_program_reads_a_new_source() {
         .expect("valid");
     let lane = native(&ed, 2, p, Some(10.0));
     let controls = wire(&mut ed, 1, lane, 2);
-    let step = |src: u32, v: f64| {
-        ParamSegment::by_id(ParamId::new(src), v, v, Samples::new(0), Law::Linear)
-    };
+    let step = |src: u32, v: f64| ParamSegment::by_id(ParamId::new(src), v, v, Samples::new(0));
     let mut plan: Vec<(u64, ParamSegment)> = (1..=8).map(|k| (0, step(k, 0.0))).collect();
     plan.push((640, step(9, 0.5)));
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
@@ -1227,7 +1225,7 @@ fn a_reused_source_id_starts_from_nothing() {
     };
     let lane = native(&ed, 2, reads3(), Some(10.0));
     let controls = wire(&mut ed, 1, lane, 2);
-    let step = |v| ParamSegment::by_id(ParamId::new(3), v, v, Samples::new(0), Law::Linear);
+    let step = |v| ParamSegment::by_id(ParamId::new(3), v, v, Samples::new(0));
     let plan = vec![(0, step(0.5)), (1_000, step(0.25))];
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
     feed_into(&mut ed, 5, 1);
@@ -1280,7 +1278,7 @@ fn an_unread_source_is_no_point() {
         ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::new(0.0, 1.0)).knob(0.25),
     );
     wire_sink(&mut ed, 1, lane, 2);
-    let step = |v| ParamSegment::by_id(ParamId::new(99), v, v, Samples::new(0), Law::Linear);
+    let step = |v| ParamSegment::by_id(ParamId::new(99), v, v, Samples::new(0));
     let plan = (1..60).map(|k| (k * 10, step(k as f64 / 100.0))).collect();
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
     feed_into(&mut ed, 5, 1);

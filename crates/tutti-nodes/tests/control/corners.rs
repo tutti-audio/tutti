@@ -3,7 +3,6 @@
 
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_curve::Law;
 use tutti_graph::{
     Cx, EventOut, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamEvent, ParamIn, ParamSegment,
     Prepare, Shape, Status,
@@ -88,7 +87,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
 }
 
 fn step(to: f64) -> ParamSegment {
-    ParamSegment::unit(UnitParam::Ratio, to, to, Samples::new(0), Law::Linear)
+    ParamSegment::unit(UnitParam::Ratio, to, to, Samples::new(0))
 }
 
 /// **A ratio stepped between grid points lands on its own frame, at any

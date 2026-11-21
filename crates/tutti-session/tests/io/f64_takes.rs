@@ -64,7 +64,7 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     let mut session = Session::builder()
         .float::<f64>()
         .input_opener(Opener(Arc::clone(&writer)))
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec, driver)
         .expect("an f64 device session builds with no device");
     let input = session.add_input(InputConfig::default()).expect("opens");
