@@ -1,4 +1,4 @@
-//! **A stretched voice follows a loop's wrap when the tempo changes at it.** Over a tempo
+//! **A stretched or disk voice follows a loop's wrap when the tempo changes at it.** Over a tempo
 //! map that changes tempo, the engine cuts a block where the tempo does, and a loop's wrap
 //! can fall on that frame: the block's first segment ends at the loop's end and the next
 //! starts at its start, at the tempo there. The wrap is then not inside any run, and what
@@ -8,7 +8,8 @@
 //!
 //! The setup: an `Engine` over a `Transport` at 48 kHz, 64-frame blocks, one placed voice
 //! from beat 0 playing a ramp (sample `i` is `i / 131072`, so the output says which source
-//! frame it played), stretched 1.5 and set back to unity so a vocoder stays resident. The
+//! frame it played), either a memory voice stretched 1.5 and set back to unity so a
+//! vocoder stays resident, or a disk voice on a hand-stepped streamer. The
 //! tempo map is 60 BPM until beat 1.38 and 240 BPM after, the loop beats 0.25 to 1.5, so
 //! the loop's end is at 1.38 s + 0.12 beat / (4 beats per s) = 1.41 s, frame 67 680, and
 //! the ramp must fall back to the loop's start (source frame 12 000, beat 0.25 at 60 BPM,
@@ -20,7 +21,10 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Wave};
 use tutti_engine::Engine;
 use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare};
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
+use tutti_sampler::testing::wait_for_open;
+use tutti_sampler::{
+    DiskStreamer, DiskVoice, MemorySource, Playback, SlotId, StreamStart, VoicePool, VoiceWindow,
+};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{LoopEdit, MotionCommand, Transport};
 use tutti_units::{At, Beat, Bpm, Cents, SampleRate, Samples, StretchFactor};
@@ -29,48 +33,84 @@ const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
 const SCALE: f32 = 131_072.0;
 
+/// The voice a render plays.
+#[derive(Clone, Copy, PartialEq)]
+enum Tier {
+    /// A memory voice stretched 1.5 and set back to unity, so a vocoder stays resident.
+    Stretched,
+    /// A disk voice, its streamer stepped by hand after each block.
+    Disk,
+}
+
 /// The ramp voice's left channel over `frames` frames, under `points` (beat, BPM, all
 /// steps) and the loop beats 0.25 to 1.5.
-fn render(points: &[(f64, f64)], stretched: bool, frames: usize) -> Vec<f32> {
-    render_with(points, stretched, frames, |i| i as f32 / SCALE)
+fn render(points: &[(f64, f64)], tier: Tier, frames: usize) -> Vec<f32> {
+    render_with(points, tier, frames, |i| i as f32 / SCALE)
 }
 
 /// [`render`] with the source `sample(i)` at frame `i`.
 fn render_with(
     points: &[(f64, f64)],
-    stretched: bool,
+    tier: Tier,
     frames: usize,
     sample: impl Fn(usize) -> f32,
 ) -> Vec<f32> {
     let transport = Transport::new(SampleRate::of(SR));
-    let mut wave = Wave::new(1, SampleRate::of(SR));
-    for i in 0..4 * SR as usize {
-        wave.append(Interleaved::new(&[sample(i)], wave.layout()).unwrap())
-            .unwrap();
-    }
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(4_096)),
     ));
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
-    let pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
-    let handle = ed.insert(NodeKey(1), "voice", pool).controls;
-    handle
-        .add(
-            SlotId(1),
-            source,
-            Playback {
-                stretch: StretchFactor::new(if stretched { 1.5 } else { 1.0 }),
-                ..Playback::default()
-            },
-        )
-        .expect("room");
-    if stretched {
-        // A vocoder resident at unity.
+    let dir = tempfile::tempdir().expect("a directory");
+    let mut streamer =
+        DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
+    // Held while the voice plays: dropping the stream ends it.
+    let mut stream = None;
+    if tier == Tier::Disk {
+        let path = dir.path().join("ramp.wav");
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: SR as u32,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut w = hound::WavWriter::create(&path, spec).expect("writes");
+        for i in 0..4 * SR as usize {
+            w.write_sample(sample(i)).expect("writes");
+            w.write_sample(sample(i)).expect("writes");
+        }
+        w.finalize().expect("writes");
+        let opening = streamer.open_stream(&path, StreamStart::HEAD);
+        let (s, reader) = wait_for_open(&mut streamer, opening).expect("opens");
+        stream = Some(s);
+        let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)))
+            .with_tempo(transport.settings().tempo_reader());
+        ed.insert(NodeKey(1), "voice", voice);
+    } else {
+        let mut wave = Wave::new(1, SampleRate::of(SR));
+        for i in 0..4 * SR as usize {
+            wave.append(Interleaved::new(&[sample(i)], wave.layout()).unwrap())
+                .unwrap();
+        }
+        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
+            .expect("a placeable wave");
+        let pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
+        let handle = ed.insert(NodeKey(1), "voice", pool).controls;
         handle
-            .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+            .add(
+                SlotId(1),
+                source,
+                Playback {
+                    stretch: StretchFactor::new(if tier == Tier::Stretched { 1.5 } else { 1.0 }),
+                    ..Playback::default()
+                },
+            )
             .expect("room");
+        if tier == Tier::Stretched {
+            // A vocoder resident at unity.
+            handle
+                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+                .expect("room");
+        }
     }
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
         PortSource::Node(OutPort {
@@ -106,7 +146,9 @@ fn render_with(
     while left.len() < frames {
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         left.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));
+        let _ = streamer.step();
     }
+    drop(stream);
     left
 }
 
@@ -124,7 +166,39 @@ fn falls(x: &[f32]) -> Vec<usize> {
 /// frames of it.
 #[test]
 fn a_stretched_voice_follows_a_loop_wrap_that_falls_on_a_tempo_change() {
-    let x = render(&[(0.0, 60.0), (1.38, 240.0)], true, 130_000);
+    let x = render(&[(0.0, 60.0), (1.38, 240.0)], Tier::Stretched, 130_000);
+    let falls = falls(&x);
+    assert!(
+        falls
+            .first()
+            .is_some_and(|&f| (67_680..67_680 + 512).contains(&f)),
+        "the ramp falls at {:?}, want 67 680",
+        falls.first()
+    );
+}
+
+/// A disk voice re-seeks at the same wrap, on its frame. The disk voice reads its ring at
+/// the positions placed over each run of the block, and a run that starts at the loop's
+/// start jumps from the one before, which the reader crossfades from the old position.
+/// The wrap is due at frame 67 680, in the middle of a block (67 680 = 1 057.5 blocks), so
+/// the wrap's crossfade is on its frame, not a block later: up to frame 67 679 the output
+/// is the ramp `i / 131072` itself, and 30 frames into the wrap's crossfade (frame 67 710,
+/// before the next block starts at 67 712) the output is already below the ramp's
+/// continuation by 1e-4, a tenth of what the fade takes by then. A position carried
+/// across the cut stays on the ramp until the next block.
+#[test]
+fn a_disk_voice_re_seeks_on_the_frame_of_a_loop_wrap_that_falls_on_a_tempo_change() {
+    let x = render(&[(0.0, 60.0), (1.38, 240.0)], Tier::Disk, 130_000);
+    let ramp = |i: usize| i as f32 / SCALE;
+    assert!(
+        (67_000..67_680).all(|i| (x[i] - ramp(i)).abs() < 1e-6),
+        "the output leaves the ramp before the wrap at 67 680"
+    );
+    let below = ramp(67_710) - x[67_710];
+    assert!(
+        below > 1e-4,
+        "30 frames into the wrap the output is {below} below the ramp, want over 1e-4"
+    );
     let falls = falls(&x);
     assert!(
         falls
@@ -147,7 +221,12 @@ fn a_stretched_voice_follows_a_loop_wrap_that_falls_on_a_tempo_change() {
 #[test]
 fn a_looping_stretched_clip_sounds_across_a_wrap_after_a_tempo_change() {
     let tone = |i: usize| (0.5 * (std::f64::consts::TAU * 1500.0 * i as f64 / SR).sin()) as f32;
-    let x = render_with(&[(0.0, 60.0), (1.38, 240.0)], true, 130_000, tone);
+    let x = render_with(
+        &[(0.0, 60.0), (1.38, 240.0)],
+        Tier::Stretched,
+        130_000,
+        tone,
+    );
     let steady = 0.5 / 2.0f64.sqrt();
     for (b, block) in x[6_016..].as_chunks::<128>().0.iter().enumerate() {
         let rms = (block.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>() / 128.0).sqrt();
