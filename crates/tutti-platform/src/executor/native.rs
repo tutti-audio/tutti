@@ -8,6 +8,7 @@
 //! earliest deadline unparks every registered thread, so a parked thread wakes for both
 //! with no condvar of ours: `park_timeout` to the next deadline is the only wait.
 
+use std::cell::Cell;
 use std::future::Future;
 use std::io;
 use std::num::NonZeroUsize;
@@ -86,6 +87,47 @@ pub(super) fn unblock<T: Send + 'static>(
     handle.own.blocking.unblock(f)
 }
 
+thread_local! {
+    /// Set while this thread runs [`drive`]: a `join` here would stop the drive.
+    static DRIVING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks the current thread as driving for as long as it lives.
+struct Driving;
+
+impl Driving {
+    fn enter() -> Self {
+        DRIVING.with(|d| d.set(true));
+        Self
+    }
+}
+
+impl Drop for Driving {
+    fn drop(&mut self) {
+        DRIVING.with(|d| d.set(false));
+    }
+}
+
+/// Parks the calling thread until `task` ends: the task's waker unparks it.
+pub(super) fn join<T>(task: Task<T>) -> Option<T> {
+    assert!(
+        !DRIVING.with(Cell::get),
+        "join on a thread that drives an executor: the wait would stop the tasks it runs"
+    );
+    let mut ended = pin!(task.fallible());
+    let waker = Waker::from(Arc::new(Unpark(thread::current())));
+    let mut cx = Context::from_waker(&waker);
+    loop {
+        // A task whose future panicked hands the panic back to its poll; the panic hook
+        // already reported it on the task's thread, so the wait ends as `None`.
+        match catch_unwind(AssertUnwindSafe(|| ended.as_mut().poll(&mut cx))) {
+            Ok(Poll::Ready(output)) => return output,
+            Ok(Poll::Pending) => thread::park(),
+            Err(_) => return None,
+        }
+    }
+}
+
 /// Unparks the thread that polls.
 struct Unpark(Thread);
 
@@ -104,6 +146,7 @@ impl Wake for Unpark {
 /// scheduled or the next deadline. `stopped` is read after every task and every wake, and
 /// whoever sets it unparks every registered thread.
 fn drive(queue: &async_executor::Executor<'static>, timers: &Timers, stopped: &dyn Fn() -> bool) {
+    let _driving = Driving::enter();
     let thread = thread::current();
     timers.parked.register(thread.clone());
     let waker = Waker::from(Arc::new(Unpark(thread.clone())));

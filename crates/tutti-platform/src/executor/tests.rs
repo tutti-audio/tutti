@@ -779,5 +779,91 @@ fn a_stop_deadline_is_shared_by_every_join() {
     assert_eq!(deadline.left(t0 + os::STOP_BOUND * 3), Duration::ZERO);
 }
 
+/// **`join` waits for a task that runs on another thread and returns its output.** The
+/// dedicated future ends only once the test sends, which it does after the waiter says it
+/// is about to call `join`, so the output comes back through the wait.
+#[test]
+fn join_waits_for_a_task_run_elsewhere_and_returns_its_output() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let task = executor
+        .spawn_dedicated("joined", None, async move { wait.recv().unwrap() * 2 })
+        .unwrap();
+    let (ready, joining) = mpsc::channel();
+    let (out, joined) = mpsc::channel();
+    let waiter = thread::spawn(move || {
+        ready.send(()).unwrap();
+        let _ = out.send(join(task));
+    });
+    joining.recv_timeout(HANG_GUARD).unwrap();
+    go.send(21).unwrap();
+    assert_eq!(joined.recv_timeout(HANG_GUARD).unwrap(), Some(42));
+    waiter.join().unwrap();
+}
+
+/// `join(task)` on a thread of its own, its outcome or `None` past the hang guard.
+fn joined_off_thread<T: Send + 'static>(task: Task<T>) -> Option<T> {
+    let (out, joined) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = out.send(join(task));
+    });
+    joined
+        .recv_timeout(HANG_GUARD)
+        .expect("join returns: the hang guard passed")
+}
+
+/// **A task the executor drops instead of finishing joins as `None`**: a queued task no
+/// driver ran, dropped at shutdown; a dedicated future still pending when its executor
+/// drops; and a future that panicked.
+#[test]
+fn join_of_a_task_the_executor_dropped_is_none() {
+    let executor = Executor::new();
+    let queued = executor.spawn(async { 7 });
+    let pending = executor
+        .spawn_dedicated("pending", None, std::future::pending::<u32>())
+        .unwrap();
+    drop(executor);
+    assert_eq!(joined_off_thread(queued), None);
+    assert_eq!(joined_off_thread(pending), None);
+
+    let executor = Executor::new();
+    let panicked = executor
+        .spawn_dedicated("panics", None, async { panic!("the future panicked") })
+        .unwrap();
+    assert_eq!(joined_off_thread::<()>(panicked), None);
+    drop(executor);
+}
+
+/// **A task whose thread was detached at shutdown still joins with its output** once its
+/// future ends: the wedged future is released after the executor's drop returned.
+#[test]
+fn join_of_a_task_detached_at_shutdown_returns_its_output_when_it_ends() {
+    let executor = Executor::new();
+    let (release, wedged) = mpsc::channel::<u32>();
+    let (entered, in_poll) = mpsc::channel();
+    let task = executor
+        .spawn_dedicated("wedged", None, async move {
+            entered.send(()).unwrap();
+            wedged.recv().unwrap()
+        })
+        .unwrap();
+    in_poll.recv_timeout(HANG_GUARD).unwrap();
+    drop(executor);
+    release.send(5).unwrap();
+    assert_eq!(joined_off_thread(task), Some(5));
+}
+
+/// **`join` refuses a thread that drives an executor**: on a dedicated thread it panics
+/// instead of stopping the drive, so the joining task ends as `None`.
+#[test]
+fn join_on_a_driving_thread_panics_instead_of_waiting() {
+    let executor = Executor::new();
+    let never = executor.spawn(std::future::pending::<()>());
+    let joiner = executor
+        .spawn_dedicated("joiner", None, async move { join(never) })
+        .unwrap();
+    assert_eq!(joined_off_thread(joiner), None);
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
