@@ -227,9 +227,9 @@ impl Default for Workers {
 /// MIDI nodes, and what the engine's callback state holds.
 pub(crate) struct Parts<F: Float> {
     /// The session's executor, the one the MIDI hardware opened on: `session()`
-    /// clones it into the session's jobs, sampler and plugins.
+    /// clones it into the session's background work, sampler and plugins.
     executor: tutti_platform::Executor,
-    /// The thread that drives `executor`; the session's jobs take it over in `session()`.
+    /// The thread that drives `executor`; the session's background work takes it over in `session()`.
     background: crate::background::Running,
     graph: Graph<F>,
     transport: Transport,
@@ -1036,7 +1036,7 @@ impl<C: Clock> SessionBuilder<C> {
             devices: crate::session::parts::DevicePart::new(&executor),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
-            jobs: crate::jobs::Jobs::new(executor, parts.background, bells),
+            background: crate::background::Background::new(executor, parts.background, bells),
             plugins,
         };
         session.provide_values(&table, click_settings);

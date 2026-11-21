@@ -15,6 +15,9 @@ impl<F: SessionFloat> Inputs<F> {
         Self(std::marker::PhantomData)
     }
 
+    /// No take to report.
+    pub(crate) fn land_takes(&mut self, _: &mut Vec<crate::SessionEvent>) {}
+
     /// No input to forget.
     pub(crate) fn forget(&mut self, _: NodeKey) {}
 }
