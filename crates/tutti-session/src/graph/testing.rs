@@ -102,7 +102,7 @@ impl<F: Float> Testing<'_, F> {
             .is_some_and(|entry| entry.reclaimer.is_some())
     }
 
-    /// Whether the node of the pooled plugin at `node` was re-inserted for new
+    /// Whether the node of the loaded plugin at `node` was re-inserted for new
     /// ports and its Processor has not reached it yet (its record is
     /// `Settling`): `None` for a node with no such record.
     #[cfg(feature = "plugin")]

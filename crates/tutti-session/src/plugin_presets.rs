@@ -2,11 +2,11 @@
 //! what the format does with them ([`PluginPresets::support`]) and the list
 //! where there is one ([`ListedPreset`]).
 //!
-//! The list is read once, when the plugin loads, and held: an in-process plugin
-//! answers it where the load lands, and a served plugin's list is a round trip,
-//! so it is read by the first [`update`](crate::Session::update) on the main
-//! thread after the load ([`PluginPresets::is_read`]). No host reports a change
-//! of a plugin's list, so nothing refreshes it later. Loading is work the app runs
+//! The list is read once, when the plugin loads, and held: the load runs on the
+//! main thread ([`LoadPlugin::run`](crate::LoadPlugin::run)), which a served
+//! plugin's round trip and an in-process plugin's answer both take
+//! ([`PluginPresets::is_read`]). No host reports a change of a plugin's list, so
+//! nothing refreshes it later. Loading is work the app runs
 //! ([`Session::load_preset`](crate::Session::load_preset),
 //! [`Session::load_preset_file`](crate::Session::load_preset_file)).
 
@@ -62,10 +62,9 @@ impl PluginPresets {
         self.support
     }
 
-    /// Whether the plugin's list has been read. A served plugin's is read by the
-    /// first update on the main thread after the load; until then
-    /// [`iter`](Self::iter) is empty although the plugin lists some. A read the
-    /// plugin could not answer (it was gone) leaves this `false` for good.
+    /// Whether the plugin's list has been read, which the load does. A read the
+    /// plugin could not answer (it was gone) leaves this `false` for good, with
+    /// [`iter`](Self::iter) empty although the plugin lists some.
     #[must_use]
     pub fn is_read(&self) -> bool {
         self.list.get().is_some()
@@ -104,7 +103,7 @@ impl PluginPresets {
 }
 
 /// One preset a plugin listed ([`PluginPresets::iter`]): an owned handle that
-/// belongs to that plugin's entry, loaded by
+/// belongs to that plugin instance, loaded by
 /// [`Session::load_preset`](crate::Session::load_preset).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedPreset {
