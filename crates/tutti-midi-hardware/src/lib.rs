@@ -27,7 +27,6 @@
 //! the other order, and their ordinals swap).
 //!
 //! ```rust,no_run
-//! use std::time::Duration;
 //! use tutti_midi_device::DeviceEvent;
 //! use tutti_midi_hardware::Devices;
 //!
@@ -42,8 +41,9 @@
 //! for device in events.initial() {
 //!     println!("{}: {}", device.id, device.name);
 //! }
-//! // Blocks until a device comes or goes, or the timeout passes.
-//! while let Ok(event) = events.recv_timeout(Duration::from_secs(5)) {
+//! // `recv()` is a future the watch wakes when a device comes or goes; it resolves to
+//! // an error once the watch has ended.
+//! while let Ok(event) = events.recv().await {
 //!     match event {
 //!         DeviceEvent::Added(device) => println!("plugged in: {}", device.name),
 //!         DeviceEvent::Removed(device) => println!("gone: {}", device.name),
@@ -66,7 +66,7 @@
 //!   for setup notifications (the ports still use a second client, until they
 //!   move to that crate), and each [`Devices`] registers with it. A
 //!   [`DeviceId`](tutti_midi_device::DeviceId) is the endpoint's `MIDIUniqueID`. Untested by the author.
-//! - If the watch ends on its own, [`DeviceEvents::recv_timeout`] says why, once the events the watch reported are taken, and the list
+//! - If the watch ends on its own, [`DeviceEvents::recv`] says why, once the events the watch reported are taken, and the list
 //!   stays as it was.
 //! - **Windows:** Windows Multimedia has no notification, so the watch lists the
 //!   ports once a second and reports the difference; a device shows within about
@@ -329,7 +329,7 @@ pub use answer::{Answer, ReportEnd};
 pub use capability::OsEndpoint;
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
-    ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, RecvTimeoutError, SeedError,
+    ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, Recv, SeedError,
     WatchFailure,
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
