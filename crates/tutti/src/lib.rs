@@ -740,8 +740,9 @@ pub mod modulation {
 pub mod polysynth {
     pub use tutti_polysynth::{
         AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane,
-        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, SvfMode, SynthConfig,
-        SynthFloat, Tuning, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
+        MasterVolume, MasterVolumeOutOfRange, OscillatorType, PolySynth, PortamentoConfig,
+        PortamentoMode, SvfMode, SvfQ, SvfQOutOfRange, SynthConfig, SynthFloat, Tuning,
+        TuningError, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
     };
 }
 
