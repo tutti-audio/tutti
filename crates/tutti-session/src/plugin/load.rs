@@ -641,7 +641,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// fit the graph's check, else a plain swap, at the same key, so the node's
     /// wiring and lanes stay. The record at the key is carried over to the
     /// incoming plugin with nothing of the outgoing plugin's state, so a node
-    /// that was recovering reads healthy again, and a host-inserted node has the
+    /// that was recovering reads healthy again, its way back is the incoming
+    /// plugin's kind's (an out-of-process plugin is reloaded when it dies, one
+    /// hosted in process is not, whatever the outgoing plugin was), and a host-inserted node has the
     /// loaded kind's death behaviour afterwards: it stays silent at its key
     /// rather than being removed.
     ///
@@ -803,6 +805,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     ) -> Result<tutti_plugin::catalog::PluginRebinder, CrossfadeRefused> {
         let (fade, law) = (tutti_graph::DECLICK, tutti_graph::FadeLaw::default());
         let meter = self.transport.settings().project_meter().clone();
+        let recovery = self.plugins.recovery.map(crate::Recovery::new);
         match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
@@ -812,7 +815,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 if swapped.is_ok()
                     && let Some(hosted) = self.graph.plugins.get_mut(&node)
                 {
-                    hosted.origin = Some(origin);
+                    hosted.reloadable = Some(super::Reloadable { origin, recovery });
                 }
                 swapped.map_err(|refused| match refused {
                     ReplaceRefused::Failed(refused) => refused,
