@@ -88,7 +88,7 @@
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
 //!   direction's gains and one channel rendered along a ramp between two) and the HRTF
 //!   binaural convolver ([`HrtfBinaural`]); ambisonics in AmbiX ([`Harmonics`] and
-//!   [`AmbisonicEncoder`], [`Rotation`] and [`AmbisonicRotator`]).
+//!   [`AmbisonicEncoder`], [`Rotation`] and [`AmbisonicRotator`], [`AmbisonicDecoder`]).
 //! - **FFT** (`fft/`): [`RealFft`], a real-input FFT whose arithmetic does not depend on the
 //!   CPU (the convolver also runs it in steps), and [`FftScratch`], reusable plans and
 //!   buffers; [`Correlator`] cross-correlates through it. It is rustfft's *scalar* planner
@@ -307,10 +307,10 @@ pub use sos::{
     SosBank, SosCoefficients, SosError, StopbandAttenuation, StopbandAttenuationError, Tilt,
 };
 pub use spatial::{
-    AmbisonicEncoder, AmbisonicRotator, HRTF_LATENCY, HRTF_STEP, HarmonicNormalization, Harmonics,
-    HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError, MAX_PREPARED_RATE,
-    MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation, SpeakerGeometryError, SpeakerLayout, VbapGains,
-    VbapKernel,
+    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HRTF_LATENCY, HRTF_STEP,
+    HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
+    MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation, SpeakerGeometryError,
+    SpeakerLayout, VbapGains, VbapKernel,
 };
 pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
 pub use stereo::{MidSide, WidthBank, WidthControls};

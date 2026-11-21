@@ -2,23 +2,23 @@
 //! at most one block of output, and every block after that block is finite, for every
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicRotatorConfig, AmbisonicRotatorNode,
-    Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode,
-    CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig, CrossoverControls,
-    CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
-    DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig,
-    FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode, LadderFilterConfig,
-    LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
-    ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
-    PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig, PitchShifterNode,
-    PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode, ShimmerConfig, ShimmerNode,
-    SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
+    AmbisonicDecoderConfig, AmbisonicDecoderNode, AmbisonicEncoderConfig, AmbisonicEncoderNode,
+    AmbisonicRotatorConfig, AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode,
+    BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
+    CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
+    DelayLayout, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode,
+    FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
+    MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
+    PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    ShimmerConfig, ShimmerNode, SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -296,6 +296,15 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
                     AmbisonicOrder::MAX,
                 )))
+                .unwrap(),
+            ),
+        ),
+        (
+            "ambisonic decoder",
+            Box::new(
+                AmbisonicDecoderNode::<f32>::try_from(
+                    AmbisonicDecoderConfig::new(Bed::Surround51).input(ambix(AmbisonicOrder::MAX)),
+                )
                 .unwrap(),
             ),
         ),

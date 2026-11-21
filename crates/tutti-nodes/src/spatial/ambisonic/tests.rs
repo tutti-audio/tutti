@@ -1,4 +1,3 @@
-use tutti_buffers::Bed;
 use tutti_dsp::Harmonics;
 use tutti_graph::contract::{BlockRig, assert_param_fork};
 use tutti_graph::{IntoNode, Node};
@@ -137,10 +136,92 @@ fn the_rotator_rolls_about_the_front_by_the_configured_arc() {
     }
 }
 
-/// The shapes: the encoder is mono in and `(order + 1)^2` out, the rotator keeps the
-/// width.
+/// A decoder to a quad bed by sampling: the four feeds of a plane wave sum to the source
+/// (a square is a design of the first harmonics), so the level of a source does not depend
+/// on where it sits.
 #[test]
-fn the_shapes_are_mono_to_the_order_and_through() {
+fn the_sampling_decoder_to_a_quad_keeps_the_sum_of_the_feeds_at_the_source() {
+    let order = AmbisonicOrder::of(1);
+    let node = AmbisonicDecoderNode::<f64>::try_from(
+        AmbisonicDecoderConfig::new(Bed::Quad)
+            .input(ambix(order))
+            .decoding(Decoding::Sampling),
+    )
+    .unwrap();
+    let wave = harmonics(order, HarmonicNormalization::Sn3d, aim(30.0, 20.0));
+    let got = run(node, &wave, 2, |_| {});
+    assert_eq!(got.len(), 4);
+    assert!((got.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+}
+
+/// The LFE of a 5.1 bed is never fed; the other five channels sound.
+#[test]
+fn the_decoder_leaves_the_lfe_silent() {
+    let order = AmbisonicOrder::of(3);
+    let node = AmbisonicDecoderNode::<f64>::try_from(
+        AmbisonicDecoderConfig::new(Bed::Surround51).input(ambix(order)),
+    )
+    .unwrap();
+    let wave = harmonics(order, HarmonicNormalization::Sn3d, aim(10.0, 0.0));
+    let got = run(node, &wave, 2, |_| {});
+    assert_eq!(got.len(), 6);
+    let lfe = Bed::Surround51
+        .topology()
+        .positions()
+        .unwrap()
+        .iter()
+        .position(|&s| s == tutti_buffers::Speaker::LowFrequency)
+        .unwrap();
+    assert_eq!(got[lfe], 0.0);
+    assert!(
+        got.iter()
+            .enumerate()
+            .any(|(c, g)| c != lfe && g.abs() > 0.1)
+    );
+}
+
+/// A decoder reads N3D channels as SN3D ones: the same sound field in the two scalings
+/// decodes to the same feeds.
+#[test]
+fn a_decoder_reads_n3d_and_sn3d_encodings_of_one_field_to_the_same_feeds() {
+    let order = AmbisonicOrder::of(2);
+    let d = aim(-70.0, 15.0);
+    let feeds = |n| {
+        let node = AmbisonicDecoderNode::<f64>::try_from(
+            AmbisonicDecoderConfig::new(Bed::Surround50).input(bus(order, n)),
+        )
+        .unwrap();
+        run(node, &harmonics(order, n, d), 2, |_| {})
+    };
+    let a = feeds(HarmonicNormalization::Sn3d);
+    let b = feeds(HarmonicNormalization::N3d);
+    for (a, b) in a.iter().zip(&b) {
+        assert!((a - b).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn a_decoder_refuses_a_bus_that_is_not_a_bed_and_a_bed_with_one_speaker() {
+    let order = AmbisonicOrder::of(1);
+    let unassigned = BusTopology::unassigned(tutti_buffers::ChannelLayout::from_count(3)).unwrap();
+    assert!(matches!(
+        AmbisonicDecoderNode::<f32>::try_from(
+            AmbisonicDecoderConfig::new(unassigned).input(ambix(order))
+        ),
+        Err(AmbisonicError::NotABed)
+    ));
+    assert!(matches!(
+        AmbisonicDecoderNode::<f32>::try_from(
+            AmbisonicDecoderConfig::new(Bed::Mono).input(ambix(order))
+        ),
+        Err(AmbisonicError::Geometry(_))
+    ));
+}
+
+/// The shapes: the encoder is mono in and `(order + 1)^2` out, the rotator keeps the
+/// width, and the decoder is the order's channels in and the bed's out.
+#[test]
+fn the_shapes_are_mono_to_the_order_through_and_the_order_to_the_bed() {
     let encoder = prepared(
         AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(THIRD))).unwrap(),
     );
@@ -160,6 +241,17 @@ fn the_shapes_are_mono_to_the_order_and_through() {
     assert_eq!(
         (shape.audio_in().count(), shape.audio_out().count()),
         (9, 9)
+    );
+    let decoder = prepared(
+        AmbisonicDecoderNode::<f32>::try_from(
+            AmbisonicDecoderConfig::new(Bed::Surround51).input(ambix(AmbisonicOrder::of(1))),
+        )
+        .unwrap(),
+    );
+    let shape = decoder.shape();
+    assert_eq!(
+        (shape.audio_in().count(), shape.audio_out().count()),
+        (4, 6)
     );
 }
 
@@ -192,9 +284,53 @@ fn the_nodes_refuse_a_bus_that_is_not_acn_in_sn3d_or_n3d() {
             AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(bus)),
             Err(AmbisonicError::Unsupported(_))
         ));
+        assert!(matches!(
+            AmbisonicDecoderNode::<f32>::try_from(
+                AmbisonicDecoderConfig::new(Bed::Quad).input(bus)
+            ),
+            Err(AmbisonicError::Unsupported(_))
+        ));
     }
     assert!(matches!(
         AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(Bed::Quad)),
         Err(AmbisonicError::NotAmbisonic)
     ));
+}
+
+/// Each channel of the bed carries the harmonics sampled at its own speaker: feed `c` of a
+/// plane wave is `(1 / L) sum_n (2 n + 1) Y_n(speaker c) Y_n(source)` over the `L` placed
+/// speakers, with the LFE skipped in the count and its channel left out of the map.
+#[test]
+fn the_sampling_decoder_feeds_each_channel_the_harmonics_at_its_own_speaker() {
+    let order = AmbisonicOrder::of(2);
+    let bed = Bed::Surround51;
+    let node = AmbisonicDecoderNode::<f64>::try_from(
+        AmbisonicDecoderConfig::new(bed)
+            .input(ambix(order))
+            .decoding(Decoding::Sampling),
+    )
+    .unwrap();
+    let source = harmonics(order, HarmonicNormalization::Sn3d, aim(30.0, 20.0));
+    let got = run(node, &source, 2, |_| {});
+    let speakers = bed.topology().positions().unwrap().to_vec();
+    let placed = speakers
+        .iter()
+        .filter(|&&s| bed.direction(s).is_some())
+        .count();
+    for (channel, speaker) in speakers.iter().enumerate() {
+        let expected = bed.direction(*speaker).map_or(0.0, |d| {
+            let at_speaker = harmonics(order, HarmonicNormalization::Sn3d, d);
+            let sum: f64 = at_speaker
+                .iter()
+                .zip(&source)
+                .enumerate()
+                .map(|(acn, (y, s))| {
+                    let degree = (acn as f64).sqrt().floor();
+                    (2.0 * degree + 1.0) * y * s
+                })
+                .sum();
+            sum / placed as f64
+        });
+        assert!((got[channel] - expected).abs() < 1e-12, "channel {channel}");
+    }
 }
