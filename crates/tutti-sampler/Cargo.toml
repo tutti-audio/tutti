@@ -62,9 +62,6 @@ thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 serde = { version = "1", optional = true, features = ["derive"] }
 
-# Lock-free
-crossbeam-channel = "0.5"
-
 # Parallel I/O
 rayon = "1.10"
 

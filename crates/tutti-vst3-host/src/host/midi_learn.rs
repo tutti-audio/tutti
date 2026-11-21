@@ -11,7 +11,8 @@
 //! - **Capture (RT thread):** when armed, each incoming CC `(channel, cc)` is
 //!   pushed to a bounded, lock-free channel. Gated by an [`AtomicBool`] so the
 //!   normal (un-armed) case does literally nothing on the hot path. Bounded +
-//!   `try_send` keeps the push allocation-free; on overflow the CC just sent is
+//!   `try_send` keeps the push allocation-free (a `sync_channel` of capacity at least 1 is a preallocated
+//!   array queue whose `try_send` takes no lock); on overflow the CC just sent is
 //!   dropped, and counted (learning only needs *a* recent CC, not all of them).
 //! - **Forward (main thread):** [`Vst3Loaded::poll_plugin_notifications`](super::loaded::Vst3Loaded::poll_plugin_notifications) drains
 //!   the channel and makes the actual `onLiveMIDIControllerInput` COM call,
@@ -24,8 +25,8 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 
-use crossbeam_channel::{Receiver, Sender, TrySendError};
 use tutti_rt::{Tally, TallyWriter, tally};
 use tutti_ump::MidiChannel;
 use tutti_vst3_ffi::MidiLearn;
@@ -48,7 +49,7 @@ type CapturedCc = (i16, i16);
 /// it's built at load, the producer only exists while the plugin is active).
 pub(super) struct MidiLearnProducer {
     armed: Arc<AtomicBool>,
-    tx: Sender<CapturedCc>,
+    tx: SyncSender<CapturedCc>,
     dropped: TallyWriter<u64>,
 }
 
@@ -89,7 +90,7 @@ impl MidiLearnProducer {
 pub(super) struct MidiLearnConsumer {
     controller: Option<MidiLearn>,
     armed: Arc<AtomicBool>,
-    tx: Sender<CapturedCc>,
+    tx: SyncSender<CapturedCc>,
     rx: Receiver<CapturedCc>,
     dropped: Tally<u64>,
 }
@@ -100,7 +101,7 @@ impl MidiLearnConsumer {
     /// which case [`forward_pending`](Self::forward_pending) is a no-op and
     /// arming has no observable effect.
     pub(super) fn new(controller: Option<MidiLearn>) -> Self {
-        let (tx, rx) = crossbeam_channel::bounded(CC_CHANNEL_CAPACITY);
+        let (tx, rx) = sync_channel(CC_CHANNEL_CAPACITY);
         Self {
             controller,
             armed: Arc::new(AtomicBool::new(false)),

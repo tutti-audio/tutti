@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crossbeam_channel::Receiver;
+use std::sync::mpsc::Receiver;
 use tutti_platform::yield_now;
 use tutti_rt::{Listener, RingFloat};
 

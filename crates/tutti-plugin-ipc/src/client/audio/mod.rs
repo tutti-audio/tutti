@@ -112,7 +112,7 @@ pub use thread::IpcThread;
 fn await_reply<T>(
     ask: ask::Ask<T>,
     wait: Duration,
-) -> std::result::Result<T, crossbeam_channel::RecvTimeoutError> {
+) -> std::result::Result<T, std::sync::mpsc::RecvTimeoutError> {
     ask.recv_timeout(wait)
 }
 
@@ -832,10 +832,8 @@ impl AudioBridge {
         let timeouts = self.lifecycle.timeouts();
         match ask.recv_timeout_borrowed(timeouts.state_wait()) {
             Ok(answer) => answer,
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                Err(StateError::PluginCrashed)
-            }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(StateError::Stalled {
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(StateError::PluginCrashed),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(StateError::Stalled {
                 after: timeouts.state,
             }),
         }
@@ -1374,7 +1372,7 @@ mod tests {
         let (waiting, _reply) = ask::ask::<u8>();
         assert_eq!(
             await_reply(waiting, timeouts.param_wait()),
-            Err(crossbeam_channel::RecvTimeoutError::Timeout)
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
         );
     }
 
