@@ -1091,8 +1091,16 @@ fn disconnect<F: tutti_buffers::Float>(
     graph: &mut crate::graph::Graph<F>,
 ) {
     if let Some(id) = port.open.take() {
-        // An input the session no longer holds is closed already.
-        let _ = io.disconnect_input(&id);
+        // An input the session no longer holds is closed already; a query by
+        // id fails only with `NotConnected`.
+        let closed = io.disconnect_input(&id);
+        debug_assert!(
+            matches!(
+                closed,
+                Ok(()) | Err(tutti_midi_hardware::MidiHardwareError::NotConnected(_))
+            ),
+            "closing an input by id: {closed:?}"
+        );
     }
     if let Some(key) = port.inlet.take() {
         // A host that removed the inlet itself leaves nothing to take.

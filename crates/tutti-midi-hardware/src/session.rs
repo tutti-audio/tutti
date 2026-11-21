@@ -189,7 +189,9 @@ impl core::fmt::Debug for MidiSession {
 /// and tested with `contains` against each device's lowercased name, among the
 /// devices [`inputs`](MidiSession::inputs) or [`outputs`](MidiSession::outputs)
 /// returns (the open inputs, for a disconnect). So `"iac"` matches
-/// `"IAC Driver Bus 1"`; a name matching no device is
+/// `"IAC Driver Bus 1"`. A device whose whole name equals the query, ignoring
+/// case, is picked over the others it is a substring of, so `"IAC Driver Bus 1"`
+/// picks that device beside `"IAC Driver Bus 10"`. A name matching no device is
 /// [`MidiHardwareError::NoDeviceNamed`], and one matching several is
 /// [`MidiHardwareError::AmbiguousDeviceName`], which lists them: name one by
 /// its [`DeviceId`] or by more of its name.
@@ -244,6 +246,14 @@ impl DeviceQuery {
                 matched.push((id, candidate));
             }
             searched.push((id, candidate));
+        }
+        let exact: Vec<_> = matched
+            .iter()
+            .filter(|(_, candidate)| candidate.to_lowercase() == needle)
+            .copied()
+            .collect();
+        if let [(id, _)] = exact.as_slice() {
+            return Ok((*id).clone());
         }
         match matched.as_slice() {
             [(id, _)] => Ok((*id).clone()),
@@ -959,7 +969,8 @@ fn follow_timing(ports: &HardwareMidiInputs, held: &Held) {
             held.timing.applied(stream.config())
         });
     // The port is the held input's own, so it is open while `held` is.
-    let _ = ports.set_input_timing(held.input.port(), source);
+    let set = ports.set_input_timing(held.input.port(), source);
+    debug_assert!(set.is_ok(), "a held input's port is open: {set:?}");
 }
 
 /// Makes the port's copy of SysEx7 packets what the negotiation wants.

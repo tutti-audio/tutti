@@ -182,6 +182,29 @@ fn a_query_by_id_and_by_name_reach_the_same_device() {
 /// refuse it with the devices it matched, and change nothing. Both inputs'
 /// names contain an "s".
 #[test]
+fn a_whole_name_picks_its_device_beside_one_it_is_a_substring_of() {
+    let (s, _, _) = session();
+    let one = input(&s, "IAC Bus 1");
+    let ten = input(&s, "Keystep Pro");
+    let candidates = [(&one, "IAC Bus 1"), (&ten, "IAC Bus 10")];
+    assert_eq!(
+        DeviceQuery::from("iac bus 1").pick(candidates).unwrap(),
+        one,
+        "the whole name, in any case, wins"
+    );
+    assert_eq!(
+        DeviceQuery::from("IAC Bus 10").pick(candidates).unwrap(),
+        ten
+    );
+    let Err(MidiHardwareError::AmbiguousDeviceName { matches, .. }) =
+        DeviceQuery::from("IAC Bus").pick(candidates)
+    else {
+        panic!("a part of both names is still ambiguous");
+    };
+    assert_eq!(matches, ["IAC Bus 1", "IAC Bus 10"]);
+}
+
+#[test]
 fn a_name_matching_several_devices_is_ambiguous() {
     let (mut s, _, _) = session();
     let Err(MidiHardwareError::AmbiguousDeviceName { name, matches }) =
