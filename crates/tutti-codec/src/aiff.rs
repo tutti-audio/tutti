@@ -10,7 +10,6 @@
 //! [`Sample`] every format shares.
 
 use crate::error::{Codec, Error, Result, SpecError};
-use crate::format::Format;
 use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -19,7 +18,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use tutti_buffers::{I24, Interleaved, Sample};
 
 /// Writes an AIFF (or AIFF-C) file through the [`FormatWriter`] contract.
-pub struct AiffWriter<W: Write + Seek> {
+pub(crate) struct AiffWriter<W: Write + Seek> {
     writer: AifcWriter<W>,
     pcm: Pcm,
     ints: Vec<i32>,
@@ -40,15 +39,7 @@ impl<W: Write + Seek> AiffWriter<W> {
     /// # Errors
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
-    pub fn create(spec: &Spec, sink: W) -> Result<Self> {
-        let pcm = match spec.format() {
-            Format::Aiff(pcm) => pcm,
-            #[allow(
-                unreachable_patterns,
-                reason = "the only `Format` variant when one encoder is the only feature on"
-            )]
-            _ => return Err(SpecError::WrongFormat { expected: "AIFF" }.into()),
-        };
+    pub(crate) fn create(spec: &Spec, pcm: Pcm, sink: W) -> Result<Self> {
         spec.header_rate()?;
         let channels = spec.channels()?;
         let info = AifcWriteInfo {

@@ -90,8 +90,6 @@ mod wave_mask;
 mod wave_write;
 mod writer;
 
-#[cfg(feature = "encode-aiff")]
-pub use aiff::AiffWriter;
 #[cfg(decode)]
 pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
@@ -99,13 +97,8 @@ pub use decode_error::DecodeError;
 pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile, Kept, Unfinished};
 pub use error::{Codec, Error, Result, SpecError};
 pub use file_out::FileOut;
-#[cfg(feature = "encode-flac")]
-pub use flac::FlacWriter;
 pub use format::{FlacLevel, Format};
 pub use pcm::{IntDepth, Pcm};
 pub use spec::Spec;
-#[cfg(feature = "encode-wav")]
-pub use wav::WavWriter;
 #[cfg(encode)]
 pub use wave_write::write_wave;
-pub use writer::FormatWriter;

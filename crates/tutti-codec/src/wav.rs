@@ -18,8 +18,7 @@
 
 mod mask;
 
-use crate::error::{Error, Result, SpecError};
-use crate::format::Format;
+use crate::error::{Error, Result};
 use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -125,7 +124,7 @@ impl Header {
 /// recording whose pump thread panicked is not lost). The data chunk is not
 /// padded to an even length: odd-length data is left as it is, which is what
 /// the `hound`-written files this replaces did.
-pub struct WavWriter<W: Write + Seek> {
+pub(crate) struct WavWriter<W: Write + Seek> {
     /// `None` once `finish` has taken it.
     sink: Option<W>,
     pcm: Pcm,
@@ -151,15 +150,7 @@ impl<W: Write + Seek> WavWriter<W> {
     /// # Errors
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
-    pub fn create(spec: &Spec, mut sink: W) -> Result<Self> {
-        let pcm = match spec.format() {
-            Format::Wav(pcm) => pcm,
-            #[allow(
-                unreachable_patterns,
-                reason = "the only `Format` variant when one encoder is the only feature on"
-            )]
-            _ => return Err(SpecError::WrongFormat { expected: "WAV" }.into()),
-        };
+    pub(crate) fn create(spec: &Spec, pcm: Pcm, mut sink: W) -> Result<Self> {
         let rate = spec.header_rate()?.get();
         let mask = channel_mask(spec.topology());
         let header = Header::new(spec, pcm, rate, mask);

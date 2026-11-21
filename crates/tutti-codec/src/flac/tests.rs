@@ -32,8 +32,9 @@ fn an_empty_stream_states_valid_sizes() {
 /// and `finish` return errors.
 #[test]
 fn a_writer_that_lost_a_frame_fails_every_later_call() {
+    use crate::Spec;
     use crate::test_sink::Flaky;
-    use crate::{FormatWriter, Spec};
+    use crate::writer::FormatWriter;
     use tutti_buffers::ChannelLayout;
     use tutti_buffers::Interleaved;
     use tutti_units::SampleRate;
@@ -46,7 +47,13 @@ fn a_writer_that_lost_a_frame_fails_every_later_call() {
         ChannelLayout::STEREO,
         SampleRate::SR_44K1,
     );
-    let mut w = FlacWriter::create(&spec, Flaky::failing_write(3)).unwrap();
+    let mut w = FlacWriter::create(
+        &spec,
+        IntDepth::Int16,
+        FlacLevel::Standard,
+        Flaky::failing_write(3),
+    )
+    .unwrap();
     let samples: Vec<f32> = (0..BLOCK_SIZE * 2)
         .map(|i| ((i * 31) % 255) as f32 / 255.0 - 0.5)
         .collect();

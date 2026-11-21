@@ -22,7 +22,7 @@ use tutti_buffers::{Interleaved, Sample};
 /// that needs more of its sink asks for more on its own `impl`.
 ///
 /// [`Encoder`](crate::Encoder) is the one type that holds any of them.
-pub trait FormatWriter: Sized {
+pub(crate) trait FormatWriter: Sized {
     /// The sink the file is written to, handed back by [`finish`](Self::finish).
     type Sink;
 

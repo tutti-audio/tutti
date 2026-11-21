@@ -1,6 +1,7 @@
 use super::*;
+use crate::SpecError;
 use crate::test_sink::Full;
-use crate::{FormatWriter, SpecError};
+use crate::writer::FormatWriter;
 use std::io::Cursor;
 use tutti_units::SampleRate;
 
@@ -21,10 +22,18 @@ fn ramp(channels: u16, frames: usize) -> Vec<f32> {
 }
 
 fn write_all(spec: &Spec, samples: &[f32]) -> Vec<u8> {
-    let mut w = WavWriter::create(spec, Cursor::new(Vec::new())).unwrap();
+    let mut w = WavWriter::create(spec, wav_pcm(spec), Cursor::new(Vec::new())).unwrap();
     w.write(Interleaved::new(samples, spec.layout()).unwrap())
         .unwrap();
     w.finish().unwrap().into_inner()
+}
+
+fn wav_pcm(spec: &Spec) -> Pcm {
+    match spec.format() {
+        crate::Format::Wav(pcm) => pcm,
+        #[allow(unreachable_patterns)]
+        _ => unreachable!("a WAV spec"),
+    }
 }
 
 fn u16_at(b: &[u8], at: usize) -> u16 {
@@ -155,7 +164,7 @@ fn a_rate_no_header_holds_is_refused() {
             ChannelLayout::STEREO,
             SampleRate::of(rate),
         );
-        let err = WavWriter::create(&s, Cursor::new(Vec::new()))
+        let err = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new()))
             .err()
             .unwrap_or_else(|| panic!("{rate} Hz was accepted"));
         assert!(
@@ -171,7 +180,7 @@ fn a_rate_no_header_holds_is_refused() {
 #[test]
 fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
     let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Cursor::new(Vec::new())).unwrap();
+    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
     w.limit_frames(5);
     let block = ramp(2, 3);
     w.write(Interleaved::new(&block, s.layout()).unwrap())
@@ -187,7 +196,7 @@ fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
     );
 
     // The block that crosses it is written up to the limit.
-    let mut w = WavWriter::create(&s, Cursor::new(Vec::new())).unwrap();
+    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
     w.limit_frames(5);
     let eight = ramp(2, 8);
     let err = w
@@ -211,7 +220,7 @@ fn the_limit_stops_at_a_whole_frame_and_a_take_ending_on_it_is_clean() {
 #[test]
 fn the_limit_only_comes_down() {
     let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Cursor::new(Vec::new())).unwrap();
+    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
     let real = w.max_frames;
     w.limit_frames(u64::MAX);
     assert_eq!(w.max_frames, real);
@@ -251,7 +260,7 @@ fn the_frame_limit_fits_both_32_bit_sizes() {
 #[test]
 fn a_full_disk_mid_take_fails_the_write_that_hit_it() {
     let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Full::holding(44 + 6 * 4)).unwrap();
+    let mut w = WavWriter::create(&s, Pcm::Int16, Full::holding(44 + 6 * 4)).unwrap();
     w.write(Interleaved::new(&ramp(2, 4), s.layout()).unwrap())
         .unwrap();
     let err = w
@@ -278,7 +287,7 @@ fn a_dropped_writer_leaves_a_readable_file() {
     let s = spec(2, Pcm::Int16);
     let mut sink = Cursor::new(Vec::new());
     {
-        let mut w = WavWriter::create(&s, &mut sink).unwrap();
+        let mut w = WavWriter::create(&s, Pcm::Int16, &mut sink).unwrap();
         w.write(Interleaved::new(&ramp(2, 7), s.layout()).unwrap())
             .unwrap();
     }
@@ -290,27 +299,9 @@ fn a_dropped_writer_leaves_a_readable_file() {
 #[test]
 fn a_finished_writer_hands_back_its_sink_untouched_by_drop() {
     let s = spec(2, Pcm::Int16);
-    let mut w = WavWriter::create(&s, Cursor::new(Vec::new())).unwrap();
+    let mut w = WavWriter::create(&s, Pcm::Int16, Cursor::new(Vec::new())).unwrap();
     w.write(Interleaved::new(&ramp(2, 7), s.layout()).unwrap())
         .unwrap();
     let bytes = w.finish().unwrap().into_inner();
     assert_eq!(bytes.len(), 44 + 7 * 4);
-}
-
-/// A spec of another format is refused with a named error, not written as WAV.
-#[cfg(feature = "encode-aiff")]
-#[test]
-fn a_spec_of_another_format_is_refused() {
-    let s = Spec::of_width(
-        crate::Format::Aiff(Pcm::Int16),
-        ChannelLayout::STEREO,
-        SampleRate::SR_48K,
-    );
-    let Err(err) = WavWriter::create(&s, Cursor::new(Vec::new())) else {
-        panic!("an AIFF spec was accepted");
-    };
-    assert!(
-        matches!(err, Error::Spec(SpecError::WrongFormat { .. })),
-        "{err}"
-    );
 }
