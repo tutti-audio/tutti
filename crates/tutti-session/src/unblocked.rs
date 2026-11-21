@@ -16,8 +16,9 @@ use crate::loaded::caught_by;
 /// executor was gone, or the work panicked. A family's error implements it
 /// with its own variants.
 pub(crate) trait Unanswered {
-    /// The session's executor is gone or refused the task, or dropped it before
-    /// it ran: the host is shutting down and the work did not fail.
+    /// The session's executor is gone, refused the `unblock` (the OS would not
+    /// start a thread), or dropped the task before it ran: the host is shutting
+    /// down and the work did not fail.
     fn shut_down() -> Self;
 
     /// The work panicked; `message` is the panic's, when it was a string.
@@ -133,5 +134,66 @@ impl<W, T, E> Unpin for Unblocked<W, T, E> {}
 impl<W, T, E> fmt::Debug for Unblocked<W, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Unblocked").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_platform::Executor;
+
+    #[derive(Debug, PartialEq)]
+    enum Toy {
+        ShutDown,
+        Panicked(String),
+    }
+
+    impl Unanswered for Toy {
+        fn shut_down() -> Self {
+            Self::ShutDown
+        }
+
+        fn panicked(message: String) -> Self {
+            Self::Panicked(message)
+        }
+    }
+
+    /// **Work that panics resolves to `E::panicked` carrying the panic's
+    /// message**, on a real executor, and the awaiting thread carries on.
+    #[test]
+    fn work_that_panics_resolves_to_the_errors_panicked_with_the_message() {
+        let executor = Executor::new();
+        let load = Unblocked::new(executor.downgrade(), (), |()| -> Result<(), Toy> {
+            panic!("the work gave up")
+        });
+        assert_eq!(
+            tutti_fixtures::block_on(load),
+            Err(Toy::Panicked("the work gave up".to_owned()))
+        );
+    }
+
+    /// **A poll after the future resolved panics**, rather than answering twice.
+    #[test]
+    #[should_panic(expected = "polled after it resolved")]
+    fn a_poll_after_it_resolved_panics() {
+        let executor = Executor::new();
+        let mut load = Unblocked::new(executor.downgrade(), (), |()| Ok::<_, Toy>(7));
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        assert_eq!(tutti_fixtures::block_on(&mut load), Ok(7));
+        let _ = Pin::new(&mut load).poll(&mut cx);
+    }
+
+    /// **A task the executor dropped before it ran (its sender gone) resolves
+    /// to `E::shut_down`**, never a wait without end.
+    #[test]
+    fn a_sender_dropped_unrun_resolves_to_the_errors_shut_down() {
+        let (reply, receiver) = oneshot::channel::<Result<(), Toy>>();
+        drop(reply);
+        let load = Unblocked::<(), (), Toy> {
+            executor: Executor::new().downgrade(),
+            work: |()| Ok(()),
+            stage: Stage::Running(receiver),
+        };
+        assert_eq!(tutti_fixtures::block_on(load), Err(Toy::ShutDown));
     }
 }
