@@ -164,6 +164,7 @@ mod entry;
 #[cfg(test)]
 mod fake_hosting;
 mod inbox;
+mod load;
 mod lost;
 mod rebind;
 pub use rebind::PortsRefusal;
@@ -171,11 +172,12 @@ mod preset;
 mod state;
 pub(crate) use lost::Lost;
 
-use entry::PooledLink;
 pub use entry::{
-    AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginInfo, PluginPorts,
-    PoolPluginEntry, PooledPlugin,
+    AddPooledPluginError, PluginCause, PluginDeclaration, PluginInfo, PluginPorts, PoolPluginEntry,
+    PooledPlugin,
 };
+use load::NodeLink;
+pub use load::{AddPluginError, LoadPlugin, LoadedPlugin, PluginNode, SwapPluginError};
 pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
 pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
@@ -908,7 +910,7 @@ pub(crate) struct HostedPlugin {
     pub(crate) silenced: bool,
     /// The pool entry this plugin's node is over, `None` for a plugin added
     /// outside the pool. Dropped when the record retires, which ends the hold.
-    pub(crate) pooled: Option<PooledLink>,
+    pub(crate) link: Option<NodeLink>,
     /// What re-inserts this plugin's node when it changes its ports. `None` for
     /// a plugin that reported no ports.
     pub(crate) rebind: Option<RebindState>,
@@ -1126,7 +1128,7 @@ impl HostedPlugin {
             carried: None,
             mirror_token: Arc::new(()),
             silenced: false,
-            pooled: None,
+            link: None,
             rebind: None,
         }
     }
@@ -1193,7 +1195,7 @@ impl HostedPlugin {
     pub(crate) fn retire(mut self) -> Retired {
         self.gate.end();
         // The node over a pool entry is gone: the entry is no longer held.
-        self.pooled = None;
+        self.link = None;
         Retired::of(self.placement, self)
     }
 
@@ -2191,7 +2193,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             .graph
             .plugins
             .get(&node)
-            .is_some_and(|hosted| hosted.pooled.is_some())
+            .is_some_and(|hosted| hosted.link.is_some())
         {
             self.silence_node(node);
         } else {
@@ -2224,12 +2226,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 .plugins
                 .get(&node)
                 .and_then(|h| h.withheld.clone().or_else(|| h.snapshot.clone()));
-            if let Some(link) = self
-                .graph
-                .plugins
-                .get(&node)
-                .and_then(|h| h.pooled.as_ref())
-            {
+            if let Some(link) = self.graph.plugins.get(&node).and_then(|h| h.link.as_ref()) {
                 link.gave_up(why.clone());
             }
             self.end_node(node);
@@ -2376,7 +2373,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 continue;
             };
             if matches!(hosted.status, PluginLiveness::Dead { .. }) {
-                if hosted.pooled.is_some() && !hosted.silenced {
+                if hosted.link.is_some() && !hosted.silenced {
                     unsilenced.push(node);
                 }
                 continue;
@@ -2404,7 +2401,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 PluginStatus::Dead { cause } => Some(cause),
                 _ => None,
             };
-            if let (Some(cause), Some(link)) = (&cause, hosted.pooled.as_ref()) {
+            if let (Some(cause), Some(link)) = (&cause, hosted.link.as_ref()) {
                 link.died(cause.clone());
             }
             if matches!(hosted.status, PluginLiveness::Recovering { .. }) {

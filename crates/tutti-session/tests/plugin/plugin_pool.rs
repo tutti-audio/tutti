@@ -19,7 +19,7 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    AddPluginError, CrossfadeRefused, DetachedSession, LoadError, OtherPeer, Peer, PeerState,
+    AddPooledPluginError, CrossfadeRefused, DetachedSession, LoadError, OtherPeer, Peer, PeerState,
     PluginCause, PluginHealth, PoolEvent, PoolState, Presence, RecoveryPolicy, Resource,
     RetryError, Session, SessionEvent, StateStartError,
 };
@@ -231,7 +231,7 @@ fn a_served_plugin_lands_through_the_pool() {
     );
     assert!(matches!(
         s.add_pooled_plugin(&"verb"),
-        Err(AddPluginError::Installed("verb"))
+        Err(AddPooledPluginError::Installed("verb"))
     ));
 }
 
@@ -358,7 +358,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
     );
     assert!(matches!(
         s.add_pooled_plugin(&"verb"),
-        Err(AddPluginError::Lost("verb"))
+        Err(AddPooledPluginError::Lost("verb"))
     ));
 
     s.retry(&"verb").expect("a lost entry reloads");
@@ -381,7 +381,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
     assert_eq!(s.graph_ref().node_tail(node), Ok(tail));
     assert!(matches!(
         s.add_pooled_plugin(&"verb"),
-        Err(AddPluginError::Installed("verb"))
+        Err(AddPooledPluginError::Installed("verb"))
     ));
 }
 
@@ -900,7 +900,7 @@ fn a_retry_after_a_refused_swap_swaps_the_node() {
     assert_ne!(pid_of(&s, node), first, "another server");
     assert!(matches!(
         s.add_pooled_plugin(&"fx"),
-        Err(AddPluginError::Installed("fx"))
+        Err(AddPooledPluginError::Installed("fx"))
     ));
 }
 
@@ -960,7 +960,7 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
     // refusal leaves the plugin for the swap.
     assert!(matches!(
         s.add_pooled_plugin(&"fx"),
-        Err(AddPluginError::Installed("fx"))
+        Err(AddPooledPluginError::Installed("fx"))
     ));
     s.pool(
         s.plugin_entry("fx", &first_id(), &catalog)
@@ -976,7 +976,7 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
     // The last landing's plugin is likewise kept.
     assert!(matches!(
         s.add_pooled_plugin(&"fx"),
-        Err(AddPluginError::Installed("fx"))
+        Err(AddPooledPluginError::Installed("fx"))
     ));
 
     let mut out = vec![vec![0.0; BLOCK]; 2];
@@ -1126,7 +1126,7 @@ mod process {
         ));
         assert!(matches!(
             s.add_pooled_plugin(&"verb"),
-            Err(AddPluginError::Lost("verb"))
+            Err(AddPooledPluginError::Lost("verb"))
         ));
     }
 
@@ -1162,7 +1162,7 @@ mod process {
         assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
         assert!(matches!(
             s.add_pooled_plugin(&"fx"),
-            Err(AddPluginError::Installed("fx"))
+            Err(AddPooledPluginError::Installed("fx"))
         ));
     }
 

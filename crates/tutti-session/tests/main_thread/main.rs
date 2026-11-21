@@ -34,6 +34,9 @@ mod pool_main;
 // main-affine parts. The reference CLAP plugin.
 #[cfg(feature = "clap")]
 mod plugin_pool_main;
+// A plugin hosted in process, as a load: the handle's last clone closes it on the main thread.
+#[cfg(feature = "clap")]
+mod plugin_load_main;
 // What plugins hand to the main thread: each session runs its own, and `close` runs what is owed.
 #[cfg(feature = "vst2")]
 mod main_work;
@@ -68,6 +71,8 @@ fn main() {
     cases.extend_from_slice(pool_main::CASES);
     #[cfg(feature = "clap")]
     cases.extend_from_slice(plugin_pool_main::CASES);
+    #[cfg(feature = "clap")]
+    cases.extend_from_slice(plugin_load_main::CASES);
     cases.extend_from_slice(plugin_event_sources::CASES);
     #[cfg(all(feature = "export", feature = "clap"))]
     cases.extend_from_slice(export_fork_plugin::CASES);

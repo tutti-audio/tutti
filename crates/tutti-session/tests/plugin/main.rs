@@ -38,6 +38,10 @@ mod plugin_executor_drop;
 // the reference CLAP bundle in a real `plugin-server`.
 #[cfg(feature = "clap")]
 mod plugin_pool;
+// A plugin as a load: a handle, a node from it, and the plugin closing with the last clone:
+// the reference CLAP bundle in a real `plugin-server`.
+#[cfg(feature = "clap")]
+mod plugin_load;
 // What a load asks of the catalog (a blacklisted plugin is refused at load) and
 // of the ref's `Hosting`: the reference CLAP plugin.
 #[cfg(feature = "clap")]
