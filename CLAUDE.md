@@ -135,7 +135,7 @@ std only. A rule the compiler already enforces is not a gate.
   call with a named error, never later and never as a default. A port that goes missing
   after a successful call reads silence, except a tap whose every source was removed:
   it ends (`Pull::Ended`) once drained. Removal returns a `#[must_use] Result`.
-- The session graph declicks wiring (`connect` fades in unless `.hard()`); a test that
+- The session graph declicks wiring (`connect` fades in unless `.unfaded()`); a test that
   renders a session wire for another reason wires `.unfaded()`.
 - An inlet whose rate is not the graph's is refused, never resampled.
 - An app reads the playhead through `Session::playhead()`.

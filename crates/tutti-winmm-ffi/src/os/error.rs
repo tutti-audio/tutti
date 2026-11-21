@@ -82,6 +82,8 @@ pub enum OsOperation {
     SetEvent,
     /// `WaitForMultipleObjects`.
     WaitForMultipleObjects,
+    /// `WaitForSingleObject`.
+    WaitForSingleObject,
     /// Starting the input's worker thread.
     SpawnInputWorker,
 }
@@ -94,6 +96,7 @@ impl std::fmt::Display for OsOperation {
             Self::SetWaitableTimer => "SetWaitableTimer",
             Self::SetEvent => "SetEvent",
             Self::WaitForMultipleObjects => "WaitForMultipleObjects",
+            Self::WaitForSingleObject => "WaitForSingleObject",
             Self::SpawnInputWorker => "spawn the input worker",
         })
     }

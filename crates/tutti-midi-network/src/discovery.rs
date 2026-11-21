@@ -6,7 +6,6 @@
 //! one place the TXT keys are written and read.
 
 use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
 
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tutti_ump::{InstanceIdError, NameError};
@@ -263,27 +262,31 @@ impl Browser {
         Ok(Self { daemon, events })
     }
 
-    /// The next Host event, waiting up to `timeout` for one.
-    pub fn next_event(&self, timeout: Duration) -> Option<HostEvent> {
-        let deadline = tutti_platform::Instant::now() + timeout;
+    /// The next Host event: a future the daemon's thread wakes when a Host
+    /// appears, changes or goes. It resolves to `None` once the daemon has
+    /// stopped and nothing more will arrive.
+    pub async fn next_event(&self) -> Option<HostEvent> {
         loop {
-            let left = deadline.saturating_duration_since(tutti_platform::Instant::now());
-            match self.events.recv_timeout(left).ok()? {
-                ServiceEvent::ServiceResolved(service) => {
-                    return Some(match FoundHost::from_service(&service) {
-                        Ok(host) => HostEvent::Found(host),
-                        Err(error) => HostEvent::Refused {
-                            fullname: service.get_fullname().to_owned(),
-                            error,
-                        },
-                    });
-                }
-                ServiceEvent::ServiceRemoved(_, fullname) => {
-                    return Some(HostEvent::Removed { fullname });
-                }
-                _ => {}
+            if let Some(event) = host_event(self.events.recv_async().await.ok()?) {
+                return Some(event);
             }
         }
+    }
+}
+
+/// What a daemon event says about Hosts: `None` for the ones that say nothing
+/// of them (a search starting or stopping, a service seen but not yet resolved).
+fn host_event(event: ServiceEvent) -> Option<HostEvent> {
+    match event {
+        ServiceEvent::ServiceResolved(service) => Some(match FoundHost::from_service(&service) {
+            Ok(host) => HostEvent::Found(host),
+            Err(error) => HostEvent::Refused {
+                fullname: service.get_fullname().to_owned(),
+                error,
+            },
+        }),
+        ServiceEvent::ServiceRemoved(_, fullname) => Some(HostEvent::Removed { fullname }),
+        _ => None,
     }
 }
 
@@ -296,5 +299,25 @@ impl std::fmt::Debug for Browser {
 impl Drop for Browser {
     fn drop(&mut self) {
         let _ = self.daemon.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A removal is the Host's full name; a search that starts says nothing of any Host.
+    #[test]
+    fn a_removal_names_the_host_and_a_search_start_names_none() {
+        let removed = ServiceEvent::ServiceRemoved(
+            SERVICE_TYPE.to_owned(),
+            "Keys._midi2._udp.local.".to_owned(),
+        );
+        assert!(matches!(
+            host_event(removed),
+            Some(HostEvent::Removed { fullname }) if fullname == "Keys._midi2._udp.local."
+        ));
+        assert!(host_event(ServiceEvent::SearchStarted(SERVICE_TYPE.to_owned())).is_none());
+        assert!(host_event(ServiceEvent::SearchStopped(SERVICE_TYPE.to_owned())).is_none());
     }
 }

@@ -33,10 +33,11 @@ impl Watched {
         Self { devices, events }
     }
 
-    /// The change that comes within `timeout` and any queued behind it.
-    fn wait(&self, timeout: Duration) -> Vec<DeviceEvent> {
-        self.events
-            .recv_timeout(timeout)
+    /// The change that comes before the hang guard `within` and any queued
+    /// behind it; none if the guard passes first.
+    fn wait(&self, within: Duration) -> Vec<DeviceEvent> {
+        tutti_fixtures::block_on_within(self.events.recv(), within)
+            .and_then(|received| received.ok())
             .into_iter()
             .chain(self.events.try_iter())
             .collect()

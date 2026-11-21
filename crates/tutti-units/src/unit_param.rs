@@ -175,6 +175,12 @@ pub enum UnitParam {
     /// A position within a source, 0 at its start and 1 at its end (`Normalized`): a
     /// wavetable's frame position, a granular source's read point.
     Position = 42,
+    /// The length of a grain in a granular cloud (`Seconds`, above zero).
+    GrainLength = 43,
+    /// Random deviation as a fraction of its range (`Normalized`). A granular cloud's index 0 is
+    /// its position jitter, a fraction of the source, and index 1 its timing jitter, a
+    /// fraction of the interval between grains.
+    Jitter = 44,
     /// A modulation index (`ModulationIndex`, at least zero, in radians): how far a modulator
     /// swings the phase of the operator it modulates. A frequency-modulation source numbers its
     /// indices: 0 is the index of modulation the carrier receives, and 1 is the feedback
@@ -241,6 +247,8 @@ impl TryFrom<u16> for UnitParam {
             40 => Pitch,
             41 => Distance,
             42 => Position,
+            43 => GrainLength,
+            44 => Jitter,
             45 => Index,
             other => return Err(UnitParamOutOfRange(other)),
         })
@@ -720,6 +728,8 @@ param_keys! {
         RATIO = Ratio;
     }
     Seconds {
+        /// A grain's length.
+        GRAIN_LENGTH = GrainLength;
         /// Envelope attack.
         ATTACK = Attack;
         /// Envelope release.
@@ -780,6 +790,8 @@ param_keys! {
     Normalized {
         /// A position within a source: a wavetable's frame position.
         POSITION = Position;
+        /// Random deviation as a fraction of its range.
+        JITTER = Jitter;
     }
     ModulationIndex {
         /// A modulation index: the swing of one operator's output on another's phase.
@@ -947,7 +959,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 43] = [
+    const PINNED: [(UnitParam, u16); 45] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -990,6 +1002,8 @@ mod tests {
         (UnitParam::Pitch, 40),
         (UnitParam::Distance, 41),
         (UnitParam::Position, 42),
+        (UnitParam::GrainLength, 43),
+        (UnitParam::Jitter, 44),
         (UnitParam::Index, 45),
     ];
 

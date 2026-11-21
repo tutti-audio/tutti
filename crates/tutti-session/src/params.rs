@@ -85,6 +85,8 @@ param_methods! {
     pitch, pitch_at => Pitch;
     distance, distance_at => Distance;
     position, position_at => Position;
+    grain_length, grain_length_at => GrainLength;
+    jitter, jitter_at => Jitter;
     index, index_at => Index;
     knee, knee_at => Knee;
     decay, decay_at => Decay;

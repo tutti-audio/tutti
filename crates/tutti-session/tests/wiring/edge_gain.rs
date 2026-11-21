@@ -60,8 +60,9 @@ fn rig() -> Rig {
     let a = g.add(ForkByClone(Const::mono(A)));
     let b = g.add(ForkByClone(Const::mono(B)));
     let sink = g.add(ForkByClone(Through::mono()));
-    g.set_sources_unfaded(Root::output(0), [OutPort::new(sink, 0)])
-        .unwrap();
+    g.set_sources(Root::output(0), [OutPort::new(sink, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
     Rig {
@@ -197,8 +198,9 @@ fn a_gain_target_needs_a_lane_and_a_number() {
     assert!(!r.s.graph_ref().is_edited(), "a refusal edits nothing");
 
     r.s.graph()
-        .disconnect_unfaded(node(r.a), InPort::new(r.sink, 0))
-        .unwrap();
+        .disconnect(node(r.a), InPort::new(r.sink, 0))
+        .unwrap()
+        .unfaded();
     let _ = r.s.update();
     assert_eq!(
         r.s.set(gain.to(amp(1.0))).unwrap_err().kind,
@@ -325,8 +327,9 @@ fn removing_a_source_drops_its_weight() {
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 0.5 * A) + B));
 
     r.s.graph()
-        .disconnect_unfaded(node(a), InPort::new(sink, 0))
-        .unwrap();
+        .disconnect(node(a), InPort::new(sink, 0))
+        .unwrap()
+        .unfaded();
     assert!(r.no_lane(a));
     assert!(all_are(&settled(&mut r.s, 0), B), "valid, and just b");
     r.s.graph()
@@ -345,8 +348,9 @@ fn removing_a_source_drops_its_weight() {
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .set_sources_unfaded(InPort::new(sink, 0), [node(b)])
-        .unwrap();
+        .set_sources(InPort::new(sink, 0), [node(b)])
+        .unwrap()
+        .unfaded();
     assert!(r.no_lane(a));
     assert!(all_are(&settled(&mut r.s, 0), B));
 
@@ -362,8 +366,9 @@ fn removing_a_source_drops_its_weight() {
         .unfaded();
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + B));
     r.s.graph()
-        .disconnect_unfaded(node(a), Root::output(1))
-        .unwrap();
+        .disconnect(node(a), Root::output(1))
+        .unwrap()
+        .unfaded();
     assert_eq!(
         r.s.graph_ref().gain_target(node(a), Root::output(1)),
         Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
@@ -376,8 +381,9 @@ fn removing_a_source_drops_its_weight() {
         .gain(amp(0.5))
         .unwrap();
     r.s.graph()
-        .set_sources_unfaded(Root::output(1), [node(b)])
-        .unwrap();
+        .set_sources(Root::output(1), [node(b)])
+        .unwrap()
+        .unfaded();
     assert_eq!(
         r.s.graph_ref().gain_target(node(a), Root::output(1)),
         Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
