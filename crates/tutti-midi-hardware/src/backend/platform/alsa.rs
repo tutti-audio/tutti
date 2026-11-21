@@ -3,18 +3,13 @@
 use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::start::{Start, Started};
+use crate::start::Started;
 use crate::virtual_endpoint::{Immediate, OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend.
 pub(crate) fn active(executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::alsa::AlsaEndpoints::new(executor))
-}
-
-/// The wait for the backend to be ready: ALSA has nothing to start.
-pub(crate) fn start() -> Start {
-    Start::ready()
 }
 
 /// Publishes the virtual endpoint `spec` describes, delivering into `producer`:

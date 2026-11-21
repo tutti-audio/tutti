@@ -4,18 +4,13 @@
 use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::start::{Start, Started};
+use crate::start::Started;
 use crate::virtual_endpoint::{OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend: the stub.
 pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::stub::StubEndpoints::new())
-}
-
-/// The wait for the backend to be ready: the stub has nothing to start.
-pub(crate) fn start() -> Start {
-    Start::ready()
 }
 
 /// Refuses on the first poll: the stub has no virtual endpoints.

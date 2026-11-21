@@ -1,6 +1,7 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Wake;
+use std::time::Duration;
 
 /// A waker that counts how often it is woken.
 struct Count(AtomicUsize);
@@ -216,16 +217,41 @@ fn a_start_failed_before_it_could_wait_resolves_to_the_error() {
     ));
 }
 
+/// A start that another thread publishes wakes the thread waiting on it. The bound
+/// only guards a hang: the test asserts that the wait completed.
 #[test]
 fn a_gate_used_across_threads_wakes_the_waiting_thread() {
     let gate = Arc::new(StartGate::new());
     let start = Start::over(Arc::clone(&gate), gate.begin());
+    let (done, completed) = std::sync::mpsc::channel();
+    let (waiting, is_waiting) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        let mut start = start;
+        let mut said = false;
+        // Says it is waiting once its first poll has stored the waker.
+        let polled = std::future::poll_fn(move |cx| {
+            let polled = Pin::new(&mut start).poll(cx);
+            if polled.is_pending() && !std::mem::replace(&mut said, true) {
+                let _ = waiting.send(());
+            }
+            polled
+        });
+        let _ = done.send(tutti_fixtures::block_on(polled).is_ok());
+    });
     let publisher = {
         let gate = Arc::clone(&gate);
-        std::thread::spawn(move || gate.publish_ready())
+        std::thread::spawn(move || {
+            is_waiting.recv().expect("the waiter polled");
+            gate.publish_ready();
+        })
     };
-    assert!(tutti_fixtures::block_on(start).is_ok());
+    assert_eq!(
+        completed.recv_timeout(Duration::from_secs(30)),
+        Ok(true),
+        "the waiting thread was never woken"
+    );
     publisher.join().unwrap();
+    waiter.join().unwrap();
 }
 
 #[test]

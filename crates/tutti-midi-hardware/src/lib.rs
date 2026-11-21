@@ -31,12 +31,13 @@
 //! use tutti_midi_device::DeviceEvent;
 //! use tutti_midi_hardware::Devices;
 //!
+//! # async fn watch() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
 //! let executor = tutti_platform::Executor::new();
 //! let devices = Devices::open(&executor)?;
 //! // The backend may need a moment to start (macOS makes CoreMIDI's client on a thread
 //! // of its own): `start()` is a future the app awaits, on whatever executor it has,
 //! // and the list is seeded when it resolves. Every other backend is ready at once.
-//! tutti_fixtures::block_on(devices.start())?;
+//! devices.start().await?;
 //! let events = devices.subscribe();
 //! for device in events.initial() {
 //!     println!("{}: {}", device.id, device.name);
@@ -49,7 +50,8 @@
 //!         DeviceEvent::Changed(device) => println!("changed: {}", device.name),
 //!     }
 //! }
-//! # Ok::<(), tutti_midi_hardware::MidiHardwareError>(())
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! - **Linux:** a thread subscribes to the sequencer's `System:Announce` port, so a
@@ -107,8 +109,7 @@
 //! CoreMIDI's server may be restarting for several seconds. That wait ends when the
 //! backend's thread says so, so [`Devices::start`] and [`MidiSession::start`]
 //! return a [`Start`], a `Send` [`Future`] that thread wakes,
-//! with no executor of this crate behind it (the free [`start()`] is the same wait
-//! for a program that opens a virtual endpoint with no session). Opening a port
+//! with no executor of this crate behind it. Opening a port
 //! before it resolved is [`MidiHardwareError::BackendStarting`]; a start that
 //! failed is [`MidiHardwareError::BackendFailed`], and asking again starts again.
 //! Every other backend is ready on the first poll.
@@ -144,13 +145,14 @@
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
 //!
+//! # async fn play() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
 //! let executor = tutti_platform::Executor::new();
 //! let mut session = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())?;
 //! // Awaited before any port opens: opening earlier is `BackendStarting`.
-//! tutti_fixtures::block_on(session.start())?;
+//! session.start().await?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -171,7 +173,8 @@
 //! let mut output = session.connect_output("iac")?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
 //! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
-//! # Ok::<(), tutti_midi_hardware::MidiHardwareError>(())
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Main types
@@ -332,7 +335,7 @@ pub use profiles::{
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
-pub use start::{Start, Started, start};
+pub use start::{Start, Started};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{
     OpeningVirtualEndpoint, VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec,

@@ -4,7 +4,8 @@
 use std::task::Poll;
 use std::time::Duration;
 use tutti_midi_hardware::{
-    InputProducerHandle, MidiHardwareError, OpeningVirtualEndpoint, VirtualEndpoint, VirtualSpec,
+    Devices, InputProducerHandle, MidiHardwareError, OpeningVirtualEndpoint, VirtualEndpoint,
+    VirtualSpec,
 };
 use tutti_platform::{Executor, Instant, MainThreadMarker};
 
@@ -35,7 +36,9 @@ pub fn open(
     producer: InputProducerHandle,
     main: MainThreadMarker,
 ) -> Result<VirtualEndpoint, MidiHardwareError> {
-    let started = tutti_fixtures::block_on(tutti_midi_hardware::start())?;
+    // The one way to a `Started`: a `Devices` over the platform's backend.
+    let devices = Devices::open(executor)?;
+    let started = tutti_fixtures::block_on(devices.start())?;
     finished(
         VirtualEndpoint::open(executor, spec, producer, started, main)?,
         main,

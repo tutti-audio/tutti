@@ -55,7 +55,12 @@ fn virtual_endpoints_report_unsupported_on_the_first_poll() {
     );
     let ports = crate::HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
-    let started = tutti_fixtures::block_on(crate::start()).unwrap();
+    let devices = crate::Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(StubEndpoints::new()),
+    )
+    .unwrap();
+    let started = tutti_fixtures::block_on(devices.start()).unwrap();
     let mut opening = open_virtual_endpoint(
         &tutti_platform::Executor::new(),
         &spec,

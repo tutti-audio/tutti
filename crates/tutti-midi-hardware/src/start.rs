@@ -19,15 +19,6 @@ use tutti_rt::LockExt;
 
 use crate::error::{MidiHardwareError, MidiThread};
 
-/// The wait for this platform's backend to be ready, with no session: what
-/// [`MidiEndpoints::start`](crate::MidiEndpoints::start) is for the backend a
-/// [`Devices`](crate::Devices) holds, and the same wait (a platform has one
-/// backend, started once per process). A virtual endpoint is opened with the
-/// [`Started`] it resolves to.
-pub fn start() -> Start {
-    crate::backend::start()
-}
-
 /// The proof that the backend is ready to open endpoints, which [`Start`] resolves
 /// to. Only a finished start makes one.
 #[derive(Clone, Copy, Debug)]

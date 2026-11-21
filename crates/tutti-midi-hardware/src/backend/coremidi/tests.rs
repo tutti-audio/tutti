@@ -157,7 +157,12 @@ pub(in crate::backend::coremidi) fn plain(
     .protocol(protocol);
     let main = tutti_fixtures::main_thread();
     // The client is the hub's: it exists once the start resolved.
-    tutti_fixtures::block_on(start()).expect("the hub makes its client");
+    let devices = crate::Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(CoreMidiEndpoints::new()),
+    )
+    .expect("devices");
+    tutti_fixtures::block_on(devices.start()).expect("the hub makes its client");
     let mut opening = UmpVirtualEndpoint::create(&spec, main, move |ump, _| {
         on_event(ump);
     })
