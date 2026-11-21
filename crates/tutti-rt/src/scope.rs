@@ -73,9 +73,14 @@ impl RtScope {
     }
 
     /// Whether the current thread is inside an [`enter`](Self::enter) scope.
+    ///
+    /// Allocation-free and never panics, so a global allocator may call it on
+    /// every `alloc` and `dealloc`, including during thread teardown, where it
+    /// answers `false`. A checking allocator refuses an allocation while it is
+    /// `true`.
     #[must_use]
-    pub(crate) fn is_inside() -> bool {
-        DEPTH.with(|d| d.get() > 0)
+    pub fn is_inside() -> bool {
+        DEPTH.try_with(|d| d.get() > 0).unwrap_or(false)
     }
 
     /// Panics, in debug builds, if the current thread is marked.

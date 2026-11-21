@@ -1199,15 +1199,19 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
         );
     }
     for &fed in routed.iter() {
-        if !wanted.contains_key(&fed) {
-            graph.set_feed(fed, Feeder::Routes, Vec::new());
+        // A sink removed since has no feed left to clear.
+        if !wanted.contains_key(&fed) && graph.contains(fed) {
+            let unfed = graph.set_feed(fed, Feeder::Routes, Vec::new());
+            debug_assert!(unfed.is_ok(), "the sink is in the graph");
         }
     }
     *routed = wanted.keys().copied().collect();
     for (sink, mut sources) in wanted {
         sources.sort();
         sources.dedup();
-        graph.set_feed(sink, Feeder::Routes, sources);
+        // `wanted` holds only sinks in the graph.
+        let fed = graph.set_feed(sink, Feeder::Routes, sources);
+        debug_assert!(fed.is_ok(), "the sink is in the graph");
     }
 }
 
@@ -1325,6 +1329,7 @@ impl<F: Float> Midi<'_, F> {
     fn instrument_queue(&self, target: NodeKey) -> Option<NodeKey> {
         self.graph
             .feed(target, Feeder::Instrument)
+            .ok()?
             .first()
             .map(|port| port.node())
     }
@@ -1342,7 +1347,8 @@ impl<F: Float> Midi<'_, F> {
         let (node, keys) = open_keys(self.graph);
         let node = node.erase();
         self.graph
-            .set_feed(target, Feeder::LiveInput, vec![EventOutPort::new(node, 0)]);
+            .set_feed(target, Feeder::LiveInput, vec![EventOutPort::new(node, 0)])
+            .map_err(|_| MidiError::NoEventInput(target))?;
         self.state.live.insert(
             node,
             Live {
@@ -1433,11 +1439,13 @@ impl<F: Float> Midi<'_, F> {
                 // otherwise: it is the one holder of the zones.
                 let transform = self.graph.add(MpeTransformNode::new(self.state.mpe()));
                 let transform = transform.erase();
-                self.graph.set_feed(
+                // The transform was just added, so it is in the graph.
+                let fed = self.graph.set_feed(
                     transform,
                     Feeder::Sequencer,
                     vec![EventOutPort::new(clip, 0)],
                 );
+                debug_assert!(fed.is_ok(), "the transform just added is in the graph");
                 self.state.clips.insert(clip, Clip { transform, target });
                 clip
             }
@@ -1445,11 +1453,13 @@ impl<F: Float> Midi<'_, F> {
         // Set on every call: `set_feed` leaves an unchanged feed (and the
         // edit flag) alone.
         let transform = self.state.clips[&clip].transform;
-        self.graph.set_feed(
-            target,
-            Feeder::Sequencer,
-            vec![EventOutPort::new(transform, 0)],
-        );
+        self.graph
+            .set_feed(
+                target,
+                Feeder::Sequencer,
+                vec![EventOutPort::new(transform, 0)],
+            )
+            .map_err(|_| MidiError::NoEventInput(target))?;
         Ok(())
     }
 
@@ -1510,6 +1520,7 @@ impl<F: Float> Midi<'_, F> {
         let target = target.into();
         self.graph
             .feed(target, Feeder::Sequencer)
+            .ok()?
             .iter()
             .find_map(|s| {
                 self.state
@@ -1531,6 +1542,7 @@ impl<F: Float> Midi<'_, F> {
     ) -> Option<(NodeKey, &'s V)> {
         self.graph
             .feed(target, feeder)
+            .ok()?
             .iter()
             .find_map(|s| ours.get_key_value(&s.node()))
             .map(|(&node, v)| (node, v))
@@ -1590,12 +1602,17 @@ impl<F: Float> Midi<'_, F> {
             && self
                 .graph
                 .feed(old, feeder)
-                .contains(&EventOutPort::new(node, 0))
+                .is_ok_and(|fed| fed.contains(&EventOutPort::new(node, 0)))
         {
-            self.graph.set_feed(old, feeder, Vec::new());
+            // `old` is in the graph, as `feed` just answered.
+            let unfed = self.graph.set_feed(old, feeder, Vec::new());
+            debug_assert!(unfed.is_ok(), "the sink was just read");
         }
-        self.graph
+        // The callers checked `target` takes MIDI, so it is in the graph.
+        let fed = self
+            .graph
             .set_feed(target, feeder, vec![EventOutPort::new(node, 0)]);
+        debug_assert!(fed.is_ok(), "the target takes MIDI");
     }
 
     // --- Routes ---
@@ -2133,8 +2150,11 @@ impl<F: Float> Midi<'_, F> {
         ));
         let node = key.erase();
         if let Some(nodes) = self.nodes {
-            self.graph
-                .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.sync, 0)]);
+            // The node was just added, so it is in the graph.
+            let fed =
+                self.graph
+                    .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.sync, 0)]);
+            debug_assert!(fed.is_ok(), "the node just added is in the graph");
         }
         let tap = self
             .graph

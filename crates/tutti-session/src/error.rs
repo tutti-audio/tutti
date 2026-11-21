@@ -39,8 +39,7 @@ pub enum DeclarationError {
     },
 }
 
-/// Why [`Graph::remove`](crate::Graph::remove) (or
-/// [`Session::remove`](crate::Session::remove)) refused: what was not there.
+/// Why [`Session::remove`](crate::Session::remove) refused: what was not there.
 /// Nothing is changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
@@ -119,6 +118,27 @@ pub enum InletError {
         /// The graph's rate when the inlet was opened.
         graph: tutti_units::SampleRate,
     },
+}
+
+/// Why [`Graph::set_sample_rate`](crate::Graph::set_sample_rate) refused.
+/// The graph keeps its rate.
+#[derive(Clone, Debug, PartialEq, Error)]
+#[non_exhaustive]
+pub enum SetRateError {
+    /// A node runs at other sample rates than the new one
+    /// ([`Shape::with_rates`](tutti_graph::Shape::with_rates)).
+    #[error("{node:?} runs at {supported}, not at {rate}")]
+    RateUnsupported {
+        /// A node that cannot run at the new rate.
+        node: tutti_graph::NodeKey,
+        /// The rates it runs at.
+        supported: tutti_graph::SampleRates,
+        /// The rate asked for.
+        rate: tutti_units::SampleRate,
+    },
+    /// The graph would not re-prepare.
+    #[error("the graph would not re-prepare: {0}")]
+    Commit(#[from] tutti_graph::CommitError),
 }
 
 /// Why [`Graph::connect`](crate::Graph::connect),
@@ -249,7 +269,7 @@ pub enum MidiError {
     NoClip(tutti_graph::NodeKey),
 
     /// A clip's events could not be written through its target: the clip's
-    /// node was taken out of the graph directly (`Graph::remove`), or the call
+    /// node was removed ([`Session::remove`](crate::Session::remove)), or the call
     /// was made from inside a `modify` closure.
     #[error("a clip's events could not be written")]
     ClipEvents(#[source] crate::ValueErrorKind),

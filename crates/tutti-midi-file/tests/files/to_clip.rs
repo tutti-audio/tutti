@@ -19,9 +19,9 @@ use tutti_midi_file::{
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
 use tutti_ump::{
-    BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
-    ManufacturerId, Message, Metronome, MidiChannel, MidiGroup, SharpsFlats, Stream, SysexStatus,
-    TextError, Utility, split_stream,
+    BarAccents, Flex, FlexAddress, FlexTextError, FlexTextKind, FlexTimeSignature, Form,
+    KeySignature, Letter, ManufacturerId, Message, Metronome, MidiChannel, MidiGroup, SharpsFlats,
+    Stream, SysexStatus, Utility, split_stream,
 };
 use tutti_units::{Beat, Seconds};
 
@@ -715,7 +715,7 @@ fn text_that_flex_cannot_carry_is_reported() {
     assert_eq!(
         reasons,
         [
-            DropReason::Text(TextError::Nul.into()),
+            DropReason::Text(FlexTextError::Nul.into()),
             DropReason::TextNotUtf8,
         ]
     );
@@ -1223,11 +1223,11 @@ fn a_lyric_that_cannot_be_a_message_is_reported() {
     assert_eq!(
         reasons,
         [
-            DropReason::Text(TextError::TooLong.into()),
+            DropReason::Text(FlexTextError::TooLong.into()),
             DropReason::LyricWithoutSyllable,
             DropReason::LyricWithoutSyllable,
-            DropReason::Text(TextError::TooLong.into()),
-            DropReason::Text(TextError::Nul.into()),
+            DropReason::Text(FlexTextError::TooLong.into()),
+            DropReason::Text(FlexTextError::Nul.into()),
         ]
     );
 }

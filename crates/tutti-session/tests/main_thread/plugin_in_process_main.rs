@@ -567,7 +567,7 @@ fn a_muted_node_stays_muted_through_a_port_change() {
     let _ = r.until("the wider node", |s| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
-    assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Muted));
+    assert_eq!(r.s.get(ModeTarget::of(node)).unwrap(), NodeMode::Muted);
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -590,7 +590,7 @@ fn a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor() {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
             && s.graph_ref().testing().rebuild_settling(node) == Some(false)
     });
-    assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Bypassed));
+    assert_eq!(r.s.get(ModeTarget::of(node)).unwrap(), NodeMode::Bypassed);
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -623,7 +623,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     // The plugin has its Processor in the graph before the re-prepare.
     let _ = s.update();
     side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
     probe().set(ClapSwitch::PortLayout, 1);
     probe().set(ClapSwitch::RequestPortsRescan, 0x24);
@@ -666,7 +666,7 @@ fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
     // The plugin's own restart deactivated it already; what follows is the close.
     probe().thread_reset();
     assert!(!deactivation().observed);
-    r.s.graph().remove(node).expect("the node is there");
+    r.s.remove(node).expect("the node is there");
     let events = r.until("the node to be gone", |s| s.plugin_view(node).is_err());
     assert!(
         !events.iter().any(|event| matches!(

@@ -70,14 +70,14 @@ use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
 use tutti_dsp::{FrameCount, rms};
 use tutti_music::Note;
-use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Cents, Db, FrequencyRatio, SampleRate, Samples, Seconds};
 
 use crate::analyses::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::meters::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::meters::silence::FiniteLevel;
-use crate::{Error, Meter, Region, Result};
+use crate::{Error, Region, Result, StreamMeter};
 use tutti_dsp::{median, median_of_sorted};
 use tutti_units::ranged;
 
@@ -584,8 +584,11 @@ fn voiced_frames(
             if frequency <= 0.0 {
                 return Err(Error::NonPositiveFrequency);
             }
+            // Under the finite positive frequency, the ratio is positive unless
+            // it underflows to zero.
+            let ratio = FrequencyRatio::new(frequency / a4).ok_or(Error::NonPositiveFrequency)?;
             Ok((*level >= floor).then(|| Voiced {
-                cents: Cents::from_pitch_ratio(frequency / a4),
+                cents: Cents::from_pitch_ratio(ratio),
                 level: *level,
             }))
         })

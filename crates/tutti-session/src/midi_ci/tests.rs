@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{PeData, PeJson, PeResource, PeResourceList, ResourceGet, ResourceTarget};
-use tutti_midi_device::DeviceId;
+use tutti_midi_device::MidiDeviceId;
 use tutti_midi_hardware::test_support::property_peer;
 use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;
@@ -125,7 +125,7 @@ fn a_body_that_is_not_json_or_not_the_resources_lands_as_unreadable() {
 }
 
 /// The id of a fake device.
-fn device_id() -> DeviceId {
+fn device_id() -> MidiDeviceId {
     use tutti_midi_device::PortDirection;
     use tutti_midi_hardware::test_support::{FakeBackend, endpoint};
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);

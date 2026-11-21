@@ -8,7 +8,7 @@
 
 use tutti_units::{BeatsPerCycle, Hz, PhaseIncrement, Seconds};
 
-use crate::{Adsr, Clock, LfoShape, Source, Waveform};
+use crate::{Adsr, LayerClock, LfoShape, Source, Waveform};
 
 /// How an [`Lfo`] keeps time.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,11 +108,11 @@ impl From<Lfo> for Source {
     /// as the clock, with no anchor (the compiler's to set).
     fn from(lfo: Lfo) -> Self {
         let clock = match lfo.rate {
-            LfoRate::Beats(per_cycle) => Clock::Beats {
+            LfoRate::Beats(per_cycle) => LayerClock::Beats {
                 per_cycle,
                 phase: lfo.phase,
             },
-            LfoRate::Hz(rate) => Clock::Seconds {
+            LfoRate::Hz(rate) => LayerClock::Seconds {
                 rate,
                 phase: lfo.phase,
                 anchor: None,

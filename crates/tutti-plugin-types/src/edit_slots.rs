@@ -220,7 +220,7 @@ mod tests {
     }
 
     /// **A drain allocates nothing**, with every slot written (the crate's test
-    /// binary installs `AllocDisabler`).
+    /// binary installs `RtAllocCheck`).
     #[test]
     fn a_drain_allocates_nothing() {
         let (mut writer, mut reader) = edit_slots((0..64).map(id));

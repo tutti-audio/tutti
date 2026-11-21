@@ -106,7 +106,7 @@ impl<F: Float + SimdLanes + Lerp> GeneralMidi<F> {
             self.reverb.erase(),
             self.strip.erase(),
         ] {
-            let removed = session.remove(node);
+            let removed = session.remove(node).map(|_| ());
             first = first.and(removed);
         }
         first

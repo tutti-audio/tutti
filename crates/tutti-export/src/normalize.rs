@@ -14,9 +14,10 @@
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, convert, interleave};
-use tutti_dsp::DitherShape;
+use tutti_dsp::{DitherShape, NoiseShaping};
 use tutti_measure::{
-    Loudness, LoudnessConfig, LoudnessMeter, Measure, Meter as _, TruePeakConfig, TruePeakMeter,
+    Loudness, LoudnessConfig, LoudnessMeter, Measure, StreamMeter as _, TruePeakConfig,
+    TruePeakMeter,
 };
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
@@ -25,6 +26,7 @@ use crate::Unmeasured;
 #[cfg(doc)]
 use crate::Written;
 use crate::control::{Control, Outcome, Stage, Weights};
+use crate::encode::output_rate;
 use crate::output::FileTarget;
 
 /// A gain chosen by measuring the rendered signal.
@@ -238,12 +240,15 @@ impl Normalize {
     /// An integer format clamps at full scale, and dither adds noise to every
     /// sample before it does, so a peak at 0 dBTP clips about half its crests.
     /// The limit is one LSB plus the dither's amplitude (0 for none, half an
-    /// LSB for rectangular, one for triangular) below full scale; a target or
+    /// LSB for rectangular, one for triangular) below full scale, and with noise
+    /// shaping the filtered past errors too: at most
+    /// [`NoiseShaping::feedback_gain`] times the largest error (the dither's
+    /// amplitude plus half an LSB). A target or
     /// ceiling already under it is unchanged, and a format that does not
     /// quantize ([`Pcm::Float32`](tutti_codec::Pcm::Float32)) has no
     /// limit.
-    pub(crate) fn within(self, target: &FileTarget) -> Self {
-        let Some(limit) = headroom_ceiling(target) else {
+    pub(crate) fn within(self, target: &FileTarget, render_rate: SampleRate) -> Self {
+        let Some(limit) = headroom_ceiling(target, render_rate) else {
             return self;
         };
         let cap = |db: Db| db.min(limit);
@@ -268,7 +273,9 @@ fn finished<T>(outcome: Outcome<T>) -> T {
 
 /// The loudest peak, in dBTP, an integer format can take with its dither
 /// ([`Normalize::within`]), or `None` for a format that does not quantize.
-fn headroom_ceiling(target: &FileTarget) -> Option<Db> {
+/// `render_rate` is the rate the file's frames are rendered at; the shaping filter
+/// is designed for the file's, after any resample.
+fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> {
     let depth = target.format().int_depth()?;
     // One LSB in the `[-1, 1]` float domain, as the dither scales it.
     let lsb = depth.lsb().get();
@@ -277,8 +284,17 @@ fn headroom_ceiling(target: &FileTarget) -> Option<Db> {
         Some(DitherShape::Rectangular) => 0.5,
         Some(DitherShape::Triangular) => 1.0,
     };
+    // Error feedback adds the filtered past errors to each value. Every
+    // recorded error is at most the dither plus half a step of rounding, and the
+    // filter passes at most `feedback_gain` times that.
+    let feedback_peak = if target.noise_shaping {
+        let rate = output_rate(target, render_rate);
+        NoiseShaping::new(rate).feedback_gain().get() * (dither_peak + 0.5)
+    } else {
+        0.0
+    };
     Some(Db::from_amplitude(Amplitude::new(
-        1.0 - (1.0 + dither_peak) * lsb,
+        1.0 - (1.0 + dither_peak + feedback_peak) * lsb,
     )))
 }
 

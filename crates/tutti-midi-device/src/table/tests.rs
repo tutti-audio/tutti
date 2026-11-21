@@ -12,7 +12,7 @@ fn handle(n: u64) -> EndpointId {
 fn dev(n: u64, client: &str, port: &str, direction: PortDirection) -> OsDevice {
     OsDevice {
         handle: handle(n),
-        identity: Identity::alsa(client, port),
+        identity: OsEndpointIdentity::alsa(client, port),
         name: format!("{client}: {port}"),
         direction,
     }
@@ -160,7 +160,7 @@ fn a_product_id_is_shared_by_ports_of_one_device() {
     let mut table = DeviceTable::default();
     let port = |n| OsDevice {
         handle: handle(n),
-        identity: Identity::Product(ProductInstanceId::new("sn-0042").unwrap()),
+        identity: OsEndpointIdentity::Product(ProductInstanceId::new("sn-0042").unwrap()),
         name: format!("Port {n}"),
         direction: PortDirection::Duplex,
     };
@@ -198,7 +198,7 @@ fn change() -> impl Strategy<Value = OsChange> {
     let present = (0u64..5, 0usize..2, 0usize..2, 0usize..3).prop_map(|(h, who, label, dir)| {
         OsChange::Present(OsDevice {
             handle: handle(h),
-            identity: Identity::alsa(["A", "B"][who], "P"),
+            identity: OsEndpointIdentity::alsa(["A", "B"][who], "P"),
             name: ["one", "two"][label].to_string(),
             direction: [
                 PortDirection::Input,
@@ -242,7 +242,7 @@ fn drive(
 proptest! {
     #[test]
     fn added_and_removed_alternate_per_id(changes in prop::collection::vec(change(), 0..60)) {
-        let mut listed: BTreeMap<DeviceId, DeviceInfo> = BTreeMap::new();
+        let mut listed: BTreeMap<MidiDeviceId, DeviceInfo> = BTreeMap::new();
         let mut table = DeviceTable::default();
         drive(&mut table, changes, |event, _, _| match event {
             Some(DeviceEvent::Added(info)) => {
@@ -306,7 +306,7 @@ fn ordinals(candidates: &[DeviceInfo]) -> Vec<u32> {
 fn port(n: u64, unit: &str, name: &str, direction: PortDirection) -> OsDevice {
     OsDevice {
         handle: handle(n),
-        identity: Identity::Product(ProductInstanceId::new(unit).unwrap()),
+        identity: OsEndpointIdentity::Product(ProductInstanceId::new(unit).unwrap()),
         name: name.into(),
         direction,
     }
@@ -315,7 +315,7 @@ fn port(n: u64, unit: &str, name: &str, direction: PortDirection) -> OsDevice {
 fn coremidi(n: u64, unique: i32, name: &str) -> OsDevice {
     OsDevice {
         handle: handle(n),
-        identity: Identity::CoreMidi(unique),
+        identity: OsEndpointIdentity::CoreMidi(unique),
         name: name.into(),
         direction: PortDirection::Input,
     }
@@ -372,11 +372,11 @@ fn a_winmm_interface_path_resolves_exactly_and_a_name_only_by_name() {
         name: "USB MIDI".into(),
         direction: PortDirection::Input,
     };
-    let path = Identity::winmm_input(WinMmDevice::Interface("\\\\?\\usb#vid_1".into()));
+    let path = OsEndpointIdentity::winmm_input(WinMmDevice::Interface("\\\\?\\usb#vid_1".into()));
     let by_path = added(table.apply(OsChange::Present(on(1, path))));
     let by_name = added(table.apply(OsChange::Present(on(
         2,
-        Identity::winmm_input(named("Other")),
+        OsEndpointIdentity::winmm_input(named("Other")),
     ))));
     assert_eq!(table.resolve(&by_path), Resolved::Exact(by_path.clone()));
     assert_eq!(table.resolve(&by_name), Resolved::SameName(by_name.clone()));
@@ -395,12 +395,12 @@ fn a_winmm_input_and_output_of_one_unit_are_both_ordinal_zero() {
     };
     let input = added(table.apply(OsChange::Present(on(
         1,
-        Identity::winmm_input(named("USB MIDI")),
+        OsEndpointIdentity::winmm_input(named("USB MIDI")),
         PortDirection::Input,
     ))));
     let output = added(table.apply(OsChange::Present(on(
         2,
-        Identity::winmm_output(named("USB MIDI")),
+        OsEndpointIdentity::winmm_output(named("USB MIDI")),
         PortDirection::Output,
     ))));
     assert_eq!((input.id.ordinal(), output.id.ordinal()), (0, 0));
@@ -413,7 +413,7 @@ fn a_winmm_input_and_output_of_one_unit_are_both_ordinal_zero() {
 fn nothing_alike_is_missing() {
     let mut table = DeviceTable::default();
     let info = DeviceInfo {
-        id: DeviceId::new(Identity::alsa("Keystep", "MIDI 1"), 0),
+        id: MidiDeviceId::new(OsEndpointIdentity::alsa("Keystep", "MIDI 1"), 0),
         name: "Keystep: MIDI 1".into(),
         direction: PortDirection::Input,
     };

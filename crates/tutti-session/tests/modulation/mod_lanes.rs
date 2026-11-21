@@ -25,8 +25,8 @@ use tutti_ump::{MidiChannel, NoteNumber, U7};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
-    Adsr, CompileError, Curve, Declarations, Follower, Lfo, NoteEnvelope, RouteDecl, RouteKey,
-    RouteTarget, Source, SourceKey, TargetKey,
+    Adsr, Curve, Declarations, Follower, Lfo, NoteEnvelope, ProgramCompileError, RouteDecl,
+    RouteKey, RouteTarget, Source, SourceKey, TargetKey,
 };
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
@@ -57,7 +57,7 @@ pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
         .expect("builds");
-    s.graph().set_sample_rate(SampleRate::of(RATE));
+    s.graph().set_sample_rate(SampleRate::of(RATE)).unwrap();
     let side = s.graph().take_audio_side();
     (s, side)
 }
@@ -701,7 +701,7 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
                 s.mod_state().problems().next(),
                 Some(Problem::Refused {
                     cause: ModRefusal::Apply(ReconcileError::Compile(
-                        CompileError::DuplicateTarget(_)
+                        ProgramCompileError::DuplicateTarget(_)
                     )),
                     ..
                 })

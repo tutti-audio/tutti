@@ -179,7 +179,7 @@ pub fn play<F: Float>(
 /// it, steps the streamer until it has taken the stream, then until it has
 /// primed (`step_until_idle`), so the reader's ring holds what the threaded
 /// streamer would have read by the time a voice plays. The
-/// [`Stream`](crate::Stream) is the caller's to keep while the voice plays:
+/// [`StreamHandle`](crate::StreamHandle) is the caller's to keep while the voice plays:
 /// dropping it ends the stream.
 ///
 /// # Errors
@@ -193,7 +193,7 @@ pub fn play<F: Float>(
 pub fn wait_for_open<F: tutti_rt::RingFloat>(
     streamer: &mut crate::DiskStreamer<crate::Manual<F>, F>,
     opening: crate::OpenStream<F>,
-) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
+) -> Result<(crate::StreamHandle<F>, crate::StreamReader<F>), crate::OpenError> {
     let (stream, reader) = streamer
         .adopt(opening.run()?)
         .expect("a hand-stepped streamer adopts what it read");
@@ -215,7 +215,7 @@ pub fn wait_for_open<F: tutti_rt::RingFloat>(
 pub fn wait_for_open_threaded<D, F: tutti_rt::RingFloat>(
     streamer: &crate::DiskStreamer<D, F>,
     opening: crate::OpenStream<F>,
-) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
+) -> Result<(crate::StreamHandle<F>, crate::StreamReader<F>), crate::OpenError> {
     Ok(streamer
         .adopt(opening.run()?)
         .expect("a running streamer adopts what it read"))

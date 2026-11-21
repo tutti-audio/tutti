@@ -28,7 +28,7 @@
 //! in [`Cents`] in `-50..=50`: a recording that sits 30 cents sharp reads +30,
 //! and folding subtracts it, so its notes land on their own classes. It is
 //! the estimate over the whole buffer ([`chroma`] runs a first pass to find
-//! it), or a [fixed](Tuning::Fixed) value. A peak is folded to the nearest
+//! it), or a [fixed](TuningReference::Fixed) value. A peak is folded to the nearest
 //! class: a signal tuned near a quarter tone is ambiguous, whatever the
 //! estimate.
 //!
@@ -43,7 +43,7 @@
 //! chunks of any length, cuts its frames at the hop and keeps a running mean.
 //! Its buffers are built on the first frame, so a push allocates nothing after
 //! the first, but the first transform of the meter's scratch plans lazily. With
-//! [`Tuning::Estimate`] a meter can only use the peaks seen so far, so early
+//! [`TuningReference::Estimate`] a meter can only use the peaks seen so far, so early
 //! frames fold with a rougher tuning than [`chroma`]'s whole-buffer one; with a
 //! fixed tuning the two agree to the bit.
 //!
@@ -56,13 +56,13 @@ use tutti_dsp::local_maxima;
 
 use tutti_buffers::{Mono, Sample};
 use tutti_music::Note;
-use tutti_units::{Cents, Db, Hz, SampleRate, Samples, Semitones};
+use tutti_units::{Cents, Db, FrequencyRatio, Hz, SampleRate, Samples, Semitones};
 
 use crate::convert::{all_finite, for_blocks, widen};
 use crate::framing::{
     FrameCutter, Framing, check_frame_count, check_nyquist, check_overlap, check_window,
 };
-use crate::{Error, Measure, Meter, Result};
+use crate::{Error, Measure, Result, StreamMeter};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -87,7 +87,7 @@ const TINY: f64 = 1e-30;
 ranged! {
     /// How many partials a peak may be, itself included: `1..=16`. 1 folds a
     /// peak to its own class only.
-    Harmonics(usize), HarmonicsError, "a harmonic count within 1..=16",
+    HarmonicCount(usize), HarmonicCountError, "a harmonic count within 1..=16",
     |raw| raw >= 1 && raw <= 16
 }
 
@@ -176,7 +176,7 @@ impl TryFrom<core::ops::RangeInclusive<Hz>> for FrequencyBand {
 /// How the tuning a frame is folded with is found.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
-pub enum Tuning {
+pub enum TuningReference {
     /// The circular mean of the peaks' distance from the equal-tempered grid.
     Estimate,
     /// This offset from A4 = 440 Hz.
@@ -190,10 +190,10 @@ pub enum Tuning {
 pub struct ChromaConfig {
     framing: Framing,
     band: Option<FrequencyBand>,
-    harmonics: Harmonics,
+    harmonics: HarmonicCount,
     harmonic_decay: HarmonicDecay,
     peak_floor: PeakFloor,
-    tuning: Tuning,
+    tuning: TuningReference,
 }
 
 impl ChromaConfig {
@@ -206,10 +206,10 @@ impl ChromaConfig {
         Self {
             framing: Framing::new(Samples::new(4096), Samples::new(1024)),
             band: None,
-            harmonics: Harmonics::of(4),
+            harmonics: HarmonicCount::of(4),
             harmonic_decay: HarmonicDecay::of(0.6),
             peak_floor: PeakFloor::of(Db::new(-40.0)),
-            tuning: Tuning::Estimate,
+            tuning: TuningReference::Estimate,
         }
     }
 
@@ -237,7 +237,7 @@ impl ChromaConfig {
 
     /// How many partials a peak may be, itself included.
     #[must_use]
-    pub fn harmonics(mut self, harmonics: Harmonics) -> Self {
+    pub fn harmonics(mut self, harmonics: HarmonicCount) -> Self {
         self.harmonics = harmonics;
         self
     }
@@ -258,7 +258,7 @@ impl ChromaConfig {
 
     /// Folds with a fixed or an estimated tuning.
     #[must_use]
-    pub fn tuning(mut self, tuning: Tuning) -> Self {
+    pub fn tuning(mut self, tuning: TuningReference) -> Self {
         self.tuning = tuning;
         self
     }
@@ -320,10 +320,10 @@ struct ChromaPlan {
     geometry: StftGeometry,
     min_freq: Hz,
     max_freq: Hz,
-    harmonics: Harmonics,
+    harmonics: HarmonicCount,
     harmonic_decay: HarmonicDecay,
     peak_floor: PeakFloor,
-    tuning: Tuning,
+    tuning: TuningReference,
 }
 
 impl ChromaPlan {
@@ -373,7 +373,10 @@ impl ChromaPlan {
 
     /// Adds a peak's distance from the equal-tempered grid to `sums`.
     fn tune(frequency: f64, energy: f64, sums: &mut TuningSums) {
-        let off = off_grid(frequency);
+        // A frequency with no pitch (not above zero) adds no tuning evidence.
+        let Some(off) = off_grid(frequency) else {
+            return;
+        };
         let turn = off * std::f64::consts::TAU;
         let w = energy;
         sums.cos += w * libm::cos(turn);
@@ -388,8 +391,10 @@ impl ChromaPlan {
             if sub < self.min_freq.get() {
                 break;
             }
-            let class = class_of(sub, tuning);
-            frame[class] += weight;
+            // A frequency with no pitch (not above zero) folds into no class.
+            if let Some(class) = class_of(sub, tuning) {
+                frame[class] += weight;
+            }
             weight *= self.harmonic_decay.get();
         }
     }
@@ -397,21 +402,22 @@ impl ChromaPlan {
 
 /// The half-semitone-wide distance of `frequency` from the nearest
 /// equal-tempered pitch, in semitones, `-0.5..=0.5`.
-fn off_grid(frequency: f64) -> f64 {
-    let s = semitones_from_a4(frequency).get();
-    s - s.round()
+fn off_grid(frequency: f64) -> Option<f64> {
+    let s = semitones_from_a4(frequency)?.get();
+    Some(s - s.round())
 }
 
 /// `frequency`'s distance from A4.
-fn semitones_from_a4(frequency: f64) -> Semitones {
-    Semitones::from_pitch_ratio(frequency / Note::A4.frequency().get())
+/// `None` for a frequency that is not above zero.
+fn semitones_from_a4(frequency: f64) -> Option<Semitones> {
+    FrequencyRatio::new(frequency / Note::A4.frequency().get()).map(Semitones::from_pitch_ratio)
 }
 
 /// The class of `frequency` once `tuning` is taken out, as a column.
-fn class_of(frequency: f64, tuning: Semitones) -> usize {
+fn class_of(frequency: f64, tuning: Semitones) -> Option<usize> {
     let a = f64::from(Note::A4.class().semitones_above_c());
-    let position = a + semitones_from_a4(frequency).get() - tuning.get();
-    (position.round() as i64).rem_euclid(CLASSES as i64) as usize
+    let position = a + semitones_from_a4(frequency)?.get() - tuning.get();
+    Some((position.round() as i64).rem_euclid(CLASSES as i64) as usize)
 }
 
 /// Parabolic interpolation of the log magnitude through three bins, whose
@@ -552,8 +558,8 @@ impl ChromaFold {
     /// peaks seen so far (0 before any).
     fn tuning(&self) -> Cents {
         match self.plan.tuning {
-            Tuning::Fixed(offset) => offset.get(),
-            Tuning::Estimate => self.sums.cents(),
+            TuningReference::Fixed(offset) => offset.get(),
+            TuningReference::Estimate => self.sums.cents(),
         }
     }
 
@@ -574,8 +580,8 @@ impl ChromaFold {
 
         let mut frame = [0.0f64; CLASSES];
         let tuning = match plan.tuning {
-            Tuning::Fixed(offset) => offset.get(),
-            Tuning::Estimate => {
+            TuningReference::Fixed(offset) => offset.get(),
+            TuningReference::Estimate => {
                 let sums = &mut self.sums;
                 plan.peaks(&self.magnitudes, |f, e| ChromaPlan::tune(f, e, sums));
                 sums.cents()
@@ -626,9 +632,9 @@ pub struct ChromaSummary {
 /// far.
 ///
 /// The reading, [`mean`](Self::mean) and [`tuning`](Self::tuning), is
-/// available after any push, and [`finish`](Meter::finish) returns both as a
+/// available after any push, and [`finish`](StreamMeter::finish) returns both as a
 /// [`ChromaSummary`]. With
-/// [`Tuning::Estimate`] the tuning is the estimate from the peaks seen so far;
+/// [`TuningReference::Estimate`] the tuning is the estimate from the peaks seen so far;
 /// with a fixed tuning the frames equal [`chroma`]'s bit for bit.
 ///
 /// A push allocates nothing once the meter is made (the transform is planned
@@ -696,7 +702,7 @@ impl<S: Sample> ChromaMeter<S> {
     }
 }
 
-impl<S: Sample> Meter for ChromaMeter<S> {
+impl<S: Sample> StreamMeter for ChromaMeter<S> {
     type Input<'a> = Mono<'a, S>;
     type Item = ChromaFrame;
     type Output = ChromaSummary;
@@ -730,7 +736,7 @@ impl<S: Sample> Meter for ChromaMeter<S> {
 /// The chromagram of a whole buffer at `rate`.
 ///
 /// With a fixed tuning this feeds one [`ChromaMeter`] the buffer, so streaming
-/// it gives these frames bit for bit. With [`Tuning::Estimate`] it is the one
+/// it gives these frames bit for bit. With [`TuningReference::Estimate`] it is the one
 /// exception to "the one-shot is a meter fed the buffer": the buffer is
 /// transformed twice, once to find the tuning of all its peaks and once, in a
 /// meter with that tuning fixed, to fold with it, so a streaming estimate (which
@@ -771,8 +777,8 @@ pub fn chroma<S: Sample>(
     };
 
     let tuning = match plan.tuning {
-        Tuning::Fixed(offset) => offset,
-        Tuning::Estimate => {
+        TuningReference::Fixed(offset) => offset,
+        TuningReference::Estimate => {
             let mut state = ChromaFold::new(plan);
             // The meter built below owns a separate scratch.
             let mut fft = FftScratch::new();
@@ -786,7 +792,7 @@ pub fn chroma<S: Sample>(
     };
 
     let fixed = ChromaPlan {
-        tuning: Tuning::Fixed(tuning),
+        tuning: TuningReference::Fixed(tuning),
         ..plan
     };
     let mut meter = ChromaMeter::<f64>::new(fixed);

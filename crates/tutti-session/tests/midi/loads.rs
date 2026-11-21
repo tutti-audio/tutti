@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tutti_midi_file::{Normalized, TimelineDrop};
+use tutti_midi_file::{ReadRepair, TimelineDrop};
 use tutti_music::TimeSignature;
 use tutti_session::{
     DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
@@ -184,10 +184,10 @@ fn a_repaired_file_reports_what_the_read_added() {
     let loaded = load(&mut session(), write(dir.path(), "bare.mid", &bytes)).expect("loads");
     let report = loaded.report();
     assert_eq!(
-        report.normalized,
+        report.repairs,
         vec![
-            Normalized::DefaultTempo { track: 0 },
-            Normalized::DefaultTimeSignature { track: 0 },
+            ReadRepair::DefaultTempo { track: 0 },
+            ReadRepair::DefaultTimeSignature { track: 0 },
         ]
     );
     assert!(report.dropped.is_empty());
@@ -273,7 +273,7 @@ fn a_missing_file_is_an_io_read_error() {
 mod soundfont {
     use super::*;
     use tutti_session::{LoadError, LoadSoundFont, LoadingSoundFont};
-    use tutti_soundfont::Settings;
+    use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 
     /// **A SoundFont load of a dropped session is `ShutDown`.**
     #[test]
@@ -327,7 +327,9 @@ mod soundfont {
         assert!(declared > 0);
         let font = tutti_fixtures::block_on(session().load_soundfont(path)).unwrap();
         assert_eq!(font.font().presets().len(), declared);
-        let unit = Settings::new().build::<f32>(std::sync::Arc::clone(font.font()));
+        let unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(std::sync::Arc::clone(
+            font.font(),
+        )));
         assert!(unit.is_ok(), "{:?}", unit.err());
     }
 

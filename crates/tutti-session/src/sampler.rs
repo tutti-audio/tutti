@@ -21,9 +21,8 @@ use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-
 use tutti_platform::{Asset, WeakExecutor};
-use tutti_sampler::{AdoptError, Stream, StreamReader, StreamStart};
+use tutti_sampler::{AdoptError, StreamHandle, StreamReader, StreamStart};
 
 use crate::LoadError;
 use crate::apply::{Cut, Sealed};
@@ -200,7 +199,7 @@ pub struct OpenedStream<F: SessionFloat> {
 }
 
 impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
-    type Applied = (Stream<F>, StreamReader<F>);
+    type Applied = (StreamHandle<F>, StreamReader<F>);
     type Error = OpenStreamError<F>;
 
     fn cut(&self) -> &Cut {
@@ -214,7 +213,7 @@ impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
     fn apply_to<K: AppKey, C: Clock<Float = F>>(
         self,
         session: &mut Session<K, C>,
-    ) -> Result<(Stream<F>, StreamReader<F>), OpenStreamError<F>> {
+    ) -> Result<(StreamHandle<F>, StreamReader<F>), OpenStreamError<F>> {
         let Self { cut, opened } = self;
         let streamer = session
             .sampler

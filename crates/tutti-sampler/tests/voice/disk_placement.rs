@@ -27,8 +27,8 @@ use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract;
 use tutti_sampler::testing::{MockTransport, wait_for_open};
 use tutti_sampler::{
-    AdoptError, Direction, DiskStreamer, DiskVoice, Loop, Manual, OpenError, PlaceError, Stream,
-    StreamReader, StreamStart,
+    AdoptError, DiskStreamer, DiskVoice, Loop, Manual, OpenError, PlaceError, PlayDirection,
+    StreamHandle, StreamReader, StreamStart,
 };
 use tutti_units::{Beat, Bpm, SampleRate};
 
@@ -83,7 +83,7 @@ fn open(
     width: Option<ChannelLayout>,
 ) -> (
     DiskStreamer<Manual<f32>, f32>,
-    Result<(Stream<f32>, StreamReader<f32>), Refusal>,
+    Result<(StreamHandle<f32>, StreamReader<f32>), Refusal>,
 ) {
     let mut streamer =
         DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
@@ -120,7 +120,7 @@ fn placed(error: AdoptError<f32>) -> Refusal {
 /// held while the voice plays (dropping the handle ends the stream).
 struct Rig {
     streamer: DiskStreamer<Manual<f32>, f32>,
-    stream: Stream<f32>,
+    stream: StreamHandle<f32>,
 }
 
 /// A file written to a temp dir and streamed into a frame of `frame` channels
@@ -532,7 +532,7 @@ fn a_fork_places_every_read_path() {
             }
             let voice = voice_of(reader);
             if path == "reversed" {
-                rig.stream.direction_cell().publish(Direction::Reverse);
+                rig.stream.direction_cell().publish(PlayDirection::Reverse);
                 assert!(rig.streamer.step_until_idle(1_000) < 1_000);
             }
             let mut node = fork(&voice);

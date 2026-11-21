@@ -7,7 +7,7 @@
 //! its ResourceList, and lists those that answered. A request is made only from
 //! such a handle, so an app cannot ask a peer that never declared the category
 //! or never answered. The handle is a snapshot: the peer may be lost before the
-//! request is sent, and that is refused ([`PeerError::NoSuchPeer`]).
+//! request is sent, and that is refused ([`PeerRequestError::NoSuchPeer`]).
 //!
 //! As the Responder it serves a [`ResourceStore`](tutti_midi_ci::ResourceStore)
 //! ([`MidiSession::serve_properties`](crate::MidiSession::serve_properties)),
@@ -30,10 +30,10 @@ use tutti_midi_ci::{
     PeResource, PeResourceList, ResourceEvent, ResourceGet, ResourceSet, ResponderEvent,
     SubscribeId,
 };
-use tutti_midi_device::DeviceId;
+use tutti_midi_device::MidiDeviceId;
 use tutti_ump::MidiGroup;
 
-use crate::peer::{PeerError, PeerRef};
+use crate::peer::{PeerRef, PeerRequestError};
 
 /// A peer that declared Property Exchange and answered its Capabilities Inquiry:
 /// the handle a [`PropertyAsk`] is made from.
@@ -53,7 +53,7 @@ impl PropertyPeer {
 
     /// The input device the peer was found on.
     #[must_use]
-    pub const fn device(&self) -> &DeviceId {
+    pub const fn device(&self) -> &MidiDeviceId {
         self.at.device()
     }
 
@@ -153,11 +153,11 @@ impl PropertyAsk {
     ///
     /// # Errors
     ///
-    /// [`PeerError::NoSuchPeer`] when it is not.
+    /// [`PeerRequestError::NoSuchPeer`] when it is not.
     pub(crate) fn check<'a>(
         &self,
         peers: impl IntoIterator<Item = &'a PropertyPeer>,
-    ) -> Result<(), PeerError> {
+    ) -> Result<(), PeerRequestError> {
         self.peer.at.find(peers, |peer| &peer.at).map(|_| ())
     }
 }

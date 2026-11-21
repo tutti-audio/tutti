@@ -32,7 +32,7 @@ const EVLAG: NodeKey = NodeKey(4);
 const REC: NodeKey = NodeKey(5);
 
 /// `(tag word 0, hop word 1, delivery frame)` per event received.
-type Inbox = Arc<Mutex<Vec<(u32, u32, u64)>>>;
+type Inbox = tutti_fixtures::Record<(u32, u32, u64)>;
 
 /// Logs every event it receives, with its absolute delivery frame.
 struct Recorder(Inbox);
@@ -79,7 +79,7 @@ fn units(inbox: &Inbox) -> Vec<(NodeKey, Box<dyn Node>)> {
             EVLAG,
             Box::new(TestNode::new(Kind::EventLag { latency: 30 })),
         ),
-        (REC, Box::new(Recorder(Arc::clone(inbox)))),
+        (REC, Box::new(Recorder(inbox.clone()))),
     ]
 }
 
@@ -136,7 +136,7 @@ struct Rig {
 }
 
 fn rig(p: Prepare) -> Rig {
-    let (exec_inbox, ref_inbox) = (Inbox::default(), Inbox::default());
+    let (exec_inbox, ref_inbox) = (tutti_fixtures::Record::new(), tutti_fixtures::Record::new());
     let (mut ed, mut exec) = Editor::new(p);
     for (k, u) in units(&exec_inbox) {
         ed.insert(k, "n", Unforkable(u));
@@ -228,8 +228,8 @@ fn a_max_block_change_keeps_every_ring() {
     let span = 0..got.len() as u64 - 64;
     assert_direct_events_conserved(&rig.exec_inbox, std::slice::from_ref(&span));
     assert_eq!(
-        *rig.exec_inbox.lock().unwrap(),
-        *straight.inbox.lock().unwrap(),
+        rig.exec_inbox.lock().unwrap().to_vec(),
+        straight.inbox.lock().unwrap().to_vec(),
         "and every event lands where it would have"
     );
 }
@@ -241,9 +241,9 @@ struct Solo {
 }
 
 fn rig_reference(p: Prepare) -> Solo {
-    let inbox = Inbox::default();
+    let inbox = tutti_fixtures::Record::new();
     let (mut ed, _exec) = Editor::new(p);
-    for (k, u) in units(&Inbox::default()) {
+    for (k, u) in units(&tutti_fixtures::Record::new()) {
         ed.insert(k, "n", Unforkable(u));
     }
     wire(&mut ed);
@@ -300,8 +300,8 @@ fn a_rate_change_resets_rings_and_flushes_pending_events() {
     assert_eq!(rig.exec.frame().get(), 384 + 256);
     assert_direct_events_conserved(&rig.exec_inbox, &[0..192, 384..384 + 256 - 64]);
     assert_eq!(
-        *rig.exec_inbox.lock().unwrap(),
-        *rig.ref_inbox.lock().unwrap(),
+        rig.exec_inbox.lock().unwrap().to_vec(),
+        rig.ref_inbox.lock().unwrap().to_vec(),
         "the reference, stating the rule independently, agrees event for event"
     );
     // And some really were in the delay at the change, and landed after it.

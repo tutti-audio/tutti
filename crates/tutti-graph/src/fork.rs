@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
+use tutti_units::SampleRate;
 
 use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InPort, OutPort, PortSink, PortSource, Topology};
@@ -536,7 +537,7 @@ pub enum ForkTarget {
 }
 
 /// Why [`Editor::fork`] failed. Nothing was built.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ForkError {
     /// A node the fork needs has no [`ForkSource`] for the unit now at its
@@ -569,6 +570,17 @@ pub enum ForkError {
         /// The source's error.
         cause: ForkCause,
     },
+    /// A node the fork needs does not run at the fork's sample rate
+    /// ([`Shape::with_rates`](crate::Shape::with_rates)). The first such key,
+    /// in key order; nothing is built.
+    RateUnsupported {
+        /// The node.
+        key: NodeKey,
+        /// The rates it runs at.
+        supported: crate::SampleRates,
+        /// The fork's rate.
+        rate: SampleRate,
+    },
     /// The forked graph did not commit — the spec as the editor holds it is
     /// invalid (an uncommitted edit), or does not compile at the fork's
     /// [`Prepare`] (a feedback delay shorter than its `MaxBlock`).
@@ -584,6 +596,14 @@ impl fmt::Display for ForkError {
             Self::Source { key, cause } => {
                 write!(f, "node {key:?} could not be forked: {cause}")
             }
+            Self::RateUnsupported {
+                key,
+                supported,
+                rate,
+            } => write!(
+                f,
+                "node {key:?} runs at {supported}, not at the fork's {rate}"
+            ),
             Self::Commit(e) => write!(f, "the forked graph did not commit: {e}"),
         }
     }
@@ -960,6 +980,17 @@ impl<F: Float> Editor<F> {
                 (Self::upstream(live, [key]), outputs)
             }
         };
+        // Before any unit is prepared: a node that cannot run at the fork's
+        // rate refuses it whole.
+        if let Some((key, supported)) =
+            self.first_unsupported_rate(keys.iter().copied(), prepare.sample_rate())
+        {
+            return Err(ForkError::RateUnsupported {
+                key,
+                supported,
+                rate: prepare.sample_rate(),
+            });
+        }
         // Every source first, so a refusal forks nothing (a fork may clone a
         // large unit, and would be thrown away).
         let mut sources = Vec::with_capacity(keys.len());

@@ -242,8 +242,10 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
     let src = g.add(ForkByClone(Ports::<0, 2>));
     let other = g.add(ForkByClone(Ports::<0, 1>));
     let sink = g.add(ForkByClone(Ports::<1, 0>));
-    g.set_feed(sink, Feeder::Sequencer, vec![src.events_out_at(0)]);
-    g.set_feed(sink, Feeder::Routes, vec![src.events_out_at(1)]);
+    g.set_feed(sink, Feeder::Sequencer, vec![src.events_out_at(0)])
+        .unwrap();
+    g.set_feed(sink, Feeder::Routes, vec![src.events_out_at(1)])
+        .unwrap();
     let events = s.update();
     assert!(!refused(&events));
 
@@ -262,7 +264,8 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
     );
 
     s.graph()
-        .set_feed(sink, Feeder::LiveInput, vec![other.events_out_at(0)]);
+        .set_feed(sink, Feeder::LiveInput, vec![other.events_out_at(0)])
+        .unwrap();
     let events = s.update();
     assert!(
         !refused(&events),

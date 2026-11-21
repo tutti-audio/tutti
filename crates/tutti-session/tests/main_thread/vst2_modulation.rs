@@ -226,9 +226,12 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
     };
     check(&mut s, &[lane], "before");
     s.graph()
-        .set_feed(node, Feeder::Declared, vec![clip.events_out()]);
+        .set_feed(node, Feeder::Declared, vec![clip.events_out()])
+        .unwrap();
     check(&mut s, &[lane, clip.erase()], "a MIDI source added");
-    s.graph().set_feed(node, Feeder::Declared, Vec::new());
+    s.graph()
+        .set_feed(node, Feeder::Declared, Vec::new())
+        .unwrap();
     check(&mut s, &[lane], "the MIDI source removed");
 }
 
