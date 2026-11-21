@@ -31,6 +31,14 @@ impl Rig {
         Self::with(SoundFontConfig::new(Arc::clone(font)))
     }
 
+    /// A unit at the default settings, prepared by a graph at `rate`.
+    pub fn dry_at(font: &Arc<SoundFont>, rate: SampleRate) -> Self {
+        let unit = SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).unwrap();
+        Self {
+            hand: Hand::at(unit, rate),
+        }
+    }
+
     pub fn with(config: SoundFontConfig) -> Self {
         Self {
             hand: Hand::new(SoundFontUnit::try_from(config).unwrap()),

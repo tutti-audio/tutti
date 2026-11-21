@@ -12,7 +12,7 @@ use tutti_ump::{Bank, CCNumber, MidiChannel, U7, Voice2};
 
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
-use tutti_graph::{Node, Prepare};
+use tutti_graph::{Node, Prepare, SampleRates};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Error, Polyphony, SoundFontConfig, SoundFontUnit};
 use tutti_units::{SampleRate, Samples};
@@ -30,8 +30,20 @@ fn prepared_at(rate: SampleRate) -> SoundFontUnit<f32> {
     unit
 }
 
+/// The unit's declared rates are the range `prepare` re-rates within.
 #[test]
-fn a_graph_re_rates_the_unit_within_16_to_192_khz_and_leaves_it_outside() {
+fn the_shape_declares_the_rates_the_unit_runs_at() {
+    let unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(timgm6mb())).unwrap();
+    assert_eq!(
+        Node::<f32>::shape(&unit).rates(),
+        SampleRates::of(SampleRate::of(16_000.0), SampleRate::of(192_000.0))
+    );
+}
+
+/// A rate within the declared rates is the unit's rate; `prepare` leaves a rate
+/// outside them at the rate the unit has (a graph refuses to hand one in).
+#[test]
+fn a_graph_re_rates_the_unit_within_its_rates_and_leaves_it_outside() {
     let initial = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(timgm6mb()))
         .unwrap()
         .sample_rate();
@@ -42,6 +54,25 @@ fn a_graph_re_rates_the_unit_within_16_to_192_khz_and_leaves_it_outside() {
     for hz in [15_999_u32, 192_001] {
         let unit = prepared_at(SampleRate::from_hz(hz).unwrap());
         assert_eq!(unit.sample_rate(), initial, "{hz} Hz is left alone");
+    }
+}
+
+/// A key 69 sounds the font's 441 Hz at every rate the unit runs at: the
+/// rising zero crossings in one second are the frequency. Spec: SF2 2.04
+/// section 8.1.3 (root key and playback pitch).
+#[test]
+fn a_note_sounds_its_pitch_at_every_rate_in_range() {
+    let font = octave_font();
+    for rate in [SampleRate::SR_44K1, SampleRate::SR_96K] {
+        let mut rig = Rig::dry_at(&font, rate);
+        rig.note_on(0, 69, 100);
+        let (left, _) = rig.render(rate.get() as usize);
+        assert!(left.iter().any(|s| s.abs() > 1e-3), "{rate}: silent");
+        let hz = left
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        assert!((hz as i64 - 441).abs() <= 2, "{rate}: {hz} Hz");
     }
 }
 
