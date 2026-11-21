@@ -812,14 +812,25 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let stop = Arc::new(AtomicBool::new(false));
         let parts: Arc<Mutex<Option<Parts<C::Float>>>> = Arc::default();
         let (waiting, stopping) = (Arc::clone(&parts), Arc::clone(&stop));
+        let pump_bell = bell.clone();
         self.jobs
-            .spawn_long("tutti-take", async move {
+            .spawn_long("tutti-take", pump_bell, async move {
                 let Some((pump, run)) = await_parts(&mut listener, &waiting, &stopping).await
                 else {
                     return;
                 };
-                run.run(move |landings| async move { pump.run(&landings, &mut listener).await })
-                    .await;
+                run.run(move |landings| async move {
+                    let ended = pump.run(&landings, &mut listener).await;
+                    // The session's drop closed the landings: no event carries a failed
+                    // commit, so it is logged here.
+                    if let Err(error) = &ended
+                        && landings.is_closed()
+                    {
+                        tracing::warn!("a take ended with the session and did not commit: {error}");
+                    }
+                    ended
+                })
+                .await;
             })
             .map_err(|error| TakeError::NotStarted(error.kind()))?;
         let stop = StopOnDrop { stop, bell };

@@ -200,7 +200,13 @@ fn wav(dir: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
 fn read(path: &std::path::Path) -> Vec<[f32; 2]> {
     let mut reader = hound::WavReader::open(path).expect("a readable wav");
     assert_eq!(reader.spec().channels, 2);
+    let header_frames = reader.duration() as usize;
     let samples: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).collect();
+    assert_eq!(
+        samples.len() / 2,
+        header_frames,
+        "the header's data length matches the frames in the file"
+    );
     samples.chunks(2).map(|f| [f[0], f[1]]).collect()
 }
 
@@ -785,13 +791,13 @@ fn an_idle_take_never_stalls_update() {
     );
 }
 
-/// **Dropping a session ends a take's pump, which commits the take.** The pump awaits its
+/// **Dropping a session commits every take before it returns.** The pump awaits its
 /// tap's bell; the graph's drop drops the tap's writer, which rings that bell, and the
-/// session's bells deliver the ring before they go. The woken pump reads the writer gone
-/// and closes its sink: the take's file lands at its path, holding the ramp's frames. Until
-/// then the path does not exist.
+/// session's drop closes the landings, rings each pump's bell and joins the pump, which
+/// closes its sink: the take's file is at its path, complete, holding the ramp's frames,
+/// when the drop returns. Until then the path does not exist.
 #[test]
-fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
+fn dropping_a_session_commits_every_take_before_it_returns() {
     let dir = tempfile::tempdir().unwrap();
     let path = wav(&dir, "dropped.wav");
     let mut rig = rig(InputConfig::default(), Samples::new(0));
@@ -807,13 +813,11 @@ fn dropping_a_session_ends_a_take_pump_and_commits_the_file() {
     assert!(!path.exists(), "the file is committed when the pump ends");
 
     drop(rig);
-    // The pump's thread commits the file when the bell tells it the writer is gone: a
-    // hang guard by deadline, and the wait is the file's arrival.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !path.exists() && Instant::now() < deadline {
-        std::thread::park_timeout(Duration::from_millis(1));
-    }
-    assert!(path.exists(), "the pump never committed the file");
+    // The drop finishes the take's commit before it returns.
+    assert!(
+        path.exists(),
+        "the drop returned before the take was committed"
+    );
 
     let frames = read(&path);
     assert!(!frames.is_empty(), "the committed file holds the take");

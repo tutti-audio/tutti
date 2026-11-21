@@ -41,7 +41,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use tutti_platform::{Executor, Task};
-use tutti_rt::{Bells, LockExt};
+use tutti_rt::{Bell, Bells, LockExt};
 
 use crate::background::Running;
 use crate::job::{Cancel, Job, JobKind, JobOutputQueue, Ticket};
@@ -226,6 +226,9 @@ pub(crate) struct Jobs {
     _background: Running,
     executor: Executor,
     bells: Bells,
+    /// The long-lived pumps (a take's) and the bell each one awaits: the drop rings them
+    /// and joins them, so what a pump owes at its end (a take's commit) is done first.
+    pumps: Vec<(Task<()>, Bell)>,
     tx: Sender<Arrival>,
     arrivals: Arrivals,
     landers: HashMap<Slot, Lander>,
@@ -259,6 +262,7 @@ impl Jobs {
             _background: background,
             executor,
             bells,
+            pumps: Vec::new(),
             tx,
             arrivals: Arrivals {
                 rx,
@@ -355,9 +359,29 @@ impl Jobs {
     }
 }
 
+/// The longest the drop waits for the long-lived pumps to finish: a guard against a hang, not
+/// a deadline; a pump that has the landings closed and its bell rung ends within a block.
+const PUMP_JOIN_BOUND: Duration = Duration::from_secs(10);
+
 impl Drop for Jobs {
+    /// Closes the landings, rings each pump's bell so it sees them closed and finishes
+    /// (a take commits its file), and waits for each before the executor can go.
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
+        for (_, bell) in &self.pumps {
+            bell.ring();
+        }
+        // Delivers the rings to the pumps' wakers now, not at the next tick.
+        self.bells.tick();
+        for (pump, _) in self.pumps.drain(..) {
+            if let Err(pump) = tutti_platform::join_within(pump, PUMP_JOIN_BOUND) {
+                tracing::warn!(
+                    "a pump did not finish within {PUMP_JOIN_BOUND:?} of the session's drop: \
+                     what it owed (a take's file) is not committed"
+                );
+                pump.detach();
+            }
+        }
     }
 }
 
@@ -489,7 +513,8 @@ impl Jobs {
     }
 
     /// Spawns `future` with a thread of its own: work that is not a job and runs as long
-    /// as a take.
+    /// as a take. It awaits `bell`: the session's drop closes the landings, rings it and
+    /// waits for the future to end.
     ///
     /// # Errors
     ///
@@ -499,13 +524,15 @@ impl Jobs {
         expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
     )]
     pub(crate) fn spawn_long(
-        &self,
+        &mut self,
         name: &str,
+        bell: Bell,
         future: impl Future<Output = ()> + Send + 'static,
     ) -> std::io::Result<()> {
-        self.executor
-            .spawn_dedicated(name, None, future)
-            .map(Task::detach)
+        let pump = self.executor.spawn_dedicated(name, None, future)?;
+        self.pumps.retain(|(pump, _)| !pump.is_finished());
+        self.pumps.push((pump, bell));
+        Ok(())
     }
 
     /// The session's bells: a future that awaits the audio thread makes its bell here.
