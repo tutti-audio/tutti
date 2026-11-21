@@ -28,12 +28,12 @@ use tutti_midi_ci::{
     CiDeviceId, ProfileChange, ProfileChannels, ProfileEntry, ProfileId, ProfileRequest,
     ProfileState, ProfileTable, ProfileTarget, SpecificData, Whole,
 };
-use tutti_midi_device::DeviceId;
+use tutti_midi_device::MidiDeviceId;
 use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
 use tutti_ump::{MidiChannel, MidiGroup, MpeOverlap};
 
 use crate::ci::PeerId;
-use crate::peer::{PeerError, PeerRef};
+use crate::peer::{PeerRef, PeerRequestError};
 
 tutti_units::ranged! {
     /// The Channels a Profile is asked to use when it is enabled on a Channel: the
@@ -102,7 +102,7 @@ pub struct ProfileSwitch {
 impl ProfileSwitch {
     /// The input device the switch was made from.
     #[must_use]
-    pub const fn device(&self) -> &DeviceId {
+    pub const fn device(&self) -> &MidiDeviceId {
         self.at.device()
     }
 
@@ -138,7 +138,7 @@ impl ProfileSwitch {
     ///
     /// # Errors
     ///
-    /// [`PeerError::NoSuchPeer`] (as [`ProfileError::Peer`]) when no peer of
+    /// [`PeerRequestError::NoSuchPeer`] (as [`ProfileError::Peer`]) when no peer of
     /// `peers` is the switch's,
     /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
     pub fn check<'a>(
@@ -308,7 +308,7 @@ pub struct PeerProfiles {
 impl PeerProfiles {
     /// The input device the peer was found on.
     #[must_use]
-    pub const fn device(&self) -> &DeviceId {
+    pub const fn device(&self) -> &MidiDeviceId {
         self.at.device()
     }
 
@@ -470,7 +470,7 @@ pub enum ProfileError {
     /// The peer cannot be asked at all: the input is closed, or the peer is not
     /// one it lists for Profile Configuration.
     #[error(transparent)]
-    Peer(#[from] PeerError),
+    Peer(#[from] PeerRequestError),
     /// The peer does not list that Profile at that address now (the handle is
     /// older than a Removed Report).
     #[error("the peer does not list that Profile at that address")]

@@ -367,6 +367,12 @@ impl AudioBridge {
         self.lifecycle.rate_refusal()
     }
 
+    /// Has the bridge thread offer each rate refusal to `wait`
+    /// ([`OfflineWait::refusal`](crate::OfflineWait::refusal)), so the audio thread only latches a flag.
+    pub(crate) fn offer_refusals_to(&self, wait: Arc<crate::OfflineWait>) {
+        self.lifecycle.offer_refusals_to(wait);
+    }
+
     /// Whether the plugin refuses its rate, as [`rate_refusal`](Self::rate_refusal)
     /// is `Some`, for the audio thread: wait-free, no lock and no allocation.
     pub(crate) fn rate_refused(&self) -> bool {

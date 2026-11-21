@@ -45,7 +45,7 @@ use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
 use crate::devices::{Devices, OpenInput, OpenOutput};
 use crate::endpoints::MidiEndpoints;
 use crate::error::{MidiHardwareError, Result};
-use crate::peer::{PeerError, PeerRef};
+use crate::peer::{PeerRef, PeerRequestError};
 use crate::process::{ProcessChange, ReportAsk, Reporter};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
@@ -54,7 +54,7 @@ use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
 use tutti_midi_ci::{CiDeviceId, ProfileChange, ProfileId};
-use tutti_midi_device::{DeviceId, DeviceInfo, Learned, MidiIdentity, SavedDevice};
+use tutti_midi_device::{DeviceInfo, Learned, MidiDeviceId, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::{InputInlets, InputWriters};
 use tutti_ump::ProductInstanceId;
 use tutti_ump::{GroupSpan, MidiGroup};
@@ -88,7 +88,7 @@ use tutti_ump::{GroupSpan, MidiGroup};
 /// pushes into.
 pub struct MidiSession {
     /// Live input connections, keyed by device.
-    inputs: HashMap<DeviceId, Held>,
+    inputs: HashMap<MidiDeviceId, Held>,
     /// Ring manager the backend pushes inbound events into: each open input
     /// takes a port from it and retires the port on close.
     ports: Arc<HardwareMidiInputs>,
@@ -198,28 +198,28 @@ pub enum Polled {
     /// The device's UMP Stream negotiation settled or its settled state
     /// changed.
     /// (Boxed: an Endpoint is large.)
-    Stream(DeviceId, Box<DeviceStream>),
+    Stream(MidiDeviceId, Box<DeviceStream>),
     /// A MIDI-CI peer of the device (named by its [`PeerId`]) was found, changed
     /// or lost.
-    Ci(DeviceId, PeerId, CiChange),
+    Ci(MidiDeviceId, PeerId, CiChange),
     /// A MIDI-CI peer's Profiles became known or changed, or the peer's
     /// Profiles were dropped.
-    Profile(DeviceId, PeerId, ProfilesChange),
+    Profile(MidiDeviceId, PeerId, ProfilesChange),
     /// A MIDI-CI peer answered Process Inquiry, or the peer's Process Inquiry
     /// was dropped.
-    Process(DeviceId, PeerId, ProcessChange),
+    Process(MidiDeviceId, PeerId, ProcessChange),
     /// A request made of a MIDI-CI peer ended: the peer's Report or NAK, the
     /// wait running out, or the peer lost first.
-    Answer(DeviceId, PeerId, Answer),
+    Answer(MidiDeviceId, PeerId, Answer),
     /// A MIDI-CI peer answered Property Exchange, a call ended, the peer
     /// changed what the device serves, or the peer's Property Exchange was
     /// dropped.
-    Property(DeviceId, PeerId, PropertyChange),
+    Property(MidiDeviceId, PeerId, PropertyChange),
     /// MIDI-CI could not start a device on a Group of the device: the operating
     /// system gave no random bytes for its MUID. It is reported once until the
     /// device starts, and again if the Group leaves the device's Groups and
     /// returns; the Group is tried again at every poll.
-    CiNotStarted(DeviceId, MidiGroup, getrandom::Error),
+    CiNotStarted(MidiDeviceId, MidiGroup, getrandom::Error),
 }
 
 impl MidiSession {
@@ -339,7 +339,7 @@ impl MidiSession {
     /// error, never a silent no-op), and [`MidiHardwareError::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while opening the port or
     /// the device's output, or while describing the device.
-    pub fn connect_input(&mut self, started: Started, device: &DeviceId) -> Result<Connected> {
+    pub fn connect_input(&mut self, started: Started, device: &MidiDeviceId) -> Result<Connected> {
         self.connect_input_with(started, device, InputWriters::new().0)
     }
 
@@ -358,7 +358,7 @@ impl MidiSession {
     pub fn connect_input_with(
         &mut self,
         started: Started,
-        device: &DeviceId,
+        device: &MidiDeviceId,
         writers: InputWriters,
     ) -> Result<Connected> {
         let (writers, ci_refused) = writers.split();
@@ -416,7 +416,7 @@ impl MidiSession {
     /// # Errors
     ///
     /// [`MidiHardwareError::NotConnected`] when `device` names no open input.
-    pub fn disconnect_input(&mut self, device: &DeviceId) -> Result<()> {
+    pub fn disconnect_input(&mut self, device: &MidiDeviceId) -> Result<()> {
         let mut held = self
             .inputs
             .remove(device)
@@ -467,7 +467,7 @@ impl MidiSession {
     /// [`MidiHardwareError::NotFound`] when `device` names no present device,
     /// [`MidiHardwareError::WrongDirection`] when it is not an output, plus whatever the
     /// backend raises while opening.
-    pub fn connect_output(&self, started: Started, device: &DeviceId) -> Result<OpenOutput> {
+    pub fn connect_output(&self, started: Started, device: &MidiDeviceId) -> Result<OpenOutput> {
         let mut output = self.devices.open_output(started, device)?;
         if let Some(stream) = self
             .inputs
@@ -483,7 +483,7 @@ impl MidiSession {
     /// reader ended on an error is not (see [`OpenInput::is_alive`]), and
     /// [`connect_input`](Self::connect_input) reopens it.
     #[must_use]
-    pub fn is_input_connected(&self, id: &DeviceId) -> bool {
+    pub fn is_input_connected(&self, id: &MidiDeviceId) -> bool {
         self.inputs
             .get(id)
             .is_some_and(|held| held.input.is_alive())
@@ -493,7 +493,7 @@ impl MidiSession {
     /// is not open. An input with a fault is one
     /// [`is_input_connected`](Self::is_input_connected) reads `false` for.
     #[must_use]
-    pub fn input_fault(&self, id: &DeviceId) -> Option<InputFault> {
+    pub fn input_fault(&self, id: &MidiDeviceId) -> Option<InputFault> {
         self.inputs.get(id).and_then(|held| held.input.fault())
     }
 
@@ -663,7 +663,7 @@ impl MidiSession {
     /// copied: it is rebuilt when a [`poll`](Self::poll) reports a change, and a
     /// read clones the pointer, so holding one keeps the peers as they were.
     #[must_use]
-    pub fn ci_peers(&self, id: &DeviceId) -> Arc<[CiPeerInfo]> {
+    pub fn ci_peers(&self, id: &MidiDeviceId) -> Arc<[CiPeerInfo]> {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.ci_peers())
@@ -701,7 +701,7 @@ impl MidiSession {
     /// its Capabilities when it is found. Shared like
     /// [`ci_peers`](Self::ci_peers): read again after a [`Polled::Property`].
     #[must_use]
-    pub fn property_peers(&self, id: &DeviceId) -> Arc<[PropertyPeer]> {
+    pub fn property_peers(&self, id: &MidiDeviceId) -> Arc<[PropertyPeer]> {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.property_peers())
@@ -714,9 +714,9 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`PeerError::NotOpen`] when that input has since closed, and
-    /// [`PeerError::NoSuchPeer`] when the peer is gone.
-    pub fn ask_property(&mut self, ask: PropertyAsk) -> std::result::Result<(), PeerError> {
+    /// [`PeerRequestError::NotOpen`] when that input has since closed, and
+    /// [`PeerRequestError::NoSuchPeer`] when the peer is gone.
+    pub fn ask_property(&mut self, ask: PropertyAsk) -> std::result::Result<(), PeerRequestError> {
         self.input_of(ask.peer.at())?.stream.ask_property(ask)
     }
 
@@ -727,7 +727,7 @@ impl MidiSession {
     /// [`ci_peers`](Self::ci_peers): read again after a
     /// [`Polled::Profile`].
     #[must_use]
-    pub fn profiles(&self, id: &DeviceId) -> Arc<[PeerProfiles]> {
+    pub fn profiles(&self, id: &MidiDeviceId) -> Arc<[PeerProfiles]> {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.profiles())
@@ -742,8 +742,8 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`ProfileError::Peer`] with [`PeerError::NotOpen`] when that input has
-    /// since closed, with [`PeerError::NoSuchPeer`] when the peer is gone, and
+    /// [`ProfileError::Peer`] with [`PeerRequestError::NotOpen`] when that input has
+    /// since closed, with [`PeerRequestError::NoSuchPeer`] when the peer is gone, and
     /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
     ///
     /// [`PEER_REPLY_TIMEOUT`]: tutti_midi_ci::PEER_REPLY_TIMEOUT
@@ -758,7 +758,7 @@ impl MidiSession {
     /// [`ci_peers`](Self::ci_peers): read again after a
     /// [`Polled::Process`] that says `Capabilities`.
     #[must_use]
-    pub fn report_peers(&self, id: &DeviceId) -> Arc<[Reporter]> {
+    pub fn report_peers(&self, id: &MidiDeviceId) -> Arc<[Reporter]> {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.report_peers())
@@ -772,15 +772,17 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`PeerError::NotOpen`] when that input has since closed, and
-    /// [`PeerError::NoSuchPeer`] when the peer is gone.
-    pub fn report(&mut self, ask: ReportAsk) -> std::result::Result<(), PeerError> {
+    /// [`PeerRequestError::NotOpen`] when that input has since closed, and
+    /// [`PeerRequestError::NoSuchPeer`] when the peer is gone.
+    pub fn report(&mut self, ask: ReportAsk) -> std::result::Result<(), PeerRequestError> {
         self.input_of(ask.peer.at())?.stream.report(ask)
     }
 
     /// The open input the peer `at` was found on.
-    fn input_of(&mut self, at: &PeerRef) -> std::result::Result<&mut Held, PeerError> {
-        self.inputs.get_mut(at.device()).ok_or(PeerError::NotOpen)
+    fn input_of(&mut self, at: &PeerRef) -> std::result::Result<&mut Held, PeerRequestError> {
+        self.inputs
+            .get_mut(at.device())
+            .ok_or(PeerRequestError::NotOpen)
     }
 
     /// What is known of the UMP Stream state of the open input `id`: `None`
@@ -789,7 +791,7 @@ impl MidiSession {
     /// [`config`](DeviceStream::config) is the Protocol and JR Timestamps in
     /// use.
     #[must_use]
-    pub fn stream(&self, id: &DeviceId) -> Option<DeviceStream> {
+    pub fn stream(&self, id: &MidiDeviceId) -> Option<DeviceStream> {
         self.inputs.get(id)?.stream.settled()
     }
 
@@ -805,7 +807,7 @@ impl MidiSession {
     /// answered says nothing. Compare it with a saved device's
     /// through [`Learned::compare`](tutti_midi_device::Learned::compare).
     #[must_use]
-    pub fn learned(&self, id: &DeviceId) -> Learned {
+    pub fn learned(&self, id: &MidiDeviceId) -> Learned {
         let Some(held) = self.inputs.get(id) else {
             return Learned::new();
         };
@@ -830,7 +832,7 @@ impl MidiSession {
     /// [`Devices::resolve`](crate::Devices::resolve) on
     /// [`SavedDevice::info`] and check it with [`SavedDevice::confirm`].
     #[must_use]
-    pub fn saved(&self, id: &DeviceId) -> Option<SavedDevice> {
+    pub fn saved(&self, id: &MidiDeviceId) -> Option<SavedDevice> {
         let info = self.devices.list().into_iter().find(|d| d.id == *id)?;
         self.is_input_connected(id)
             .then(|| SavedDevice::new(info, self.learned(id)))

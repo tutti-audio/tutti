@@ -13,13 +13,13 @@
 //!
 //! ```
 //! use tutti_midi_device::{
-//!     DeviceEvent, DeviceTable, PortDirection, EndpointId, Identity, OsChange, OsDevice,
+//!     DeviceEvent, DeviceTable, PortDirection, EndpointId, OsEndpointIdentity, OsChange, OsDevice,
 //! };
 //!
 //! let mut table = DeviceTable::default();
 //! let keys = OsDevice {
 //!     handle: EndpointId::from_raw(1),
-//!     identity: Identity::alsa("Keystep", "Keystep MIDI 1"),
+//!     identity: OsEndpointIdentity::alsa("Keystep", "Keystep MIDI 1"),
 //!     name: "Keystep: Keystep MIDI 1".into(),
 //!     direction: PortDirection::Input,
 //! };
@@ -80,7 +80,9 @@ pub use endpoint::{
 pub use endpoint_discovery::{
     DiscoveryAction, DiscoveryEnding, EndpointDiscovery, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT,
 };
-pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};
+pub use id::{
+    DeviceInfo, EndpointId, MidiDeviceId, OsEndpointIdentity, PortDirection, WinMmDevice,
+};
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
 pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_RATE, Unmapped, tick_time};
 pub use learned::{Learned, Match, SavedDevice};

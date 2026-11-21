@@ -39,7 +39,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     EventOut, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Standalone, TransportPosition,
 };
-use tutti_modulation::{Amount, Clock, ControlProgramBuilder, Law, Layer, LayerId, Polarity};
+use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceNodeHandle, VoiceSource};
 use tutti_units::{
@@ -272,7 +272,7 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
         .expect("the node declares its gain as a port");
     let layer = Layer {
         id: LayerId(1),
-        clock: Clock::Beats {
+        clock: LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
             phase: PhaseIncrement::new(0.0),
         },

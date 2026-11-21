@@ -91,7 +91,7 @@
 //! Streaming needs a real file. Build a `DiskStreamer` once with
 //! `DiskStreamer::start` (it fails if the OS refuses the streamer's thread), open a
 //! stream with `open`, and build the `DiskVoice` from the reader the open answers
-//! with. The `Stream` it answers with is the control side: `Stream::status` reports
+//! with. The `StreamHandle` it answers with is the control side: `StreamHandle::status` reports
 //! whether the ring is primed, ended or faulted, and how many frames the voice
 //! missed. `DiskStreamer`'s own documentation has that example.
 //!
@@ -131,7 +131,7 @@
 //! - [`DiskVoice`]: disk-streamed playback, built from the [`StreamReader`] a
 //!   [`DiskStreamer::adopt`] answers with.
 //! - [`DiskStreamer`]: owns the streamer future; a stream it opens is a
-//!   [`Stream`] (the control side: steer it, drop it to end it) and a
+//!   [`StreamHandle`] (the control side: steer it, drop it to end it) and a
 //!   [`StreamReader`] (the voice's).
 //! - [`Voice`], [`VoiceSource`], [`Playback`]: a voice of either tier and its
 //!   control state.
@@ -217,9 +217,9 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 // `DiskVoice`'s `inner` — one capability, and only the outer type is a doorway.
 //
 pub use voice::{
-    Direction, DiskVoice, DiskVoiceControls, GainError, Loop, LoopError, MemorySource,
-    MemorySourceConfig, PlayError, Playback, PoolDrops, SendError, SlotId, StreamingAddError,
-    Voice, VoiceNode, VoiceNodeError, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource,
+    DiskVoice, DiskVoiceControls, GainError, Loop, LoopError, MemorySource, MemorySourceConfig,
+    PlayDirection, PlayError, Playback, PoolDrops, SendError, SlotId, StreamingAddError, Voice,
+    VoiceNode, VoiceNodeError, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource,
     VoiceWindow, memory_voice, voice_width,
 };
 // The async disk-streaming engine (streamer future + the `DiskStreamer` handle).
@@ -227,7 +227,7 @@ pub(crate) mod streamer;
 
 pub use streamer::{
     AdoptError, Block, ControlCell, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, OpenError,
-    OpenStream, OpenedStream, RefusedStreamStart, Running, Stream, StreamFault, StreamFile,
+    OpenStream, OpenedStream, RefusedStreamStart, Running, StreamFailure, StreamFile, StreamHandle,
     StreamId, StreamPhase, StreamReader, StreamStart, StreamStatus,
 };
 
@@ -248,4 +248,4 @@ pub use streamer::{Manual, StepOutcome};
 #[cfg(codec)]
 mod probe;
 #[cfg(codec)]
-pub use probe::{ProbeError, SampleFacts, probe};
+pub use probe::{SampleFacts, SampleProbeError, probe};

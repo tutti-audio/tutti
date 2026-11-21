@@ -393,7 +393,7 @@ fn finish<F: FftFloat>(
         for &i in &own {
             control.set_output(i);
             let w = waiting_of(&lanes[i]);
-            let normalize = w.spec.mode().within(&w.target);
+            let normalize = w.spec.mode().within(&w.target, rate);
             let Outcome::Finished((reading, at)) =
                 measure(w, i, lanes[i].layout, rate, normalize, done, total, control)?
             else {

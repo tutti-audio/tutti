@@ -131,7 +131,7 @@ fn peaks_under_the_floor_do_not_vote() {
         .zip(sine(330.0, 8192, 0.5 * 10f64.powf(-50.0 / 20.0)))
         .map(|(a, b)| a + b)
         .collect();
-    let only = cfg().harmonics(Harmonics::of(1));
+    let only = cfg().harmonics(HarmonicCount::of(1));
     let ignored = run(&x, &only.peak_floor(PeakFloor::of(Db::new(-40.0)))).mean();
     assert_eq!(ignored[4], 0.0);
     let heard = run(&x, &only.peak_floor(PeakFloor::of(Db::new(-80.0)))).mean();
@@ -170,7 +170,9 @@ fn the_tuning_of_a_sine_is_its_distance_from_the_grid() {
 fn a_fixed_tuning_moves_the_fold() {
     let x = sine(440.0 * (30.0f64 / 1200.0).exp2(), 8192, 0.5);
     let at = |cents: f64| {
-        let cfg = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents::new(cents)).unwrap()));
+        let cfg = cfg().tuning(TuningReference::Fixed(
+            TuningOffset::new(Cents::new(cents)).unwrap(),
+        ));
         let c = run(&x, &cfg);
         assert_eq!(c.tuning(), Cents::new(cents));
         c.mean()
@@ -190,7 +192,9 @@ fn a_meter_at_a_fixed_tuning_is_the_one_shot() {
         .map(|(a, b)| a + b)
         .collect();
     let batch = run(&x, &cfg());
-    let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(batch.tuning()).unwrap()));
+    let fixed = cfg().tuning(TuningReference::Fixed(
+        TuningOffset::new(batch.tuning()).unwrap(),
+    ));
     // At the batch's tuning, the one-shot is the meter's reference.
     assert_eq!(run(&x, &fixed).grid(), batch.grid());
     for chunk in [1usize, 777, 4096, 5000, x.len()] {
@@ -378,7 +382,9 @@ fn an_integer_buffer_folds_at_its_nominal_level() {
 #[test]
 fn the_trait_fold_over_uneven_chunks_equals_the_chroma_rows() {
     let x = sine(440.0, 30_000, 0.5);
-    let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents::new(0.0)).unwrap()));
+    let fixed = cfg().tuning(TuningReference::Fixed(
+        TuningOffset::new(Cents::new(0.0)).unwrap(),
+    ));
     let batch = run(&x, &fixed);
     let (items, summary) = fold_uneven(&fixed, RATE, x.len(), |meter, at, out| {
         meter.push(Mono::new(&x[at]), out)

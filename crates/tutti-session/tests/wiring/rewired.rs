@@ -91,7 +91,7 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
         "the last source going is reported"
     );
 
-    s.graph().remove(x).expect("there");
+    s.remove(x).expect("there");
     assert_eq!(
         rewired(&s.update()),
         [],

@@ -321,10 +321,10 @@ fn every_setter_stores_silence_as_the_empty_set() {
         .set_sources(Root::output(0), [OutPort::new(src, 0)])
         .unwrap()
         .unfaded();
-    assert!(graph.disconnect_all(Root::output(0)).unwrap());
+    graph.set_sources(Root::output(0), []).unwrap().unfaded();
     assert!(
         graph.testing().planned_compensation().is_some(),
-        "disconnect_all"
+        "set_sources of none after one"
     );
 
     graph.connect(src, Root).unwrap().unfaded();
@@ -349,17 +349,12 @@ fn removing_a_node_twice_names_what_was_not_there() {
     let mut s = detached(1);
     let node = s.graph().add(ForkByClone(Const::mono(1.0)));
     assert!(s.graph_ref().contains(node));
-    assert_eq!(s.remove(node), Ok(()));
+    assert!(s.remove(node).is_ok());
     assert!(!s.graph_ref().contains(node));
     assert_eq!(
-        s.remove(node),
+        s.remove(node).map(|_| ()),
         Err(RemoveError::NoSuchNode(node.erase())),
-        "the session's remove names the node that is gone"
-    );
-    assert_eq!(
-        s.graph().remove(node).map(|_| ()),
-        Err(RemoveError::NoSuchNode(node.erase())),
-        "so does the graph's"
+        "the remove names the node that is gone"
     );
 }
 
@@ -370,7 +365,10 @@ fn removing_a_stranger_changes_nothing() {
     let mut s = detached(1);
     let _ = s.update();
     let stranger = tutti_graph::NodeKey(u64::MAX);
-    assert_eq!(s.remove(stranger), Err(RemoveError::NoSuchNode(stranger)));
+    assert_eq!(
+        s.remove(stranger).map(|_| ()),
+        Err(RemoveError::NoSuchNode(stranger))
+    );
     assert!(!s.graph_ref().has_uncommitted_edits(), "nothing was edited");
 }
 
@@ -505,7 +503,7 @@ fn an_update_with_no_edit_sends_no_plan() {
 fn a_replace_on_a_removed_node_is_refused_naming_it() {
     let mut s = detached(1);
     let knob = s.graph().add(Params(Knob::new()));
-    s.graph().remove(knob).unwrap();
+    s.remove(knob).unwrap();
     let refused = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
@@ -600,7 +598,7 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
         .expect("the node is in the graph");
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
 
-    s.graph().remove(knob).unwrap();
+    s.remove(knob).unwrap();
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 0, "purged");
     assert_eq!(Arc::strong_count(&token), 1, "the incoming node dropped");
 
@@ -842,7 +840,7 @@ fn removing_a_node_reports_the_parked_swap_it_drops() {
     s.graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
         .unwrap();
-    s.graph().remove(knob).unwrap();
+    s.remove(knob).unwrap();
     let mut dropped = Vec::new();
     for _ in 0..4 {
         for event in s.update() {
@@ -861,7 +859,7 @@ fn removing_a_node_reports_the_parked_swap_it_drops() {
 fn an_unfaded_removal_cuts_where_the_default_fades_out() {
     for unfaded in [false, true] {
         let (mut s, mut side, knob) = playing_knob();
-        let removal = s.graph().remove(knob).unwrap();
+        let removal = s.remove(knob).unwrap();
         if unfaded {
             let _ = removal.unfaded();
         }
@@ -1111,7 +1109,7 @@ fn a_removal_a_commit_and_an_update_run_on_any_thread() {
 
     let (s, driven) = std::thread::spawn(move || {
         let mut s = s;
-        let removed = s.remove(dc);
+        let removed = s.remove(dc).map(|_| ());
         s.commit();
         let _ = s.update();
         (s, removed)

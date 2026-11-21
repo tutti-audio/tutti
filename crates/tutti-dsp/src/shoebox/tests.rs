@@ -32,12 +32,12 @@ fn room() -> ShoeboxConfig {
 }
 
 /// The taps of the room `config` makes, at the test rate.
-fn taps_of(config: ShoeboxConfig) -> Taps {
+fn taps_of(config: ShoeboxConfig) -> TapSet {
     ShoeboxRoom::try_from(config).unwrap().taps(RATE)
 }
 
 /// `(delay, gain)` of every tap, sorted.
-fn pairs(taps: &Taps) -> Vec<(f64, f64)> {
+fn pairs(taps: &TapSet) -> Vec<(f64, f64)> {
     let mut v: Vec<(f64, f64)> = taps
         .taps
         .iter()

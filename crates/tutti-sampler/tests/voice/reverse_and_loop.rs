@@ -1,7 +1,7 @@
 //! Reverse playback and loop crossfade, end to end.
 //!
 //! Two of the six `Playback` axes had no end-to-end coverage at all.
-//! `Direction::Reverse` appeared in exactly two source files and no test;
+//! `PlayDirection::Reverse` appeared in exactly two source files and no test;
 //! `LoopSetting::On` appeared in no test or example. Both are distinct read
 //! paths with their own index arithmetic, and both are the kind of thing that
 //! sounds "roughly right" while being wrong — a reversed read off by one plays
@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
-use tutti_sampler::{Direction, MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
+use tutti_sampler::{MemorySource, MemorySourceConfig, PlayDirection, Playback, SlotId, VoicePool};
 use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -130,7 +130,7 @@ fn render(node: &mut dyn Node, blocks: usize) -> Vec<f32> {
 /// `MemorySource` — the source has no direction verb, and `apply_direction` is
 /// a deliberate no-op on the memory tier. So exercising it means going through a
 /// pool, which is also the assembly a real render uses.
-fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool<f32>, Arc<Clock>) {
+fn reversed_pool(wave: Arc<Wave>, direction: PlayDirection) -> (VoicePool<f32>, Arc<Clock>) {
     let clock = Clock::new();
     // Placed, not free-running. `PlaybackSlot` reads `seated_position()`, which
     // needs a timeline; without one the slot returns early and emits silence, so
@@ -179,7 +179,7 @@ fn render_placed(pool: &mut VoicePool<f32>, clock: &Clock, blocks: usize) -> Vec
 #[test]
 fn reverse_playback_reads_the_source_backwards() {
     const LEN: usize = 4096;
-    let (mut pool, clock) = reversed_pool(ramp(LEN), Direction::Reverse);
+    let (mut pool, clock) = reversed_pool(ramp(LEN), PlayDirection::Reverse);
     let out = render_placed(&mut pool, &clock, 8);
 
     // The first frame must be the LAST source sample: len-1-0 = len-1.
@@ -219,8 +219,8 @@ fn reverse_playback_reads_the_source_backwards() {
 #[test]
 fn forward_and_reverse_are_mirror_images_of_each_other() {
     const LEN: usize = 4096;
-    let (mut fwd_pool, fwd_clock) = reversed_pool(ramp(LEN), Direction::Forward);
-    let (mut rev_pool, rev_clock) = reversed_pool(ramp(LEN), Direction::Reverse);
+    let (mut fwd_pool, fwd_clock) = reversed_pool(ramp(LEN), PlayDirection::Forward);
+    let (mut rev_pool, rev_clock) = reversed_pool(ramp(LEN), PlayDirection::Reverse);
     let fwd = render_placed(&mut fwd_pool, &fwd_clock, 4);
     let rev = render_placed(&mut rev_pool, &rev_clock, 4);
 
@@ -247,7 +247,7 @@ fn forward_and_reverse_are_mirror_images_of_each_other() {
 #[test]
 fn reverse_does_not_read_outside_the_source() {
     const LEN: usize = 512;
-    let (mut pool, clock) = reversed_pool(ramp(LEN), Direction::Reverse);
+    let (mut pool, clock) = reversed_pool(ramp(LEN), PlayDirection::Reverse);
     // 64 blocks = 4096 samples against a 512-sample source: eight times over.
     let out = render_placed(&mut pool, &clock, 64);
 
@@ -281,7 +281,7 @@ fn reverse_past_the_first_frame_is_silent() {
         w.append(Interleaved::new(&[v, v], w.layout()).unwrap())
             .unwrap();
     }
-    let (mut pool, clock) = reversed_pool(Arc::new(w), Direction::Reverse);
+    let (mut pool, clock) = reversed_pool(Arc::new(w), PlayDirection::Reverse);
     let out = render_placed(&mut pool, &clock, 16);
 
     for (k, &s) in out[..LEN].iter().enumerate() {
@@ -601,7 +601,7 @@ fn a_reversed_voice_with_a_loop_set_stays_bounded() {
         SlotId(1),
         source,
         Playback {
-            direction: Direction::Reverse,
+            direction: PlayDirection::Reverse,
             gain: Amplitude::new(1.0),
             ..Default::default()
         },

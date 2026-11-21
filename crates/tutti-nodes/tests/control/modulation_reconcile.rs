@@ -22,7 +22,7 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_modulation::{
-    Adsr, Clock, Declarations, Law, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
+    Adsr, Declarations, Law, LayerClock, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
     Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
 };
 use tutti_music::FrameClock;
@@ -341,7 +341,7 @@ fn sine(rate: f64) -> ModSource {
             shape: LfoShape::Sine,
             seed: 0,
         },
-        clock: Clock::Seconds {
+        clock: LayerClock::Seconds {
             rate: Hz::new(rate),
             phase: PhaseIncrement::new(0.0),
             anchor: None,
