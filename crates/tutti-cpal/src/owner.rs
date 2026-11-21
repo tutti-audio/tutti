@@ -17,8 +17,10 @@ use tutti_platform::{Executor, Task, is_driving, join_within, panic_message};
 
 use crate::error::{DeviceError, Result};
 
-/// The longest a drop waits for the owner thread to drop its value. A stream
-/// that has not stopped by then is left to finish on its own thread.
+/// The longest a drop waits for the owner thread to drop its value: longer than
+/// the executor's own bounds, since a device's stop can take seconds on some hosts
+/// (a WASAPI release, a CoreAudio stop). A stream that has not stopped by then is
+/// left to finish on its own thread.
 const STOP_PATIENCE: Duration = Duration::from_secs(5);
 
 /// The handle to a value owned by its own thread. Dropping it asks that
