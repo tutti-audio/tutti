@@ -112,7 +112,7 @@ impl IntoFuture for ParamRead {
 /// that lists none gives `Ok` of an empty snapshot.
 ///
 /// **What feeds it.** The plugin's hosting answers each question into a oneshot
-/// ([`AnyThread::parameter_descriptors_answer`] and its siblings): a served plugin's
+/// ([`AnyThread::parameter_descriptors_answer`](tutti_plugin_types::AnyThread::parameter_descriptors_answer) and its siblings): a served plugin's
 /// bridge control lane thread fills it with the server's reply, or with `None`
 /// at the query deadline; an in-process plugin's main thread fills it when it
 /// runs the work the question queued (at once, when the future is polled on the
