@@ -2,8 +2,6 @@
 //! one MPE mode, a take recorded with `s.midi().record`, its placement, and a
 //! saved route rule.
 
-use std::sync::Arc;
-
 #[cfg(feature = "midi-hardware")]
 use crate::common::OpenPorts as _;
 use crate::common::{Seen, Tap, blocks, offline};
@@ -75,8 +73,8 @@ impl Node for Latent {
 #[test]
 fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     let mut s = offline();
-    let seen = Seen::default();
-    let target = s.graph().add(Tap(Arc::clone(&seen)));
+    let seen = tutti_fixtures::Record::new();
+    let target = s.graph().add(Tap(seen.clone()));
     let latent = s.graph().add(ForkByClone(Latent));
     s.graph().connect(latent, tutti_session::Root).unwrap();
     let mut take = s

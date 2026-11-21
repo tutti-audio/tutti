@@ -41,7 +41,7 @@
 //! The three no-alloc tests run against the shared test plugin
 //! (`testing/tutti-shared-plugin`) registered as an Audio Unit, because its
 //! render allocates nothing: an allocation under the guard is the host's. The
-//! binary's global allocator is `AllocDisabler` (in `main.rs`) and an allocation
+//! binary's global allocator is `RtAllocCheck` (in `main.rs`) and an allocation
 //! in a guarded region **aborts the process**, so nextest (one process per test)
 //! reports an abort as the failure of that case. The unit is built by the same
 //! `cargo` invocation as the tests; a missing one is a panic, never a skip.
@@ -1121,7 +1121,7 @@ impl RtBufs {
 /// `mData` field of an existing `AudioBuffer` and a `Vec` reallocating look the
 /// same from the outside.
 ///
-/// A violation aborts the process rather than failing the test — `AllocDisabler`
+/// A violation aborts the process rather than failing the test — `RtAllocCheck`
 /// is not a catchable panic — so a regression appears as the binary dying with
 /// `memory allocation of N bytes failed`, not as an assertion diff.
 #[test]

@@ -17,8 +17,6 @@
 
 use tutti_graph::testing as common;
 
-use std::sync::{Arc, Mutex};
-
 use common::{Kind, TestNode, prepare};
 
 use tutti_fixtures::midi;
@@ -713,7 +711,7 @@ fn opening_refuses_a_port_that_does_not_exist_now() {
 /// with the frame it was due on: what the node's `process` saw.
 #[derive(Clone)]
 struct Probe {
-    heard: Arc<Mutex<Vec<TapEvent>>>,
+    heard: tutti_fixtures::Record<TapEvent>,
     ports: usize,
     /// The event capacity the probe declares; 0 declares none.
     capacity: u32,
@@ -746,7 +744,7 @@ impl Node for Probe {
 
 /// Two scripts, one latent, feed one input of a probe, with events on shared
 /// frames (so the merge's tie-break shows) and a note-off before a note-on.
-fn fan_in(r: &mut Rig, probe_ports: usize) -> Arc<Mutex<Vec<TapEvent>>> {
+fn fan_in(r: &mut Rig, probe_ports: usize) -> tutti_fixtures::Record<TapEvent> {
     let shared = vec![
         (5, on(1)),
         (40, off(1)),
@@ -756,12 +754,12 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> Arc<Mutex<Vec<TapEvent>>> {
     ];
     script(r, 1, Script::new(shared.clone()));
     script(r, 2, Script::new(shared).latency(15));
-    let heard = Arc::new(Mutex::new(Vec::new()));
+    let heard = tutti_fixtures::Record::new();
     r.ed.insert(
         NodeKey(3),
         "probe",
         ForkByClone(Probe {
-            heard: Arc::clone(&heard),
+            heard: heard.clone(),
             ports: probe_ports,
             capacity: 0,
         }),
@@ -815,7 +813,7 @@ fn an_input_tap_reads_what_the_node_heard() {
         commit(&mut r);
         assert_eq!(tap_ops(&r), 2);
         render(&mut r, sizes, 300);
-        let node_heard = heard.lock().unwrap().clone();
+        let node_heard = heard.lock().unwrap().to_vec();
         assert_eq!(node_heard.len(), 10, "both sources reached the node");
         assert_eq!(drain(&mut raw), node_heard, "{sizes:?}");
         let later: Vec<TapEvent> = node_heard
@@ -862,7 +860,7 @@ fn an_input_tap_of_one_source_and_of_none() {
         .expect("the input exists");
     commit(&mut r);
     render(&mut r, &[64], 200);
-    let node_heard = heard.lock().unwrap().clone();
+    let node_heard = heard.lock().unwrap().to_vec();
     assert_eq!(node_heard.len(), 5);
     assert_eq!(drain(&mut one), node_heard);
     assert!(drain(&mut none).is_empty());
@@ -882,12 +880,12 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
         s.cap = 16;
         script(&mut r, key, s);
     }
-    let heard = Arc::new(Mutex::new(Vec::new()));
+    let heard = tutti_fixtures::Record::new();
     r.ed.insert(
         NodeKey(3),
         "probe",
         ForkByClone(Probe {
-            heard: Arc::clone(&heard),
+            heard: heard.clone(),
             ports: 1,
             capacity: 1,
         }),
@@ -914,7 +912,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
     commit(&mut r);
     assert_eq!(event_delays(&r), 1, "the aligned tap is delayed");
     render(&mut r, &[64], 200);
-    let node_heard = heard.lock().unwrap().clone();
+    let node_heard = heard.lock().unwrap().to_vec();
     assert_eq!(node_heard.len(), 32);
     let later: Vec<TapEvent> = node_heard
         .iter()

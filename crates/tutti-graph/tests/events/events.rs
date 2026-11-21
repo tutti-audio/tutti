@@ -17,8 +17,8 @@
 use tutti_graph::testing as common;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use common::prepare;
 use proptest::prelude::*;
@@ -32,8 +32,8 @@ use tutti_graph::{NodeKey, Topology};
 use tutti_ump::Ump;
 use tutti_units::{At, Frame, Latency, Samples, Tail};
 
-type Ledger = Arc<Mutex<Vec<(u32, u64)>>>;
-type Inbox = Arc<Mutex<Vec<(u16, u32, u64, u64)>>>;
+type Ledger = tutti_fixtures::Record<(u32, u64)>;
+type Inbox = tutti_fixtures::Record<(u16, u32, u64, u64)>;
 
 /// Emits `[id, frame]` every `period` frames and writes each emission to its
 /// ledger.
@@ -216,7 +216,7 @@ fn units_of(
             Box::new(Emitter {
                 id,
                 period,
-                ledger: Arc::clone(ledger),
+                ledger: ledger.clone(),
                 stop: Arc::clone(stop),
             }),
         );
@@ -226,7 +226,7 @@ fn units_of(
         REC,
         Box::new(Recorder {
             ports: REC_PORTS,
-            inbox: Arc::clone(inbox),
+            inbox: inbox.clone(),
         }),
     );
     u
@@ -265,8 +265,8 @@ fn run_scheduled(
     let mut landings: Vec<Landing> = Vec::new();
     let mut spans: Spans = Vec::new();
     let mut now = 0u64;
-    let ledger: Ledger = Arc::default();
-    let inbox: Inbox = Arc::default();
+    let ledger: Ledger = tutti_fixtures::Record::new();
+    let inbox: Inbox = tutti_fixtures::Record::new();
     let stop = Arc::new(AtomicBool::new(false));
     let prep = prepare(MAX);
     let (mut ed, mut exec): (Editor, Executor) = Editor::with_event_capacity(prep, CAP);
@@ -335,7 +335,7 @@ fn run_scheduled(
         );
         assert_eq!(ed.commands_outstanding(), 0, "every command landed");
     }
-    let got = inbox.lock().unwrap().clone();
+    let got = inbox.lock().unwrap().to_vec();
     (phase_of, got, landings, spans)
 }
 
@@ -545,8 +545,8 @@ fn wide_event_fan_in_is_a_merge_tree_in_source_order() {
             "{width}: runs, then one merge of runs"
         );
 
-        let ledger: Ledger = Arc::default();
-        let inbox: Inbox = Arc::default();
+        let ledger: Ledger = tutti_fixtures::Record::new();
+        let inbox: Inbox = tutti_fixtures::Record::new();
         let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
         let stop = Arc::new(AtomicBool::new(false));
         for i in 0..width {
@@ -557,7 +557,7 @@ fn wide_event_fan_in_is_a_merge_tree_in_source_order() {
                 Box::new(Emitter {
                     id: i as u32 * 1000,
                     period: 1000,
-                    ledger: Arc::clone(&ledger),
+                    ledger: ledger.clone(),
                     stop: Arc::clone(&stop),
                 }),
             );
@@ -566,7 +566,7 @@ fn wide_event_fan_in_is_a_merge_tree_in_source_order() {
             REC,
             Box::new(Recorder {
                 ports: 1,
-                inbox: Arc::clone(&inbox),
+                inbox: inbox.clone(),
             }),
         );
         let (mut ed, mut exec) = Editor::with_event_capacity(prep, 4096);
@@ -655,10 +655,10 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
         (96, vec![96, 96, 50, 96, 3, 96, 96]),
     ] {
         for executor in [true, false] {
-            let inbox: Inbox = Arc::default();
+            let inbox: Inbox = tutti_fixtures::Record::new();
             let mut t = Topology::default();
             let cs = Clock.shape();
-            let ts = Tap(Arc::default()).shape();
+            let ts = Tap(tutti_fixtures::Record::new()).shape();
             t.nodes
                 .insert(clock, NodeSpec::new("c", cs.audio_in(), cs.audio_out()));
             t.nodes.insert(
@@ -693,7 +693,7 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
             let units = || -> BTreeMap<NodeKey, Box<dyn Node>> {
                 [
                     (clock, Box::new(Clock) as Box<dyn Node>),
-                    (tap, Box::new(Tap(Arc::clone(&inbox)))),
+                    (tap, Box::new(Tap(inbox.clone()))),
                 ]
                 .into()
             };
@@ -725,7 +725,7 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
                 audio, want,
                 "audio, max {max}, {schedule:?}, executor {executor}"
             );
-            let got = inbox.lock().unwrap().clone();
+            let got = inbox.lock().unwrap().to_vec();
             let want_ev: Vec<(u64, u64)> = (0..(total as u64).saturating_sub(DELAY as u64))
                 .map(|f| (f, f + DELAY as u64))
                 .collect();
@@ -746,7 +746,7 @@ fn a_feedback_delay_shorter_than_max_block_is_refused() {
     let (clock, tap) = (NodeKey(1), NodeKey(2));
     let mut t = Topology::default();
     let cs = Clock.shape();
-    let ts = Tap(Arc::default()).shape();
+    let ts = Tap(tutti_fixtures::Record::new()).shape();
     t.nodes
         .insert(clock, NodeSpec::new("c", cs.audio_in(), cs.audio_out()));
     t.nodes.insert(
@@ -809,8 +809,8 @@ fn wide_fan_in_matches_the_reference() {
     let valid = g.validate().unwrap();
     let prep = prepare(MAX);
     let run = |executor: bool| {
-        let ledger: Ledger = Arc::default();
-        let inbox: Inbox = Arc::default();
+        let ledger: Ledger = tutti_fixtures::Record::new();
+        let inbox: Inbox = tutti_fixtures::Record::new();
         let stop = Arc::new(AtomicBool::new(false));
         let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
         for i in 0..width {
@@ -819,7 +819,7 @@ fn wide_fan_in_matches_the_reference() {
                 Box::new(Emitter {
                     id: i as u32,
                     period: 4 + (i as u64 % 3),
-                    ledger: Arc::clone(&ledger),
+                    ledger: ledger.clone(),
                     stop: Arc::clone(&stop),
                 }),
             );
@@ -828,7 +828,7 @@ fn wide_fan_in_matches_the_reference() {
             REC,
             Box::new(Recorder {
                 ports: 1,
-                inbox: Arc::clone(&inbox),
+                inbox: inbox.clone(),
             }),
         );
         let (mut ed, mut exec) = Editor::with_event_capacity(prep, 4096);
@@ -849,7 +849,7 @@ fn wide_fan_in_matches_the_reference() {
             }
         }
 
-        inbox.lock().unwrap().clone()
+        inbox.lock().unwrap().to_vec()
     };
     let (a, b) = (run(true), run(false));
     assert!(a.len() > width, "the sources fired");

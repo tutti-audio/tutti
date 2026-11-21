@@ -21,8 +21,8 @@
 //!   is far smaller.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeSpec;
@@ -36,7 +36,7 @@ use tutti_ump::Ump;
 use tutti_units::{At, Frame, Latency, SampleRate, Samples};
 
 /// What a sink saw: `(block start frame, offset, port, tag)`.
-type Seen = Arc<Mutex<Vec<(u64, u32, u16, u32)>>>;
+type Seen = tutti_fixtures::Record<(u64, u32, u16, u32)>;
 
 /// Emits each planned `(frame, port, tag)` on its frame, on `ports` event
 /// outputs, declaring `cap` (or the default). Counts the pushes its writers
@@ -209,7 +209,7 @@ impl Rig {
             }
             r.dropped_event_count()
         };
-        (seen.lock().unwrap().clone(), dropped)
+        (seen.lock().unwrap().to_vec(), dropped)
     }
 }
 
@@ -245,11 +245,11 @@ fn burst(
 }
 
 fn sink(ports: u16, seen: &Seen) -> Make {
-    let seen = Arc::clone(seen);
+    let seen = seen.clone();
     Box::new(move || {
         Box::new(Sink {
             ports,
-            seen: Arc::clone(&seen),
+            seen: seen.clone(),
         })
     })
 }
@@ -288,7 +288,7 @@ fn ragged(total: u64, max: usize) -> Vec<usize> {
 /// The plan has no event delay: nothing on the path is latent.
 #[test]
 fn an_event_reaches_downstream_in_the_block_it_was_emitted() {
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     let frames = [0u64, 5, 63, 64 + 17, 200, 255];
     let plan: Vec<(u64, u16, u32)> = frames.iter().map(|&f| (f, 0, f as u32)).collect();
@@ -334,7 +334,7 @@ fn an_event_reaches_downstream_in_the_block_it_was_emitted() {
 #[test]
 fn fan_in_ties_go_by_source_key_then_port() {
     for k in [0u64, 1, 31, 62, 63] {
-        let seen: Seen = Arc::default();
+        let seen: Seen = tutti_fixtures::Record::new();
         let refused = Arc::new(AtomicUsize::new(0));
         let tie = 64 + k;
         let five = [(tie, 1, 51), (tie, 0, 50)];
@@ -406,7 +406,7 @@ fn fan_in_ties_go_by_source_key_then_port() {
 #[test]
 fn pdc_shifts_events_across_blocks_and_drops_none() {
     const LATE: usize = 141;
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     // A block's first and last frames, the 64-frame seam, and a chord.
     let frames = [0u64, 1, 60, 63, 64, 100, 127, 128, 300, 300, 300, 511];
@@ -466,7 +466,7 @@ fn pdc_shifts_events_across_blocks_and_drops_none() {
 #[test]
 fn an_event_feedback_edge_delays_by_its_declared_delay() {
     const DELAY: usize = 100;
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     let frames = [0u64, 27, 28, 63, 64, 90, 200];
     let plan: Vec<(u64, u16, u32)> = frames.iter().map(|&f| (f, 0, f as u32)).collect();
@@ -513,7 +513,7 @@ fn an_event_feedback_edge_delays_by_its_declared_delay() {
 /// A port that declares nothing takes the executor's default, and all 5 fit.
 #[test]
 fn a_port_past_its_declared_capacity_drops_the_newest_and_counts_them() {
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     for (cap, kept) in [(Some(3u32), 3usize), (None, 5)] {
         let plan: Vec<(u64, u16, u32)> = (0..5).map(|i| (70 + i, 0, i as u32)).collect();
         let want: Vec<(u64, u32, u16, u32)> =
@@ -551,7 +551,7 @@ fn a_port_past_its_declared_capacity_drops_the_newest_and_counts_them() {
 #[test]
 fn declared_capacities_size_merges_and_delays_so_nothing_is_lost() {
     const LATE: usize = 141;
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     // Every 64 frames, 8 events on one frame, for 10 blocks.
     let chord = |tag: u32| -> Vec<(u64, u16, u32)> {
@@ -654,7 +654,7 @@ impl Node for CappedRelay {
 fn a_delay_delivers_what_came_due_across_its_sources_blocks() {
     const LATE: usize = 13;
     const FEEDBACK: usize = 70;
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     let plan = [(63u64, 0u16, 1u32), (64, 0, 2)];
     let mut events = BTreeMap::new();
@@ -732,7 +732,7 @@ fn burst_unit(cap: u32, plan: &[(u64, u16, u32)], refused: &Arc<AtomicUsize>) ->
 fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
     const LATE: usize = 300;
     const PER_BLOCK: u64 = 32;
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     // 32 events in each of the first four 64-frame blocks, one per frame.
     let plan: Vec<(u64, u16, u32)> = (0..4u64)
@@ -747,7 +747,7 @@ fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
         "sink",
         Unforkable(Sink {
             ports: 1,
-            seen: Arc::clone(&seen),
+            seen: seen.clone(),
         }),
     );
     ed.insert(
@@ -791,7 +791,7 @@ fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
 #[test]
 fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     const LEN: usize = 640;
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     // One event a frame for the first 640 frames.
     let plan: Vec<(u64, u16, u32)> = (0..LEN as u64).map(|f| (f, 0, f as u32)).collect();
@@ -802,7 +802,7 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
         "sink",
         Unforkable(Sink {
             ports: 2,
-            seen: Arc::clone(&seen),
+            seen: seen.clone(),
         }),
     );
     ed.insert(NodeKey(2), "burst", burst_unit(16, &plan, &refused));
@@ -871,7 +871,7 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
 #[test]
 fn a_flush_into_a_port_a_lowered_bound_widened_drops_nothing() {
     const LATE: usize = 256;
-    let seen: Seen = Arc::default();
+    let seen: Seen = tutti_fixtures::Record::new();
     let refused = Arc::new(AtomicUsize::new(0));
     // A: 32 events in each of the first four 64-frame blocks.
     let a_plan: Vec<(u64, u16, u32)> = (0..4u64)
@@ -887,7 +887,7 @@ fn a_flush_into_a_port_a_lowered_bound_widened_drops_nothing() {
         "sink",
         Unforkable(Sink {
             ports: 1,
-            seen: Arc::clone(&seen),
+            seen: seen.clone(),
         }),
     );
     ed.insert(NodeKey(2), "a", burst_unit(32, &a_plan, &refused));

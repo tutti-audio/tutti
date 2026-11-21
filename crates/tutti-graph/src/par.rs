@@ -62,11 +62,18 @@
 //! # Panics on a worker
 //!
 //! A node that panics on any participant aborts the block's task graph (so
-//! the others stop taking tasks), and the caller panics once every
-//! participant has left, naming the cause. The node's own panic message has
-//! already been printed by the panic hook.
+//! the others stop taking tasks), and the caller resumes the first panic's
+//! own payload (in participant order) once every participant has left, so the
+//! caller unwinds with the node's message. The participant moves the payload
+//! into its [`Worker`] without allocating, and it is freed while the caller
+//! unwinds, never inside the block; so is a second participant's payload, which
+//! is not reported. Only when no payload was stored (the pool
+//! returned before the tasks were done) does the caller panic with a message
+//! naming the cause. The node's own panic message has already been printed by
+//! the panic hook.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::any::Any;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use tutti_buffers::Float;
@@ -158,6 +165,22 @@ pub(crate) struct Worker {
     dropped: Dropped,
     /// Whether a crossfade ended this block.
     fade_ended: bool,
+    /// The payload of a node's panic on this participant, moved here without
+    /// allocating; the caller resumes it once every participant has left.
+    panic: Option<Box<dyn Any + Send>>,
+}
+
+/// The workers of a block whose first panic the caller is resuming: dropped as
+/// the caller unwinds, it frees every other participant's payload then, never
+/// inside a block.
+struct Unclaimed<'w>(&'w mut [Worker]);
+
+impl Drop for Unclaimed<'_> {
+    fn drop(&mut self) {
+        for w in self.0.iter_mut() {
+            drop(w.panic.take());
+        }
+    }
 }
 
 /// The parallel executor's per-plan state: the task graph and every claim
@@ -253,6 +276,7 @@ impl Par {
                     overlay: Overlay::with_capacity(overlay),
                     dropped: Dropped::new(),
                     fade_ended: false,
+                    panic: None,
                 })
                 .collect(),
             worker_claims: ClaimTable::new(participants.max(1)),
@@ -349,7 +373,7 @@ struct Shared<'s, 'o, F: Float = f32> {
 /// # Panics
 ///
 /// If a node panicked on any participant (after every participant has left
-/// the block).
+/// the block): the first stored payload, in participant order, is resumed.
 pub(crate) fn run_block<F: Float>(
     par: &mut Par,
     pool: &Arc<dyn Pool>,
@@ -426,6 +450,12 @@ pub(crate) fn run_block<F: Float>(
         pool.run(wake, &|w| shared.participate(w));
         shared.graph.is_aborted() || !shared.graph.done()
     };
+    if aborted && let Some(payload) = workers.iter_mut().find_map(|w| w.panic.take()) {
+        // Every other participant's payload is freed by this guard as the
+        // caller unwinds, so none is left for a later block to drop in scope.
+        let _rest = Unclaimed(workers);
+        resume_unwind(payload);
+    }
     assert!(
         !aborted,
         "a node panicked on a parallel worker (its message is above), or the pool \
@@ -468,7 +498,8 @@ impl<F: Float> Shared<'_, '_, F> {
                     }
                 });
             }));
-            if r.is_err() {
+            if let Err(payload) = r {
+                ws.panic = Some(payload);
                 self.graph.abort();
             }
         });
@@ -482,6 +513,7 @@ impl<F: Float> Shared<'_, '_, F> {
             overlay,
             dropped,
             fade_ended,
+            panic: _,
         } = ws;
         let frames = self.frames;
         let mut flags = SharedFlags(self.flags);
