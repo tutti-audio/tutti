@@ -310,3 +310,30 @@ fn a_span_past_the_range_is_the_last_position_and_a_negative_one_the_start() {
         ReadPosition::START
     );
 }
+
+/// **`advanced` moves by exact counts**: `n` steps of a fractional step land where
+/// `n` single advances do, and the sum saturates at `MAX`.
+#[test]
+fn advanced_is_n_exact_steps_and_saturates() {
+    let step = ReadPosition::from_count(3 << 30); // 0.75 frame
+    let mut one_by_one = ReadPosition::START;
+    for _ in 0..1000 {
+        one_by_one = one_by_one.advanced(step, Samples::new(1));
+    }
+    let at_once = ReadPosition::START.advanced(step, Samples::new(1000));
+    assert_eq!(at_once, one_by_one);
+    assert_eq!(at_once.frames(), Samples::new(750));
+    assert_eq!(
+        ReadPosition::from_frames(Samples::new(10)).advanced(ReadPosition::START, Samples::new(5)),
+        ReadPosition::from_frames(Samples::new(10)),
+        "a zero step stays put"
+    );
+    assert_eq!(
+        ReadPosition::MAX.advanced(step, Samples::new(1)),
+        ReadPosition::MAX
+    );
+    assert_eq!(
+        ReadPosition::START.advanced(ReadPosition::MAX, Samples::new(2)),
+        ReadPosition::MAX
+    );
+}
