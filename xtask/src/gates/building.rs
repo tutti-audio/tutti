@@ -158,6 +158,7 @@ const NODE_AUTHOR: &str = "tutti-graph's node-author API: what a node declares a
     node is prepared with, not what an app configures";
 
 const CTOR: &[Rule] = &[Rule::CtorResult];
+const CHAIN: &[Rule] = &[Rule::ChainResult];
 const RANGE: &[Rule] = &[Rule::RangeMacro];
 const SETTER: &[Rule] = &[Rule::Setter];
 const WIDTH: &[Rule] = &[Rule::ConfigWidth];
@@ -248,6 +249,18 @@ pub(super) const ALLOW: &[Allow] = &[
         rules: &[],
         reason: "an FFI crate's raw types mirror a C ABI or an OS call, not an app's configuration",
     },
+    ty(
+        "crates/tutti-dsp/src/waveshape.rs",
+        "WaveshaperBank::antialiasing",
+        CHAIN,
+        "an antialiasing order is valid for a curve: validity of the kind and the order together, which neither type can carry",
+    ),
+    ty(
+        "crates/tutti-nodes/src/distortion.rs",
+        "DistortionConfig::antialiasing",
+        CHAIN,
+        "the same validity as `WaveshaperBank::antialiasing`: the config holds the kind the order must be valid for",
+    ),
     ty(
         "crates/tutti-buffers/src/input_output.rs",
         "InputOutput::new",

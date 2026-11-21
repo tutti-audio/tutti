@@ -15,7 +15,7 @@ fn spec() -> DistanceSpec {
 /// A spec whose reference is its farthest distance, so the level is 1 at every distance and
 /// the output is the delayed input alone.
 fn delay_only() -> DistanceSpec {
-    spec().reference(Metres::of(100.0))
+    spec().reference(ReferenceDistance::of(Metres::of(100.0)))
 }
 
 fn at(distance: f64) -> DistanceControls {
@@ -72,7 +72,7 @@ fn impulse(frames: usize) -> Vec<f64> {
 fn a_static_source_is_delayed_by_r_over_c_and_scaled_by_reference_over_r() {
     let r = distance_of(480);
     for reference in [1.0, 2.0] {
-        let spec = spec().reference(Metres::of(reference));
+        let spec = spec().reference(ReferenceDistance::of(Metres::of(reference)));
         let mut d = distance(spec, 1, &DistanceControls { distance: r });
         let y = run(&mut d, &[impulse(1000)], 1000, |_, _| {}).remove(0);
         let gain = reference / r.get();
@@ -299,4 +299,17 @@ fn a_reset_drops_what_was_in_flight() {
     d.reset();
     let y = run(&mut d, &[vec![0.0; 500]], 500, |_, _| {}).remove(0);
     assert!(y.iter().all(|&v| v == 0.0));
+}
+
+/// **A reference distance is at least 1 mm**: the level `r_ref / r` is a ratio of lengths, so
+/// zero and anything under a millimetre are refused rather than raised to it.
+#[test]
+fn a_reference_distance_takes_exactly_the_distances_from_a_millimetre() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: ReferenceDistance::new,
+        get: ReferenceDistance::get,
+        of: Some(ReferenceDistance::of),
+        valid: &[Metres::of(0.001), Metres::of(1.0), Metres::of(100.0)],
+        invalid: &[Metres::ZERO, Metres::of(0.000_999)],
+    });
 }

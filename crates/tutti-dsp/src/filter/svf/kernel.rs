@@ -87,6 +87,11 @@ impl SvfDesign {
 
     /// Computes SVF filter coefficients from parameters (pure function, no state).
     ///
+    /// The solve of a control value, which every caller reads at control rate with no one to
+    /// refuse it to: the cutoff is held in `1 Hz` to just under Nyquist (`tan` diverges at it),
+    /// `q` at `0.01` or above, a gain within `+-`[`MAX_GAIN`](Self::MAX_GAIN), and a NaN
+    /// gain is 0 dB.
+    ///
     /// The three tuning parameters are three different units, and taking them as
     /// [`Hz`] / [`Q`] / [`Db`] is what keeps them apart. As bare floats they are
     /// adjacent and interchangeable — the call reads as a run of positional numbers,

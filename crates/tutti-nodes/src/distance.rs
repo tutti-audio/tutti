@@ -2,7 +2,7 @@
 //! optional air absorption.
 
 use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock, Planes, PlanesMut};
-use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
+use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, Metres, SampleRate, Samples, Speed, Tail};
 
@@ -30,10 +30,9 @@ impl DistanceConfig {
         }
     }
 
-    /// The distance at which the level is 1 (at least a millimetre): a source nearer is not
-    /// louder.
+    /// The distance at which the level is 1: a source nearer is not louder.
     #[must_use]
-    pub fn reference(self, reference: Metres) -> Self {
+    pub fn reference(self, reference: ReferenceDistance) -> Self {
         Self {
             spec: self.spec.reference(reference),
             ..self
