@@ -216,7 +216,8 @@ fn harmony_session() -> (
     let tap = s.graph().add(HarmonyTap(Arc::clone(&seen)));
     let harmony = s.graph().add(HarmonyNode::new([]));
     s.graph()
-        .set_feed(tap, Feeder::Declared, vec![harmony.events_out()]);
+        .set_feed(tap, Feeder::Declared, vec![harmony.events_out()])
+        .unwrap();
     let _ = s.update();
     play(&s);
     (s, harmony, seen)
@@ -324,7 +325,8 @@ fn blocks_adopting_written_values_do_not_allocate() {
     let clip = s.midi().clip(note_sink).expect("the clip");
     let harmony = s.graph().add(HarmonyNode::new([]));
     s.graph()
-        .set_feed(chord_sink, Feeder::Declared, vec![harmony.events_out()]);
+        .set_feed(chord_sink, Feeder::Declared, vec![harmony.events_out()])
+        .unwrap();
     let _ = s.update();
     play(&s);
     blocks(&s, 2);
@@ -375,7 +377,8 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
+        .set_feed(synth, Feeder::Declared, vec![clip.events_out()])
+        .unwrap();
     let _ = s.update();
     s.graph()
         .replace(
