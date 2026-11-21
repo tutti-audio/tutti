@@ -110,7 +110,7 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     let mut node = Direct::new(
         CompressorNode::<f32>::from(
             CompressorConfig::new(
-                tutti_buffers::BusTopology::assumed(tutti_buffers::ChannelLayout::from(6u16))
+                tutti_buffers::BusTopology::default_for(tutti_buffers::ChannelLayout::from(6u16))
                     .expect("at most one bus wide"),
             )
             .key(KeySource::Sidechain)
@@ -195,7 +195,7 @@ fn limiter_node_wide_6ch_process_is_allocation_free() {
     gate(
         LimiterNode::<f32>::from(
             LimiterConfig::new(
-                BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                BusTopology::default_for(ChannelLayout::from(6u16)).expect("at most one bus wide"),
             )
             .controls(LimiterControls {
                 threshold: Db::new(-3.0),
@@ -273,6 +273,30 @@ fn gate_stereo_process_is_allocation_free() {
                 }),
         ),
         0.6,
+        16,
+        2_000,
+    );
+}
+
+/// A downward expander (a finite ratio) is a gate with a level-dependent closed gain, and runs
+/// without allocating.
+#[test]
+fn expander_process_is_allocation_free() {
+    gate(
+        GateNode::<f32>::from(
+            GateConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(GateControls {
+                    threshold: Db::new(-10.0),
+                    attack: Seconds::new(0.001),
+                    hold: Seconds::new(0.010),
+                    release: Seconds::new(0.100),
+                    range: Db::new(-60.0),
+                    ratio: CompressionRatio::new(3.0),
+                    ..GateControls::DEFAULT
+                }),
+        ),
+        0.1,
         16,
         2_000,
     );
@@ -462,7 +486,7 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
     let mut node = Direct::new(
         LimiterNode::<f32>::from(
             LimiterConfig::new(
-                BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                BusTopology::default_for(ChannelLayout::from(6u16)).expect("at most one bus wide"),
             )
             .controls(LimiterControls::DEFAULT),
         ),
@@ -745,7 +769,7 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
         frames: 19_200,
     };
     for width in [2u16, 6] {
-        let bus = BusTopology::assumed(ChannelLayout::from(width)).expect("one bus");
+        let bus = BusTopology::default_for(ChannelLayout::from(width)).expect("one bus");
         let key = Some(usize::from(width));
         for corners in [&CORNERS, &CLAMPED, &HUGE_KNEE] {
             sweep(
@@ -794,7 +818,7 @@ fn the_gate_corners_are_allocation_free_and_finite() {
         frames: 19_200,
     };
     for width in [1u16, 2, 6] {
-        let bus = BusTopology::assumed(ChannelLayout::from(width)).expect("one bus");
+        let bus = BusTopology::default_for(ChannelLayout::from(width)).expect("one bus");
         sweep(
             || {
                 GateNode::<f32>::from(
@@ -880,7 +904,7 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
     };
     for lookahead in [Seconds::new(1e-9), Seconds::new(1.0)] {
         for width in [2u16, 6] {
-            let bus = BusTopology::assumed(ChannelLayout::from(width)).expect("one bus");
+            let bus = BusTopology::default_for(ChannelLayout::from(width)).expect("one bus");
             for corners in [&CORNERS, &HOSTILE, &HOSTILE_BASE, &INFINITE] {
                 sweep(
                     || {
@@ -1038,7 +1062,7 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
                 sweep(
                     || {
                         MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-                            BusTopology::assumed(ChannelLayout::from(width)).unwrap(),
+                            BusTopology::default_for(ChannelLayout::from(width)).unwrap(),
                             MultibandBands::new(bands).unwrap(),
                         ))
                     },

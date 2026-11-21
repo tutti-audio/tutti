@@ -9,7 +9,7 @@ use tutti_graph::{RootError, fold_to_width};
 const M: f32 = <f32 as Float>::MINUS_3_DB;
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::assumed(ChannelLayout::from(n))
+    ChannelTopology::default_for(ChannelLayout::from(n))
 }
 
 fn width(n: u16) -> ChannelLayout {
@@ -37,7 +37,7 @@ fn a_channel_no_speaker_names_is_refused_for_every_destination() {
 
 /// An all-unassigned source is independent buses: channel `i` stays channel
 /// `i`, a wider destination is zero-filled, and a narrower one is refused, even
-/// at four, which `ChannelTopology::assumed` would read as quad.
+/// at four, which `ChannelTopology::default_for` would read as quad.
 #[test]
 fn an_unassigned_source_goes_by_index_and_only_widens() {
     let four = ChannelTopology::unassigned(ChannelLayout::QUAD);
@@ -56,12 +56,12 @@ fn an_unassigned_source_goes_by_index_and_only_widens() {
 }
 
 /// A bare four read in the engine's order is a quad: what a caller that reads
-/// a count that way gets by passing `assumed` first.
+/// a count that way gets by passing `default_for` first.
 #[test]
 fn a_bare_count_in_the_engines_order_places_by_speaker() {
     let mut out = [0.0f32; 2];
     fold_to_width::<f32>(
-        &ChannelTopology::assumed(ChannelLayout::QUAD),
+        &ChannelTopology::default_for(ChannelLayout::QUAD),
         ChannelLayout::STEREO,
     )
     .unwrap()

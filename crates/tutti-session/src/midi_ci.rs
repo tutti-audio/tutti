@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, Weak};
 
 use tutti_midi_ci::{
-    BodyLimit, CallError, CiDeviceId, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
+    BodyLimit, CallError, CiDeviceId, Muid, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
     PeStatus, PeTerminator, ProfileId, ProfileOutcome, ProfileRequest, ProfileState, ReportRequest,
     ResourceEntry, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
 };
@@ -45,7 +45,7 @@ use tutti_midi_hardware::{
     Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
 use tutti_rt::LockExt;
-use tutti_ump::MidiChannel;
+use tutti_ump::{MidiChannel, MidiGroup};
 
 use crate::SessionEvent;
 use crate::job::{JobOutputQueue, Ticket, job_kind};
@@ -148,12 +148,22 @@ impl PeFailure {
 #[derive(Clone)]
 pub(crate) struct PortLink {
     shared: Weak<InputShared>,
+    /// Upgrades while the session's ports live.
+    session: Weak<()>,
     outputs: JobOutputQueue,
 }
 
 impl PortLink {
-    pub(crate) fn new(shared: Weak<InputShared>, outputs: JobOutputQueue) -> Self {
-        Self { shared, outputs }
+    pub(crate) fn new(
+        shared: Weak<InputShared>,
+        session: Weak<()>,
+        outputs: JobOutputQueue,
+    ) -> Self {
+        Self {
+            shared,
+            session,
+            outputs,
+        }
     }
 
     /// A job for `request`, queued for the next poll, or already ended when
@@ -174,7 +184,7 @@ impl PortLink {
         job
     }
 
-    /// A [`Request`] for `request`, queued as [`submit`](Self::submit) queues a
+    /// A [`PeerReply`] for `request`, queued as [`submit`](Self::submit) queues a
     /// job: it resolves when the peer answers, or at once when the port cannot
     /// take it.
     fn reply<J, R>(
@@ -201,6 +211,9 @@ impl PortLink {
         J: crate::JobKind<Error = PeerError<E>>,
     {
         match self.shared.upgrade() {
+            // The port is gone: released when every handle was dropped and the
+            // session took it out, disconnected when the session itself ended.
+            None if self.session.strong_count() > 0 => reply.land(Err(PeerError::Released)),
             None => reply.land(Err(PeerError::Disconnected)),
             Some(shared) => shared.push(request, reply, lists, make),
         }
@@ -646,6 +659,11 @@ impl ListedResource {
     }
 }
 
+/// The peer a Group and a MUID name.
+const fn peer_at(group: MidiGroup, muid: Muid) -> PeerId {
+    PeerId { group, muid }
+}
+
 /// A handle the hardware layer holds of one peer, named by its Group and MUID.
 pub(crate) trait AtPeer {
     fn peer_id(&self) -> PeerId;
@@ -653,28 +671,19 @@ pub(crate) trait AtPeer {
 
 impl AtPeer for PeerProfiles {
     fn peer_id(&self) -> PeerId {
-        PeerId {
-            group: self.group(),
-            muid: self.muid(),
-        }
+        peer_at(self.group(), self.muid())
     }
 }
 
 impl AtPeer for ListedReporter {
     fn peer_id(&self) -> PeerId {
-        PeerId {
-            group: self.group(),
-            muid: self.muid(),
-        }
+        peer_at(self.group(), self.muid())
     }
 }
 
 impl AtPeer for PropertyPeer {
     fn peer_id(&self) -> PeerId {
-        PeerId {
-            group: self.group(),
-            muid: self.muid(),
-        }
+        peer_at(self.group(), self.muid())
     }
 }
 

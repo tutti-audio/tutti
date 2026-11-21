@@ -215,7 +215,7 @@ fn a_voice_plays_in_time_at_every_device_block_size() {
 /// own record of where the playhead was (its `Clock`), so neither sees the
 /// other's render as a jump: the nodes share no cursor to get wrong.
 ///
-/// Dry, not pitched: a stretch filter's fill-up would only delay the tone.
+/// Dry, not pitched: a stretch vocoder's fill-up would only delay the tone.
 #[test]
 fn two_voices_over_one_transport_both_play_the_tone() {
     let t = Transport::new(SampleRate::of(SR));

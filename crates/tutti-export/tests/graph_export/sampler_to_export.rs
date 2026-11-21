@@ -312,7 +312,7 @@ fn a_pitched_voice_exports_at_the_shifted_frequency() {
 /// Time-stretch must change duration, not pitch — through the export too.
 ///
 /// This is the assertion that caught a real defect in the sampler: `VoicePool`
-/// never applied `stretch::Unit::input_rate`, so the factor behaved as plain
+/// never fed its vocoder the frames it asked for, so the factor behaved as plain
 /// varispeed and 2.0x turned 440 Hz into 880 Hz. It is pinned in-tree at
 /// `voice_pool.rs`, but only against a live transport. Here it is pinned against
 /// the *export* clock, which is a different driver of the same code.
@@ -332,7 +332,7 @@ fn a_stretched_voice_exports_without_transposing() {
             err <= 0.02,
             "{name}: stretch must not move pitch — expected ~{BASE_HZ} Hz, \
              exported file measures {hz:.1} Hz ({:.2}% off). A factor acting as \
-             varispeed is the `input_rate` bug returning.",
+             varispeed is the varispeed bug returning.",
             err * 100.0
         );
         assert!(

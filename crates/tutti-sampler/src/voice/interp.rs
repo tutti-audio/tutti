@@ -156,7 +156,12 @@ impl Gate {
     /// `None` where no block is in hand ([`window_position`]): the tempo is
     /// the transport's.
     #[inline]
-    fn origin(&self, now: Beat, tempo: Bpm, clock: Option<&BlockClock<'_>>) -> SamplePosition {
+    pub(crate) fn origin(
+        &self,
+        now: Beat,
+        tempo: Bpm,
+        clock: Option<&BlockClock<'_>>,
+    ) -> SamplePosition {
         // Reached within the tolerance may be a hair before the start: that
         // is the start itself.
         let seconds_offset = match clock {
@@ -537,7 +542,7 @@ pub(crate) fn read_looped_frame<F: Float>(
 /// allocation-free.
 ///
 /// The destination is taken to be what the engine assumes for its width
-/// ([`ChannelTopology::assumed`]): a voice's outputs are a count, and the count is
+/// ([`ChannelTopology::default_for`]): a voice's outputs are a count, and the count is
 /// all there is to go on. A width with no order (3, 5, 7, 9 to 11, 13 and up)
 /// has no centre to name, so the sample goes to every channel, as it always
 /// did; so does a width of one or two, where the rule is exactly that, and a
@@ -570,8 +575,8 @@ impl<F: Float> MonoSpread<F> {
         }
         Self {
             fold: Fold::between(
-                &ChannelTopology::assumed(ChannelLayout::MONO),
-                &ChannelTopology::assumed(width),
+                &ChannelTopology::default_for(ChannelLayout::MONO),
+                &ChannelTopology::default_for(width),
             )
             .ok(),
         }
@@ -737,7 +742,7 @@ impl<F: Float> Place<F> {
         // A file that names no speakers is read in the engine's order for its
         // width.
         let named = if topology.is_unassigned() {
-            ChannelTopology::assumed(topology.width())
+            ChannelTopology::default_for(topology.width())
         } else {
             topology.clone()
         };
@@ -1210,7 +1215,7 @@ mod tests {
         for width in 1usize..=MAX_CHANNELS {
             let mut out = vec![9.0f32; width];
             read_frame(&w, 8.0, &mut out);
-            // The assumed placement of the width: a centre where it has one
+            // The default layout for the width: a centre where it has one
             // (5.1, 7.1, 7.1.4), the front pair of a quad, and no order
             // elsewhere (a fan; mono and stereo are the fan exactly).
             for (c, &s) in out.iter().enumerate() {
@@ -1239,8 +1244,8 @@ mod tests {
         for width in [1u16, 2, 6, 8] {
             let layout = ChannelLayout::from(width);
             let fold = Fold::between(
-                &ChannelTopology::assumed(ChannelLayout::MONO),
-                &ChannelTopology::assumed(layout),
+                &ChannelTopology::default_for(ChannelLayout::MONO),
+                &ChannelTopology::default_for(layout),
             )
             .unwrap();
             let spread = MonoSpread::to(layout);
@@ -1387,7 +1392,10 @@ mod tests {
         super::read_frame(&w, &place, SamplePosition::new(4.0), &mut out);
         assert_eq!(out, [0.0, 1.0, 2.0, 3.0, 6.0, 7.0, 4.0, 5.0]);
         // The engine's own order needs no fold.
-        let own = constant_wave(ChannelTopology::assumed(ChannelLayout::from(8u16)), &frame);
+        let own = constant_wave(
+            ChannelTopology::default_for(ChannelLayout::from(8u16)),
+            &frame,
+        );
         assert!(
             Place::<f32>::for_wave(&own, ChannelLayout::from(8u16))
                 .unwrap()
@@ -1439,7 +1447,7 @@ mod tests {
         let mut frame = [0.0f32; 12];
         frame[8] = 1.0; // top front left
         let w = Arc::new(constant_wave(
-            tutti_buffers::ChannelTopology::assumed(ChannelLayout::from(12u16)),
+            tutti_buffers::ChannelTopology::default_for(ChannelLayout::from(12u16)),
             &frame,
         ));
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
@@ -1674,7 +1682,7 @@ mod tests {
 
     /// A loop wrap inside a block re-seats the read at the loop's start on
     /// the wrap's frame, and the clock reports it as a jump (a new
-    /// generation): the buffered state behind a read — a stretch filter, the
+    /// generation): the buffered state behind a read — a stretch vocoder, the
     /// live disk reader — is flushed or crossfaded there.
     #[test]
     fn a_loop_wrap_inside_a_block_reseats_at_the_loop_start() {

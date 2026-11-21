@@ -599,13 +599,13 @@ fn a_caller_can_still_fold_to_stereo_itself() {
     // A file that names no speakers is read in the engine's order for its width.
     let file = decoder.topology();
     let file = if file.is_unassigned() {
-        tutti_buffers::ChannelTopology::assumed(file.width())
+        tutti_buffers::ChannelTopology::default_for(file.width())
     } else {
         file.clone()
     };
     tutti_buffers::Fold::between(
         &file,
-        &tutti_buffers::ChannelTopology::assumed(tutti_buffers::ChannelLayout::STEREO),
+        &tutti_buffers::ChannelTopology::default_for(tutti_buffers::ChannelLayout::STEREO),
     )
     .expect("a 5.1 file places into stereo")
     .frame(&native[..ch], &mut stereo);

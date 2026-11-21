@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 use tutti_graph::{Losses, UmpAt};
+use tutti_platform::Executor;
 use tutti_rt::LockExt;
 
 use tutti_graph::EventInletNode;
@@ -217,7 +218,8 @@ impl core::fmt::Debug for ChangeSink {
 /// use std::time::Duration;
 /// use tutti_midi_hardware::Devices;
 ///
-/// let devices = Devices::open()?;
+/// let executor = tutti_platform::Executor::new();
+/// let devices = Devices::open(&executor)?;
 /// let events = devices.subscribe();
 /// for device in events.initial() {
 ///     println!("{}: {}", device.id, device.name);
@@ -237,6 +239,8 @@ struct Inner {
     _watch: Box<dyn Watch>,
     backend: Box<dyn MidiEndpoints>,
     shared: Arc<Shared>,
+    /// What an output's heartbeat is spawned on.
+    executor: Executor,
 }
 
 impl core::fmt::Debug for Devices {
@@ -248,8 +252,13 @@ impl core::fmt::Debug for Devices {
 }
 
 impl Devices {
-    /// Lists this platform's devices and starts watching them; the watch stops
-    /// when the last `Devices` and [`DeviceEvents`] over it are dropped.
+    /// Lists this platform's devices and starts watching them, on a thread of
+    /// `executor` where the backend has one; the watch stops when the last
+    /// `Devices` and [`DeviceEvents`] over it are dropped.
+    ///
+    /// Dropping the last `Devices` stops the watch as [`Watch`] says, without
+    /// waiting for it; a connection opened through the backend closes, and its
+    /// port unsubscribes, as its own thread ends.
     ///
     /// Where the build has no MIDI backend (Windows, or alsa-lib older than
     /// 1.2.10) the list is empty and stays so, as enumeration is; opening a
@@ -259,17 +268,17 @@ impl Devices {
     ///
     /// The platform error from starting the watch, such as a thread that could
     /// not be spawned.
-    pub fn open() -> Result<Self> {
-        Self::open_over(backend::active())
+    pub fn open(executor: &Executor) -> Result<Self> {
+        Self::open_over(executor, backend::active(executor))
     }
 
     /// As [`open`](Self::open), over a supplied backend: a test's
-    /// `test_support::FakeBackend`.
+    /// `test_support::FakeBackend`. `executor` runs the outputs' Active Sensing.
     ///
     /// # Errors
     ///
     /// As [`open`](Self::open).
-    pub fn open_over(backend: Box<dyn MidiEndpoints>) -> Result<Self> {
+    pub fn open_over(executor: &Executor, backend: Box<dyn MidiEndpoints>) -> Result<Self> {
         let shared = Arc::new(Shared::default());
         let watch = backend.watch(ChangeSink {
             shared: Arc::clone(&shared),
@@ -279,6 +288,7 @@ impl Devices {
                 _watch: watch,
                 backend,
                 shared,
+                executor: executor.clone(),
             }),
         })
     }
@@ -353,6 +363,7 @@ impl Devices {
             port: producer.port(),
             ports: Arc::clone(ports),
             info,
+            _executor: self.inner.executor.clone(),
         };
         // On an error `input` drops here, and takes the port with it.
         input.connection = Some(self.inner.backend.open_input(handle, producer)?);
@@ -377,6 +388,7 @@ impl Devices {
             wire: Wire::new(described),
             refused: 0,
             heartbeat: None,
+            executor: self.inner.executor.clone(),
         })
     }
 
@@ -543,6 +555,10 @@ pub struct OpenInput {
     port: InputId,
     ports: Arc<HardwareMidiInputs>,
     info: DeviceInfo,
+    /// Keeps the executor of the connection's thread alive: declared last, so the
+    /// connection ends its thread and frees the port before the last clone of the
+    /// executor can shut it down.
+    _executor: Executor,
 }
 
 impl core::fmt::Debug for OpenInput {
@@ -603,15 +619,20 @@ impl OpenInput {
 /// ([`follow`](Self::follow) takes it from a
 /// [`MidiSession::poll`](crate::MidiSession::poll) report). UMP Stream messages pass in every form.
 pub struct OpenOutput {
-    /// The Active Sensing thread, once [`active_sensing`](Self::active_sensing)
-    /// started it. Declared first: it drops, and its thread ends holding the
-    /// sink, before the sink does, so the connection closes on the dropping thread.
+    /// The Active Sensing task, once [`active_sensing`](Self::active_sensing)
+    /// started it. Declared first: it is cancelled before the sink drops. A task
+    /// being polled when it is cancelled ends on its driver, which then drops the
+    /// sink it holds, so the connection may close on that thread.
     heartbeat: Option<Heartbeat>,
     info: DeviceInfo,
     sink: Arc<dyn DeviceOut>,
     wire: Wire,
     /// The packets the sink had no room for, for [`losses`](Self::losses).
     refused: u64,
+    /// What the heartbeat is spawned on. Declared after `sink`: the sink ends its
+    /// sender and frees the port before the last clone of the executor can shut
+    /// it down.
+    executor: Executor,
 }
 
 impl core::fmt::Debug for OpenOutput {
@@ -623,26 +644,28 @@ impl core::fmt::Debug for OpenOutput {
 }
 
 impl OpenOutput {
-    /// Starts this output sending Active Sensing (`0xFE`) from a thread of its own
-    /// whenever it has been silent for
+    /// Starts this output sending Active Sensing (`0xFE`) from a task on the
+    /// executor its [`Devices`] was opened with, whenever it has been silent for
     /// [`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL),
     /// until it is dropped: a transmitter that starts goes on (MIDI 1.0
     /// Detailed Specification p. 32), so there is no stopping it short of
-    /// closing the output. The thread sends nothing while the output's
+    /// closing the output. Dropping the output cancels the task without waiting
+    /// for a send under way.
+    ///
+    /// **The task runs only while something drives the executor.** On an executor
+    /// the app drives, Active Sensing stops when the app stops driving it, and a
+    /// receiver that has seen one releases its notes after about 300 ms.
+    /// The task sends nothing while the output's
     /// Protocol is MIDI 2.0, which has no Active Sensing, and sends again if
     /// the Protocol returns to MIDI 1.0.
-    ///
-    /// # Errors
-    ///
-    /// [`MidiHardwareError::Spawn`] when the thread cannot start.
-    pub fn active_sensing(&mut self) -> Result<()> {
+    pub fn active_sensing(&mut self) {
         if self.heartbeat.is_none() {
             self.heartbeat = Some(Heartbeat::start(
+                &self.executor,
                 Arc::clone(&self.sink),
                 self.wire.config().protocol,
-            )?);
+            ));
         }
-        Ok(())
     }
 
     /// Whether the output can still send; see

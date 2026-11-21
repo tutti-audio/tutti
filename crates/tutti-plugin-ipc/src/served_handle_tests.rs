@@ -203,6 +203,7 @@ fn handle_with_mock_server(
     })
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path.clone(),
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -288,6 +289,7 @@ fn handle_with_multi_reply_server(
     })
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path.clone(),
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,

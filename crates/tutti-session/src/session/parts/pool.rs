@@ -10,6 +10,14 @@ pub(crate) struct PoolPart<K: AppKey, C: Clock> {
     /// What the app declared loaded ([`Session::pool`](crate::Session::pool)).
     pub(crate) entries: Pool<K, C>,
     /// The source of the ids of this session's resources.
+    #[cfg_attr(
+        not(any(feature = "plugin", feature = "midi", feature = "device")),
+        expect(
+            dead_code,
+            reason = "the ids of plugins and MIDI ports (features `plugin`, `midi`); \
+                      a clock switch (`device`) carries them over"
+        )
+    )]
     pub(crate) resource_ids: ResourceIds,
 }
 

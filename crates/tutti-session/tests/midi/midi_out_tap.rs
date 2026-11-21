@@ -1,5 +1,5 @@
-//! A `midi_sink` is an output node an event tap on its output is read from,
-//! drained by `Phase::MidiOut` into the sink the host declared:
+//! A MIDI sink is an output node an event tap on its output is read from,
+//! drained by `Phase::MidiOut` into the sink the host opened:
 //! what reaches the wire, in what order and on which frames, what a full tap
 //! drops, and the tap following the graph to another rate.
 //!
@@ -17,11 +17,9 @@ use tutti_ump::{MidiGroup, Ump};
 use tutti_units::SampleRate;
 
 use tutti_midi_runtime::MidiClipNode;
-use tutti_session::{
-    Declared, EventInPort, EventOutPort, MidiSinkEntry, Peer, Presence, Resource, Session,
-    SinkOptions, Stamping, midi_sink,
-};
+use tutti_session::{EventInPort, EventOutPort, MidiSink, Session, Stamp, Stamping};
 use tutti_ump::{Message, System};
+use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber};
 use tutti_units::{Beat, BeatDuration};
 
 const RATE: f64 = 48_000.0;
@@ -44,8 +42,9 @@ impl Wire {
     }
 }
 
-/// A session with its clock enabled and a stamping-off sink on `wire`.
-fn rig(wire: &Wire) -> Session {
+/// A session with its clock enabled and a stamping-off sink on `wire`, with the
+/// sink's handle, which keeps it open.
+fn rig(wire: &Wire) -> (Session, MidiSink) {
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -59,11 +58,10 @@ fn rig(wire: &Wire) -> Session {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    s.pool(midi_sink("out", Arc::new(wire.clone())))
-        .expect("declares");
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
     let _ = s.update();
     s.play().expect("room");
-    s
+    (s, sink)
 }
 
 fn render(s: &Session, frames: usize) {
@@ -90,7 +88,7 @@ fn ticks(batch: &[UmpAt]) -> Vec<u32> {
 #[test]
 fn the_clock_reaches_the_output_in_order_on_its_frames() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, _sink) = rig(&wire);
     render(&s, 24_000);
     let _ = s.update();
     let batches = wire.batches();
@@ -117,7 +115,7 @@ fn the_clock_reaches_the_output_in_order_on_its_frames() {
 #[test]
 fn a_full_tap_counts_what_it_drops() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, sink) = rig(&wire);
     let clock = s.midi_nodes().unwrap().sync;
     let mut all = s
         .graph()
@@ -166,7 +164,7 @@ fn a_full_tap_counts_what_it_drops() {
         "the spacing holds across the drain's 256-event chunks"
     );
     assert_eq!(
-        s.midi_sink(&"out").unwrap().losses(),
+        sink.losses(),
         Losses::lost((total - 1_024) as u64),
         "the rest is the sink's own: what its node's tap had no room for"
     );
@@ -179,7 +177,7 @@ fn a_full_tap_counts_what_it_drops() {
 #[test]
 fn reopening_one_tap_leaves_the_others_fed() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, _sink) = rig(&wire);
     let clock = s.midi_nodes().unwrap().sync;
     let mut first = s
         .graph()
@@ -230,13 +228,12 @@ fn reopening_one_tap_leaves_the_others_fed() {
 #[test]
 fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, out) = rig(&wire);
     s.midi_nodes()
         .unwrap()
         .sync_controls
         .messages()
         .store(tutti_midi_runtime::SyncMessages::OFF);
-    let out = s.midi_sink(&"out").expect("loaded");
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
@@ -261,71 +258,81 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
     assert_eq!(kinds, [(0, true), (24_000, false)], "{sent:?}");
 }
 
-/// **A sink is a pool entry**: its node is in the graph while the entry is
-/// declared, its handle reads `Live` and says whether it stamps, declaring the
-/// same sink again keeps the entry, and another sink under the key replaces it
-/// (the old handle reads `Closed` and its node leaves the graph).
+/// **A sink is open while a handle is held**: its node is in the graph, a
+/// clone keeps it open, and a second sink on the same `MidiOut` is a sink of
+/// its own.
 #[test]
-fn a_sink_is_a_pool_entry_that_a_new_sink_replaces() {
+fn a_sink_is_open_while_a_handle_is_held() {
     let first: Arc<dyn MidiOut> = Arc::new(Wire::default());
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
-    s.pool(midi_sink("out", Arc::clone(&first)))
-        .expect("declares");
+    let sink = s.open_midi_sink(Arc::clone(&first)).run();
     let _ = s.update();
-    let sink = s.midi_sink(&"out").expect("loaded");
-    assert_eq!(sink.presence(), Presence::Live);
-    assert_eq!(sink.info().options, SinkOptions::new());
     assert!(s.graph_ref().contains(sink.node()), "the sink's node");
 
-    s.pool(midi_sink("out", Arc::clone(&first)))
-        .expect("declares");
+    let node = sink.node();
+    let clone = sink.clone();
+    drop(sink);
     let _ = s.update();
-    assert_eq!(
-        s.midi_sink(&"out").unwrap().id(),
-        sink.id(),
-        "the same sink keeps its entry"
-    );
+    let _ = s.update();
+    assert!(s.graph_ref().contains(node), "a clone keeps the sink open");
 
-    let second: Arc<dyn MidiOut> = Arc::new(Wire::default());
-    s.pool(midi_sink("out", second).options(SinkOptions::new().stamping(Stamping::Jr)))
-        .expect("declares");
-    let _ = s.update();
-    let _ = s.update();
-    assert_eq!(sink.presence(), Presence::Closed, "the old one ended");
-    assert!(!s.graph_ref().contains(sink.node()), "and its node left");
-    let now = s.midi_sink(&"out").expect("the new one loaded");
-    assert_eq!(now.info().options.stamping, Stamping::Jr);
-    assert_ne!(now.id(), sink.id());
+    let other = s.open_midi_sink(first).stamping(Stamping::Jr).run();
+    assert_ne!(other.node(), clone.node(), "a sink of its own");
 }
 
-/// **Releasing the entry ends the sink**: its handle reads `Closed`, its node
-/// leaves the graph, and a clip that was wired to it is heard by nobody.
+/// **Dropping the last handle ends the sink**: its node leaves the graph, and
+/// a clip that was wired to it is heard by nobody.
 #[test]
-fn releasing_the_entry_ends_the_sink() {
+fn dropping_the_last_handle_ends_the_sink() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
-    let sink = s.midi_sink(&"out").expect("loaded");
+    let (mut s, sink) = rig(&wire);
     render(&s, 4_096);
     let _ = s.update();
     assert!(!wire.batches().is_empty(), "the clock reached the sink");
 
-    s.pool(Vec::<Declared<&str, MidiSinkEntry>>::new())
-        .expect("declares nothing");
+    let node = sink.node();
+    drop(sink);
     let _ = s.update();
+    assert!(
+        s.graph_ref().contains(node),
+        "its node stays until the graph has rendered past the drop"
+    );
+    render(&s, 3 * 512);
     let _ = s.update();
-    assert_eq!(sink.presence(), Presence::Closed);
-    assert!(!s.graph_ref().contains(sink.node()), "its node left");
+    assert!(!s.graph_ref().contains(node), "its node left");
     let _ = wire.batches();
     render(&s, 4_096);
     let _ = s.update();
     assert!(wire.batches().is_empty(), "nothing more reaches it");
-    assert!(matches!(
-        s.midi_sink(&"out"),
-        Err(tutti_session::HandleError::NotPooled("out"))
-    ));
+}
+
+/// **A note off sent just before the last handle of a sink drops reaches the
+/// sink**: the sink stays open, its tap drained into it, until the graph has
+/// rendered past the drop.
+#[test]
+fn a_note_off_sent_just_before_the_last_handle_drops_reaches_the_sink() {
+    let wire = Wire::default();
+    let (mut s, sink) = rig(&wire);
+    let node = sink.node();
+    let mut keys = s.midi().input(node).expect("the node takes events");
+    let _ = s.update();
+    let _ = wire.batches();
+
+    keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
+        .expect("queued");
+    drop(sink);
+    let _ = s.update();
+    assert!(s.graph_ref().contains(node), "no block has rendered it yet");
+    render(&s, 3 * 512);
+    let _ = s.update();
+    assert!(!s.graph_ref().contains(node), "the sink retired");
+    let off = wire.batches().iter().flatten().any(|(_, ump)| {
+        matches!(ump.note_key_event(), Some(NoteKeyEvent::Off(k)) if k.note().get() == 60)
+    });
+    assert!(off, "the sink received the note off");
 }
 
 /// **A JR-stamped sink stamps at the graph's new rate after a re-rate.** At 44.1
@@ -339,10 +346,10 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
-    s.pool(
-        midi_sink("out", Arc::new(wire.clone())).options(SinkOptions::new().stamping(Stamping::Jr)),
-    )
-    .expect("declares");
+    let out = s
+        .open_midi_sink(Arc::new(wire.clone()))
+        .stamping(Stamping::Jr)
+        .run();
     let _ = s.update();
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     let _ = s.update();
@@ -353,7 +360,6 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
     let _ = s.update();
     let _ = wire.batches();
 
-    let out = s.midi_sink(&"out").expect("loaded");
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,

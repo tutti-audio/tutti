@@ -55,23 +55,17 @@ pub fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
 }
 
 impl<T> OneshotSender<T> {
-    /// Answers, and wakes the receiver's task.
+    /// Answers: dropping the sender, which this does, wakes the receiver's task.
     ///
     /// # Errors
     ///
     /// `value` back when the receiver is gone.
     pub fn send(self, value: T) -> Result<(), T> {
-        let waker = {
-            let mut state = lock(&self.shared);
-            if state.receiver_gone {
-                return Err(value);
-            }
-            state.value = Some(value);
-            state.waker.take()
-        };
-        if let Some(waker) = waker {
-            waker.wake();
+        let mut state = lock(&self.shared);
+        if state.receiver_gone {
+            return Err(value);
         }
+        state.value = Some(value);
         Ok(())
     }
 }
@@ -92,16 +86,26 @@ impl<T> Drop for OneshotSender<T> {
 impl<T> OneshotReceiver<T> {
     /// Reads the answer if it came; pending stores the task's waker.
     ///
+    /// The answer is read once: a poll after it reads [`RecvError`], as the sender
+    /// is gone.
+    ///
     /// # Errors
     ///
-    /// [`RecvError`] when the sender dropped without answering.
+    /// [`RecvError`] when the sender dropped without answering, or its answer was
+    /// already read.
     pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, RecvError>> {
         let mut state = lock(&self.shared);
         match state.value.take() {
             Some(value) => Poll::Ready(Ok(value)),
             None if state.sender_gone => Poll::Ready(Err(RecvError)),
             None => {
-                state.waker = Some(cx.waker().clone());
+                if !state
+                    .waker
+                    .as_ref()
+                    .is_some_and(|w| w.will_wake(cx.waker()))
+                {
+                    state.waker = Some(cx.waker().clone());
+                }
                 Poll::Pending
             }
         }
@@ -130,71 +134,16 @@ impl<T> std::fmt::Debug for OneshotReceiver<T> {
 
 impl<T> Drop for OneshotReceiver<T> {
     fn drop(&mut self) {
-        lock(&self.shared).receiver_gone = true;
+        // The task that stored its waker is no longer waiting: the waker goes with
+        // the receiver, outside the lock, so a later send wakes no one.
+        let waker = {
+            let mut state = lock(&self.shared);
+            state.receiver_gone = true;
+            state.waker.take()
+        };
+        drop(waker);
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::task::Wake;
-
-    struct Count(AtomicUsize);
-
-    impl Wake for Count {
-        fn wake(self: Arc<Self>) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    fn counting() -> (Arc<Count>, Waker) {
-        let count = Arc::new(Count(AtomicUsize::new(0)));
-        let waker = Waker::from(Arc::clone(&count));
-        (count, waker)
-    }
-
-    /// A value sent before the receiver is polled is read by the first poll.
-    #[test]
-    fn a_value_sent_before_the_poll_is_read_by_it() {
-        let (tx, rx) = oneshot::<u8>();
-        tx.send(5).unwrap();
-        let (_, waker) = counting();
-        let mut cx = Context::from_waker(&waker);
-        assert_eq!(rx.poll_recv(&mut cx), Poll::Ready(Ok(5)));
-    }
-
-    /// A send wakes the task that polled the receiver pending, once, and the poll
-    /// after it reads the value.
-    #[test]
-    fn a_send_wakes_the_pending_task_and_the_next_poll_reads_it() {
-        let (tx, rx) = oneshot::<u8>();
-        let (count, waker) = counting();
-        let mut cx = Context::from_waker(&waker);
-        assert_eq!(rx.poll_recv(&mut cx), Poll::Pending);
-        tx.send(7).unwrap();
-        assert_eq!(count.0.load(Ordering::SeqCst), 1);
-        assert_eq!(rx.poll_recv(&mut cx), Poll::Ready(Ok(7)));
-    }
-
-    /// A sender dropped unanswered ends the receiver with `RecvError`, and wakes its
-    /// task.
-    #[test]
-    fn a_dropped_sender_ends_the_receiver_with_a_recv_error_and_wakes() {
-        let (tx, rx) = oneshot::<u8>();
-        let (count, waker) = counting();
-        let mut cx = Context::from_waker(&waker);
-        assert_eq!(rx.poll_recv(&mut cx), Poll::Pending);
-        drop(tx);
-        assert_eq!(count.0.load(Ordering::SeqCst), 1);
-        assert_eq!(rx.poll_recv(&mut cx), Poll::Ready(Err(RecvError)));
-    }
-
-    /// A send to a dropped receiver hands the value back.
-    #[test]
-    fn a_send_to_a_dropped_receiver_returns_the_value() {
-        let (tx, rx) = oneshot::<u8>();
-        drop(rx);
-        assert_eq!(tx.send(3), Err(3));
-    }
-}
+mod tests;

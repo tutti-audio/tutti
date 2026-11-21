@@ -21,20 +21,17 @@
 //! stays until the new load lands; if that load fails the old value is dropped,
 //! its handles read closed, and the entry reads failed.
 //!
-//! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler` and a `decode-*`) and
-//! `soundfont` (feature `soundfont`) are the data kinds, and
-//! `Session::plugin_entry` (feature `plugin`) declares a plugin, which a node
-//! then takes (`Session::add_pooled_plugin`). A load's outcome lands
-//! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
-//! [`Session::pool_state`] reads where an entry stands. A handle read by key
-//! (`Session::audio`, `Session::soundfont`) is a clone that owns nothing:
-//! dropping it leaves its entry loaded. [`Session::when_loaded`] runs a
-//! closure once an entry is loaded.
+//! Each kind of entry is a [`PoolEntry`]; `Session::plugin_entry` (feature
+//! `plugin`) declares a plugin, which a node then takes
+//! (`Session::add_pooled_plugin`). A
+//! load's outcome lands in [`Session::update`] as a
+//! [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
+//! [`Session::pool_state`] reads where an entry stands.
+//! [`Session::when_loaded`] runs a closure once an entry is loaded.
 //!
-//! An entry that reads an asset takes the asset's [`Identity`](tutti_platform::Identity)
-//! on the worker that loads it (a file's is its path and stamp, bytes' is minted
-//! once), and [`Session::refresh_pool`] takes it again, where the app runs it, and
-//! [`Session::apply`] loads again the entries whose asset changed; the diff itself never reads metadata.
+//! A wave file and a SoundFont are not entries: [`Session::load_audio`] and
+//! [`Session::load_soundfont`] return values the app runs, and the handles they
+//! return are the app's.
 //!
 //! # Stages
 //!
@@ -54,28 +51,18 @@
 //! is pending, and a bounce refuses while one is
 //! (`BounceError::PoolPending`, feature `export`).
 
-#[cfg(feature = "soundfont")]
-use std::sync::Arc;
-
 use crate::Session;
 
 mod config;
-#[cfg(any(all(feature = "sampler", codec), feature = "soundfont"))]
-mod data;
 mod entry;
 mod job;
 mod key;
 mod open;
-mod refresh;
 mod report;
 mod run;
 mod table;
 
 pub use config::PoolConfig;
-#[cfg(all(feature = "sampler", codec))]
-pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
-#[cfg(feature = "soundfont")]
-pub use data::{SoundFontFile, soundfont};
 pub use entry::{
     Declared, IntoPool, Life, LoadError, Owned, PoolEntry, PoolLoad, PoolSet, Retention, Sharing,
     stranded_loads,
@@ -84,7 +71,6 @@ pub(crate) use entry::{Defer, Staged};
 pub use job::{PoolJobError, PoolLoaded};
 pub use key::PoolKey;
 pub use open::OpenCx;
-pub use refresh::{RefreshError, RefreshPool, RefreshReport, RefreshedPool};
 pub use report::{PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
@@ -144,7 +130,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// (a plugin that gave up, a device unplugged mid-run) reopens: its load
     /// runs again, and the entry reads [`PoolState::Reloading`] until it lands
     /// as a [`PoolEvent::Reloaded`]. It is the kind that decides whether an
-    /// entry is lost ([`PoolEntry::is_lost`]); the data kinds never are.
+    /// entry is lost ([`PoolEntry::is_lost`]).
     ///
     /// # Errors
     ///
@@ -211,40 +197,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         self.pool.entries.when_loaded(key, Box::new(then))
     }
 
-    /// The check of the assets the pool's entries read, as a value the app
-    /// runs.
-    ///
-    /// Each entry that reads an asset took the asset's
-    /// [`Identity`](tutti_platform::Identity) when it loaded (a file's is its
-    /// path with its length and modification time). [`RefreshPool::run`] takes
-    /// each identity again, anywhere the app likes, and
-    /// [`apply`](Self::apply) compares: an entry whose identity differs reloads
-    /// as it does for a changed identity (the old value stays until the new one
-    /// lands, as a [`PoolEvent::Reloaded`]), and two keys that share a load
-    /// reload with one. An entry whose asset can no longer be opened keeps what
-    /// it has, and is named as unreadable. An entry with no identity (its file
-    /// could not be stamped when it loaded) loads again once its asset has one,
-    /// and that load's worker stage takes it; a kind whose load has no worker
-    /// stage takes none, so it loads again at every refresh. An asset of bytes
-    /// never changes, so it never reloads, and an asset that never has an
-    /// identity is not watched.
-    ///
-    /// The refresh is cut from the pool as it stands now: an entry released,
-    /// declared again or loaded again before the apply makes it
-    /// [`RefreshError::Stale`], and nothing is applied; run the refresh again.
-    ///
-    /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
-    /// never does, so a key declared after its file changed shares the loaded
-    /// entry until the next refresh, and a plugin binary that changed on disk
-    /// or a provided asset is never detected. Dropping the value reloads
-    /// nothing.
-    pub fn refresh_pool(&self) -> RefreshPool {
-        RefreshPool::new(
-            crate::apply::Cut::of(self),
-            self.pool.entries.stamped_files(),
-        )
-    }
-
     /// Where the entry under `key` stands, `None` when the pool has none: never
     /// declared, or released.
     #[must_use]
@@ -253,44 +205,5 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         P: crate::AppKey,
     {
         self.pool.entries.state(&PoolKey::new(key))
-    }
-}
-
-#[cfg(all(feature = "sampler", codec))]
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// What the `audio_file` entry under `key` read: its wave, or its stream's
-    /// header ([`AudioEntry`]).
-    ///
-    /// The handle is a clone and owns nothing: dropping it leaves the entry
-    /// loaded, and the entry's release leaves it reading what it had.
-    ///
-    /// # Errors
-    ///
-    /// [`HandleError::NotPooled`] when the key is not declared (never, or
-    /// released); [`HandleError::WrongKind`] when it is another kind of entry;
-    /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn audio<P>(&self, key: &P) -> Result<AudioEntry<C::Float>, HandleError<P>>
-    where
-        P: crate::AppKey,
-    {
-        self.pool.entries.handle::<P, AudioFile>(key)
-    }
-}
-
-#[cfg(feature = "soundfont")]
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
-    /// The handle owns nothing: dropping it leaves the entry loaded.
-    ///
-    /// # Errors
-    ///
-    /// [`HandleError::NotPooled`] when the key is not declared (never, or
-    /// released); [`HandleError::WrongKind`] when it is another kind of entry;
-    /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn soundfont<P>(&self, key: &P) -> Result<Arc<tutti_sf2::SoundFont>, HandleError<P>>
-    where
-        P: crate::AppKey,
-    {
-        self.pool.entries.handle::<P, SoundFontFile>(key)
     }
 }

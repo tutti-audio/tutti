@@ -23,21 +23,33 @@
 //! ([`params`](Plugin::params)). A crossfade to another plugin (`Graph::crossfade_plugin`,
 //! `replace_plugin`) carries the record over to the incoming plugin, with
 //! nothing of the outgoing plugin's state (its last good state, an in-flight
-//! snapshot job, its mirror); replacing it with a native node
+//! snapshot task, its mirror); replacing it with a native node
 //! (`Graph::replace`, `crossfade`) or removing the node drops it.
 //!
 //! # The main thread
 //!
 //! An in-process plugin's handle (`PluginHandle`, VST2 today) works from any
-//! thread, which is what the snapshot and parameter-read jobs below need: a
+//! thread, which is what the snapshot and parameter-read tasks below need: a
 //! call off the main thread is posted to the session's
 //! [`MainWork`](tutti_plugin_types::MainWork) and the caller waits, for at most two
 //! seconds, for the main thread's next tick to run it
 //! ([`Session::update`], called on the process's main thread, drains it). A host that does not
 //! call it there
 //! has those calls answer "unavailable" at the deadline (`StateError::Unavailable`, `None`,
-//! `false`). A host blocking its main thread on such a job (joining it there)
-//! gets the same.
+//! `false`).
+//!
+//! # Plugin tasks
+//!
+//! The loops below (a reload, a parameter read, a snapshot) each run a blocking round trip
+//! as a task on the session's executor, on its blocking pool (32 threads, shared with other
+//! blocking work: a task may wait in the pool's queue). [`Session::plugin_tasks`] counts the
+//! ones queued or running. A task holds clones of its plugin's handle, so
+//! dropping or [closing](Session::close) a session waits for them first: each is bounded by
+//! its round trip's IPC deadline (the `Timeouts` load for a reload, param for a read, state
+//! for a snapshot), a close on the main thread runs the work they hand it while it waits,
+//! and past the bound the session warns and goes on without them. A close from the main
+//! thread therefore leaves no in-process plugin's close stranded unless a task outlives its
+//! deadline.
 //!
 //! What retires an in-process record (a removal, a crossfade to another plugin
 //! or to a native node, a reload's dead plugin) parks it in the graveyard
@@ -71,16 +83,16 @@
 //! - **Parameters.** The values the plugin reported (or the host set) go into
 //!   its mirror, and (`modulation`) into the knob of the lane on that
 //!   parameter when it has one (doc 014 §8.2). A mirror rebuilt by a crossfade
-//!   to another plugin, or by a rescan the plugin announced, is read as a job
+//!   to another plugin, or by a rescan the plugin announced, is read by a task
 //!   on the session's executor (`SessionBuilder::executor`): one round trip
-//!   per parameter, landed in a later [`Session::update`]. Until then the
+//!   per parameter, landed through the plugin inbox in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
 //!   `snapshot_interval` (8 s by default, set on the `SessionBuilder`) of
-//!   `now`, as a job on the same executor (a blocking round trip), landed in a later
-//!   update. One is in flight per plugin at most: the landing holds the
-//!   plugin's snapshot token until it lands, whether the job ran, panicked or
-//!   was dropped.
+//!   `now`, by a task on the same executor (a blocking round trip), landed through
+//!   the plugin inbox in a later update. One is in flight per plugin at most: the
+//!   task holds the plugin's snapshot token until its end lands, whether it ran,
+//!   panicked or was dropped.
 //!
 //! # Hang
 //!
@@ -99,13 +111,13 @@
 //! - **Death.** The node stays in the graph, silent, with its wiring and
 //!   every lane fed to it; [`PluginChange::Reloading`].
 //! - **Load.** When the backoff passes, the existing `PluginLoad` (with
-//!   the last good state as its state) is submitted to the executor as a job.
-//!   Its landing, in a later `Session::update` and on whatever thread runs it
+//!   the last good state as its state) runs as a task on the executor.
+//!   Its end lands through the plugin inbox in a later `Session::update`, on whatever thread runs it
 //!   (no main-thread proof: a served replacement opens off the main thread,
 //!   and one that came back unopened for the main thread is a failed attempt),
 //!   swaps the loaded plugin in at the same node (`Graph::replace_plugin`)
 //!   and keeps the record: the last good state, its age, the failure
-//!   history. A job the executor drops is [`RecoveryFailure::ReloadDropped`],
+//!   history. A task the executor drops is [`RecoveryFailure::ReloadDropped`],
 //!   one that panics [`RecoveryFailure::ReloadPanicked`]: a failed attempt.
 //! - **Reported.** [`PluginChange::Recovered`] says whether the state
 //!   came back and how old it was; a spent budget is
@@ -151,11 +163,12 @@ use tutti_units::{SampleRate, Samples};
 mod entry;
 #[cfg(test)]
 mod fake_hosting;
+mod inbox;
 mod lost;
 mod rebind;
 pub use rebind::PortsRefusal;
-mod preset_job;
-mod state_job;
+mod preset;
+mod state;
 pub(crate) use lost::Lost;
 
 use entry::PooledLink;
@@ -163,16 +176,17 @@ pub use entry::{
     AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginInfo, PluginPorts,
     PoolPluginEntry, PooledPlugin,
 };
-pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
-pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
+pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
+pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
-use crate::jobs::{Landing, PluginLanding};
 use crate::plugin_diagnostics::Figures;
+use crate::session::parts::Loop;
 use crate::{
-    Diagnostics, GiveUp, HangDetector, Key, OtherPeer, PeerState, PluginBuses, PluginParams,
-    PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, SavedPeer,
-    Session, SessionEvent, WorkerError,
+    Diagnostics, GiveUp, HangDetector, Key, PeerState, PluginBuses, PluginParams, PortCounts,
+    Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, Session, SessionEvent,
 };
+pub(crate) use inbox::Inbox;
+use inbox::{Arrival, contained};
 
 /// How often a healthy plugin's state is captured, by default: 8 s.
 /// [`SessionBuilder::snapshot_interval`](crate::SessionBuilder::snapshot_interval)
@@ -192,6 +206,10 @@ pub(crate) struct PluginLoad {
     state: Option<Arc<PeerState>>,
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
+    /// The session's executor, which a served plugin's exit watch runs on. The
+    /// load upgrades it as it opens a served plugin and holds it only while it
+    /// does, so a queued load never keeps the executor alive.
+    executor: tutti_platform::WeakExecutor,
 }
 
 impl std::fmt::Debug for PluginLoad {
@@ -210,7 +228,7 @@ impl PluginLoad {
     /// modulation lane's knob starts at. Any thread; it blocks.
     ///
     /// A plugin hosted in process is not opened here: an in-process load is
-    /// confined to the main thread, so the job returns it unopened and the
+    /// confined to the main thread, so the task returns it unopened and the
     /// pool's main-thread stage opens it there (a library load and an
     /// instance's init, with no subprocess to wait for).
     ///
@@ -236,6 +254,19 @@ impl PluginLoad {
         }
     }
 
+    /// The session's executor while it lives: a load that runs once the
+    /// session is dropping is refused.
+    ///
+    /// The open is the spawn: a served plugin's exit watch is spawned inside it, so the
+    /// strong handle lives only for the launch, which the load deadline bounds
+    /// (`Timeouts::load`), and drops when the open returns. A session's drop waits for a
+    /// reload task inside the open (see the module docs), so the executor outlives the
+    /// launch; if the last other handle goes first the open still ends, and the server's
+    /// `ProcessGuard` reaps the child when the plugin or the load that owns it drops.
+    fn executor(&self) -> Result<tutti_platform::Executor, IpcError> {
+        self.executor.upgrade().ok_or(IpcError::ShutDown)
+    }
+
     /// [`run`](Self::run)'s open, on this thread.
     fn open(self, at: Opening) -> Open {
         // The state goes in **before the plugin is activated** (`open_with_state`):
@@ -244,18 +275,27 @@ impl PluginLoad {
         // it is not silent.
         let state = self.state.as_deref().map(PeerState::bytes);
         let opened = match (at, state) {
-            (Opening::Served, None) => {
-                HostPlugin::open_served(&self.config, &self.work, &self.loadable, self.rate)
-                    .map(|plugin| (plugin, None))
-            }
-            (Opening::Served, Some(state)) => HostPlugin::open_served_restoring(
-                &self.config,
-                &self.work,
-                &self.loadable,
-                self.rate,
-                state,
-            )
-            .map(|(plugin, restore)| (plugin, Some(restore))),
+            (Opening::Served, None) => self.executor().and_then(|executor| {
+                HostPlugin::open_served(
+                    &self.config,
+                    &executor,
+                    &self.work,
+                    &self.loadable,
+                    self.rate,
+                )
+                .map(|plugin| (plugin, None))
+            }),
+            (Opening::Served, Some(state)) => self.executor().and_then(|executor| {
+                HostPlugin::open_served_restoring(
+                    &self.config,
+                    &executor,
+                    &self.work,
+                    &self.loadable,
+                    self.rate,
+                    state,
+                )
+                .map(|(plugin, restore)| (plugin, Some(restore)))
+            }),
             (Opening::OnMain(main), None) => {
                 HostPlugin::open_in_process(main, &self.work, &self.loadable, self.rate)
                     .map(|plugin| (plugin, None))
@@ -293,7 +333,7 @@ impl PluginLoad {
             let (mut values, read) = tutti_plugin_host::PluginParamValues::start(plugin.handle());
             // A read the plugin did not answer (its list unavailable) leaves
             // the mirror not ready and goes to the hosted record, to be handed
-            // out as a job.
+            // out as a task.
             let unread = match read.run() {
                 Ok(read) => {
                     values.land(read);
@@ -315,7 +355,7 @@ impl PluginLoad {
 /// when the load-time read was not answered.
 struct Mirror {
     values: tutti_plugin_host::PluginParamValues,
-    /// Becomes the hosted record's `param_read`, to be run as a job.
+    /// Becomes the hosted record's `param_read`, to be run as a task.
     unread: Option<tutti_plugin_host::ParamRead>,
 }
 
@@ -343,7 +383,7 @@ impl Open {
 pub(crate) type ParamValues =
     Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
 
-/// Where a load is opened: on the job's thread, or on the main thread an
+/// Where a load is opened: on the task's thread, or on the main thread an
 /// in-process plugin is confined to.
 #[derive(Clone, Copy)]
 enum Opening {
@@ -353,7 +393,7 @@ enum Opening {
 
 /// What a `PluginLoad`'s run did.
 enum Opened {
-    /// Opened (or failed to) on the job's thread. Boxed: a plugin is far
+    /// Opened (or failed to) on the task's thread. Boxed: a plugin is far
     /// larger than an unopened load.
     Done(Box<Open>),
     /// Hosted in process: opened on the main thread.
@@ -406,7 +446,7 @@ impl std::fmt::Debug for PluginLoaded {
 }
 
 impl PluginLoaded {
-    /// Opens what the run left: nothing for a plugin opened on the job's
+    /// Opens what the run left: nothing for a plugin opened on the task's
     /// thread, the plugin itself for one hosted in process, which opens on
     /// `main` (without it the open is refused).
     fn finish(self, main: Option<MainThreadMarker>) -> (Loadable, AudioConfig, Open) {
@@ -828,7 +868,7 @@ pub(crate) struct HostedPlugin {
     origin: Option<Origin>,
     recovery: Option<Recovery>,
     reload: Reload,
-    /// Held by the snapshot job in flight, if one is.
+    /// Held by the snapshot task in flight, if one is.
     snapshot_token: Arc<()>,
     /// When the last snapshot was asked for, or (until the first) when the
     /// plugin was first observed.
@@ -854,13 +894,13 @@ pub(crate) struct HostedPlugin {
     refused_writes: Arc<std::sync::atomic::AtomicU64>,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
     /// was not answered, or the plugin announced a rescan), until
-    /// `Phase::Plugins` hands it to the host as a job.
+    /// `Phase::Plugins` starts it as a task.
     param_read: Option<tutti_plugin_host::ParamRead>,
     /// What the outgoing mirror declared, when a replace put the same plugin
     /// ([`PluginRef::is_same_plugin`]) at the node: the value table keeps these
     /// declarations and values until the new read lands, which replaces them.
     carried: Option<Vec<crate::value::CarriedParam>>,
-    /// Held by that job: a later read mints a new one, and the earlier read
+    /// Held by that task: a later read mints a new one, and the earlier read
     /// lands nowhere.
     mirror_token: Arc<()>,
     /// The node of a plugin that is gone renders silence in the plugin's
@@ -945,6 +985,17 @@ impl Gate {
         self.0.lock_recover().ended = true;
     }
 
+    /// Whether the plugin is gone: removed or replaced.
+    pub(crate) fn is_ended(&self) -> bool {
+        self.0.lock_recover().ended
+    }
+
+    /// Whether `other` is this same plugin instance's gate: a replaced plugin
+    /// has a gate of its own.
+    pub(crate) fn is(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// The ids the mirror declares now (a read landed).
     pub(crate) fn declare(&self, mirror: &tutti_plugin_host::PluginParamValues) {
         self.0.lock_recover().declared = mirror.descriptors().iter().map(|p| p.id()).collect();
@@ -971,10 +1022,15 @@ struct Origin {
 struct Reload {
     /// When to hand the load out.
     due: Option<Instant>,
-    /// Held by the job in flight; a new one per job, so a late landing of an
-    /// earlier job is recognised.
+    /// Held by the task in flight; a new one per task, so a late landing of an
+    /// earlier task is recognised.
     token: Arc<()>,
     in_flight: bool,
+    /// Raised by the task when it begins to run; a task queued behind a full pool has not
+    /// raised it, and its load deadline has not begun.
+    started: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the recovery's clock was restarted at the instant `started` was seen.
+    clock_started: bool,
     /// The node's latency before the failure.
     latency_before: Samples,
     /// The age of a snapshot left out of the reload (see
@@ -1085,15 +1141,15 @@ impl HostedPlugin {
     /// of the outgoing plugin's state carries over but what it lost
     /// ([`Plugin::losses`] stays cumulative): its last good state is
     /// cleared (its bytes would restore the wrong plugin), a fresh snapshot token
-    /// makes a job of the outgoing plugin still in flight land nowhere, the
+    /// makes a task of the outgoing plugin still in flight land nowhere, the
     /// snapshot clock restarts, and its own-bypass state (the episode, the waits
     /// and the count) starts over.
     ///
     /// (`modulation`) A record that kept a parameter mirror gets one for
     /// the incoming plugin, from its handle (where its reports now arrive),
-    /// not yet ready: its values are read by a job (one round trip per
+    /// not yet ready: its values are read by a task (one round trip per
     /// parameter, so not on the calling thread), which the next
-    /// `Phase::Plugins` submits to the session's executor.
+    /// `Phase::Plugins` starts on the session's executor.
     /// The outgoing mirror's report callback was on the outgoing handle,
     /// which reports nothing here once it is gone.
     ///
@@ -1277,7 +1333,9 @@ impl HostedPlugin {
         };
         self.reload.due = Some(now + delay);
         self.reload.in_flight = false;
-        // A job of an earlier attempt lands nowhere.
+        self.reload.started = Arc::default();
+        self.reload.clock_started = false;
+        // A task of an earlier attempt lands nowhere.
         self.reload.token = Arc::new(());
         out.push(event(
             node,
@@ -1306,10 +1364,14 @@ impl HostedPlugin {
     /// plugin's own would arrive: a load the host made moves values the plugin
     /// may not report, and the next `Phase::Plugins` reads them again.
     pub(crate) fn refresh_values(&self) {
-        queue(
-            &self.notices,
-            PluginSignal::Refresh(PluginRefresh::ParamValues),
-        );
+        let mut waiting = self.notices.lock_recover();
+        // One read serves every request made before the next phase.
+        if !waiting
+            .iter()
+            .any(|signal| matches!(signal, PluginSignal::Refresh(PluginRefresh::ParamValues)))
+        {
+            waiting.push(PluginSignal::Refresh(PluginRefresh::ParamValues));
+        }
     }
 
     /// Whether the plugin reacts to the host's automation mode.
@@ -1334,6 +1396,14 @@ impl HostedPlugin {
             .takes_automation_mode()
             .then(|| crate::value::AutomationModeSlot::cell(self.handle.clone()));
         table.provide_plugin(node, entry, mode);
+    }
+
+    /// The IPC timeouts the plugin was loaded with, which bound its loops' round trips; the
+    /// defaults for a plugin with no origin (one the host inserted in process).
+    fn timeouts(&self) -> tutti_plugin_types::Timeouts {
+        self.origin
+            .as_ref()
+            .map_or_else(Default::default, |origin| origin.config.timeouts)
     }
 
     /// Asks for the parameters to be read again (the plugin announced a
@@ -1455,8 +1525,21 @@ impl<'a> Plugin<'a> {
         self.hosted.losses()
     }
 
-    /// The plugin's saved states: the last good one, the withheld one, a save
-    /// now, and a restore.
+    /// The presets the plugin lists, read now on the main thread: the list of
+    /// the plugin instance at this node, which [`Session::load_preset`] takes
+    /// back. A plugin that lists none, or is gone, has an empty list.
+    pub fn presets(&self, main: MainThreadMarker) -> crate::PluginPresets {
+        let handle = &self.hosted.handle;
+        let presets = crate::PluginPresets::new(handle.preset_support(), handle.instance());
+        if presets.support().can_list() {
+            presets.fill(handle.presets(main));
+        }
+        presets
+    }
+
+    /// The plugin's saved states: the last good one and the withheld one.
+    /// A save now and a restore are [`Session::save_state`] and
+    /// [`Session::restore_state`].
     pub fn state(&self) -> StateView<'a> {
         StateView {
             hosted: self.hosted,
@@ -1532,8 +1615,9 @@ impl<'a> Plugin<'a> {
     }
 }
 
-/// A hosted plugin's states ([`Plugin::state`]): what the session holds
-/// of them, a save now, and a restore.
+/// A hosted plugin's states ([`Plugin::state`]): what the session holds of
+/// them. A save now and a restore are [`Session::save_state`] and
+/// [`Session::restore_state`].
 #[derive(Debug, Clone, Copy)]
 pub struct StateView<'a> {
     hosted: &'a HostedPlugin,
@@ -1542,7 +1626,7 @@ pub struct StateView<'a> {
 impl<'a> StateView<'a> {
     /// The last state captured while the plugin was healthy: the
     /// crash-recovery copy a reload restores, up to a snapshot interval
-    /// stale. A project is saved from [`save`](Self::save), not from this.
+    /// stale. A project is saved with [`Session::save_state`], not from this.
     pub fn last_good(&self) -> Option<&'a PeerState> {
         self.hosted.snapshot.as_ref()
     }
@@ -1555,50 +1639,6 @@ impl<'a> StateView<'a> {
     pub fn withheld(&self) -> Option<&'a PeerState> {
         self.hosted.withheld.as_ref()
     }
-
-    /// Saves the plugin's state for `state_use` now, as a blocking round trip
-    /// to it (ten seconds at worst; an in-process plugin's is run by the main
-    /// thread's next tick, see the module docs). A pooled plugin's state goes through
-    /// [`Session::save_state`], a job that lands in an update.
-    ///
-    /// # Errors
-    ///
-    /// The plugin's [`StateError`]: it is gone, busy, refused, or has no state
-    /// route.
-    pub fn save(&self, state_use: StateUse) -> Result<PeerState, StateError> {
-        let bytes = self.hosted.handle.save_state(state_use)?;
-        Ok(PeerState::of_plugin(self.hosted.plugin.clone(), bytes))
-    }
-
-    /// Restores `state` into the plugin. The parameter mirror is read again by
-    /// the next `Phase::Plugins`, whatever values the state moved. A pooled
-    /// plugin's state goes through [`Session::restore_state`], a job.
-    ///
-    /// # Errors
-    ///
-    /// [`RestoreError::OtherPeer`] when `state` was saved from another peer
-    /// (nothing is sent to the plugin); otherwise the plugin's own
-    /// [`RestoreError::State`].
-    pub fn restore(&self, main: MainThreadMarker, state: &PeerState) -> Result<(), RestoreError> {
-        state
-            .check_for(&SavedPeer::Plugin(self.hosted.plugin.clone()))
-            .map_err(RestoreError::OtherPeer)?;
-        self.hosted.handle.load_state(main, state.bytes())?;
-        self.hosted.refresh_values();
-        Ok(())
-    }
-}
-
-/// Why [`StateView::restore`] restored nothing.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum RestoreError {
-    /// The state was saved from another peer: nothing was sent to the plugin.
-    #[error(transparent)]
-    OtherPeer(OtherPeer),
-    /// The plugin was asked and could not restore it.
-    #[error(transparent)]
-    State(#[from] StateError),
 }
 
 /// `Phase::RenderMode`'s record: the mode last announced.
@@ -1617,38 +1657,41 @@ impl Default for RenderModeState {
 
 /// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
-    /// Applies what a hosted plugin's job ended with.
-    pub(crate) fn land_plugin_job(
-        &mut self,
-        landing: PluginLanding<'_>,
-        out: &mut Vec<SessionEvent>,
-    ) {
-        match landing.0 {
-            Landing::Reload {
-                node,
-                token,
-                snapshot_age,
-                loaded,
-            } => self.land_reload(node, token, snapshot_age, *loaded, out),
-            Landing::ReloadFailed {
-                node,
-                token,
-                failed,
-            } => self.reload_job_failed(node, token, failed, out),
-            Landing::Params {
-                node,
-                token,
-                values,
-            } => {
-                self.land_params(node, token, values);
-            }
-            Landing::Snapshot {
-                node,
-                token,
-                asked,
-                state,
-            } => {
-                self.land_snapshot(node, token, asked, state);
+    /// Lands what the plugin loops sent since the last phase, in arrival order.
+    fn land_arrivals(&mut self, out: &mut Vec<SessionEvent>) {
+        for arrival in self.plugins.inbox.drain() {
+            match arrival {
+                Arrival::Reload {
+                    node,
+                    token,
+                    snapshot_age,
+                    loaded,
+                } => self.land_reload(node, &token, snapshot_age, *loaded, out),
+                Arrival::ReloadEnded { node, token, cause } => {
+                    self.reload_ended(node, &token, cause, out);
+                }
+                Arrival::Params {
+                    node,
+                    token,
+                    values,
+                } => {
+                    self.land_params(node, &token, values);
+                }
+                Arrival::ParamsLost { node, token } => {
+                    if let Some(hosted) = self.graph.plugins.get_mut(&node)
+                        && Arc::ptr_eq(&token, &hosted.mirror_token)
+                    {
+                        hosted.reread_params();
+                    }
+                }
+                Arrival::Snapshot {
+                    node,
+                    token,
+                    asked,
+                    state,
+                } => {
+                    self.land_snapshot(node, &token, asked, state);
+                }
             }
         }
     }
@@ -1725,6 +1768,20 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         self.graph.graveyard.len()
     }
 
+    /// How many plugin tasks (a snapshot, a parameter read, a reload) are queued or
+    /// running on the session's executor. They share its blocking pool with the session's
+    /// other blocking work, so a task may wait in the pool's queue; a session's close or
+    /// drop waits for them, each bounded by its round trip's IPC deadline.
+    pub fn plugin_tasks(&self) -> usize {
+        self.plugins.tasks.in_flight()
+    }
+
+    /// How many plugin tasks the executor refused to start since the session began (it had
+    /// shut down, or the OS refused a thread). Each loop asks again at its next interval.
+    pub fn plugin_task_refusals(&self) -> u64 {
+        self.plugins.tasks.refused()
+    }
+
     /// Every hosted plugin, in node order.
     pub fn plugins(&self) -> impl Iterator<Item = Plugin<'_>> {
         self.graph
@@ -1739,7 +1796,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// plugin for its next snapshot (the landing's own `token` clone drops).
     ///
     /// A snapshot of a plugin no longer at its node (removed, or crossfaded
-    /// to another plugin since the job was asked for) lands nowhere: it is
+    /// to another plugin since the task was asked for) lands nowhere: it is
     /// the outgoing plugin's state, not a recovery point for the node.
     pub(crate) fn land_snapshot(
         &mut self,
@@ -1773,7 +1830,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// longer at its node (removed, or crossfaded again since) lands
     /// nowhere. A read the plugin did not answer (its list unavailable) does
     /// not land either: the mirror stays not ready, the read goes back to the
-    /// plugin's record, and the next `Phase::Plugins` submits it again.
+    /// plugin's record, and the next `Phase::Plugins` starts it again.
     pub(crate) fn land_params(
         &mut self,
         node: NodeKey,
@@ -2073,7 +2130,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         ));
     }
 
-    /// One reload attempt failed (or its job was dropped): the next backoff,
+    /// One reload attempt failed (or its task was dropped): the next backoff,
     /// or the end of trying.
     fn fail_reload(
         &mut self,
@@ -2187,7 +2244,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// One phase's work on a plugin being replaced: install a replacement
-    /// that was waiting, count a dropped or overdue job as failed, or hand
+    /// that was waiting, count a dropped or overdue task as failed, or hand
     /// the load out when its backoff has passed.
     fn drive_reload(
         &mut self,
@@ -2203,6 +2260,22 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         if let Some(ready) = hosted.reload.ready.take() {
             self.install_reload(node, ready, now, out);
             return;
+        }
+        if hosted.reload.in_flight {
+            // A load queued behind a full pool has not begun: its deadline starts when its
+            // task does.
+            if !hosted
+                .reload
+                .started
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                return;
+            }
+            if !std::mem::replace(&mut hosted.reload.clock_started, true)
+                && let Some(recovery) = hosted.recovery.as_mut()
+            {
+                recovery.start_clock(now);
+            }
         }
         let (tick, load_timeout) = hosted
             .recovery
@@ -2226,52 +2299,40 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         }
         hosted.reload.due = None;
         hosted.reload.in_flight = true;
+        let timeouts = origin.config.timeouts;
         let load = PluginLoad {
             loadable: origin.loadable.retargeted(hosted.plugin.clone()),
             rate,
             config: origin.config,
             state: hosted.snapshot.clone().map(Arc::new),
             work: self.plugins.work.clone(),
+            executor: self.plugins.executor.clone(),
         };
         let token = Arc::clone(&hosted.reload.token);
         let snapshot_age = hosted
             .snapshot_from
             .map(|t| now.saturating_duration_since(t));
-        // blocks: a plugin load is an IPC round trip, bounded by the load deadlines.
-        // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job stalls
-        // `update` until the plugin lane makes it await its reply.
-        self.jobs.submit_blocking(
-            "tutti-reload",
-            move || load.run(),
-            move |session, ended, out| match ended {
-                Ok(loaded) => session.land_plugin(
-                    Landing::Reload {
-                        node,
-                        token: &token,
-                        snapshot_age,
-                        loaded: Box::new(loaded),
-                    },
-                    out,
-                ),
-                Err(failed) => session.land_plugin(
-                    Landing::ReloadFailed {
-                        node,
-                        token: &token,
-                        failed,
-                    },
-                    out,
-                ),
-            },
-        );
+        let started = Arc::clone(&hosted.reload.started);
+        let post = self
+            .plugins
+            .inbox
+            .post()
+            .reload(node, token, snapshot_age, started);
+        // blocks: a plugin load is an IPC round trip, bounded by the load deadlines. The task
+        // holds the post and the load's weak executor, never an executor. A refused task is
+        // dropped unrun, which ends the reload as dropped through its post.
+        let _ = self.plugins.spawn(Loop::Reload, &timeouts, move || {
+            post.run(move || load.run());
+        });
     }
 
-    /// The reload's job ended without a result (the executor dropped it, or it
-    /// panicked): a failed attempt, unless the attempt no longer applies.
-    pub(crate) fn reload_job_failed(
+    /// The reload's task ended without a result (it was dropped, or it panicked): a
+    /// failed attempt, unless the attempt no longer applies.
+    pub(crate) fn reload_ended(
         &mut self,
         node: NodeKey,
         token: &Arc<()>,
-        failed: WorkerError,
+        cause: RecoveryFailure,
         out: &mut Vec<SessionEvent>,
     ) {
         let now = self.plugins.now;
@@ -2283,12 +2344,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         {
             return;
         }
-        let cause = match failed {
-            WorkerError::Panicked { message } => RecoveryFailure::ReloadPanicked { message },
-            // `Dropped`, and any end a later version names: no replacement
-            // came of the job.
-            _ => RecoveryFailure::ReloadDropped,
-        };
         let mut gave_up = Vec::new();
         self.fail_reload(node, cause, now, out, &mut gave_up);
         self.finish_gave_up(gave_up, out);
@@ -2305,6 +2360,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         self.graph.reconcile_own_bypass();
         let now = cx.now;
         self.plugins.now = now;
+        // Before what is due is decided: a landed snapshot frees its plugin for the next.
+        self.land_arrivals(out);
         let interval = self.plugins.snapshot_interval;
         let hang_policy = self.plugins.hang;
         let values = self.graph.value_table();
@@ -2328,7 +2385,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             // it reported it.
             let heard = std::mem::take(&mut *hosted.notices.lock_recover());
             // A rescan the plugin announced re-reads what it declares and the
-            // value of each, as a job below.
+            // value of each, as a task below.
             if heard.iter().any(|notice| {
                 matches!(
                     notice,
@@ -2456,31 +2513,29 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             };
             let snapshot = due.then(|| {
                 hosted.snapshot_at = Some(now);
-                (hosted.handle.clone(), Arc::clone(&hosted.snapshot_token))
+                (
+                    hosted.handle.clone(),
+                    Arc::clone(&hosted.snapshot_token),
+                    hosted.timeouts(),
+                )
             });
 
             if let Some(read) = hosted.param_read.take() {
                 let token = Arc::clone(&hosted.mirror_token);
+                let post = self.plugins.inbox.post();
                 // blocks: the parameter read is an IPC round trip, bounded by `param_wait`.
-                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
-                // stalls `update` until the plugin lane makes it await its reply.
-                self.jobs.submit_blocking(
-                    "tutti-params",
-                    move || read.run(),
-                    move |session, ended, out| match ended {
-                        Ok(values) => session.land_plugin(
-                            Landing::Params {
-                                node,
-                                token: &token,
-                                values,
-                            },
-                            out,
-                        ),
-                        Err(failed) => {
-                            tracing::warn!("plugin {node:?}: its parameter read ended: {failed}");
+                let timeouts = hosted.timeouts();
+                let started =
+                    self.plugins.spawn(Loop::ParamRead, &timeouts, move || {
+                        match contained("parameter read", node, move || read.run()) {
+                            Some(values) => post.params(node, token, values),
+                            None => post.params_lost(node, token),
                         }
-                    },
-                );
+                    });
+                if !started {
+                    // The read went with the refused task: ask the plugin for a fresh one.
+                    hosted.reread_params();
+                }
             }
             // A value the plugin reported or the host set goes into the knob
             // of the lane driving that parameter, if one does.
@@ -2505,29 +2560,18 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                     },
                 ));
             }
-            if let Some((handle, token)) = snapshot {
+            if let Some((handle, token, timeouts)) = snapshot {
                 let asked = now;
+                let post = self.plugins.inbox.post();
                 // blocks: the state save is an IPC round trip, bounded by `state_wait`.
-                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
-                // stalls `update` until the plugin lane makes it await its reply.
-                self.jobs.submit_blocking(
-                    "tutti-snapshot",
-                    move || handle.save_state(StateUse::Project),
-                    move |session, ended, out| match ended {
-                        Ok(state) => session.land_plugin(
-                            Landing::Snapshot {
-                                node,
-                                token: &token,
-                                asked,
-                                state,
-                            },
-                            out,
-                        ),
-                        Err(failed) => {
-                            tracing::warn!("plugin {node:?}: its state snapshot ended: {failed}");
-                        }
-                    },
-                );
+                // A refused task drops its token, which frees the plugin for the next ask.
+                let _ = self.plugins.spawn(Loop::Snapshot, &timeouts, move || {
+                    if let Some(state) = contained("state snapshot", node, move || {
+                        handle.save_state(StateUse::Project)
+                    }) {
+                        post.snapshot(node, token, asked, state);
+                    }
+                });
             }
         }
         for node in unsilenced {
@@ -2571,8 +2615,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 mod tests {
     //! The record's own rules over a fake backend (no `plugin-server`):
     //! the snapshot cadence and its one-in-flight token, a declined save,
-    //! and a failing plugin's skipped snapshot. The session's executor is polled
-    //! and shared with the test, so a job waits until the test runs it. The death, the render mode
+    //! and a failing plugin's skipped snapshot. A task ends in the plugin inbox, which a
+    //! test waits on (no sleep) before the update that lands it. The death, the render mode
     //! and the export are pinned end to end over the CLAP test plugin, in
     //! `tests/plugin/plugin.rs`.
 
@@ -2580,9 +2624,357 @@ mod tests {
     use crate::RecoveryPolicy;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tutti_platform::Executor;
-    use tutti_plugin_types::ParameterInfo;
+    use tutti_plugin_types::{ParameterInfo, Timeouts};
     use tutti_units::Normalized;
     use tutti_units::ParamId;
+
+    /// **A plugin load that is queued and never run keeps no executor alive**:
+    /// the load reaches the executor through the session part's weak handle, so
+    /// with every strong handle dropped the executor shuts down while the load
+    /// is still in its queue.
+    #[test]
+    fn a_queued_plugin_load_does_not_keep_the_executor_alive() {
+        let executor = Executor::new();
+        let (part, _early) = crate::session::parts::PluginPart::new(
+            &crate::session::parts::PluginOptions::default(),
+            &executor,
+        );
+        let (_collector, work) = tutti_plugin_types::MainWork::new();
+        let load = PluginLoad {
+            loadable: Loadable::uncatalogued(PluginRef::file("queued.vst3")),
+            rate: SampleRate::SR_48K,
+            config: AudioConfig::default(),
+            state: None,
+            work,
+            executor: part.executor.clone(),
+        };
+        // Queued, and nothing drives the executor: the load waits in its queue.
+        let queued = executor.spawn(async move {
+            let _load = load;
+            std::future::pending::<()>().await;
+        });
+        let weak = executor.downgrade();
+
+        drop(executor);
+
+        assert!(
+            weak.upgrade().is_none(),
+            "a queued load kept the executor alive"
+        );
+        drop(queued);
+    }
+
+    /// **No plugin task holds an executor.** A task of each loop, held in its round trip,
+    /// leaves the executor to shut down when its last strong handle drops: the part keeps a
+    /// weak handle and `spawn` upgrades it for the call only.
+    #[test]
+    fn no_plugin_task_holds_an_executor() {
+        for kind in [Loop::Reload, Loop::ParamRead, Loop::Snapshot] {
+            let executor = Executor::new();
+            let (part, _early) = crate::session::parts::PluginPart::new(
+                &crate::session::parts::PluginOptions::default(),
+                &executor,
+            );
+            let (release, hold) = std::sync::mpsc::channel::<()>();
+            assert!(part.spawn(kind, &Timeouts::default(), move || {
+                let _ = hold.recv_timeout(HANG_GUARD);
+            }));
+            assert_eq!(part.tasks.in_flight(), 1, "{kind:?}: queued or running");
+            let weak = executor.downgrade();
+            drop(executor);
+            assert!(
+                weak.upgrade().is_none(),
+                "a {kind:?} task kept the executor alive"
+            );
+            // The executor's shutdown may have dropped the task unrun, which ended it too.
+            let _ = release.send(());
+            assert!(part.tasks.wait_idle(None), "{kind:?}: the task ended");
+        }
+    }
+
+    /// **A loop's bound is the plugin's own configured timeout.** A close waits for a
+    /// reload as long as its `load` timeout, a read its `param` and a snapshot its
+    /// `state`, as the plugin was loaded with (`Origin::config`), the defaults only for a
+    /// plugin with no origin: an app that raised a timeout is not given up on early.
+    #[test]
+    fn a_loops_bound_is_the_plugins_configured_timeout() {
+        let mut timeouts = Timeouts::default();
+        timeouts.load = Duration::from_secs(101);
+        timeouts.param = Duration::from_secs(102);
+        timeouts.state = Duration::from_secs(103);
+        assert_eq!(Loop::Reload.deadline(&timeouts), timeouts.load);
+        assert_eq!(Loop::ParamRead.deadline(&timeouts), timeouts.param);
+        assert_eq!(Loop::Snapshot.deadline(&timeouts), timeouts.state);
+
+        let mut rig = rig(None);
+        let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
+        assert_eq!(hosted.timeouts(), Timeouts::default(), "no origin");
+        hosted.origin = Some(Origin {
+            config: AudioConfig::default().timeouts(timeouts),
+            loadable: Loadable::uncatalogued(PluginRef::file("fake.clap")),
+        });
+        assert_eq!(hosted.timeouts(), timeouts);
+    }
+
+    /// **A task still queued when a close begins never runs.** The pool is full, so the
+    /// snapshot waits in its queue; a piece of main-thread work frees a pool thread during
+    /// the close, after it was marked begun, and the freed thread takes the snapshot: it
+    /// ends at its first step, unrun (no save was asked), and the plugin's close reaches
+    /// the main thread with nothing stranded.
+    #[test]
+    fn a_task_queued_when_a_close_begins_never_runs() {
+        let mut rig = in_process_rig(Some(vec![1]));
+        let executor = rig.executor.upgrade().expect("the session's executor");
+        let held: Vec<_> = (0..32)
+            .map(|_| {
+                let (release, hold) = std::sync::mpsc::channel::<()>();
+                let task = executor
+                    .unblock(move || {
+                        let _ = hold.recv_timeout(HANG_GUARD);
+                    })
+                    .expect("a pool thread starts");
+                (release, task)
+            })
+            .collect();
+        drop(executor);
+        let _ = rig.events_at(0);
+        let _ = rig.events_at(1_000);
+        assert_eq!(rig.session.plugin_tasks(), 1, "the snapshot is queued");
+
+        // The close runs this on the main thread, once it has begun: it frees a thread and
+        // waits for the queued snapshot to end, which only its first step can do quickly.
+        let tasks = rig.session.plugins.tasks.clone();
+        let (first, _) = &held[0];
+        let first = first.clone();
+        rig.session.plugins.work.defer(move |_| {
+            let _ = first.send(());
+            let guard = tutti_platform::Instant::now() + HANG_GUARD;
+            while tasks.in_flight() > 0 && tutti_platform::Instant::now() < guard {
+                std::thread::yield_now();
+            }
+        });
+        let closed = Arc::clone(&rig.closed);
+        let saves = Arc::clone(&rig.saves);
+        let stranded = tutti_plugin_types::MainWork::stranded();
+        rig.session.close(tutti_fixtures::main_thread());
+        for (release, task) in held {
+            let _ = release.send(());
+            task.detach();
+        }
+        assert_eq!(saves.load(Ordering::SeqCst), 0, "the snapshot never ran");
+        assert!(closed.load(Ordering::SeqCst), "the plugin's close ran");
+        assert_eq!(tutti_plugin_types::MainWork::stranded(), stranded);
+    }
+
+    /// **A refused spawn is counted, starts nothing and leaves no task in flight.**
+    #[test]
+    fn a_refused_spawn_is_counted_and_leaves_nothing_in_flight() {
+        let executor = Executor::new();
+        let (part, _early) = crate::session::parts::PluginPart::new(
+            &crate::session::parts::PluginOptions::default(),
+            &executor,
+        );
+        drop(executor);
+        for refused in 1..=3 {
+            assert!(
+                !part.spawn(Loop::Snapshot, &Timeouts::default(), || unreachable!(
+                    "the task never runs"
+                ))
+            );
+            assert_eq!(part.tasks.refused(), refused);
+        }
+        assert_eq!(part.tasks.in_flight(), 0);
+    }
+
+    /// **A close waits for an in-process plugin's snapshot, so its close reaches the main
+    /// thread and nothing is stranded.** The snapshot task holds a clone of the plugin's
+    /// handle and waits on the main thread (two pieces of work, the second handed over by
+    /// the first): the close pumps the main thread's work while it waits, the task ends
+    /// and drops its clone, and the record's drop is the last, handing the close over.
+    #[test]
+    fn a_close_waits_for_an_in_process_snapshot_so_nothing_is_stranded() {
+        let mut rig = in_process_rig(Some(vec![1]));
+        let _ = rig.events_at(0);
+        let _ = rig.events_at(1_000);
+        assert_eq!(rig.session.plugin_tasks(), 1, "the snapshot is in flight");
+        let weak = rig.executor.clone();
+        let closed = Arc::clone(&rig.closed);
+        let stranded = tutti_plugin_types::MainWork::stranded();
+        rig.session.close(tutti_fixtures::main_thread());
+        assert!(closed.load(Ordering::SeqCst), "the plugin's close ran");
+        assert_eq!(
+            tutti_plugin_types::MainWork::stranded(),
+            stranded,
+            "nothing was stranded"
+        );
+        assert!(
+            weak.upgrade().is_none(),
+            "the executor ended with the session"
+        );
+    }
+
+    /// **A reload queued behind a full blocking pool is not timed out before it starts.**
+    /// The recovery's load deadline counts from the instant the task begins to run (it
+    /// raises a flag), not from the spawn: 32 held closures fill the pool, the reload waits
+    /// in its queue far past the deadline with no failure reported, and runs once a thread
+    /// frees.
+    #[cfg(feature = "clap")]
+    #[test]
+    fn a_reload_queued_behind_a_full_pool_does_not_time_out_before_it_starts() {
+        let mut rig = rig(None);
+        let executor = rig.executor.upgrade().expect("the session's executor");
+        let held: Vec<_> = (0..32)
+            .map(|_| {
+                let (release, hold) = std::sync::mpsc::channel::<()>();
+                let task = executor
+                    .unblock(move || {
+                        let _ = hold.recv_timeout(HANG_GUARD);
+                    })
+                    .expect("a pool thread starts");
+                (release, task)
+            })
+            .collect();
+        drop(executor);
+        rig.recovering_in_process();
+        let events = rig.events_at(0);
+        assert!(events.is_empty());
+        assert_eq!(rig.session.plugin_tasks(), 1, "the reload is queued");
+        let ten_minutes = rig.events_at(600_000);
+        assert!(
+            ten_minutes.is_empty(),
+            "a reload that has not started timed out: {ten_minutes:?}"
+        );
+        for (release, task) in held {
+            release.send(()).expect("the closure waits");
+            task.detach();
+        }
+        rig.settle();
+        let landed = rig.land();
+        assert!(
+            matches!(
+                &landed[..],
+                [SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::Reloading {
+                        cause: ReloadCause::Attempt(RecoveryFailure::ReplacementInProcess),
+                        ..
+                    },
+                    ..
+                })]
+            ),
+            "{landed:?}"
+        );
+    }
+
+    /// **A parameter read the executor refused is asked for again.** The read went with the
+    /// refused task, so the record makes a fresh one; the next phase, with the executor
+    /// back, runs it and its values land.
+    #[test]
+    fn a_refused_parameter_read_is_asked_again() {
+        let param = ParamId::new(3);
+        let mut rig = rig(None);
+        let (incoming, _) = fake_handle(None, vec![(param, 0.75)]);
+        rig.session
+            .graph
+            .plugins
+            .get_mut(&rig.node)
+            .unwrap()
+            .adopt(incoming, Placement::InProcess);
+        let live = rig.session.plugins.executor.clone();
+        rig.session.plugins.executor = Executor::new().downgrade();
+        let _ = rig.events_at(0);
+        assert_eq!(rig.session.plugin_task_refusals(), 1);
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_some(),
+            "the read is kept to run again"
+        );
+        rig.session.plugins.executor = live;
+        let _ = rig.events_at(10);
+        rig.settle();
+        let _ = rig.land();
+        assert_eq!(
+            rig.session.graph.plugins[&rig.node].param_value(param),
+            Some(Some(0.75))
+        );
+    }
+
+    /// **A parameter read whose task panicked is asked for again.** The panic is contained,
+    /// the task sends that the read was lost, and the landing makes the record read afresh
+    /// (a new token), where the read would otherwise be lost for good.
+    #[test]
+    fn a_parameter_read_that_panicked_is_asked_again() {
+        let mut rig = rig(None);
+        let (incoming, release) = held_handle(vec![(ParamId::new(3), 0.5)]);
+        rig.session
+            .graph
+            .plugins
+            .get_mut(&rig.node)
+            .unwrap()
+            .adopt(incoming, Placement::InProcess);
+        let _ = rig.events_at(0);
+        // The plugin's round trip panics when the test's end of its hold goes.
+        drop(release);
+        rig.settle();
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_none(),
+            "the read was consumed by the task"
+        );
+        let _ = rig.land();
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_some(),
+            "the lost read is made again"
+        );
+    }
+
+    /// **With two reads in flight across a crossfade, only the new one lands.** The first
+    /// plugin's read is held, the second crossfade's read is released and lands; the first
+    /// then ends, and lands nowhere.
+    #[test]
+    fn with_two_reads_in_flight_only_the_new_one_lands() {
+        let param = ParamId::new(3);
+        let mut rig = rig(None);
+        let (first, release_first) = held_handle(vec![(param, 0.25)]);
+        rig.session
+            .graph
+            .plugins
+            .get_mut(&rig.node)
+            .unwrap()
+            .adopt(first, Placement::InProcess);
+        let _ = rig.events_at(0);
+        let (second, release_second) = held_handle(vec![(param, 0.75)]);
+        rig.session
+            .graph
+            .plugins
+            .get_mut(&rig.node)
+            .unwrap()
+            .adopt(second, Placement::InProcess);
+        let _ = rig.events_at(10);
+        assert_eq!(rig.session.plugin_tasks(), 2, "both reads are in flight");
+
+        // The reads list their parameters first and read each value after: a token each.
+        for _ in 0..2 {
+            let _ = release_second.send(());
+        }
+        // Wait for the second to end by landing until its values are in.
+        let guard = tutti_platform::Instant::now() + HANG_GUARD;
+        while rig.session.graph.plugins[&rig.node].param_value(param) != Some(Some(0.75)) {
+            assert!(
+                tutti_platform::Instant::now() < guard,
+                "the new read never landed"
+            );
+            let _ = rig.land();
+            std::thread::yield_now();
+        }
+        for _ in 0..2 {
+            let _ = release_first.send(());
+        }
+        rig.settle();
+        let _ = rig.land();
+        assert_eq!(
+            rig.session.graph.plugins[&rig.node].param_value(param),
+            Some(Some(0.75)),
+            "the old plugin's read landed nowhere"
+        );
+    }
 
     /// The controls of a plugin's node, counting nothing yet.
     fn node_controls() -> NodeControls {
@@ -2601,10 +2993,53 @@ mod tests {
         /// `None`), as an in-process plugin's is when its main thread does
         /// not answer.
         unlisted: Arc<AtomicBool>,
+        /// While it holds one, a state save or a parameter list waits for a token on it:
+        /// the round trip stays in flight until the test sends one.
+        hold: Option<Mutex<std::sync::mpsc::Receiver<()>>>,
+        /// Models an in-process plugin: a state save waits for the main thread to run two
+        /// pieces of its work, the second handed over by the first, and the plugin's close
+        /// is handed to the collector, setting the flag when the main thread runs it.
+        main: Option<(tutti_plugin_types::MainWorkHandle, Arc<AtomicBool>)>,
+    }
+
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            if let Some((work, closed)) = self.main.take() {
+                work.defer(move |_| closed.store(true, Ordering::SeqCst));
+            }
+        }
+    }
+
+    /// The longest a test waits for an event it started: a guard against a hang, never a
+    /// measure of speed.
+    const HANG_GUARD: Duration = Duration::from_secs(60);
+
+    impl Fake {
+        /// Waits for the test to release the round trip, when it holds them.
+        fn held(&self) {
+            if let Some((work, _)) = &self.main {
+                let (done, ran) = std::sync::mpsc::channel();
+                let again = work.clone();
+                work.defer(move |_| {
+                    again.defer(move |_| {
+                        let _ = done.send(());
+                    })
+                });
+                ran.recv_timeout(HANG_GUARD)
+                    .expect("the main thread ran the call");
+            }
+            if let Some(hold) = &self.hold {
+                hold.lock()
+                    .unwrap()
+                    .recv_timeout(HANG_GUARD)
+                    .expect("the test released the round trip");
+            }
+        }
     }
 
     impl tutti_plugin_types::AnyThread for Fake {
         fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
+            self.held();
             if self.unlisted.load(Ordering::SeqCst) {
                 return None;
             }
@@ -2645,6 +3080,7 @@ mod tests {
             _: tutti_plugin_types::StateUse,
         ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
             self.saves.fetch_add(1, Ordering::SeqCst);
+            self.held();
             self.state
                 .clone()
                 .ok_or(tutti_plugin_types::StateError::NoStateRoute)
@@ -2682,22 +3118,56 @@ mod tests {
         saves: Arc<AtomicUsize>,
         dead: Arc<AtomicBool>,
         t0: Instant,
-        /// The session's polled executor: a job it was handed waits here until
-        /// the test polls it.
-        executor: Executor,
+        /// The session's executor, which the test does not keep alive.
+        executor: tutti_platform::WeakExecutor,
+        /// Releases one held round trip of the plugin, when the rig holds them.
+        release: Option<std::sync::mpsc::Sender<()>>,
+        /// Set when an in-process rig's plugin is closed on the main thread.
+        closed: Arc<AtomicBool>,
     }
 
     /// A detached session snapshotting every second, hosting a fake that
     /// answers `state` at a dc node.
     fn rig(state: Option<Vec<u8>>) -> Rig {
+        build_rig(state, Mode::Plain)
+    }
+
+    /// [`rig`], whose plugin's state saves wait for [`Rig::release`].
+    fn held_rig(state: Option<Vec<u8>>) -> Rig {
+        build_rig(state, Mode::Held)
+    }
+
+    /// [`rig`], whose plugin models an in-process one (see `Fake::main`).
+    fn in_process_rig(state: Option<Vec<u8>>) -> Rig {
+        build_rig(state, Mode::InProcess)
+    }
+
+    #[derive(PartialEq)]
+    enum Mode {
+        Plain,
+        Held,
+        InProcess,
+    }
+
+    fn build_rig(state: Option<Vec<u8>>, mode: Mode) -> Rig {
         let executor = Executor::new();
+        let weak = executor.downgrade();
         let mut session = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
-            .executor(executor.clone())
+            .executor(executor)
             .build_detached(SampleRate::SR_48K)
             .unwrap();
         let saves = Arc::new(AtomicUsize::new(0));
         let dead = Arc::new(AtomicBool::new(false));
+        let (release, hold) = if mode == Mode::Held {
+            let (tx, rx) = std::sync::mpsc::channel();
+            (Some(tx), Some(Mutex::new(rx)))
+        } else {
+            (None, None)
+        };
+        let closed = Arc::new(AtomicBool::new(false));
+        let main =
+            (mode == Mode::InProcess).then(|| (session.plugins.work.clone(), Arc::clone(&closed)));
         let handle = PluginHandle::from_backend(
             Arc::new(Fake {
                 state,
@@ -2705,6 +3175,8 @@ mod tests {
                 dead: Arc::clone(&dead),
                 params: Vec::new(),
                 unlisted: Arc::default(),
+                hold,
+                main,
             }),
             None,
             Default::default(),
@@ -2719,7 +3191,7 @@ mod tests {
                 )));
         super::fake_hosting::host(&mut session, node, handle, PluginRef::file("fake.clap"));
         let node = node.erase();
-        // The load's parameter read is not what these tests count jobs of.
+        // The load's parameter read is not what these tests count reads of.
         session
             .graph
             .plugins
@@ -2732,7 +3204,9 @@ mod tests {
             saves,
             dead,
             t0: Instant::now(),
-            executor,
+            executor: weak,
+            release,
+            closed,
         }
     }
 
@@ -2750,6 +3224,8 @@ mod tests {
                 dead: Arc::default(),
                 params,
                 unlisted: Arc::default(),
+                hold: None,
+                main: None,
             }),
             None,
             Default::default(),
@@ -2759,8 +3235,31 @@ mod tests {
         (handle, sink)
     }
 
+    /// A fake plugin's handle listing `params`, whose parameter list waits for a token on the
+    /// returned sender (dropping the sender makes the waiting round trip panic).
+    fn held_handle(params: Vec<(ParamId, f32)>) -> (PluginHandle, std::sync::mpsc::Sender<()>) {
+        let (release, hold) = std::sync::mpsc::channel();
+        let handle = PluginHandle::from_backend(
+            Arc::new(Fake {
+                state: None,
+                saves: Arc::default(),
+                dead: Arc::default(),
+                params,
+                unlisted: Arc::default(),
+                hold: Some(Mutex::new(hold)),
+                main: None,
+            }),
+            None,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+        (handle, release)
+    }
+
     impl Rig {
-        /// `Phase::Plugins` at `t0 + ms`: every event it reported.
+        /// `Phase::Plugins` at `t0 + ms`: every event it reported. What the loops'
+        /// tasks sent lands first; what is due starts a task.
         fn events_at(&mut self, ms: u64) -> Vec<SessionEvent> {
             let mut out = Vec::new();
             let cx = crate::PhaseCx::at(self.t0 + Duration::from_millis(ms));
@@ -2768,40 +3267,38 @@ mod tests {
             out
         }
 
-        /// `Phase::Plugins` at `t0 + ms`; the jobs it submitted wait on the
-        /// executor.
-        fn start_at(&mut self, ms: u64) {
-            let _ = self.events_at(ms);
+        /// Waits until no task is in flight: what they sent waits in the inbox for the next
+        /// landing.
+        fn settle(&self) {
+            super::fake_hosting::await_tasks(&self.session);
         }
 
-        /// Runs the jobs that wait, on another thread: how many there were. Their
-        /// ends wait for [`land`](Self::land).
-        fn run_jobs(&self) -> usize {
-            let executor = self.executor.clone();
-            std::thread::spawn(move || executor.run_until_stalled())
-                .join()
-                .unwrap()
-        }
-
-        /// `Phase::Plugins` at `t0 + ms`, then the jobs it submitted run: how
-        /// many there were.
-        fn plugins_at(&mut self, ms: u64) -> usize {
-            self.start_at(ms);
-            self.run_jobs()
-        }
-
-        /// `Phase::Collect`: what the jobs sent lands; the events it reported.
+        /// Lands what the tasks sent, without deciding anything is due: the events it
+        /// reported.
         fn land(&mut self) -> Vec<SessionEvent> {
             let mut out = Vec::new();
-            let cx = crate::PhaseCx::at(self.t0);
-            self.session.run_phase(crate::Phase::Collect, cx, &mut out);
+            self.session.plugins.now = self.t0;
+            self.session.land_arrivals(&mut out);
             out
         }
 
-        /// Runs the one job that waits, on another thread, and lands its end.
-        fn run_and_land(&mut self) -> Vec<SessionEvent> {
-            assert_eq!(self.run_jobs(), 1, "one job waits");
-            self.land()
+        /// Lets one held round trip of the plugin return.
+        fn release(&self) {
+            self.release
+                .as_ref()
+                .expect("a held rig")
+                .send(())
+                .expect("the plugin holds the other end");
+        }
+
+        /// The tokens on the node's snapshot: the record's, and one per ask in flight.
+        fn snapshot_holders(&self) -> usize {
+            Arc::strong_count(&self.session.graph.plugins[&self.node].snapshot_token)
+        }
+
+        /// The tokens on the node's mirror: the record's, and one per read in flight.
+        fn mirror_holders(&self) -> usize {
+            Arc::strong_count(&self.session.graph.plugins[&self.node].mirror_token)
         }
 
         /// The node's record as a plugin being recovered, its reload due now,
@@ -2842,21 +3339,44 @@ mod tests {
     /// **Snapshots are taken on the interval of `now`, not every update,
     /// and one at a time.** The first update starts the clock; updates
     /// inside the interval ask for nothing; the first at or past it asks
-    /// once; while that job is unlanded nothing more is asked, however late
-    /// (the job ran, its end is unlanded); landing it stores the bytes and
-    /// restarts the cadence.
+    /// once; while that task is in flight nothing more is asked, however late
+    /// (the record and the task hold the snapshot token, and no second ask clones it);
+    /// landing its end stores the bytes, frees the plugin and restarts the cadence at
+    /// the next ask.
     #[test]
     fn snapshots_are_taken_on_the_interval_one_at_a_time() {
-        let mut rig = rig(Some(vec![1, 2, 3]));
-        assert_eq!(rig.plugins_at(0), 0, "the first update starts the clock");
-        assert_eq!(rig.plugins_at(500), 0, "inside the interval");
-        assert_eq!(rig.plugins_at(1_000), 1, "one job at the interval");
+        let mut rig = held_rig(Some(vec![1, 2, 3]));
+        let _ = rig.events_at(0);
         assert_eq!(
-            rig.plugins_at(5_000),
-            0,
-            "nothing more while the job is in flight"
+            rig.snapshot_holders(),
+            1,
+            "the first update starts the clock"
         );
-        rig.land();
+        let _ = rig.events_at(500);
+        assert_eq!(rig.snapshot_holders(), 1, "inside the interval");
+        let _ = rig.events_at(1_000);
+        assert_eq!(rig.snapshot_holders(), 2, "one task at the interval");
+        let _ = rig.events_at(5_000);
+        assert_eq!(
+            rig.snapshot_holders(),
+            2,
+            "nothing more while the task is in flight"
+        );
+        assert!(
+            rig.session
+                .plugin_view(rig.node)
+                .unwrap()
+                .state()
+                .last_good()
+                .is_none(),
+            "nothing landed yet"
+        );
+
+        // The first task ends: its landing stores the bytes, and the plugin, a long
+        // interval past its last ask, is asked again in the same phase.
+        rig.release();
+        rig.settle();
+        let _ = rig.events_at(5_000);
         assert_eq!(
             rig.session
                 .plugin_view(rig.node)
@@ -2866,16 +3386,17 @@ mod tests {
                 .map(PeerState::bytes),
             Some(&[1u8, 2, 3][..])
         );
-        assert_eq!(rig.saves.load(Ordering::SeqCst), 1, "one job is one save");
-        assert_eq!(
-            rig.plugins_at(5_500),
-            1,
-            "the cadence restarted when the last job was asked for (at 1 s)"
-        );
-        // Its end lands: the plugin is free again, on the interval.
-        rig.land();
-        assert_eq!(rig.plugins_at(6_000), 0, "inside the interval");
-        assert_eq!(rig.plugins_at(6_500), 1, "a landed job frees it");
+        assert_eq!(rig.snapshot_holders(), 2, "a landed task frees it");
+
+        // The second ends, and the third waits for the interval from the second's ask.
+        rig.release();
+        rig.settle();
+        let _ = rig.events_at(5_500);
+        assert_eq!(rig.saves.load(Ordering::SeqCst), 2, "one task is one save");
+        assert_eq!(rig.snapshot_holders(), 1, "landed, inside the interval");
+        let _ = rig.events_at(6_000);
+        assert_eq!(rig.snapshot_holders(), 2, "asked again at the interval");
+        rig.release();
     }
 
     /// **A declined save keeps the previous snapshot.** A refusal (the
@@ -2886,9 +3407,15 @@ mod tests {
         let mut rig = rig(None);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.snapshot = Some(PeerState::of_plugin(hosted.plugin.clone(), vec![4, 2]));
-        rig.plugins_at(0);
-        assert_eq!(rig.plugins_at(1_000), 1, "a job at the interval");
-        rig.land();
+        let _ = rig.events_at(0);
+        let _ = rig.events_at(1_000);
+        rig.settle();
+        assert!(rig.land().is_empty());
+        assert_eq!(
+            rig.saves.load(Ordering::SeqCst),
+            1,
+            "the plugin was asked and declined"
+        );
         assert_eq!(
             rig.session
                 .plugin_view(rig.node)
@@ -2952,7 +3479,7 @@ mod tests {
             )
             .0,
         );
-        rig.plugins_at(0);
+        let _ = rig.events_at(0);
         assert_eq!(
             rig.session.graph_ref().node_latency(rig.node).unwrap(),
             tutti_graph::MAX_NODE_LATENCY.to_samples_ceil(SampleRate::SR_48K)
@@ -2964,9 +3491,11 @@ mod tests {
     #[test]
     fn a_failing_plugin_is_not_snapshotted() {
         let mut rig = rig(Some(vec![1]));
-        rig.plugins_at(0);
+        let _ = rig.events_at(0);
         rig.dead.store(true, Ordering::SeqCst);
-        assert_eq!(rig.plugins_at(1_000), 0, "failing: no snapshot");
+        let _ = rig.events_at(1_000);
+        assert_eq!(rig.snapshot_holders(), 1, "failing: no snapshot task");
+        assert_eq!(rig.saves.load(Ordering::SeqCst), 0, "failing: no save");
         assert!(matches!(
             rig.session.plugin_view(rig.node).unwrap().health(),
             PluginHealth::Died { .. }
@@ -3049,6 +3578,8 @@ mod tests {
                     dead: Arc::default(),
                     params: Vec::new(),
                     unlisted: Arc::default(),
+                    hold: None,
+                    main: None,
                 }),
                 Some(control),
                 Default::default(),
@@ -3097,18 +3628,25 @@ mod tests {
 
     /// **A crossfade to another plugin does not inherit the outgoing
     /// plugin's recovery state.** Its last snapshot is cleared, and a
-    /// snapshot job of the outgoing plugin still in flight lands nowhere
+    /// snapshot task of the outgoing plugin still in flight lands nowhere
     /// (its token is not the record's any more); the incoming plugin gets
     /// its own on the interval from the crossfade. Driven through
     /// `HostedPlugin::adopt`, `replace`'s handle half (a crossfade to
     /// another plugin needs a `PluginClient`, a real `plugin-server`).
     #[test]
     fn a_crossfade_to_another_plugin_drops_the_old_snapshot() {
-        let mut rig = rig(Some(vec![1, 2, 3]));
-        rig.plugins_at(0);
-        assert_eq!(rig.plugins_at(1_000), 1, "a job at the interval");
-        rig.land();
-        rig.start_at(2_000);
+        let mut rig = held_rig(Some(vec![1, 2, 3]));
+        let _ = rig.events_at(0);
+        let _ = rig.events_at(1_000);
+        rig.release();
+        rig.settle();
+        let _ = rig.events_at(1_000);
+        let _ = rig.events_at(2_000);
+        assert_eq!(
+            rig.snapshot_holders(),
+            2,
+            "the outgoing plugin's task is in flight"
+        );
 
         let (incoming, _) = fake_handle(Some(vec![9]), Vec::new());
         rig.session
@@ -3117,7 +3655,7 @@ mod tests {
             .get_mut(&rig.node)
             .unwrap()
             .adopt(incoming, Placement::InProcess);
-        // The incoming plugin's parameter read is not what this counts jobs of.
+        // The incoming plugin's parameter read is not what this counts.
         rig.session
             .graph
             .plugins
@@ -3134,7 +3672,9 @@ mod tests {
             None,
             "the outgoing plugin's snapshot is not the incoming one's"
         );
-        rig.run_and_land();
+        rig.release();
+        rig.settle();
+        assert!(rig.land().is_empty());
         assert_eq!(
             rig.session
                 .plugin_view(rig.node)
@@ -3143,12 +3683,15 @@ mod tests {
                 .last_good()
                 .map(PeerState::bytes),
             None,
-            "the outgoing plugin's job must not land on the incoming plugin"
+            "the outgoing plugin's task must not land on the incoming plugin"
         );
 
-        assert_eq!(rig.plugins_at(2_000), 0, "its clock starts here");
-        assert_eq!(rig.plugins_at(3_000), 1, "its own job");
-        rig.land();
+        let _ = rig.events_at(2_000);
+        assert_eq!(rig.snapshot_holders(), 1, "its clock starts here");
+        let _ = rig.events_at(3_000);
+        assert_eq!(rig.snapshot_holders(), 2, "its own task");
+        rig.settle();
+        let _ = rig.land();
         assert_eq!(
             rig.session
                 .plugin_view(rig.node)
@@ -3160,12 +3703,32 @@ mod tests {
         );
     }
 
+    /// **A snapshot of a plugin removed since it was asked for lands nowhere.** The task
+    /// ends with its bytes after the node's record is gone: no event, nothing stored.
+    #[test]
+    fn a_snapshot_of_a_removed_plugin_lands_nowhere() {
+        let mut rig = held_rig(Some(vec![1]));
+        let _ = rig.events_at(0);
+        let _ = rig.events_at(1_000);
+        rig.session.remove(rig.node).expect("the node is removed");
+        assert!(
+            rig.session.plugin_view(rig.node).is_err(),
+            "its record is gone"
+        );
+        rig.release();
+        rig.settle();
+        assert!(
+            rig.land().is_empty(),
+            "nothing is reported for a node that is gone"
+        );
+    }
+
     /// **A crossfade to another plugin rebuilds the parameter mirror from
     /// the incoming plugin, read off the control thread.** Right after the
     /// crossfade the mirror is not ready (a lane waits rather than start
-    /// from the outgoing plugin's value); the next `Phase::Plugins` submits
-    /// the read to the executor as a job, once; the job runs on another thread
-    /// and lands the incoming plugin's values in a later update. A read asked for before a
+    /// from the outgoing plugin's value); the next `Phase::Plugins` starts
+    /// the read as a task on the session's executor, once; the task runs on another thread
+    /// and its values land in a later update. A read asked for before a
     /// second crossfade lands nowhere. The read goes through the incoming
     /// handle, which `PluginParamValues::start` also gives the mirror's
     /// report callback; a fake's reports cannot be fired from outside
@@ -3193,41 +3756,54 @@ mod tests {
             "not ready until the read lands: nothing was read on this thread"
         );
 
-        rig.start_at(0);
-        rig.start_at(10);
-        assert_eq!(rig.run_jobs(), 1, "the read is submitted once, as a job");
-        rig.land();
+        let _ = rig.events_at(0);
+        assert_eq!(
+            rig.mirror_holders(),
+            2,
+            "the read is a task holding the token"
+        );
+        rig.settle();
+        // This phase lands the read's end, and starts no second one.
+        let _ = rig.events_at(10);
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             Some(Some(0.75)),
             "the mirror holds the incoming plugin's values"
+        );
+        assert_eq!(
+            rig.mirror_holders(),
+            1,
+            "the landing freed the token, and no second read started"
         );
 
         // A read asked for, then a second crossfade: the first lands nowhere.
         let (second, _) = fake_handle(None, vec![(param, 0.5)]);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.adopt(second, Placement::InProcess);
-        rig.start_at(20);
+        let _ = rig.events_at(20);
         let (third, _) = fake_handle(None, vec![(param, 0.125)]);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         hosted.adopt(third, Placement::InProcess);
-        rig.run_and_land();
+        rig.settle();
+        let _ = rig.land();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             None,
             "a read of the previous plugin must not land"
         );
-        assert_eq!(rig.plugins_at(30), 1, "its own read");
-        rig.land();
+        let _ = rig.events_at(30);
+        rig.settle();
+        let _ = rig.land();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
-            Some(Some(0.125))
+            Some(Some(0.125)),
+            "its own read landed"
         );
     }
 
     /// **A read whose parameter list is unavailable does not make the mirror
-    /// ready, and is submitted again.** The job lands as not landed (the
-    /// mirror stays not ready), the next phase submits the read for the
+    /// ready, and is started again.** Its end lands as not landed (the
+    /// mirror stays not ready), the next phase starts the read for the
     /// same plugin once more, and once the list answers the re-run read lands
     /// the values.
     #[test]
@@ -3248,6 +3824,8 @@ mod tests {
                 dead: Arc::default(),
                 params: vec![(param, 0.75)],
                 unlisted: Arc::clone(&unlisted),
+                hold: None,
+                main: None,
             }),
             None,
             Default::default(),
@@ -3256,38 +3834,40 @@ mod tests {
         );
         hosted.adopt(incoming, Placement::InProcess);
 
-        assert_eq!(rig.plugins_at(0), 1, "the read is submitted");
-        rig.land();
+        let _ = rig.events_at(0);
+        rig.settle();
+        let _ = rig.land();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             None,
             "the mirror is not ready"
         );
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_some(),
+            "the read is kept to run again"
+        );
 
-        rig.start_at(10);
         unlisted.store(false, Ordering::SeqCst);
-        rig.run_and_land();
+        let _ = rig.events_at(10);
+        rig.settle();
+        let _ = rig.land();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
             Some(Some(0.75)),
             "the re-run read filled the mirror"
         );
-        assert_eq!(rig.plugins_at(20), 0, "and it is done");
+        let _ = rig.events_at(20);
+        assert_eq!(rig.mirror_holders(), 1, "and it is done");
     }
 
-    /// **A reload job that ends without a result is a failed attempt, named by
-    /// how it ended.** A job the executor dropped is `ReloadDropped`, one that
+    /// **A reload task that ends without a result is a failed attempt, named by
+    /// how it ended.** A task dropped unrun is `ReloadDropped`, one that
     /// panicked `ReloadPanicked` with its message; either schedules the next
     /// attempt (`Reloading`). The end of an attempt that was already replaced
     /// (its token is not the record's any more) changes nothing.
     #[test]
-    fn a_reload_job_that_ends_without_a_result_is_a_failed_attempt() {
-        for failed in [
-            WorkerError::Dropped,
-            WorkerError::Panicked {
-                message: "boom".into(),
-            },
-        ] {
+    fn a_reload_task_that_ends_without_a_result_is_a_failed_attempt() {
+        for panics in [false, true] {
             let mut rig = rig(None);
             let now = rig.t0;
             let node = rig.node;
@@ -3305,11 +3885,16 @@ mod tests {
             };
             hosted.reload.in_flight = true;
             let token = Arc::clone(&hosted.reload.token);
-            rig.session.plugins.now = now;
+            let post = rig.session.plugins.inbox.post();
+            let end =
+                |post: &inbox::Post| post.reload(node, Arc::clone(&token), None, Arc::default());
+            if panics {
+                end(&post).run(|| panic!("boom"));
+            } else {
+                drop(end(&post));
+            }
 
-            let mut out = Vec::new();
-            rig.session
-                .reload_job_failed(node, &token, failed.clone(), &mut out);
+            let out = rig.land();
             let [
                 SessionEvent::Plugin(PluginEvent {
                     change: PluginChange::Reloading { cause, .. },
@@ -3319,21 +3904,51 @@ mod tests {
             else {
                 panic!("the next attempt is scheduled: {out:?}");
             };
-            match (&failed, cause) {
-                (WorkerError::Dropped, ReloadCause::Attempt(RecoveryFailure::ReloadDropped)) => {}
-                (
-                    WorkerError::Panicked { message },
-                    ReloadCause::Attempt(RecoveryFailure::ReloadPanicked { message: got }),
-                ) => assert_eq!(got, message),
+            match (panics, cause) {
+                (false, ReloadCause::Attempt(RecoveryFailure::ReloadDropped)) => {}
+                (true, ReloadCause::Attempt(RecoveryFailure::ReloadPanicked { message })) => {
+                    assert_eq!(message, "boom")
+                }
                 other => panic!("{other:?}"),
             }
 
             // The same end again, with the attempt's old token: nothing.
-            let mut again = Vec::new();
-            rig.session
-                .reload_job_failed(node, &token, failed, &mut again);
+            drop(end(&post));
+            let again = rig.land();
             assert!(again.is_empty(), "a replaced attempt's end is stale");
         }
+    }
+
+    /// **Recovery lands once per attempt.** The reload's task ends with its load, which
+    /// fails the attempt and schedules the next with a new token; a second end of the same
+    /// attempt (a task dropped after it sent) lands nowhere, so one attempt is one
+    /// `Reloading` and one failure in the policy's history.
+    #[cfg(feature = "clap")]
+    #[test]
+    fn recovery_lands_once_per_attempt() {
+        let mut rig = rig(None);
+        rig.recovering_in_process();
+        let attempt = Arc::clone(&rig.session.graph.plugins[&rig.node].reload.token);
+        let _ = rig.events_at(0);
+        rig.settle();
+        drop(
+            rig.session
+                .plugins
+                .inbox
+                .post()
+                .reload(rig.node, attempt, None, Arc::default()),
+        );
+        let events = rig.land();
+        let [
+            SessionEvent::Plugin(PluginEvent {
+                change: PluginChange::Reloading { attempt, .. },
+                ..
+            }),
+        ] = &events[..]
+        else {
+            panic!("one attempt, one landing: {events:?}");
+        };
+        assert_eq!(*attempt, 2, "the death, and the one failed attempt");
     }
 
     /// **A reload of a plugin whose load resolves in process is refused as
@@ -3351,8 +3966,9 @@ mod tests {
         );
         let mut rig = rig(None);
         rig.recovering_in_process();
-        rig.start_at(0);
-        let events = rig.run_and_land();
+        let _ = rig.events_at(0);
+        rig.settle();
+        let events = rig.land();
         let [
             SessionEvent::Plugin(PluginEvent {
                 change: PluginChange::Reloading { cause, .. },
@@ -3392,10 +4008,11 @@ mod tests {
         let loadable = Loadable::uncatalogued(plugin.clone()).under(&catalog);
         let mut rig = rig(None);
         rig.recovering(plugin, loadable);
-        rig.start_at(0);
 
         catalog.blacklist(&file, "crashed the scanner");
-        let events = rig.run_and_land();
+        let _ = rig.events_at(0);
+        rig.settle();
+        let events = rig.land();
         std::fs::remove_file(&file).ok();
 
         let [
@@ -3416,21 +4033,22 @@ mod tests {
         );
     }
 
-    /// **A reload job that outlives its node lands nowhere, silently.** The
-    /// executor holds the job; the node is removed; the job then runs and its end
-    /// lands: no event, and no failure recorded for a node that is gone.
+    /// **A reload task that outlives its node lands nowhere, silently.** The
+    /// task ends after the node is removed: its end lands as no event, and no failure is
+    /// recorded for a node that is gone.
     #[cfg(feature = "clap")]
     #[test]
-    fn a_reload_job_that_outlives_its_node_lands_quietly() {
+    fn a_reload_task_that_outlives_its_node_lands_quietly() {
         let mut rig = rig(None);
         rig.recovering_in_process();
-        rig.start_at(0);
+        let _ = rig.events_at(0);
         rig.session.remove(rig.node).expect("the node is removed");
         assert!(
             rig.session.plugin_view(rig.node).is_err(),
             "its record is gone"
         );
-        let events = rig.run_and_land();
+        rig.settle();
+        let events = rig.land();
         assert!(events.is_empty(), "nothing is reported: {events:?}");
     }
 

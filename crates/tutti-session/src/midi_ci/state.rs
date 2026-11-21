@@ -37,6 +37,9 @@ pub struct SavePeerState {
     device: Option<SavedDevice>,
 }
 
+/// # Panics
+///
+/// When polled again after it returned `Ready`.
 impl Future for SavePeerState {
     type Output = Result<PeerState, PeerError<PeFailure>>;
 
@@ -49,14 +52,12 @@ impl Future for SavePeerState {
             .take()
             .expect("a future is not polled once ready");
         Poll::Ready(got.and_then(|data| {
-            let PeData::State(state) = data else {
-                return Err(PeerError::Refused(PeFailure::Unreadable(
-                    ResourceFailure::Data(PeDataError {
-                        place: Place::of("State"),
-                        fault: PeDataFault::OfResource(data.resource()),
-                    }),
-                )));
-            };
+            let state = PeState::try_from(data).map_err(|other| {
+                PeerError::Refused(PeFailure::Unreadable(ResourceFailure::Data(PeDataError {
+                    place: Place::of("State"),
+                    fault: PeDataFault::OfResource(other.resource()),
+                })))
+            })?;
             let (media_type, bytes) = match state.body() {
                 OpaqueBody::Binary { media_type, bytes } => (media_type.clone(), bytes.clone()),
                 OpaqueBody::Json(json) => (MediaType::JSON, json.encode()),

@@ -24,20 +24,4 @@ tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/poller.rs::DevicePoller::spaw
 tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  core-engine
 
 # plugin
-tutti-plugin-db  spawn  crates/tutti-plugin-db/src/catalog.rs::Catalog::save_in_background  plugin
 tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin
-tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thread.rs::IpcThread::spawn  plugin
-tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thread.rs::run_thread  plugin
-tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched  plugin
-tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::reap_elsewhere  plugin
-tutti-plugin-server  spawn_dedicated  crates/tutti-plugin-server/src/render.rs::RenderThread::spawn  plugin
-tutti-plugin-server  spawn  crates/tutti-plugin-server/src/server.rs::beat_while  plugin
-
-# midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/alsa/input.rs::start  midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/alsa/watch.rs::start  midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/coremidi/watch.rs::start_hub  midi
-tutti-midi-hardware  spawn  crates/tutti-midi-hardware/src/backend/legacy_port/poll.rs::start  midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/winmm/output.rs::open  midi
-tutti-midi-hardware  spawn  crates/tutti-midi-hardware/src/sensing.rs::Heartbeat::start  midi
-tutti-winmm-ffi  spawn_dedicated  crates/tutti-winmm-ffi/src/os/input.rs::MidiIn::open  midi

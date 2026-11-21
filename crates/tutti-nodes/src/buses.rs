@@ -6,10 +6,10 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::Buses;
 
 /// A main bus of `width` channels at the engine's speakers for that width
-/// (`ChannelTopology::assumed`), so the graph's mix and bypass fold a mono
+/// (`ChannelTopology::default_for`), so the graph's mix and bypass fold a mono
 /// input onto both sides of a stereo output. A width with no order names no
 /// placement: the graph passes it only onto the same width. Past a bus's width
 /// there is no bus; the node's ports say how many channels it has.
 pub(crate) fn main_bus(width: ChannelLayout) -> Buses {
-    BusTopology::assumed(width).map_or(Buses::NONE, Buses::main)
+    BusTopology::default_for(width).map_or(Buses::NONE, Buses::main)
 }

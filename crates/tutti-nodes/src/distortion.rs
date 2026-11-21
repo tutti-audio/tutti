@@ -1,4 +1,4 @@
-//! The waveshaper [`DistortionNode`]: six curves ([`ShapeKind`]) at a drive.
+//! The waveshaper [`DistortionNode`]: seven curves ([`ShapeKind`]) at a drive.
 
 use tutti_buffers::{BusTopology, ChannelLayout, MAX_CHANNELS, MaxBlock};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
@@ -398,11 +398,12 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
-    const KINDS: [ShapeKind; 6] = [
+    const KINDS: [ShapeKind; 7] = [
         ShapeKind::Tanh,
         ShapeKind::Atan,
         ShapeKind::Softsign,
         ShapeKind::HardClip,
+        ShapeKind::TriangleFold,
         ShapeKind::Crush,
         ShapeKind::SoftCrush,
     ];

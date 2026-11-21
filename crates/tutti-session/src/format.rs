@@ -17,16 +17,6 @@ pub trait Sealed: tutti_rt::RingFloat {
         out: &mut Vec<SessionEvent>,
     );
 
-    /// Lands what a hosted plugin's job ended with: only an `f32` session
-    /// hosts plugins, so an `f64` one submits no plugin job.
-    #[doc(hidden)]
-    #[cfg(feature = "plugin")]
-    fn land_plugin<K: AppKey, C: Clock<Float = Self>>(
-        session: &mut Session<K, C>,
-        landing: crate::jobs::PluginLanding<'_>,
-        out: &mut Vec<SessionEvent>,
-    );
-
     /// Swaps the pooled plugins into their nodes: only an `f32` session
     /// hosts plugins.
     #[doc(hidden)]
@@ -62,15 +52,6 @@ impl Sealed for f32 {
     }
 
     #[cfg(feature = "plugin")]
-    fn land_plugin<K: AppKey, C: Clock<Float = f32>>(
-        session: &mut Session<K, C>,
-        landing: crate::jobs::PluginLanding<'_>,
-        out: &mut Vec<SessionEvent>,
-    ) {
-        session.land_plugin_job(landing, out);
-    }
-
-    #[cfg(feature = "plugin")]
     fn swap_pooled_plugins<K: AppKey, C: Clock<Float = f32>>(session: &mut Session<K, C>) {
         session.swap_pooled_plugins();
     }
@@ -92,14 +73,6 @@ impl Sealed for f64 {
     fn serve_plugins<K: AppKey, C: Clock<Float = f64>>(
         _: &mut Session<K, C>,
         _: PhaseCx<'_>,
-        _: &mut Vec<SessionEvent>,
-    ) {
-    }
-
-    #[cfg(feature = "plugin")]
-    fn land_plugin<K: AppKey, C: Clock<Float = f64>>(
-        _: &mut Session<K, C>,
-        _: crate::jobs::PluginLanding<'_>,
         _: &mut Vec<SessionEvent>,
     ) {
     }

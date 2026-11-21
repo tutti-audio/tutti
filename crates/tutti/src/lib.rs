@@ -185,10 +185,10 @@ pub use tutti_session::PluginParams;
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
-    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginPresets,
-    PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
-    SaveState,
+    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, LoadedPreset, Opened, Plugin,
+    PluginApplyError, PluginBuses, PluginChange, PluginDeclaration, PluginEvent, PluginHealth,
+    PluginInfo, PluginPresets, PooledPlugin, PortCounts, PresetStartError, RestoreState,
+    RestoredState, SaveState, StateStartError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -271,11 +271,17 @@ pub mod nodes {
         SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
-        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, Cookbook, CutResponse,
-        FirError, LinearPhaseDesign, LinkwitzRiley, Lti, MAX_GRID, MatchedBell, Sos, SosError,
-        System, Tilt,
+        AllPassFilter, CombBank, CombControls, CombFilter, CombForm, FrequencyShifterBank,
+        FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
+    };
+    pub use tutti_dsp::{
+        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
+        Cookbook, CutResponse, Elliptic, EllipticTolerances, FirError, LinearPhaseDesign,
+        LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
+        SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
+    pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
@@ -286,10 +292,11 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
-        ChannelOutOfRange, MidSideConfig, MidSideNode, OscillatorWave, PanLaw, PolarityConfig,
-        PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel, RingModNode,
-        RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet,
-        TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
+        ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour, OscillatorWave, PanLaw,
+        PolarityConfig, PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel,
+        RingModNode, RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode,
+        StereoWidthSet, TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet,
+        WidthControls,
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
@@ -300,8 +307,8 @@ pub mod nodes {
         CrossoverConfig, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
         CutFilterConfig, CutFilterControls, CutFilterNode, DcBlockerConfig, DcBlockerControls,
         DcBlockerNode, DelayConfig, DelayControls, DelayLayout, DelayLayoutBuilder,
-        DelayLayoutError, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig,
-        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
+        DelayLayoutError, DelayNode, DelayTiming, DistortionConfig, DistortionNode,
+        DynamicEqConfig, DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
         EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
         EqBandConfig, EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode, FeedbackRouting,
         FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FreeverbConfig,
@@ -312,13 +319,14 @@ pub mod nodes {
         LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
         MetronomeMode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder,
         ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
-        MultibandControls, NoteEnvelopeConfig, NoteEnvelopeNode, OscillatorConfig, OscillatorNode,
-        OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode, PlateControls,
-        PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
-        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterConfig,
-        SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError,
-        TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
-        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        MultibandControls, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
+        NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
+        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
+        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
+        StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder,
+        SweepError, SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls,
+        TiltFilterNode, TransientControls, TransientShaperConfig, TransientShaperNode, VbapError,
+        VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -334,6 +342,11 @@ pub mod nodes {
         FreeverbSet, GateSet, GraphicEqSet, HasControl, LadderSet, LevellerSet, LimiterSet,
         ModDelaySet, PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet,
         TransientShaperKernel, TransientShaperSet,
+    };
+    pub use tutti_nodes::{
+        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
+        FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig,
+        PitchShifterKernel, PitchShifterNode, PitchShifterSet,
     };
 }
 
@@ -361,8 +374,9 @@ pub mod types {
     pub use tutti_music::{
         Adsr, BarPosition, BeatsPerBar, FRAME_TOLERANCE, FrameClock, InvalidBeatsPerBar,
         InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, NotOnMidiScale, Note,
-        NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
-        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        NoteDuration, NoteModifier, NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass,
+        SegmentOrigin, TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
+        snap_to_whole_frame,
     };
     pub use tutti_platform::{
         Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek,
@@ -477,8 +491,8 @@ pub mod session {
     pub use tutti_session::{
         Apply, Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig,
         PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome,
-        PoolReport, PoolSet, PoolState, RefreshError, RefreshPool, RefreshReport, RefreshedPool,
-        Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
+        PoolReport, PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError,
+        stranded_loads,
     };
 
     #[cfg(feature = "export")]
@@ -500,7 +514,7 @@ pub mod session {
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
     pub use tutti_session::{Start, TakeLatency, Trim};
-    // The `audio_file` entry decodes a file, so it needs a decoder.
+    // `load_audio` decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
     #[cfg(all(
@@ -512,7 +526,7 @@ pub mod session {
             feature = "decode-ogg"
         )
     ))]
-    pub use tutti_session::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
+    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, Tier};
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
@@ -532,11 +546,10 @@ pub mod session {
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, LoadedPlugin, ParamGesture, PluginCause,
         PluginParam, PluginPorts, PoolPluginEntry, PortsRefusal, Recovery, RecoveryAction,
-        RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateJobFailed,
-        StateRestore, StateView,
+        RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
-    pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
+    pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
@@ -617,9 +630,9 @@ pub mod measure {
     };
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
-        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, CosineWindow,
-        FrameCount, FrameIndex, Grid, HopSize, HopSizeError, StftError, WindowLength,
-        WindowLengthError,
+        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
+        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
+        StftGeometry, WindowLength, WindowLengthError,
     };
 }
 
@@ -707,7 +720,8 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin_db::{
-            CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
+            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, Scan, ScanPoll,
+            ScanResult,
         };
         pub use tutti_plugin_ipc::AudioConfig;
         pub use tutti_plugin_types::{
@@ -723,10 +737,9 @@ pub mod plugin {
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
-/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`midi_sink`, `MidiSink`,
-/// `SinkLoaded`), and under `midi-hardware` a device (`DeviceId`,
-/// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
-/// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`DeviceId`,
+/// `DeviceInfo`), the ports a session opens for them
+/// (`MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The translation layer
 /// (`Midi2Translator`, `Midi1Translator`), the runtime's clock sync and the MIDI-CI codec
@@ -832,13 +845,11 @@ pub mod midi {
     pub use tutti_session::{
         AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
         InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport,
-        MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo, NoCommonTimelineError,
-        NotInstrument, SinkLoaded, SinkOptions, Stamping, TrackError, midi_sink,
+        MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink,
+        Stamping, TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
-    pub use tutti_session::{
-        InputLoaded, MidiInput, MidiInputEntry, MidiOutput, MidiOutputEntry, OutputLoaded,
-    };
+    pub use tutti_session::{MidiInput, MidiOutput, OpenMidiOutput};
 
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;
@@ -853,9 +864,8 @@ pub mod midi {
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
         ChannelProfile, ListedPeer, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy,
-        MidiPolicyError, MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer,
-        ReportPeer, RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
-        midi_input, midi_output,
+        MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
+        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};

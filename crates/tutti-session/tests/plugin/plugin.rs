@@ -79,9 +79,9 @@ fn session_built(
     for (key, value) in extra {
         set_env(key, value);
     }
-    // The executor is polled: a job runs in the `Collect` that polls it and lands
-    // there, in a deterministic order. A test that wants another executor says so
-    // in `build`.
+    // The executor is polled: a queued job runs in the `Collect` that polls it and lands
+    // there, in a deterministic order (the plugin tasks run on its blocking pool). A test
+    // that wants another executor says so in `build`.
     build(Session::builder().executor(tutti_platform::Executor::new()))
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
@@ -117,8 +117,8 @@ fn round_trip(s: &Session, node: NodeKey) {
     let _ = s
         .plugin_view(node)
         .expect("hosted")
-        .state()
-        .save(tutti_plugin_types::StateUse::Project);
+        .handle()
+        .save_state(tutti_plugin_types::StateUse::Project);
 }
 
 /// Waits (up to 10 s) for the probe's latency to read `want`: the
@@ -476,13 +476,13 @@ fn renders_sound(s: &mut Session) -> bool {
 }
 
 /// A virtual clock for the session's phases, and every event they reported
-/// (the jobs' landings included: the session's executor is polled, so a job
-/// submitted in a frame runs and lands in that frame's `Phase::Collect`).
+/// (the plugin tasks' ends included: a task started in a frame runs on a pool thread, and
+/// its end lands in the `Phase::Plugins` of a later frame).
 struct Drive {
     now: Instant,
     events: Vec<SessionEvent>,
     /// Checked in every frame once a `Reloading` has been reported, after the
-    /// plugins' phase submitted the reload and before the `Collect` that runs it.
+    /// plugins' phase started the reload task, which runs on a pool thread meanwhile.
     at_reload: Option<Box<dyn Fn()>>,
     /// Whether a `Reloading` has been reported.
     reload_reported: bool,
@@ -499,7 +499,7 @@ impl Drive {
     }
 
     /// One frame: a block rendered (the server gets real time to act), the
-    /// plugins' phase at the clock 20 ms on, and what its jobs sent landing.
+    /// plugins' phase at the clock 20 ms on, landing what the tasks sent.
     fn step(&mut self, s: &mut Session) {
         let _ = renders_sound(s);
         std::thread::sleep(Duration::from_millis(5));
@@ -521,7 +521,6 @@ impl Drive {
             check();
         }
         self.events.extend(out);
-        // The jobs it submitted run, and what they sent lands.
         s.run_phase(Phase::Collect, PhaseCx::at(self.now), &mut self.events);
         // The commit that puts a replacement into the executor's plan, and the
         // collect that frees the plan's old unit on this thread.
@@ -547,7 +546,7 @@ impl Drive {
 /// probe's first server aborts on its 60th block (a replacement does not: the
 /// once-file); before that a parameter is set and a snapshot captured. The
 /// death is reported as `PluginChange::Reloading` with the node kept, and the load
-/// is handed out as a job; landing it puts the replacement at the same node
+/// is handed out as a task; its landing puts the replacement at the same node
 /// with its wiring (the outputs still read it, so the render is sound again
 /// with no re-wiring), the parameter back at the snapshot's value, and
 /// `PluginChange::Recovered` saying the state was restored, how old, and that the
@@ -595,13 +594,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
         std::thread::sleep(Duration::from_millis(5));
     }
     let t0 = Instant::now();
-    for at in [0, 2_000] {
-        let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs in the collect's poll, and lands there.
-        s.run_phase(Phase::Plugins, cx, &mut Vec::new());
-        s.run_phase(Phase::Collect, cx, &mut Vec::new());
-    }
-    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
+    snapshot_now(&mut s, node);
     let total_before = s.latency();
 
     // Render into the crash, then through the recovery.
@@ -804,10 +797,115 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
     assert!(s.plugin_view(node).is_ok(), "and its record");
 }
 
+#[cfg(target_os = "linux")]
+mod reaped_on_drop {
+    use super::*;
+
+    /// **Dropping a session with a reload in flight waits for it, so the replacement's
+    /// server is reaped and the executor ends.** The first server aborts on its 60th
+    /// block; the replacement restores a state its load holds on a fifo until a releaser
+    /// thread opens and closes it. The reload task is inside `PluginLoad::run` (it holds the
+    /// load and, through its upgrade, the executor only for the launch) when the session
+    /// drops: the drop waits for the task, the replacement lands in the inbox, and its
+    /// server dies with the inbox. No child of this process outlives the drop.
+    #[test]
+    fn dropping_a_session_with_a_reload_in_flight_reaps_the_replacement_server() {
+        let once = once_file("drop-mid-reload.once");
+        let fifo = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("drop-mid-reload.fifo.{}", std::process::id()));
+        let _ = std::fs::remove_file(&fifo);
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success());
+        let executor = tutti_platform::Executor::new();
+        let weak = executor.downgrade();
+        let mut s = session_built(
+            &[
+                PASSTHROUGH,
+                ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
+                ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "60"),
+                (
+                    "TUTTI_CLAP_PROBE_STATE_LOAD_HOLD_FIFO",
+                    fifo.to_str().expect("a utf-8 path"),
+                ),
+            ],
+            |b| {
+                b.snapshot_interval(Duration::from_secs(1))
+                    .executor(executor)
+            },
+        );
+        let (node, _) = wired_probe(&mut s);
+        snapshot_now(&mut s, node);
+
+        // The death, and the reload handed out: its state restore holds on the fifo.
+        let mut drive = Drive::new();
+        drive.until(&mut s, "the reload starts", |e| {
+            matches!(
+                e,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::Reloading { .. },
+                    ..
+                })
+            )
+        });
+        let guard = Instant::now() + Duration::from_secs(30);
+        while s.plugin_tasks() == 0 {
+            assert!(Instant::now() < guard, "the reload was never handed out");
+            drive.step(&mut s);
+        }
+        // Opening the fifo for writing waits for the plugin's read, and closing it releases
+        // the restore.
+        let releaser = std::thread::spawn({
+            let fifo = fifo.clone();
+            move || drop(std::fs::OpenOptions::new().write(true).open(fifo))
+        });
+
+        drop(s);
+        // A session dropped before the plugin opened the fifo leaves the releaser blocked
+        // opening it for writing. Opening it for reading and writing never blocks and pairs
+        // with that open, so the releaser ends whenever the plugin did.
+        drop(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&fifo)
+                .expect("the fifo opens"),
+        );
+        releaser.join().expect("the releaser ended");
+        assert!(
+            weak.upgrade().is_none(),
+            "the executor ended with the session"
+        );
+        assert_eq!(
+            children_of_this_process(),
+            Vec::<u32>::new(),
+            "a plugin-server outlived the session"
+        );
+        let _ = std::fs::remove_file(&fifo);
+    }
+
+    /// The pids of this process's live children, from the kernel.
+    fn children_of_this_process() -> Vec<u32> {
+        let mut pids = Vec::new();
+        for task in std::fs::read_dir("/proc/self/task").expect("the task list") {
+            let path = task.expect("a task").path().join("children");
+            if let Ok(list) = std::fs::read_to_string(path) {
+                pids.extend(
+                    list.split_whitespace()
+                        .filter_map(|pid| pid.parse::<u32>().ok()),
+                );
+            }
+        }
+        pids
+    }
+}
+
 /// **A reload completes with no host code but `update()`.** The probe's first
-/// server aborts on its first block. The host does nothing with jobs: it renders
+/// server aborts on its first block. The host does nothing with tasks: it renders
 /// and calls `update()`, on the real clock, under a threaded executor. The death
-/// is declared, the reload is submitted to the executor, runs off this thread,
+/// is declared, the reload is started on the executor, runs off this thread,
 /// and lands in a later `update()`: the node is
 /// `Recovered`, and renders again.
 #[test]
@@ -824,7 +922,7 @@ fn a_reload_completes_with_no_host_code_but_update() {
                 backoff: Duration::from_millis(1),
                 ..Default::default()
             })
-            // The session's own threads run each job: nothing here touches a job but
+            // The session's own executor runs each task: nothing here touches a task but
             // to start it.
         },
     );
@@ -1134,7 +1232,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
     assert!(s.graph_ref().is_edited());
     // The commit alone, on the drive's clock: `update()` would run
     // `Phase::Plugins` on the real one, where a server launch (hundreds of ms on
-    // macOS) outlasts the 1 ms reload backoff and hands out a reload job this test
+    // macOS) outlasts the 1 ms reload backoff and hands out a reload task this test
     // would discard.
     s.run_phase(Phase::Commit, PhaseCx::at(drive.now), &mut Vec::new());
     assert!(
@@ -1185,16 +1283,19 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
 }
 
 /// Captures a snapshot of `node` at once, as a host's worker would (the
-/// session's snapshot cadence is 1 s here, driven by the virtual clock).
+/// session's snapshot cadence is 1 s here, driven by the virtual clock). The first phase
+/// starts the cadence, the second, a virtual 2 s on, asks the plugin, and the phases after
+/// it land the task's end; a hang guard bounds the wait.
 fn snapshot_now(s: &mut Session, node: NodeKey) {
     let t0 = Instant::now();
-    for at in [0, 2_000] {
-        let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs in the collect's poll, and lands there.
+    s.run_phase(Phase::Plugins, PhaseCx::at(t0), &mut Vec::new());
+    let cx = PhaseCx::at(t0 + Duration::from_millis(2_000));
+    let guard = Instant::now() + Duration::from_secs(30);
+    while s.plugin_view(node).unwrap().state().last_good().is_none() {
+        assert!(Instant::now() < guard, "the snapshot never landed");
         s.run_phase(Phase::Plugins, cx, &mut Vec::new());
-        s.run_phase(Phase::Collect, cx, &mut Vec::new());
+        std::thread::yield_now();
     }
-    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
 }
 
 fn recovered_state(drive: &Drive) -> Vec<tutti_session::StateRestore> {

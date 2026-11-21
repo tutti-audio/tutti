@@ -28,7 +28,7 @@
 //!   SysEx7 packets; the input node translates the first as it does for any
 //!   MIDI 1.0 port. Each carries its time since the port started, placed on
 //!   the `Instant` clock.
-//! - **Output** is a thread of its own: it holds each event until its time
+//! - **Output** is a future on a dedicated thread of the executor: it holds each event until its time
 //!   (a high-resolution waitable timer; one already due goes at once) and
 //!   sends them in order, a SysEx message whole, waiting for the driver to
 //!   take it.
@@ -46,6 +46,7 @@ use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
 use tutti_midi_device::{EndpointId, OsDevice, WinMmDevice};
+use tutti_platform::Executor;
 
 use super::legacy_port::poll;
 use super::legacy_port::ports::{PortInfo, Side, endpoints, locate, slot_of};
@@ -53,13 +54,17 @@ use tutti_winmm_ffi::{Input, InputPort, Output, OutputPort, Port, PortKind, port
 
 /// The Windows [`MidiEndpoints`] implementation. Holds nothing: winmm is
 /// asked afresh at each call.
-#[derive(Debug, Default)]
-pub struct WinMmEndpoints;
+#[derive(Debug)]
+pub struct WinMmEndpoints {
+    executor: Executor,
+}
 
 impl WinMmEndpoints {
-    /// The winmm backend.
-    pub fn new() -> Self {
-        Self
+    /// The winmm backend, whose device poll is a task on `executor`.
+    pub fn new(executor: &Executor) -> Self {
+        Self {
+            executor: executor.clone(),
+        }
     }
 }
 
@@ -153,7 +158,12 @@ fn in_use_if_allocated(id: EndpointId, error: MidiHardwareError) -> MidiHardware
 
 impl MidiEndpoints for WinMmEndpoints {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        Ok(Box::new(poll::start(sink, devices, poll::INTERVAL)?))
+        Ok(Box::new(poll::start(
+            &self.executor,
+            sink,
+            devices,
+            poll::INTERVAL,
+        )?))
     }
 
     fn inputs(&self) -> Vec<OsEndpoint> {
@@ -171,14 +181,14 @@ impl MidiEndpoints for WinMmEndpoints {
     ) -> Result<Box<dyn InputConnection>> {
         let port = resolve_input(id)?;
         Ok(Box::new(
-            input::open(&port, producer).map_err(|e| in_use_if_allocated(id, e))?,
+            input::open(&self.executor, &port, producer).map_err(|e| in_use_if_allocated(id, e))?,
         ))
     }
 
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let port = resolve_output(id)?;
         Ok(Box::new(
-            output::open(&port).map_err(|e| in_use_if_allocated(id, e))?,
+            output::open(&self.executor, &port).map_err(|e| in_use_if_allocated(id, e))?,
         ))
     }
 }

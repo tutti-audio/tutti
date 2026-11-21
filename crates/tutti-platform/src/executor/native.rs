@@ -8,15 +8,17 @@
 //! earliest deadline unparks every registered thread, so a parked thread wakes for both
 //! with no condvar of ours: `park_timeout` to the next deadline is the only wait.
 
+use std::cell::Cell;
 use std::future::Future;
 use std::io;
 use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread, ThreadId};
+use std::time::Duration;
 
 use super::{Executor, Handle, Shared, Task, Timers, lock};
 use crate::Instant;
@@ -85,6 +87,84 @@ pub(super) fn unblock<T: Send + 'static>(
     handle.own.blocking.unblock(f)
 }
 
+thread_local! {
+    /// Set while this thread runs [`drive`]: a `join` here would stop the drive.
+    static DRIVING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks the current thread as driving for as long as it lives.
+struct Driving;
+
+impl Driving {
+    fn enter() -> Self {
+        DRIVING.with(|d| d.set(true));
+        Self
+    }
+}
+
+impl Drop for Driving {
+    fn drop(&mut self) {
+        DRIVING.with(|d| d.set(false));
+    }
+}
+
+/// Parks the calling thread until `task` ends: the task's waker unparks it.
+pub(super) fn join<T>(task: Task<T>) -> Option<T> {
+    match wait(task, None) {
+        Ok(output) => output,
+        Err(_) => unreachable!("a wait with no deadline only ends with the task"),
+    }
+}
+
+/// Parks the calling thread until `task` ends or `bound` has passed.
+pub(super) fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
+    wait(task, Some(Instant::now() + bound))
+}
+
+/// Polls `task`'s handle, parking between polls, until it ends or `deadline` passes.
+fn wait<T>(mut task: Task<T>, deadline: Option<Instant>) -> Result<Option<T>, Task<T>> {
+    assert!(
+        !DRIVING.with(Cell::get),
+        "join on a thread that drives an executor: the wait would stop the tasks it runs"
+    );
+    let waker = Waker::from(Arc::new(Unpark(thread::current())));
+    let mut cx = Context::from_waker(&waker);
+    loop {
+        if task.is_finished() {
+            return Ok(ended(task, &mut cx));
+        }
+        // A poll registers the waker. One that finds the task dropped without ending, in
+        // the moment since the look above, panics with `async_task`'s message, which the
+        // panic hook prints: `None`. A `fallible()` handle would not panic, but cannot be
+        // handed back past the bound.
+        match catch_unwind(AssertUnwindSafe(|| Pin::new(&mut task).poll(&mut cx))) {
+            Ok(Poll::Ready(output)) => return Ok(Some(output)),
+            Err(_) => return Ok(None),
+            Ok(Poll::Pending) => match deadline {
+                None => thread::park(),
+                Some(deadline) => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(task);
+                    }
+                    thread::park_timeout(left);
+                }
+            },
+        }
+    }
+}
+
+/// The outcome of a task that has finished: its output, or `None` when its future
+/// panicked (the hook already reported it on the task's thread, and the poll hands the
+/// panic back) or was dropped without ending.
+fn ended<T>(task: Task<T>, cx: &mut Context<'_>) -> Option<T> {
+    let mut ended = pin!(task.fallible());
+    match catch_unwind(AssertUnwindSafe(|| ended.as_mut().poll(cx))) {
+        Ok(Poll::Ready(output)) => output,
+        Ok(Poll::Pending) | Err(_) => None,
+    }
+}
+
 /// Unparks the thread that polls.
 struct Unpark(Thread);
 
@@ -103,6 +183,7 @@ impl Wake for Unpark {
 /// scheduled or the next deadline. `stopped` is read after every task and every wake, and
 /// whoever sets it unparks every registered thread.
 fn drive(queue: &async_executor::Executor<'static>, timers: &Timers, stopped: &dyn Fn() -> bool) {
+    let _driving = Driving::enter();
     let thread = thread::current();
     timers.parked.register(thread.clone());
     let waker = Waker::from(Arc::new(Unpark(thread.clone())));
@@ -136,19 +217,49 @@ fn drive(queue: &async_executor::Executor<'static>, timers: &Timers, stopped: &d
     timers.parked.forget(thread.id());
 }
 
-/// Requests every thread's stop, wakes them and joins them, except the calling thread,
-/// which a drop on one of them leaves to end by itself.
+/// How long a stop waits, in all, for the threads it stops to end. A thread still
+/// running then (a future wedged in an OS call its wake cannot reach) is detached.
+pub(super) const STOP_BOUND: Duration = Duration::from_secs(1);
+
+/// One deadline for every join of a stop: each join waits only what is left of it, so
+/// stopping `n` threads waits [`STOP_BOUND`] in all, not `n` times it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct StopDeadline(Instant);
+
+impl StopDeadline {
+    /// The deadline [`STOP_BOUND`] after `now`.
+    pub(super) fn after(now: Instant) -> Self {
+        Self(now + STOP_BOUND)
+    }
+
+    /// What is left of the deadline at `now`: zero once it has passed.
+    pub(super) fn left(self, now: Instant) -> Duration {
+        self.0.saturating_duration_since(now)
+    }
+}
+
+/// Requests every thread's stop, wakes them and joins them within [`STOP_BOUND`] in all,
+/// except the calling thread, which a drop on one of them leaves to end by itself. A
+/// thread still running at the bound is detached, named in a warning: it holds only the
+/// queue and timers it drives, and ends when its future does.
 fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
     for worker in &threads {
         worker.handle.token().stop();
     }
     timers.parked.unpark_all();
     let current = thread::current().id();
+    let deadline = StopDeadline::after(Instant::now());
     for worker in threads {
         if worker.id.get() == Some(&current) {
             worker.handle.detach();
-        } else {
-            drop(worker.handle);
+            continue;
+        }
+        if let Err(running) = worker.handle.stop_within(deadline.left(Instant::now())) {
+            tracing::warn!(
+                thread = running.name(),
+                "a stopped thread still runs past the stop bound; it is detached"
+            );
+            running.detach();
         }
     }
 }

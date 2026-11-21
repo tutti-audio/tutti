@@ -91,6 +91,12 @@ mod jobs;
 mod key;
 #[cfg(any(feature = "capture", feature = "midi"))]
 mod latency;
+#[cfg(all(feature = "sampler", codec))]
+mod load_audio;
+#[cfg(feature = "soundfont")]
+mod load_soundfont;
+#[cfg(any(all(feature = "sampler", codec), feature = "soundfont"))]
+mod loaded;
 #[cfg(feature = "midi")]
 mod midi;
 #[cfg(feature = "midi-hardware")]
@@ -202,6 +208,10 @@ pub use key::{
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
+#[cfg(all(feature = "sampler", codec))]
+pub use load_audio::{AudioData, LoadAudio, LoadedAudio, Tier};
+#[cfg(feature = "soundfont")]
+pub use load_soundfont::{LoadSoundFont, LoadedSoundFont};
 #[cfg(feature = "midi")]
 pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping};
 #[cfg(feature = "midi-hardware")]
@@ -218,14 +228,13 @@ pub use midi_load::{
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
-    InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
-    MidiOutputInfo, MidiPortError, NoHardware, OutputLoaded, OutputOptions, PortCause, midi_input,
-    midi_output,
+    MidiInput, MidiInputInfo, MidiOutput, MidiOutputInfo, MidiPortError, NoHardware,
+    OpenMidiOutput, PortCause,
 };
 #[cfg(feature = "midi")]
 pub use midi_report::MidiReport;
 #[cfg(feature = "midi")]
-pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptions, midi_sink};
+pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
@@ -237,24 +246,19 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange,
-    PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginPorts, PoolPluginEntry,
-    PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
-    SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
+    AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, LoadedPreset, Plugin, PluginApplyError,
+    PluginCause, PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo,
+    PluginPorts, PoolPluginEntry, PooledPlugin, PortsRefusal, PresetStartError, RestoreState,
+    RestoredState, SaveState, StateRestore, StateStartError, StateView,
 };
 pub(crate) use pool::Pool;
-#[cfg(all(feature = "sampler", codec))]
-pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
     Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
     PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
-    PoolSet, PoolState, RefreshError, RefreshPool, RefreshReport, RefreshedPool, Retention,
-    RetryError, Sharing, WhenLoadedError, stranded_loads,
+    PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::{Hold, HoldKind};
-#[cfg(feature = "soundfont")]
-pub use pool::{SoundFontFile, soundfont};
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;

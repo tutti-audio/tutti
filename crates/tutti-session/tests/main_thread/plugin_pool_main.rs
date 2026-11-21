@@ -18,7 +18,7 @@ use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::{Locator, PluginId};
 use tutti_session::{
-    JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
+    LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -408,8 +408,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
 }
 
 /// A value saved through `save_state`, then moved, is the value the plugin and
-/// its mirror hold after `restore_state` lands in an update on the main thread;
-/// the outcome lands in an update, never at the call.
+/// its mirror hold after `restore_state` is run on the main thread and applied.
 fn restore_round_trip(hosting: Hosting) {
     const CUTOFF: tutti_units::ParamId = tutti_units::ParamId::new(101);
     let mut env = tutti_fixtures::ScopedEnv::new();
@@ -460,21 +459,22 @@ fn restore_round_trip(hosting: Hosting) {
 
     set(&s, 0.9);
     blocks(&mut s);
-    let saving = s
-        .save_state(&"verb", tutti_plugin_types::StateUse::Project)
-        .expect("a node holds the plugin");
-    let state = saving.wait(&mut s).expect("a state");
+    let main = tutti_fixtures::main_thread();
+    let state = s
+        .save_state(&node, tutti_plugin_types::StateUse::Project)
+        .expect("a node holds the plugin")
+        .run(main)
+        .expect("a state");
 
     set(&s, 0.1);
     blocks(&mut s);
-    let restoring = s.restore_state(&"verb", state).expect("its own plugin's");
-    assert_eq!(
-        restoring.status(),
-        JobStatus::WaitingForMainThread,
-        "it runs in an update on the main thread"
-    );
-    restoring.wait(&mut s).expect("applied");
-    // The mirror is read again by a job the next updates land.
+    let restored = s
+        .restore_state(&node, state)
+        .expect("its own plugin's")
+        .run(main)
+        .expect("the plugin takes it");
+    s.apply(restored).expect("the node still hosts the plugin");
+    // The mirror is read again by the next updates.
     let deadline = Instant::now() + Duration::from_secs(30);
     while (knob(&s) - 0.9).abs() > 1e-6 {
         assert!(
@@ -488,16 +488,15 @@ fn restore_round_trip(hosting: Hosting) {
     s.close(tutti_fixtures::main_thread());
 }
 
-/// **A restore job applies the saved state to an in-process plugin**: its
+/// **A restore applies the saved state to an in-process plugin**: its
 /// writes reach the plugin at the head of a block, so the saved state holds the
 /// value the blocks delivered, and the restore moves it back.
-fn a_restore_job_applies_the_saved_state_to_an_in_process_plugin() {
+fn a_restore_applies_the_saved_state_to_an_in_process_plugin() {
     restore_round_trip(Hosting::InProcess);
 }
 
-/// **A restore job applies the saved state to a served plugin**, in the first
-/// update on the main thread.
-fn a_restore_job_applies_the_saved_state_to_a_served_plugin() {
+/// **A restore applies the saved state to a served plugin**.
+fn a_restore_applies_the_saved_state_to_a_served_plugin() {
     restore_round_trip(Hosting::OutOfProcess);
 }
 
@@ -987,6 +986,7 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
+        tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(clap_probe())),
         SampleRate::SR_48K,
@@ -1020,8 +1020,8 @@ a_released_in_process_plugin_on_the_main_thread_is_closed_in_place,
 a_changed_identity_swaps_an_in_process_node,
 an_in_process_swap_to_other_ports_fails_the_entry,
 an_in_process_swap_waits_for_the_main_thread,
-a_restore_job_applies_the_saved_state_to_an_in_process_plugin,
-a_restore_job_applies_the_saved_state_to_a_served_plugin,
+a_restore_applies_the_saved_state_to_an_in_process_plugin,
+a_restore_applies_the_saved_state_to_a_served_plugin,
 a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 a_plugin_that_grows_wider_than_a_block_is_refused_by_name,

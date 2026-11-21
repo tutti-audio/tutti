@@ -429,10 +429,10 @@ fn off_declares_no_controls_and_a_filter_declares_two_more() {
     );
 
     let gate = gate(KeyFilter::Off, -30.0, 100.0, 1.0);
-    assert_eq!(gate.shape().params.len(), 5);
+    assert_eq!(gate.shape().params.len(), 6);
     let gate = self::gate(KeyFilter::HighPass, -30.0, 100.0, 1.0);
     assert_eq!(
-        &gate.shape().params.as_slice()[5..],
+        &gate.shape().params.as_slice()[6..],
         &[UnitParam::Cutoff, UnitParam::Q][..]
     );
 }

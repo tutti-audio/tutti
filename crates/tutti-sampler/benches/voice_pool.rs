@@ -359,7 +359,7 @@ fn pool_knobs(
             loop_: knobs.loop_,
             ..Default::default()
         };
-        // The handle builds the stretch filter, on this (control) thread, as it
+        // The handle builds the stretch vocoder, on this (control) thread, as it
         // does for a real host.
         match built {
             Built::Memory(source) => handle

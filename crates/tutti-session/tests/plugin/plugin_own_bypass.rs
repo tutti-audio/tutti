@@ -31,7 +31,7 @@ fn plugin_file() -> std::path::PathBuf {
     tutti_fixtures::publish_with_extension(&real, "clap")
 }
 
-fn session_with_plugin() -> (Session, tutti_graph::NodeKey) {
+fn session_with_plugin() -> (Session, tutti_session::Key<tutti_session::AnyPlugin>) {
     // SAFETY: nextest runs each test in its own process, and this is set from
     // the test's own thread before the first server is spawned.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
@@ -48,7 +48,7 @@ fn session_with_plugin() -> (Session, tutti_graph::NodeKey) {
         )
         .expect("the shared plugin loads");
     let _ = s.update();
-    (s, plugin.erase())
+    (s, plugin)
 }
 
 /// The shared plugin's bypass parameter (`core.rs`, `BYPASS`), `0` processing
@@ -85,7 +85,8 @@ fn until_told(s: &mut Session, node: tutti_graph::NodeKey, want: f64) -> bool {
 /// The plugin starts processing.
 #[test]
 fn setting_bypassed_writes_the_plugins_own_bypass_and_active_clears_it() {
-    let (mut s, node) = session_with_plugin();
+    let (mut s, key) = session_with_plugin();
+    let node = key.erase();
     assert_eq!(told(&s, node), Some(0.0), "the plugin starts processing");
     s.set(ModeTarget::of(node).to(NodeMode::Bypassed)).unwrap();
     assert!(until_told(&mut s, node, 1.0), "bypassed was not told");
@@ -99,7 +100,8 @@ fn setting_bypassed_writes_the_plugins_own_bypass_and_active_clears_it() {
 /// path), and the mode the plugin plays under is the node's.
 #[test]
 fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
-    let (mut s, node) = session_with_plugin();
+    let (mut s, key) = session_with_plugin();
+    let node = key.erase();
     s.set(ModeTarget::of(node).to(NodeMode::Bypassed)).unwrap();
     assert!(
         until_told(&mut s, node, 1.0),
@@ -111,6 +113,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
+        tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(plugin_file())),
         SampleRate::SR_48K,
@@ -143,7 +146,8 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
 /// it.
 #[test]
 fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
-    let (mut s, node) = session_with_plugin();
+    let (mut s, key) = session_with_plugin();
+    let node = key.erase();
     // Let the install's reconciliation finish, so the session is not already
     // comparing when the plugin is moved.
     let mut block = vec![0.0f32; BLOCK * 2];
@@ -159,17 +163,18 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         until_told(&mut s, node, 1.0),
         "the plugin's own bypass went on"
     );
+    let main = tutti_fixtures::main_thread();
     let state = s
-        .plugin_view(node)
+        .save_state(&key, tutti_plugin_types::StateUse::Project)
         .expect("hosted")
-        .state()
-        .save(tutti_plugin_types::StateUse::Project)
+        .run(main)
         .expect("saves");
-    s.plugin_view(node)
-        .expect("hosted")
-        .state()
-        .restore(tutti_fixtures::main_thread(), &state)
+    let restored = s
+        .restore_state(&key, state)
+        .expect("its own plugin's")
+        .run(main)
         .expect("restores");
+    s.apply(restored).expect("the node hosts the plugin");
     assert!(
         until_told(&mut s, node, 0.0),
         "the session did not make the plugin's bypass the node's mode"

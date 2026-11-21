@@ -59,7 +59,7 @@ use tutti_alsa_ffi::{
     Announced, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
-use tutti_platform::{ThreadHandle, spawn_named};
+use tutti_platform::{Executor, Task};
 
 /// Looks a settle takes before it reports the last one.
 const MAX_SETTLE: usize = 8;
@@ -545,40 +545,39 @@ impl Announce {
     }
 }
 
-/// The running watch. Dropping it closes the stop pair, which wakes the thread
-/// out of `poll`, and stops and joins the thread.
+/// The running watch.
 struct AlsaWatch {
     /// The thread polls the other end; closing this one is the wake.
     stop: Option<UnixStream>,
-    thread: Option<ThreadHandle<()>>,
+    /// The watch's future, on a thread of the executor's own.
+    task: Option<Task<()>>,
 }
 
 impl Watch for AlsaWatch {}
 
 impl Drop for AlsaWatch {
+    /// Closing the stop pair wakes the thread out of `poll`, and the watch
+    /// returns `Woken::Stopped`; the task drops second, which ends the future on
+    /// its thread. A cancelled future does not leave a syscall it is blocked in,
+    /// so only the stop wakes it; what follows is as [`Watch`] says.
     fn drop(&mut self) {
-        // Closing the pair wakes `poll`; the join then waits for the thread.
         drop(self.stop.take());
-        if let Some(thread) = self.thread.take() {
-            thread.token().stop();
-            // The thread reports its own panics to the sink; one that escapes
-            // that (inside `fail`) is reported here.
-            if let Err(panicked) = thread.join() {
-                tracing::error!("ALSA device watch: {panicked}");
-            }
-        }
+        drop(self.task.take());
     }
 }
 
 /// Subscribes to the announce port, reports `snapshot` once, then reports it
-/// again after each announcement until the returned watch drops. `snapshot`
+/// again after each announcement, from a dedicated thread of `executor`, until
+/// the returned watch drops. `snapshot`
 /// enumerates on the client it is given: the watch's own.
 ///
 /// Subscribing comes first, so a device that appears during the first
 /// enumeration is announced too. A sequencer that will not open starts no
-/// thread: there are no devices to watch, as enumeration reports. A watch that
-/// later fails, by an error or a panic, tells `sink` ([`ChangeSink::fail`]).
+/// thread: the list stays empty. Either that refusal or a later failure of
+/// the watch, by an error or a panic, is told to `sink` ([`ChangeSink::fail`]),
+/// so the app can read why.
 pub(super) fn start(
+    executor: &Executor,
     sink: ChangeSink,
     snapshot: impl Fn(&Client) -> Option<Vec<OsDevice>> + Send + 'static,
 ) -> Result<Box<dyn Watch>> {
@@ -589,46 +588,47 @@ pub(super) fn start(
     let mut announce = match Announce::open(stop_rx) {
         Ok(announce) => announce,
         Err(e) => {
-            tracing::debug!("ALSA device watch: {}", crate::error::chain(&e));
+            sink.fail(e);
             return Ok(Box::new(crate::endpoints::NoWatch));
         }
     };
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
     tracker.seed(|| announce.drain(), || snapshot(&announce.seq.client()))?;
-    let thread = spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
-        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            loop {
-                match announce.wait(tracker.retry_after()) {
-                    Ok(woken @ (Woken::Announced(_) | Woken::TimedOut)) => {
-                        let first = match woken {
-                            Woken::Announced(first) => first,
-                            _ => Drained::default(),
-                        };
-                        tracker.step(
-                            first,
-                            || announce.drain(),
-                            || snapshot(&announce.seq.client()),
-                        );
+    let task = executor
+        .spawn_dedicated(MidiThread::DeviceWatch.name(), None, async move {
+            let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                loop {
+                    match announce.wait(tracker.retry_after()) {
+                        Ok(woken @ (Woken::Announced(_) | Woken::TimedOut)) => {
+                            let first = match woken {
+                                Woken::Announced(first) => first,
+                                _ => Drained::default(),
+                            };
+                            tracker.step(
+                                first,
+                                || announce.drain(),
+                                || snapshot(&announce.seq.client()),
+                            );
+                        }
+                        Ok(Woken::Stopped) => return None,
+                        Err(e) => return Some(e),
                     }
-                    Ok(Woken::Stopped) => return None,
-                    Err(e) => return Some(e),
                 }
+            }));
+            match run {
+                Ok(None) => {}
+                Ok(Some(why)) => failures.fail(why),
+                Err(_) => failures.fail(crate::WatchFailure::Panicked),
             }
-        }));
-        match run {
-            Ok(None) => {}
-            Ok(Some(why)) => failures.fail(why),
-            Err(_) => failures.fail(crate::WatchFailure::Panicked),
-        }
-    })
-    .map_err(|source| MidiHardwareError::Spawn {
-        thread: MidiThread::DeviceWatch,
-        source,
-    })?;
+        })
+        .map_err(|source| MidiHardwareError::Spawn {
+            thread: MidiThread::DeviceWatch,
+            source,
+        })?;
     Ok(Box::new(AlsaWatch {
         stop: Some(stop_tx),
-        thread: Some(thread),
+        task: Some(task),
     }))
 }
 

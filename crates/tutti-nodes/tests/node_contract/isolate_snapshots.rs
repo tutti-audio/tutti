@@ -19,12 +19,13 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
-    BusStripNode, ChannelTimes, CompressorConfig, CompressorControls, CompressorNode,
-    ConvolverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
-    DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
-    LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode,
-    MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
+    BusStripNode, ChannelTimes, CombFilterConfig, CombFilterNode, CombForm, CompressorConfig,
+    CompressorControls, CompressorNode, ConvolverNode, DelayConfig, DelayControls, DelayLayout,
+    DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig,
+    EqBandNode, FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
+    LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
+    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
     RingModConfig, RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
     TremoloConfig, TremoloNode,
 };
@@ -39,8 +40,8 @@ use tutti_nodes::{
     StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode,
 };
 use tutti_units::{
-    Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
-    Semitones, StereoWidth, UnitAddr, UnitParam,
+    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples,
+    Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -428,6 +429,49 @@ fn auto_pan() {
     })
     .control("depth", |p| {
         assert!(p.param_set().set(UnitParam::Depth, 1.0))
+    })
+    .check();
+}
+
+#[test]
+fn comb_filter() {
+    for form in [CombForm::Feedforward, CombForm::Feedback] {
+        IsolateRow::new("CombFilterNode (stereo)", move || {
+            CombFilterNode::from(CombFilterConfig::new(
+                ChannelLayout::STEREO,
+                form,
+                Seconds::new(0.004),
+            ))
+        })
+        .control("coefficient", |r| {
+            assert!(r.param_set().set(UnitParam::Feedback, 0.8))
+        })
+        .check();
+    }
+}
+
+#[test]
+fn frequency_shifter() {
+    IsolateRow::new("FrequencyShifterNode (stereo)", || {
+        FrequencyShifterNode::from(
+            FrequencyShifterConfig::new(ChannelLayout::STEREO).shift(Hz::new(200.0)),
+        )
+    })
+    .control("shift", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, -90.0))
+    })
+    .check();
+}
+
+#[test]
+fn pitch_shifter() {
+    IsolateRow::new("PitchShifterNode (stereo)", || {
+        PitchShifterNode::<f32>::from(
+            PitchShifterConfig::new(ChannelLayout::STEREO).pitch(Cents::new(200.0)),
+        )
+    })
+    .control("pitch", |r| {
+        assert!(r.param_set().set(UnitParam::Pitch, -900.0))
     })
     .check();
 }

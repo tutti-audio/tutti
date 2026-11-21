@@ -30,7 +30,10 @@
 //!   [`spawn_dedicated`](Executor::spawn_dedicated) gives a long-lived future a thread
 //!   of its own; [`Executor::sleep_until`] is a deadline as a future ([`Sleep`]);
 //!   [`Executor::timer`] gives a [`Timer`] that makes them and keeps nothing alive, and
-//!   [`Executor::downgrade`] a [`WeakExecutor`] that reaches the executor while it lives.
+//!   [`Executor::downgrade`] a [`WeakExecutor`] that reaches the executor while it lives;
+//!   [`join`] waits on the calling thread for a [`Task`] that runs elsewhere to end, and
+//!   [`join_within`] waits at most a bound, handing the task back past it; [`yield_now`]
+//!   returns to the executor once between slices of a task's work.
 //! - [`oneshot()`] — a value one side sends and a future resolves to, control side only
 //!   ([`OneshotSender`], [`OneshotReceiver`]; [`RecvError`] when the sender is dropped).
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main

@@ -16,7 +16,8 @@ use tutti_nodes::testing::Through;
 use tutti_nodes::{
     ChannelTimes, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
     DelayLayout, DelayNode, InterpolationMode, MaxDelay, ModDelayConfig, ModDelayNode,
-    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode, PitchShifterConfig,
+    PitchShifterNode,
 };
 use tutti_units::Latency;
 use tutti_units::{Feedback, Hz, Mix, Seconds};
@@ -325,6 +326,32 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
 }
 
 // ---------------------------------------------------------------------------
+// The pitch shifter's reported latency is true of the whole output.
+// ---------------------------------------------------------------------------
+
+/// At 0 cents the wet path is a pure delay of the reported latency, so at every graph mix the
+/// output is one impulse at exactly that latency of amplitude `dry_share + wet_share` = 1: the
+/// graph's blend delays the dry by the declared latency and the two land together.
+#[test]
+fn pitch_shifter_dry_and_wet_leave_together_at_the_reported_latency() {
+    for mix in [0.0_f64, 0.5, 1.0] {
+        let node = PitchShifterNode::<f32>::from(PitchShifterConfig::new(1u16));
+        let latency = declared(&prepared(node.clone(), SR, BLOCK)).samples().get();
+        let out = mixed_impulse_response(node, latency + 256, Mix::new(mix));
+        // The impulse is 1.0 at the unity COLA sum, to the transforms' rounding; the bound is
+        // `4 * 2 log2(2048) eps` of `f32`.
+        let bound = 4.0 * 2.0 * 11.0 * f64::from(f32::EPSILON);
+        for (i, &y) in out[0].iter().enumerate() {
+            let want = if i == latency { 1.0 } else { 0.0 };
+            assert!(
+                (f64::from(y) - want).abs() < bound,
+                "mix {mix}, frame {i}: {y}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The convolver's reported latency is true of the whole output.
 // ---------------------------------------------------------------------------
 mod convolver {
@@ -544,7 +571,7 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    let bus = tutti_buffers::BusTopology::assumed(width).expect("a test width fits a bus");
+    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(bus, irs)
             .folded()

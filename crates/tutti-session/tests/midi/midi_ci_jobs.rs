@@ -29,7 +29,8 @@ use crate::midi::{Asked, MpePeer, Reply, connect, hot_plug_session_ci, plug, upd
 struct Wire {
     s: Session,
     fake: FakeCounters,
-    port: MidiInput,
+    /// The port's handle, which keeps it open until it is taken.
+    port: Option<MidiInput>,
     peer: MpePeer,
     seen: Seen,
     start: Instant,
@@ -38,6 +39,11 @@ struct Wire {
 }
 
 impl Wire {
+    /// The port, while its handle is held.
+    fn port(&self) -> &MidiInput {
+        self.port.as_ref().expect("the port is held")
+    }
+
     fn new(switch: Reply, report: Reply) -> Self {
         let (mut s, fake) = hot_plug_session_ci(DeviceIdentity {
             manufacturer: ManufacturerId::NON_COMMERCIAL,
@@ -51,8 +57,7 @@ impl Wire {
             .expect("routes");
         plug(&fake, MpePeer::RAW, "Wire", PortDirection::Duplex);
         let _ = s.update();
-        connect(&mut s, &["wire"]);
-        let port = s.midi_input(&"wire").expect("loaded");
+        let port = connect(&mut s, &["wire"]).remove(0);
         play(&s);
         let mut peer = MpePeer::new();
         peer.switch = switch;
@@ -60,7 +65,7 @@ impl Wire {
         let mut wire = Self {
             s,
             fake,
-            port,
+            port: Some(port),
             peer,
             seen,
             start: Instant::now(),
@@ -98,7 +103,7 @@ impl Wire {
 
     /// The Profile the peer lists on Channel 1, as the port's info reads now.
     fn profile(&self) -> ChannelProfile {
-        let info = self.port.info();
+        let info = self.port().info();
         let [listed] = info.peers() else {
             panic!("one peer: {:?}", info.peers());
         };
@@ -110,7 +115,7 @@ impl Wire {
     }
 
     fn reporter(&self) -> ReportPeer {
-        let info = self.port.info();
+        let info = self.port().info();
         let [listed] = info.peers() else {
             panic!("one peer: {:?}", info.peers());
         };
@@ -118,7 +123,7 @@ impl Wire {
     }
 
     fn state(&self) -> ProfileState {
-        let info = self.port.info();
+        let info = self.port().info();
         info.peers()[0]
             .profiles()
             .expect("the peer lists Profiles")
@@ -419,7 +424,7 @@ fn a_report_of_another_kind_waits_behind_the_one_in_flight() {
     assert_eq!(wire.result(&second), Some(Ok(())));
 }
 
-/// A request pending when the entry is released ends as `Released`, and one made
+/// A request pending when the port's last handle is dropped ends as `Released`, and one made
 /// after it ends at the call.
 #[test]
 fn a_request_pending_when_the_port_is_released_ends_released() {
@@ -427,11 +432,7 @@ fn a_request_pending_when_the_port_is_released_ends_released() {
     let profile = wire.profile();
     let pending = profile.enable(four());
     wire.run(5);
-    wire.s
-        .pool(Vec::<
-            tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
-        >::new())
-        .expect("declares nothing");
+    drop(wire.port.take());
     wire.run(3);
     assert_eq!(wire.result(&pending), Some(Err(PeerError::Released)));
     let late = profile.enable(four());

@@ -215,6 +215,7 @@ pub(super) fn rig_gated(gate: Option<ReplyGate>) -> Rig {
     let (slab, handle) = AudioSlab::create(layout()).unwrap();
     let server_slab = AudioSlab::open(&handle, layout()).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
+        tutti_fixtures::executor(),
         path.clone(),
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,

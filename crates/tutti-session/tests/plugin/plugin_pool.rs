@@ -19,9 +19,9 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    AddPluginError, CrossfadeRefused, DetachedSession, HandleError, JobStatus, LoadError,
-    OtherPeer, Peer, PeerState, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,
-    RecoveryPolicy, Resource, RetryError, Session, SessionEvent, StateJobError, StateJobFailed,
+    AddPluginError, CrossfadeRefused, DetachedSession, LoadError, OtherPeer, Peer, PeerState,
+    PluginCause, PluginHealth, PoolEvent, PoolState, Presence, RecoveryPolicy, Resource,
+    RetryError, Session, SessionEvent, StateStartError,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -457,10 +457,9 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
 
     s.set(target.to(set)).unwrap();
     let state = s
-        .plugin_view(a)
+        .save_state(&a, tutti_plugin_types::StateUse::Project)
         .unwrap()
-        .state()
-        .save(tutti_plugin_types::StateUse::Project)
+        .run(tutti_fixtures::main_thread())
         .expect("a state");
 
     s.pool((
@@ -488,14 +487,14 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     assert_ne!(s.plugin(&"a").unwrap().id(), s.plugin(&"b").unwrap().id());
 }
 
-/// **A state saved by a job is the state of the plugin at the call, and the
-/// job's errors are named.** A value set on a served plugin and saved through
-/// `save_state` is the value another entry loads with; a key with no entry, a
-/// plugin with no node and a state of another plugin are refused at the call,
-/// and nothing is sent to the plugin.
+/// **A state saved is the state of the plugin at the run, and the refusals are
+/// named.** A value set on a served plugin and saved through `save_state` is the
+/// value another entry loads with; a node that is gone and a state of another
+/// plugin are refused at the call, and nothing is sent to the plugin.
 #[test]
-fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
+fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     const CUTOFF: ParamId = ParamId::new(101);
+    let main = tutti_fixtures::main_thread();
     let (catalog, _dir) = catalog();
     let mut s = session(true);
     s.pool((
@@ -508,15 +507,15 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         s.plugin(&"a").is_ok() && s.plugin(&"idle").is_ok()
     });
     let a = s.add_pooled_plugin(&"a").unwrap();
+    let gone = s.add_pooled_plugin(&"idle").unwrap();
+    s.graph().remove(gone).unwrap();
 
-    assert!(matches!(
-        s.save_state(&"missing", StateUse::Project),
-        Err(StateJobError::Entry(HandleError::NotPooled("missing")))
-    ));
-    assert!(matches!(
-        s.save_state(&"idle", StateUse::Project),
-        Err(StateJobError::NoNode("idle"))
-    ));
+    assert_eq!(
+        s.save_state(&gone, StateUse::Project)
+            .expect_err("the node is gone")
+            .node(),
+        gone.erase()
+    );
     let foreign = {
         let entry = catalog
             .entries()
@@ -525,12 +524,12 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         PeerState::of_plugin(entry.plugin_ref(), Vec::new())
     };
     assert!(matches!(
-        s.restore_state(&"idle", foreign.clone()),
-        Err(StateJobError::NoNode("idle"))
+        s.restore_state(&gone, foreign.clone()),
+        Err(StateStartError::NoNode(_))
     ));
     assert!(matches!(
-        s.restore_state(&"a", foreign),
-        Err(StateJobError::OtherPeer(OtherPeer { .. }))
+        s.restore_state(&a, foreign),
+        Err(StateStartError::OtherPeer(OtherPeer { .. }))
     ));
 
     let set = Normalized::of(0.9);
@@ -543,11 +542,11 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         .target();
 
     s.set(target.to(set)).unwrap();
-    let saving = s
-        .save_state(&"a", StateUse::Project)
-        .expect("a node holds the plugin");
-    assert_ne!(saving.status(), JobStatus::Done, "it lands in an update");
-    let state = saving.wait(&mut s).expect("a state");
+    let state = s
+        .save_state(&a, StateUse::Project)
+        .expect("a node holds the plugin")
+        .run(main)
+        .expect("a state");
     assert_eq!(
         state.media_type().as_str(),
         "application/x-clap-state",
@@ -563,9 +562,9 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         "a project save is FOR_PROJECT"
     );
     let duplicate = s
-        .save_state(&"a", StateUse::Duplicate)
+        .save_state(&a, StateUse::Duplicate)
         .expect("a node holds the plugin")
-        .wait(&mut s)
+        .run(main)
         .expect("a duplicate state");
     assert_eq!(
         duplicate.bytes()[CONTEXT_BYTE],
@@ -596,11 +595,49 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     );
 }
 
-/// **A save of a plugin whose server was terminated lands the crash, not a
-/// state:** the job ends as `StateJobFailed::State(PluginCrashed)`, and no
-/// empty state is saved as the real thing.
+/// **A restored state applied after crash recovery replaced the node's plugin is
+/// refused `Stale`**: the server that took the state is gone, and the plugin
+/// now at the node is a new instance.
 #[test]
-fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
+fn a_restore_applied_after_a_recovery_replaced_the_plugin_is_stale() {
+    let (catalog, _dir) = catalog();
+    let main = tutti_fixtures::main_thread();
+    let mut s = session(true);
+    s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
+    loaded(&mut s, "a");
+    let node = s.add_pooled_plugin(&"a").unwrap();
+    let state = s
+        .save_state(&node, StateUse::Project)
+        .unwrap()
+        .run(main)
+        .expect("a state");
+    let restored = s
+        .restore_state(&node, state)
+        .unwrap()
+        .run(main)
+        .expect("the plugin takes it");
+    let before = pid_of(&s, node);
+    s.plugin_view(node)
+        .unwrap()
+        .diagnostics()
+        .terminate(TerminationReason::Hung {
+            blocks: 16,
+            held: Duration::from_secs(5),
+        });
+    pump_until(&mut s, "the recovered plugin", |s| {
+        pid_of(s, node).is_some() && pid_of(s, node) != before
+    });
+    assert_eq!(
+        s.apply(restored).unwrap_err(),
+        tutti_session::PluginApplyError::Stale
+    );
+}
+
+/// **A save of a plugin whose server was terminated ends as the crash, not a
+/// state:** the run is `StateError::PluginCrashed`, and no empty state is saved
+/// as the real thing.
+#[test]
+fn a_save_of_a_dead_plugin_is_the_plugins_refusal() {
     let (catalog, _dir) = catalog();
     let mut s = session(false);
     s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
@@ -613,16 +650,13 @@ fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
             blocks: 16,
             held: Duration::from_secs(5),
         });
-    let saving = s
-        .save_state(&"a", StateUse::Project)
-        .expect("the node is still there");
-    let landed = saving.wait(&mut s);
+    let saved = s
+        .save_state(&node, StateUse::Project)
+        .expect("the node is still there")
+        .run(tutti_fixtures::main_thread());
     assert!(
-        matches!(
-            landed,
-            Err(StateJobFailed::State(StateError::PluginCrashed))
-        ),
-        "the plugin's refusal: {landed:?}"
+        matches!(saved, Err(StateError::PluginCrashed)),
+        "the plugin's refusal: {saved:?}"
     );
 }
 

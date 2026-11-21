@@ -988,6 +988,50 @@ fn a_placed_ring_jump_edge_is_allocation_free() {
     }
 }
 
+/// A stretching disk voice allocates nothing when it seats: its vocoder is fed
+/// through `DiskFeed` (the reader's flush at a seat, `read_at` over positions of its
+/// own, `idle` where nothing sounds), at a seat, a seek inside the ring, a stop (idle)
+/// and a start, all inside the guard.
+#[test]
+fn a_stretching_disk_voice_is_allocation_free_through_its_seats() {
+    use crate::voice::{Playback, SlotId, Voice, VoicePool, VoiceSource};
+    use tutti_units::StretchFactor;
+    const BLOCK: usize = 64;
+    let mut pool = VoicePool::new();
+    pool.insert_voice(
+        SlotId(0),
+        Voice {
+            source: VoiceSource::Disk(wide_clip(2)),
+            play: Playback {
+                stretch: StretchFactor::new(1.5),
+                ..Playback::default()
+            },
+        },
+    );
+    let pool = tutti_graph::contract::prepared(pool, SampleRate::of(SR), BLOCK);
+    let mut direct = Direct::new(pool, SampleRate::of(SR), BLOCK);
+    let t = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
+    for _ in 0..8 {
+        direct.block_in(&t.env(BLOCK, SampleRate::of(SR)));
+        t.advance(BLOCK as i64, SampleRate::of(SR));
+    }
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..400 {
+            match i {
+                // A seek back into the ring: a seat.
+                100 => t.seek(Beat::new(1.0)),
+                // Stopped: nothing sounds, the reader idles.
+                200 => t.set_rolling(false),
+                // Rolling again: a seat.
+                230 => t.set_rolling(true),
+                _ => {}
+            }
+            direct.block_in(&t.env(BLOCK, SampleRate::of(SR)));
+            t.advance(BLOCK as i64, SampleRate::of(SR));
+        }
+    });
+}
+
 /// A streamed clip wider than its pool renders through the pool, the
 /// pool's channels taking the clip's first ones: a stereo clip in a mono
 /// pool, a 6-channel clip in a stereo pool, over 8 rolling blocks.

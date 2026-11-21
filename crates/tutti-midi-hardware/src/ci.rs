@@ -1342,8 +1342,13 @@ mod tests {
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
-        let session =
-            MidiSession::open_over(backend, inlets, crate::MidiHardwareConfig::new()).unwrap();
+        let session = MidiSession::open_over(
+            &tutti_platform::Executor::new(),
+            backend,
+            inlets,
+            crate::MidiHardwareConfig::new(),
+        )
+        .unwrap();
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         let id = session.outputs().first().expect("the device").id.clone();
         (session.connect_output(&id).unwrap(), counters)
@@ -1647,8 +1652,13 @@ mod tests {
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
-        let session =
-            MidiSession::open_over(backend, inlets, crate::MidiHardwareConfig::new()).unwrap();
+        let session = MidiSession::open_over(
+            &tutti_platform::Executor::new(),
+            backend,
+            inlets,
+            crate::MidiHardwareConfig::new(),
+        )
+        .unwrap();
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         session.outputs().first().expect("the device").id.clone()
     }

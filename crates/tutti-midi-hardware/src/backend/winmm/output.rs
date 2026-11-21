@@ -1,7 +1,6 @@
 //! Sending MIDI 1.0 to a winmm output, each event at its time.
 
 use std::sync::Arc;
-use std::time::Duration;
 use tutti_platform::Instant;
 
 use super::super::legacy_port::bytes::{ByteOut, Wire};
@@ -10,7 +9,7 @@ use crate::endpoints::DeviceOut;
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
-use tutti_platform::{ThreadHandle, spawn_named};
+use tutti_platform::{Executor, Task, join};
 use tutti_rt::CounterWriter;
 use tutti_ump::Ump;
 use tutti_winmm_ffi::{MidiOut as Port, OutputPort, TimerWaiter, TimerWaker, waitable_timer};
@@ -18,24 +17,25 @@ use tutti_winmm_ffi::{MidiOut as Port, OutputPort, TimerWaiter, TimerWaker, wait
 /// How many events wait at most; a queue past it takes a prefix and says so.
 const MAX_PENDING: usize = 8192;
 
-/// How long dropping an output waits for its thread. The thread looks at the
-/// stop before each event, so it ends within the send it is in; a SysEx long
-/// enough to take longer is left to finish on its own, and the thread is
-/// detached with a warning.
-const JOIN_BOUND: Duration = Duration::from_secs(2);
-
 struct Shared {
     mailbox: Mailbox<Ump>,
     /// Ends the thread's wait when an earlier event arrives or the output stops.
     wake: TimerWaker,
 }
 
-/// An open winmm output, as a [`MidiOut`]: a thread holds each event until its
-/// time and sends in order. Dropping it stops the thread and closes the port;
-/// events not yet due are dropped.
+/// An open winmm output, as a [`MidiOut`]: a future on a dedicated thread of the
+/// executor holds each event until its time and sends in order. Dropping it
+/// stops the sender, waits for it to end and closes the port; events not yet due
+/// are dropped.
+///
+/// The output ends its sender before the executor clone it was opened with drops,
+/// and the sender cannot see its executor shut down: an app that holds the
+/// executor's last clone elsewhere and drops it while an output is open costs the
+/// executor's shutdown bound, and the thread is then detached with a warning (it
+/// ends when the output drops). Drop an output before its executor.
 pub struct WinMmOutput {
     shared: Arc<Shared>,
-    thread: Option<ThreadHandle<()>>,
+    task: Option<Task<()>>,
 }
 
 impl MidiOut for WinMmOutput {
@@ -87,19 +87,13 @@ impl Drop for WinMmOutput {
         if let Err(e) = self.shared.wake.wake() {
             tracing::warn!("winmm MIDI output wake: {e}");
         }
-        if let Some(thread) = self.thread.take() {
-            match thread.stop_within(JOIN_BOUND) {
-                Ok(Ok(())) => {}
-                // A panic in the sender is caught by its loop, which kills the
-                // mailbox; one that escapes is reported here.
-                Ok(Err(panicked)) => tracing::error!("winmm MIDI output: {panicked}"),
-                Err(stuck) => {
-                    tracing::warn!(
-                        "winmm MIDI output did not stop within {JOIN_BOUND:?}; left running"
-                    );
-                    stuck.detach();
-                }
-            }
+        // The port closes as the sender ends (it owns it), so the drop waits for
+        // that: a reopen at once finds the device free. The sender returns because
+        // the mailbox is stopped, not because the task is cancelled: its body is
+        // synchronous inside the async block and never awaits. A `None` means the
+        // future panicked or was dropped unrun; it no longer touches the port.
+        if let Some(task) = self.task.take() {
+            let _ = join(task);
         }
     }
 }
@@ -130,23 +124,24 @@ fn thread(mut port: Port, mut wait: TimerWaiter, losses: CounterWriter<Losses>, 
 ///
 /// [`MidiHardwareError::Os`] from the port's or the timer's creation, and
 /// [`MidiHardwareError::Spawn`] if the thread cannot be spawned.
-pub(super) fn open(port: &OutputPort) -> Result<WinMmOutput> {
+pub(super) fn open(executor: &Executor, port: &OutputPort) -> Result<WinMmOutput> {
     let port = Port::open(port)?;
     let (wake, wait) = waitable_timer()?;
     let (mailbox, losses) = Mailbox::new();
     let shared = Arc::new(Shared { mailbox, wake });
-    let thread = spawn_named(MidiThread::MidiOut.name(), None, {
-        let shared = Arc::clone(&shared);
-        move |_| {
-            thread(port, wait, losses, &shared);
-        }
-    })
-    .map_err(|source| MidiHardwareError::Spawn {
-        thread: MidiThread::MidiOut,
-        source,
-    })?;
+    let task = executor
+        .spawn_dedicated(MidiThread::MidiOut.name(), None, {
+            let shared = Arc::clone(&shared);
+            async move {
+                thread(port, wait, losses, &shared);
+            }
+        })
+        .map_err(|source| MidiHardwareError::Spawn {
+            thread: MidiThread::MidiOut,
+            source,
+        })?;
     Ok(WinMmOutput {
         shared,
-        thread: Some(thread),
+        task: Some(task),
     })
 }

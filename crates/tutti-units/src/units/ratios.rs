@@ -20,7 +20,9 @@ unit! {
     ///
     /// `1.0` is no compression. Below 1.0 would be an *expander*, which this
     /// type deliberately does not represent — a compressor clamps
-    /// up to 1.0 rather than silently inverting its own behaviour.
+    /// up to 1.0 rather than silently inverting its own behaviour. The ratio reaches
+    /// `+inf` (a limiter over the threshold; a gate under it, as a downward expander's
+    /// ratio: dB of output per dB of input past the threshold, on either side of it).
     pub struct CompressionRatio(f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: 4:1 plus 4:1 is not 8:1.

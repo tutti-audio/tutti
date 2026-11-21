@@ -283,7 +283,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
         let bands = splits.len() + 1;
         let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::assumed(ChannelLayout::from(channels)).unwrap(),
+            BusTopology::default_for(ChannelLayout::from(channels)).unwrap(),
             CrossoverControls::try_from(&hz[..]).unwrap(),
         ))
         .unwrap();

@@ -34,7 +34,7 @@ use hardware::Hardware;
 /// The engine's MIDI, as graph nodes the builder inserts: the sync node (Beat
 /// Clock, MTC and Machine Control, sending nothing until a host sets its
 /// messages), with its controls. An input port's input node is not here: each
-/// `midi_input` entry makes its own (`MidiInput::node`), and each output its own
+/// input port makes its own (`MidiInput::node`), and each output its own
 /// (`MidiSink::node`, `MidiOutput::node`), fed by the sync node.
 #[derive(Clone, Debug)]
 pub struct MidiNodes {

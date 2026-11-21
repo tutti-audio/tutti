@@ -12,6 +12,7 @@ use std::future::Future;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::task::Poll;
 use std::time::Duration;
 
 use crate::Instant;
@@ -20,6 +21,7 @@ use crate::priority::PriorityRequest;
 mod timers;
 
 pub use async_task::Task;
+
 use timers::Timers;
 pub use timers::{Shutdown, Sleep, Timer};
 
@@ -27,11 +29,74 @@ pub use timers::{Shutdown, Sleep, Timer};
 #[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
 mod os;
 
+/// Waits on the calling thread until `task` ends, and returns its output: `None` when the
+/// executor dropped the task instead (its future panicked, or the executor shut down
+/// first).
+///
+/// It only waits: the task runs where its executor runs it (a dedicated thread, a
+/// [`Threads`] driver), never here, so this is no way to run a future inline. A drop that
+/// must not return before a future it stopped has ended (an OS handle the future still
+/// uses) waits with it.
+///
+/// Never call it on the thread that runs `task` (its own dedicated thread, or the only
+/// thread that drives its executor): nothing else would run it, and the wait never ends.
+///
+/// The web cannot block: there it looks once and returns the output of a task that has
+/// ended, or `None`, and a task that has not ended is dropped, which cancels it.
+///
+/// # Panics
+///
+/// On a thread that drives an executor (a dedicated thread, a [`Threads`] driver): a wait
+/// there would stop the thread running the tasks it drives, its own task among them.
+pub fn join<T>(task: Task<T>) -> Option<T> {
+    os::join(task)
+}
+
+/// [`join`] with a bound: waits at most `bound` for `task` to end, and hands the task back
+/// when it has not.
+///
+/// The caller keeps the task while it waits, so nothing is cancelled by the wait. An owner
+/// that stops a future (a stop flag it reads) and must not wait for it without end calls
+/// this, then waits again, [`detach`](Task::detach)es or drops (cancels) what comes back.
+///
+/// The web cannot block: there it looks once, whatever the bound.
+///
+/// # Errors
+///
+/// The task itself when it has not ended within `bound`.
+///
+/// # Panics
+///
+/// As [`join`]: on a thread that drives an executor.
+pub fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
+    os::join_within(task, bound)
+}
+
+/// Returns to the executor once, waking itself first so it is polled again.
+///
+/// A future that runs slices of blocking work awaits it between them: its executor can
+/// drive other tasks and see a cancelled [`Task`] there, and a caller-driven executor
+/// gets its thread back instead of being held by a loop still busy.
+pub async fn yield_now() {
+    let mut yielded = false;
+    std::future::poll_fn(|cx| {
+        if yielded {
+            Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+    .await;
+}
+
 /// Threads that drive an [`Executor`]'s queue, started by `Executor::spawn_threads` on a
 /// native target. The web has no constructor for it.
 ///
 /// Each fires the due sleeps, runs a ready task, and parks until a task is scheduled or the
-/// next deadline falls due. Dropping the `Threads` stops and joins them; a drop on one of
+/// next deadline falls due. Dropping the `Threads` stops them and joins them within one
+/// second in all, detaching one still running then; a drop on one of
 /// the threads itself (the last holder of a waker, say) does not join that thread. The
 /// executor it drives stays alive while it does.
 #[must_use = "dropping `Threads` stops and joins its threads"]
@@ -71,8 +136,12 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// # Shutdown
 ///
-/// When the last clone drops, the dedicated threads are told to stop, woken and joined, the
-/// blocking pool's idle threads end, and every task still pending is dropped. A future
+/// When the last clone drops, the dedicated threads are told to stop, woken and joined
+/// within one second in all. One still running then (a future wedged in an OS call its wake
+/// cannot reach) is detached and named in a `tracing::warn!`: it ends when its future does,
+/// and until then holds its queue, the deadline queue and whatever its future captured (a
+/// file, a channel). The blocking pool's idle threads end, and every task still pending is
+/// dropped. A future
 /// that holds an `Executor` clone keeps the executor alive, so that drop never comes:
 /// tutti's own futures never hold a clone, and a spawner passes a future what it needs
 /// instead. A long-lived future ends on its own stop flag before the executor drops. A
@@ -158,6 +227,15 @@ impl WeakExecutor {
     #[must_use]
     pub fn upgrade(&self) -> Option<Executor> {
         self.handle.upgrade().map(|handle| Executor { handle })
+    }
+
+    /// Whether an executor clone still lives: `false` from the moment the last clone
+    /// drops, which is when shutdown begins and the dedicated threads are joined. A
+    /// dedicated future that never yields reads it each turn and returns. One atomic
+    /// load: no lock, allocation or clone.
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        self.handle.strong_count() > 0
     }
 }
 

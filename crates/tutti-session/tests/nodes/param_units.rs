@@ -10,8 +10,9 @@ use std::any::TypeId;
 
 use tutti_session::HasParam;
 use tutti_units::{
-    Amplitude, Azimuth, Balance, BitDepth, CompressionRatio, Db, Depth, Drive, Elevation, Feedback,
-    HoldFactor, Hz, Mix, Q, Resonance, Seconds, Semitones, Spread, StereoWidth, UnitParam,
+    Amplitude, Azimuth, Balance, BitDepth, Cents, CompressionRatio, Db, Depth, Drive, Elevation,
+    Feedback, HoldFactor, Hz, Mix, Q, Resonance, Seconds, Semitones, Spread, StereoWidth,
+    UnitParam,
 };
 
 /// Whether `N`'s param of kind `P` is in `U`: the unit a key's method for it
@@ -64,10 +65,12 @@ units! {
             Release => Seconds, Range => Db, Cutoff => Hz, Q => Q
         }
         tutti_nodes::GateNode<f32> {
-            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db
+            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db,
+            Ratio => CompressionRatio
         }
         tutti_nodes::GateNode<f64> {
-            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db
+            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db,
+            Ratio => CompressionRatio
         }
         tutti_nodes::LimiterNode<f32> { Threshold => Db, Ceiling => Db, Release => Seconds }
         tutti_nodes::LimiterNode<f64> { Threshold => Db, Ceiling => Db, Release => Seconds }
@@ -78,6 +81,7 @@ units! {
         tutti_nodes::EnvelopeFilterNode<f32> {
             Cutoff => Hz, Q => Q, Attack => Seconds, Release => Seconds, Semitones => Semitones
         }
+        tutti_nodes::PitchShifterNode<f32> { Pitch => Cents }
         tutti_nodes::TransientShaperNode<f32> { GainDb => Db }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
         tutti_nodes::CrossoverNode<f32> { Cutoff => Hz }
@@ -92,6 +96,7 @@ units! {
         tutti_nodes::PhaserNode<f32> { Rate => Hz, Depth => Depth, Feedback => Feedback }
         tutti_nodes::LfoNode { Depth => Depth, Rate => Hz }
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
+        tutti_nodes::NoiseNode<f32> { Volume => Amplitude }
         tutti_nodes::FreeverbNode<f32> { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode<f32> { Volume => Amplitude }
         tutti_nodes::PlateReverbNode<f32> {

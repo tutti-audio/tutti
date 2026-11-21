@@ -218,7 +218,8 @@ fn store() -> ResourceStore {
 struct Wire {
     s: Session,
     fake: FakeCounters,
-    port: MidiInput,
+    /// The port's handle, which keeps it open until it is taken.
+    port: Option<MidiInput>,
     peer: PePeer,
     start: Instant,
     ms: u64,
@@ -228,6 +229,11 @@ struct Wire {
 }
 
 impl Wire {
+    /// The port, while its handle is held.
+    fn port(&self) -> &MidiInput {
+        self.port.as_ref().expect("the port is held")
+    }
+
     fn new(store: ResourceStore) -> Self {
         Self::taking(store, 4)
     }
@@ -242,13 +248,12 @@ impl Wire {
         });
         plug(&fake, RAW, "Wire", PortDirection::Duplex);
         let _ = s.update();
-        connect(&mut s, &["wire"]);
-        let port = s.midi_input(&"wire").expect("loaded");
+        let port = connect(&mut s, &["wire"]).remove(0);
         play(&s);
         let mut wire = Self {
             s,
             fake,
-            port,
+            port: Some(port),
             peer: PePeer::new(store, requests),
             start: Instant::now(),
             ms: 0,
@@ -286,7 +291,7 @@ impl Wire {
     /// The Resource the peer's ResourceList names `resource`, as the port's info
     /// reads now.
     fn listed(&self, resource: &PeResource) -> ListedResource {
-        let info = self.port.info();
+        let info = self.port().info();
         let [listed] = info.peers() else {
             panic!("one peer: {:?}", info.peers());
         };
@@ -306,7 +311,7 @@ fn on(value: bool) -> PeData {
 #[test]
 fn the_info_lists_the_resources_of_the_peers_resource_list() {
     let wire = Wire::new(store());
-    let info = wire.port.info();
+    let info = wire.port().info();
     let [listed] = info.peers() else {
         panic!("one peer: {:?}", info.peers());
     };
@@ -469,7 +474,7 @@ fn a_request_on_a_lost_port_fails_at_the_call() {
     assert_eq!(wire.result(&set), Some(Err(PeerError::Disconnected)));
 }
 
-/// A request pending when the entry is released ends as `Released`, and one made
+/// A request pending when the port's last handle is dropped ends as `Released`, and one made
 /// after it ends at the call.
 #[test]
 fn a_request_pending_when_the_port_is_released_ends_released() {
@@ -478,11 +483,7 @@ fn a_request_pending_when_the_port_is_released_ends_released() {
     let res = wire.listed(&PeResource::LocalOn);
     let pending = res.fetch();
     wire.run(5);
-    wire.s
-        .pool(Vec::<
-            tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
-        >::new())
-        .expect("declares nothing");
+    drop(wire.port.take());
     wire.run(3);
     assert_eq!(wire.result(&pending), Some(Err(PeerError::Released)));
     let late = res.fetch();
@@ -694,7 +695,7 @@ impl Wire {
 
     /// What the live Subscriptions hold of `resource`, as the port's info reads now.
     fn held(&self, resource: &PeResource) -> Option<PeData> {
-        let info = self.port.info();
+        let info = self.port().info();
         let listed = self.listed(resource);
         info.peers()[0]
             .resources()
@@ -720,7 +721,7 @@ impl Wire {
 
     /// How many times the peer was told of a change of the info of the port.
     fn info_notices(&self) -> usize {
-        let id = self.port.id();
+        let id = self.port().id();
         self.changed
             .iter()
             .filter(|c| **c == (id, ResourceFact::Info))
@@ -987,7 +988,7 @@ fn a_peer_that_leaves_ends_its_leases_as_ended_by_the_peer() {
     );
     assert!(wire.changed.contains(&(lease.id(), ResourceFact::Presence)));
     assert!(
-        wire.port
+        wire.port()
             .info()
             .peers()
             .iter()
@@ -1080,11 +1081,7 @@ fn an_unsubscribe_past_the_peers_simultaneous_requests_waits_and_goes_out() {
 fn a_lease_dropped_after_its_port_was_released_sends_nothing() {
     let mut wire = Wire::new(subscribable());
     let lease = wire.subscribed(&PeResource::LocalOn);
-    wire.s
-        .pool(Vec::<
-            tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
-        >::new())
-        .expect("declares nothing");
+    drop(wire.port.take());
     wire.run(5);
     assert_eq!(
         lease.presence(),
@@ -1158,7 +1155,7 @@ mod state {
     }
 
     fn peer(wire: &Wire) -> tutti_session::ListedPeer {
-        wire.port.info().peers()[0].clone()
+        wire.port().info().peers()[0].clone()
     }
 
     /// **A save lands the bytes the device holds** (M2-111 §3): with the media
@@ -1330,11 +1327,7 @@ mod state {
         );
         let restore = device.restore_state(state).expect("the same device");
         wire.run(20);
-        wire.s
-            .pool(Vec::<
-                tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
-            >::new())
-            .expect("declares nothing");
+        drop(wire.port.take());
         assert_eq!(drive(&mut wire, restore), Err(PeerError::Released));
     }
 
@@ -1356,10 +1349,13 @@ mod state {
             assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
         }
         wire.run(20);
-        assert!(wire.port.info().peers().is_empty(), "the peer left");
+        assert!(wire.port().info().peers().is_empty(), "the peer left");
+        // The call itself ends the request: no update has run since it was made.
+        let mut save = pin!(device.save_state());
+        let mut cx = Context::from_waker(Waker::noop());
         assert_eq!(
-            drive(&mut wire, device.save_state()),
-            Err(PeerError::Disconnected)
+            save.as_mut().poll(&mut cx),
+            Poll::Ready(Err(PeerError::Disconnected))
         );
     }
 

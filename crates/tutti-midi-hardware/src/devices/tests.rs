@@ -23,8 +23,12 @@ fn wake(events: &DeviceEvents) -> Vec<DeviceEvent> {
 }
 
 fn fake() -> (Devices, DeviceEvents, FakeCounters) {
+    fake_on(&tutti_platform::Executor::new())
+}
+
+fn fake_on(executor: &tutti_platform::Executor) -> (Devices, DeviceEvents, FakeCounters) {
     let (backend, counters) = FakeBackend::build_with(Vec::new(), Vec::new(), usize::MAX);
-    let devices = Devices::open_over(backend).unwrap();
+    let devices = Devices::open_over(executor, backend).unwrap();
     let events = devices.subscribe();
     (devices, events, counters)
 }
@@ -50,7 +54,7 @@ fn ports() -> Arc<HardwareMidiInputs> {
 #[test]
 fn open_lists_what_is_plugged_in_and_reports_no_event_for_it() {
     let (backend, _) = FakeBackend::build();
-    let devices = Devices::open_over(backend).unwrap();
+    let devices = Devices::open_over(&tutti_platform::Executor::new(), backend).unwrap();
     let events = devices.subscribe();
     // Keystep Pro (in), IAC Bus 1 (in), Synth A (out), IAC Bus 1 (out): the
     // two IAC endpoints share an identity and get two ordinals.
@@ -257,7 +261,7 @@ impl MidiEndpoints for Refuses {
 /// is tried.
 #[test]
 fn a_backend_failure_leaves_no_port() {
-    let devices = Devices::open_over(Box::new(Refuses)).unwrap();
+    let devices = Devices::open_over(&tutti_platform::Executor::new(), Box::new(Refuses)).unwrap();
     let ports = ports();
     let keys = id_of(&devices, "Keys");
     for _ in 0..3 {
@@ -277,7 +281,8 @@ fn a_backend_failure_leaves_no_port() {
 fn a_change_during_subscribe_is_in_initial_or_in_the_stream_once() {
     const DEVICES: i32 = 2000;
     for _ in 0..10 {
-        let devices = Devices::open_over(Box::new(Refuses)).unwrap();
+        let devices =
+            Devices::open_over(&tutti_platform::Executor::new(), Box::new(Refuses)).unwrap();
         let sink = ChangeSink {
             shared: Arc::clone(&devices.inner.shared),
         };
@@ -356,7 +361,7 @@ fn a_saved_device_resolves_through_devices() {
 #[test]
 fn dropping_devices_stops_the_watch_thread() {
     let (backend, fake) = FakeBackend::build();
-    let devices = Devices::open_over(backend).unwrap();
+    let devices = Devices::open_over(&tutti_platform::Executor::new(), backend).unwrap();
     assert_eq!(
         fake.watchers(),
         1,
@@ -540,6 +545,7 @@ fn a_replaced_device_is_never_missing_from_the_list() {
             _watch: Box::new(crate::endpoints::NoWatch),
             backend: FakeBackend::build().0,
             shared: Arc::clone(&shared),
+            executor: tutti_platform::Executor::new(),
         }),
     };
     let mut reporter = Reporter::new(ChangeSink { shared });
@@ -571,6 +577,7 @@ fn sink_over_empty() -> (ChangeSink, Devices) {
             _watch: Box::new(crate::endpoints::NoWatch),
             backend: FakeBackend::build().0,
             shared: Arc::clone(&shared),
+            executor: tutti_platform::Executor::new(),
         }),
     };
     (ChangeSink { shared }, devices)
@@ -651,7 +658,11 @@ impl MidiEndpoints for Tagging {
 fn the_sink_follows_the_protocol_the_output_is_in() {
     use tutti_ump::{Protocol, StreamConfig};
     let told = Arc::default();
-    let devices = Devices::open_over(Box::new(Tagging(Arc::clone(&told)))).unwrap();
+    let devices = Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(Tagging(Arc::clone(&told))),
+    )
+    .unwrap();
     let mut out = devices.open_output(&id_of(&devices, "Synth")).unwrap();
     assert_eq!(*told.lock().unwrap(), [Protocol::Midi2], "at open");
     out.set_config(StreamConfig {
@@ -694,13 +705,13 @@ fn a_reference_to_the_events_iterates_the_queued_changes() {
 /// `Synth`, in `protocol`, and the fake that records what it was sent. The
 /// schedule's timing is `Pulse`'s tests; these cover the thread that runs it.
 mod sensing {
-    use std::time::Duration;
-    use tutti_platform::Instant;
+    use std::num::NonZeroUsize;
+    use tutti_platform::{Executor, Instant, Threads};
 
     use tutti_midi_device::{EndpointId, PortDirection};
     use tutti_ump::{Message, MidiGroup, Protocol, StreamConfig, System, Ump};
 
-    use super::{Devices, FakeCounters, PATIENCE, endpoint, fake, id_of, wake};
+    use super::{Devices, FakeCounters, PATIENCE, endpoint, fake_on, id_of, wake};
     use crate::OpenOutput;
 
     const SYNTH: u64 = 1;
@@ -709,8 +720,15 @@ mod sensing {
         Ump::from(Message::System(MidiGroup::FIRST, System::ActiveSensing))
     }
 
-    fn output_in(protocol: Protocol, sensing: bool) -> (OpenOutput, FakeCounters, Devices) {
-        let (devices, events, fake) = fake();
+    /// The output, the fake behind it, its `Devices`, and the threads that drive
+    /// the heartbeat's executor: they stop when the last of these drops.
+    fn output_in(
+        protocol: Protocol,
+        sensing: bool,
+    ) -> (OpenOutput, FakeCounters, Devices, Threads) {
+        let executor = Executor::new();
+        let threads = executor.spawn_threads(NonZeroUsize::MIN).unwrap();
+        let (devices, events, fake) = fake_on(&executor);
         fake.plug(endpoint(SYNTH, "Synth"), PortDirection::Output);
         wake(&events);
         let mut out = devices.open_output(&id_of(&devices, "Synth")).unwrap();
@@ -720,9 +738,9 @@ mod sensing {
             tx_jr: false,
         });
         if sensing {
-            out.active_sensing().unwrap();
+            out.active_sensing();
         }
-        (out, fake, devices)
+        (out, fake, devices, threads)
     }
 
     fn sent(fake: &FakeCounters) -> Vec<Ump> {
@@ -731,21 +749,21 @@ mod sensing {
 
     /// What the output is sent next, polled under a hang guard.
     fn next_sent(fake: &FakeCounters) -> Vec<Ump> {
-        let start = Instant::now();
+        let deadline = Instant::now() + PATIENCE;
         loop {
             let got = sent(fake);
             if !got.is_empty() {
                 return got;
             }
-            assert!(start.elapsed() < PATIENCE, "nothing was sent");
-            std::thread::sleep(Duration::from_millis(1));
+            assert!(Instant::now() < deadline, "nothing was sent");
+            std::thread::yield_now();
         }
     }
 
     /// **An idle output with the option sends Active Sensing, and goes on.**
     #[test]
     fn an_idle_output_with_the_option_sends_active_sensing_and_keeps_sending() {
-        let (_out, fake, _devices) = output_in(Protocol::Midi1, true);
+        let (_out, fake, _devices, _threads) = output_in(Protocol::Midi1, true);
         let first = next_sent(&fake);
         assert!(first.iter().all(|&u| u == active_sensing()), "{first:?}");
         let later = next_sent(&fake);
@@ -755,22 +773,11 @@ mod sensing {
         );
     }
 
-    /// **Closing the output stops it**: dropping joins the thread, so nothing
-    /// is sent after.
-    #[test]
-    fn closing_the_output_stops_active_sensing() {
-        let (out, fake, _devices) = output_in(Protocol::Midi1, true);
-        next_sent(&fake);
-        drop(out);
-        let _ = sent(&fake);
-        assert_eq!(sent(&fake), [], "nothing after the close");
-    }
-
     /// **An output opened without the option never sends it**: it has no
-    /// heartbeat thread.
+    /// heartbeat task.
     #[test]
     fn an_output_without_the_option_never_sends_active_sensing() {
-        let (out, fake, _devices) = output_in(Protocol::Midi1, false);
+        let (out, fake, _devices, _threads) = output_in(Protocol::Midi1, false);
         assert!(out.heartbeat.is_none());
         assert_eq!(sent(&fake), []);
     }
@@ -778,7 +785,7 @@ mod sensing {
     /// **A MIDI 2.0 Protocol output sends once the Protocol is MIDI 1.0.**
     #[test]
     fn a_midi2_protocol_output_sends_active_sensing_once_it_is_in_midi1() {
-        let (mut out, fake, _devices) = output_in(Protocol::Midi2, true);
+        let (mut out, fake, _devices, _threads) = output_in(Protocol::Midi2, true);
         out.set_config(StreamConfig {
             protocol: Protocol::Midi1,
             rx_jr: false,

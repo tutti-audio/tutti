@@ -494,6 +494,7 @@ fn a_weak_executor_keeps_no_executor_alive_and_upgrades_while_one_lives() {
         })
         .detach();
     armed_rx.recv_timeout(HANG_GUARD).unwrap();
+    assert!(weak.is_alive(), "a clone lives");
     let upgraded = weak.upgrade().expect("a clone lives, so it upgrades");
     assert_eq!(
         wait(upgraded.spawn(async { 6 * 7 })),
@@ -503,6 +504,7 @@ fn a_weak_executor_keeps_no_executor_alive_and_upgrades_while_one_lives() {
     drop(upgraded);
     drop(threads);
     drop(executor);
+    assert!(!weak.is_alive(), "no clone lives");
     assert_eq!(
         Arc::strong_count(&marker),
         1,
@@ -714,6 +716,237 @@ fn the_last_drop_stops_and_joins_a_pending_dedicated_thread() {
     assert_eq!(Arc::strong_count(&marker), 2);
     drop(executor);
     assert_eq!(Arc::strong_count(&marker), 1);
+}
+
+/// **The executor's drop returns while dedicated futures are wedged in a call their wake
+/// cannot reach, and each detached thread ends when its future does.** Three futures block
+/// inside their polls on channels only the test sends on; the drop stops them, waits out
+/// the shared bound, detaches them and returns. Each send then lets its thread finish.
+#[test]
+fn dedicated_threads_wedged_past_the_bound_are_detached_and_end_with_their_futures() {
+    let executor = Executor::new();
+    let (finished, ended) = mpsc::channel();
+    let mut releases = Vec::new();
+    for n in 0..3 {
+        let (release, wedged) = mpsc::channel::<()>();
+        let (entered, in_poll) = mpsc::channel();
+        let finished = finished.clone();
+        let _task = executor
+            .spawn_dedicated(&format!("wedged-{n}"), None, async move {
+                entered.send(()).unwrap();
+                let _ = wedged.recv();
+                let _ = finished.send(n);
+            })
+            .unwrap();
+        in_poll.recv_timeout(HANG_GUARD).unwrap();
+        releases.push(release);
+    }
+    let (dropped, returned) = mpsc::channel();
+    let dropper = thread::spawn(move || {
+        drop(executor);
+        let _ = dropped.send(());
+    });
+    assert!(
+        returned.recv_timeout(HANG_GUARD).is_ok(),
+        "the drop returns past wedged dedicated threads"
+    );
+    dropper.join().unwrap();
+    for release in releases {
+        release.send(()).unwrap();
+    }
+    let mut done: Vec<_> = (0..3)
+        .map(|_| ended.recv_timeout(HANG_GUARD).unwrap())
+        .collect();
+    done.sort_unstable();
+    assert_eq!(
+        done,
+        [0, 1, 2],
+        "every detached thread ends with its future"
+    );
+}
+
+/// **A stop's joins share one deadline.** What is left is the bound minus the time
+/// spent, never the bound again, and zero once it has passed: so `n` joins wait the bound
+/// in all.
+#[test]
+fn a_stop_deadline_is_shared_by_every_join() {
+    let t0 = Instant::now();
+    let deadline = os::StopDeadline::after(t0);
+    assert_eq!(deadline.left(t0), os::STOP_BOUND);
+    let spent = os::STOP_BOUND / 4;
+    assert_eq!(deadline.left(t0 + spent), os::STOP_BOUND - spent);
+    assert_eq!(deadline.left(t0 + os::STOP_BOUND), Duration::ZERO);
+    assert_eq!(deadline.left(t0 + os::STOP_BOUND * 3), Duration::ZERO);
+}
+
+/// **`join` waits for a task that runs on another thread and returns its output.** The
+/// dedicated future ends only once the test sends, which it does after the waiter says it
+/// is about to call `join`, so the output comes back through the wait.
+#[test]
+fn join_waits_for_a_task_run_elsewhere_and_returns_its_output() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let task = executor
+        .spawn_dedicated("joined", None, async move { wait.recv().unwrap() * 2 })
+        .unwrap();
+    let (ready, joining) = mpsc::channel();
+    let (out, joined) = mpsc::channel();
+    let waiter = thread::spawn(move || {
+        ready.send(()).unwrap();
+        let _ = out.send(join(task));
+    });
+    joining.recv_timeout(HANG_GUARD).unwrap();
+    go.send(21).unwrap();
+    assert_eq!(joined.recv_timeout(HANG_GUARD).unwrap(), Some(42));
+    waiter.join().unwrap();
+}
+
+/// `join(task)` on a thread of its own, its outcome or `None` past the hang guard.
+fn joined_off_thread<T: Send + 'static>(task: Task<T>) -> Option<T> {
+    let (out, joined) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = out.send(join(task));
+    });
+    joined
+        .recv_timeout(HANG_GUARD)
+        .expect("join returns: the hang guard passed")
+}
+
+/// **A task the executor drops instead of finishing joins as `None`**: a queued task no
+/// driver ran, dropped at shutdown; a dedicated future still pending when its executor
+/// drops; and a future that panicked.
+#[test]
+fn join_of_a_task_the_executor_dropped_is_none() {
+    let executor = Executor::new();
+    let queued = executor.spawn(async { 7 });
+    let pending = executor
+        .spawn_dedicated("pending", None, std::future::pending::<u32>())
+        .unwrap();
+    drop(executor);
+    assert_eq!(joined_off_thread(queued), None);
+    assert_eq!(joined_off_thread(pending), None);
+
+    let executor = Executor::new();
+    let panicked = executor
+        .spawn_dedicated("panics", None, async { panic!("the future panicked") })
+        .unwrap();
+    assert_eq!(joined_off_thread::<()>(panicked), None);
+    drop(executor);
+}
+
+/// **A task whose thread was detached at shutdown still joins with its output** once its
+/// future ends: the wedged future is released after the executor's drop returned.
+#[test]
+fn join_of_a_task_detached_at_shutdown_returns_its_output_when_it_ends() {
+    let executor = Executor::new();
+    let (release, wedged) = mpsc::channel::<u32>();
+    let (entered, in_poll) = mpsc::channel();
+    let task = executor
+        .spawn_dedicated("wedged", None, async move {
+            entered.send(()).unwrap();
+            wedged.recv().unwrap()
+        })
+        .unwrap();
+    in_poll.recv_timeout(HANG_GUARD).unwrap();
+    drop(executor);
+    release.send(5).unwrap();
+    assert_eq!(joined_off_thread(task), Some(5));
+}
+
+/// **`join` refuses a thread that drives an executor**: on a dedicated thread it panics
+/// instead of stopping the drive, so the joining task ends as `None`.
+#[test]
+fn join_on_a_driving_thread_panics_instead_of_waiting() {
+    let executor = Executor::new();
+    let never = executor.spawn(std::future::pending::<()>());
+    let joiner = executor
+        .spawn_dedicated("joiner", None, async move { join(never) })
+        .unwrap();
+    assert_eq!(joined_off_thread(joiner), None);
+}
+
+/// **`join_within` hands back a task that has not ended within the bound, and the task
+/// still runs**: a zero bound on a pending task returns it, and a later `join` gets its
+/// output once the test lets it end.
+#[test]
+fn join_within_hands_back_a_running_task_past_the_bound() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let task = executor
+        .spawn_dedicated("bounded", None, async move { wait.recv().unwrap() })
+        .unwrap();
+    let task = join_within(task, Duration::ZERO).expect_err("the task has not ended");
+    go.send(3).unwrap();
+    assert_eq!(joined_off_thread(task), Some(3));
+}
+
+/// **`join_within` returns a task's outcome once it ends within the bound**: its output,
+/// or `None` for a task its executor dropped.
+#[test]
+fn join_within_returns_the_outcome_of_a_task_that_ends() {
+    let executor = Executor::new();
+    let (go, wait) = mpsc::channel::<u32>();
+    let task = executor
+        .spawn_dedicated("ends", None, async move { wait.recv().unwrap() })
+        .unwrap();
+    go.send(8).unwrap();
+    assert_eq!(join_within(task, HANG_GUARD).ok(), Some(Some(8)));
+
+    let queued = executor.spawn(async { 1 });
+    drop(executor);
+    assert_eq!(join_within(queued, HANG_GUARD).ok(), Some(None));
+}
+
+/// Counts its wakes.
+struct CountWakes(AtomicUsize);
+
+impl Wake for CountWakes {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// **`yield_now` is pending once, having woken its task, then ready**: the first poll
+/// returns to the executor and asks to run again, the second completes.
+#[test]
+fn yield_now_is_pending_once_after_waking_itself_then_ready() {
+    let wakes = Arc::new(CountWakes(AtomicUsize::new(0)));
+    let waker = Waker::from(wakes.clone());
+    let mut cx = Context::from_waker(&waker);
+    let mut yielding = Box::pin(yield_now());
+    assert!(yielding.as_mut().poll(&mut cx).is_pending());
+    assert_eq!(
+        wakes.0.load(Ordering::SeqCst),
+        1,
+        "the yield wakes its task once"
+    );
+    assert!(yielding.as_mut().poll(&mut cx).is_ready());
+    assert_eq!(wakes.0.load(Ordering::SeqCst), 1);
+}
+
+/// **A task cancelled while it yields ends at the yield**: a dedicated loop of yields with
+/// no stop of its own ends when its `Task` drops, which the executor sees between slices.
+#[test]
+fn a_loop_of_yields_ends_when_its_task_is_dropped() {
+    let executor = Executor::new();
+    let (ended, done) = mpsc::channel::<()>();
+    let (entered, looping) = mpsc::channel();
+    let task = executor
+        .spawn_dedicated("yields", None, async move {
+            let _ended = DropSignal(ended);
+            entered.send(()).unwrap();
+            loop {
+                yield_now().await;
+            }
+        })
+        .unwrap();
+    looping.recv_timeout(HANG_GUARD).unwrap();
+    drop(task);
+    assert!(
+        done.recv_timeout(HANG_GUARD).is_ok(),
+        "the cancelled loop drops its future"
+    );
+    drop(executor);
 }
 
 #[cfg(target_os = "linux")]

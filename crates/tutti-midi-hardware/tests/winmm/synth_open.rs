@@ -31,7 +31,7 @@ fn drained(out: &OpenOutput) {
 
 #[test]
 fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
-    let devices = Devices::open().unwrap();
+    let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
     let id = synth(&devices).id;
     let note_on = Ump([0x2090_3C64, 0, 0, 0]);
     let note_off = Ump([0x2080_3C00, 0, 0, 0]);
@@ -62,4 +62,21 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
             now.elapsed()
         );
     }
+}
+
+/// With the app's clone of the executor kept past both, dropping `Devices` and
+/// then the output closes the port, and the synth opens again at once: the output
+/// ends its sender before the executor's last clone drops.
+#[test]
+fn an_output_dropped_before_the_executors_last_clone_frees_the_synth_for_a_reopen() {
+    let executor = tutti_platform::Executor::new();
+    let devices = Devices::open(&executor).unwrap();
+    let id = synth(&devices).id;
+    let out = devices.open_output(&id).expect("the synth opens");
+    drop(devices);
+    drop(out);
+    drop(executor);
+    let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
+    let again = devices.open_output(&id);
+    assert!(again.is_ok(), "the synth opens again: {:?}", again.err());
 }

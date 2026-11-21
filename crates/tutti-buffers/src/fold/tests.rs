@@ -5,7 +5,7 @@ use crate::{BufferError, InterleavedMut};
 use Speaker::*;
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::assumed(ChannelLayout::from(n))
+    ChannelTopology::default_for(ChannelLayout::from(n))
 }
 
 fn fold(s: &ChannelTopology, d: &ChannelTopology) -> Fold {
@@ -16,7 +16,10 @@ fn fold(s: &ChannelTopology, d: &ChannelTopology) -> Fold {
 /// have one, channels by index where either has none.
 fn widths(src: u16, dst: u16) -> Result<Fold, FoldError> {
     let (s, d) = (ChannelLayout::from(src), ChannelLayout::from(dst));
-    let (from, to) = (ChannelTopology::assumed(s), ChannelTopology::assumed(d));
+    let (from, to) = (
+        ChannelTopology::default_for(s),
+        ChannelTopology::default_for(d),
+    );
     if from.is_unassigned() || to.is_unassigned() {
         Fold::<f32>::by_index(s, d)
     } else {
@@ -524,19 +527,19 @@ fn what_cannot_be_placed_is_an_error() {
     );
 }
 
-/// A bare width goes through [`ChannelTopology::assumed`]: a width with an order
+/// A bare width goes through [`ChannelTopology::default_for`]: a width with an order
 /// folds by speaker, and one with none is unassigned, which `between` refuses
 /// against another width rather than guess.
 #[test]
-fn a_bare_width_folds_through_assumed() {
-    let assumed = |n: u16| ChannelTopology::assumed(ChannelLayout::from(n));
+fn a_bare_width_folds_through_default_for() {
+    let default = |n: u16| ChannelTopology::default_for(ChannelLayout::from(n));
     assert_eq!(
-        Fold::<f32>::between(&assumed(6), &assumed(2)).unwrap(),
+        Fold::<f32>::between(&default(6), &default(2)).unwrap(),
         fold(&smpte(6), &smpte(2))
     );
     // A bare four is quad, whose rears are the stereo fold's surrounds.
     let mut out = [0.0f32; 2];
-    Fold::<f32>::between(&assumed(4), &assumed(2))
+    Fold::<f32>::between(&default(4), &default(2))
         .unwrap()
         .frame(&[1.0, 2.0, 3.0, 4.0], &mut out);
     assert_eq!(
@@ -544,7 +547,7 @@ fn a_bare_width_folds_through_assumed() {
         [1.0 + f32::MINUS_3_DB * 3.0, 2.0 + f32::MINUS_3_DB * 4.0]
     );
     assert_eq!(
-        Fold::<f32>::between(&assumed(3), &assumed(2)),
+        Fold::<f32>::between(&default(3), &default(2)),
         Err(FoldError::Unassigned {
             src: ChannelLayout::from(3u16),
             dst: ChannelLayout::STEREO
@@ -1180,7 +1183,7 @@ fn copies_contribute_at_exactly_unity() {
 fn contributions_are_the_fold_as_a_matrix() {
     let mut tops: Vec<ChannelTopology> = ORDERED
         .iter()
-        .map(|&n| ChannelTopology::assumed(ChannelLayout::from(n)))
+        .map(|&n| ChannelTopology::default_for(ChannelLayout::from(n)))
         .collect();
     tops.push(ChannelTopology::new([FrontLeft, FrontRight, SideLeft, SideRight]).unwrap());
     tops.push(ChannelTopology::new([FrontRight, FrontLeft, FrontCenter]).unwrap());
