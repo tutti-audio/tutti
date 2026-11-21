@@ -21,6 +21,13 @@ mod timers;
 
 pub use async_task::Task;
 
+use timers::Timers;
+pub use timers::{Shutdown, Sleep, Timer};
+
+#[cfg_attr(not(target_arch = "wasm32"), path = "executor/native.rs")]
+#[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
+mod os;
+
 /// Waits on the calling thread until `task` ends, and returns its output: `None` when the
 /// executor dropped the task instead (its future panicked, or the executor shut down
 /// first).
@@ -32,17 +39,17 @@ pub use async_task::Task;
 ///
 /// Never call it on the thread that runs `task` (its own dedicated thread, or the only
 /// thread that drives its executor): nothing else would run it, and the wait never ends.
+///
 /// The web cannot block: there it looks once and returns the output of a task that has
-/// ended, or `None`.
+/// ended, or `None`, and a task that has not ended is dropped, which cancels it.
+///
+/// # Panics
+///
+/// On a thread that drives an executor (a dedicated thread, a [`Threads`] driver): a wait
+/// there would stop the thread running the tasks it drives, its own task among them.
 pub fn join<T>(task: Task<T>) -> Option<T> {
     os::join(task)
 }
-use timers::Timers;
-pub use timers::{Shutdown, Sleep, Timer};
-
-#[cfg_attr(not(target_arch = "wasm32"), path = "executor/native.rs")]
-#[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
-mod os;
 
 /// Threads that drive an [`Executor`]'s queue, started by `Executor::spawn_threads` on a
 /// native target. The web has no constructor for it.
