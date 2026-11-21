@@ -34,8 +34,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
-use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor, join};
-use tutti_plugin_types::{IpcError, IpcResult, PluginFailure};
+use tutti_platform::{Executor, PriorityRequest, Task, WeakExecutor, join_within};
+use tutti_plugin_types::{IpcError, IpcResult, PluginFailure, Timeouts};
 use tutti_rt::Parker;
 
 /// How long the control lane waits on its connection, its bell and the stream it
@@ -167,19 +167,49 @@ impl IpcThread {
     ///
     /// # Panics
     ///
-    /// On a thread that drives an executor ([`join`]): a bridge is dropped
+    /// On a thread that drives an executor ([`join_within`]): a bridge is dropped
     /// from the control side, never from a task.
     pub fn shutdown(&mut self) {
         self.lifecycle.request_shutdown();
         self.channels.wake();
         if let Some(lanes) = self.lanes.take() {
-            join(lanes.audio);
-            join(lanes.control);
+            let patience = lane_patience(self.lifecycle.timeouts());
+            // A lane still running after `patience` is detached with its `Orphaned`
+            // armed: when it is eventually dropped, it declares the bridge dead and
+            // drains and answers the queued blocks as a crash does.
+            for (name, lane) in [
+                ("plugin-bridge", lanes.audio),
+                ("plugin-control", lanes.control),
+            ] {
+                if let Err(lane) = join_within(lane, patience) {
+                    tracing::warn!("plugin-ipc: the {name} lane did not stop; leaving it");
+                    lane.detach();
+                }
+            }
         }
     }
 }
 
+/// How long a stopped lane may take to end: the longest call deadline of the bridge, plus
+/// the margin a host adds to it.
+fn lane_patience(timeouts: &Timeouts) -> Duration {
+    [
+        timeouts.call,
+        timeouts.load,
+        timeouts.state_restore,
+        timeouts.state,
+        timeouts.param,
+        timeouts.editor,
+        timeouts.rate,
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or_default()
+        + timeouts.reply_margin
+}
+
 impl Drop for IpcThread {
+    /// Must not run on a thread that drives an executor: `join_within` panics there.
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -969,60 +999,70 @@ mod tests {
     }
 
     /// **A lane never polled resolves its task and declares the bridge dead**:
-    /// the executor that took the tasks shut down before it ran them.
+    /// the executor that took the task shut down before it ran it. Each lane has
+    /// its own executor and lifecycle, so each one's guard is seen alone.
     #[test]
     fn a_lane_dropped_unpolled_resolves_its_task_and_declares_the_bridge_dead() {
         let (channels, waits) =
             Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
-        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
         let listener = silent_listener();
-        let executor = Executor::new();
+        let fresh = || Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
+        let (audio_lifecycle, control_lifecycle) = (fresh(), fresh());
+        let (audio_executor, control_executor) = (Executor::new(), Executor::new());
         let (stream_tx, stream_rx) = mpsc::channel();
-        let audio = executor.spawn(audio_lane(
+        let audio = audio_executor.spawn(audio_lane(
             AudioLaneParts {
                 channels: channels.clone(),
                 parker: waits.audio,
                 payloads: payloads_of(&channels),
-                lifecycle: lifecycle.clone(),
+                lifecycle: audio_lifecycle.clone(),
                 listener: Arc::clone(&listener),
                 socket_path: PathBuf::new(),
                 control_stream: stream_tx,
-                executor: executor.downgrade(),
+                executor: audio_executor.downgrade(),
                 ready_within: HANG_GUARD,
             },
             Orphaned::of_audio(
                 &channels,
-                &lifecycle,
+                &audio_lifecycle,
                 &listener,
                 AudioState::new(timeouts().drain, response_ring().0),
             ),
         ));
-        let control = executor.spawn(control_lane(
+        let control = control_executor.spawn(control_lane(
             ControlLaneParts {
                 channels: channels.clone(),
                 wait: waits.control,
-                lifecycle: lifecycle.clone(),
+                lifecycle: control_lifecycle.clone(),
                 listener: Arc::clone(&listener),
                 stream: stream_rx,
             },
-            Orphaned::new(&channels, &lifecycle, &listener),
+            Orphaned::new(&channels, &control_lifecycle, &listener),
         ));
         assert!(!audio.is_finished() && !control.is_finished());
-        assert!(!lifecycle.is_crashed());
+        assert!(!audio_lifecycle.is_crashed() && !control_lifecycle.is_crashed());
 
-        drop(executor);
+        drop(control_executor);
+
+        assert!(
+            matches!(join_within(control, HANG_GUARD), Ok(None)),
+            "the control lane's task"
+        );
+        assert!(
+            control_lifecycle.is_crashed(),
+            "a bridge whose control lane is gone is dead"
+        );
+        assert!(!audio_lifecycle.is_crashed(), "the audio lane still waits");
+
+        drop(audio_executor);
 
         assert!(
             matches!(join_within(audio, HANG_GUARD), Ok(None)),
             "the audio lane's task"
         );
         assert!(
-            lifecycle.is_crashed(),
-            "a bridge whose lane is gone is dead"
-        );
-        assert!(
-            matches!(join_within(control, HANG_GUARD), Ok(None)),
-            "the control lane's task"
+            audio_lifecycle.is_crashed(),
+            "a bridge whose audio lane is gone is dead"
         );
     }
 

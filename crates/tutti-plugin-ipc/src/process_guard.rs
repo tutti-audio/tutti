@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::{
-    Executor, Instant, Task, WeakExecutor, join, join_within, monotonic_ns, sleep_until_ns,
+    Executor, Instant, Task, WeakExecutor, join_within, monotonic_ns, sleep_until_ns,
 };
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::{Deadline, PluginFailure};
@@ -30,6 +30,10 @@ use tutti_rt::LockExt;
 /// Only bounds how long a dropped guard waits for the task when the process was
 /// not the one ending: the end of the process wakes the wait at once.
 const EXIT_SLICE: Duration = Duration::from_millis(100);
+
+/// How long a dropped guard waits for the exit task to end once told to stop: it ends at
+/// its next look, within one `EXIT_SLICE`, so a few slices is a task stuck in the OS.
+const EXIT_STOP_PATIENCE: Duration = Duration::from_millis(500);
 
 /// How long a killed server is waited for before its reaping is handed to
 /// another thread: a process in uninterruptible sleep outlasts its kill, and
@@ -216,10 +220,13 @@ impl Drop for ProcessGuard {
     ///    more, for `REAP_PATIENCE`.
     /// 3. The task is told to stop, and the drop waits for it to end: at its
     ///    next look, within `EXIT_SLICE` (an OS wake or a nap, whichever the
-    ///    platform gives). A process the kill did not end is then handed to the
+    ///    platform gives), or within `EXIT_STOP_PATIENCE`, after which it is
+    ///    detached with a warning. A process the kill did not end is then handed to the
     ///    executor's blocking pool to be reaped there.
     ///
     /// Every wait is on the exit task's end, an event; nothing polls.
+    ///
+    /// Must not run on a thread that drives an executor: `join_within` panics there.
     fn drop(&mut self) {
         let shutting_down = self._bridge_thread.is_some();
         if let Some(launched) = &self.launched {
@@ -251,8 +258,11 @@ impl Drop for ProcessGuard {
             }
             flow.stop.store(true, Ordering::Release);
             // Ends within a slice of the stop, or at once when it has ended.
-            if let Some(exit) = exit {
-                join(exit);
+            if let Some(exit) = exit
+                && let Err(exit) = join_within(exit, EXIT_STOP_PATIENCE)
+            {
+                tracing::warn!("plugin-ipc: the plugin-exit task did not stop; leaving it");
+                exit.detach();
             }
             let left = process.lock_recover().take();
             if let (false, Some(process)) = (reaped, left) {

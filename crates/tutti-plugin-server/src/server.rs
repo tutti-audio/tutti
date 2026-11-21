@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
-use tutti_platform::{Executor, Task, join};
+use tutti_platform::{Executor, Task, join_within};
 use tutti_plugin_ipc::{
     AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
@@ -465,19 +465,26 @@ impl Drop for Beat {
     /// Stops the task at its wait for the next period, or after the frame it is
     /// sending: the wait is for that frame, which the host reads, and never for a
     /// period. Runs on the thread that serves a request (the main thread), never
-    /// on one that drives an executor, which [`join`] would refuse.
+    /// on one that drives an executor, which `join_within` would refuse.
     fn drop(&mut self) {
         drop(self.stop.take());
-        if let Some(task) = self.task.take() {
-            join(task);
+        if let Some(task) = self.task.take()
+            && let Err(task) = join_within(task, BEAT_STOP_PATIENCE)
+        {
+            tracing::warn!("plugin-server: the plugin-beat task did not stop; leaving it");
+            task.detach();
         }
     }
 }
 
 /// The beat's task: every `period`, tells the host `Working` for request `id`
-/// until the host cannot be written to or `stopped` is dropped. It waits on the
-/// stop for the period, so a stop ends it at once; the executor that runs it
-/// outlives it (the [`Beat`] borrows one), so nothing else ends it.
+/// until the host cannot be written to or `stopped` is dropped.
+///
+/// It waits on the stop with `recv_timeout(period)` and not on the executor's
+/// `Timer`: a stop must end the wait at once, and a task parked on a timer has no
+/// waker for the owner to ring. So an executor that shut down mid-period would be
+/// noticed only after up to one [`WORKING_PERIOD`]; none can, since the [`Beat`]
+/// borrows its executor and ends before it.
 async fn beat(
     stopped: mpsc::Receiver<()>,
     pulse: Pulser<ControlFrame>,
@@ -527,6 +534,10 @@ impl Drop for PluginServer {
 /// step, so this is a thread stuck inside the plugin or in a read.
 /// How often the server tells the host it is at work on a load.
 pub(crate) const WORKING_PERIOD: Duration = Duration::from_secs(1);
+
+/// How long a dropped [`Beat`] waits for its task: the pulse in flight is a write with
+/// no timeout, so this bounds the wait, after which the task is left to end with it.
+const BEAT_STOP_PATIENCE: Duration = Duration::from_secs(5);
 
 pub(crate) const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 
