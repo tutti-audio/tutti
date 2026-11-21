@@ -191,6 +191,12 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Whether `git describe`'s failure text says only that no tag matches, the
+/// first release; any other failure is a real one.
+fn names_no_tag(stderr: &str) -> bool {
+    stderr.contains("No names found") || stderr.contains("No tags can describe")
+}
+
 /// Applies the release edits in the checkout at `root`.
 pub(crate) fn run(root: &Path, version: &Version) -> Result<(), String> {
     let read = |p: &Path| {
@@ -227,7 +233,11 @@ pub(crate) fn run(root: &Path, version: &Version) -> Result<(), String> {
         }
     }
 
-    let previous = git(root, &["describe", "--tags", "--abbrev=0", "--match", "v*"]).ok();
+    let previous = match git(root, &["describe", "--tags", "--abbrev=0", "--match", "v*"]) {
+        Ok(tag) => Some(tag),
+        Err(stderr) if names_no_tag(&stderr) => None,
+        Err(other) => return Err(format!("cannot find the previous release tag: {other}")),
+    };
     let range = previous
         .as_deref()
         .map(|t| format!("{}..HEAD", t.trim()))
@@ -254,6 +264,17 @@ pub(crate) fn run(root: &Path, version: &Version) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_missing_tag_is_the_first_release() {
+        assert!(names_no_tag(
+            "fatal: No names found, cannot describe anything."
+        ));
+        assert!(!names_no_tag(
+            "fatal: not a git repository (or any of the parent directories): .git"
+        ));
+        assert!(!names_no_tag("cannot run git: No such file or directory"));
+    }
 
     fn v(s: &str) -> Version {
         Version::parse(s).unwrap()

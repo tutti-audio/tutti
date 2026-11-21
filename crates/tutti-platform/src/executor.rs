@@ -3,7 +3,7 @@
 //! One type: a run queue of woken tasks, a queue of sleep deadlines, and a drive that
 //! fires the due sleeps and runs the ready tasks. Whoever calls
 //! [`run_until_stalled`](Executor::run_until_stalled) or
-//! [`try_tick`](Executor::try_tick) drives it, and on a native target
+//! [`tick`](Executor::tick) drives it, and on a native target
 //! [`spawn_threads`](Executor::spawn_threads) starts threads that drive it for good.
 //! This is not an async runtime: it has no I/O reactor.
 
@@ -112,7 +112,7 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// - **The caller.** [`run_until_stalled`](Self::run_until_stalled) fires every sleep that
 ///   is due and runs ready tasks on the calling thread until none is ready;
-///   [`try_tick`](Self::try_tick) runs one. Neither waits. On the web the caller is the
+///   [`tick`](Self::tick) runs one. Neither waits. On the web the caller is the
 ///   only driver.
 /// - **Threads** (native only). [`spawn_threads`](Self::spawn_threads) starts threads
 ///   that each fire the due sleeps, run a ready task, and park until a task is scheduled
@@ -237,7 +237,7 @@ impl fmt::Debug for WeakExecutor {
 impl Executor {
     /// An executor with nothing running: no thread starts, and nothing runs until
     /// [`run_until_stalled`](Self::run_until_stalled) or
-    /// [`try_tick`](Self::try_tick) is called, or threads are spawned.
+    /// [`tick`](Self::tick) is called, or threads are spawned.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -269,7 +269,7 @@ impl Executor {
     /// end once idle, so a driver never blocks on it; it starts at once, whether or not
     /// anything drives the queue. On the web there are no threads: `f` runs inside the
     /// next [`run_until_stalled`](Self::run_until_stalled) or
-    /// [`try_tick`](Self::try_tick), on the caller's thread, for as long as it takes.
+    /// [`tick`](Self::tick), on the caller's thread, for as long as it takes.
     ///
     /// Dropping the task before `f` starts cancels it; one that has started finishes and
     /// its output is dropped.
@@ -387,10 +387,10 @@ impl Executor {
     ///
     /// A task that wakes itself runs again within the same call, so a self-waking task
     /// never lets it return: a caller that must bound its work loops
-    /// [`try_tick`](Self::try_tick) instead. A task that panicked counts as run.
+    /// [`tick`](Self::tick) instead. A task that panicked counts as run.
     pub fn run_until_stalled(&self) -> usize {
         let mut ran = 0;
-        while self.try_tick() {
+        while self.tick() {
             ran += 1;
         }
         ran
@@ -400,7 +400,7 @@ impl Executor {
     /// it did. Never waits; the meaning of smol's `try_tick`.
     ///
     /// A task that panicked counts as run: its panic is its own end, not the caller's.
-    pub fn try_tick(&self) -> bool {
+    pub fn tick(&self) -> bool {
         let shared = &self.handle.shared;
         shared.timers.fire(Instant::now());
         catch_unwind(AssertUnwindSafe(|| shared.queue.try_tick())).unwrap_or(true)

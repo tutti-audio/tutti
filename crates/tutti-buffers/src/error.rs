@@ -61,4 +61,12 @@ pub enum BufferError {
         /// The destination's width.
         dst: ChannelLayout,
     },
+    /// A slot count is zero or past the most a structure holds.
+    #[error("{frames} frames is not within 1..={max}")]
+    CapacityOutOfRange {
+        /// The count asked for.
+        frames: usize,
+        /// The most the structure holds.
+        max: usize,
+    },
 }

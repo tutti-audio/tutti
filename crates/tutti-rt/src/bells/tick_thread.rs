@@ -70,6 +70,7 @@ impl Drop for Tick {
         let Some(task) = self.task.take() else {
             return;
         };
+        // A drop has no caller left to tell, so each failure here is logged.
         if is_driving() {
             tracing::warn!(
                 "the bells dropped on a thread that drives an executor: their tick task is detached, and its last pass may not have run"
