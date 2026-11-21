@@ -1,4 +1,8 @@
 //! What the CLAP host does with a plugin: audio, events, parameters, bundles and event translation.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[path = "../support/mod.rs"]
 mod support;

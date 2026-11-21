@@ -266,6 +266,7 @@ fn block_losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_did_not_render() {
         incoming,
         swapped.controls.clone(),
         plugin(),
+        None,
     );
     drop(outgoing);
     assert_eq!(block_losses(&s, node).unlent, 5, "the swap lost nothing");
@@ -307,6 +308,7 @@ fn losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_lost() {
         incoming,
         swapped.controls.clone(),
         plugin(),
+        None,
     );
     drop(outgoing);
     assert_eq!(

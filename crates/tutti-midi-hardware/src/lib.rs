@@ -31,8 +31,13 @@
 //! use tutti_midi_device::DeviceEvent;
 //! use tutti_midi_hardware::Devices;
 //!
+//! # async fn watch() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
 //! let executor = tutti_platform::Executor::new();
 //! let devices = Devices::open(&executor)?;
+//! // The backend may need a moment to start (macOS makes CoreMIDI's client on a thread
+//! // of its own): `start()` is a future the app awaits, on whatever executor it has,
+//! // and the list is seeded when it resolves. Every other backend is ready at once.
+//! devices.start().await?;
 //! let events = devices.subscribe();
 //! for device in events.initial() {
 //!     println!("{}: {}", device.id, device.name);
@@ -45,7 +50,8 @@
 //!         DeviceEvent::Changed(device) => println!("changed: {}", device.name),
 //!     }
 //! }
-//! # Ok::<(), tutti_midi_hardware::MidiHardwareError>(())
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! - **Linux:** a thread subscribes to the sequencer's `System:Announce` port, so a
@@ -78,7 +84,11 @@
 //! applications to connect to: they read what it sends and write what it
 //! receives. A [`VirtualSpec`] gives the name, the Device Identity and Product
 //! Instance Id, the [`VirtualProtocol`] and the Function Blocks. Opening one takes
-//! a `MainThreadMarker`, and the type is `!Send` and `!Sync` on every platform
+//! the [`Started`] a [`Start`] resolved to and returns an
+//! [`OpeningVirtualEndpoint`], which is polled with the current time and a
+//! `MainThreadMarker` until it yields the endpoint (macOS retries a registration
+//! CoreMIDI refuses, and `deadline()` is the next attempt's instant; the other
+//! platforms are ready on the first poll). The endpoint is `!Send` and `!Sync` on every platform
 //! (macOS's UMP Endpoint is a main-thread object); a [`VirtualSender`] sends from
 //! another thread. What peers write is delivered into an [`InputProducerHandle`],
 //! so its events take the path a device input's do. Where the platform cannot publish what the
@@ -91,6 +101,20 @@
 //! refusal named). On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
 //! client otherwise; the endpoint reports the protocol it got.
+//!
+//! ## Starting
+//!
+//! A backend may have something to start before it can open an endpoint: on macOS
+//! the process's one CoreMIDI client is made on a thread of the backend's own, and
+//! CoreMIDI's server may be restarting for several seconds. That wait ends when the
+//! backend's thread says so, so [`Devices::start`] and [`MidiSession::start`]
+//! return a [`Start`], a `Send` [`Future`] that thread wakes, with no executor of
+//! this crate behind it. It resolves to the [`Started`] that opening a port or a
+//! virtual endpoint takes, so a port is never opened before the backend can open it.
+//! A start that failed is [`MidiHardwareError::BackendFailed`] for every future
+//! waiting on it; the device watches stay registered, and the next [`Start`] asks the
+//! backend again and, when it succeeds, seeds them. Every other backend is ready on
+//! the first poll.
 //!
 //! ## Background work
 //!
@@ -123,11 +147,14 @@
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
 //!
+//! # async fn play() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
 //! let executor = tutti_platform::Executor::new();
 //! let mut session = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())?;
+//! // Awaited before any port opens: the proof it resolves to is what opening takes.
+//! let started = session.start().await?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -138,17 +165,18 @@
 //! // Connect by id when the choice matters (see "Matching by name" below).
 //! if let Some(first) = session.inputs().first() {
 //!     // The inlet node of a newly opened input is the graph's to add and wire.
-//!     let _inlet = session.connect_input(&first.id)?;
+//!     let _inlet = session.connect_input(started, &first.id)?;
 //! }
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
 //! session.disconnect_input("keystep");
 //!
 //! // Outbound: the output is a value the caller owns; `queue` returns what the
 //! // device took of them, always whole messages.
-//! let mut output = session.connect_output("iac")?;
+//! let mut output = session.connect_output(started, "iac")?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
 //! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
-//! # Ok::<(), tutti_midi_hardware::MidiHardwareError>(())
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Main types
@@ -232,6 +260,13 @@
 //! subscribers, so a send/receive pair on one virmidi port receives nothing),
 //! and `Midi Through` is the kernel's actual loopback.
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 // --- Framework-free hardware I/O core ---
 
@@ -269,6 +304,7 @@ mod profiles;
 mod properties;
 mod sensing;
 mod session;
+mod start;
 // Only the backends with a clock of their own to read convert its timestamp.
 #[cfg_attr(
     any(midi_backend = "none", midi_backend = "winmm"),
@@ -308,8 +344,11 @@ pub use profiles::{
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
+pub use start::{Start, Started};
 pub use stream::{Basis, DeviceStream, InputTiming};
-pub use virtual_endpoint::{VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec};
+pub use virtual_endpoint::{
+    OpeningVirtualEndpoint, VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec,
+};
 
 // --- Standard MIDI File codec: NOT here ---
 //

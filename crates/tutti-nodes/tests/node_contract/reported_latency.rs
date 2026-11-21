@@ -423,6 +423,61 @@ mod convolver {
         }
     }
 
+    /// `0.9^k`, alternating in sign: a response of `len` taps whose every tap is distinct.
+    fn response(len: usize, sign: f32) -> Vec<f32> {
+        (0..len)
+            .map(|k| sign.powi(k as i32 + 1) * 0.9_f32.powi(k as i32))
+            .collect()
+    }
+
+    /// A zero-latency node declares none, and its impulse response is the IR from frame 0:
+    /// the head's `64` taps and the levels' remainder both land on their own frames.
+    #[test]
+    fn a_zero_latency_convolver_declares_none_and_answers_at_frame_zero() {
+        use tutti_buffers::BusTopology;
+        use tutti_nodes::{ConvolverConfig, ConvolverNode};
+        let (a, b) = (response(700, -1.0), response(300, 1.0));
+        let (c, d) = (response(90, 1.0), response(1000, -1.0));
+        let mono = ConvolverNode::<f32>::try_from(
+            ConvolverConfig::new(BusTopology::MONO, &[Mono::new(&a)])
+                .block_size(Samples::new(64))
+                .zero_latency(),
+        )
+        .unwrap();
+        let stereo = ConvolverNode::<f32>::try_from(
+            ConvolverConfig::new(
+                BusTopology::STEREO,
+                &[Mono::new(&a), Mono::new(&c), Mono::new(&b), Mono::new(&d)],
+            )
+            .true_stereo()
+            .block_size(Samples::new(64))
+            .zero_latency(),
+        )
+        .unwrap();
+        for node in [&mono, &stereo] {
+            assert_eq!(node.latency_samples(), Samples::ZERO);
+            assert_eq!(declared(node), Latency::new(Samples::ZERO));
+        }
+        let near = |got: &[f32], want: &dyn Fn(usize) -> f32| {
+            got.iter()
+                .enumerate()
+                .all(|(k, &g)| (g - want(k)).abs() < 1e-5)
+        };
+        let at = |v: &[f32], k: usize| v.get(k).copied().unwrap_or(0.0);
+        let out = impulse_response(mono, 1000);
+        assert!(
+            near(&out[0], &|k| at(&a, k)),
+            "the mono impulse response is the IR"
+        );
+        // An impulse on both inputs: each output is the sum of its column's paths.
+        let out = impulse_response(stereo, 1100);
+        assert!(near(&out[0], &|k| at(&a, k) + at(&b, k)), "left is LL + RL");
+        assert!(
+            near(&out[1], &|k| at(&c, k) + at(&d, k)),
+            "right is LR + RR"
+        );
+    }
+
     /// The wide node in all three channel configs, at width 2 and width 6:
     /// each channel's dry input (the graph's aligned input) is delayed by the
     /// same latency as its wet path.

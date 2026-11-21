@@ -61,7 +61,7 @@
 //! A unit is a name on a float, not a validated value: `Pan::new(5.0)` builds. The
 //! range a type documents is what its `new_clamped` or wrap produces, and
 //! `new_clamped` passes NaN through (see the `units` module docs). The types that
-//! do validate are `SampleRate`, `Bpm`, `Depth` and `Bipolar`: `SampleRate::new`
+//! do validate are `SampleRate`, `Bpm`, `Depth`, `Bipolar`, `Metres` and `Speed`: `SampleRate::new`
 //! (finite and above zero) returns `None` for a raw it cannot hold.
 //!
 //! ## Operators are opt-in, and every omission is deliberate
@@ -129,9 +129,10 @@ pub use units::{
     Amplitude, ArcDegrees, Azimuth, Balance, Ballistics, Beat, BeatDuration, BeatsPerCycle,
     BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm, BpmOutOfRange, Cents,
     CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Db, Depth,
-    DepthOutOfRange, Direction, Drive, Elevation, Feedback, Gain, HoldFactor, Hz, Mix, Pan, Phase,
-    PhaseIncrement, PhaseStep, PlaybackRate, PlaybackRateOutOfRange, Q, Radians, ReadPosition,
-    ReadRate, Resonance, RunningPhase, SamplePosition, SampleRate, SampleRateOutOfRange,
-    SampleSpan, SampleSpanOutOfRange, Seconds, Semitones, Spread, SrcRatio, StereoBalance,
-    StereoWidth, StretchFactor, Unit, Velocity,
+    DepthOutOfRange, Direction, Drive, Elevation, Feedback, Gain, HoldFactor, Hz, Metres,
+    MetresOutOfRange, Mix, Pan, Phase, PhaseIncrement, PhaseStep, PlaybackRate,
+    PlaybackRateOutOfRange, Q, Radians, ReadPosition, ReadRate, Resonance, RunningPhase,
+    SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Seconds,
+    Semitones, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor,
+    Unit, Velocity,
 };

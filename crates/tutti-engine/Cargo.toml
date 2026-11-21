@@ -18,7 +18,7 @@ thiserror = { workspace = true, features = ["std"] }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-# `monotonic_ns`, `sleep_until_ns`, `spawn_named`, `request_priority`, `with_no_denormals`: the clock, the pacing threads and their priority.
+# `monotonic_ns`, `sleep_until_ns`, `spawn_named` (the deviceless clock's thread), `request_priority`, `with_no_denormals`: the clock, the pacing threads and their priority.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 bytemuck = { version = "1.16", features = ["derive", "min_const_generics"] }

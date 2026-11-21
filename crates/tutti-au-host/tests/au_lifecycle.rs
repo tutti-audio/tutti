@@ -6,6 +6,10 @@
 //! themselves ([`Loaded`], [`Processor`], [`Controller`]).
 
 #![cfg(target_os = "macos")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 mod support;
 

@@ -12,6 +12,7 @@
 #       ctor-result   a receiverless `pub fn` returning its type in a `Result`
 #       range-macro   a `macro_rules!` writing a range type outside tutti-units and tutti-rt's id.rs
 #       option-arg    a chained option (`self` in, `Self` out) that takes an `Option`
+#       default-enum-arg  a parameter whose type is an enum with a usual value (`Default`), passed positionally
 # key   `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`.
 
 # tutti-au-host
@@ -62,14 +63,34 @@ tutti-codec  ctor-result  crates/tutti-codec/src/flac.rs::FlacWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_path
 tutti-codec  ctor-result  crates/tutti-codec/src/wav.rs::WavWriter::create
+tutti-codec  default-enum-arg  crates/tutti-codec/src/aiff.rs::AiffWriter::create
+tutti-codec  default-enum-arg  crates/tutti-codec/src/flac.rs::FlacWriter::create
+tutti-codec  default-enum-arg  crates/tutti-codec/src/spec.rs::Spec::new
+tutti-codec  default-enum-arg  crates/tutti-codec/src/spec.rs::Spec::of_width
+tutti-codec  default-enum-arg  crates/tutti-codec/src/wav.rs::WavWriter::create
 
 # tutti-cpal
 tutti-cpal  ctor-result  crates/tutti-cpal/src/mic.rs::MicIn::open
+tutti-cpal  default-enum-arg  crates/tutti-cpal/src/driver.rs::TuttiDriver::restart_with
+tutti-cpal  default-enum-arg  crates/tutti-cpal/src/host.rs::DeviceHost::supported_configs
+tutti-cpal  default-enum-arg  crates/tutti-cpal/src/mic.rs::MicIn::matching_sink
+tutti-cpal  default-enum-arg  crates/tutti-cpal/src/poller.rs::DevicePoller::new
 
 # tutti-curve
 tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with_range
+tutti-curve  default-enum-arg  crates/tutti-curve/src/piece.rs::Piece::new
+tutti-curve  default-enum-arg  crates/tutti-curve/src/trajectory.rs::Breakpoint::with_law
 
 # tutti-dsp
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/all_pass.rs::AllPassFilter::new
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/delay.rs::DelayLine::read_sample
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::builder
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::new
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/dynamics/dynamic_eq.rs::DynamicEqBank::new
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/dynamics/limiter.rs::LimiterBank::detecting
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/filter/envelope.rs::EnvelopeFilterBank::new
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/filter/svf/kernel.rs::SvfDesign::new
+tutti-dsp  default-enum-arg  crates/tutti-dsp/src/waveshape.rs::WaveshaperBank::new
 
 # tutti-engine
 tutti-engine  with-prefix  crates/tutti-engine/src/routing.rs::OutputLevels::with_dim
@@ -81,11 +102,14 @@ tutti-engine  setter  crates/tutti-engine/src/routing.rs::OutputLevels::set_stri
 tutti-engine  ctor-result  crates/tutti-engine/src/engine.rs::Engine::new
 tutti-engine  ctor-result  crates/tutti-engine/src/engine.rs::Engine::with_capacity
 tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channels
+tutti-engine  default-enum-arg  crates/tutti-engine/src/engine.rs::Engine::new
+tutti-engine  default-enum-arg  crates/tutti-engine/src/engine.rs::Engine::with_capacity
 
 # tutti-export
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
 tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
 tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
+tutti-export  default-enum-arg  crates/tutti-export/src/output.rs::FileTarget::new
 
 # tutti-graph
 tutti-graph  with-prefix  crates/tutti-graph/src/param_event.rs::ParamRamp::with_shape
@@ -123,6 +147,12 @@ tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::with_bo
 tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
+tutti-graph  default-enum-arg  crates/tutti-graph/src/editor/taps.rs::Editor::open_event_tap
+tutti-graph  default-enum-arg  crates/tutti-graph/src/fade.rs::Fade::new
+tutti-graph  default-enum-arg  crates/tutti-graph/src/fade.rs::Fade::seconds
+tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::by_id
+tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::new
+tutti-graph  default-enum-arg  crates/tutti-graph/src/param_event.rs::ParamSegment::unit
 
 # tutti-midi-runtime
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::new
@@ -131,15 +161,20 @@ tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/out_node.r
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/clip_node.rs::MidiClipNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/harmony_node.rs::HarmonyNode::new
 
-# tutti-modulation
 
 # tutti-music
 tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_sample_rate
 tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_tempo
+tutti-music  default-enum-arg  crates/tutti-music/src/duration.rs::NoteDuration::new
 
 # tutti-nodes
+tutti-nodes  default-enum-arg  crates/tutti-nodes/src/distortion.rs::DistortionConfig::new
+tutti-nodes  default-enum-arg  crates/tutti-nodes/src/filter/envelope.rs::EnvelopeFilterConfig::new
+tutti-nodes  default-enum-arg  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterConfig::new
+tutti-nodes  default-enum-arg  crates/tutti-nodes/src/filter/svf.rs::SvfFilterConfig::new
 
 # tutti-plugin
+
 
 # tutti-plugin-host
 tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_invalidate_sink
@@ -202,8 +237,10 @@ tutti-plugin-types  setter  crates/tutti-plugin-types/src/process.rs::ProcessOut
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/metadata.rs::PluginBus::placed
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_role
+tutti-plugin-types  default-enum-arg  crates/tutti-plugin-types/src/descriptor.rs::PluginDescriptor::new
 
 # tutti-polysynth
+
 
 # tutti-sampler
 tutti-sampler  with-prefix  crates/tutti-sampler/src/clip.rs::Clip::with_tempo
@@ -269,15 +306,24 @@ tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallbac
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
-tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
-tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite
-tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite_with_capacity
-tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::new
+tutti-session  default-enum-arg  crates/tutti-session/src/bounce.rs::Stem::new
+tutti-session  default-enum-arg  crates/tutti-session/src/device.rs::Session::watch_devices_on
+tutti-session  default-enum-arg  crates/tutti-session/src/device.rs::Session::watch_host
+tutti-session  default-enum-arg  crates/tutti-session/src/graph/observe.rs::Meters::open
+tutti-session  default-enum-arg  crates/tutti-session/src/graph/observe.rs::Taps::open_event
+tutti-session  default-enum-arg  crates/tutti-session/src/latency.rs::TakeLatency::new
+tutti-session  default-enum-arg  crates/tutti-session/src/take.rs::TakeTarget::file
+tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::DeviceWatch::new
+tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::DeviceWatch::without_stream
+tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::Follow::not_started
+tutti-session  default-enum-arg  crates/tutti-session/src/watch.rs::Follow::running
 
 # tutti-sf2
 
+
 # tutti-soundfont
+
 
 # tutti-tempo
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::constant
@@ -307,6 +353,7 @@ tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteMessage::from_vo
 tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteType::from_value
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::Sysex7Packets::from_payload
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::SysexMessage::from_framed
+tutti-ump  default-enum-arg  crates/tutti-ump/src/midi_translation.rs::Voice1::try_from_with
 
 # tutti-voicing
 tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_bend_range

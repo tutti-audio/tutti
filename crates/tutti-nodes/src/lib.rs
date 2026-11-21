@@ -60,7 +60,9 @@
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
 //! - **Noise** — [`NoiseNode`], a mono source of white, pink or brown noise
 //!   (`tutti_dsp::Noise`) from a seed; its level (`Volume`) is read per frame.
-//! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
+//! - **Spring reverb** — `SpringReverbNode`, a spring's chirp (stretched all-pass cascades) in a
+//!   loop with a delay and a low-pass, any width, from a `SpringReverbConfig`.
+//! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser, spring and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
 //! - **Level and pan modulation** — `TremoloNode` and `AutoPanNode` (an LFO of a chosen
 //!   `OscillatorWave` scales the level, or places a stereo pair by a `PanLaw`) and `RingModNode`
 //!   (the input times a sine carrier), from a `TremoloConfig`, `AutoPanConfig` and `RingModConfig`.
@@ -81,7 +83,8 @@
 //! - **Utilities** — `PolarityNode` (chosen channels inverted, from a `PolarityConfig`),
 //!   `MidSideNode` (stereo L/R to M/S and back, from a `MidSideConfig`) and `StereoWidthNode`
 //!   (the side scaled by a ramping `StereoWidth`, from a `StereoWidthConfig`).
-//! - **Spatial** — `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
+//! - **Spatial** — `AmbisonicEncoderNode`, `AmbisonicRotatorNode` and `AmbisonicDecoderNode`
+//!   (AmbiX ambisonics), `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
 //!   and `HrtfBinauralNode` (two outputs, by FFT convolution against a
 //!   caller-supplied HRIR sphere), both steered by their params (bearing,
 //!   height, spread and width, or the blend), ramped. A mix of several panned sources
@@ -245,7 +248,8 @@
 //! - Signal-driven modulation sources, feeding a
 //!   control lane's event input: [`EnvelopeFollowerNode`] and
 //!   [`NoteEnvelopeNode`].
-//! - Spatial: [`VbapPannerNode`] ([`VbapError`]) and [`HrtfBinauralNode`],
+//! - Spatial: [`AmbisonicEncoderNode`], [`AmbisonicRotatorNode`] and
+//!   [`AmbisonicDecoderNode`] ([`AmbisonicError`]), [`VbapPannerNode`] ([`VbapError`]) and [`HrtfBinauralNode`],
 //!   steered by their params (bearing, height, and the VBAP spread and width
 //!   or the HRTF blend).
 //! - Mixing: [`BusStripNode`]. Summing is the graph's (a port or an output
@@ -446,18 +450,32 @@ pub use reverb_freeverb::{FreeverbConfig, FreeverbKernel, FreeverbNode, Freeverb
 mod reverb_fdn;
 pub use reverb_fdn::{FdnConfig, FdnKernel, FdnNode, FdnSet};
 
+// The feedback delay network with a pitch shifter in its feedback, as a `KernelNode`.
+mod reverb_shimmer;
+pub use reverb_shimmer::{ShimmerConfig, ShimmerKernel, ShimmerNode, ShimmerSet};
+
 // Dattorro's plate as a `KernelNode`.
 mod reverb_plate;
 pub use reverb_plate::{PlateKernel, PlateReverbConfig, PlateReverbNode, PlateSet};
 
+// The spring reverb as a `KernelNode`.
+mod reverb_spring;
+pub use reverb_spring::{
+    SpringReverbConfig, SpringReverbKernel, SpringReverbNode, SpringReverbSet,
+};
+
 // The banks' controls that sit in a node's signature.
 pub use tutti_dsp::{
-    FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, PlateControls,
+    FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, PlateControls, SpringControls,
+    SpringLayout, SpringLength, SpringLengthError, SpringStages, SpringStagesError,
 };
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
 pub use spatial::{
+    AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
+    AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
+    AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet,
     HrtfBinauralConfig, HrtfBinauralNode, VbapError, VbapPannerConfig, VbapPannerNode,
 };
 

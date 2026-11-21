@@ -53,10 +53,10 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     let node = node.into();
     let (controls, _) =
         PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
-    let previous = session
-        .graph
-        .plugins
-        .insert(node, HostedPlugin::served(handle, plugin, controls));
+    let mut record = HostedPlugin::new(handle, plugin, (*controls).clone());
+    record.placement = crate::plugin::Placement::Served;
+    record.controls = Some(controls);
+    let previous = session.graph.plugins.insert(node, record);
     assert!(previous.is_none(), "{node:?} hosts one plugin");
     session.graph.provide_plugin(node);
     session.graph.write_own_bypass(node);
@@ -147,4 +147,39 @@ impl tutti_plugin_types::Health for Inert {
         tutti_plugin_types::BlockCounts::default()
     }
     fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
+}
+
+/// The work values of a plugin hosted in process, run on the main thread: the
+/// fakes are in-process plugins, so the other arm is a test's mistake.
+pub(super) trait Run {
+    type Output;
+
+    /// Runs the in-process work.
+    ///
+    /// # Panics
+    ///
+    /// When the work is for a plugin in a plugin server.
+    fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output;
+}
+
+impl Run for crate::SaveState {
+    type Output = Result<crate::PeerState, tutti_plugin_types::StateError>;
+
+    fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output {
+        match self {
+            Self::InProcess(save) => save.run(main),
+            Self::OutOfProcess(_) => panic!("a fake plugin runs in process"),
+        }
+    }
+}
+
+impl Run for crate::RestoreState {
+    type Output = Result<crate::RestoredState, tutti_plugin_types::StateError>;
+
+    fn run(self, main: tutti_plugin_types::MainThreadMarker) -> Self::Output {
+        match self {
+            Self::InProcess(restore) => restore.run(main),
+            Self::OutOfProcess(_) => panic!("a fake plugin runs in process"),
+        }
+    }
 }

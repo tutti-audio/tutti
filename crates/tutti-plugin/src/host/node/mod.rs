@@ -565,6 +565,14 @@ impl<S> PluginClient<S> {
         self.bridge.audio().presets()
     }
 
+    /// The state and preset requests of this plugin, as [`PluginAnswers`]: a
+    /// cloneable, `Send` handle that outlives the client's move into a graph.
+    pub fn answers(&self) -> PluginAnswers {
+        PluginAnswers {
+            bridge: Arc::clone(&self.bridge),
+        }
+    }
+
     /// The main-thread control handle for this plugin: editor, parameters,
     /// state.
     ///
@@ -674,5 +682,67 @@ impl IntoNode for PluginClient<Bound> {
             controls,
             fork: Some(Box::new(fork)),
         }
+    }
+}
+
+/// A served plugin's state and preset requests, each answered into a oneshot
+/// receiver: a request is queued with the plugin's bridge and the call returns,
+/// with no wait and no main thread. **The bridge's IPC reader thread fills the
+/// sender** with the server's reply, and **its `plugin-control` lane thread
+/// fires the deadline**: a server that never answers is cut off there, and the
+/// lane sends [`StateError::Stalled`] (or [`PresetError::Stalled`]) into the
+/// sender. A sender dropped unanswered (the bridge ended or the server died)
+/// cancels the receiver.
+///
+/// Made by [`PluginClient::answers`]. Cheap to clone; it keeps the bridge, not
+/// the plugin's server, alive.
+///
+/// [`StateError::Stalled`]: tutti_plugin_types::StateError::Stalled
+/// [`PresetError::Stalled`]: tutti_plugin_types::PresetError::Stalled
+#[derive(Clone)]
+pub struct PluginAnswers {
+    bridge: Arc<PluginBridge>,
+}
+
+impl std::fmt::Debug for PluginAnswers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginAnswers").finish_non_exhaustive()
+    }
+}
+
+/// An answer a bridge thread fills.
+pub type Answer<T> = futures_channel::oneshot::Receiver<T>;
+
+impl PluginAnswers {
+    /// Queues the save of the plugin's state for `state_use`.
+    pub fn save_state(
+        &self,
+        state_use: tutti_plugin_types::StateUse,
+    ) -> Answer<Result<Vec<u8>, tutti_plugin_types::StateError>> {
+        self.bridge.audio().save_state_answer(state_use)
+    }
+
+    /// Queues the restore of `data`, a project's state. The server may apply it
+    /// after its answer is no longer awaited.
+    pub fn load_state(&self, data: &[u8]) -> Answer<Result<(), tutti_plugin_types::StateError>> {
+        self.bridge
+            .audio()
+            .load_state_answer(data, tutti_plugin_types::StateUse::Project)
+    }
+
+    /// Queues the load of the preset `id`. The server may load it after its
+    /// answer is no longer awaited.
+    pub fn load_preset(
+        &self,
+        id: &tutti_plugin_types::PresetId,
+    ) -> Answer<Result<(), tutti_plugin_types::PresetError>> {
+        self.bridge.audio().load_preset_answer(id.clone())
+    }
+
+    /// Loads `data` into the plugin's in-process editor instance, the one an
+    /// Audio Unit's editor runs in, so its display follows a state the server
+    /// took ([`load_state`](Self::load_state)). On the main thread.
+    pub fn mirror_state(&self, main: tutti_plugin_types::MainThreadMarker, data: &[u8]) {
+        self.bridge.mirror_state(main, data);
     }
 }

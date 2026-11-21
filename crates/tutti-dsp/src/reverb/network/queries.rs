@@ -142,7 +142,7 @@ impl Fdn {
     pub fn rt60(&self, band: Band, rate: SampleRate) -> Seconds {
         let lines = self.lines.iter().map(|l| {
             (
-                l.effective_frames(),
+                l.effective_frames() + self.loop_delay.get(),
                 Db::from_amplitude(l.absorption.gain(band)),
             )
         });
@@ -178,7 +178,7 @@ impl Fdn {
                 let g = d.gain.magnitude().get();
                 d.delay.get() * (1.0 + g) / (1.0 - g)
             });
-            let m = l.length.get() + peak + l.absorption.peak_delay().get();
+            let m = l.length.get() + peak + l.absorption.peak_delay().get() + self.loop_delay.get();
             let db_g = Db::from_amplitude(l.absorption.gain(band)).get();
             if m.is_nan() || m <= 0.0 || db_g.is_nan() {
                 return None;
@@ -289,7 +289,7 @@ impl Fdn {
     pub(super) fn transit(&self) -> f64 {
         self.lines
             .iter()
-            .map(|l| l.effective_frames())
+            .map(|l| l.effective_frames() + self.loop_delay.get())
             .fold(0.0, f64::max)
     }
 }

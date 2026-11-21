@@ -100,6 +100,8 @@ missing_docs = "warn"
 missing_debug_implementations = "deny"
 
 [workspace.lints.clippy]
+# The thread ban: `clippy.toml` lists the thread starts.
+disallowed_methods = "deny"
 too_many_arguments = "allow"
 type_complexity = "allow"
 missing_errors_doc = "warn"
@@ -107,7 +109,8 @@ missing_panics_doc = "warn"
 
 [workspace.dependencies]
 thiserror = { version = "2", default-features = false }
-# `oneshot`: the reply of a plugin load running on the session executor, and of a MIDI-CI peer request.
+# `oneshot`: a reply filled off the caller (a plugin load, a MIDI-CI peer request, a
+# device stream's stop).
 futures-channel = { version = "0.3.34", default-features = false, features = ["alloc"] }
 # `tutti-platform`'s `Executor`: the run queue, and the `Task` a spawn returns.
 async-executor = "1.14.1"

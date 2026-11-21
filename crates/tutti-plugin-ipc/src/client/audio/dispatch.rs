@@ -16,11 +16,11 @@ use crate::transport::shm::RING_SLOTS;
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
 };
-use crossbeam_channel::RecvTimeoutError;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_types::{Deadline, MidiIntake};
-use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
+use tutti_plugin_types::MidiIntake;
+use tutti_plugin_types::{IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -862,10 +862,12 @@ pub(super) fn handle_audio(
 /// control lane answers `applied` (the server answers that lane, not the audio
 /// one).
 ///
-/// The wait ends after a rate change's deadline and a query's, or when the
-/// bridge stops or crashes. A change the lane gives up on at the deadline is
-/// counted ([`Channels::note_unapplied`]) and logged, and the blocks go on: a
-/// lane that cannot answer in that time is the control lane's to report.
+/// The wait ends when the control lane answers, when the bridge stops or
+/// crashes (the lane's end drops the setting's reply, so the wait sees it
+/// disconnect at once), or at `settle_wait()`. A change the lane gives up on at
+/// the deadline is counted ([`Channels::note_unapplied`]) and logged, and the
+/// blocks go on: a lane that cannot answer in that time is the control lane's
+/// to report.
 pub(super) fn apply_setting(channels: &Channels, lifecycle: &Lifecycle, setting: Setting) {
     let what = match setting {
         Setting::SampleRate(_) => "a rate change",
@@ -873,25 +875,15 @@ pub(super) fn apply_setting(channels: &Channels, lifecycle: &Lifecycle, setting:
         Setting::Fence => "a settle",
     };
     let (applied, reply) = super::ask::ask::<()>();
-    let deadline = Deadline::after(Instant::now(), lifecycle.timeouts().settle_wait());
     channels.put_setting(setting, reply);
-    loop {
-        match applied.recv_timeout_borrowed(RATE_SLICE) {
-            Err(RecvTimeoutError::Timeout) => {
-                if !lifecycle.is_running() || lifecycle.is_crashed() {
-                    return;
-                }
-                if deadline.passed(Instant::now()) {
-                    channels.note_unapplied();
-                    tracing::warn!(
-                        "the plugin bridge gave up holding blocks for {what}: \
-                         the plugin did not apply it in time"
-                    );
-                    return;
-                }
-            }
-            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
-        }
+    if let Err(RecvTimeoutError::Timeout) =
+        applied.recv_timeout_borrowed(lifecycle.timeouts().settle_wait())
+    {
+        channels.note_unapplied();
+        tracing::warn!(
+            "the plugin bridge gave up holding blocks for {what}: \
+             the plugin did not apply it in time"
+        );
     }
 }
 
@@ -942,7 +934,16 @@ pub(super) fn handle_control(
                 ControlRequest::SetTrackInfo { info: *info },
             )?;
         }
-        ControlCommand::SaveState { state_use, reply } => {
+        ControlCommand::SaveState {
+            state_use,
+            flush,
+            reply,
+        } => {
+            // The host's writes no block carried are applied first, so the state
+            // holds them: this lane waits for the audio lane, not the asker.
+            if let Some(applied) = flush {
+                let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
+            }
             let Lane { stream, state } = lane;
             let window = lifecycle.timeouts().state;
             // The server's `Working` while it saves restarts the window, up to the
@@ -1018,11 +1019,16 @@ pub(super) fn handle_control(
             reply.send(value);
         }
         ControlCommand::LoadPreset { id, reply } => {
-            let ok = matches!(
-                query(lane, inbox, lifecycle, ControlRequest::LoadPreset { id })?,
-                Some(ControlReply::PresetLoaded { ok: true })
-            );
-            reply.send(ok);
+            // No answer within the window: the plugin was asked and may have
+            // loaded it, which is not a refusal.
+            let loaded = match query(lane, inbox, lifecycle, ControlRequest::LoadPreset { id })? {
+                Some(ControlReply::PresetLoaded { ok: true }) => Ok(()),
+                Some(_) => Err(PresetError::Refused),
+                None => Err(PresetError::Stalled {
+                    after: lifecycle.timeouts().param,
+                }),
+            };
+            reply.send(loaded);
         }
         ControlCommand::SetupSharedMemory {
             slab,

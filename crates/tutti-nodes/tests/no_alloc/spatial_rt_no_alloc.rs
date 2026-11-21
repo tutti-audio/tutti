@@ -4,14 +4,17 @@
 //! The gate lives in the crate that owns the panners: `assert_no_alloc`
 //! installs a global allocator, which only a test binary of that crate may do.
 
-use tutti_buffers::{Bed, MaxBlock};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, MaxBlock};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
 use tutti_nodes::testing::aim;
-use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
-use tutti_units::Elevation;
+use tutti_nodes::{
+    AmbisonicDecoderConfig, AmbisonicDecoderNode, AmbisonicEncoderConfig, AmbisonicEncoderNode,
+    AmbisonicRotatorConfig, AmbisonicRotatorNode, Decoding, VbapPannerConfig, VbapPannerNode,
+};
 use tutti_units::SampleRate;
+use tutti_units::{ArcDegrees, Elevation};
 use tutti_units::{Azimuth, UnitParam};
 
 /// `node` alone in a graph (`BlockRig`) at 48 kHz in 64-frame blocks, fed a
@@ -475,4 +478,99 @@ fn hrtf<F: tutti_dsp::FftFloat>(
             tutti_dsp::HrirSphere::from_bytes(bytes)?,
         )),
     ))
+}
+
+/// `node` alone in a graph at 48 kHz in 64-frame blocks, its direction moved before every
+/// block: 16 warm-up blocks, then 1 000 under `assert_no_alloc`. The inputs carry a
+/// non-trivial signal and the output is checked to sound.
+fn gate_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
+    let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
+    for (c, plane) in rig.inputs_mut().iter_mut().enumerate() {
+        for (i, x) in plane.into_samples_mut().iter_mut().enumerate() {
+            *x = 0.1 * (c as f32 + 1.0) * (((i * 7 + c) % 13) as f32 - 6.0);
+        }
+    }
+    let aim = |i: usize| {
+        controls.set(
+            UnitParam::Azimuth,
+            if i.is_multiple_of(2) { -150.0 } else { 120.0 },
+        );
+        controls.set(
+            UnitParam::Elevation,
+            if i.is_multiple_of(3) { 60.0 } else { -20.0 },
+        );
+    };
+    for i in 0..16 {
+        aim(i);
+        rig.block();
+    }
+    assert!(
+        (0..rig.output().channels()).any(|c| rig
+            .output()
+            .plane(c)
+            .samples()
+            .iter()
+            .any(|s| s.abs() > 1e-6)),
+        "the node rendered silence; the gate would walk no DSP"
+    );
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..1_000 {
+            aim(i);
+            rig.block();
+        }
+    });
+}
+
+#[test]
+fn ambisonic_encoder_process_is_allocation_free_with_the_direction_moving() {
+    gate_moving(
+        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
+            AmbisonicOrder::MAX,
+        )))
+        .unwrap(),
+    );
+}
+
+#[test]
+fn ambisonic_rotator_process_is_allocation_free_with_the_front_moving() {
+    gate_moving(
+        AmbisonicRotatorNode::<f32>::try_from(
+            AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).roll(ArcDegrees::new(30.0)),
+        )
+        .unwrap(),
+    );
+}
+
+#[test]
+fn ambisonic_decoder_process_is_allocation_free() {
+    for decoding in [Decoding::Sampling, Decoding::AllRad] {
+        let node = AmbisonicDecoderNode::<f32>::try_from(
+            AmbisonicDecoderConfig::new(Bed::Surround71)
+                .input(ambix(AmbisonicOrder::MAX))
+                .decoding(decoding),
+        )
+        .unwrap();
+        let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
+        for (c, plane) in rig.inputs_mut().iter_mut().enumerate() {
+            plane.into_samples_mut().fill(0.05 * (c as f32 + 1.0));
+        }
+        rig.block();
+        assert!(
+            rig.output()
+                .plane(0)
+                .samples()
+                .iter()
+                .any(|s| s.abs() > 1e-6)
+        );
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..1_000 {
+                rig.block();
+            }
+        });
+    }
+}
+
+/// The AmbiX bus of `order`: ACN, SN3D.
+fn ambix(order: AmbisonicOrder) -> BusTopology {
+    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
 }

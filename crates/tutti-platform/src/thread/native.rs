@@ -30,6 +30,10 @@ impl Deadline {
 }
 
 /// Starts a thread named `name` running `body`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the platform's own thread start: the executor's threads and `spawn_named` begin here"
+)]
 pub(super) fn spawn<F, R>(name: &str, body: F) -> io::Result<JoinHandle<R>>
 where
     F: FnOnce() -> R + Send + 'static,

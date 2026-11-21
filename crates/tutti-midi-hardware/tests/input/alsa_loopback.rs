@@ -50,13 +50,16 @@ fn open() -> Loopback {
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
         panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
     };
-    let tutti_midi_hardware::Connected::Opened(inlet) =
-        io.connect_input(&inp.id).expect("connect input")
+    let tutti_midi_hardware::Connected::Opened(inlet) = io
+        .connect_input(super::opening::started(&io), &inp.id)
+        .expect("connect input")
     else {
         panic!("a new input opens");
     };
     graph.attach(inlet);
-    let mut sink = io.connect_output(&out.id).expect("connect output");
+    let mut sink = io
+        .connect_output(super::opening::started(&io), &out.id)
+        .expect("connect output");
     // Whatever was buffered before the test is drained with the probes.
     graph.ready(
         || {
@@ -184,14 +187,19 @@ fn an_input_reopened_at_once_hears_a_note() {
         panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
     };
     let (input_id, output_id) = (inp.id.clone(), out.id.clone());
-    let mut sink = io.connect_output(&output_id).expect("connect output");
+    let mut sink = io
+        .connect_output(super::opening::started(&io), &output_id)
+        .expect("connect output");
 
-    let first = io.connect_input(&input_id).expect("connect input");
+    let first = io
+        .connect_input(super::opening::started(&io), &input_id)
+        .expect("connect input");
     assert!(matches!(first, tutti_midi_hardware::Connected::Opened(_)));
     drop(first);
     assert!(io.disconnect_input(&input_id), "the input was open");
-    let tutti_midi_hardware::Connected::Opened(inlet) =
-        io.connect_input(&input_id).expect("reconnects at once")
+    let tutti_midi_hardware::Connected::Opened(inlet) = io
+        .connect_input(super::opening::started(&io), &input_id)
+        .expect("reconnects at once")
     else {
         panic!("a closed input opens anew");
     };

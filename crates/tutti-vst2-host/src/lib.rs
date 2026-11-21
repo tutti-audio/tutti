@@ -221,6 +221,13 @@
 //! [`ParamId`]: tutti_units::ParamId
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 // The VST2 FFI layer is `tutti-vst2-ffi`, the host half of our fork of vst-rs, which holds
 // every VST2 `unsafe`. Aliased to `vst` at the crate root so every `vst::` path in the

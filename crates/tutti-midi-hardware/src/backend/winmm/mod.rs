@@ -45,6 +45,7 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
+use crate::start::Started;
 use tutti_midi_device::{EndpointId, OsDevice, WinMmDevice};
 use tutti_platform::Executor;
 
@@ -176,6 +177,7 @@ impl MidiEndpoints for WinMmEndpoints {
 
     fn open_input(
         &self,
+        _started: Started,
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
@@ -185,7 +187,7 @@ impl MidiEndpoints for WinMmEndpoints {
         ))
     }
 
-    fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: Started, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let port = resolve_output(id)?;
         Ok(Box::new(
             output::open(&self.executor, &port).map_err(|e| in_use_if_allocated(id, e))?,

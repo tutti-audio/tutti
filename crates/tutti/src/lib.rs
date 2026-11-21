@@ -97,7 +97,7 @@
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
 //! - `codec` — `tutti::codec`, `Wave`. Implied by every decode and encode feature.
-//! - `record` — the session's `Recorder` and its pump loop, device-free. Implied by `capture`.
+//! - `record` — the session's pump loop, device-free. Implied by `capture`.
 //! - `capture` — live audio input from the sound card: `Session::add_input`, takes, mic capture
 //!   (implies `device` and `record`).
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
@@ -189,10 +189,12 @@ pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadInProcess, LoadOutOfProcess,
-    LoadPlugin, LoadPreset, LoadedPlugin, LoadedPreset, LoadingOutOfProcess, Opened, Plugin,
-    PluginApplyError, PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode,
-    PluginPresets, PortCounts, PresetStartError, RestoreState, RestoredState, SaveState,
-    StateStartError, SwapPluginError,
+    LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin,
+    LoadedPreset, LoadingOutOfProcess, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
+    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPresets,
+    PortCounts, PresetStartError, RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess,
+    RestoredState, RestoringStateOutOfProcess, SaveState, SaveStateInProcess,
+    SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError, SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -280,6 +282,10 @@ pub mod nodes {
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
     pub use tutti_dsp::{
+        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics,
+        Rotation, SpeakerLayout,
+    };
+    pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
         Cookbook, CutResponse, Elliptic, EllipticTolerances, FirError, LinearPhaseDesign,
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
@@ -289,7 +295,10 @@ pub mod nodes {
         Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, VelvetDensity,
         VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise, VelvetPulse,
     };
-    pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
+    pub use tutti_dsp::{
+        Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
+        SpringLengthError,
+    };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
@@ -298,6 +307,12 @@ pub mod nodes {
         AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
+    };
+    pub use tutti_nodes::{
+        AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
+        AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
+        AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding,
+        DirectionSet,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
@@ -331,11 +346,12 @@ pub mod nodes {
         MultibandControls, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
         NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
         PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder,
-        SweepError, SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls,
-        TiltFilterNode, TransientControls, TransientShaperConfig, TransientShaperNode, VbapError,
-        VbapPannerConfig, VbapPannerNode,
+        SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
+        SpringControls, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
+        SpringStagesError, Stages, StagesError, Stagger, StaggerError, SvfControls,
+        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
+        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
+        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -343,14 +359,14 @@ pub mod nodes {
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, GraphicEqKernel, Kernel,
         KernelConfig, KernelNode, LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel,
-        PhaserKernel, ReconcileError, SvfKernel, TiltFilterKernel,
+        PhaserKernel, ReconcileError, ShimmerKernel, SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
         FreeverbSet, GateSet, GraphicEqSet, HasControl, LadderSet, LevellerSet, LimiterSet,
-        ModDelaySet, PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet,
-        TransientShaperKernel, TransientShaperSet,
+        ModDelaySet, PhaserSet, PlateKernel, PlateSet, ShimmerSet, SpringReverbKernel,
+        SpringReverbSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
     };
     pub use tutti_nodes::{
         CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
@@ -379,9 +395,9 @@ pub mod types {
         PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_buffers::{
-        BufferError, FiniteSource, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel,
-        FoldLevels, FoldSpec, NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed,
-        Source, StereoPlanes, Stop,
+        BufferError, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec,
+        NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes,
+        Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
@@ -405,12 +421,12 @@ pub mod types {
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Mix, Moment, NormalizedOutOfRange,
-        Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate,
-        PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance, RunningPhase,
-        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Spread, SrcRatio,
-        StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
-        UnitParamOutOfRange, Velocity,
+        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
+        Moment, NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep,
+        PlayReading, PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate,
+        Resonance, RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan,
+        SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
+        StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }
@@ -498,7 +514,6 @@ pub mod session {
         )
     ))]
     pub use tutti_session::LoadError;
-    pub use tutti_session::WorkerError;
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
         CrossfadeId, CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin,
@@ -558,8 +573,7 @@ pub mod session {
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{
-        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, NoiseShaping, PumpLoop, PumpPass,
-        Recorder, RecorderError,
+        DitherSink, FinalizeError, NoiseShaping, PumpLoop, PumpLoopError, PumpPass,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{

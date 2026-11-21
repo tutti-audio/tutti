@@ -1,4 +1,8 @@
 //! `Engine` over the graph: blocks, clocks, loop region, tempo and root channel layouts.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[path = "../support/mod.rs"]
 mod support;

@@ -78,7 +78,8 @@
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
 //!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
 //!   feedback delay network, over an [`FdnLayout`]) and
-//!   [`PlateBank`] (Dattorro's plate), their parameters [`Ramp`]s in [`FreeverbRamps`],
+//!   [`PlateBank`] (Dattorro's plate), [`SpringReverb`] (Valimaki, Parker and Abel's spring:
+//!   stretched all-pass cascades in a loop with a delay and a low-pass), their parameters [`Ramp`]s in [`FreeverbRamps`],
 //!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
 //!   given gain; [`EarlyReflections`] (the model's [`Taps`] stage: a sparse multi-tap delay
 //!   per output channel); and the velvet-noise [`Decorrelator`] over a [`VelvetNoise`] sequence.
@@ -88,7 +89,8 @@
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
 //!   direction's gains and one channel rendered along a ramp between two) and the HRTF
-//!   binaural convolver ([`HrtfBinaural`]).
+//!   binaural convolver ([`HrtfBinaural`]); ambisonics in AmbiX ([`Harmonics`] and
+//!   [`AmbisonicEncoder`], [`Rotation`] and [`AmbisonicRotator`], [`AmbisonicDecoder`]).
 //! - **FFT** (`fft/`): [`RealFft`], a real-input FFT whose arithmetic does not depend on the
 //!   CPU (the convolver also runs it in steps), and [`FftScratch`], reusable plans and
 //!   buffers; [`Correlator`] cross-correlates through it. It is rustfft's *scalar* planner
@@ -304,6 +306,10 @@ pub use reverb::network::{
 };
 pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
+pub use reverb::spring::{
+    SpringControls, SpringLayout, SpringLength, SpringLengthError, SpringReverb, SpringStages,
+    SpringStagesError,
+};
 pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;
@@ -314,9 +320,10 @@ pub use sos::{
     SosBank, SosCoefficients, SosError, StopbandAttenuation, StopbandAttenuationError, Tilt,
 };
 pub use spatial::{
-    HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
-    MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, SpeakerGeometryError, SpeakerLayout,
-    VbapGains, VbapKernel,
+    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HRTF_LATENCY, HRTF_STEP,
+    HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
+    MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation, SpeakerGeometryError,
+    SpeakerLayout, VbapGains, VbapKernel,
 };
 pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
 pub use stereo::{MidSide, WidthBank, WidthControls};

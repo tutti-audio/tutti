@@ -153,7 +153,12 @@ fn open_input_when_listed(
 ) -> crate::OpenInput {
     when_listed(devices, || {
         devices
-            .open_input(id, ports, DeviceWriters::unread())
+            .open_input(
+                crate::testing::started(),
+                id,
+                ports,
+                DeviceWriters::unread(),
+            )
             .map(|(input, _inlet)| input)
     })
 }
@@ -291,7 +296,12 @@ fn an_input_held_when_its_device_vanishes_is_reported_removed() {
     until(&devices, removed(id.clone()));
     assert!(
         devices
-            .open_input(&id, &ports, DeviceWriters::unread())
+            .open_input(
+                crate::testing::started(),
+                &id,
+                &ports,
+                DeviceWriters::unread()
+            )
             .is_err()
     );
     drop(connection);
@@ -365,7 +375,9 @@ fn the_engines_own_clients_are_not_listed() {
     let id = info(until_in(&devices, &mut backlog, added(&name))).id;
 
     let input = open_input_when_listed(&devices, &id, &ports);
-    let output = when_listed(&devices, || devices.open_output(&id));
+    let output = when_listed(&devices, || {
+        devices.open_output(crate::testing::started(), &id)
+    });
     drop(device);
     // Announcements are in order: whatever the opens announced is before this.
     until_in(&devices, &mut backlog, removed(id));
@@ -496,6 +508,7 @@ impl crate::MidiEndpoints for Panicky {
     }
     fn open_input(
         &self,
+        _started: crate::Started,
         _: tutti_midi_device::EndpointId,
         _: crate::InputProducerHandle,
     ) -> crate::Result<Box<dyn crate::InputConnection>> {
@@ -503,6 +516,7 @@ impl crate::MidiEndpoints for Panicky {
     }
     fn open_output(
         &self,
+        _: crate::Started,
         _: tutti_midi_device::EndpointId,
     ) -> crate::Result<Box<dyn crate::DeviceOut>> {
         Err(crate::MidiHardwareError::Unsupported("none"))
@@ -1270,7 +1284,9 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
             }
         })
     };
-    let _ = session.connect_input(&id).unwrap();
+    let _ = session
+        .connect_input(crate::testing::started(), &id)
+        .unwrap();
     let deadline = Instant::now() + PATIENCE;
     let stream = loop {
         session.poll(Instant::now());

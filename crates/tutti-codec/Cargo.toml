@@ -38,7 +38,7 @@ decode-ogg = ["dep:symphonia", "symphonia/ogg", "symphonia/vorbis"]
 thiserror = { workspace = true, features = ["std"] }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-# `spawn_named`: the encoders' worker threads; `Staged`: the files written beside their path.
+# `Staged`: the files written beside their path.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # No default features: the encoder drives flacenc's frame encoder on its own
 # workers, so flacenc's `par` (and its `serde`/`log`) are unused.

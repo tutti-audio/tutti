@@ -360,6 +360,13 @@
 //! [`Preset`]: tutti_plugin_types::Preset
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod format;
 mod host;
@@ -381,4 +388,4 @@ pub mod catalog {
 
 // The graph node of a served plugin and its two states. The control handle,
 // the node's controls and the host policy over a handle are `tutti-plugin-host`'s.
-pub use host::node::{Bound, PluginClient, Unbound};
+pub use host::node::{Answer, Bound, PluginAnswers, PluginClient, Unbound};

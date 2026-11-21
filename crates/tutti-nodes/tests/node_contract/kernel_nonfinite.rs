@@ -2,23 +2,25 @@
 //! at most one block of output, and every block after that block is finite, for every
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
 use tutti_dsp::{Inline, Tap, Taps};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode,
-    CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig, CrossoverControls,
-    CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
-    DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig,
-    FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode, LadderFilterConfig,
-    LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
-    ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
-    PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig, PitchShifterNode,
-    PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode, SvfFilterConfig, SvfFilterNode,
-    TremoloConfig, TremoloNode,
+    AmbisonicDecoderConfig, AmbisonicDecoderNode, AmbisonicEncoderConfig, AmbisonicEncoderNode,
+    AmbisonicRotatorConfig, AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode,
+    BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
+    CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
+    DelayLayout, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode,
+    FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
+    InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
+    MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
+    PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
+    SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -254,6 +256,14 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             ))),
         ),
         (
+            "shimmer",
+            Box::new(ShimmerNode::<f32>::from(
+                ShimmerConfig::new()
+                    .pitch(Cents::new(1200.0))
+                    .send(Feedback::new_clamped(0.9)),
+            )),
+        ),
+        (
             "freeverb",
             Box::new(FreeverbNode::<f32>::from(FreeverbConfig::new().controls(
                 FreeverbControls {
@@ -266,6 +276,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "plate",
             Box::new(PlateReverbNode::<f32>::from(PlateReverbConfig::new())),
         ),
+        (
+            "spring",
+            Box::new(SpringReverbNode::<f32>::from(SpringReverbConfig::new(
+                ChannelLayout::STEREO,
+            ))),
+        ),
         // The LFO and the carrier are state of the clock, not of the input: a NaN sample is
         // heard at its own frame and nowhere else.
         (
@@ -275,6 +291,34 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "auto-pan",
             Box::new(AutoPanNode::from(AutoPanConfig::new())),
+        ),
+        // A gain per channel and frame and no state: nothing remembers the sample.
+        (
+            "ambisonic encoder",
+            Box::new(
+                AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
+                    AmbisonicOrder::MAX,
+                )))
+                .unwrap(),
+            ),
+        ),
+        (
+            "ambisonic rotator",
+            Box::new(
+                AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
+                    AmbisonicOrder::MAX,
+                )))
+                .unwrap(),
+            ),
+        ),
+        (
+            "ambisonic decoder",
+            Box::new(
+                AmbisonicDecoderNode::<f32>::try_from(
+                    AmbisonicDecoderConfig::new(Bed::Surround51).input(ambix(AmbisonicOrder::MAX)),
+                )
+                .unwrap(),
+            ),
         ),
         (
             "ring mod",
@@ -537,4 +581,9 @@ mod logged {
         let records = records(node, f32::NAN, Some(1), 8);
         assert_one_warning(&records, 1, POISONED * BLOCK as u64 + AT as u64);
     }
+}
+
+/// The AmbiX bus of `order`: ACN, SN3D.
+fn ambix(order: AmbisonicOrder) -> BusTopology {
+    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
 }

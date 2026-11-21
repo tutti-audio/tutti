@@ -37,7 +37,6 @@ conformance = ["tutti-vst3-ffi/conformance"]
 dpi.workspace = true
 thiserror = "2"
 parking_lot = "0.13"
-crossbeam-channel = "0.5"
 crossbeam-queue = "0.3"
 # The editor key vocabulary a `KeyEvent` is written in.
 keyboard-types.workspace = true

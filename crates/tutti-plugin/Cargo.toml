@@ -54,6 +54,9 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # served plugin.
 tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc" }
 
+# The oneshot receivers `PluginAnswers` hands out.
+futures-channel = { workspace = true }
+
 # Shared value vocabulary used across host crates + IPC protocol.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["serde", "probe-wire"] }
 
@@ -99,8 +102,6 @@ parking_lot = "0.13"
 # The node tests' mock plugin-server speaks the wire by hand.
 interprocess = { version = "2" }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
-# The catalog tests' scan hand-off.
-crossbeam-channel = "0.5"
 # The client's test-only knobs (`process_guard`).
 tutti-plugin-ipc = { path = "../tutti-plugin-ipc", features = ["testing"] }
 tutti-engine = { path = "../tutti-engine" }

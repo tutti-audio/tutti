@@ -27,7 +27,8 @@ use tutti_nodes::{
     CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
     InterpolationMode, KeySource, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
-    PlateReverbConfig, PlateReverbNode, Stages,
+    PlateReverbConfig, PlateReverbNode, ShimmerConfig, ShimmerNode, SpringReverbConfig,
+    SpringReverbNode, Stages,
 };
 use tutti_units::{CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds};
 
@@ -293,8 +294,22 @@ fn the_reverbs_are_blended_by_the_graph() {
     );
     check_io("fdn", &|| FdnNode::<f32>::from(FdnConfig::new()), 1, 2, 0);
     check_io(
+        "shimmer",
+        &|| ShimmerNode::<f32>::from(ShimmerConfig::new()),
+        1,
+        2,
+        0,
+    );
+    check_io(
         "plate",
         &|| PlateReverbNode::<f32>::from(PlateReverbConfig::new()),
+        2,
+        2,
+        0,
+    );
+    check_io(
+        "spring",
+        &|| SpringReverbNode::<f32>::from(SpringReverbConfig::new(2u16)),
         2,
         2,
         0,

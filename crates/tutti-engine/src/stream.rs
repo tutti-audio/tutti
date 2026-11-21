@@ -3,7 +3,7 @@
 //!
 //! `tutti-session`'s recorder keeps one pass apart from where it runs the same
 //! way: its `PumpLoop` is one pass with no thread and no clock, which a test
-//! steps by hand and `Recorder` runs on a thread. Here [`OutputBlock`] is the
+//! steps by hand. Here [`OutputBlock`] is the
 //! pass and [`StreamDriver`] decides where it runs: a sound card's callback
 //! (`tutti-cpal`'s `CpalDriver`), or a caller's own hands
 //! ([`ManualStreamDriver`](crate::ManualStreamDriver)). [`RunningStream`] is the

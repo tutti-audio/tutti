@@ -15,10 +15,11 @@
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
 use tutti_buffers::Mono;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
+    AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicRotatorConfig, AmbisonicRotatorNode,
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
     BusStripNode, ChannelTimes, CombFilterConfig, CombFilterNode, CombForm, CompressorConfig,
     CompressorControls, CompressorNode, ConvolverNode, DelayConfig, DelayControls, DelayLayout,
@@ -27,8 +28,8 @@ use tutti_nodes::{
     InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
     LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
     ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
-    RingModConfig, RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
-    TremoloConfig, TremoloNode,
+    RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages, SvfFilterConfig,
+    SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -38,7 +39,8 @@ use tutti_nodes::{
 };
 use tutti_nodes::{
     GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
-    StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode,
+    SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
+    TiltFilterNode,
 };
 use tutti_units::{
     Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples,
@@ -435,6 +437,40 @@ fn auto_pan() {
 }
 
 #[test]
+fn ambisonic_encoder() {
+    IsolateRow::new("AmbisonicEncoderNode", || {
+        AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
+            AmbisonicOrder::MAX,
+        )))
+        .unwrap()
+    })
+    .control("azimuth", |p| {
+        assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
+    })
+    .control("elevation", |p| {
+        assert!(p.param_set().set(UnitParam::Elevation, 40.0))
+    })
+    .check();
+}
+
+#[test]
+fn ambisonic_rotator() {
+    IsolateRow::new("AmbisonicRotatorNode", || {
+        AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
+            AmbisonicOrder::MAX,
+        )))
+        .unwrap()
+    })
+    .control("azimuth", |p| {
+        assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
+    })
+    .control("elevation", |p| {
+        assert!(p.param_set().set(UnitParam::Elevation, 40.0))
+    })
+    .check();
+}
+
+#[test]
 fn comb_filter() {
     for form in [CombForm::Feedforward, CombForm::Feedback] {
         IsolateRow::new("CombFilterNode (stereo)", move || {
@@ -473,6 +509,24 @@ fn pitch_shifter() {
     })
     .control("pitch", |r| {
         assert!(r.param_set().set(UnitParam::Pitch, -900.0))
+    })
+    .check();
+}
+
+#[test]
+fn shimmer() {
+    IsolateRow::new("ShimmerNode", || {
+        ShimmerNode::<f32>::from(
+            ShimmerConfig::new()
+                .pitch(Cents::new(1200.0))
+                .send(Feedback::new_clamped(0.6)),
+        )
+    })
+    .control("pitch", |r| {
+        assert!(r.param_set().set(UnitParam::Pitch, 700.0))
+    })
+    .control("send", |r| {
+        assert!(r.param_set().set(UnitParam::Feedback, 0.2))
     })
     .check();
 }
@@ -563,6 +617,25 @@ fn plate_reverb() {
         assert!(p.param_set().set(UnitParam::Depth, 1.0))
     })
     .control("diffusion", |p| {
+        assert!(p.param_set().set(UnitParam::Diffusion, 0.2))
+    })
+    .check();
+}
+
+#[test]
+fn spring_reverb() {
+    IsolateRow::new("SpringReverbNode", || {
+        SpringReverbNode::<f32>::from(
+            SpringReverbConfig::new(ChannelLayout::STEREO).decay(Seconds::new(1.0)),
+        )
+    })
+    .control("decay", |p| {
+        assert!(p.param_set().set(UnitParam::Decay, 4.0))
+    })
+    .control("tone", |p| {
+        assert!(p.param_set().set(UnitParam::Cutoff, 500.0))
+    })
+    .control("dispersion", |p| {
         assert!(p.param_set().set(UnitParam::Diffusion, 0.2))
     })
     .check();
@@ -673,4 +746,9 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
             .block_size(block_size),
     )
     .expect("one response on a mono bus")
+}
+
+/// The AmbiX bus of `order`: ACN, SN3D.
+fn ambix(order: AmbisonicOrder) -> BusTopology {
+    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
 }

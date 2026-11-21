@@ -1,4 +1,8 @@
 //! VST3 host conformance, correctness and robustness against the reference plugin (feature `conformance`).
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[cfg(feature = "conformance")]
 #[path = "../support/conformance.rs"]

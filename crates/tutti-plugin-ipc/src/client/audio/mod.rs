@@ -33,7 +33,7 @@ use dpi::Size;
 use tutti_platform::Executor;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
-    StateError, StateUse, UnknownParam, edit_slots,
+    PresetError, StateError, StateUse, UnknownParam, edit_slots,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -112,7 +112,7 @@ pub use thread::IpcThread;
 fn await_reply<T>(
     ask: ask::Ask<T>,
     wait: Duration,
-) -> std::result::Result<T, crossbeam_channel::RecvTimeoutError> {
+) -> std::result::Result<T, std::sync::mpsc::RecvTimeoutError> {
     ask.recv_timeout(wait)
 }
 
@@ -766,7 +766,11 @@ impl AudioBridge {
         // What the host wrote and no block has carried is in the state.
         self.flush_host_edits();
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
-            ControlCommand::SaveState { state_use, reply }
+            ControlCommand::SaveState {
+                state_use,
+                flush: None,
+                reply,
+            }
         }) else {
             return Err(self.refused());
         };
@@ -787,30 +791,12 @@ impl AudioBridge {
         data: &[u8],
         state_use: StateUse,
     ) -> std::result::Result<(), StateError> {
-        if self.lifecycle.is_crashed() {
-            return Err(StateError::PluginCrashed);
-        }
-        // The writes made so far were made against the values this load
-        // replaces: none lands after it.
-        self.reset_host_edits();
-        // Refused here, before an object is made of it: the object is a copy of
-        // the state, and the answer comes on the calling thread rather than after
-        // a round trip through the bridge.
-        if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
-            return Err(StateError::TooLarge {
-                bytes: data.len(),
-                limit: tutti_plugin_types::MAX_STATE_BYTES,
-            });
-        }
-        // The one copy of the state the host makes, on the calling thread: the
-        // bridge sends the object as it is.
-        let blob = Blob::create(data).map_err(|e| {
-            StateError::Rejected(format!("the state could not be made into an object: {e}"))
-        })?;
+        let blob = self.state_object(data)?;
+        let len = data.len() as u64;
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
             ControlCommand::LoadState {
                 state_use,
-                len: data.len() as u64,
+                len,
                 blob,
                 reply,
             }
@@ -819,6 +805,33 @@ impl AudioBridge {
         };
         // A refusal to answer is not an acceptance.
         self.await_state(ask_resp)
+    }
+
+    /// The object a state travels as: the one copy of it the host makes, on the
+    /// calling thread, which the bridge sends as it is. Voids the writes made so
+    /// far (they were made against the values the load replaces).
+    ///
+    /// # Errors
+    ///
+    /// The plugin is dead, or the state is over [`MAX_STATE_BYTES`]
+    /// (refused here, before an object is made of it), or the object could not
+    /// be made.
+    ///
+    /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
+    fn state_object(&self, data: &[u8]) -> std::result::Result<Blob, StateError> {
+        if self.lifecycle.is_crashed() {
+            return Err(StateError::PluginCrashed);
+        }
+        self.reset_host_edits();
+        if data.len() > tutti_plugin_types::MAX_STATE_BYTES {
+            return Err(StateError::TooLarge {
+                bytes: data.len(),
+                limit: tutti_plugin_types::MAX_STATE_BYTES,
+            });
+        }
+        Blob::create(data).map_err(|e| {
+            StateError::Rejected(format!("the state could not be made into an object: {e}"))
+        })
     }
 
     /// The answer to a state request, waited for up to [`Timeouts::state_wait`]:
@@ -832,10 +845,8 @@ impl AudioBridge {
         let timeouts = self.lifecycle.timeouts();
         match ask.recv_timeout_borrowed(timeouts.state_wait()) {
             Ok(answer) => answer,
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                Err(StateError::PluginCrashed)
-            }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(StateError::Stalled {
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(StateError::PluginCrashed),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(StateError::Stalled {
                 after: timeouts.state,
             }),
         }
@@ -995,7 +1006,83 @@ impl AudioBridge {
         }) else {
             return false;
         };
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)
+        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
+            .is_ok_and(|loaded| loaded.is_ok())
+    }
+
+    // --- Requests answered into a future ---
+
+    /// [`save_state`](Self::save_state) as a oneshot receiver: queues the request and
+    /// returns, and **the control lane's thread fills the answer** when the
+    /// server's reply lands. That lane owns the deadline: with no reply within
+    /// [`Timeouts::state`] (renewed by the server's `Working`, up to the
+    /// ceiling) it sends [`StateError::Stalled`] into the answer, so no caller
+    /// waits and none polls. A lane that ends drops the request unanswered, which
+    /// cancels the answer. The request takes no slot (`ControlSlot`) and
+    /// queues behind one in flight.
+    pub fn save_state_answer(
+        &self,
+        state_use: StateUse,
+    ) -> futures_channel::oneshot::Receiver<std::result::Result<Vec<u8>, StateError>> {
+        let (answer, reply) = ask::awaited();
+        if self.lifecycle.is_crashed() {
+            reply.send(Err(StateError::PluginCrashed));
+            return answer;
+        }
+        // The lane waits for the flush, as a blocking save waits for it itself.
+        let flush = self.request_flush();
+        self.queue(ControlCommand::SaveState {
+            state_use,
+            flush,
+            reply,
+        });
+        answer
+    }
+
+    /// `load_state` as a oneshot receiver, filled and bounded as
+    /// [`save_state_answer`](Self::save_state_answer) is: [`StateError::Stalled`]
+    /// at [`Timeouts::state`]. The server may apply a state whose answer is no
+    /// longer awaited.
+    pub fn load_state_answer(
+        &self,
+        data: &[u8],
+        state_use: StateUse,
+    ) -> futures_channel::oneshot::Receiver<std::result::Result<(), StateError>> {
+        let (answer, reply) = ask::awaited();
+        match self.state_object(data) {
+            Ok(blob) => self.queue(ControlCommand::LoadState {
+                state_use,
+                len: data.len() as u64,
+                blob,
+                reply,
+            }),
+            Err(error) => reply.send(Err(error)),
+        }
+        answer
+    }
+
+    /// `load_preset` as a oneshot receiver, filled and bounded as
+    /// [`save_state_answer`](Self::save_state_answer) is:
+    /// [`PresetError::Stalled`] at [`Timeouts::param`].
+    pub fn load_preset_answer(
+        &self,
+        id: PresetId,
+    ) -> futures_channel::oneshot::Receiver<std::result::Result<(), PresetError>> {
+        let (answer, reply) = ask::awaited();
+        if self.lifecycle.is_crashed() {
+            reply.send(Err(PresetError::Lost));
+            return answer;
+        }
+        self.reset_host_edits();
+        self.queue(ControlCommand::LoadPreset { id, reply });
+        answer
+    }
+
+    /// Queues `command`; a full queue answers it `Busy`.
+    fn queue(&self, command: ControlCommand) {
+        if let Err(refused) = self.channels.push_control_back(command) {
+            refused.refuse();
+        }
     }
 
     /// Has the server open the slab `slab` names (laid out as `layout`) and
@@ -1374,7 +1461,7 @@ mod tests {
         let (waiting, _reply) = ask::ask::<u8>();
         assert_eq!(
             await_reply(waiting, timeouts.param_wait()),
-            Err(crossbeam_channel::RecvTimeoutError::Timeout)
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
         );
     }
 

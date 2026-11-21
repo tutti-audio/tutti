@@ -295,3 +295,47 @@ impl Block for LoadOutOfProcess {
         tutti_fixtures::block_on(self)
     }
 }
+
+/// A plugin's state or preset work as an app runs it for the plugin's hosting:
+/// on the calling main thread for a plugin in process, awaited for one in a
+/// plugin server.
+pub trait Perform {
+    /// What the work yields.
+    type Output;
+
+    /// Runs the work.
+    fn perform(self, main: MainThreadMarker) -> Self::Output;
+}
+
+impl Perform for tutti_session::SaveState {
+    type Output = Result<PeerState, tutti_plugin_types::StateError>;
+
+    fn perform(self, main: MainThreadMarker) -> Self::Output {
+        match self {
+            Self::InProcess(save) => save.run(main),
+            Self::OutOfProcess(save) => tutti_fixtures::block_on(save),
+        }
+    }
+}
+
+impl Perform for tutti_session::RestoreState {
+    type Output = Result<tutti_session::RestoredState, tutti_plugin_types::StateError>;
+
+    fn perform(self, main: MainThreadMarker) -> Self::Output {
+        match self {
+            Self::InProcess(restore) => restore.run(main),
+            Self::OutOfProcess(restore) => tutti_fixtures::block_on(restore),
+        }
+    }
+}
+
+impl Perform for tutti_session::LoadPreset {
+    type Output = Result<tutti_session::LoadedPreset, tutti_plugin_types::PresetError>;
+
+    fn perform(self, main: MainThreadMarker) -> Self::Output {
+        match self {
+            Self::InProcess(load) => load.run(main),
+            Self::OutOfProcess(load) => tutti_fixtures::block_on(load),
+        }
+    }
+}

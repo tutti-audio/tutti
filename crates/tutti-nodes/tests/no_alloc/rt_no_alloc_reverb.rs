@@ -15,7 +15,7 @@ use tutti_graph::Status;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_nodes::{
     FdnConfig, FdnControls, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig,
-    PlateReverbNode,
+    PlateReverbNode, SpringReverbConfig, SpringReverbNode,
 };
 use tutti_units::{SampleRate, Seconds, UnitAddr, UnitParam};
 
@@ -339,6 +339,25 @@ fn the_plate_node_process_is_allocation_free_with_every_control_moving() {
     ];
     gate_of(
         PlateReverbNode::<f32>::from(PlateReverbConfig::new()),
+        1_000,
+        |set, i| {
+            for &(param, lo, hi) in &ends {
+                let at = if i.is_multiple_of(2) { lo } else { hi };
+                assert!(set.set(UnitAddr::first(param), at));
+            }
+        },
+    );
+}
+
+#[test]
+fn the_spring_node_process_is_allocation_free_with_every_control_moving() {
+    let ends = [
+        (UnitParam::Decay, 0.1, 30.0),
+        (UnitParam::Cutoff, 20.0, 20_000.0),
+        (UnitParam::Diffusion, 0.0, 1.0),
+    ];
+    gate_of(
+        SpringReverbNode::<f32>::from(SpringReverbConfig::new(2u16)),
         1_000,
         |set, i| {
             for &(param, lo, hi) in &ends {

@@ -30,6 +30,7 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, MidiThread, NotFound, Result};
+use crate::start::Started;
 use crate::{InputFault, InputProducerHandle};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
@@ -506,6 +507,10 @@ impl FakeBackend {
 }
 
 impl MidiEndpoints for FakeBackend {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test support: the fake backend's watch thread stands in for an OS one"
+    )]
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
         let (changes, incoming) = mpsc::channel();
         let mut devices = self.devices();
@@ -554,6 +559,7 @@ impl MidiEndpoints for FakeBackend {
 
     fn open_input(
         &self,
+        _started: Started,
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
@@ -577,7 +583,7 @@ impl MidiEndpoints for FakeBackend {
         }))
     }
 
-    fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: Started, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let devices = self.devices();
         if devices.refuse_outputs {
             return Err(MidiHardwareError::InUse(id));

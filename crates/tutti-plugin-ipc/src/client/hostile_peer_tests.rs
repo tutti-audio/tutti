@@ -561,7 +561,7 @@ impl Drop for MockServer {
 fn call_within<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
 ) -> std::result::Result<T, Duration> {
-    let (tx, rx) = crossbeam_channel::bounded(1);
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let start = Instant::now();
     std::thread::Builder::new()
         .name("hostile-call".to_string())
@@ -1468,7 +1468,7 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
 /// drop joins it: the wait must notice the shutdown, not run out.
 #[test]
 fn dropping_the_bridge_ends_a_hung_rate_change() {
-    let (asked, request_seen) = crossbeam_channel::bounded(1);
+    let (asked, request_seen) = std::sync::mpsc::sync_channel(1);
     let mut mock = MockServer::start("hung_rate", move |msg| {
         if matches!(msg, ControlRequest::SetSampleRate { .. }) {
             let _ = asked.try_send(());
@@ -1499,7 +1499,7 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
 /// declares nothing for the end the server then makes.
 #[test]
 fn a_bridge_asked_to_stop_tells_the_server_to_shut_down() {
-    let (heard, shutdown_seen) = crossbeam_channel::bounded(1);
+    let (heard, shutdown_seen) = std::sync::mpsc::sync_channel(1);
     let mock = MockServer::start("shutdown", move |msg| {
         if matches!(msg, ControlRequest::Shutdown) {
             let _ = heard.try_send(());
@@ -1887,6 +1887,132 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
     assert_healthy_after_stall(&mock, "load_state");
 }
 
+// ── Requests answered into a future ──────────────────────────────────────────
+
+/// Awaits `answer` on a thread of its own, as an app's executor would: it is
+/// polled when the reader or the lane fills it, and nothing else polls it. The
+/// budget only guards a hang.
+fn await_answer<T: Send + 'static>(
+    answer: futures_channel::oneshot::Receiver<T>,
+) -> std::result::Result<T, futures_channel::oneshot::Canceled> {
+    call_within(move || futures_lite::future::block_on(answer))
+        .unwrap_or_else(|w| panic!("an answer was never filled; waited {w:?}"))
+}
+
+/// **An awaited save is filled with the state the server sends**, by the
+/// bridge's lane thread: the caller queued it and returned.
+#[test]
+fn an_awaited_save_state_is_filled_with_the_servers_state() {
+    let bytes = vec![7u8, 8, 9];
+    let sent = bytes.clone();
+    let mock = MockServer::start("awaited-save", move |msg| match msg {
+        ControlRequest::SaveState { .. } => Action::State {
+            len: sent.len() as u64,
+            bytes: sent.clone(),
+        },
+        _ => Action::Silent,
+    });
+    let answer = mock
+        .bridge
+        .audio()
+        .save_state_answer(tutti_plugin_types::StateUse::Project);
+    assert_eq!(await_answer(answer), Ok(Ok(bytes)));
+}
+
+/// **A server that never answers a save is cut off by the control lane's
+/// deadline**, which sends `Stalled` into the answer: no one calls anything
+/// after the request was queued, and the bridge stays healthy.
+#[test]
+fn an_awaited_save_state_the_server_never_answers_stalls_at_the_lanes_deadline() {
+    let mock =
+        MockServer::start_with_state_timeout(
+            "awaited-stalled-save",
+            STATE_TIMEOUT,
+            |msg| match msg {
+                ControlRequest::GetParameterList => {
+                    Action::Reply(Box::new(ControlReply::ParameterList {
+                        parameters: Vec::new(),
+                    }))
+                }
+                _ => Action::Silent,
+            },
+        );
+    let answer = mock
+        .bridge
+        .audio()
+        .save_state_answer(tutti_plugin_types::StateUse::Project);
+    let stalled = await_answer(answer).expect("the lane answered");
+    assert!(
+        matches!(stalled, Err(StateError::Stalled { after }) if after == STATE_TIMEOUT),
+        "{stalled:?}"
+    );
+    assert_healthy_after_stall(&mock, "awaited save_state");
+}
+
+/// **The same for a restore**: the object goes out and the acknowledgement
+/// never comes, so the lane sends `Stalled` into the answer.
+#[test]
+fn an_awaited_load_state_the_server_never_acknowledges_stalls_at_the_lanes_deadline() {
+    let mock =
+        MockServer::start_with_state_timeout(
+            "awaited-stalled-load",
+            STATE_TIMEOUT,
+            |msg| match msg {
+                ControlRequest::GetParameterList => {
+                    Action::Reply(Box::new(ControlReply::ParameterList {
+                        parameters: Vec::new(),
+                    }))
+                }
+                _ => Action::Silent,
+            },
+        );
+    let answer = mock
+        .bridge
+        .audio()
+        .load_state_answer(&[3u8; 128], tutti_plugin_types::StateUse::Project);
+    let stalled = await_answer(answer).expect("the lane answered");
+    assert!(
+        matches!(stalled, Err(StateError::Stalled { after }) if after == STATE_TIMEOUT),
+        "{stalled:?}"
+    );
+    assert_healthy_after_stall(&mock, "awaited load_state");
+}
+
+/// **A preset load the server never answers ends `Stalled` at the parameter
+/// deadline**, not as a refusal: the plugin was asked and may have loaded it.
+#[test]
+fn an_awaited_preset_load_the_server_never_answers_stalls_at_the_lanes_deadline() {
+    let param = Duration::from_millis(300);
+    let mut timeouts = Timeouts::default();
+    timeouts.param = param;
+    let mock =
+        MockServer::start_with_timeouts("awaited-stalled-preset", timeouts, |_| Action::Silent);
+    let answer = mock
+        .bridge
+        .audio()
+        .load_preset_answer(tutti_plugin_types::PresetId::Location("/x.preset".into()));
+    let stalled = await_answer(answer).expect("the lane answered");
+    assert_eq!(
+        stalled,
+        Err(tutti_plugin_types::PresetError::Stalled { after: param })
+    );
+}
+
+/// **A server that dies mid-request drops the sender**, which resolves the
+/// answer as canceled: it never hangs.
+#[test]
+fn an_awaited_save_state_the_server_dies_in_is_canceled() {
+    let mock = MockServer::start("awaited-death", |msg| match msg {
+        ControlRequest::SaveState { .. } => Action::Die,
+        _ => Action::Silent,
+    });
+    let answer = mock
+        .bridge
+        .audio()
+        .save_state_answer(tutti_plugin_types::StateUse::Project);
+    assert!(await_answer(answer).is_err(), "no reply was sent");
+}
+
 /// Assert that a stall left the session genuinely usable, not merely unflagged.
 ///
 /// Shared by both stall tests so they cannot drift into proving different
@@ -1954,7 +2080,7 @@ fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
 #[test]
 fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
     let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
-    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
     let timeouts = {
         let mut t = Timeouts::default();
         t.param = Duration::from_millis(200);
@@ -2018,8 +2144,8 @@ fn answered(mock: &mut MockServer, seq: u64) -> bool {
 /// A control lane that holds the first `GetParameter` until `release` says go,
 /// telling `seen` it arrived, and answers every later one at once.
 fn hold_first_query(
-    seen: crossbeam_channel::Sender<()>,
-    release: crossbeam_channel::Receiver<()>,
+    seen: std::sync::mpsc::SyncSender<()>,
+    release: std::sync::mpsc::Receiver<()>,
 ) -> impl Fn(ControlRequest) -> Action + Send + 'static {
     let first = std::sync::atomic::AtomicBool::new(true);
     move |msg| match msg {
@@ -2042,8 +2168,8 @@ fn hold_first_query(
 /// sends the block.
 #[test]
 fn a_block_completes_while_a_control_request_is_outstanding() {
-    let (seen, seen_rx) = crossbeam_channel::bounded(1);
-    let (release_tx, release) = crossbeam_channel::bounded(1);
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release) = std::sync::mpsc::sync_channel(1);
     let mut mock = MockServer::start_lanes("block-beside-control", answer_blocks, {
         hold_first_query(seen, release)
     });
@@ -2122,8 +2248,8 @@ fn a_crash_the_control_lane_sees_is_answered_by_the_audio_lane() {
 /// its queue is filled behind it.
 #[test]
 fn a_control_call_on_a_full_queue_is_busy() {
-    let (seen, seen_rx) = crossbeam_channel::bounded(1);
-    let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
     let mock = MockServer::start_lanes("full", answer_blocks, move |msg| match msg {
         ControlRequest::GetCurrentPreset => {
             let _ = seen.try_send(());
@@ -2165,7 +2291,7 @@ fn a_control_call_on_a_full_queue_is_busy() {
 /// passes. What is asserted is that the shutdown completes, not how fast.
 #[test]
 fn a_shutdown_ends_when_a_control_request_is_stuck_in_the_server() {
-    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
     let timeouts = {
         let mut t = Timeouts::default();
         t.param = Duration::from_millis(200);
@@ -2195,7 +2321,7 @@ fn a_shutdown_ends_when_a_control_request_is_stuck_in_the_server() {
 /// its constructed deadline passes, then counted unapplied.
 #[test]
 fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
-    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
     let timeouts = {
         let mut t = Timeouts::default();
         t.param = Duration::from_millis(100);
@@ -2230,13 +2356,59 @@ fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
     });
 }
 
+/// **A shutdown ends a setting's wait through its reply.** The control lane is
+/// held in a query the server answers late, a render mode waits in its slot, and
+/// the bridge is shut down: the lane's end drops the setting's reply, so the
+/// audio lane's wait ends at once instead of at the settle deadline (made huge
+/// here; the call bound only guards a hang).
+#[test]
+fn a_shutdown_ends_a_waiting_setting_through_its_reply() {
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.rate = Duration::from_secs(600);
+        t
+    };
+    let mut mock =
+        MockServer::start_lanes_under("setting-shutdown", timeouts, answer_blocks, move |msg| {
+            if matches!(msg, ControlRequest::GetParameter { .. }) {
+                let _ = seen.try_send(());
+                let _ = release.recv();
+            }
+            Action::Silent
+        });
+    let bridge = Arc::clone(&mock.bridge);
+    let query = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the control lane is held in the query");
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+
+    let mut thread = mock.thread.take().expect("the bridge thread");
+    let shutdown = std::thread::spawn(move || thread.shutdown());
+    release_tx.send(()).expect("the control lane is waiting");
+    let (done_tx, done) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = done_tx.send(shutdown.join());
+    });
+    done.recv_timeout(Duration::from_secs(60))
+        .expect("the shutdown completes before the settle deadline")
+        .expect("the shutdown's thread");
+    let _ = query.join();
+}
+
 /// A control script that holds a setting while a block may overtake it: the
 /// setting's request waits up to a window for the block to arrive at the audio
 /// lane's script (it ends at once if one does, and is only waited out by a host
 /// that holds the block back), then logs `name`.
 fn log_after_window(
     log: &Arc<std::sync::Mutex<Vec<&'static str>>>,
-    block_rx: &crossbeam_channel::Receiver<()>,
+    block_rx: &std::sync::mpsc::Receiver<()>,
     name: &'static str,
 ) {
     let _ = block_rx.recv_timeout(Duration::from_millis(300));
@@ -2246,7 +2418,7 @@ fn log_after_window(
 /// The audio lane's script for the ordering tests: logs the block, then answers.
 fn log_blocks(
     log: Arc<std::sync::Mutex<Vec<&'static str>>>,
-    block_seen: crossbeam_channel::Sender<()>,
+    block_seen: std::sync::mpsc::SyncSender<()>,
 ) -> impl Fn(AudioRequest) -> Action + Send + 'static {
     move |msg| {
         if matches!(msg, AudioRequest::ProcessAudio(_)) {
@@ -2264,7 +2436,7 @@ fn log_blocks(
 #[test]
 fn a_render_mode_is_applied_before_the_next_block() {
     let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
-    let (block_seen, block_rx) = crossbeam_channel::bounded(1);
+    let (block_seen, block_rx) = std::sync::mpsc::sync_channel(1);
     let control = {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
@@ -2302,7 +2474,7 @@ fn a_render_mode_is_applied_before_the_next_block() {
 #[test]
 fn a_rate_change_is_applied_before_the_next_block() {
     let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
-    let (block_seen, block_rx) = crossbeam_channel::bounded(1);
+    let (block_seen, block_rx) = std::sync::mpsc::sync_channel(1);
     let control = {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
@@ -2337,8 +2509,8 @@ fn a_rate_change_is_applied_before_the_next_block() {
 #[test]
 fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
     let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
-    let (fence_seen, fence_rx) = crossbeam_channel::bounded(1);
-    let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
+    let (fence_seen, fence_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
     let audio = {
         let log = Arc::clone(&log);
         move |msg: AudioRequest| {

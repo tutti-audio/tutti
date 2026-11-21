@@ -1,4 +1,8 @@
 //! The session's graph: wiring, buses, edge gain, latency, the root and the scene render.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 /// Inert outside `assert_no_alloc`, so every test here may also gate a closure on
 /// allocating nothing.

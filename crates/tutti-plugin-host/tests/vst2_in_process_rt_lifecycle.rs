@@ -21,6 +21,10 @@
 //! Two tests read the render itself: what the node writes is what the
 //! plugin wrote, and silence past the channels it hands the plugin. The last
 //! counts the parameter reports a burst from `process` loses, on the handle.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};

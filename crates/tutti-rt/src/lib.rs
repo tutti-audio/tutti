@@ -153,6 +153,13 @@
 //! takes down the out-of-process `plugin-server`, not the host.
 #![deny(missing_docs)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod atomic_rate;
 mod backoff;
