@@ -278,7 +278,8 @@ pub mod nodes {
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
     pub use tutti_dsp::{
-        AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics, Rotation,
+        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics,
+        Rotation, SpeakerLayout,
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
@@ -297,8 +298,10 @@ pub mod nodes {
         Trajectory, UnitLaneConfig,
     };
     pub use tutti_nodes::{
+        AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
         AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
-        AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, DirectionSet,
+        AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding,
+        DirectionSet,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,

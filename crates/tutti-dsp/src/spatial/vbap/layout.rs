@@ -72,6 +72,8 @@ impl Tuple {
 #[derive(Debug, Clone)]
 pub struct SpeakerLayout {
     count: usize,
+    /// The speakers' positions, in gain order.
+    directions: Box<[Direction]>,
     tuples: Box<[Tuple]>,
     has_rear_speakers: bool,
 }
@@ -202,9 +204,16 @@ impl SpeakerLayout {
             .any(|d| d.azimuth.wrap().get().abs() > 90.0);
         Ok(Self {
             count,
+            directions: positions.into(),
             tuples,
             has_rear_speakers,
         })
+    }
+
+    /// The speakers' positions, in the order of every gain slice.
+    #[must_use]
+    pub fn directions(&self) -> &[Direction] {
+        &self.directions
     }
 
     /// The number of speakers.

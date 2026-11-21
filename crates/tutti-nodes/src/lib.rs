@@ -77,7 +77,7 @@
 //! - **Utilities** — `PolarityNode` (chosen channels inverted, from a `PolarityConfig`),
 //!   `MidSideNode` (stereo L/R to M/S and back, from a `MidSideConfig`) and `StereoWidthNode`
 //!   (the side scaled by a ramping `StereoWidth`, from a `StereoWidthConfig`).
-//! - **Spatial** — `AmbisonicEncoderNode` and `AmbisonicRotatorNode`
+//! - **Spatial** — `AmbisonicEncoderNode`, `AmbisonicRotatorNode` and `AmbisonicDecoderNode`
 //!   (AmbiX ambisonics), `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
 //!   and `HrtfBinauralNode` (two outputs, by FFT convolution against a
 //!   caller-supplied HRIR sphere), both steered by their params (bearing,
@@ -242,8 +242,8 @@
 //! - Signal-driven modulation sources, feeding a
 //!   control lane's event input: [`EnvelopeFollowerNode`] and
 //!   [`NoteEnvelopeNode`].
-//! - Spatial: [`AmbisonicEncoderNode`] and [`AmbisonicRotatorNode`]
-//!   ([`AmbisonicError`]), [`VbapPannerNode`] ([`VbapError`]) and [`HrtfBinauralNode`],
+//! - Spatial: [`AmbisonicEncoderNode`], [`AmbisonicRotatorNode`] and
+//!   [`AmbisonicDecoderNode`] ([`AmbisonicError`]), [`VbapPannerNode`] ([`VbapError`]) and [`HrtfBinauralNode`],
 //!   steered by their params (bearing, height, and the VBAP spread and width
 //!   or the HRTF blend).
 //! - Mixing: [`BusStripNode`]. Summing is the graph's (a port or an output
@@ -444,8 +444,9 @@ pub use tutti_dsp::{
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
 pub use spatial::{
+    AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
     AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
-    AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, DirectionSet,
+    AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet,
     HrtfBinauralConfig, HrtfBinauralNode, VbapError, VbapPannerConfig, VbapPannerNode,
 };
 
