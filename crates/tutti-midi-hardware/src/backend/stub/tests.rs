@@ -29,12 +29,9 @@ fn devices_over_the_stub_is_empty_and_quiet() {
     )
     .unwrap();
     assert!(devices.list().is_empty());
-    assert!(matches!(
-        devices
-            .subscribe()
-            .recv_timeout(std::time::Duration::from_millis(10)),
-        Err(crate::RecvTimeoutError::Timeout)
-    ));
+    let events = devices.subscribe();
+    assert!(events.try_iter().next().is_none());
+    assert!(events.failure().is_none());
 }
 
 /// A platform with no backend publishes no virtual endpoint, and says so with
