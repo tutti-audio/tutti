@@ -138,7 +138,7 @@ pub use server::{EXIT_PLUGIN_LEAKED, EXIT_TASKS_DETACHED, Ended, PluginServer};
 // test build; normal builds use the system allocator.
 #[cfg(test)]
 #[global_allocator]
-static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static RT_NO_ALLOC_HARNESS: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 /// Plugin-loading tests across the crate serialize on this lock: format
 /// modules keep process globals of their own, and plugins' `main` may too.

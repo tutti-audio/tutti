@@ -496,7 +496,7 @@ fn a_mic_whose_backend_keeps_failing_without_audio_is_failed() {
 // test binary rather than in `tests/` (where the output gates are). Nothing
 // else in this binary allocates inside an `assert_no_alloc` section.
 #[global_allocator]
-static ALLOC: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 /// The capture callback does not allocate: blocks of `f32` and `i16`, wider than
 /// a chunk, with the recording ring and the monitor ring both filling and

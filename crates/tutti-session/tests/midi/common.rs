@@ -1,8 +1,6 @@
 //! What the MIDI tests share: an offline session, and a [`Tap`] that stands in for a
 //! synth, logging every MIDI event its event input receives with its absolute frame.
 
-use std::sync::{Arc, Mutex};
-
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, EventKind, IntoNode, Io, Node, NodeKey, NodeParts, Prepare, Shape, Status};
@@ -15,7 +13,7 @@ use tutti_units::{Beat, BeatDuration};
 pub const MF: u16 = 0x8000;
 
 /// `(absolute frame, event)` of every MIDI event a [`Tap`] received.
-pub type Seen = Arc<Mutex<Vec<(u64, Ump)>>>;
+pub type Seen = tutti_fixtures::Record<(u64, Ump)>;
 
 /// A stand-in synth: one MIDI event input, logged with each event's absolute frame.
 pub struct Tap(pub Seen);
@@ -57,8 +55,8 @@ pub fn offline() -> Session {
 
 /// A tap in `s`'s graph, and what it hears.
 pub fn tap(s: &mut Session) -> (NodeKey, Seen) {
-    let seen = Seen::default();
-    let node = s.graph().add(Tap(Arc::clone(&seen)));
+    let seen = tutti_fixtures::Record::new();
+    let node = s.graph().add(Tap(seen.clone()));
     (node.erase(), seen)
 }
 

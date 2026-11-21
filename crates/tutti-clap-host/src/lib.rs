@@ -211,4 +211,4 @@ pub use types::{ClapNoteExpression, RtNoteExpressions};
 // Test-only global allocator for RT-safety regression tests.
 #[cfg(test)]
 #[global_allocator]
-static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static RT_NO_ALLOC_HARNESS: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;

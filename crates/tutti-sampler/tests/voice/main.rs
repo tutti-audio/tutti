@@ -18,4 +18,4 @@ mod wrap_fade_modes;
 
 /// Aborts inside an `assert_no_alloc` region (`disk_placement`, `rt_no_alloc`); inert elsewhere.
 #[global_allocator]
-static ALLOC: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;

@@ -75,8 +75,9 @@ std only. A rule the compiler already enforces is not a gate.
   tutti's own output. A comparison with an external implementation is a one-off
   validation, never a test.
 - **One integration binary per area**: `tests/<area>/main.rs`, one `mod` per file. An area
-  binary installs `assert_no_alloc::AllocDisabler` once and its allocation tests are
-  modules in it; a file is its own binary only for a different allocator (counting,
+  binary installs `tutti_fixtures::RtAllocCheck` once: any allocation or free inside a
+  `tutti_rt::RtScope` aborts the test with its name, so every render test is an
+  allocation test. A file is its own binary only for a different allocator (counting,
   no-free), `harness = false`, or `cfg(loom)`.
 - **A test must be able to fail.** It asserts a spec property, an analytic figure or an
   invariant, and its name says which. Delete a test that cannot fail: one that is always
@@ -151,6 +152,12 @@ std only. A rule the compiler already enforces is not a gate.
 
 - Never allocate, free, lock or wait on the audio thread. A full queue is counted, never
   waited on.
+- A collection the audio thread fills is a `tutti_rt::CappedVec`, its cap set on the
+  control side when it is built (or an inline `tutti_rt::RtVec<T, N>`); a push past it is
+  refused and counted. Never a `Vec` or
+  `VecDeque` whose room a `with_capacity` or `reserve` elsewhere promises. An owned item a
+  full collection refuses comes back to the caller (`push_within_capacity`), never drops
+  there. Test nodes follow the same rule.
 - The audio thread never calls `tracing`, `log` or a print macro: a subscriber may
   allocate, lock or write a file. What it reports is a count an app can act on, and what
   it logs goes only through `Io::log`.

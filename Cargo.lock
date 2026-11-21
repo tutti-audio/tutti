@@ -2547,6 +2547,7 @@ dependencies = [
  "objc2-foundation",
  "thiserror 2.0.21",
  "tutti-buffers",
+ "tutti-fixtures",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
@@ -2713,6 +2714,7 @@ dependencies = [
  "tutti-buffers",
  "tutti-codec",
  "tutti-engine",
+ "tutti-fixtures",
  "tutti-graph",
  "tutti-nodes",
  "tutti-platform",
@@ -2799,6 +2801,7 @@ dependencies = [
 name = "tutti-fixtures"
 version = "0.0.1"
 dependencies = [
+ "assert_no_alloc",
  "coreaudio-sys",
  "hound",
  "raw-window-handle",
@@ -3615,6 +3618,7 @@ dependencies = [
  "assert_no_alloc",
  "libm",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-midi-protocol",
  "tutti-rt",
  "tutti-ump",

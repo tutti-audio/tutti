@@ -663,7 +663,7 @@ fn a_loop_wrap_crossfade_is_allocation_free() {
 /// test would not catch it, since `assert_no_alloc` counts allocations, and a free
 /// is not one.
 ///
-/// The `AllocDisabler` global allocator *aborts* the process (SIGABRT via
+/// The `RtAllocCheck` global allocator *aborts* the process (SIGABRT via
 /// `handle_alloc_error`) on a violation — it cannot be caught with
 /// `catch_unwind`. An allocation here would take the whole test binary down,
 /// hiding every other test's result. So the actual `assert_no_alloc`-guarded
