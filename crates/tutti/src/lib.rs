@@ -767,7 +767,7 @@ pub mod plugin {
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
     };
     // What a `ProbeFailure` holds.
-    pub use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeRefusal};
+    pub use tutti_plugin_types::{MeasureFailure, ProbeDeath, ProbeError, ProbeExit, ProbeRefusal};
     pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it
