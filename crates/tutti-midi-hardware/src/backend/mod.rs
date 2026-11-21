@@ -36,6 +36,18 @@ mod alsa;
 #[cfg(midi_backend = "winmm")]
 mod winmm;
 
+// What a backend with a thread of its own to start shares (where its start stands,
+// the futures waiting on it, the registered watches): always compiled so its tests
+// run everywhere; only `coremidi` uses it as a backend.
+#[cfg_attr(
+    not(midi_backend = "coremidi"),
+    allow(
+        dead_code,
+        reason = "the backend with a thread to start is not this platform's, so only the tests use it"
+    )
+)]
+mod hub;
+
 // What a backend over a MIDI 1.0 byte API decides, with no OS call in it:
 // always compiled so its tests run everywhere; only `winmm` uses it as a
 // backend.

@@ -49,6 +49,7 @@ use crate::peer::{PeerError, PeerRef};
 use crate::process::{ProcessChange, ReportAsk, Reporter};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
+use crate::start::Started;
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
@@ -334,6 +335,11 @@ impl MidiSession {
         })
     }
 
+    /// The wait for the backend to be ready: [`Devices::start`].
+    pub fn start(&self) -> crate::Start {
+        self.devices.start()
+    }
+
     /// The devices present. A host that wants hot-plug subscribes
     /// ([`Devices::subscribe`]); the session's `Phase::Poll` has a
     /// subscription of its own.
@@ -391,6 +397,8 @@ impl MidiSession {
     /// places its events by them once it agrees, while [`InputTiming::Arrival`]
     /// is the OS's arrival stamp. An input already open is kept as it is.
     ///
+    /// `started` is what [`start`](Self::start) resolved to: the backend is ready.
+    ///
     /// # Errors
     ///
     /// [`MidiHardwareError::NoDeviceNamed`] when a name matches no input (listing the
@@ -399,8 +407,12 @@ impl MidiSession {
     /// shape a stale id takes after a hot-plug — and [`MidiHardwareError::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
-    pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<Connected> {
-        self.connect_input_with(device, InputWriters::new().0)
+    pub fn connect_input(
+        &mut self,
+        started: Started,
+        device: impl Into<DeviceQuery>,
+    ) -> Result<Connected> {
+        self.connect_input_with(started, device, InputWriters::new().0)
     }
 
     /// [`connect_input`](Self::connect_input), the input reporting to `writers`:
@@ -417,6 +429,7 @@ impl MidiSession {
     /// As [`connect_input`](Self::connect_input).
     pub fn connect_input_with(
         &mut self,
+        started: Started,
         device: impl Into<DeviceQuery>,
         writers: InputWriters,
     ) -> Result<Connected> {
@@ -436,13 +449,15 @@ impl MidiSession {
         }
 
         // One ring per connection, retired with it.
-        let (input, inlet) = self.devices.open_input(&id, &self.ports, writers)?;
+        let (input, inlet) = self
+            .devices
+            .open_input(started, &id, &self.ports, writers)?;
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.
         let os = self.devices.capability(&id).unwrap_or_else(legacy);
         // A MIDI 1.0 port with an output is asked for its identity instead.
-        let out = self.devices.open_output(&id).ok();
+        let out = self.devices.open_output(started, &id).ok();
         let stream = Negotiation::new(id.clone(), os, out, timing, ci_refused);
         let held = Held {
             stream,
@@ -532,15 +547,21 @@ impl MidiSession {
     /// later settle is the caller's to apply, from what [`poll`](Self::poll)
     /// reports, with [`OpenOutput::follow`].
     ///
+    /// `started` is what [`start`](Self::start) resolved to: the backend is ready.
+    ///
     /// # Errors
     ///
     /// [`MidiHardwareError::NoDeviceNamed`] when a name matches no output,
     /// [`MidiHardwareError::NotFound`] when an id names no present device,
     /// [`MidiHardwareError::WrongDirection`] when it is not an output, plus whatever the
     /// backend raises while opening.
-    pub fn connect_output(&self, device: impl Into<DeviceQuery>) -> Result<OpenOutput> {
+    pub fn connect_output(
+        &self,
+        started: Started,
+        device: impl Into<DeviceQuery>,
+    ) -> Result<OpenOutput> {
         let id = device.into().pick(self.outputs())?;
-        let mut output = self.devices.open_output(&id)?;
+        let mut output = self.devices.open_output(started, &id)?;
         if let Some(stream) = self.inputs.get(&id).and_then(|held| held.stream.settled()) {
             output.set_config(stream.config());
         }

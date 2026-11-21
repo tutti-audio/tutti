@@ -36,7 +36,7 @@ use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch,
-    PropertyAsk, PropertyPeer, ReportAsk,
+    PropertyAsk, PropertyPeer, ReportAsk, Started,
 };
 use tutti_midi_runtime::{
     DeviceGeneration, GenerationWriter, InputReaders, InputWriters, JrStream, MidiInputControls,
@@ -49,6 +49,76 @@ use tutti_units::{Resyncs, Seconds};
 use crate::midi::{
     Claim, Departure, Held, LossReaders, LossWriters, Retiring, Sweepable, UmpOut, loss_cells,
 };
+
+/// The OS MIDI layer with the proof that its backend started, which opening a port
+/// takes. The builder waits for the start once ([`Io::start`]); every later open
+/// passes the proof along.
+#[derive(Debug)]
+pub(crate) struct Io {
+    session: MidiSession,
+    started: Started,
+}
+
+impl Io {
+    /// `session` once its backend is ready.
+    ///
+    /// The wait parks the calling thread until the backend's thread wakes it: the
+    /// builder is synchronous, and a start has at most the retry window of the MIDI
+    /// server (about ten seconds) to finish.
+    pub(crate) fn start(
+        session: MidiSession,
+    ) -> Result<Self, tutti_midi_hardware::MidiHardwareError> {
+        use std::task::{Context, Poll, Wake, Waker};
+
+        struct Unpark(std::thread::Thread);
+        impl Wake for Unpark {
+            fn wake(self: Arc<Self>) {
+                self.0.unpark();
+            }
+        }
+        let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
+        let mut start = std::pin::pin!(session.start());
+        let started = loop {
+            if let Poll::Ready(outcome) = start.as_mut().poll(&mut Context::from_waker(&waker)) {
+                break outcome?;
+            }
+            std::thread::park();
+        };
+        Ok(Self { session, started })
+    }
+
+    /// [`MidiSession::connect_input_with`], with this layer's proof.
+    pub(crate) fn connect_input_with(
+        &mut self,
+        device: impl Into<tutti_midi_hardware::DeviceQuery>,
+        writers: InputWriters,
+    ) -> tutti_midi_hardware::Result<tutti_midi_hardware::Connected> {
+        self.session
+            .connect_input_with(self.started, device, writers)
+    }
+
+    /// [`MidiSession::connect_output`], with this layer's proof.
+    pub(crate) fn connect_output(
+        &self,
+        device: impl Into<tutti_midi_hardware::DeviceQuery>,
+    ) -> tutti_midi_hardware::Result<tutti_midi_hardware::OpenOutput> {
+        self.session.connect_output(self.started, device)
+    }
+}
+
+impl std::ops::Deref for Io {
+    type Target = MidiSession;
+
+    fn deref(&self) -> &MidiSession {
+        &self.session
+    }
+}
+
+impl std::ops::DerefMut for Io {
+    fn deref_mut(&mut self) -> &mut MidiSession {
+        &mut self.session
+    }
+}
 use crate::midi_ci::{
     ListedPeer, Pending, PortLink, ProfilePeer, ReplySender, ReportPeer, ResourcePeer,
     Subscription, at_peer, resolve,
@@ -812,7 +882,7 @@ fn set_presence<I>(
 
 /// The snapshot of the open input `device`, as the OS layer reads it now.
 fn input_info(
-    io: &MidiSession,
+    io: &Io,
     port: ResourceId,
     device: &DeviceInfo,
     link: &PortLink,
@@ -868,7 +938,7 @@ impl InputPort {
 
     /// Takes in what the OS layer reads of the open device, saying so when it
     /// differs from what the handles read.
-    fn refresh(&self, io: &MidiSession, out: &mut Vec<SessionEvent>) {
+    fn refresh(&self, io: &Io, out: &mut Vec<SessionEvent>) {
         let Some(id) = &self.open else { return };
         let Some(device) = io.devices().list().into_iter().find(|d| d.id == *id) else {
             return;
@@ -896,7 +966,7 @@ impl InputPort {
 /// let go; the node releases what the device held.
 fn disconnect<F: tutti_buffers::Float>(
     port: &mut InputPort,
-    io: &mut MidiSession,
+    io: &mut Io,
     graph: &mut crate::graph::Graph<F>,
 ) {
     if let Some(id) = port.open.take() {
@@ -932,7 +1002,7 @@ impl Ports {
     /// Takes the MPE Profile zones the peers of `device` have enabled (M2-120) as
     /// what its input node follows: the zones of every peer on a Group
     /// together, or none where no peer has the Profile enabled.
-    fn sync_mpe_profiles(&self, io: &MidiSession, device: &DeviceId) {
+    fn sync_mpe_profiles(&self, io: &Io, device: &DeviceId) {
         let Some(port) = self.inputs.iter().find(|p| p.open.as_ref() == Some(device)) else {
             return;
         };
@@ -963,7 +1033,7 @@ impl Ports {
     fn connect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
-        io: &mut MidiSession,
+        io: &mut Io,
         graph: &mut crate::graph::Graph<F>,
         info: &DeviceInfo,
     ) -> Result<(), MidiPortError> {
@@ -1000,7 +1070,7 @@ impl Ports {
     fn disconnect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
-        io: &mut MidiSession,
+        io: &mut Io,
         graph: &mut crate::graph::Graph<F>,
     ) {
         disconnect(&mut self.inputs[at], io, graph);
@@ -1011,7 +1081,7 @@ impl Ports {
     /// asked, and reads what the devices said. What was edited.
     pub(crate) fn poll<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut Io,
         graph: &mut crate::graph::Graph<F>,
         rate: tutti_units::SampleRate,
         events: Vec<tutti_midi_device::DeviceEvent>,
@@ -1043,7 +1113,7 @@ impl Ports {
     /// [`close_dropped_outputs`](Self::close_dropped_outputs).
     pub(crate) fn retire<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut Io,
         graph: &mut crate::graph::Graph<F>,
     ) -> Edits {
         let mut edits = Edits::default();
@@ -1065,7 +1135,7 @@ impl Ports {
     /// [`PortCause::Unplugged`].
     fn lose<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut Io,
         graph: &mut crate::graph::Graph<F>,
         device: &DeviceInfo,
         out: &mut Vec<SessionEvent>,
@@ -1115,7 +1185,7 @@ impl Ports {
     /// is tried again when a device next arrives.
     fn restore<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut Io,
         graph: &mut crate::graph::Graph<F>,
         rate: tutti_units::SampleRate,
         arrived: &DeviceInfo,
@@ -1125,7 +1195,7 @@ impl Ports {
         // The matcher a load binds by: the device that is surely the saved one,
         // or the only present one of its name. Several that could be it stay
         // for the app to choose.
-        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| {
+        let is_arrived = |io: &Io, saved: &DeviceInfo| {
             matches!(
                 io.devices().resolve(saved),
                 Resolved::Exact(found) | Resolved::SameName(found) if found.id == arrived.id
@@ -1180,7 +1250,7 @@ impl Ports {
 
     /// Sends what the handles asked of the peers: a request the device took
     /// waits for its answer, and one it cannot take ends its future.
-    fn send_requests(&mut self, io: &mut MidiSession) {
+    fn send_requests(&mut self, io: &mut Io) {
         for port in &mut self.inputs {
             for request in port.shared.drain() {
                 match request {
@@ -1209,7 +1279,7 @@ impl Ports {
     /// Resolves the requests waiting for what a peer of `device` answered.
     fn answer(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut Io,
         device: &DeviceId,
         peer: tutti_midi_hardware::PeerId,
         answer: &Answer,
@@ -1223,7 +1293,7 @@ impl Ports {
     /// they settled, reopens an input whose reader died, and says what changed.
     fn step<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut Io,
         graph: &mut crate::graph::Graph<F>,
         now: tutti_platform::Instant,
         out: &mut Vec<SessionEvent>,
@@ -1414,7 +1484,7 @@ impl OutputPort {
 
 /// The output of device `id`, sending Active Sensing when `active_sensing`.
 fn open_device_output(
-    io: &MidiSession,
+    io: &Io,
     id: &DeviceId,
     active_sensing: bool,
 ) -> Result<tutti_midi_hardware::OpenOutput, MidiPortError> {

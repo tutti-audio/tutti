@@ -12,18 +12,20 @@
 //! # Main thread
 //!
 //! Apple documents every interaction with a `MIDIUMPMutableEndpoint` as
-//! main-thread only. [`UmpEndpoint::new`] takes a [`MainThreadMarker`] (and the
-//! process's [`SharedClient`], see its docs) and the endpoint is `!Send` and `!Sync`, so creating, enabling, disabling and
+//! main-thread only. A [`CreateUmpEndpoint`] takes a [`MainThreadMarker`] (and the
+//! process's [`SharedClient`], see its docs) at each poll, and the creation and the
+//! endpoint are `!Send` and `!Sync`, so creating, enabling, disabling and
 //! releasing it all happen on the main thread. What may cross threads is the
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
 use super::client::SharedClient;
-use super::error::{Error, Operation, OsStatus};
+use super::error::{Error, Operation};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
-use super::retry::{Backoff, retry};
 use super::source::{protocol_id, publish};
+use crate::checks::backoff::Failure;
 use crate::checks::blocks::{PlatformBlock, numbers_in_registered_order, platform_blocks};
+use crate::checks::endpoint_phases::{Phases, RegisterFailure, Stage, TakeDown, settle_register};
 use block2::DynBlock;
 use coremidi_sys::{MIDIEndpointRef, MIDIProtocolID};
 use objc2::AnyThread;
@@ -35,7 +37,9 @@ use objc2_core_midi::{
     MIDIUMPFunctionBlockUIHint, MIDIUMPMutableEndpoint, MIDIUMPMutableFunctionBlock,
 };
 use objc2_foundation::{NSArray, NSError, NSString};
+use std::marker::PhantomData;
 use std::sync::{Arc, PoisonError, RwLock};
+use std::task::Poll;
 use std::time::Duration;
 use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{
@@ -137,56 +141,93 @@ impl UmpSender {
     }
 }
 
-impl UmpEndpoint {
-    /// Creates the endpoint `name` on `client`, carrying `protocol`, identified as `device`
-    /// (the Device Identity, M2-104 §7.1.3) with Product Instance Id `instance`
-    /// (§7.1.5, `None` for none), registers `blocks` as its static Function Blocks
-    /// and enables it. `on_ump` gets each message sent to it, on CoreMIDI's
-    /// delivery thread. `main` proves the caller is on the main thread.
+/// A virtual UMP Endpoint being made: a value polled until the endpoint is
+/// registered, enabled and read back.
+///
+/// CoreMIDI has been seen to refuse the registration of the blocks and the enable
+/// with `kMIDINotPermitted` while other processes create endpoints, and to accept
+/// the same call a few milliseconds later. A poll runs the attempt of the current
+/// phase only when one is due (waits of 10 ms doubling to 200 ms, a bound of two
+/// seconds from the phase's first attempt), and [`deadline`](Self::deadline) is the
+/// instant the next poll can make progress. It waits for nothing itself.
+///
+/// It stays on the main thread that made it:
+///
+/// ```compile_fail,E0277
+/// fn send<T: Send>() {}
+/// send::<tutti_coremidi_ffi::CreateUmpEndpoint>();
+/// ```
+///
+/// Dropping it before it finished takes the endpoint down: it is disabled and
+/// released, so no endpoint is left published.
+#[must_use = "a creation that is not polled makes no endpoint"]
+pub struct CreateUmpEndpoint {
+    // Declared first, so it is taken down before the receiver its callback reads
+    // goes (fields drop in order).
+    endpoint: TakeDown<Held>,
+    blocks: Vec<PlatformBlock>,
+    protocol: MIDIProtocolID,
+    // `None` once the finished endpoint owns it.
+    receiver: Option<Receiver>,
+    phases: Phases,
+    // What the read-back found, taken when the creation finishes.
+    built: Option<(MIDIEndpointRef, Vec<FunctionBlockId>)>,
+    // Makes the type `!Send` and `!Sync` whatever its fields are.
+    _thread: PhantomData<*const ()>,
+}
+
+/// What a creation owns of CoreMIDI: the endpoint and the blocks it registers.
+/// Both are Objective-C objects, so both are released inside the guarded disposal.
+struct Held {
+    endpoint: Retained<MIDIUMPMutableEndpoint>,
+    function_blocks: Retained<NSArray<MIDIUMPMutableFunctionBlock>>,
+}
+
+impl core::fmt::Debug for CreateUmpEndpoint {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("CreateUmpEndpoint")
+            .field("stage", &self.phases.stage())
+            .finish_non_exhaustive()
+    }
+}
+
+impl CreateUmpEndpoint {
+    /// Starts creating the endpoint `name` on `client`, carrying `protocol`,
+    /// identified as `device` (the Device Identity, M2-104 §7.1.3) with Product
+    /// Instance Id `instance` (§7.1.5, `None` for none), to register `blocks` as its
+    /// static Function Blocks and enable. `on_ump` gets each message sent to it, on
+    /// CoreMIDI's delivery thread. `main` proves the caller is on the main thread.
+    /// The first registration is due at `now`.
     ///
-    /// `client` proves that [`SharedClient::start`] succeeded, so the process has
-    /// connected to the MIDI server. The endpoint API takes no client, and with no
-    /// connection and the server gone, CoreMIDI raises an exception that the crate's
-    /// exception catch cannot catch: the process aborts. A process whose start
-    /// failed has no way to call this. The proof does not cover a server that
-    /// dies after the start.
+    /// This does the part that is not retried: the checks on the arguments, the
+    /// platform's blocks and the allocation of the endpoint. Nothing is published
+    /// until the polls finish.
+    ///
+    /// `client` proves that the process's [`StartClient`](crate::StartClient)
+    /// finished, so the process has connected to the MIDI server. The endpoint API
+    /// takes no client, and with no connection and the server gone, CoreMIDI raises
+    /// an exception that the crate's exception catch cannot catch: the process
+    /// aborts. A process whose start failed has no way to call this. The proof does
+    /// not cover a server that dies after the start.
     ///
     /// CoreMIDI numbers the blocks itself, in registration order. `blocks` are
     /// given in number order with their numbers running from 0 without a gap, and
-    /// [`blocks`](Self::blocks) reads back the numbers CoreMIDI gave them: those
-    /// are the numbers other apps read.
+    /// [`UmpEndpoint::blocks`] reads back the numbers CoreMIDI gave them: those are
+    /// the numbers other apps read.
     ///
     /// # Errors
     ///
-    /// Before any call into CoreMIDI: [`Error::ReservedProtocol`] for a reserved
-    /// `protocol`, [`Error::Block`] for a block CoreMIDI cannot carry (checked
-    /// before the class lookup, so it is the same on every macOS). Then
-    /// [`Error::UmpEndpointUnsupported`] before macOS 15, [`Error::Exception`] when
-    /// CoreMIDI raises an Objective-C exception, [`Error::NotPermitted`] when it
-    /// answers a call with `kMIDINotPermitted` (the enable is tried again for up
-    /// to two seconds first), [`Error::Objc`] or
-    /// [`Error::NoObject`] when it refuses the endpoint otherwise,
-    /// [`Error::BlockNumber`] for a number the spec cannot hold, and
-    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the
-    /// registered ones.
-    /// An `Err` leaves no endpoint published.
-    ///
-    /// # Concurrent creations
-    ///
-    /// Probes have seen CoreMIDI refuse an enable with `kMIDINotPermitted` while
-    /// other processes create endpoints, and accept the same call a few
-    /// milliseconds later. This call retries the enable, waiting 10 ms and then
-    /// longer, for two seconds from its first attempt, and returns
-    /// [`Error::NotPermitted`] only if the refusal lasts that long. The registration
-    /// of the blocks is retried the same way.
-    ///
-    /// On macOS 15.8.2 the registration has been seen to report failure without an
-    /// error after registering the blocks; that is accepted when the endpoint holds
-    /// as many blocks as were registered.
-    ///
-    /// The wait happens on the calling thread, which is the main thread.
+    /// [`Error::ReservedProtocol`] for a reserved `protocol`, [`Error::Block`] for a
+    /// block CoreMIDI cannot carry (checked before the class lookup, so it is the
+    /// same on every macOS), [`Error::UmpEndpointUnsupported`] before macOS 15,
+    /// [`Error::Exception`] when CoreMIDI raises an Objective-C exception, and
+    /// [`Error::NoObject`] when it refuses to make the endpoint.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "every one is a field of the endpoint's creation"
+    )]
     pub fn new<F>(
-        main: MainThreadMarker,
+        _main: MainThreadMarker,
         _client: SharedClient,
         name: &str,
         protocol: Protocol,
@@ -194,6 +235,7 @@ impl UmpEndpoint {
         instance: Option<&ProductInstanceId>,
         blocks: &[(FunctionBlockInfo, Option<&str>)],
         on_ump: F,
+        now: Instant,
     ) -> Result<Self, Error>
     where
         F: FnMut(Option<Duration>, Ump) + Send + 'static,
@@ -208,41 +250,134 @@ impl UmpEndpoint {
             return Err(Error::UmpEndpointUnsupported);
         }
         let receiver = Receiver::ump(on_ump);
-        let mut made = None;
-        // Nothing autoreleased escapes the pool: the endpoint is owned (+1, kept in
-        // `made`), and what leaves is a `u32` and bytes.
-        let built = autoreleasepool(|_| {
+        // Nothing autoreleased escapes the pool: the endpoint and the array are
+        // owned (+1).
+        let (endpoint, function_blocks) = autoreleasepool(|_| {
+            catch(|| allocate(name, protocol, device, instance, &blocks, &receiver))
+        })
+        .map_err(Error::from)
+        .and_then(|inner| inner)?;
+        Ok(Self {
+            endpoint: TakeDown::new(
+                Held {
+                    endpoint,
+                    function_blocks,
+                },
+                take_down,
+            ),
+            blocks,
+            protocol,
+            receiver: Some(receiver),
+            phases: Phases::new(now),
+            built: None,
+            _thread: PhantomData,
+        })
+    }
+
+    /// When the next poll can make progress: the next attempt's instant.
+    #[must_use]
+    pub fn deadline(&self) -> Instant {
+        self.phases.deadline()
+    }
+
+    /// One poll at `now`: runs the attempt of the current phase when one is due.
+    /// A phase that succeeds starts the next with a fresh bound; the last is the
+    /// read-back of the blocks.
+    ///
+    /// `Pending` means try again at [`deadline`](Self::deadline). A poll after the
+    /// creation finished, or failed, is [`Error::EndpointGone`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Exception`] when CoreMIDI raises an Objective-C exception,
+    /// [`Error::RetryTimedOut`] when a refusal with `kMIDINotPermitted` (the
+    /// registration and the enable) lasted until the phase's bound,
+    /// [`Error::Objc`] or [`Error::NoObject`] when it refuses a call otherwise,
+    /// [`Error::BlockNumber`] for a number the spec cannot hold, and
+    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the
+    /// registered ones. An `Err` leaves no endpoint published.
+    ///
+    /// On macOS 15.8.2 the registration has been seen to report failure without an
+    /// error after registering the blocks; that is accepted when the endpoint holds
+    /// as many blocks as were registered.
+    pub fn poll(
+        &mut self,
+        main: MainThreadMarker,
+        now: Instant,
+    ) -> Poll<Result<UmpEndpoint, Error>> {
+        let Self {
+            endpoint,
+            blocks,
+            phases,
+            built,
+            ..
+        } = self;
+        let Some(live) = endpoint.get() else {
+            return Poll::Ready(Err(Error::EndpointGone));
+        };
+        let count = blocks.len();
+        // Nothing autoreleased escapes the pool: what leaves is a `u32` and bytes.
+        let polled = autoreleasepool(|_| {
             catch(|| {
-                create(
-                    name, protocol, device, instance, &blocks, &receiver, &mut made,
+                phases.poll(
+                    now,
+                    |stage| match stage {
+                        Stage::Register => register(&live.endpoint, &live.function_blocks, count),
+                        Stage::Enable => enable(&live.endpoint),
+                        Stage::ReadBack => {
+                            read_back(&live.endpoint, blocks).map(|done| *built = Some(done))
+                        }
+                    },
+                    Error::os_status,
                 )
             })
         });
-        let (source, numbers) = match built.map_err(Error::from).and_then(|inner| inner) {
-            Ok(built) => built,
-            Err(error) => {
-                // The endpoint may be enabled: take it down before it is released.
-                if let Some(endpoint) = made {
-                    disable_and_release(endpoint);
-                }
-                return Err(error);
-            }
+        let failure = match polled {
+            Err(exception) => Error::from(exception),
+            Ok(Poll::Pending) => return Poll::Pending,
+            Ok(Poll::Ready(Ok(()))) => return Poll::Ready(Ok(self.finish(main))),
+            Ok(Poll::Ready(Err((_, Failure::Failed(error))))) => error,
+            Ok(Poll::Ready(Err((stage, Failure::TimedOut { last })))) => Error::RetryTimedOut {
+                operation: match stage {
+                    Stage::Register => Operation::RegisterFunctionBlocks,
+                    Stage::Enable | Stage::ReadBack => Operation::EnableUmpEndpoint,
+                },
+                last,
+            },
         };
-        let live = Arc::new(RwLock::new(true));
-        Ok(Self {
-            endpoint: made,
+        // The endpoint may be enabled: take it down before it is released.
+        self.endpoint.dispose();
+        Poll::Ready(Err(failure))
+    }
+
+    /// The finished endpoint, once the read-back has succeeded.
+    fn finish(&mut self, main: MainThreadMarker) -> UmpEndpoint {
+        let (source, numbers) = self.built.take().expect("the read-back ran");
+        let receiver = self.receiver.take().expect("the creation has not finished");
+        let held = self
+            .endpoint
+            .release()
+            .expect("the creation has not finished");
+        // The blocks were registered and are no longer needed: released with the
+        // exceptions caught, as the endpoint's own release is.
+        let function_blocks = held.function_blocks;
+        let _ = autoreleasepool(|_| catch(|| drop(function_blocks)));
+        UmpEndpoint {
+            endpoint: Some(held.endpoint),
             sender: UmpSender {
                 source,
-                protocol,
-                live,
+                protocol: self.protocol,
+                live: Arc::new(RwLock::new(true)),
                 counts: receiver.counts(),
             },
             blocks: numbers,
             _main: main,
             _receiver: receiver,
-        })
+        }
     }
+}
 
+impl UmpEndpoint {
     /// How many panics in the endpoint's callback have been caught: 0, or 1 once
     /// the callback panicked and was dropped.
     #[must_use]
@@ -264,25 +399,22 @@ impl UmpEndpoint {
     }
 }
 
-/// The endpoint, registered and enabled, its source and its blocks' numbers.
-///
-/// Seen on macOS 15.8.2: `registerFunctionBlocks:markAsStatic:error:` registers the blocks and
-/// then reports failure without an `NSError` ([`RegisterFailure::Unreported`]);
-/// [`register`] accepts that only when the endpoint holds the registered count, and
-/// the read-back after the enable still checks the blocks by name.
-///
-/// The endpoint is put in `made` as soon as it exists, so a caller that gets an error
-/// (or an exception, which unwinds past this frame's destructors) can still take
-/// it down.
-fn create(
+/// The endpoint, allocated and initialised and not yet registered, with its blocks
+/// as the array to register.
+fn allocate(
     name: &str,
     protocol: MIDIProtocolID,
     device: &DeviceIdentity,
     instance: Option<&ProductInstanceId>,
     blocks: &[PlatformBlock],
     receiver: &Receiver,
-    made: &mut Option<Retained<MIDIUMPMutableEndpoint>>,
-) -> Result<(MIDIEndpointRef, Vec<FunctionBlockId>), Error> {
+) -> Result<
+    (
+        Retained<MIDIUMPMutableEndpoint>,
+        Retained<NSArray<MIDIUMPMutableFunctionBlock>>,
+    ),
+    Error,
+> {
     let function_blocks = blocks
         .iter()
         .map(function_block)
@@ -291,8 +423,9 @@ fn create(
     // SAFETY: every initialiser is sent to a freshly allocated object with valid
     // arguments, the strings and `info` live across their calls, and the callback
     // block is the receiver's, which CoreMIDI copies before `init` returns. The
-    // block outlives the endpoint: the receiver outlives it (`Drop`), and
-    // `Receiver::new` also leaks one reference to the block.
+    // block outlives the endpoint: the receiver outlives it (`CreateUmpEndpoint`
+    // and `UmpEndpoint` take the endpoint down first), and `Receiver::new` also
+    // leaks one reference to the block.
     let endpoint = unsafe {
         let info = MIDI2DeviceInfo::initWithManufacturerID_family_modelNumber_revisionLevel(
             MIDI2DeviceInfo::alloc(),
@@ -315,9 +448,15 @@ fn create(
         )
     }
     .ok_or(Error::NoObject(Operation::CreateUmpEndpoint))?;
-    let endpoint = made.insert(endpoint);
-    register(endpoint, &function_blocks, blocks.len())?;
-    enable(endpoint)?;
+    Ok((endpoint, function_blocks))
+}
+
+/// The source of the enabled `endpoint` and the numbers CoreMIDI gave its blocks,
+/// in the order of `blocks`. Called inside [`catch`].
+fn read_back(
+    endpoint: &MIDIUMPMutableEndpoint,
+    blocks: &[PlatformBlock],
+) -> Result<(MIDIEndpointRef, Vec<FunctionBlockId>), Error> {
     // SAFETY: plain getters on the live endpoint and its blocks.
     let (source, listed) = unsafe {
         (
@@ -340,32 +479,20 @@ fn create(
     Ok((source, numbers))
 }
 
-/// How `registerFunctionBlocks:markAsStatic:error:` failed.
-#[derive(Debug, PartialEq, Eq)]
-enum RegisterFailure {
-    /// CoreMIDI returned an `NSError`.
-    Refused(Error),
-    /// It returned `NO` with no `NSError`, which objc2 reports as its own
-    /// missing-error object.
-    Unreported,
-}
-
-impl RegisterFailure {
-    /// The failure for an `NSError` with these fields.
-    fn classify(operation: Operation, code: isize, domain: String, description: String) -> Self {
-        if is_missing_error(code, &domain) {
-            Self::Unreported
-        } else {
-            Self::Refused(Error::from_ns_error(operation, code, domain, description))
-        }
-    }
-
-    /// The status the retry rule filters on: none for an unreported failure.
-    fn os_status(&self) -> Option<OsStatus> {
-        match self {
-            Self::Refused(error) => error.os_status(),
-            Self::Unreported => None,
-        }
+/// The failure of `registerFunctionBlocks:markAsStatic:error:` for an `NSError`
+/// with these fields: `Unreported` for the one objc2 makes when the method returns
+/// `NO` and leaves its error out, a refusal otherwise. The refusal keeps its error,
+/// [`Error::os_status`] is the status the retry rule filters on.
+fn classify(
+    operation: Operation,
+    code: isize,
+    domain: String,
+    description: String,
+) -> RegisterFailure<Error> {
+    if is_missing_error(code, &domain) {
+        RegisterFailure::Unreported
+    } else {
+        RegisterFailure::Refused(Error::from_ns_error(operation, code, domain, description))
     }
 }
 
@@ -380,63 +507,42 @@ fn is_missing_error(code: isize, domain: &str) -> bool {
     code == 0 && domain == "__objc2.missingError"
 }
 
-/// Registers `function_blocks` (`count` of them) as static, trying again while
-/// CoreMIDI refuses with `kMIDINotPermitted`. A `NO` without an `NSError` is
-/// accepted when the endpoint holds `count` blocks, and is
-/// [`Error::NoObject`] otherwise. Called inside [`catch`].
+/// One attempt to register `function_blocks` (`count` of them) as static. A `NO`
+/// without an `NSError` is accepted when the endpoint holds `count` blocks, and is
+/// [`Error::NoObject`] otherwise. A refusal keeps its `NSError`, and
+/// [`Error::os_status`] says whether it is retried. Called inside [`catch`].
 fn register(
     endpoint: &MIDIUMPMutableEndpoint,
     function_blocks: &NSArray<MIDIUMPMutableFunctionBlock>,
     count: usize,
 ) -> Result<(), Error> {
     let operation = Operation::RegisterFunctionBlocks;
-    let result = retry(
-        Backoff::endpoint(Instant::now()),
-        || {
-            // SAFETY: plain messages to the live endpoint with an array of live blocks.
-            unsafe { endpoint.registerFunctionBlocks_markAsStatic_error(function_blocks, true) }
-                .map_err(|e| {
-                    RegisterFailure::classify(
-                        operation,
-                        e.code(),
-                        e.domain().to_string(),
-                        e.localizedDescription().to_string(),
-                    )
-                })
-        },
-        RegisterFailure::os_status,
-    );
-    match result {
-        Ok(()) => Ok(()),
-        Err(RegisterFailure::Refused(error)) => Err(error),
-        Err(RegisterFailure::Unreported) => {
-            // SAFETY: a plain getter on the live endpoint.
-            let held = unsafe { endpoint.mutableFunctionBlocks() }.count();
-            if held == count {
-                Ok(())
-            } else {
-                Err(Error::NoObject(operation))
-            }
-        }
-    }
+    // SAFETY: plain messages to the live endpoint with an array of live blocks.
+    let result =
+        unsafe { endpoint.registerFunctionBlocks_markAsStatic_error(function_blocks, true) }
+            .map_err(|e| {
+                classify(
+                    operation,
+                    e.code(),
+                    e.domain().to_string(),
+                    e.localizedDescription().to_string(),
+                )
+            });
+    settle_register(
+        result,
+        count,
+        // SAFETY: a plain getter on the live endpoint.
+        || unsafe { endpoint.mutableFunctionBlocks() }.count(),
+        Error::NoObject(operation),
+    )
 }
 
-/// Enables `endpoint`, trying again while CoreMIDI refuses with `kMIDINotPermitted`
-/// (see [`Backoff::endpoint`]). Called inside [`catch`].
-///
-/// An attempt fails with the whole [`Error`], so the last refusal keeps its
-/// `NSError` domain and description; [`Error::os_status`] is the status the rule
-/// filters on.
+/// One attempt to enable `endpoint`. An attempt fails with the whole [`Error`], so
+/// a refusal keeps its `NSError` domain and description; [`Error::os_status`] is
+/// the status the retry rule filters on. Called inside [`catch`].
 fn enable(endpoint: &MIDIUMPMutableEndpoint) -> Result<(), Error> {
-    retry(
-        Backoff::endpoint(Instant::now()),
-        || {
-            // SAFETY: a plain message to the live endpoint.
-            unsafe { endpoint.setEnabled_error(true) }
-                .map_err(|e| objc(Operation::EnableUmpEndpoint, &e))
-        },
-        Error::os_status,
-    )
+    // SAFETY: a plain message to the live endpoint.
+    unsafe { endpoint.setEnabled_error(true) }.map_err(|e| objc(Operation::EnableUmpEndpoint, &e))
 }
 
 /// The Objective-C Function Block for `block`.
@@ -467,6 +573,17 @@ fn objc(operation: Operation, error: &NSError) -> Error {
         error.domain().to_string(),
         error.localizedDescription().to_string(),
     )
+}
+
+/// Takes a creation down: disables the endpoint and releases it and the blocks it
+/// registered, each release inside its own [`catch`] and pool.
+fn take_down(held: Held) {
+    let Held {
+        endpoint,
+        function_blocks,
+    } = held;
+    disable_and_release(endpoint);
+    let _ = autoreleasepool(|_| catch(|| drop(function_blocks)));
 }
 
 /// Disables `endpoint` and releases it, each in its own [`catch`] (releasing runs the
@@ -535,14 +652,14 @@ mod tests {
 
     const OP: Operation = Operation::RegisterFunctionBlocks;
 
-    fn classify(code: isize, domain: &str) -> RegisterFailure {
-        RegisterFailure::classify(OP, code, domain.into(), "d".into())
+    fn classified(code: isize, domain: &str) -> RegisterFailure<Error> {
+        classify(OP, code, domain.into(), "d".into())
     }
 
     #[test]
     fn objc2s_missing_error_is_an_unreported_failure() {
         assert_eq!(
-            classify(0, "__objc2.missingError"),
+            classified(0, "__objc2.missingError"),
             RegisterFailure::Unreported
         );
     }
@@ -550,29 +667,20 @@ mod tests {
     #[test]
     fn a_real_ns_error_is_refused_even_with_the_missing_error_domain_or_code() {
         assert_eq!(
-            classify(-10844, "NSOSStatusErrorDomain"),
+            classified(-10844, "NSOSStatusErrorDomain"),
             RegisterFailure::Refused(Error::NotPermitted(OP))
         );
         assert!(matches!(
-            classify(-10843, "NSOSStatusErrorDomain"),
+            classified(-10843, "NSOSStatusErrorDomain"),
             RegisterFailure::Refused(Error::Objc { code: -10843, .. })
         ));
         assert!(matches!(
-            classify(0, "NSOSStatusErrorDomain"),
+            classified(0, "NSOSStatusErrorDomain"),
             RegisterFailure::Refused(Error::Objc { code: 0, .. })
         ));
         assert!(matches!(
-            classify(-10843, "__objc2.missingError"),
+            classified(-10843, "__objc2.missingError"),
             RegisterFailure::Refused(_)
         ));
-    }
-
-    #[test]
-    fn only_a_refused_not_permitted_carries_a_status_to_retry() {
-        assert_eq!(
-            classify(-10844, "d").os_status(),
-            Some(OsStatus::NOT_PERMITTED)
-        );
-        assert_eq!(classify(0, "__objc2.missingError").os_status(), None);
     }
 }

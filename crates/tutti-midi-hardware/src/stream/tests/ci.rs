@@ -389,7 +389,9 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
         crate::test_support::endpoint(8, "Other"),
         PortDirection::Output,
     );
-    wire.session.connect_output("other").unwrap();
+    wire.session
+        .connect_output(crate::testing::started(), "other")
+        .unwrap();
 
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);

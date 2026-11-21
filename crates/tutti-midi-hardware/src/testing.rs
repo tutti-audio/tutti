@@ -97,3 +97,8 @@ impl Rig {
         self.rig.take()
     }
 }
+
+/// The proof that a test backend is ready: a fake backend has nothing to start.
+pub(crate) fn started() -> crate::Started {
+    crate::Started::new()
+}

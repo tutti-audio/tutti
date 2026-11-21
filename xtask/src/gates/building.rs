@@ -277,12 +277,6 @@ pub(super) const ALLOW: &[Allow] = &[
         rules: &[Rule::CtorResult],
         reason: "a conversion from a Function Block Info Notification and a name, not a configuration: it refuses what no block can hold, with a named error",
     },
-    Allow {
-        path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
-        owner: "VirtualEndpoint::open",
-        rules: &[Rule::CtorResult],
-        reason: "opening an OS endpoint: the OS refuses, not a value a type could forbid",
-    },
     ty(
         "crates/tutti-vst2-host/",
         "Vst2Loaded::load",
@@ -450,12 +444,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "MidiSession::open_over",
         CTOR,
         "opening the OS MIDI ports: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-midi-hardware/",
-        "VirtualEndpoint::open",
-        CTOR,
-        "opening an OS endpoint: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-network/",

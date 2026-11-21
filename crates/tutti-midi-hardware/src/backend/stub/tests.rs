@@ -14,7 +14,7 @@ fn it_enumerates_nothing() {
 fn opening_reports_unsupported_rather_than_not_found() {
     let b = StubEndpoints::new();
     assert!(matches!(
-        b.open_output(EndpointId::from_raw(0)),
+        b.open_output(crate::testing::started(), EndpointId::from_raw(0)),
         Err(MidiHardwareError::Unsupported(_))
     ));
 }
@@ -38,9 +38,10 @@ fn devices_over_the_stub_is_empty_and_quiet() {
 }
 
 /// A platform with no backend publishes no virtual endpoint, and says so with
-/// the named error rather than returning an endpoint that does nothing.
+/// the named error on the first poll rather than returning an endpoint that does
+/// nothing.
 #[test]
-fn virtual_endpoints_report_unsupported() {
+fn virtual_endpoints_report_unsupported_on_the_first_poll() {
     let spec = VirtualSpec::new(
         tutti_ump::EndpointName::new("tutti-stub").unwrap(),
         tutti_fixtures::midi::device_identity(),
@@ -54,8 +55,22 @@ fn virtual_endpoints_report_unsupported() {
     );
     let ports = crate::HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
+    let devices = crate::Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(StubEndpoints::new()),
+    )
+    .unwrap();
+    let started = tutti_fixtures::block_on(devices.start()).unwrap();
+    let mut opening = open_virtual_endpoint(
+        &tutti_platform::Executor::new(),
+        &spec,
+        producer,
+        started,
+        main,
+    )
+    .expect("the stub makes its refusal a value");
     assert!(matches!(
-        open_virtual_endpoint(&tutti_platform::Executor::new(), &spec, producer, main),
-        Err(MidiHardwareError::Unsupported(_))
+        opening.poll(main, tutti_platform::Instant::now()),
+        std::task::Poll::Ready(Err(MidiHardwareError::Unsupported(_)))
     ));
 }

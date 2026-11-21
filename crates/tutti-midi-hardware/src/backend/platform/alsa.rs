@@ -3,7 +3,8 @@
 use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
+use crate::start::Started;
+use crate::virtual_endpoint::{AtOnce, OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend.
@@ -11,15 +12,18 @@ pub(crate) fn active(executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::alsa::AlsaEndpoints::new(executor))
 }
 
-/// Publishes the virtual endpoint `spec` describes, delivering into `producer`.
+/// Publishes the virtual endpoint `spec` describes, delivering into `producer`:
+/// ready on the first poll.
 pub(crate) fn open_virtual_endpoint(
     executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
+    _started: Started,
     _main: MainThreadMarker,
-) -> Result<(Box<dyn EndpointBackend>, VirtualProtocol)> {
-    let (endpoint, protocol) = super::alsa::virtual_endpoint::endpoint(executor, spec, producer)?;
-    Ok((Box::new(endpoint), protocol))
+) -> Result<Box<dyn OpeningBackend>> {
+    let made = super::alsa::virtual_endpoint::endpoint(executor, spec, producer)
+        .map(|(endpoint, protocol)| (Box::new(endpoint) as _, protocol));
+    Ok(Box::new(AtOnce::new(made)))
 }
 
 /// The platform's own error, as [`MidiHardwareError::Os`](crate::MidiHardwareError::Os) carries it.

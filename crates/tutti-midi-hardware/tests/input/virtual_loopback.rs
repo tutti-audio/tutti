@@ -12,9 +12,7 @@ use tutti_fixtures::main_thread;
 use tutti_fixtures::midi::{device_identity, note_on};
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::DeviceInfo;
-use tutti_midi_hardware::{
-    MidiHardwareConfig, MidiSession, VirtualEndpoint, VirtualProtocol, VirtualSpec,
-};
+use tutti_midi_hardware::{MidiHardwareConfig, MidiSession, VirtualProtocol, VirtualSpec};
 use tutti_midi_runtime::InputInlets;
 use tutti_platform::{Executor, MainThreadMarker};
 use tutti_ump::EndpointName;
@@ -38,10 +36,9 @@ fn spec(tag: &str) -> VirtualSpec {
 fn session(executor: &Executor) -> (MidiSession, Listener) {
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let listener = Listener::over(&inlets);
-    (
-        MidiSession::open(executor, inlets, MidiHardwareConfig::new()).expect("a session"),
-        listener,
-    )
+    let session =
+        MidiSession::open(executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    (session, listener)
 }
 
 /// The device `spec` published, once the session lists it.
@@ -77,11 +74,12 @@ fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
     let spec = spec("send");
     let (mut io, mut graph) = session(&executor);
     let (producer, _inlet) = Arc::clone(io.ports()).open_input_port("virtual");
-    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+    let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let device = listed(|| io.inputs(), &spec);
-    let tutti_midi_hardware::Connected::Opened(inlet) =
-        io.connect_input(&device.id).expect("connects")
+    let tutti_midi_hardware::Connected::Opened(inlet) = io
+        .connect_input(super::opening::started(&io), &device.id)
+        .expect("connects")
     else {
         panic!("a new input opens");
     };
@@ -106,10 +104,12 @@ fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
     let (io, mut graph) = session(&executor);
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+    let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let device = listed(|| io.outputs(), &spec);
-    let mut out = io.connect_output(&device.id).expect("connects");
+    let mut out = io
+        .connect_output(super::opening::started(&io), &device.id)
+        .expect("connects");
     graph.ready(
         || {
             let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8000))]);
@@ -139,10 +139,12 @@ fn a_midi1_endpoint_delivers_what_the_input_node_widens() {
     let io = MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let _endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+    let _endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let device = listed(|| io.outputs(), &spec);
-    let mut out = io.connect_output(&device.id).expect("connects");
+    let mut out = io
+        .connect_output(super::opening::started(&io), &device.id)
+        .expect("connects");
     graph.ready(
         || {
             let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8100))]);

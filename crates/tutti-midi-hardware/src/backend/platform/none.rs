@@ -4,7 +4,8 @@
 use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
+use crate::start::Started;
+use crate::virtual_endpoint::{OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend: the stub.
@@ -12,14 +13,15 @@ pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::stub::StubEndpoints::new())
 }
 
-/// Refuses: the stub has no virtual endpoints.
+/// Refuses on the first poll: the stub has no virtual endpoints.
 pub(crate) fn open_virtual_endpoint(
     executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
+    started: Started,
     main: MainThreadMarker,
-) -> Result<(Box<dyn EndpointBackend>, VirtualProtocol)> {
-    super::stub::open_virtual_endpoint(executor, spec, producer, main)
+) -> Result<Box<dyn OpeningBackend>> {
+    super::stub::open_virtual_endpoint(executor, spec, producer, started, main)
 }
 
 /// No platform call exists to fail, so [`MidiHardwareError::Os`] is never

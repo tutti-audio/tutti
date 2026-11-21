@@ -23,12 +23,17 @@ impl MidiEndpoints for Refuses {
     }
     fn open_input(
         &self,
+        _: tutti_midi_hardware::Started,
         _: EndpointId,
         _: InputProducerHandle,
     ) -> tutti_midi_hardware::Result<Box<dyn InputConnection>> {
         Err(MidiHardwareError::Unsupported("test"))
     }
-    fn open_output(&self, _: EndpointId) -> tutti_midi_hardware::Result<Box<dyn DeviceOut>> {
+    fn open_output(
+        &self,
+        _: tutti_midi_hardware::Started,
+        _: EndpointId,
+    ) -> tutti_midi_hardware::Result<Box<dyn DeviceOut>> {
         Err(MidiHardwareError::Unsupported("test"))
     }
 }
