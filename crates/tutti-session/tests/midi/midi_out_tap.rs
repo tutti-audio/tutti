@@ -195,7 +195,7 @@ fn reopening_one_tap_leaves_the_others_fed() {
         )
         .unwrap();
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let reopened = s
         .graph()
         .taps()
@@ -348,7 +348,7 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         .stamping(Stamping::Jr)
         .open();
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let _ = s.update();
     // The re-prepare's second half lands on a render, then the commit.
     render(&s, 4_096);

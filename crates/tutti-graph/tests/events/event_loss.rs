@@ -167,7 +167,7 @@ fn a_full_port_takes_note_offs_before_note_ons() {
     assert_eq!(note_off_room(16), 26);
     let (mut ed, mut exec, seen) = rig(1, 16, &[vec![Script { ons: 20, offs: 20 }]]);
     let losses = run(&mut ed, &mut exec, 1);
-    assert_eq!(*seen.lock().unwrap(), vec![(16, 10)]);
+    assert_eq!(seen.lock().unwrap().to_vec(), vec![(16, 10)]);
     assert_eq!(exec.dropped_event_count(), 14);
     assert_eq!(
         losses,
@@ -187,7 +187,7 @@ fn a_full_port_takes_note_offs_before_note_ons() {
 fn a_node_within_its_room_loses_nothing() {
     let (mut ed, mut exec, seen) = rig(1, 16, &[vec![Script { ons: 16, offs: 10 }]]);
     let losses = run(&mut ed, &mut exec, 3);
-    assert_eq!(*seen.lock().unwrap(), vec![(48, 30)]);
+    assert_eq!(seen.lock().unwrap().to_vec(), vec![(48, 30)]);
     assert_eq!(exec.dropped_event_count(), 0);
     assert!(losses.is_empty());
 }
@@ -234,7 +234,7 @@ fn the_parallel_losses_are_the_serial_ones() {
     let writers: Vec<Vec<Script>> = (0..4).map(scripts).collect();
     let (mut ed, mut exec, seen) = rig(1, 16, &writers);
     let serial = run(&mut ed, &mut exec, 5);
-    let (serial_total, serial_seen) = (exec.dropped_event_count(), seen.lock().unwrap().clone());
+    let (serial_total, serial_seen) = (exec.dropped_event_count(), seen.lock().unwrap().to_vec());
     assert!(!serial.is_empty());
     let sorted = |mut v: Vec<EventLoss>| {
         v.sort_by_key(|l| (l.node, l.port, l.count));
@@ -245,7 +245,7 @@ fn the_parallel_losses_are_the_serial_ones() {
         assert!(exec.is_parallel(), "{workers} workers");
         let parallel = run(&mut ed, &mut exec, 5);
         assert_eq!(exec.dropped_event_count(), serial_total, "{workers}");
-        assert_eq!(*seen.lock().unwrap(), serial_seen, "{workers}");
+        assert_eq!(seen.lock().unwrap().to_vec(), serial_seen, "{workers}");
         assert_eq!(sorted(parallel), sorted(serial.clone()), "{workers}");
     }
 }
@@ -255,7 +255,7 @@ fn the_parallel_losses_are_the_serial_ones() {
 /// together).
 struct Recorder {
     bound: Option<u32>,
-    blocks: Arc<Mutex<Vec<Vec<u32>>>>,
+    blocks: Arc<Mutex<tutti_fixtures::BlockLog<u32>>>,
 }
 
 impl Node for Recorder {
@@ -269,7 +269,7 @@ impl Node for Recorder {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
         let frames = io.events(0).iter().map(|e| e.offset.index() as u32);
-        self.blocks.lock().unwrap().push(frames.collect());
+        self.blocks.lock().unwrap().push_block(frames);
         Status::Silent
     }
     fn reset(&mut self) {}
@@ -281,7 +281,7 @@ impl Node for Recorder {
 struct Bounded {
     ed: Editor,
     exec: Executor,
-    blocks: Arc<Mutex<Vec<Vec<u32>>>>,
+    blocks: Arc<Mutex<tutti_fixtures::BlockLog<u32>>>,
     writers: u64,
 }
 
@@ -292,7 +292,7 @@ impl Bounded {
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
         }
-        let blocks = Arc::default();
+        let blocks = tutti_fixtures::BlockLog::shared();
         ed.insert(
             NodeKey(100),
             "recorder",
@@ -352,7 +352,8 @@ impl Bounded {
             self.exec
                 .process(BLOCK, &TransportPosition::default(), &[], &mut []);
         }
-        self.blocks.lock().unwrap().clone()
+        let blocks = self.blocks.lock().unwrap();
+        blocks.iter().map(|b| b.to_vec()).collect()
     }
 }
 
@@ -520,7 +521,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
         }
-        let blocks = Arc::default();
+        let blocks = tutti_fixtures::BlockLog::shared();
         let input = EventIn {
             node: NodeKey(100),
             port: 0,
@@ -564,7 +565,10 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
         ed.collect();
         let transport = TransportPosition::default();
         exec.process(BLOCK, &transport, &[], &mut []);
-        assert_eq!(blocks.lock().unwrap().last().unwrap(), &[0, 1, 2, 3]);
+        assert_eq!(
+            blocks.lock().unwrap().last().unwrap().as_slice(),
+            &[0, 1, 2, 3]
+        );
         assert_eq!(exec.dropped_event_count(), 0, "{workers}");
 
         ed.schedule(
@@ -579,14 +583,17 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
         ed.collect();
         exec.process(BLOCK, &transport, &[], &mut []);
         assert_eq!(
-            blocks.lock().unwrap().last().unwrap(),
+            blocks.lock().unwrap().last().unwrap().as_slice(),
             &[0, 0, 0, 1],
             "{workers}"
         );
         assert_eq!(exec.dropped_event_count(), 2, "{workers}");
 
         exec.process(BLOCK, &transport, &[], &mut []);
-        assert_eq!(blocks.lock().unwrap().last().unwrap(), &[0, 1, 2, 3]);
+        assert_eq!(
+            blocks.lock().unwrap().last().unwrap().as_slice(),
+            &[0, 1, 2, 3]
+        );
         assert_eq!(exec.dropped_event_count(), 2, "{workers}");
     }
 }
@@ -606,7 +613,7 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
             "recorder",
             tutti_graph::Unforkable(Recorder {
                 bound: Some(bound),
-                blocks: Arc::default(),
+                blocks: tutti_fixtures::BlockLog::shared(),
             }),
         );
         ed.insert(
@@ -670,7 +677,7 @@ fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
 /// note-offs; declares `bound` and an event output so it can be bypassed.
 struct Holder {
     bound: u32,
-    blocks: Arc<Mutex<Vec<(usize, usize)>>>,
+    blocks: tutti_fixtures::Record<(usize, usize)>,
 }
 
 impl Node for Holder {
@@ -729,13 +736,13 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
         }
-        let blocks = Arc::default();
+        let blocks = tutti_fixtures::Record::new();
         ed.insert(
             NodeKey(100),
             "holder",
             tutti_graph::Unforkable(Holder {
                 bound: 4,
-                blocks: Arc::clone(&blocks),
+                blocks: blocks.clone(),
             }),
         );
         ed.insert(
@@ -764,7 +771,10 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
         for _ in 0..3 {
             exec.process(BLOCK, &transport, &[], &mut []);
         }
-        assert_eq!(*blocks.lock().unwrap(), vec![(4, 0), (4, 0), (2, 0)]);
+        assert_eq!(
+            blocks.lock().unwrap().to_vec(),
+            vec![(4, 0), (4, 0), (2, 0)]
+        );
         blocks.lock().unwrap().clear();
         ed.set_mode(NodeKey(100), tutti_graph::NodeMode::Bypassed)
             .expect("a node");
@@ -822,7 +832,7 @@ impl Node for EarlyOnsLateOffs {
 /// Records `(frame, is note-off)` for each event it is sent, block by block,
 /// declaring a bound of 4.
 struct Trace {
-    blocks: Arc<Mutex<Vec<Vec<(u32, bool)>>>>,
+    blocks: Arc<Mutex<tutti_fixtures::BlockLog<(u32, bool)>>>,
 }
 
 impl Node for Trace {
@@ -837,7 +847,7 @@ impl Node for Trace {
             .events(0)
             .iter()
             .map(|e| (e.offset.index() as u32, e.is_note_off()));
-        self.blocks.lock().unwrap().push(seen.collect());
+        self.blocks.lock().unwrap().push_block(seen);
         Status::Silent
     }
     fn reset(&mut self) {}
@@ -859,7 +869,7 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
         }
-        let blocks = Arc::default();
+        let blocks = tutti_fixtures::BlockLog::shared();
         let input = EventIn {
             node: NodeKey(100),
             port: 0,
@@ -895,7 +905,8 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
         let transport = TransportPosition::default();
         exec.process(BLOCK, &transport, &[], &mut []);
         exec.process(BLOCK, &transport, &[], &mut []);
-        let got = blocks.lock().unwrap().clone();
+        let got: Vec<Vec<(u32, bool)>> =
+            blocks.lock().unwrap().iter().map(|b| b.to_vec()).collect();
         let early = vec![(0, false), (1, false), (20, true), (21, true)];
         let joint = vec![(0, false), (20, true), (21, true), (30, true)];
         assert_eq!(got, vec![early, joint], "{workers}");

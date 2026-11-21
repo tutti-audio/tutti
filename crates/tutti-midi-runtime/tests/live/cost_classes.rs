@@ -2,7 +2,7 @@
 //! clip-to-output lanes pack into fewer tasks than undeclared ones, and on a
 //! pool every event leaves on the frame the serial walk sends it on.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
 use crate::common;
@@ -46,7 +46,7 @@ impl<N: Node> Node for Undeclared<N> {
 }
 
 /// `(absolute frame, packet)` of every MIDI event a recorder received.
-type Seen = Arc<Mutex<Vec<(u64, Ump)>>>;
+type Seen = tutti_fixtures::Record<(u64, Ump)>;
 
 /// Logs the MIDI on its event input; a silent mono output. Declares
 /// nothing.
@@ -107,8 +107,8 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
         let (source, sink) = (NodeKey(100 + k), NodeKey(k + 1));
         if k >= LANES {
             ed.insert(source, "clip", clip(k));
-            let log = Seen::default();
-            ed.insert(sink, "recorder", ForkByClone(Recorder(Arc::clone(&log))));
+            let log = tutti_fixtures::Record::new();
+            ed.insert(sink, "recorder", ForkByClone(Recorder(log.clone())));
             seen.push(log);
             outputs.push(PortSource::Node(OutPort {
                 node: sink,

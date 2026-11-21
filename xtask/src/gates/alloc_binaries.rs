@@ -1,18 +1,18 @@
 //! `check-alloc-binaries`: an allocation test is a module of its area's test
 //! binary, not a binary of its own.
 //!
-//! `assert_no_alloc::AllocDisabler` does nothing outside an `assert_no_alloc`
-//! closure, so an area binary (`tests/<area>/main.rs`) installs it once and its
-//! allocation tests are modules in it. A file directly under a crate's `tests/`
-//! is a binary of its own, and one that installs `AllocDisabler` as its
+//! `assert_no_alloc::AllocDisabler` and `tutti_fixtures::RtAllocCheck` (which wraps it)
+//! are global allocators, so an area binary (`tests/<area>/main.rs`) installs one once
+//! and its allocation tests are modules in it. A file directly under a crate's `tests/`
+//! is a binary of its own, and one that installs either as its
 //! `#[global_allocator]` is a finding. A file with another allocator (a counting
 //! or a no-free one) is not, and nor is a file in a subdirectory.
 //!
 //! [`ALLOWED`] is the debt, one row per file with what removes it. A row whose
-//! file no longer installs `AllocDisabler` is an error, so the list cannot rot.
+//! file no longer installs one is an error, so the list cannot rot.
 //!
 //! Limits: a textual scan of code (comments and literals blanked). It sees a
-//! `#[global_allocator]` whose `static` item names `AllocDisabler` before its
+//! `#[global_allocator]` whose `static` item names `AllocDisabler` or `RtAllocCheck` before its
 //! `;`.
 
 use super::lex::{blank, find_word_from, line_of};
@@ -47,7 +47,10 @@ fn installs_alloc_disabler(text: &str) -> Option<usize> {
         let start = from + at;
         let item = &code[start..];
         let end = item.find(';').unwrap_or(item.len());
-        if find_word_from(&item[..end], "AllocDisabler", 0).is_some() {
+        if ["AllocDisabler", "RtAllocCheck"]
+            .iter()
+            .any(|name| find_word_from(&item[..end], name, 0).is_some())
+        {
             return Some(line_of(&code, start));
         }
         from = start + 1;
@@ -100,6 +103,7 @@ mod tests {
     use super::*;
 
     const DISABLER: &str = "use assert_no_alloc::AllocDisabler;\n\n#[global_allocator]\nstatic A: AllocDisabler = AllocDisabler;\n";
+    const RT_CHECK: &str = "#[global_allocator]\nstatic A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;\n";
     const COUNTING: &str = "#[global_allocator]\nstatic A: Counting = Counting;\n";
 
     fn run(files: &[(&str, &str)], allowed: &[(&str, &str)]) -> Report {
@@ -117,6 +121,12 @@ mod tests {
                  area binary (tests/<area>/main.rs installs it once)",
             ]
         );
+    }
+
+    #[test]
+    fn a_top_level_test_file_installing_rt_alloc_check_fails() {
+        let r = run(&[("crates/tutti-a/tests/rt_no_alloc.rs", RT_CHECK)], &[]);
+        assert!(!r.passed());
     }
 
     #[test]

@@ -7,4 +7,4 @@ mod rt_no_alloc;
 
 /// Aborts inside an `assert_no_alloc` region; inert elsewhere.
 #[global_allocator]
-static ALLOC: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;

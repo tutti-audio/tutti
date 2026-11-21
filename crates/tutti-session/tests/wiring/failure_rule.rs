@@ -3,12 +3,11 @@
 //! error, never later at the commit and never as silence.
 
 use tutti_buffers::ChannelLayout;
-use tutti_graph::ForkByClone;
-use tutti_graph::NodeKey;
+use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DetachedSession, EventInPort, EventOutPort, InPort, OutPort, ReplaceRefused,
-    Replacement, Root, Session,
+    ConnectError, DetachedSession, EventInPort, EventOutPort, Feeder, InPort, OutPort,
+    ReplaceRefused, Replacement, Root, Session, SetRateError,
 };
 use tutti_units::SampleRate;
 
@@ -125,7 +124,7 @@ fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
     let _side = s.graph().take_audio_side();
     let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
 
     let refused = s
@@ -169,4 +168,130 @@ fn a_tap_source_past_what_a_port_index_holds_is_refused() {
         .map(|_| ())
         .unwrap_err();
     assert!(matches!(refused, MissingSource::Port { .. }));
+}
+
+/// A source of silence that runs at `rates` only.
+#[derive(Clone)]
+struct Rated(SampleRates);
+
+impl Node for Rated {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).with_rates(self.0)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(0.0);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// A node that takes events and one that makes them.
+#[derive(Clone)]
+struct Events {
+    inputs: u16,
+    outputs: u16,
+}
+
+impl Node for Events {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).with_events(self.inputs, self.outputs)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(0.0);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// **A feed into a node that is not there is refused, naming it, and the feeds
+/// stand.** Accepted, the call would have kept an entry for a node that never
+/// reads it. A node removed is as missing as one never added.
+#[test]
+fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
+    let mut s = detached();
+    let g = s.graph();
+    let sink = g.add(ForkByClone(Events {
+        inputs: 1,
+        outputs: 0,
+    }));
+    let gone = g.add(ForkByClone(Events {
+        inputs: 1,
+        outputs: 0,
+    }));
+    let source = g.add(ForkByClone(Events {
+        inputs: 0,
+        outputs: 1,
+    }));
+    let fed = vec![source.events_out()];
+    g.set_feed(sink, Feeder::Routes, fed.clone()).unwrap();
+    g.set_feed(gone, Feeder::Routes, fed.clone()).unwrap();
+    s.remove(gone).unwrap();
+    let g = s.graph();
+    let edges = g.sources(EventInPort::new(sink, 0)).unwrap();
+
+    for missing in [GHOST, gone.erase()] {
+        let refused = g.set_feed(missing, Feeder::Routes, fed.clone());
+        assert_eq!(refused.unwrap_err().node(), missing);
+        let refused = g.set_feed(missing, Feeder::Routes, Vec::new());
+        assert_eq!(refused.unwrap_err().node(), missing, "an empty feed too");
+    }
+    assert_eq!(
+        g.feed(sink, Feeder::Routes).unwrap(),
+        fed,
+        "the feed stands"
+    );
+    assert_eq!(g.sources(EventInPort::new(sink, 0)).unwrap(), edges);
+}
+
+/// **A read of the feeds of a node that is not there names it.** An empty
+/// answer reads as "nothing feeds it"; a node that is there and fed by nothing
+/// still answers empty.
+#[test]
+fn feed_and_feeds_refuse_a_node_that_is_not_there() {
+    let mut s = detached();
+    let g = s.graph();
+    let sink = g.add(ForkByClone(Events {
+        inputs: 1,
+        outputs: 0,
+    }));
+    assert_eq!(g.feed(GHOST, Feeder::Routes).unwrap_err().node(), GHOST);
+    assert_eq!(g.feeds(GHOST).unwrap_err().node(), GHOST);
+    assert!(g.feed(sink, Feeder::Routes).unwrap().is_empty());
+    assert!(g.feeds(sink).unwrap().is_empty());
+}
+
+/// **A graph re-rates only under nodes that run at the new rate, and a refusal
+/// names the node and its rates and leaves the rate alone.** Both ends of a
+/// node's range are accepted.
+#[test]
+fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
+    let mut s = detached();
+    let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_48K);
+    let g = s.graph();
+    let limited = g.add(ForkByClone(Rated(rates)));
+    g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
+
+    let refused = g.set_sample_rate(SampleRate::SR_96K).unwrap_err();
+    assert_eq!(
+        refused,
+        SetRateError::RateUnsupported {
+            node: limited.erase(),
+            supported: rates,
+            rate: SampleRate::SR_96K,
+        }
+    );
+    assert_eq!(g.testing().prepared().sample_rate(), RATE, "unchanged");
+    assert!(!g.testing().is_repreparing(), "nothing was sent");
+
+    // Below the range is refused the same way, and both ends are accepted.
+    assert!(matches!(
+        g.set_sample_rate(SampleRate::SR_22K05),
+        Err(SetRateError::RateUnsupported { .. })
+    ));
+    g.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_44K1);
+    g.set_sample_rate(SampleRate::SR_48K).unwrap();
+    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_48K);
 }

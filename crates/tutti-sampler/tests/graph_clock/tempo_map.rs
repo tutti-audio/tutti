@@ -136,7 +136,7 @@ fn render(
                 },
             )
             .expect("a placeable wave");
-            let mut pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
+            let mut pool = VoicePool::new().tempo(transport.settings().tempo_reader());
             pool.insert(SlotId(1), source, Playback::default())
                 .expect("a finite gain and a nonempty width");
             ed.insert(NodeKey(1), "voice", pool);
@@ -330,7 +330,7 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
     ));
     let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
         .expect("a placeable wave");
-    let pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
+    let pool = VoicePool::new().tempo(transport.settings().tempo_reader());
     // The handle the insert hands back is the pool's live one.
     let handle = ed.insert(NodeKey(1), "voice", pool).controls;
     handle

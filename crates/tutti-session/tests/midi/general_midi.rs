@@ -9,7 +9,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_session::{GeneralMidi, NodeMode, OutPort, Root, Session};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_units::{SampleRate, Samples, Tail};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -25,7 +25,7 @@ fn offline_session() -> Session {
 fn unit() -> SoundFontUnit<f32> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
     let font = Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
-    Settings::new().build(font).expect("builds")
+    SoundFontUnit::try_from(SoundFontConfig::new(font)).expect("builds")
 }
 
 /// The one source a port holds (these tests wire one).
@@ -191,7 +191,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
         ))
         .expect("the built font parses"),
     );
-    let unit = Settings::new().build(font).expect("builds");
+    let unit = SoundFontUnit::try_from(SoundFontConfig::new(font)).expect("builds");
     let mut session = offline_session();
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");
     session
@@ -289,7 +289,7 @@ fn short_release_setup() -> (Session, GeneralMidi<f32>) {
         ))
         .expect("the built font parses"),
     );
-    let unit = Settings::new().build(font).expect("builds");
+    let unit = SoundFontUnit::try_from(SoundFontConfig::new(font)).expect("builds");
     let mut session = offline_session();
     let gm = session.add_general_midi(unit).expect("a SoundFont unit");
     for c in 0..2 {
