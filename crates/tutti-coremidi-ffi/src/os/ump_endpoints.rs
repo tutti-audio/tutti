@@ -81,6 +81,11 @@ pub enum UmpEndpointsError {
 
 /// Every UMP Endpoint now.
 ///
+/// On macOS 15 CoreMIDI's listing reports every Function Block's direction as 0,
+/// so each listed block reads `BlockDirection::Reserved(0)`; the app that created
+/// the endpoint holds the direction it registered. From macOS 26 the listing
+/// carries the registered direction.
+///
 /// # Errors
 ///
 /// [`UmpEndpointsError::Unsupported`] before macOS 15, and
