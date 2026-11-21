@@ -102,7 +102,7 @@ fn a_notice_names_which_reading_to_read_again() {
 }
 
 /// The vocabulary crosses threads: ids and notices ride events, a peer's
-/// failure rides a job's result.
+/// failure rides a reply.
 const _: () = {
     const fn send_sync<T: Send + Sync>() {}
     send_sync::<ResourceId>();

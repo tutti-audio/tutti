@@ -19,8 +19,8 @@ use crate::{AppKey, Clock, Committed, Session, SessionEvent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Phase {
-    /// The bells tick, then what the jobs sent lands (each message,
-    /// then each end, in arrival order). Then crossfades
+    /// The bells tick, then what the session's streaming jobs sent lands
+    /// (each message, then each end, in arrival order). Then crossfades
     /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for
     /// an hour of `PhaseCx::now` warned about, once), then

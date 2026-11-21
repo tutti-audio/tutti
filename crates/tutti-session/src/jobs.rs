@@ -300,92 +300,6 @@ impl Drop for Jobs {
 }
 
 impl Jobs {
-    /// Runs `work` on the executor and lands its result in a later
-    /// [`Session::update`], on the control thread.
-    ///
-    /// `land` (and every lander of a streaming job)
-    /// runs on the thread that calls `update()`, which need not be the main
-    /// thread: a landing takes no main-thread proof, and what must be done on the main
-    /// thread is posted to the session's `MainWork` (`tutti_plugin_types`).
-    ///
-    /// A future must not block, and a closure here is one `poll` long.
-    #[cfg(test)]
-    pub(crate) fn submit<R, W, L>(&mut self, work: W, land: L)
-    where
-        R: Send + 'static,
-        W: FnOnce() -> R + Send + 'static,
-        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
-            + Send
-            + 'static,
-    {
-        self.submit_at(work, land);
-    }
-
-    #[cfg(test)]
-    fn submit_at<R, W, L>(&mut self, work: W, land: L)
-    where
-        R: Send + 'static,
-        W: FnOnce() -> R + Send + 'static,
-        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
-            + Send
-            + 'static,
-    {
-        let mut land = Some(land);
-        self.start_stream(
-            move |_: &Landings<std::convert::Infallible>| work(),
-            move |session, landed, events| {
-                let end = match landed {
-                    Stream::Message(never) => match never {},
-                    Stream::Done(result) => Ok(result),
-                    Stream::Failed(failed) => Err(failed),
-                };
-                if let Some(land) = land.take() {
-                    land(session, end, events);
-                }
-            },
-        );
-    }
-
-    /// Runs `work` on the executor, landing each message it sends through its
-    /// [`Landings`] and then its end, exactly once and after every message, in later
-    /// [`Session::update`]s on the control thread. `work` sees the landings by
-    /// reference, so nothing it sends can outlive it and follow the end.
-    #[cfg(test)]
-    pub(crate) fn submit_stream<M, R, W, L>(&mut self, work: W, land: L)
-    where
-        M: Send + 'static,
-        R: Send + 'static,
-        W: FnOnce(&Landings<M>) -> R + Send + 'static,
-        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
-    {
-        self.start_stream(work, land);
-    }
-
-    #[cfg(test)]
-    fn start_stream<M, R, W, L>(&mut self, work: W, land: L)
-    where
-        M: Send + 'static,
-        R: Send + 'static,
-        W: FnOnce(&Landings<M>) -> R + Send + 'static,
-        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
-    {
-        self.start(move |landings| async move { work(&landings) }, land);
-    }
-
-    #[cfg(test)]
-    fn start<M, R, F, W, L>(&mut self, make: W, land: L)
-    where
-        M: Send + 'static,
-        R: Send + 'static,
-        F: Future<Output = R> + Send + 'static,
-        W: FnOnce(Landings<M>) -> F + Send + 'static,
-        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
-    {
-        let run = self.open_stream(land);
-        let future = Box::pin(run.run(make));
-        self.executor.spawn(future).detach();
-    }
-
     /// Registers a streaming job's lander and gives back the half the job's future
     /// holds, made before that future exists: a take starts its pump first and hands
     /// it this once the file and the tap are open. Dropped unrun, the run lands
@@ -525,6 +439,20 @@ pub(crate) mod tests {
         builder.build_detached(SampleRate::SR_48K).unwrap()
     }
 
+    /// Starts a job the way a take does: opens its stream, then runs `make` as the job's
+    /// future on the executor. `make` sees the landings by reference.
+    fn spawn<M, R, W, L>(s: &mut crate::DetachedSession, work: W, land: L)
+    where
+        M: Send + 'static,
+        R: Send + 'static,
+        W: FnOnce(&Landings<M>) -> R + Send + 'static,
+        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+    {
+        let run = s.jobs.open_stream(land);
+        let future = Box::pin(run.run(move |landings| async move { work(&landings) }));
+        s.jobs.executor.spawn(future).detach();
+    }
+
     /// Updates until `done` holds, or panics after a generous wait.
     fn update_until(s: &mut crate::DetachedSession, done: impl Fn() -> bool) -> Vec<SessionEvent> {
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -543,13 +471,16 @@ pub(crate) mod tests {
         let (go, wait) = sync_channel::<()>(0);
         let landed = Arc::new(Mutex::new(None));
         let into = Arc::clone(&landed);
-        s.jobs.submit(
-            move || {
+        spawn(
+            &mut s,
+            move |_: &Landings<()>| {
                 wait.recv().unwrap();
                 std::thread::current().id()
             },
-            move |_, result, _| {
-                *into.lock().unwrap() = Some((result.unwrap(), std::thread::current().id()));
+            move |_, landed, _| {
+                if let Stream::Done(worker) = landed {
+                    *into.lock().unwrap() = Some((worker, std::thread::current().id()));
+                }
             },
         );
         let _ = s.update();
@@ -569,7 +500,8 @@ pub(crate) mod tests {
         let mut s = session(Session::builder());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let into = Arc::clone(&seen);
-        s.jobs.submit_stream(
+        spawn(
+            &mut s,
             |landings: &Landings<u32>| {
                 for n in 0..500 {
                     landings.send(n).unwrap();
@@ -596,16 +528,21 @@ pub(crate) mod tests {
         let mut s = session(Session::builder());
         let landed = Arc::new(Mutex::new(None));
         let into = Arc::clone(&landed);
-        s.jobs.submit(
-            || -> u8 { panic!("the file was gone") },
-            move |_, result, _| *into.lock().unwrap() = Some(result),
+        spawn(
+            &mut s,
+            |_: &Landings<()>| -> u8 { panic!("the file was gone") },
+            move |_, landed, _| {
+                if let Stream::Failed(failed) = landed {
+                    *into.lock().unwrap() = Some(failed);
+                }
+            },
         );
         let _ = update_until(&mut s, || landed.lock().unwrap().is_some());
         assert_eq!(
             landed.lock().unwrap().take().unwrap(),
-            Err(WorkerError::Panicked {
+            WorkerError::Panicked {
                 message: "the file was gone".into()
-            })
+            }
         );
     }
 
@@ -615,7 +552,8 @@ pub(crate) mod tests {
         let (started, started_rx) = sync_channel::<()>(0);
         let seen = Arc::new(Mutex::new(None));
         let into = Arc::clone(&seen);
-        s.jobs.submit_stream(
+        spawn(
+            &mut s,
             move |landings: &Landings<u8>| {
                 started.send(()).unwrap();
                 let deadline = Instant::now() + Duration::from_secs(10);
