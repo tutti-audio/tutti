@@ -199,8 +199,7 @@ impl<F: Float> Editor<F> {
     /// swap on the next commit, as [`insert`](Self::insert) at an existing key
     /// does, keeping the key's kind. A fade asked for over a shape that does
     /// not fit is refused with [`CommitError::FadeShape`]: the caller who
-    /// accepts a cut says so with a zero fade, or asks for
-    /// [`fade_or_swap`](Self::fade_or_swap).
+    /// accepts a cut says so with a zero fade.
     ///
     /// Either way the placement unwires what the new shape lacks, as
     /// [`insert`](Self::insert) does, and returns it in [`Inserted::unwired`].
@@ -227,38 +226,6 @@ impl<F: Float> Editor<F> {
         node: N,
         fade: Fade,
     ) -> Result<Inserted<N::Controls>, CommitError> {
-        self.place_replacement(key, node, fade, true)
-    }
-
-    /// [`replace_or_swap`](Self::replace_or_swap) that never refuses a shape:
-    /// the new unit fades where it fits the running one and lands as a swap
-    /// where it does not, the fade dropped. For a host that swaps a unit
-    /// under a node and wants the fade when there is one to have.
-    ///
-    /// # Errors
-    ///
-    /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`]; nothing
-    /// changes and `node` is dropped.
-    ///
-    /// # Panics
-    ///
-    /// If `key` is not in the spec.
-    pub fn fade_or_swap<N: IntoNode<F>>(
-        &mut self,
-        key: NodeKey,
-        node: N,
-        fade: Fade,
-    ) -> Result<Inserted<N::Controls>, CommitError> {
-        self.place_replacement(key, node, fade, false)
-    }
-
-    fn place_replacement<N: IntoNode<F>>(
-        &mut self,
-        key: NodeKey,
-        node: N,
-        fade: Fade,
-        refuse_unfit: bool,
-    ) -> Result<Inserted<N::Controls>, CommitError> {
         self.check_poisoned()?;
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
@@ -281,7 +248,6 @@ impl<F: Float> Editor<F> {
         let shape = unit.shape();
         let fits = running.is_some_and(|r| Self::fits(&shape, &r));
         if let Some(running) = running
-            && refuse_unfit
             && !fits
             && !fade.is_cut()
         {

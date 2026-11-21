@@ -780,14 +780,6 @@ fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
         "the lag alone from the first frame: a swap, not a blend with the gain"
     );
 
-    // `fade_or_swap` never refuses a shape: the fade is dropped.
-    let (mut ed, mut exec) = gain_graph(1.0);
-    dc(&mut exec, 20);
-    ed.fade_or_swap(NODE, lagged(), fade)
-        .expect("a shape change is a swap");
-    ed.commit().expect("commits");
-    assert_eq!(ed.fades_in_flight(), 0, "nothing to fade from");
-
     // Not running yet: inserted and replaced before any commit.
     let (mut ed, _exec) = Editor::new(prepare(128));
     ed.insert(NodeKey(5), "gain", Unforkable(gain(1.0)));

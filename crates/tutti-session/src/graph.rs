@@ -249,8 +249,8 @@ pub(crate) enum OnShape {
     /// Refuse it ([`ReplaceRefused::ShapeChanged`]): what a caller's
     /// [`replace`](Graph::replace) gets.
     Refuse,
-    /// Swap it in without the fade: what the session's own swaps (a plugin
-    /// rebuilt for new ports, one that came back) get.
+    /// Swap it in as a cut, whatever fade was asked: what the session's own
+    /// swaps (a plugin rebuilt for new ports, one that came back) get.
     #[cfg(feature = "plugin")]
     Cut,
 }
@@ -1109,6 +1109,11 @@ impl Graph {
     /// first update after a re-prepare resumes
     /// ([`SessionEvent::Replaced`](crate::SessionEvent::Replaced)).
     ///
+    /// Unlike [`replace`](Self::replace), the key keeps naming the outgoing
+    /// plugin while the swap waits: writes through it reach the outgoing
+    /// plugin and `handle` answers for it, because the incoming client is
+    /// bound only when the swap lands and a bound plugin cannot be unbound.
+    ///
     /// # Errors
     ///
     /// [`ReplaceRefused`] on a poisoned graph or a `node` not in it.
@@ -1591,13 +1596,17 @@ impl<F: Float> Graph<F> {
             return Err(SwapRefused::Busy(incoming));
         }
         let rate = self.editor.prepare().sample_rate();
-        let fade = fade.unwrap_or_else(|| Fade::seconds(tutti_graph::DECLICK, rate));
-        let placed = match on_shape {
-            OnShape::Refuse => self.editor.replace_or_swap(node, incoming, fade),
+        let fade = match on_shape {
+            OnShape::Refuse => fade.unwrap_or_else(|| Fade::seconds(tutti_graph::DECLICK, rate)),
+            // A cut: a recovered plugin may report another latency, and no
+            // app asked for a fade over a swap the session made itself.
             #[cfg(feature = "plugin")]
-            OnShape::Cut => self.editor.fade_or_swap(node, incoming, fade),
-        }
-        .map_err(|e| SwapRefused::Failed(e.into()))?;
+            OnShape::Cut => Fade::new(Samples::ZERO),
+        };
+        let placed = self
+            .editor
+            .replace_or_swap(node, incoming, fade)
+            .map_err(|e| SwapRefused::Failed(e.into()))?;
         self.note_unwired(node, &placed.unwired);
         self.note_pass(node);
         self.sweep_gain_targets();
