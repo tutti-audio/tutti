@@ -127,7 +127,7 @@ impl LoadPlugin {
             handle: LoadedPlugin {
                 shared: Arc::new(shared),
             },
-            install: Some(install),
+            install: Some(Box::new(install)),
             session: cx.session,
         })
     }
@@ -232,8 +232,9 @@ impl Peer for LoadedPlugin {
 #[must_use = "a node does nothing until it is added"]
 pub struct PluginNode {
     handle: LoadedPlugin,
-    /// The plugin, until a session takes it.
-    install: Option<Affine<Install>>,
+    /// The plugin, until a session takes it. Boxed: an opened plugin is far
+    /// larger than the errors that hand a node back.
+    install: Option<Box<Affine<Install>>>,
     /// The session that loaded it, the only one it may be added to.
     session: SessionId,
 }
@@ -259,7 +260,7 @@ impl PluginNode {
             .install
             .take()
             .expect("a node holds its plugin until taken");
-        (Affine::into_inner(install), self.handle.clone())
+        (Affine::into_inner(*install), self.handle.clone())
     }
 }
 
@@ -308,9 +309,9 @@ pub enum SwapPluginError {
     #[error("the plugin has {got} where its node has {was}")]
     Ports {
         /// The incoming plugin's ports.
-        got: PluginPorts,
+        got: Box<PluginPorts>,
         /// The node's.
-        was: PluginPorts,
+        was: Box<PluginPorts>,
         /// The incoming node.
         node: PluginNode,
     },
@@ -429,10 +430,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         // A replacement with other ports would leave the node's edges on ports
         // that are gone and refuse every later commit.
         if with.handle.shared.ports != was {
-            let got = with.handle.shared.ports.clone();
+            let got = Box::new(with.handle.shared.ports.clone());
             return Err(SwapPluginError::Ports {
                 got,
-                was,
+                was: Box::new(was),
                 node: with,
             });
         }
