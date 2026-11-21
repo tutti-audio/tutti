@@ -61,7 +61,7 @@ pub struct Fade {
 }
 
 impl Fade {
-    /// A fade of `duration` frames along [`FadeLaw::default`].
+    /// A fade of `duration` frames along [`FadeLaw::EqualAmplitude`].
     #[must_use]
     pub const fn new(duration: Samples) -> Self {
         Self {

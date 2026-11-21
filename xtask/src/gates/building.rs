@@ -861,7 +861,8 @@ pub(super) const ALLOW: &[Allow] = &[
         "crates/tutti-session/src/graph/observe.rs",
         "Meters::open",
         DEFAULT_ENUM,
-        "the alignment is the meter's one setting: an options type for one field adds a type for nothing",
+        "both alignments are everyday uses (a track's level reads `Raw`, a device's output reads `ToOutput`), \
+         so the alignment is the call's choice, not an option; `open_node` is the raw shorthand",
     ),
 ];
 
