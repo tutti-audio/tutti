@@ -13,7 +13,8 @@
 //! `s[n] = (1 - d) y[n] + d s[n - 1]`, so each trip loses highs, and `d = 0` is the plain
 //! comb. Freeverb's combs are this filter at their own tunings.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use core::num::NonZeroUsize;
+use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
 use tutti_units::{Feedback, SampleRate, Samples, Tail};
 
 use crate::TAIL_FLOOR;
@@ -43,14 +44,14 @@ pub struct CombFilter<F: Float> {
 }
 
 impl<F: Float> CombFilter<F> {
-    /// A silent comb of `form`, its delay `delay` frames (at least one) and `gain` as its
+    /// A silent comb of `form`, its delay `delay` frames and `gain` as its
     /// coefficient (a feedback comb needs it below 1: [`Feedback`]'s own contract), with no
     /// damping.
     #[must_use]
-    pub fn new(form: CombForm, delay: Samples, gain: Feedback) -> Self {
+    pub fn new(form: CombForm, delay: NonZeroUsize, gain: Feedback) -> Self {
         Self {
             form,
-            ring: DelayRing::new(delay.get().max(1)),
+            ring: DelayRing::new(delay.get()),
             gain: F::from_unit(gain),
             damp: F::ZERO,
             pass: F::ONE,
@@ -149,11 +150,11 @@ pub struct CombBank<F: Float> {
 }
 
 impl<F: Float> CombBank<F> {
-    /// `width` silent combs (at least one) of `form` and `delay`, at `gain`. Allocates.
+    /// `width` silent combs (an empty layout has none) of `form` and `delay`, at `gain`. Allocates.
     #[must_use]
-    pub fn new(form: CombForm, delay: Samples, gain: Feedback, width: usize) -> Self {
+    pub fn new(form: CombForm, delay: NonZeroUsize, gain: Feedback, width: ChannelLayout) -> Self {
         Self {
-            combs: vec![CombFilter::new(form, delay, gain); width.max(1)],
+            combs: vec![CombFilter::new(form, delay, gain); usize::from(width.count())],
         }
     }
 

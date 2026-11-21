@@ -35,8 +35,9 @@
 //! the RT60 with it, by 1.5e-6 of itself; a loop gain multiplies a line's sample, which rounds by
 //! about `u` a trip whatever the form.
 
+use core::num::NonZeroUsize;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_units::{Feedback, Gain, Mix, SampleRate, Samples, Seconds, Tail};
+use tutti_units::{Feedback, Gain, Mix, SampleRate, Seconds, Tail};
 
 use super::design::FreeverbControls;
 use crate::delay::{ring_seconds, trips};
@@ -58,8 +59,9 @@ const MAX_LINE: usize = 1 << 16;
 
 /// A tuning scaled to `rate`, in whole frames: at least one (a line of none would never
 /// advance) and at most [`MAX_LINE`].
-fn scale_tuning(rate: SampleRate, tuning: usize) -> usize {
-    ((rate.get() / 44100_f64 * (tuning as f64)).round() as usize).clamp(1, MAX_LINE)
+fn scale_tuning(rate: SampleRate, tuning: usize) -> NonZeroUsize {
+    let frames = ((rate.get() / 44100_f64 * (tuning as f64)).round() as usize).min(MAX_LINE);
+    NonZeroUsize::new(frames).unwrap_or(NonZeroUsize::MIN)
 }
 
 /// The comb loop gain and damping Freeverb starts at: the General MIDI figures.
@@ -136,7 +138,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
                     .map(|&t| {
                         CombFilter::new(
                             CombForm::Feedback,
-                            Samples::new(scale_tuning(rate, t + spread)),
+                            scale_tuning(rate, t + spread),
                             Feedback::NONE,
                         )
                     })
@@ -146,7 +148,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
                     .map(|&t| {
                         AllPassFilter::new(
                             AllPassForm::Freeverb,
-                            Samples::new(scale_tuning(rate, t + spread)),
+                            scale_tuning(rate, t + spread),
                             ALLPASS_FEEDBACK,
                         )
                     })

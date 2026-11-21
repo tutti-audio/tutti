@@ -89,7 +89,11 @@ fn a_comb_is_the_feedback_comb_of_its_definition() {
         (64, 0.7, 0.4),
         (200, 0.98, 0.1),
     ] {
-        let mut comb = CombFilter::<f32>::new(CombForm::Feedback, Samples::new(l), Feedback::NONE);
+        let mut comb = CombFilter::<f32>::new(
+            CombForm::Feedback,
+            NonZeroUsize::new(l).unwrap(),
+            Feedback::NONE,
+        );
         comb.retune(g as f32, d as f32);
         let len = 6 * l + 3;
         let x = impulse(len);
@@ -120,7 +124,7 @@ fn an_all_pass_is_freeverbs_form() {
     let (d, g) = (8usize, 0.5f32);
     let mut ap = AllPassFilter::<f32>::new(
         AllPassForm::Freeverb,
-        Samples::new(d),
+        NonZeroUsize::new(d).unwrap(),
         Feedback::new(f64::from(g)),
     );
     let mut h = impulse(18 * d + 1);
@@ -248,7 +252,8 @@ fn a_comb_falls_sixty_decibels_in_the_schroeder_rt60() {
     for room in [0.0f64, 0.5, 0.9, 1.0] {
         let feedback = controls(room, 0.0).feedback();
         let g = feedback.get();
-        let mut comb = CombFilter::<f32>::new(CombForm::Feedback, Samples::new(l), feedback);
+        let mut comb =
+            CombFilter::<f32>::new(CombForm::Feedback, NonZeroUsize::new(l).unwrap(), feedback);
         let trips = (-3.0 / g.log10()).ceil() as usize + 2;
         let len = (trips + 1) * l;
         let x = impulse(len);
@@ -577,7 +582,11 @@ fn an_f64_comb_is_its_difference_equation() {
         s = y[n] * (1.0 - d1) + s * d1;
         v[n] = x[n] * g_in + s * g;
     }
-    let mut comb = CombFilter::<f64>::new(CombForm::Feedback, Samples::new(l), Feedback::NONE);
+    let mut comb = CombFilter::<f64>::new(
+        CombForm::Feedback,
+        NonZeroUsize::new(l).unwrap(),
+        Feedback::NONE,
+    );
     comb.retune(g, d1);
     let got: Vec<f64> = x.iter().map(|&x| comb.tick(x * g_in)).collect();
     assert_close_f64(&got, &y, 2.0f64.powi(-45));
@@ -597,8 +606,11 @@ fn an_f64_all_pass_is_its_difference_equation() {
         y[n] = out - x[n];
         b[n] = x[n] + a * out;
     }
-    let mut ap =
-        AllPassFilter::<f64>::new(AllPassForm::Freeverb, Samples::new(d), Feedback::new(a));
+    let mut ap = AllPassFilter::<f64>::new(
+        AllPassForm::Freeverb,
+        NonZeroUsize::new(d).unwrap(),
+        Feedback::new(a),
+    );
     let mut got = x.clone();
     ap.process(&mut got);
     assert_close_f64(&got, &y, 2.0f64.powi(-45));

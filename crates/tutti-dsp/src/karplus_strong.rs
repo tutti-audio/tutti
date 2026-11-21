@@ -16,11 +16,12 @@
 //! A control that moves the frequency re-tunes the loop at once: the delay line's length jumps
 //! and the loop's content is kept, so a sweep is not click-free.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use core::num::NonZeroUsize;
+use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
 use tutti_units::{Db, Feedback, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use crate::delay::{DelayRing, ring_seconds, trips};
-use crate::string_tuning::{Tuned, per_trip_decay, period, tune};
+use crate::string_tuning::{LowestPitch, Tuned, per_trip_decay, period, tune};
 use crate::{AllPassFilter, AllPassForm, TAIL_FLOOR};
 
 /// The controls of a [`KarplusStrong`].
@@ -57,7 +58,7 @@ const AVERAGE_DELAY: f64 = 0.5;
 #[derive(Clone, Debug)]
 pub struct KarplusStrong<F: Float> {
     rate: SampleRate,
-    lowest: Hz,
+    lowest: LowestPitch,
     ring: DelayRing<F>,
     all_pass: AllPassFilter<F>,
     tuned: Tuned,
@@ -66,16 +67,16 @@ pub struct KarplusStrong<F: Float> {
 
 impl<F: Float> KarplusStrong<F> {
     /// A silent string at [`KarplusStrongControls::DEFAULT`], whose pitch goes down to
-    /// `lowest` at `rate`. Allocates.
+    /// `lowest` at `rate`. Allocates. A `lowest` above `fs / 6` leaves one pitch, the top.
     #[must_use]
-    pub fn new(lowest: Hz, rate: SampleRate) -> Self {
+    pub fn new(lowest: LowestPitch, rate: SampleRate) -> Self {
         let longest = period(Hz::ZERO, lowest, rate, 1);
         let frames = tune(longest, SampleSpan::of(AVERAGE_DELAY), 1).whole.get() + 2;
         let mut string = Self {
             rate,
             lowest,
             ring: DelayRing::new(frames),
-            all_pass: AllPassFilter::new(AllPassForm::Lattice, Samples::new(1), Feedback::NONE),
+            all_pass: AllPassFilter::new(AllPassForm::Lattice, NonZeroUsize::MIN, Feedback::NONE),
             tuned: Tuned {
                 whole: Samples::new(1),
                 delay: SampleSpan::of(1.0),
@@ -142,11 +143,11 @@ pub struct KarplusStrongBank<F: Float> {
 }
 
 impl<F: Float> KarplusStrongBank<F> {
-    /// `width` silent strings (at least one) down to `lowest` at `rate`. Allocates.
+    /// `width` silent strings down to `lowest` at `rate`. Allocates.
     #[must_use]
-    pub fn new(lowest: Hz, rate: SampleRate, width: usize) -> Self {
+    pub fn new(lowest: LowestPitch, rate: SampleRate, width: ChannelLayout) -> Self {
         Self {
-            strings: vec![KarplusStrong::new(lowest, rate); width.max(1)],
+            strings: vec![KarplusStrong::new(lowest, rate); usize::from(width.count())],
         }
     }
 

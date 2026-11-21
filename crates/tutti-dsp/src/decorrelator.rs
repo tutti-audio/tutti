@@ -179,7 +179,7 @@ pub struct Decorrelator<F: Float> {
 }
 
 impl<F: Float> Decorrelator<F> {
-    /// A decorrelator of `width` channels (an empty layout is one) at `rate`. Channel `c`'s
+    /// A decorrelator of `width` channels (an empty layout has none) at `rate`. Channel `c`'s
     /// sequence is [`VelvetNoise::new`] of the `c`-th word of `seed`'s stream. Allocates.
     ///
     /// # Errors
@@ -193,7 +193,7 @@ impl<F: Float> Decorrelator<F> {
         seed: u64,
     ) -> Result<Self, VelvetNoiseError> {
         let mut seeds = SplitMix64::new(seed);
-        let sequences = (0..width.count().max(1))
+        let sequences = (0..width.count())
             .map(|_| VelvetNoise::new(density, length, rate, seeds.next_u64()))
             .collect::<Result<Vec<_>, _>>()?;
         let frames = length.get().get() * rate.get();

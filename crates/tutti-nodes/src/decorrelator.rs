@@ -19,12 +19,12 @@ pub struct DecorrelatorConfig {
 }
 
 impl DecorrelatorConfig {
-    /// A decorrelator of `width` channels (an empty layout is taken as mono) at
+    /// A decorrelator of `width` channels at
     /// [`VelvetDensity::DEFAULT`] and [`VelvetLength::DEFAULT`], seed 0.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             density: VelvetDensity::DEFAULT,
             length: VelvetLength::DEFAULT,
             seed: 0,
