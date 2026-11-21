@@ -293,8 +293,9 @@ pub mod nodes {
     };
     pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
     pub use tutti_dsp::{
-        Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, VelvetDensity,
-        VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise, VelvetPulse,
+        Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, ReflectionOrder,
+        ShoeboxConfig, ShoeboxError, ShoeboxRoom, VelvetDensity, VelvetDensityError, VelvetLength,
+        VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
     };
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,

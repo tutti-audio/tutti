@@ -70,3 +70,29 @@ fn a_tap_that_cannot_run_is_refused_at_construction() {
     let bad = EarlyReflectionsNode::<f32>::try_from(config(1, &[tap(1.0, f64::NAN, 0)]));
     assert_eq!(bad.err(), Some(EarlyReflectionsError::Gain { index: 0 }));
 }
+
+/// A room's taps make a one-channel stage that rings for the last image: the tail is that
+/// image's delay rounded up.
+#[test]
+fn a_rooms_taps_are_a_stage_that_rings_for_its_last_image() {
+    use tutti_dsp::ReflectionOrder;
+    use tutti_units::{Metres, Normalized};
+    let m = Metres::of;
+    let room = tutti_dsp::ShoeboxRoom::try_from(
+        tutti_dsp::ShoeboxConfig::new(
+            [m(10.0), m(8.0), m(6.0)],
+            [m(3.0), m(4.0), m(2.0)],
+            [m(6.0), m(2.0), m(1.5)],
+            Normalized::of(0.3),
+        )
+        .order(ReflectionOrder::Second),
+    )
+    .unwrap();
+    let taps = room.taps(RATE);
+    let last = taps.taps.iter().map(|t| t.delay).next_back().unwrap();
+    let n = prepared(
+        EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(1u16, taps)).unwrap(),
+    );
+    assert_eq!(n.shape().audio_out().count(), 1);
+    assert_eq!(n.shape().tail, Tail::Finite(last.to_samples_ceil()));
+}
