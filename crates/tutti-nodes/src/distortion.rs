@@ -284,11 +284,10 @@ impl<F: Float + Lerp> Oversampled<F> {
             if let (Ok(high), Ok(shaped)) = (
                 Planes::new(&highs[..width]),
                 PlanesMut::new(&mut shaped[..width]),
-            ) {
-                if let Ok(mut wide) = InputOutput::new(high.frames(), high, shaped) {
-                    let shaped = bank.process(held, &mut wide);
-                    debug_assert!(shaped.is_ok(), "the bank is the node's width");
-                }
+            ) && let Ok(mut wide) = InputOutput::new(high.frames(), high, shaped)
+            {
+                let shaped = bank.process(held, &mut wide);
+                debug_assert!(shaped.is_ok(), "the bank is the node's width");
             }
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
                 state
