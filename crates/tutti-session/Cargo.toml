@@ -148,6 +148,8 @@ au = ["plugin", "tutti-plugin/au"]
 testing = ["tutti-cpal?/testing"]
 
 [dev-dependencies]
+# Test reads block on a `ParamRead` (a test may block).
+futures-lite.workspace = true
 # Turns `testing` on for this crate's own tests, benches and doctests.
 tutti-session = { path = ".", features = ["testing"] }
 # The `FakeBackend` the hot-plug tests drive (`plug`, `unplug`). Dev-only:

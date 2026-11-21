@@ -8,7 +8,7 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
+    Answer, AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
     Control, Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features,
     Health, LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor,
     PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RateRefusal,
@@ -31,12 +31,23 @@ use super::{Ipc, IpcController};
 macro_rules! served_control {
     ($ty:ty) => {
         impl AnyThread for $ty {
-            fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-                self.link.bridge.audio().parameters()
+            fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+                self.link.bridge.audio().parameters_answer()
             }
 
             fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
                 self.link.bridge.audio().parameter(id)
+            }
+
+            fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
+                self.link.bridge.audio().parameter_answer(id)
+            }
+
+            fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
+                self.link
+                    .bridge
+                    .audio()
+                    .parameter_normalized_answer(id, plain)
             }
 
             /// Stored in the parameter's slot and sent with the next block as a
@@ -85,10 +96,6 @@ macro_rules! served_control {
 
             fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
                 self.link.bridge.audio().parameter_plain(id, value)
-            }
-
-            fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized> {
-                self.link.bridge.audio().parameter_normalized(id, plain)
             }
 
             fn parameter_text(&self, id: ParamId, value: Normalized) -> Option<String> {
@@ -206,7 +213,7 @@ macro_rules! served_control {
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
-                AnyThread::parameter_descriptors(self).unwrap_or_default()
+                self.link.bridge.audio().parameters().unwrap_or_default()
             }
 
             fn parameter(&self, _main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
@@ -255,7 +262,7 @@ macro_rules! served_control {
                 id: ParamId,
                 plain: f64,
             ) -> Option<Normalized> {
-                AnyThread::parameter_normalized(self, id, plain)
+                self.link.bridge.audio().parameter_normalized(id, plain)
             }
 
             fn parameter_text(
