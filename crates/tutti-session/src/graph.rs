@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept ([`SessionNode`]) |
 //! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written into `editor.spec_mut()` (a port holds a set of sources, which the graph sums) |
-//! | `replace` | `Editor::replace_or_swap` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from; parked while the graph re-prepares |
+//! | `replace` | `Editor::replace_or_swap` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
 //! | `refresh_node_latency` | `Editor::set_latency` |
@@ -48,6 +48,7 @@ use crate::fork::PendingExport;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
+use tutti_graph::NodeParts;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
 use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
@@ -78,7 +79,8 @@ pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{
-    Bus, BusSink, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, SetSources, Wire,
+    Bus, BusSink, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Removal,
+    SetSources, Wire,
 };
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
@@ -145,6 +147,39 @@ pub enum ReplaceRefused {
     /// The editor refused the swap.
     #[error("the graph refused the swap: {0}")]
     Editor(tutti_graph::CommitError),
+    /// The incoming node's shape differs from the running node's, and the
+    /// [`Replacement`] asked for a fade: a crossfade needs the same ports,
+    /// buses and latency. Nothing changed and the incoming node was dropped.
+    /// A caller who accepts the cut passes a zero-length [`Fade`]
+    /// ([`Replacement::fade`]).
+    #[error(
+        "{node:?} cannot fade to a node of another shape; replace it with a zero-length fade to cut"
+    )]
+    ShapeChanged {
+        /// The node.
+        node: NodeKey,
+        /// The running node's shape.
+        running: Box<tutti_graph::Shape>,
+        /// The incoming node's shape.
+        incoming: Box<tutti_graph::Shape>,
+    },
+}
+
+impl From<tutti_graph::CommitError> for ReplaceRefused {
+    fn from(error: tutti_graph::CommitError) -> Self {
+        match error {
+            tutti_graph::CommitError::FadeShape {
+                node,
+                running,
+                incoming,
+            } => Self::ShapeChanged {
+                node,
+                running,
+                incoming,
+            },
+            other => Self::Editor(other),
+        }
+    }
 }
 
 /// Why a swap made now took nothing: the graph is re-preparing and hands the
@@ -193,8 +228,38 @@ struct Entry {
     /// last drop releases something (a voice's stream) holds it while the node
     /// still renders. `None` for a node placed without [`SessionNode`]. Read
     /// by [`Graph::controls`].
-    controls: Option<Box<dyn Any + Send>>,
+    controls: Option<Held>,
 }
+
+/// How a node's controls are put under its key: its params, its slots and
+/// its reclaimer, as [`Graph::address`] does for the type that made them.
+type Addressing = fn(&ValueTable, NodeKey, &(dyn Any + Send)) -> Option<crate::Reclaimer>;
+
+/// A node's controls with the means to address them again, which a swap that
+/// is refused when it lands needs to give the outgoing node its values back.
+struct Held {
+    controls: Box<dyn Any + Send>,
+    addressing: Addressing,
+}
+
+/// What a swap does with a fade over a node that does not fit the running
+/// one's shape.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum OnShape {
+    /// Refuse it ([`ReplaceRefused::ShapeChanged`]): what a caller's
+    /// [`replace`](Graph::replace) gets.
+    Refuse,
+    /// Fade where the shape fits and cut where it does not: what the
+    /// session's own swaps (a plugin reloaded, rebuilt for new ports, one
+    /// that came back) get.
+    #[cfg(feature = "plugin")]
+    Cut,
+}
+
+/// What the controls under a key were when a replacement parked: the
+/// outgoing node's, or the incoming one an earlier parked replacement put
+/// there (`None`: a node with no controls).
+struct Stash(Option<Held>);
 
 /// The executor, while this side still holds it, and what a local render
 /// needs beside it.
@@ -216,12 +281,33 @@ trait ErasedSwap<F: Float>: Send {
     ) -> Result<(), SwapRefused<Box<dyn ErasedSwap<F>>>>;
 }
 
-struct Swap<N>(N);
+/// A node split into its unit and its controls, the unit as the
+/// [`IntoNode`] a swap places: the controls were addressed under the key
+/// when the swap parked, and the node still names its own type's kind.
+struct Unit<N, F: Float> {
+    parts: NodeParts<(), F>,
+    node: std::marker::PhantomData<fn() -> N>,
+}
 
-impl<F: Float, N> ErasedSwap<F> for Swap<N>
+impl<N: IntoNode<F>, F: Float> IntoNode<F> for Unit<N, F> {
+    type Controls = ();
+
+    fn into_parts(self) -> NodeParts<(), F> {
+        self.parts
+    }
+
+    fn kind() -> &'static str {
+        N::kind()
+    }
+}
+
+/// A node's unit waiting to be swapped in; its controls are already under
+/// the key.
+struct Swap<N, F: Float>(Unit<N, F>);
+
+impl<F: Float, N> ErasedSwap<F> for Swap<N, F>
 where
     N: SessionNode<F>,
-    N::Controls: Send + 'static,
 {
     fn swap(
         self: Box<Self>,
@@ -229,12 +315,12 @@ where
         node: NodeKey,
         fade: Option<Fade>,
     ) -> Result<(), SwapRefused<Box<dyn ErasedSwap<F>>>> {
-        match graph.swap_node(node, self.0, fade) {
-            Ok(controls) => {
-                graph.address::<N>(node, controls);
+        match graph.place_unit(node, self.0, fade, OnShape::Refuse) {
+            Ok(()) => {
+                graph.drop_plugin_record(node);
                 Ok(())
             }
-            Err(SwapRefused::Busy(n)) => Err(SwapRefused::Busy(Box::new(Swap(n)))),
+            Err(SwapRefused::Busy(unit)) => Err(SwapRefused::Busy(Box::new(Swap(unit)))),
             Err(SwapRefused::Failed(refused)) => Err(SwapRefused::Failed(refused)),
         }
     }
@@ -264,6 +350,9 @@ struct Parked<F: Float> {
     node: NodeKey,
     swap: Box<dyn ErasedSwap<F>>,
     fade: Option<Fade>,
+    /// What the key's controls were when it parked, `None` for a plugin
+    /// swap, which leaves them alone until it lands.
+    stash: Option<Stash>,
 }
 
 impl<F: Float> std::fmt::Debug for Parked<F> {
@@ -348,6 +437,9 @@ pub struct Graph<F: Float = f32> {
     reopened: BTreeMap<RootReader, observe::Held<F>>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked<F>>,
+    /// The nodes whose waiting replacements a removal dropped, until the
+    /// session reports them ([`SessionEvent::ReplaceDropped`](crate::SessionEvent::ReplaceDropped)).
+    dropped: Vec<NodeKey>,
     /// The wiring each re-insert dropped, by node, until the commit that
     /// carries the re-insert is sent and the session reports it
     /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)).
@@ -560,6 +652,7 @@ impl<F: Float> Graph<F> {
             output_taps: BTreeMap::new(),
             reopened: BTreeMap::new(),
             parked: VecDeque::new(),
+            dropped: Vec::new(),
             unwired: Vec::new(),
             rewired: Vec::new(),
             removed: Vec::new(),
@@ -794,7 +887,8 @@ impl<F: Float> Graph<F> {
         self.nodes
             .get(&key.erase())?
             .controls
-            .as_deref()?
+            .as_ref()?
+            .controls
             .downcast_ref()
     }
 
@@ -928,14 +1022,30 @@ impl<F: Float> Graph<F> {
     /// Keeps what a [`SessionNode`] says of its controls under `node`: its
     /// params, its slots and its reclaimer.
     fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: N::Controls) {
+        let held = Held {
+            controls: Box::new(controls),
+            addressing: Self::addressing::<N>,
+        };
         if let Some(entry) = self.nodes.get_mut(&node) {
-            if let Some(set) = N::params(&controls) {
-                self.values.address(node, std::any::TypeId::of::<N>(), set);
-            }
-            self.values.provide_node(N::slots(node, &controls));
-            entry.reclaimer = N::reclaimer(&controls).into_reclaimer();
-            entry.controls = Some(Box::new(controls));
+            entry.reclaimer = (held.addressing)(&self.values, node, held.controls.as_ref());
+            entry.controls = Some(held);
         }
+    }
+
+    /// [`address`](Self::address)'s step for the controls of an `N`.
+    fn addressing<N: SessionNode<F>>(
+        values: &ValueTable,
+        node: NodeKey,
+        controls: &(dyn Any + Send),
+    ) -> Option<crate::Reclaimer> {
+        let controls = controls
+            .downcast_ref::<N::Controls>()
+            .expect("controls are held with the addressing of their own type");
+        if let Some(set) = N::params(controls) {
+            values.address(node, std::any::TypeId::of::<N>(), set);
+        }
+        values.provide_node(N::slots(node, controls));
+        N::reclaimer(controls).into_reclaimer()
     }
 }
 
@@ -1005,6 +1115,11 @@ impl Graph {
     /// first update after a re-prepare resumes
     /// ([`SessionEvent::Replaced`](crate::SessionEvent::Replaced)).
     ///
+    /// Unlike [`replace`](Self::replace), the key keeps naming the outgoing
+    /// plugin while the swap waits: writes through it reach the outgoing
+    /// plugin and `handle` answers for it, because the incoming client is
+    /// bound only when the swap lands and a bound plugin cannot be unbound.
+    ///
     /// # Errors
     ///
     /// [`ReplaceRefused`] on a poisoned graph or a `node` not in it.
@@ -1020,12 +1135,12 @@ impl Graph {
             fade,
         } = replacement;
         if self.parked.iter().any(|p| p.node == node) {
-            self.park(node, Box::new(PluginSwap(client)), fade);
+            self.park(node, Box::new(PluginSwap(client)), fade, None);
             return Ok(Key::new(node));
         }
         match self.replace_plugin_now(node, client, fade) {
             Ok(()) => {}
-            Err(SwapRefused::Busy(c)) => self.park(node, Box::new(PluginSwap(c)), fade),
+            Err(SwapRefused::Busy(c)) => self.park(node, Box::new(PluginSwap(c)), fade, None),
             Err(SwapRefused::Failed(refused)) => return Err(refused),
         }
         Ok(Key::new(node))
@@ -1040,7 +1155,7 @@ impl Graph {
         client: Box<tutti_plugin::PluginClient>,
         fade: Option<Fade>,
     ) -> Result<(), SwapRefused<Box<tutti_plugin::PluginClient>>> {
-        let rebinder = self.replace_plugin_with_rebinder(node, client, fade)?;
+        let rebinder = self.replace_plugin_with_rebinder(node, client, fade, OnShape::Refuse)?;
         if let Some(hosted) = self.plugins.get_mut(&node) {
             hosted.set_rebinder(rebinder);
         }
@@ -1060,6 +1175,7 @@ impl Graph {
         node: impl Into<NodeKey>,
         client: Box<tutti_plugin::PluginClient>,
         fade: Option<Fade>,
+        on_shape: OnShape,
     ) -> Result<tutti_plugin::catalog::PluginRebinder, SwapRefused<Box<tutti_plugin::PluginClient>>>
     {
         let node = node.into();
@@ -1083,7 +1199,7 @@ impl Graph {
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
-        match self.swap_unit(node, bound, fade) {
+        match self.swap_unit(node, bound, fade, on_shape) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike
                 // `replace`, which takes it out): its handle is what the
@@ -1125,6 +1241,7 @@ impl Graph {
         node: NodeKey,
         plugin: Box<tutti_plugin::catalog::Plugin>,
         fade: Option<Fade>,
+        on_shape: OnShape,
     ) -> Result<
         tutti_plugin::catalog::PluginRebinder,
         SwapRefused<Box<tutti_plugin::catalog::Plugin>>,
@@ -1144,7 +1261,7 @@ impl Graph {
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
         let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
-        match self.swap_unit(node, bound, fade) {
+        match self.swap_unit(node, bound, fade, on_shape) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
@@ -1185,7 +1302,7 @@ impl Graph {
         node: NodeKey,
         bound: tutti_plugin::catalog::BoundPlugin,
     ) -> Result<(), SwapRefused<tutti_plugin::catalog::BoundPlugin>> {
-        self.swap_unit(node, bound, None).map(|_| ())
+        self.swap_unit(node, bound, None, OnShape::Cut).map(|_| ())
     }
 
     /// Puts the silent stand-in of a plugin that is gone at `node`
@@ -1211,7 +1328,7 @@ impl Graph {
             return Ok(false);
         }
         let stand_in = tutti_graph::ForkByClone(crate::plugin::Lost::of(shape));
-        match self.swap_unit(node, stand_in, None) {
+        match self.swap_unit(node, stand_in, None, OnShape::Cut) {
             Ok(_) => Ok(true),
             Err(SwapRefused::Failed(refused)) => Err(refused),
             // A re-prepare is `swap_unit`'s only cause for `Busy`, and it was
@@ -1316,19 +1433,38 @@ impl<F: Float> Graph<F> {
         pinned
     }
 
-    /// Swaps the node behind `node` for the replacement's under its fade
-    /// when the shape fits the running unit's, else as a plain swap on the
-    /// next commit (`Editor::replace_or_swap`), and hands back the incoming
-    /// node's key. The incoming node goes in as [`add`](Self::add) puts one
-    /// in: its params are addressed and its reclaimer kept, and the outgoing
-    /// node's go with it.
+    /// Swaps the node behind `node` for the replacement's under its fade, and
+    /// hands back the incoming node's key. The incoming node goes in as
+    /// [`add`](Self::add) puts one in: its params are addressed and its
+    /// reclaimer kept, and the outgoing node's go with it.
+    ///
+    /// The fade is the [`Replacement`]'s: the declick unless it set one. A
+    /// crossfade needs the incoming node to have the running node's shape
+    /// (its ports, buses and latency): over another shape the call is refused
+    /// with [`ReplaceRefused::ShapeChanged`] and nothing changes. **The
+    /// default declick is not zero, so a [`Replacement::new`] across a shape
+    /// change is refused**: a caller who accepts the cut passes
+    /// [`Replacement::fade`] with a zero-length [`Fade`], and the node lands
+    /// as a plain swap on the next commit. Nothing to fade from (the node
+    /// was added since the last commit) is a plain swap too.
     ///
     /// It always lands. While the graph re-prepares (a sample-rate or
     /// block-size change between its two commits) the node waits, and the
     /// first update that finds the graph resumed swaps it in and reports
-    /// [`SessionEvent::Replaced`](crate::SessionEvent::Replaced). A
-    /// replacement asked for while another of the same node waits waits
-    /// behind it, so the later one still wins.
+    /// [`SessionEvent::Replaced`](crate::SessionEvent::Replaced), or
+    /// [`SessionEvent::ReplaceFailed`](crate::SessionEvent::ReplaceFailed)
+    /// when the shapes then turn out to differ under a fade. A replacement
+    /// asked for while another of the same node waits waits behind it, so the
+    /// later one still wins. [`remove`](Self::remove) drops a waiting
+    /// replacement and reports it
+    /// ([`SessionEvent::ReplaceDropped`](crate::SessionEvent::ReplaceDropped)).
+    ///
+    /// **The returned key names the incoming node from the call on**, also
+    /// while it waits: its params are addressed at once, so a write through
+    /// the key's targets reaches the incoming node and lands with it, and
+    /// [`handle`](Self::handle) and the other readers of the node's controls
+    /// answer for it. The outgoing node plays on, as it was, until the swap
+    /// lands.
     ///
     /// (`plugin`) A hosted plugin replaced this way is no longer hosted: its
     /// record is dropped, so its health, snapshots and render mode stop
@@ -1337,8 +1473,8 @@ impl<F: Float> Graph<F> {
     ///
     /// # Errors
     ///
-    /// [`ReplaceRefused`] on a poisoned graph or a `node` not in it, dropping
-    /// the incoming node.
+    /// [`ReplaceRefused`] on a poisoned graph, a `node` not in it, or a fade
+    /// over another shape, dropping the incoming node.
     pub fn replace<N>(
         &mut self,
         node: impl Into<NodeKey>,
@@ -1350,17 +1486,58 @@ impl<F: Float> Graph<F> {
     {
         let node = node.into();
         let Replacement { incoming, fade } = replacement;
-        let incoming = incoming.bind_tempo(&self.tempo);
+        if let Some(cause) = self.editor.poison_cause() {
+            return Err(ReplaceRefused::Poisoned(cause.to_owned()));
+        }
+        if !self.nodes.contains_key(&node) {
+            return Err(ReplaceRefused::NoSuchNode(node));
+        }
+        let NodeParts {
+            node: unit,
+            controls,
+            fork,
+        } = incoming.bind_tempo(&self.tempo).into_parts();
+        let unit = Unit::<N, F> {
+            parts: NodeParts {
+                node: unit,
+                controls: (),
+                fork,
+            },
+            node: std::marker::PhantomData,
+        };
         if self.parked.iter().any(|p| p.node == node) {
-            self.park(node, Box::new(Swap(incoming)), fade);
+            self.park_typed::<N>(node, unit, controls, fade);
             return Ok(Key::new(node));
         }
-        match self.swap_node(node, incoming, fade) {
-            Ok(controls) => self.address::<N>(node, controls),
-            Err(SwapRefused::Busy(n)) => self.park(node, Box::new(Swap(n)), fade),
+        match self.place_unit(node, unit, fade, OnShape::Refuse) {
+            Ok(()) => {
+                self.retire_outgoing(node);
+                self.drop_plugin_record(node);
+                self.address::<N>(node, controls);
+            }
+            Err(SwapRefused::Busy(unit)) => self.park_typed::<N>(node, unit, controls, fade),
             Err(SwapRefused::Failed(refused)) => return Err(refused),
         }
         Ok(Key::new(node))
+    }
+
+    /// Parks `unit` behind a re-prepare, with its controls addressed under
+    /// `node` now: the outgoing controls wait in the parked swap until it
+    /// lands or is refused.
+    fn park_typed<N: SessionNode<F>>(
+        &mut self,
+        node: NodeKey,
+        unit: Unit<N, F>,
+        controls: N::Controls,
+        fade: Option<Fade>,
+    ) {
+        let outgoing = self.nodes.get_mut(&node).and_then(|e| e.controls.take());
+        if let Some(entry) = self.nodes.get_mut(&node) {
+            entry.reclaimer = None;
+        }
+        self.values.retire(node);
+        self.address::<N>(node, controls);
+        self.park(node, Box::new(Swap(unit)), fade, Some(Stash(outgoing)));
     }
 
     /// Registers the plugin hosted at `node` with the value table, as its
@@ -1373,29 +1550,43 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// The swap under [`replace`](Self::replace), addressing nothing: the
-    /// caller addresses the incoming node.
-    fn swap_node<N: IntoNode<F>>(
-        &mut self,
-        node: NodeKey,
-        incoming: N,
-        fade: Option<Fade>,
-    ) -> Result<N::Controls, SwapRefused<N>> {
-        let controls = self.swap_unit(node, incoming, fade)?;
+    /// Takes the record of a plugin hosted at `node` out, as a swap that
+    /// took leaves it: the node is no longer hosted.
+    fn drop_plugin_record(&mut self, node: NodeKey) {
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
             record.retire().settle(node, &mut self.graveyard);
         }
-        Ok(controls)
+        #[cfg(not(feature = "plugin"))]
+        let _ = node;
     }
 
-    /// [`replace`](Self::replace)'s swap, leaving the plugin record alone. A
-    /// `fade` of `None` is the declick at the graph's rate.
+    /// [`replace`](Self::replace)'s swap of a plugin's node, leaving the
+    /// plugin record alone: [`place_unit`](Self::place_unit) and the outgoing
+    /// controls retired. A `fade` of `None` is the declick at the graph's
+    /// rate.
+    #[cfg(feature = "plugin")]
     fn swap_unit<N: IntoNode<F>>(
         &mut self,
         node: NodeKey,
         incoming: N,
         fade: Option<Fade>,
+        on_shape: OnShape,
+    ) -> Result<N::Controls, SwapRefused<N>> {
+        let controls = self.place_unit(node, incoming, fade, on_shape)?;
+        self.retire_outgoing(node);
+        Ok(controls)
+    }
+
+    /// The editor's half of a swap: the unit placed at `node` over `fade`
+    /// (`None` is the declick at the graph's rate), what it unwired noted and
+    /// the next commit owed. The controls under the key are the caller's.
+    fn place_unit<N: IntoNode<F>>(
+        &mut self,
+        node: NodeKey,
+        incoming: N,
+        fade: Option<Fade>,
+        on_shape: OnShape,
     ) -> Result<N::Controls, SwapRefused<N>> {
         if let Some(cause) = self.editor.poison_cause() {
             return Err(SwapRefused::Failed(ReplaceRefused::Poisoned(
@@ -1411,27 +1602,60 @@ impl<F: Float> Graph<F> {
             return Err(SwapRefused::Busy(incoming));
         }
         let rate = self.editor.prepare().sample_rate();
-        let placed = self
-            .editor
-            .replace_or_swap(
-                node,
-                incoming,
-                fade.unwrap_or_else(|| Fade::seconds(tutti_graph::DECLICK, rate)),
-            )
-            .map_err(|e| SwapRefused::Failed(ReplaceRefused::Editor(e)))?;
-        let controls = placed.controls;
-        self.note_unwired(node, &placed.unwired);
-        if let Some(entry) = self.nodes.get_mut(&node) {
-            self.values.retire(node);
-            entry.reclaimer = None;
-            if let Some(controls) = entry.controls.take() {
-                self.retiring.push((node, controls));
+        let fade = fade.unwrap_or_else(|| Fade::seconds(tutti_graph::DECLICK, rate));
+        let (controls, unwired) = match on_shape {
+            OnShape::Refuse => {
+                let placed = self
+                    .editor
+                    .replace_or_swap(node, incoming, fade)
+                    .map_err(|e| SwapRefused::Failed(e.into()))?;
+                (placed.controls, placed.unwired)
             }
-        }
+            // The fade where the shape fits, else a cut: a recovered or rebuilt
+            // plugin may report another latency, and no app asked for a fade
+            // over a swap the session made itself.
+            #[cfg(feature = "plugin")]
+            OnShape::Cut => {
+                let NodeParts {
+                    node: unit,
+                    controls,
+                    fork,
+                } = incoming.into_parts();
+                let fits = self.editor.fade_fits(node, &unit.shape()) == Some(true);
+                let unit = Unit::<N, F> {
+                    parts: NodeParts {
+                        node: unit,
+                        controls: (),
+                        fork,
+                    },
+                    node: std::marker::PhantomData,
+                };
+                let fade = if fits { fade } else { Fade::new(Samples::ZERO) };
+                let placed = self
+                    .editor
+                    .replace_or_swap(node, unit, fade)
+                    .map_err(|e| SwapRefused::Failed(e.into()))?;
+                (controls, placed.unwired)
+            }
+        };
+        self.note_unwired(node, &unwired);
         self.note_pass(node);
         self.sweep_gain_targets();
         self.edited = true;
         Ok(controls)
+    }
+
+    /// The outgoing node's controls at `node`, which a swap that took
+    /// replaced: its values go, and the controls are held until the outgoing
+    /// unit has left the render.
+    fn retire_outgoing(&mut self, node: NodeKey) {
+        if let Some(entry) = self.nodes.get_mut(&node) {
+            self.values.retire(node);
+            entry.reclaimer = None;
+            if let Some(held) = entry.controls.take() {
+                self.retiring.push((node, held.controls));
+            }
+        }
     }
 
     /// Drops the retiring controls of the nodes whose units the editor handed
@@ -1563,30 +1787,82 @@ impl<F: Float> Graph<F> {
         std::mem::take(&mut self.unwired)
     }
 
-    fn park(&mut self, node: NodeKey, swap: Box<dyn ErasedSwap<F>>, fade: Option<Fade>) {
-        self.parked.push_back(Parked { node, swap, fade });
+    fn park(
+        &mut self,
+        node: NodeKey,
+        swap: Box<dyn ErasedSwap<F>>,
+        fade: Option<Fade>,
+        stash: Option<Stash>,
+    ) {
+        self.parked.push_back(Parked {
+            node,
+            swap,
+            fade,
+            stash,
+        });
     }
 
     /// Try every waiting replacement again, in request order: one still
     /// `Busy` goes back on the queue, in order.
     pub(crate) fn retry_replacements(&mut self) -> Vec<Retried> {
         let mut out = Vec::new();
-        for Parked { node, swap, fade } in std::mem::take(&mut self.parked) {
+        let mut pending = std::mem::take(&mut self.parked);
+        while let Some(parked) = pending.pop_front() {
+            let (node, fade) = (parked.node, parked.fade);
             if self.parked.iter().any(|p| p.node == node) {
                 // An earlier one of the same node is still waiting.
-                self.parked.push_back(Parked { node, swap, fade });
+                self.parked.push_back(parked);
                 continue;
             }
+            let Parked { swap, stash, .. } = parked;
             match swap.swap(self, node, fade) {
-                Ok(()) => out.push(Retried::Landed { node }),
-                Err(SwapRefused::Busy(swap)) => self.parked.push_back(Parked { node, swap, fade }),
+                Ok(()) => {
+                    if let Some(Stash(Some(outgoing))) = stash {
+                        self.retiring.push((node, outgoing.controls));
+                    }
+                    out.push(Retried::Landed { node });
+                }
+                Err(SwapRefused::Busy(swap)) => self.parked.push_back(Parked {
+                    node,
+                    swap,
+                    fade,
+                    stash,
+                }),
                 Err(SwapRefused::Failed(refused)) => {
                     tracing::error!("graph: replacement of {node:?} refused: {refused}");
+                    if let Some(stash) = stash {
+                        self.give_back(node, stash, &mut pending);
+                    }
                     out.push(Retried::Failed { node, refused });
                 }
             }
         }
         out
+    }
+
+    /// A parked replacement of `node` that failed: its incoming node is
+    /// dropped, and the controls it stashed go to the next waiting one of the
+    /// node (in `pending`, the ones this pass has yet to try, or parked again)
+    /// or, with none, back under the key.
+    fn give_back(&mut self, node: NodeKey, stash: Stash, pending: &mut VecDeque<Parked<F>>) {
+        if let Some(next) = pending
+            .iter_mut()
+            .chain(self.parked.iter_mut())
+            .filter(|p| p.node == node)
+            .find_map(|p| p.stash.as_mut())
+        {
+            *next = stash;
+            return;
+        }
+        let Some(entry) = self.nodes.get_mut(&node) else {
+            return;
+        };
+        self.values.retire(node);
+        entry.controls = stash.0;
+        entry.reclaimer = entry
+            .controls
+            .as_ref()
+            .and_then(|held| (held.addressing)(&self.values, node, held.controls.as_ref()));
     }
 
     /// How many event inputs `node` declares.
@@ -1908,16 +2184,19 @@ impl<F: Float> Graph<F> {
     ///
     /// The graph's one removal for a node, whatever it is (a plugin, an inlet,
     /// a clip). The edges fade out first (a declicked removal): the node stays
-    /// in the editor, rendering, until they have. A replacement waiting on it is
-    /// dropped, and the session forgets what it declared on it (modulation,
-    /// MIDI routes, an input's capture) at its next update, as
+    /// in the editor, rendering, until they have. [`Removal::unfaded`] cuts it
+    /// at the next block boundary instead. A replacement waiting on it is
+    /// dropped and reported
+    /// ([`SessionEvent::ReplaceDropped`](crate::SessionEvent::ReplaceDropped)),
+    /// and the session forgets what it declared on the node (modulation, MIDI
+    /// routes, an input's capture) at its next update, as
     /// [`Session::remove`](crate::Session::remove) does at once.
     ///
     /// # Errors
     ///
     /// [`RemoveError::NoSuchNode`] when `node` is not in the graph (removed
     /// already, or never added); nothing changes.
-    pub fn remove(&mut self, node: impl Into<NodeKey>) -> Result<(), RemoveError> {
+    pub fn remove(&mut self, node: impl Into<NodeKey>) -> Result<Removal<'_, F>, RemoveError> {
         let node = node.into();
         self.values.retire(node);
         self.values.retire_node_controls(node);
@@ -1925,16 +2204,11 @@ impl<F: Float> Graph<F> {
         let Some(entry) = self.nodes.remove(&node) else {
             return Err(RemoveError::NoSuchNode(node));
         };
-        if let Some(controls) = entry.controls {
-            self.retiring.push((node, controls));
-        }
+        self.drop_parked(node, entry.controls);
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
             record.retire().settle(node, &mut self.graveyard);
         }
-        // A replacement waiting on it would only fail at its retry, dropping
-        // the incoming node then: drop it here, on the control thread.
-        self.parked.retain(|p| p.node != node);
         self.removed.push(node);
         // The edges it feeds fade out first: the node stays in the editor,
         // rendering, until they have.
@@ -1954,7 +2228,55 @@ impl<F: Float> Graph<F> {
         }
         self.fed_edges.retain(|_, s| !s.is_empty());
         self.edited = true;
-        Ok(())
+        Ok(Removal::new(self, node))
+    }
+
+    /// The cut of [`Removal::unfaded`]: `node` leaves the editor at the next
+    /// block boundary, its edges not faded out.
+    pub(crate) fn cut_removal(&mut self, node: NodeKey) {
+        if self.editor.is_leaving(node) {
+            self.editor.remove(node);
+            self.edited = true;
+        }
+    }
+
+    /// Drops the replacements waiting on `node`, which left the graph, and
+    /// holds what the outgoing node's controls were until its unit is gone.
+    /// `current` is what the entry held: the newest incoming node's, which
+    /// never ran, when a replacement waited.
+    fn drop_parked(&mut self, node: NodeKey, current: Option<Held>) {
+        // A replacement waiting on it would only fail at its retry, dropping
+        // the incoming node then: drop it here, on the control thread.
+        let mut stashes = Vec::new();
+        for parked in std::mem::take(&mut self.parked) {
+            if parked.node == node {
+                self.dropped.push(node);
+                stashes.extend(parked.stash);
+            } else {
+                self.parked.push_back(parked);
+            }
+        }
+        // The first stash is the controls of the node that is rendering; the
+        // rest, and the entry's, are of incoming nodes that never ran.
+        let mut stashes = stashes.into_iter();
+        match stashes.next() {
+            Some(Stash(outgoing)) => {
+                if let Some(held) = outgoing {
+                    self.retiring.push((node, held.controls));
+                }
+            }
+            None => {
+                if let Some(held) = current {
+                    self.retiring.push((node, held.controls));
+                }
+            }
+        }
+    }
+
+    /// The nodes whose waiting replacements a removal dropped since the last
+    /// call.
+    pub(crate) fn take_dropped(&mut self) -> Vec<NodeKey> {
+        std::mem::take(&mut self.dropped)
     }
 
     /// The nodes removed since the last call: what the session forgets its
@@ -4152,5 +4474,24 @@ mod root_fade_tests {
         let plan = g.editor.base().expect("a plan");
         assert_eq!(plan.root_bank(), None, "a hard declaration cuts");
         assert_eq!(plan.rendered_outputs(), 2);
+    }
+
+    /// **A session-owned swap fades where the shape fits and cuts where it
+    /// does not**: a node of the running shape swaps in under a crossfade, and
+    /// one of another width swaps in as a cut, neither refused.
+    #[cfg(feature = "plugin")]
+    #[test]
+    fn a_session_owned_swap_fades_where_the_shape_fits_and_cuts_where_it_does_not() {
+        for (incoming, fades) in [
+            (Const::mono(2.0), 1),
+            (Const::new(2.0, ChannelLayout::STEREO), 0),
+        ] {
+            let (mut g, node) = graph();
+            g.collect();
+            let swapped = g.swap_unit(node, ForkByClone(incoming), None, OnShape::Cut);
+            assert!(swapped.is_ok(), "never refused for its shape");
+            assert!(matches!(g.commit(), Committed::Sent));
+            assert_eq!(g.editor.fades_in_flight(), fades);
+        }
     }
 }

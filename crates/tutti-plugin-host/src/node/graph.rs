@@ -794,6 +794,43 @@ mod owed_tests {
         );
     }
 
+    /// **A render mode a prepare off the main thread could not apply is
+    /// reported through the handle's invalidations**, as the rate's refusal is,
+    /// and is told by the next prepare on the main thread. The mode change is a
+    /// main-thread call on every format.
+    #[test]
+    fn a_render_mode_prepared_off_the_main_thread_is_reported() {
+        let main = main_thread();
+        let (client, _handle) = load_client(main, tutti_fixtures::vst2_probe(), SampleRate::SR_48K)
+            .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));
+        let fork = client
+            .bind(tutti_fixtures::tempo())
+            .fork_instance(main, tutti_graph::ForkMode::Live)
+            .expect("the fork loads on the main thread");
+        let prepare = tutti_graph::Prepare::new(
+            SampleRate::SR_48K,
+            tutti_buffers::MaxBlock::new(tutti_units::Samples::new(BLOCK)).expect("a block"),
+        )
+        .with_render_mode(tutti_graph::RenderMode::Offline);
+        let fork = std::thread::spawn(move || {
+            let mut fork = fork;
+            fork.set_render_mode_from(&prepare);
+            fork
+        })
+        .join()
+        .expect("the thread returns");
+        let reports = fork.inner.lock().pump(main).reports;
+        assert!(
+            matches!(
+                reports.as_slice(),
+                [tutti_plugin_types::PluginInvalidation::RenderModeNotApplied { mode }]
+                    if *mode == tutti_graph::RenderMode::Offline
+            ),
+            "the refused mode is reported once: {reports:?}"
+        );
+        assert!(fork.inner.lock().pump(main).reports.is_empty(), "told once");
+    }
+
     /// Starts a rate change the way one pending for the main thread's pump
     /// does: the Processor is recalled, so the node's next block hands it
     /// back and renders without it.

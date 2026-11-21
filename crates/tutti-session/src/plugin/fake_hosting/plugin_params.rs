@@ -1,5 +1,5 @@
 //! A hosted plugin's parameters through the session's views:
-//! `Plugin::params`, `PluginParam`, `PluginParam::try_unit` and `ParamGesture`, over a fake
+//! `Plugin::params`, `PluginParam`, `PluginParam::unit` and `ParamGesture`, over a fake
 //! backend that declares its parameters and records what the host sets (no
 //! `plugin-server`), hosted at a node over `host`.
 
@@ -346,40 +346,40 @@ fn a_gesture_on_a_read_only_parameter_never_begins() {
     assert!(fake.sets().is_empty());
 }
 
-/// **`try_unit::<Db>` on a parameter that measures hertz is `UnitMismatch`**,
-/// once, when the target is made; `try_unit::<Hz>` on it is accepted.
+/// **`unit::<Db>` on a parameter that measures hertz is `UnitMismatch`**,
+/// once, when the target is made; `unit::<Hz>` on it is accepted.
 #[test]
 fn a_unit_target_of_the_wrong_unit_is_a_mismatch() {
     let (s, node, _, _) = ready();
     let params = s.plugin_view(node).unwrap().params();
-    let try_unit = |id| params.get(id).unwrap();
+    let param = |id| params.get(id).unwrap();
     assert!(matches!(
-        try_unit(CUTOFF).try_unit::<Db>(),
+        param(CUTOFF).unit::<Db>(),
         Err(UnitError::UnitMismatch { id, declared: ParamUnit::Hertz, .. }) if id == CUTOFF
     ));
     assert!(matches!(
-        try_unit(LEVEL).try_unit::<Hz>(),
+        param(LEVEL).unit::<Hz>(),
         Err(UnitError::UnitMismatch {
             declared: ParamUnit::Decibels,
             ..
         })
     ));
-    assert!(try_unit(CUTOFF).try_unit::<Hz>().is_ok());
-    assert!(try_unit(LEVEL).try_unit::<Db>().is_ok());
+    assert!(param(CUTOFF).unit::<Hz>().is_ok());
+    assert!(param(LEVEL).unit::<Db>().is_ok());
 }
 
-/// **`try_unit` on a parameter with no map is `NoUnit`**: one that declares no
+/// **`unit` on a parameter with no map is `NoUnit`**: one that declares no
 /// unit, and one that declares a unit but whose map the plugin defines.
 #[test]
 fn a_unit_target_without_a_unit_or_a_map_is_no_unit() {
     let (s, node, _, _) = ready();
     let params = s.plugin_view(node).unwrap().params();
     assert_eq!(
-        params.get(MODE).unwrap().try_unit::<Hz>(),
+        params.get(MODE).unwrap().unit::<Hz>(),
         Err(UnitError::NoUnit(MODE))
     );
     assert_eq!(
-        params.get(OPAQUE).unwrap().try_unit::<Seconds>(),
+        params.get(OPAQUE).unwrap().unit::<Seconds>(),
         Err(UnitError::NoUnit(OPAQUE))
     );
 }
@@ -404,7 +404,7 @@ fn set_refusal(result: Result<(), ValueError<&'static str>>) -> SetRefusal {
 fn a_linear_unit_write_lands_the_position_the_line_names() {
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    let cutoff = cutoff(&s, key.erase()).unit::<Hz>().unwrap();
     // The fake started it at 0.5: 20 + 19980 / 2.
     assert_eq!(s.get(cutoff).unwrap(), Hz::new(10_010.0));
 
@@ -427,7 +427,7 @@ fn a_stepped_unit_write_reads_back_the_step_the_map_rounds_to() {
         .params()
         .get(TRANSPOSE)
         .unwrap()
-        .try_unit::<Semitones>()
+        .unit::<Semitones>()
         .unwrap();
     s.set(transpose.to(Semitones::new(6.0))).unwrap();
     assert_eq!(fake.sets(), [(TRANSPOSE, 0.75)]);
@@ -448,7 +448,7 @@ fn a_stepped_unit_write_reads_back_the_step_the_map_rounds_to() {
 fn a_unit_write_outside_the_range_or_not_finite_is_refused() {
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    let cutoff = cutoff(&s, key.erase()).unit::<Hz>().unwrap();
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
             set_refusal(s.set(cutoff.to(Hz::new(bad)))),
@@ -474,7 +474,7 @@ fn a_unit_write_outside_the_range_or_not_finite_is_refused() {
 fn a_rescan_that_removes_the_unit_refuses_a_unit_target_made_before_it() {
     let (mut s, key, fake, refresh) = session_keyed();
     let _ = update(&mut s);
-    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    let cutoff = cutoff(&s, key.erase()).unit::<Hz>().unwrap();
     s.set(cutoff.to(Hz::new(100.0))).unwrap();
     let written = s.get(key.param(CUTOFF)).unwrap();
 
@@ -991,7 +991,7 @@ fn a_write_to_a_parameter_a_rescan_dropped_is_counted_and_then_no_target() {
 fn a_batch_naming_one_parameter_in_two_units_is_refused() {
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let hz = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    let hz = cutoff(&s, key.erase()).unit::<Hz>().unwrap();
     let position = key.param(CUTOFF);
 
     let Err(error) = s.set((position.to(Normalized::of(0.1)), hz.to(Hz::new(5_015.0)))) else {
@@ -1023,7 +1023,7 @@ fn a_batch_naming_one_parameter_in_two_units_is_refused() {
 fn a_rescan_to_another_range_converts_a_target_made_before_it_with_the_new_map() {
     let (mut s, key, fake, refresh) = session_keyed();
     let _ = update(&mut s);
-    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    let cutoff = cutoff(&s, key.erase()).unit::<Hz>().unwrap();
 
     *fake.infos.lock_recover() = vec![
         cutoff_info()

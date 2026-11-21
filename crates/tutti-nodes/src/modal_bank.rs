@@ -16,11 +16,11 @@ pub struct ModalBankConfig {
 }
 
 impl ModalBankConfig {
-    /// A bank of `modes` on each of `width` channels (an empty layout is taken as mono).
+    /// A bank of `modes` on each of `width` channels.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>, modes: Modes) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             modes,
         }
     }
@@ -111,7 +111,7 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        let mut bank = ModalBank::new(&self.modes, usize::from(self.width.count()), rate);
+        let mut bank = ModalBank::new(&self.modes, self.width, rate);
         bank.retarget(&self.controls);
         self.bank = Some(bank);
     }

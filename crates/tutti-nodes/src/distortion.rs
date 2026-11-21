@@ -80,7 +80,7 @@ pub struct DistortionConfig {
 
 impl DistortionConfig {
     /// A waveshaper of `width` channels with the curve `kind`: every channel is shaped by the
-    /// same (linked) drive and kind. An empty layout is taken as mono, as the other nodes do.
+    /// same (linked) drive and kind. An empty layout is no channels.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>, kind: ShapeKind) -> Self {
         Self {
@@ -130,9 +130,8 @@ impl DistortionConfig {
 
 impl<F: Float + Lerp> From<DistortionConfig> for DistortionNode<F> {
     fn from(config: DistortionConfig) -> Self {
-        let width = ChannelLayout::from_count(config.width.count().max(1));
-        let input =
-            BusTopology::unassigned(width).expect("a waveshaper is at most 16 channels wide");
+        let input = BusTopology::unassigned(config.width)
+            .expect("a waveshaper is at most 16 channels wide");
         Self::with_kernel(
             DistortionKernel::<F>::new(&config, input),
             DistortionSet,
@@ -253,7 +252,10 @@ impl<F: Float + Lerp> Oversampled<F> {
             let end = (start + self.max_block).min(frames);
             let span = Samples::new(start)..Samples::new(end);
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
-                state.upsample(input.plane(c).slice(span.clone()));
+                // The span is at most `self.max_block`, which the channel states are built for.
+                state
+                    .upsample(input.plane(c).slice(span.clone()))
+                    .expect("a span is at most the states' max block");
             }
             let held = signal.map(|l| {
                 let high = &mut self.signal[..(end - start) * factor];
@@ -279,7 +281,9 @@ impl<F: Float + Lerp> Oversampled<F> {
                 bank.process(held, high, shaped);
             }
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
-                state.downsample(output.plane_mut(c).slice_mut(span.clone()));
+                state
+                    .downsample(output.plane_mut(c).slice_mut(span.clone()))
+                    .expect("a span is at most the states' max block");
             }
             start = end;
         }
@@ -457,13 +461,13 @@ mod tests {
         }
     }
 
-    /// An empty layout is taken as mono.
+    /// An empty layout is no channels, not one.
     #[test]
-    fn an_empty_layout_is_mono() {
+    fn an_empty_layout_has_no_channels() {
         let n = DistortionNode::<f32>::from(
             DistortionConfig::new(0u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
         );
-        assert_eq!(n.shape().audio_in().count(), 1);
+        assert_eq!(n.shape().audio_in().count(), 0);
     }
 
     /// Drive is reachable by address through the node's `ParamSet`, and an address it does

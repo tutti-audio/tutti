@@ -16,12 +16,11 @@ pub struct BitCrusherConfig {
 }
 
 impl BitCrusherConfig {
-    /// A crusher of `width` channels at 8 bits and no hold. An empty layout is mono.
+    /// A crusher of `width` channels at 8 bits and no hold.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>) -> Self {
-        let width = width.into();
         Self {
-            width: ChannelLayout::from_count(width.count().max(1)),
+            width: width.into(),
             controls: BitCrusherControls::DEFAULT,
         }
     }
@@ -202,11 +201,11 @@ mod tests {
         assert_eq!((d.param_base(0), d.param_base(1)), (Some(8.0), Some(1.0)));
     }
 
-    /// An empty layout is mono.
+    /// An empty layout is no channels, not one.
     #[test]
-    fn an_empty_layout_is_mono() {
+    fn an_empty_layout_has_no_channels() {
         let n = BitCrusherNode::<f32>::from(BitCrusherConfig::new(0u16));
-        assert_eq!(n.shape().audio_in().count(), 1);
+        assert_eq!(n.shape().audio_in().count(), 0);
     }
 
     /// Both controls are settable by their kinds and land whole: at 4 bits (`q = 8`) with a

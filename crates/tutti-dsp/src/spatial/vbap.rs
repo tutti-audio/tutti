@@ -19,7 +19,7 @@ mod layout;
 mod math;
 mod select;
 
-pub use error::SpeakerGeometryError;
+pub use error::{GainsLengthMismatch, SpeakerGeometryError};
 pub use layout::SpeakerLayout;
 
 /// A width below this folds the stereo pair to mono and pans one source.
@@ -269,7 +269,8 @@ impl VbapKernel {
         if width < MONO_WIDTH {
             let mut a = [Gain::SILENT; MAX_CHANNELS];
             self.layout
-                .gains_into(azimuth, elevation, spread, &mut a[..count]);
+                .gains_into(azimuth, elevation, spread, &mut a[..count])
+                .expect("the slice is the layout's speaker count");
             return VbapGains {
                 mono: true,
                 a,
@@ -279,9 +280,11 @@ impl VbapKernel {
         let (left, right) = virtual_sources(azimuth, width);
         let (mut a, mut b) = ([Gain::SILENT; MAX_CHANNELS], [Gain::SILENT; MAX_CHANNELS]);
         self.layout
-            .gains_into(left, elevation, spread, &mut a[..count]);
+            .gains_into(left, elevation, spread, &mut a[..count])
+            .expect("the slice is the layout's speaker count");
         self.layout
-            .gains_into(right, elevation, spread, &mut b[..count]);
+            .gains_into(right, elevation, spread, &mut b[..count])
+            .expect("the slice is the layout's speaker count");
         VbapGains { mono: false, a, b }
     }
 }

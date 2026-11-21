@@ -17,7 +17,7 @@ use tutti_plugin_types::{
 };
 use tutti_plugin_types::{BlockCounts, BypassWrite};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
-use tutti_plugin_types::{Delivered, TrackInfo};
+use tutti_plugin_types::{Delivered, EditorOpened, TrackInfo};
 use tutti_plugin_types::{
     LayoutSupport, LoadedPlugin, PluginBus, PluginDescriptor, Preset, PresetError, PresetId,
     PresetSupport,
@@ -661,7 +661,9 @@ impl PluginHandle {
     // ---- Editor convenience (ergonomic wrappers over the editor slot) ------
 
     /// Embeds the plugin's editor into `parent` and returns the size the editor
-    /// asked for.
+    /// asked for, with whether the editor instance was brought in step with the
+    /// plugin's state ([`EditorOpened::mirrored`]): an editor that could not be
+    /// mirrored still opens, showing the plugin at its defaults.
     ///
     /// `parent` is [`WindowHandle::from_window`] of a winit window or a
     /// wgpu surface. `scale` is that window's backing-store scale
@@ -680,14 +682,16 @@ impl PluginHandle {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> Result<Size, EditorError> {
+    ) -> Result<EditorOpened<Size>, EditorError> {
         let control = self.editor_route()?;
-        let size = Self::editor_call(control, |c| c.open_editor(main, parent, scale))?;
+        let opened = Self::editor_call(control, |c| c.open_editor(main, parent, scale))?;
         self.editor_open.store(true, Ordering::Relaxed);
-        Ok(size)
+        Ok(opened)
     }
 
-    /// Opens the editor as a floating window the plugin owns.
+    /// Opens the editor as a floating window the plugin owns, with whether the
+    /// editor instance was brought in step with the plugin's state, as
+    /// [`open_editor`](Self::open_editor) says.
     ///
     /// For a plugin whose [`Features::EDITOR_FLOATING`](tutti_plugin_types::Features)
     /// bit is set — CLAP plugins that cannot embed. Takes no parent and returns
@@ -701,11 +705,14 @@ impl PluginHandle {
     /// route, and otherwise any error of
     /// [`EditorWindow::open_floating_editor`](tutti_plugin_types::EditorWindow::open_floating_editor),
     /// such as a format without floating editors.
-    pub fn open_floating_editor(&self, main: MainThreadMarker) -> Result<(), EditorError> {
+    pub fn open_floating_editor(
+        &self,
+        main: MainThreadMarker,
+    ) -> Result<EditorOpened<()>, EditorError> {
         let control = self.editor_route()?;
-        Self::editor_call(control, |c| c.open_floating_editor(main))?;
+        let opened = Self::editor_call(control, |c| c.open_floating_editor(main))?;
         self.editor_open.store(true, Ordering::Relaxed);
-        Ok(())
+        Ok(opened)
     }
 
     /// Which plugin instance this handle reaches ([`InstanceId`]): the same for
@@ -976,7 +983,7 @@ mod tests {
             _main: MainThreadMarker,
             _parent: WindowHandle,
             _scale: ContentScale,
-        ) -> tutti_plugin_types::PluginResult<Size> {
+        ) -> tutti_plugin_types::PluginResult<EditorOpened<Size>> {
             Err(PluginError::Editor(EditorError::PluginError("none".into())))
         }
         fn close_editor(&mut self, _main: MainThreadMarker) {}

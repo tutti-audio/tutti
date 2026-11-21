@@ -87,6 +87,20 @@ impl Submitted {
     }
 }
 
+/// Why a parameter write was not stored for the plugin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum WriteRefused {
+    /// The plugin did not declare the parameter.
+    #[error(transparent)]
+    Unknown(#[from] UnknownParam),
+    /// The plugin crashed.
+    #[error("the plugin crashed")]
+    Crashed,
+    /// The plugin did not answer its parameter list.
+    #[error("the plugin did not answer its parameter list")]
+    Unlisted,
+}
+
 use ask::{Ask, Reply};
 #[cfg(test)]
 pub(crate) use channels::COMMAND_QUEUE_SIZE;
@@ -430,39 +444,41 @@ impl AudioBridge {
     /// taken, so the latest wins. **A control-side call**: it takes a lock, and
     /// the first write asks the plugin for its parameters, once.
     ///
-    /// A crashed plugin answers `Ok` and stores nothing, as does one that does
-    /// not answer the parameter list: its recovery restores from the host's
+    /// A crashed plugin, or one that does not answer the parameter list, stores
+    /// nothing and is refused by name: its recovery restores from the host's
     /// mirror.
     ///
     /// # Errors
     ///
-    /// [`UnknownParam`] when the parameters the table holds do not include `id`.
-    /// The table follows the plugin's own word that its list changed
-    /// ([`invalidate_host_edits`](Self::invalidate_host_edits)), never a write.
+    /// [`WriteRefused::Unknown`] when the parameters the table holds do not
+    /// include `id`. The table follows the plugin's own word that its list
+    /// changed ([`invalidate_host_edits`](Self::invalidate_host_edits)), never a
+    /// write. [`WriteRefused::Crashed`] and [`WriteRefused::Unlisted`] for the
+    /// two cases above.
     pub(crate) fn write_parameter(
         &self,
         id: ParamId,
         value: Normalized,
-    ) -> Result<(), UnknownParam> {
+    ) -> Result<(), WriteRefused> {
         if self.lifecycle.is_crashed() {
-            return Ok(());
+            return Err(WriteRefused::Crashed);
         }
         if let Some(table) = self.host_edits.lock().as_mut() {
             table.written = true;
-            return table.writer.write(id, value);
+            return Ok(table.writer.write(id, value)?);
         }
         // No table: the plugin's list is asked, once, outside the lock (a round
         // trip), and the table is built from it.
         let Some(infos) = self.parameters() else {
-            return Ok(());
+            return Err(WriteRefused::Unlisted);
         };
         self.declare_host_edits(infos.iter().map(ParameterInfo::id));
         match self.host_edits.lock().as_mut() {
             Some(table) => {
                 table.written = true;
-                table.writer.write(id, value)
+                Ok(table.writer.write(id, value)?)
             }
-            None => Ok(()),
+            None => Err(WriteRefused::Unlisted),
         }
     }
 

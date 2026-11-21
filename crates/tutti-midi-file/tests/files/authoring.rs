@@ -141,11 +141,14 @@ fn notes_in_any_order_leave_the_events_in_tick_order() {
 fn a_tempo_is_a_meta_event_at_its_tick() {
     let track = Track::new()
         .meta(Tick(960), Meta::text(TextKind::Marker, "B"))
-        .meta(Tick(0), Meta::tempo(Bpm::of(90.0)));
+        .meta(Tick(0), Meta::tempo(Bpm::of(90.0)).unwrap());
     assert_eq!(
         track.events(),
         [
-            (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(90.0)))),
+            (
+                Tick(0),
+                FileEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap())
+            ),
             (
                 Tick(960),
                 FileEvent::Meta(Meta::text(TextKind::Marker, "B"))
@@ -168,13 +171,13 @@ fn push_refuses_an_event_before_the_last() {
             ),
         )
         .unwrap()
-        .push(Tick(10), Meta::tempo(Bpm::of(100.0)))
+        .push(Tick(10), Meta::tempo(Bpm::of(100.0)).unwrap())
         .unwrap();
     assert_eq!(track.events().len(), 2);
     assert_eq!(track.end(), Tick(10));
     let err = track
         .clone()
-        .push(Tick(9), Meta::tempo(Bpm::of(100.0)))
+        .push(Tick(9), Meta::tempo(Bpm::of(100.0)).unwrap())
         .unwrap_err();
     assert_eq!(
         err,
@@ -209,7 +212,7 @@ fn collecting_events_sorts_them_by_tick_keeping_ties_in_order() {
 #[test]
 fn the_timeline_is_the_messages_at_their_beats_and_not_the_meta_events() {
     let tempo_track = Track::new()
-        .meta(Tick(0), Meta::tempo(Bpm::of(60.0)))
+        .meta(Tick(0), Meta::tempo(Bpm::of(60.0)).unwrap())
         .named("tempo");
     let notes = Track::new()
         .note(
@@ -495,7 +498,9 @@ fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
 /// one map.
 #[test]
 fn the_tempo_map_is_one_shared_value() {
-    let f = file(vec![Track::new().meta(Tick(0), Meta::tempo(Bpm::of(75.0)))]);
+    let f = file(vec![
+        Track::new().meta(Tick(0), Meta::tempo(Bpm::of(75.0)).unwrap()),
+    ]);
     let again = f.clone();
     assert!(Arc::ptr_eq(
         metrical(&f).tempo_map(),
@@ -541,7 +546,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
 fn a_file_round_trips_through_a_slice() {
     let f = file(vec![
         Track::new()
-            .meta(Tick(0), Meta::tempo(Bpm::of(100.0)))
+            .meta(Tick(0), Meta::tempo(Bpm::of(100.0)).unwrap())
             .note(
                 Tick(0),
                 Tick(480),
@@ -565,13 +570,19 @@ fn a_file_round_trips_through_a_slice() {
 #[test]
 fn two_tempos_on_one_tick_are_kept_and_the_later_governs() {
     let track = Track::new()
-        .meta(Tick(0), Meta::tempo(Bpm::of(90.0)))
-        .meta(Tick(0), Meta::tempo(Bpm::of(60.0)));
+        .meta(Tick(0), Meta::tempo(Bpm::of(90.0)).unwrap())
+        .meta(Tick(0), Meta::tempo(Bpm::of(60.0)).unwrap());
     assert_eq!(
         track.events(),
         [
-            (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(90.0)))),
-            (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(60.0)))),
+            (
+                Tick(0),
+                FileEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap())
+            ),
+            (
+                Tick(0),
+                FileEvent::Meta(Meta::tempo(Bpm::of(60.0)).unwrap())
+            ),
         ]
     );
     let file = crate::common::format0(SmfDivision::per_quarter(480), track).unwrap();
