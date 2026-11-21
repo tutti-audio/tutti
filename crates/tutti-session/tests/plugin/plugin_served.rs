@@ -1073,14 +1073,16 @@ fn a_save_awaited_on_a_spawned_thread_returns_the_plugins_state() {
 }
 
 /// **A restore awaited off the main thread has its effect once the main thread
-/// applies it**: the plugin is moved off its default, the default state goes
-/// back from a spawned thread, and the mirror reads the default again after
-/// `apply`.
+/// applies it**: the plugin holds 0.3 when its state is saved, is moved to 0.9,
+/// and the saved state goes back from a spawned thread: the mirror reads 0.3
+/// again after `apply`.
 #[test]
 fn a_restore_awaited_off_main_takes_effect_when_applied() {
     let (catalog, _dir) = catalog();
     let mut s = session(false);
     let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    // Rendered, so a host write reaches the plugin with a block.
+    s.graph().connect(node, tutti_session::Root).unwrap();
     let cutoff = |s: &Session| {
         s.plugin_view(node)
             .unwrap()
@@ -1090,8 +1092,6 @@ fn a_restore_awaited_off_main_takes_effect_when_applied() {
             .normalized()
             .get()
     };
-    let default = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
-    let initial = cutoff(&s);
     let target = s
         .plugin_view(node)
         .unwrap()
@@ -1099,17 +1099,17 @@ fn a_restore_awaited_off_main_takes_effect_when_applied() {
         .get(ParamId::new(101))
         .unwrap()
         .target();
+    s.set(target.to(Normalized::of(0.3))).unwrap();
+    let saved = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
     s.set(target.to(Normalized::of(0.9))).unwrap();
-    // The write reaches the plugin with the next block.
-    pump_until(&mut s, "the plugin holds the new value", |s| {
-        (cutoff(s) - 0.9).abs() < 1e-6
-    });
-    assert!(
-        (initial - 0.9).abs() > 1e-3,
-        "the default is not the value set"
-    );
+    // The write reaches the plugin with a block: a state saved now holds it.
+    for _ in 0..4 {
+        let _ = pump(&mut s);
+    }
+    let held = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    assert_ne!(held.bytes(), saved.bytes(), "the plugin holds 0.9, not 0.3");
 
-    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, default).unwrap() else {
+    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, saved).unwrap() else {
         panic!("a served plugin's restore is awaited");
     };
     let restored = std::thread::spawn(move || tutti_fixtures::block_on(restore))
@@ -1118,7 +1118,7 @@ fn a_restore_awaited_off_main_takes_effect_when_applied() {
         .expect("the plugin takes the state");
     s.apply(restored).expect("the node hosts the plugin");
     pump_until(&mut s, "the mirror reads the restored value", |s| {
-        (cutoff(s) - initial).abs() < 1e-6
+        (cutoff(s) - 0.3).abs() < 1e-6
     });
 }
 
