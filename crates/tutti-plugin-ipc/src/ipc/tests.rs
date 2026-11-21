@@ -10,9 +10,9 @@ use tutti_platform::Instant;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
-    ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamAccess, ParameterInfo,
-    PluginBus, PluginClass, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleRate,
-    Samples,
+    ChannelLayout, Control, Controller, EditorError, Loaded, LoadedPlugin, MaxBlock, ParamAccess,
+    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, Prepare, Processor, Reopen, Request,
+    SampleRate, Samples,
 };
 use tutti_units::ParamId;
 
@@ -336,7 +336,7 @@ fn mock_with(
                     id,
                     &ControlReply::EditorOpened {
                         result: match parent {
-                            Some(0) => Err("the mock plugin has no editor".to_string()),
+                            Some(0) => Err(EditorError::ForeignWindow(0)),
                             Some(_) => Ok(Some(MOCK_EDITOR)),
                             None => Ok(None),
                         },
@@ -935,7 +935,7 @@ fn a_remote_floating_editor_sends_no_parent() {
     )));
 }
 
-/// **The server's refusal is the editor's error, in the server's words.**
+/// **The server's refusal is the editor's error, as the server typed it.**
 #[test]
 #[cfg(all(unix, not(target_os = "macos")))]
 fn a_refused_remote_open_carries_the_servers_reason() {
@@ -946,10 +946,11 @@ fn a_refused_remote_open_carries_the_servers_reason() {
         .open_editor(main_thread(), host_window(0), ContentScale::IDENTITY)
         .expect_err("the mock refuses a window 0");
     assert!(
-        refused
-            .to_string()
-            .contains("the mock plugin has no editor"),
-        "{refused}"
+        matches!(
+            refused,
+            tutti_plugin_types::PluginError::Editor(EditorError::ForeignWindow(0))
+        ),
+        "{refused:?}"
     );
 }
 

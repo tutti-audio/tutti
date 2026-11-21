@@ -383,7 +383,7 @@ mod host;
 /// that replaces it when the plugin changes its audio ports.
 pub mod catalog {
     pub use crate::host::placement::{ResolvedHosting, placement};
-    pub use crate::host::plugin::{BoundPlugin, Plugin, PluginRebinder, Rebuilt, RestoreRefused};
+    pub use crate::host::plugin::{BoundPlugin, Plugin, PluginRebinder, Rebuilt};
 }
 
 // The graph node of a served plugin and its two states. The control handle,
