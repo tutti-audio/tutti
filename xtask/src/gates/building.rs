@@ -803,7 +803,7 @@ pub(super) const ALLOW: &[Allow] = &[
         "Meters::open",
         DEFAULT_ENUM,
         "both alignments are everyday uses (a track's level reads `Raw`, a device's output reads `ToOutput`), \
-         so the alignment is the call's choice, not an option; `open_node` is the raw shorthand",
+         so the alignment is the call's choice, not an option",
     ),
 ];
 

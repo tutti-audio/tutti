@@ -1178,7 +1178,7 @@ impl Ports {
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
-                let key = graph.add_event_inlet(inlet).erase();
+                let key = graph.add(inlet).erase();
                 // The input node has the one event input, and the inlet was just
                 // added. A host that removed the input node itself leaves it nothing to feed.
                 let _ =

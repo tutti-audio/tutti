@@ -2,7 +2,7 @@
 //! new edge in over `DECLICK`, and `disconnect`, `disconnect_all`,
 //! `set_sources` removals and the edges of a removed node fade out over the same
 //! span, leaving the plan when the fade has ended. `Connection::unfaded` and
-//! `disconnect_unfaded` opt out.
+//! `Disconnection::unfaded` opt out.
 //!
 //! Every figure is analytic: a constant of 1.0 through an edge whose weight is
 //! the smootherstep `x³(6x² − 15x + 10)` at `x = (j + 1) / 241` at fade frame
@@ -123,10 +123,18 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
     let _ = s.update();
     assert!(frames(&mut s, 4).iter().all(|&x| x == 1.0));
 
-    assert!(s.graph().disconnect(src.out(0), Root::output(0)).unwrap());
+    assert!(
+        s.graph()
+            .disconnect(src.out(0), Root::output(0))
+            .unwrap()
+            .was_connected()
+    );
     assert!(s.graph_ref().sources(Root::output(0)).unwrap().is_empty());
     assert!(
-        !s.graph().disconnect(src.out(0), Root::output(0)).unwrap(),
+        !s.graph()
+            .disconnect(src.out(0), Root::output(0))
+            .unwrap()
+            .was_connected(),
         "already on its way out"
     );
     let _ = s.update();
@@ -154,7 +162,7 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
     assert!(frames(&mut s, 4).iter().all(|&x| x == 0.0));
 }
 
-/// **`disconnect_unfaded` cuts at once**, and a connect that no plan has heard
+/// **`Disconnection::unfaded` cuts at once**, and a connect that no plan has heard
 /// leaves no fade behind.
 #[test]
 fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
@@ -168,15 +176,22 @@ fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
     assert!(frames(&mut s, 4).iter().all(|&x| x == 1.0));
     assert!(
         s.graph()
-            .disconnect_unfaded(src.out(0), Root::output(0))
+            .disconnect(src.out(0), Root::output(0))
             .unwrap()
+            .unfaded()
+            .was_connected()
     );
     let _ = s.update();
     assert!(frames(&mut s, 4).iter().all(|&x| x == 0.0), "no tail");
 
     // Connected and disconnected inside one edit: nothing was ever heard.
     s.graph().connect(src.out(0), Root::output(0)).unwrap();
-    assert!(s.graph().disconnect(src.out(0), Root::output(0)).unwrap());
+    assert!(
+        s.graph()
+            .disconnect(src.out(0), Root::output(0))
+            .unwrap()
+            .was_connected()
+    );
     let _ = s.update();
     assert!(frames(&mut s, SPAN).iter().all(|&x| x == 0.0));
 }
@@ -221,8 +236,9 @@ fn set_sources_and_remove_fade_what_leaves() {
     let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     let sink = Root::output(0);
     s.graph()
-        .set_sources_unfaded(sink, [OutPort::new(a.erase(), 0)])
-        .unwrap();
+        .set_sources(sink, [OutPort::new(a.erase(), 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     frames(&mut s, 2);
     s.graph()

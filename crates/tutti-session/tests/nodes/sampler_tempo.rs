@@ -75,8 +75,9 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     let voice = s.graph().add(pool);
     for port in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(port), [OutPort::new(voice, port)])
-            .unwrap();
+            .set_sources(Root::output(port), [OutPort::new(voice, port)])
+            .unwrap()
+            .unfaded();
     }
     let _ = s.update();
     let out = run(&s, 60_000, 512);

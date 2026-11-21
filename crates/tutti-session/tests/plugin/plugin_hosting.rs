@@ -46,7 +46,7 @@ fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
         other => panic!("expected an unresolved load, got {other:?}"),
     }
 
-    assert!(catalog.unblacklist(&path));
+    assert!(catalog.unblacklist(&path).unwrap());
     probe(&mut catalog, &path);
     s.load_from(main, &catalog, &id, Hosting::Auto, None)
         .expect("an unblacklisted plugin loads");
@@ -78,11 +78,11 @@ fn the_blacklist_is_asked_when_the_load_runs() {
 
     // Blacklisted and cleared before the load runs: admitted. The cleared file
     // keeps no descriptors, so its load is built before the blacklist.
-    assert!(catalog.unblacklist(&path));
+    assert!(catalog.unblacklist(&path).unwrap());
     probe(&mut catalog, &path);
     let load = s.load_out_of_process(&id, &catalog);
     catalog.blacklist(&path, "hung in its load");
-    assert!(catalog.unblacklist(&path));
+    assert!(catalog.unblacklist(&path).unwrap());
     let _admitted = load.block().expect("an unblacklisted plugin was refused");
 }
 

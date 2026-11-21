@@ -77,6 +77,17 @@ impl<F: Float> DelayRing<F> {
         self.buf[if i >= len { i - len } else { i }]
     }
 
+    /// Adds `x` to the frame `k` slots before the cursor (`back(k)`'s slot), for `k` in
+    /// `1..=len`: a signal injected `k` frames into the ring's path.
+    #[inline]
+    pub(crate) fn add_back(&mut self, k: usize, x: F) {
+        let len = self.buf.len();
+        debug_assert!((1..=len).contains(&k), "{k} slots back in a ring of {len}");
+        let i = self.w + len - k;
+        let i = if i >= len { i - len } else { i };
+        self.buf[i] += x;
+    }
+
     /// The frame `delay` slots before the cursor, linearly interpolated between the two whole
     /// slots around it: `delay` is at least 0 and its next whole slot is at most the length.
     ///

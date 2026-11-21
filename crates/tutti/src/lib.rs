@@ -308,6 +308,10 @@ pub mod nodes {
     pub use tutti_dsp::{
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
+    pub use tutti_dsp::{
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
+        WaveguidePositions, WaveguideString,
+    };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
@@ -400,6 +404,10 @@ pub mod nodes {
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
     pub use tutti_nodes::{GranularConfig, GranularError, GranularNode};
+    pub use tutti_nodes::{
+        KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
+        WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,
+    };
     pub use tutti_nodes::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
 }
 
@@ -540,13 +548,13 @@ pub mod session {
     pub use tutti_session::LoadError;
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
-        CrossfadeId, CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin,
-        Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen,
-        PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
-        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps,
-        TempoError, Weighted, Wire, root_width,
+        CrossfadeId, CrossfadeRefused, DeclarationError, Disconnection, Event, EventEdge,
+        EventTapPort, Fanin, Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink,
+        Meters, NodeSlots, NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError,
+        OutputTapOpen, PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence,
+        Reclaimer, Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact,
+        ResourceId, RootDeclaration, RootReader, RootTopologyStatus, SessionNode,
+        SessionOutputTapError, SetSources, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -740,9 +748,9 @@ pub mod soundfont {
 #[cfg(feature = "plugin")]
 pub mod plugin {
     pub use tutti_plugin_db::{
-        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        Mtime, PluginEntry, ProbeFailure, RowChange, ScanBusy, ScanOutcome, ScanProgress,
-        ScannedFile,
+        BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileFailureCause, FileRow, FileState,
+        FilesError, Mtime, PedalError, PluginEntry, ProbeFailure, Recovered, RecoveryFailure,
+        RowChange, ScanBusy, ScanOutcome, ScanProgress, ScannedFile, UnmeasuredPlugin,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
@@ -771,7 +779,7 @@ pub mod plugin {
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
     };
     // What a `ProbeFailure` holds.
-    pub use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeRefusal};
+    pub use tutti_plugin_types::{MeasureFailure, ProbeDeath, ProbeError, ProbeExit, ProbeRefusal};
     pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it

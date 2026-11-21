@@ -192,6 +192,7 @@ mod follower;
 mod frequency_shifter;
 mod granular;
 mod interp;
+mod karplus_strong;
 mod level;
 mod lfo;
 mod loudness;
@@ -210,7 +211,9 @@ mod ring_mod;
 mod sample_convert;
 mod shoebox;
 mod stereo;
+mod string_tuning;
 mod tremolo;
+mod waveguide;
 mod waveshape;
 mod wavetable;
 
@@ -287,6 +290,7 @@ pub use frequency_shifter::{
 };
 pub use granular::{GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
+pub use karplus_strong::{KarplusStrong, KarplusStrongBank, KarplusStrongControls};
 pub use level::rms;
 pub use lfo::{Lfo, LfoWave};
 pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};
@@ -364,6 +368,7 @@ pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
+pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
 pub use wavetable::{
     TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,

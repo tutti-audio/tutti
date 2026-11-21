@@ -55,8 +55,9 @@ fn peaks(s: &mut Session, beats: usize) -> Vec<f32> {
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(port), [OutPort::new(click, port)])
-            .unwrap();
+            .set_sources(Root::output(port), [OutPort::new(click, port)])
+            .unwrap()
+            .unfaded();
     }
     let _ = s.update();
     s.transport_handle().play().expect("room");

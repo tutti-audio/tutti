@@ -28,6 +28,7 @@ mod rt_no_alloc_modal;
 mod rt_no_alloc_modulate;
 mod rt_no_alloc_modulated_reverb;
 mod rt_no_alloc_modulation;
+mod rt_no_alloc_physical;
 mod rt_no_alloc_pitch_shifter;
 mod rt_no_alloc_reflections;
 mod rt_no_alloc_reverb;

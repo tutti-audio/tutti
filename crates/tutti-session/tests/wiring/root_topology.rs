@@ -25,8 +25,9 @@ fn feed<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
-            .unwrap();
+            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .unwrap()
+            .unfaded();
     }
 }
 
