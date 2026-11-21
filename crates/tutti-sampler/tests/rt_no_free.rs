@@ -353,3 +353,31 @@ fn a_full_retirement_channel_refuses_a_remove_and_the_callback_frees_nothing() {
         "the control thread's collection freed at most {biggest} bytes: no ring"
     );
 }
+
+/// **A retirement after every handle is gone is freed with the pool.** The
+/// handle is dropped with a remove of the ring's last holder still queued;
+/// the block applies it, the callback frees nothing (the voice is parked in
+/// the pool), and dropping the pool, on the control side, frees the ring.
+#[test]
+fn a_retirement_after_the_handle_is_gone_is_freed_when_the_pool_drops() {
+    let (_dir, streamer, stream, reader) = stream();
+    let (pool, handle) = pool_holding_the_last_holder(streamer, stream, reader);
+    let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
+    let env = t.env(64, SampleRate::SR_48K);
+    rig.block_in(&env);
+
+    handle.remove(SlotId(1)).expect("room");
+    drop(handle);
+    let (frees, _) = watch(|| {
+        rig.block_in(&env);
+    });
+    assert_eq!(rig.node.voice_count(), 0, "the remove was applied");
+    assert_eq!(frees, 0, "the callback freed {frees} time(s)");
+
+    let (_, biggest) = watch(|| drop(rig));
+    assert!(
+        biggest >= RING_BYTES,
+        "dropping the pool freed at most {biggest} bytes: the ring was leaked"
+    );
+}
