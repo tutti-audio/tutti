@@ -463,6 +463,7 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         "no callbacks, no TRANSPORT bit"
     );
 
+    let ties = crate::ties::ties().expect("bells").0;
     let mut au = AuInstance {
         origin: tutti_plugin_types::InProcess::origin(&loaded).clone(),
         lifecycle: Lifecycle::new(loaded),
@@ -478,7 +479,9 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         edits: Vec::new(),
         events: Vec::new(),
         refused: false,
-        ties: crate::ties::ties().expect("bells").0,
+        edits_refused: ties.edits_refused.writer(),
+        told_losses: tutti_plugin_types::ServerLosses::default(),
+        ties,
     };
     let prepare = Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples::new(512)));
     assert!(

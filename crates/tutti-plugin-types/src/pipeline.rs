@@ -34,7 +34,7 @@ pub struct BlockCounts {
 
 /// What a plugin's server lost of its own work, cumulative over the server's
 /// life, as it last told the host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ServerLosses {
     /// Commands the server could not give its render thread.
     pub commands_refused: u64,

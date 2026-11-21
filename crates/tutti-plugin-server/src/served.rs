@@ -365,11 +365,7 @@ impl<L: ServerSide> Server<L> {
             events: Vec::new(),
             refused: false,
             edits_refused: ties.edits_refused.writer(),
-            told_losses: ServerLosses {
-                commands_refused: 0,
-                edits_refused: 0,
-                refused_off_thread_calls: 0,
-            },
+            told_losses: ServerLosses::default(),
             ties,
         };
         // The wake outlives every activation: the plugin's host state is the
