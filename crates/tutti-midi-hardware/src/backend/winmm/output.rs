@@ -1,7 +1,6 @@
 //! Sending MIDI 1.0 to a winmm output, each event at its time.
 
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use tutti_platform::Instant;
 
 use super::super::legacy_port::bytes::{ByteOut, Wire};
@@ -10,7 +9,7 @@ use crate::endpoints::DeviceOut;
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
-use tutti_platform::{Executor, Task};
+use tutti_platform::{Executor, Task, join};
 use tutti_rt::CounterWriter;
 use tutti_ump::Ump;
 use tutti_winmm_ffi::{MidiOut as Port, OutputPort, TimerWaiter, TimerWaker, waitable_timer};
@@ -37,9 +36,6 @@ struct Shared {
 pub struct WinMmOutput {
     shared: Arc<Shared>,
     task: Option<Task<()>>,
-    /// Closed when the sender's future ends; behind a `Mutex` so the output stays
-    /// `Sync`, and read only by `Drop`.
-    ended: Mutex<mpsc::Receiver<()>>,
 }
 
 impl MidiOut for WinMmOutput {
@@ -92,18 +88,13 @@ impl Drop for WinMmOutput {
             tracing::warn!("winmm MIDI output wake: {e}");
         }
         // The port closes as the sender ends (it owns it), so the drop waits for
-        // that: a reopen at once finds the device free. The platform has no
-        // blocking wait on a `Task`: this returns when the sender's future has
-        // ended, which closes the channel, and the wake above is what ends it. The
-        // sender returns because the mailbox is stopped, not because the task is
-        // cancelled: its body is synchronous inside the async block and never
-        // awaits. The task drops second.
-        let _ = self
-            .ended
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner)
-            .recv();
-        drop(self.task.take());
+        // that: a reopen at once finds the device free. The sender returns because
+        // the mailbox is stopped, not because the task is cancelled: its body is
+        // synchronous inside the async block and never awaits. A `None` means the
+        // future panicked or was dropped unrun; it no longer touches the port.
+        if let Some(task) = self.task.take() {
+            let _ = join(task);
+        }
     }
 }
 
@@ -138,12 +129,10 @@ pub(super) fn open(executor: &Executor, port: &OutputPort) -> Result<WinMmOutput
     let (wake, wait) = waitable_timer()?;
     let (mailbox, losses) = Mailbox::new();
     let shared = Arc::new(Shared { mailbox, wake });
-    let (ended_tx, ended) = mpsc::channel::<()>();
     let task = executor
         .spawn_dedicated(MidiThread::MidiOut.name(), None, {
             let shared = Arc::clone(&shared);
             async move {
-                let _ended = ended_tx;
                 thread(port, wait, losses, &shared);
             }
         })
@@ -154,6 +143,5 @@ pub(super) fn open(executor: &Executor, port: &OutputPort) -> Result<WinMmOutput
     Ok(WinMmOutput {
         shared,
         task: Some(task),
-        ended: Mutex::new(ended),
     })
 }

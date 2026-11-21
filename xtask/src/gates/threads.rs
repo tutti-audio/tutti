@@ -42,8 +42,7 @@ pub(super) const MIN_FILES: usize = 500;
 const TARGETS: [&str; 2] = ["spawn", "spawn_dedicated"];
 const OWNERS: [&str; 4] = ["core-foundation", "core-engine", "plugin", "midi"];
 
-/// A file whose thread starts the executor does not take, with the reason: the audio
-/// side's, or a process-lifetime OS client's.
+/// A file whose thread starts the executor does not take, with its reason.
 pub(crate) struct Exempt {
     pub(crate) file: &'static str,
     pub(crate) reason: &'static str,
@@ -411,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn the_real_time_sites_pass_without_rows_and_a_stale_entry_fails() {
+    fn the_exempt_files_pass_without_rows_and_a_stale_entry_fails() {
         let files = [
             ("crates/tutti-graph/src/pool.rs", SRC),
             ("crates/tutti-engine/src/timer.rs", SRC),

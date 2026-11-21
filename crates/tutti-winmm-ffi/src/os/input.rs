@@ -28,10 +28,9 @@
 use std::cell::UnsafeCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
-use tutti_platform::{Executor, Instant, Task};
+use tutti_platform::{Executor, Instant, Task, join};
 
 use windows_sys::Win32::Media::Audio::{
     CALLBACK_FUNCTION, HMIDIIN, MIDIHDR, midiInAddBuffer, midiInClose, midiInOpen,
@@ -172,15 +171,7 @@ pub struct MidiIn {
     /// Taken by `Drop`.
     owner: Option<Owner<'static, Shared>>,
     handle: HMIDIIN,
-    worker: Option<Worker>,
-}
-
-/// The worker's future on a dedicated thread of the executor, and the end of a
-/// channel its sender (held by the future) closes when the future ends.
-struct Worker {
-    task: Task<()>,
-    /// Behind a `Mutex` so `MidiIn` stays `Sync`; read only by `Drop`.
-    ended: Mutex<mpsc::Receiver<()>>,
+    worker: Option<Task<()>>,
 }
 
 impl std::fmt::Debug for MidiIn {
@@ -297,22 +288,15 @@ impl MidiIn {
         let worker = {
             let shared = Arc::clone(&shared);
             // The worker stops by the input's own wake and closing flag, and
-            // `Drop` waits for it to end before it closes the port: the future
-            // holds `ended`, which closes when the future ends or is dropped.
-            let (ended_tx, ended) = mpsc::channel::<()>();
-            let task = executor
+            // `Drop` waits for it to end before it closes the port.
+            executor
                 .spawn_dedicated("tutti-winmm-in", None, async move {
-                    let _ended = ended_tx;
                     requeue(&shared, wait);
                 })
                 .map_err(|source| Error::Os {
                     operation: OsOperation::SpawnInputWorker,
                     source,
-                })?;
-            Worker {
-                task,
-                ended: Mutex::new(ended),
-            }
+                })?
         };
         input.worker = Some(worker);
         for buffer in &shared.buffers {
@@ -361,22 +345,16 @@ impl Drop for MidiIn {
             tracing::warn!(
                 "winmm MIDI input: the worker could not be woken, so the port is left open: {e}"
             );
-            if let Some(worker) = self.worker.take() {
-                worker.task.detach();
+            if let Some(task) = self.worker.take() {
+                task.detach();
             }
             drop(closing.leak());
             return;
         }
-        if let Some(worker) = self.worker.take() {
-            // The platform has no blocking wait on a `Task`: this returns when the
-            // worker's future has ended (or been dropped unrun), which closes the
-            // channel. The wake above is what ends it.
-            let _ = worker
-                .ended
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .recv();
-            drop(worker.task);
+        if let Some(task) = self.worker.take() {
+            // The wake above is what ends the worker. A `None` means its future
+            // panicked or was dropped unrun; it no longer touches the handle.
+            let _ = join(task);
         }
         // Callbacks that found the input before it was removed finish. This
         // loop is the only place that reads the clock.
