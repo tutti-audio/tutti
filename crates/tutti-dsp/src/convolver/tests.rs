@@ -2,6 +2,8 @@ use super::*;
 use tutti_fixtures::signal::{impulse, impulse_at, peak};
 use tutti_units::{Real, Samples};
 
+mod zero_latency;
+
 /// Direct (naive) convolution — the definition, used as ground truth.
 ///
 /// `y[n] = sum_k x[k] * h[n-k]`. O(N*M) and far too slow for audio, which is

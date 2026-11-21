@@ -3096,6 +3096,7 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "dpi",
+ "futures-channel",
  "interprocess",
  "libc",
  "libloading 0.9.1",
@@ -3221,6 +3222,7 @@ dependencies = [
  "bytemuck",
  "crossbeam-queue",
  "dpi",
+ "futures-channel",
  "futures-lite",
  "getrandom",
  "interprocess",

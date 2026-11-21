@@ -344,7 +344,7 @@ fn stereo_to_mono<F: Float>() -> Fold<F> {
 /// Which speaker feeds each channel of `bed`: its place among the bed's placed
 /// speakers, in the bed's order, and `None` for a channel with no direction (the
 /// LFE). Allocates, so it runs at construction only.
-fn speaker_of_channel(bed: Bed) -> Vec<Option<usize>> {
+pub(in crate::spatial) fn speaker_of_channel(bed: Bed) -> Vec<Option<usize>> {
     let mut next = 0;
     // A bed's topology is speakers.
     bed.topology()

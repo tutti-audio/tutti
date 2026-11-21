@@ -14,6 +14,7 @@ use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
+use crate::loading::Perform as _;
 use crate::loading::{Hosted as _, LoadFrom as _};
 use tutti_buffers::MaxBlock;
 use tutti_plugin_db::PluginDb;
@@ -211,19 +212,27 @@ fn restore_round_trip(hosting: Hosting) {
     set(&s, 0.9);
     blocks(&mut s);
     let main = tutti_fixtures::main_thread();
-    let state = s
+    // The arm of each value is the node's hosting.
+    let in_process = matches!(hosting, Hosting::InProcess);
+    let save = s
         .save_state(&node, tutti_plugin_types::StateUse::Project)
-        .expect("a node holds the plugin")
-        .run(main)
-        .expect("a state");
+        .expect("a node holds the plugin");
+    assert_eq!(
+        matches!(save, tutti_session::SaveState::InProcess(_)),
+        in_process,
+        "{save:?}"
+    );
+    let state = save.perform(main).expect("a state");
 
     set(&s, 0.1);
     blocks(&mut s);
-    let restored = s
-        .restore_state(&node, state)
-        .expect("its own plugin's")
-        .run(main)
-        .expect("the plugin takes it");
+    let restore = s.restore_state(&node, state).expect("its own plugin's");
+    assert_eq!(
+        matches!(restore, tutti_session::RestoreState::InProcess(_)),
+        in_process,
+        "{restore:?}"
+    );
+    let restored = restore.perform(main).expect("the plugin takes it");
     s.apply(restored).expect("the node still hosts the plugin");
     // The mirror is read again by the next updates.
     let deadline = Instant::now() + Duration::from_secs(30);

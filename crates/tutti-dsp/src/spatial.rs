@@ -26,7 +26,7 @@
 //!
 //! ## Ambisonics
 //!
-//! `ambisonic/`: the AmbiX encoder and rotation, see [`Harmonics`].
+//! `ambisonic/`: the AmbiX encoder, rotation and decoders, see [`Harmonics`].
 //!
 //! ## HRTF
 //!
@@ -39,7 +39,8 @@ mod hrtf;
 mod vbap;
 
 pub use ambisonic::{
-    AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics, Rotation,
+    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics,
+    Rotation,
 };
 pub use hrtf::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,

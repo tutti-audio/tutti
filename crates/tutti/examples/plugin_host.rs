@@ -33,8 +33,8 @@ use tutti::plugin::PresetSupport;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb};
 use tutti::session::Peer as _;
 use tutti::{
-    Beat, Bounce, Catalog, Format, LoadPlugin, MaxBlock, ParamId, Pcm, PluginEvent, Range, Root,
-    SampleRate, Samples, Session, SessionEvent, StateUse,
+    Beat, Bounce, Catalog, Format, LoadPlugin, LoadPreset, MaxBlock, ParamId, Pcm, PluginEvent,
+    Range, Root, SampleRate, Samples, SaveState, Session, SessionEvent, StateUse,
 };
 use tutti_units::Normalized;
 
@@ -156,10 +156,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Save its state: now, from the plugin (`last_good` is the session's
     //    crash-recovery copy, up to a snapshot interval old). `save_state`
-    //    makes the work and `run` does it, on the main thread. The state names
+    //    makes the work, by where the plugin runs: the app runs a plugin in
+    //    process on the main thread, and awaits one in a plugin server. The state names
     //    the plugin it came from, so a project that keeps it restores it into
     //    that plugin and no other (`restore_state`, run, then `apply`).
-    let state = session.save_state(&node, StateUse::Project)?.run(main)?;
+    let state = match session.save_state(&node, StateUse::Project)? {
+        SaveState::InProcess(save) => save.run(main)?,
+        SaveState::OutOfProcess(save) => tutti_fixtures::block_on(save)?,
+    };
     let state_path = out.with_extension("state");
     std::fs::write(&state_path, state.bytes())?;
     eprintln!(
@@ -174,8 +178,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    reloaded). Presets are part of the plugin's info, read when it loaded:
     //    `support()` says whether the plugin lists them (load a handle with
     //    `load_preset`), loads them from files (`LoadByPath`, CLAP:
-    //    `load_preset_file`) or has none. A load is work the app runs on the
-    //    main thread, then applies.
+    //    `load_preset_file`) or has none. A load is work the app runs (on the
+    //    main thread, or awaited for a plugin in a server), then applies.
     {
         let info = loaded.info();
         let presets = info.presets();
@@ -184,7 +188,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             support if support.can_list() => {
                 eprintln!("{} preset(s)", presets.len());
                 if let Some(first) = presets.iter().next() {
-                    let loaded = session.load_preset(&node, &first)?.run(main)?;
+                    let loaded = match session.load_preset(&node, &first)? {
+                        LoadPreset::InProcess(load) => load.run(main)?,
+                        LoadPreset::OutOfProcess(load) => tutti_fixtures::block_on(load)?,
+                    };
                     session.apply(loaded)?;
                     eprintln!(
                         "loaded {:?}, current {:?}",
