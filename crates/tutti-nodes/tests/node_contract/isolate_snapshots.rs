@@ -22,13 +22,13 @@ use tutti_nodes::{
     AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
     BusStripNode, ChannelTimes, CombFilterConfig, CombFilterNode, CombForm, CompressorConfig,
     CompressorControls, CompressorNode, ConvolverNode, DelayConfig, DelayControls, DelayLayout,
-    DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig,
-    EqBandNode, FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
-    InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
-    LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
-    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
-    RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages, SvfFilterConfig,
-    SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    DelayNode, DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
+    DynamicEqNode, EqBandConfig, EqBandNode, FrequencyShifterConfig, FrequencyShifterNode,
+    GateConfig, GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig,
+    LadderFilterNode, LadderType, LfoConfig, LfoNode, LfoShape, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
+    PitchShifterConfig, PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig,
+    ShimmerNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -42,8 +42,8 @@ use tutti_nodes::{
     TiltFilterNode,
 };
 use tutti_units::{
-    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples,
-    Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
+    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Metres, Q, Resonance,
+    Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -508,6 +508,21 @@ fn pitch_shifter() {
     })
     .control("pitch", |r| {
         assert!(r.param_set().set(UnitParam::Pitch, -900.0))
+    })
+    .check();
+}
+
+#[test]
+fn distance() {
+    IsolateRow::new("DistanceNode (stereo)", || {
+        DistanceNode::<f32>::from(
+            DistanceConfig::new(ChannelLayout::STEREO, Metres::of(50.0))
+                .air_absorption(Hz::new(8000.0))
+                .distance(Metres::of(2.0)),
+        )
+    })
+    .control("distance", |r| {
+        assert!(r.param_set().set(UnitParam::Distance, 30.0))
     })
     .check();
 }

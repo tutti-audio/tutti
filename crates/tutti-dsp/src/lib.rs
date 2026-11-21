@@ -119,6 +119,9 @@
 //! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`]
 //!   and [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
 //!   [`RingModulator`], the input times a sine carrier.
+//! - **Distance** (`distance.rs`): [`Distance`], a source at a [`Metres`](tutti_units::Metres)
+//!   distance as the delay `r / c`, the level `r_ref / r` and optional air absorption, whose
+//!   moving delay is the Doppler shift ([`DistanceSpec`], [`DistanceControls`]).
 //! - **Bit crusher and DC blocker** (`bit_crush.rs`, `dc_block.rs`): [`BitCrusher`], a
 //!   sample-and-hold every [`hold_frames`] frames, then [`quantize`] to a bit depth;
 //!   [`DcBlocker`], a first-order high-pass with its pole `exp(-2 pi fc / fs)`.
@@ -166,6 +169,7 @@ mod dc_block;
 mod dct;
 mod delay;
 mod design;
+mod distance;
 mod dither;
 mod dynamics;
 mod fft;
@@ -226,6 +230,7 @@ pub use delay::{
     FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
+pub use distance::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
 pub use dither::shaping::NoiseShaping;
 pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
