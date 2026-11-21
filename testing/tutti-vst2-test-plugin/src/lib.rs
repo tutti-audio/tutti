@@ -1131,6 +1131,9 @@ pub extern "C" fn VSTPluginMain(callback: HostCallbackProc) -> *mut AEffect {
         if config.omit_can_replacing {
             (*effect).flags &= !api::PluginFlags::CAN_REPLACING.bits();
         }
+        if config.omit_set_parameter {
+            (*effect).setParameter = None;
+        }
 
         RAW_TAIL_SIZE = config.raw_tail_size;
 

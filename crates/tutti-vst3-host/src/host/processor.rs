@@ -793,7 +793,9 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// MIDI messages not handed to the plugin since this Processor was built
     /// because they were of a Group it has no event input bus for (Group `n` is
     /// event bus `n`): each is dropped whole and counted, never heard on another
-    /// Group's channels. Read on this instance only, like
+    /// Group's channels. For a plugin with no event input bus at all, every
+    /// event offered (of any kind) is counted here too: both share this one
+    /// counter. Read on this instance only, like
     /// [`sysex_dropped`](Self::sysex_dropped).
     pub fn groups_dropped(&self) -> u64 {
         self.audio.input.stager.groups_dropped()

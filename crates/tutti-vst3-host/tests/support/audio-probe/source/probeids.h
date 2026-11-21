@@ -446,6 +446,10 @@ enum ProbeMisbehaviour : int32
     /// it is active. The host's table of what the plugin declared is the
     /// activation's, so the two differ until the host reads again.
     kMisbehaveObservedWritableLate = 16,
+
+    /// The plugin declares no event input bus at all (only an event output
+    /// bus): it takes no events, so a host must send it none.
+    kMisbehaveNoEventInput = 17,
 };
 
 static const double kRefusedAboveHz = 50000.0;
@@ -491,7 +495,7 @@ inline int32 probeMisbehaviour ()
     // whose value falls outside this range is silently read as `kMisbehaveNone`,
     // so the plugin behaves and the test passes against a probe that never
     // misbehaved.
-    return (v >= kMisbehaveNone && v <= kMisbehaveObservedWritableLate) ? v : kMisbehaveNone;
+    return (v >= kMisbehaveNone && v <= kMisbehaveNoEventInput) ? v : kMisbehaveNone;
 }
 
 /// Bus count reported under [`kMisbehaveExtraBuses`]. Larger than any real

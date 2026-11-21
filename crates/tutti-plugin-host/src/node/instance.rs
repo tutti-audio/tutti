@@ -296,6 +296,7 @@ impl<L: Loaded> Instance<L> {
     fn drive(&mut self, main: MainThreadMarker, event: Event) -> Option<Trouble> {
         let mut trouble = None;
         let changes = &mut self.changes;
+        let reports = &mut self.reports;
         // The lifecycle takes the state by value and hands the next back; a
         // fresh state is no allocation, so the one held is moved, not cloned.
         let state = std::mem::replace(&mut self.state, Lifecycle::<L>::initial_state());
@@ -315,6 +316,11 @@ impl<L: Loaded> Instance<L> {
                     Notice::Stuck { reason } => {
                         trouble = Some(Trouble::Stuck {
                             reason: Arc::new(reason),
+                        });
+                    }
+                    Notice::StateNotRestored { reason } => {
+                        reports.push(PluginInvalidation::StateNotRestored {
+                            reason: reason.to_string(),
                         });
                     }
                     Notice::Lost { reason } => {

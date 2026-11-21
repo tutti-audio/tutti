@@ -65,6 +65,9 @@ pub struct ProbeConfig {
     /// `vst::main` sets that bit unconditionally, so it cannot be expressed
     /// through the `Plugin` trait — see `lib.rs`'s `VSTPluginMain`.
     pub omit_can_replacing: bool,
+    /// Clear `AEffect::setParameter` after `vst::main` has built the AEffect:
+    /// a plugin that exposes no setter, which VST 2.4 permits.
+    pub omit_set_parameter: bool,
     /// Raw `effGetTailSize` answer, bypassing the `Plugin` trait, whose path
     /// vst-rs rewrites from `0` to `1` — erasing VST 2.4's distinction
     /// between `0` ("no tail info, assume the worst") and `1` ("no tail,
@@ -117,6 +120,7 @@ impl Default for ProbeConfig {
             f64_precision: false,
             has_editor: false,
             omit_can_replacing: false,
+            omit_set_parameter: false,
             raw_tail_size: None,
             midi_inputs: 1,
             midi_outputs: 1,
@@ -155,6 +159,7 @@ impl ProbeConfig {
             f64_precision: env_flag("TUTTI_VST2_PROBE_F64"),
             has_editor: env_flag("TUTTI_VST2_PROBE_EDITOR"),
             omit_can_replacing: env_flag("TUTTI_VST2_PROBE_NO_CAN_REPLACING"),
+            omit_set_parameter: env_flag("TUTTI_VST2_PROBE_NO_SET_PARAMETER"),
             raw_tail_size: env::var("TUTTI_VST2_PROBE_TAIL_SIZE")
                 .ok()
                 .and_then(|v| v.parse::<isize>().ok()),

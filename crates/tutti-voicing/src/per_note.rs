@@ -263,12 +263,12 @@ impl Clone for PerNoteState {
 }
 
 impl PerNoteState {
-    /// State for `groups` Groups (1 to 16; more are not kept), each channel's
-    /// per-note bend sensitivity starting at `default_range` (section 7.4.13
-    /// gives no default). Allocates; `step` never does.
+    /// State for `groups` Groups, each channel's per-note bend sensitivity
+    /// starting at `default_range` (section 7.4.13 gives no default).
+    /// Allocates; `step` never does.
     #[must_use]
-    pub fn new(groups: usize, default_range: Semitones) -> Self {
-        let groups = groups.clamp(1, usize::from(tutti_ump::MidiGroup::COUNT));
+    pub fn new(groups: tutti_ump::GroupSpan, default_range: Semitones) -> Self {
+        let groups = usize::from(groups.get());
         Self {
             groups,
             default_range,
@@ -525,7 +525,7 @@ mod tests {
     }
 
     fn state() -> PerNoteState {
-        PerNoteState::new(2, Semitones::new(48.0))
+        PerNoteState::new(tutti_ump::GroupSpan::of(2), Semitones::new(48.0))
     }
 
     fn pitch_of(s: &mut PerNoteState, a: Address, n: u8, value: u32) -> Vec<NoteEvent> {
