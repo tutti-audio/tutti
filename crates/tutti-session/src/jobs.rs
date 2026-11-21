@@ -535,6 +535,15 @@ impl Jobs {
         Ok(())
     }
 
+    /// The session's executor, held for the session's whole life.
+    #[cfg_attr(
+        not(feature = "device"),
+        expect(dead_code, reason = "a device switch (feature `device`) is its user")
+    )]
+    pub(crate) fn executor(&self) -> &Executor {
+        &self.executor
+    }
+
     /// The session's bells: a future that awaits the audio thread makes its bell here.
     #[cfg_attr(
         not(feature = "capture"),

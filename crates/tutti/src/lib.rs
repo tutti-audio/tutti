@@ -366,9 +366,9 @@ pub mod types {
         PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_buffers::{
-        BufferError, FiniteSource, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel,
-        FoldLevels, FoldSpec, NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed,
-        Source, StereoPlanes, Stop,
+        BufferError, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec,
+        NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes,
+        Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{

@@ -8,13 +8,11 @@
 //! without an `unsafe` impl. Do not create a COM object on the owner thread
 //! that another thread calls into: it is a WASAPI STA with no message pump.
 
-use std::future::{Future, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, PoisonError};
-use std::task::{Poll, Waker};
 use std::time::Duration;
 
+use futures_channel::oneshot;
 use tutti_platform::{Executor, Task, is_driving, join_within, panic_message};
 
 use crate::error::{DeviceError, Result};
@@ -23,55 +21,16 @@ use crate::error::{DeviceError, Result};
 /// that has not stopped by then is left to finish on its own thread.
 const STOP_PATIENCE: Duration = Duration::from_secs(5);
 
-/// The stop request the owner's future waits on: a flag and the waker of the
-/// future that reads it.
-#[derive(Debug, Default)]
-struct Stop {
-    state: Mutex<StopState>,
-}
-
-#[derive(Debug, Default)]
-struct StopState {
-    requested: bool,
-    waker: Option<Waker>,
-}
-
-impl Stop {
-    /// Requests the stop and wakes the future waiting for it. Idempotent.
-    fn request(&self) {
-        let waker = {
-            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            state.requested = true;
-            state.waker.take()
-        };
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
-
-    /// Resolves once [`request`](Self::request) has been called.
-    fn requested(&self) -> impl Future<Output = ()> + '_ {
-        poll_fn(|cx| {
-            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            if state.requested {
-                Poll::Ready(())
-            } else {
-                state.waker = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        })
-    }
-}
-
 /// The handle to a value owned by its own thread. Dropping it asks that
-/// thread to drop the value and waits for it (at most [`STOP_PATIENCE`]), so
+/// thread to drop the value and waits for it (at most `STOP_PATIENCE`), so
 /// the stream is stopped when the drop returns.
 ///
 /// A drop on a thread that drives an executor does not wait: it asks for the
 /// stop and detaches, with a warning.
 #[derive(Debug)]
 pub(crate) struct Owned {
-    stop: Arc<Stop>,
+    /// Dropping it is the stop: the owner's future awaits the other end.
+    stop: Option<oneshot::Sender<()>>,
     task: Option<Task<()>>,
 }
 
@@ -89,8 +48,7 @@ impl Owned {
         build: impl FnOnce() -> Result<S> + Send + 'static,
     ) -> Result<Self> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<()>>();
-        let stop = Arc::new(Stop::default());
-        let held = Arc::clone(&stop);
+        let (stop, stopped) = oneshot::channel::<()>();
         let task = executor.spawn_dedicated_local(name, None, move || {
             let built = catch_unwind(AssertUnwindSafe(build));
             let value = match built {
@@ -112,14 +70,15 @@ impl Owned {
             };
             async move {
                 if value.is_some() {
-                    held.requested().await;
+                    // Resolves when the handle drops its sender.
+                    let _ = stopped.await;
                 }
                 drop(value);
             }
         })?;
         match ready_rx.recv() {
             Ok(Ok(())) => Ok(Self {
-                stop,
+                stop: Some(stop),
                 task: Some(task),
             }),
             Ok(Err(e)) => Err(e),
@@ -135,7 +94,7 @@ impl Owned {
 impl Drop for Owned {
     /// Asks the owner thread to drop the value and waits for it.
     fn drop(&mut self) {
-        self.stop.request();
+        drop(self.stop.take());
         let Some(task) = self.task.take() else {
             return;
         };

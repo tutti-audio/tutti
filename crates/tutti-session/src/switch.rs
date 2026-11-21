@@ -166,12 +166,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     ) -> std::result::Result<LiveSession<K, F>, ClockError<Self>> {
         let config = device.into();
         let device = config.device().clone();
-        let Some(executor) = self.devices.executor() else {
-            let e = tutti_cpal::DeviceError::InvalidConfig(
-                "cannot open the device: the executor has shut down".into(),
-            );
-            return Err(ClockError::new(self, e.into()));
-        };
+        let executor = self.jobs.executor().clone();
         let opened = DeviceHost::open(self.running.audio_host).and_then(|host| {
             let engine = AudioEngine::open(&executor, host, config)?;
             let resolved = engine.resolve_device()?;
