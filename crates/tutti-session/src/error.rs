@@ -528,9 +528,9 @@ pub enum Error {
     #[error(transparent)]
     Take(#[from] crate::TakeError),
 
-    /// The session's bell tick thread did not start: the OS refused it
+    /// The session's bell tick task did not start: the OS refused its thread
     /// ([`SessionBuilder::build`](crate::SessionBuilder)).
-    #[error("the session's bell thread did not start: {0}")]
+    #[error("the session's bell tick did not start: {0}")]
     Bells(std::io::Error),
 
     /// The build needs work that keeps pace with the hardware or the audio thread, and

@@ -669,7 +669,9 @@ mod tests {
         use std::pin::pin;
         use std::task::{Context, Poll, Waker};
 
-        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let executor = tutti_platform::Executor::new();
+
+        let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         let (bell, mut listener) = bells.bell();
         let (mut reader, mut writer) =
             TapReader::<f32>::named(TapId::of(2), 1, Samples::new(8), Some(bell));
@@ -704,7 +706,9 @@ mod tests {
         use std::pin::pin;
         use std::task::{Context, Poll, Waker};
 
-        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let executor = tutti_platform::Executor::new();
+
+        let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         let (bell, mut listener) = bells.bell();
         let (reader, mut writer) =
             TapReader::<f32>::named(TapId::of(1), 1, Samples::new(4), Some(bell));

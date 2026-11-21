@@ -710,7 +710,7 @@ fn a_take_records_and_its_file_holds_the_frames_written() {
     let frames = read(&path);
     assert_eq!(frames.len(), done.frames().get());
     // A stop ends the pump at its next wake, so how much of the tail it drained first
-    // depends on when the tick thread woke it: the frames it kept are what is pinned.
+    // depends on when the tick task woke it: the frames it kept are what is pinned.
     assert!(!frames.is_empty(), "the take kept no frame");
     for (k, frame) in frames.iter().enumerate() {
         let want = (first as usize + k) as f32;

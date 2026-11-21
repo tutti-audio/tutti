@@ -29,8 +29,8 @@ type Rig = (Bells, Executor);
 
 /// A streamer future on a threaded executor, and what keeps it going.
 fn streamer() -> (DiskStreamer<Running, f32>, Rig) {
-    let bells = Bells::new().expect("a tick thread");
     let executor = Executor::new();
+    let bells = Bells::new(&executor).expect("the bells' tick task");
     let streamer = DiskStreamer::start(
         SampleRate::of(f64::from(RATE)),
         DiskStreamerConfig::default(),

@@ -2,12 +2,19 @@
 
 use std::io;
 
+use tutti_platform::Executor;
+
 use super::{Arc, Parker, Shared};
 
 pub(super) struct Tick;
 
 impl Tick {
-    pub(super) fn start(_shared: &Arc<Shared>, _parker: Parker) -> io::Result<Self> {
+    /// The web ticks inline: the executor is not used.
+    pub(super) fn start(
+        _shared: &Arc<Shared>,
+        _parker: Parker,
+        _executor: &Executor,
+    ) -> io::Result<Self> {
         Ok(Self)
     }
 

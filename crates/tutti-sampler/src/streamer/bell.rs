@@ -76,7 +76,8 @@ impl<F: RingFloat> StreamerSender<F> {
 #[cfg(test)]
 impl<F: RingFloat> From<Sender<StreamerCommand<F>>> for StreamerSender<F> {
     fn from(tx: Sender<StreamerCommand<F>>) -> Self {
-        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let executor = tutti_platform::Executor::new();
+        let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         Self::new(tx, bells.bell().0)
     }
 }
