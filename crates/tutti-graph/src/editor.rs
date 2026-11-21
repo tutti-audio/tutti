@@ -269,6 +269,9 @@ pub struct Editor<F: Float = f32> {
     /// The old root a crossfading plan renders, kept for the commits that
     /// continue the crossfade.
     fading: Option<Fading>,
+    /// Where each tap this editor opens takes its bell
+    /// ([`notify_with`](Self::notify_with)); `None` opens taps without one.
+    bells: Option<tutti_rt::BellsHandle>,
 }
 
 /// The old root of a crossfade in progress, as the commit that began it
@@ -385,6 +388,7 @@ impl<F: Float> Editor<F> {
             root_fade: None,
             bank: None,
             fading: None,
+            bells: None,
         };
         (editor, Executor::new(prepare, cap, ends, command_rx))
     }
