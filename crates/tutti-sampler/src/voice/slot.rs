@@ -613,3 +613,55 @@ pub(crate) fn stretch_wanted(play: &Playback) -> bool {
 pub(crate) fn stretch_values_want_filter(stretch: StretchFactor, pitch: Cents) -> bool {
     (stretch.get() - 1.0).abs() > 0.001 || pitch.get().abs() > 0.5
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voice::clock::Clock;
+    use std::sync::Arc;
+    use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+    use tutti_music::LoopRange;
+    use tutti_tempo::{TempoMap, TempoPoint, Transition};
+    use tutti_units::{Frame, SampleRate, Samples};
+
+    /// What a voice counts to a beat ahead goes through the tempo map: the playhead at beat
+    /// 1.3 and 60 BPM, a step to 240 BPM at beat 1.38, a loop that ends at beat 1.5 and a
+    /// clip that starts at beat 1.45. The frames are the map's closed form, piecewise at
+    /// each tempo: 0.08 beat at 60 BPM is 0.08 s and 0.12 beat at 240 BPM is 0.03 s, 3 840
+    /// and 1 440 frames at 48 kHz, 5 280 to the loop's end; to 1.45, 3 840 and 840, 4 680.
+    /// At the playhead's own tempo they would be 9 600 and 7 200.
+    #[test]
+    fn what_a_voice_counts_ahead_goes_through_the_tempo_map() {
+        let map = TempoMap::new([
+            TempoPoint {
+                beat: Beat::new(0.0),
+                tempo: Bpm::of(60.0),
+                transition: Transition::Step,
+            },
+            TempoPoint {
+                beat: Beat::new(1.38),
+                tempo: Bpm::of(240.0),
+                transition: Transition::Step,
+            },
+        ])
+        .expect("a map");
+        let looping = LoopRange::new(Beat::new(0.25), Beat::new(1.5)).expect("a loop");
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: SampleRate::SR_48K,
+            block_len: Samples::new(64),
+            transport: TransportPosition::new(true, Bpm::of(60.0), Beat::new(1.3), Some(looping)),
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        let map = Arc::new(map);
+        let mut clock = Clock::new();
+        let block = clock.observe_with(&env, Some(&map));
+        let window = VoiceWindow::from(Beat::new(0.0));
+        let (to_wrap, start, _) = wrap_ahead(&block, 0, window).expect("a wrap ahead");
+        assert_eq!(start, Beat::new(0.25));
+        assert!(to_wrap.abs_diff(5_280) <= 1, "to the wrap: {to_wrap}");
+        let to_clip = frames_until(&block, 0, Beat::new(1.45)).expect("a start ahead");
+        assert!(to_clip.abs_diff(4_680) <= 1, "to the clip: {to_clip}");
+    }
+}
