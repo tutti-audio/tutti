@@ -1303,8 +1303,8 @@ impl<F: Float> Midi<'_, F> {
     /// clip ([`play_clip`](Self::play_clip)).
     ///
     /// A target has one live input and its keys are the inlet's one
-    /// producer: they are handed out once. [`tap`](Self::tap) opens the
-    /// inlet too, and leaves the keys for this call.
+    /// producer: they are handed out once. [`tap`](Self::tap) records what
+    /// they play.
     ///
     /// # Errors
     ///
@@ -1776,8 +1776,8 @@ impl<F: Float> Midi<'_, F> {
     /// [`Session::instrument`](crate::Session::instrument)) that inlet is the
     /// handle's own queue, so **what the handle's
     /// [`keys`](crate::InstrumentHandle::keys_mut) play is recorded**; any
-    /// other target is tapped on its live input ([`input`](Self::input),
-    /// opened when it has none). A reader of
+    /// other target is tapped on the live input [`input`](Self::input)
+    /// opened for it. A reader of
     /// `capacity` events (a non-note-off is refused once that many are held, a
     /// note-off is kept up to [`note_off_room`](tutti_graph::note_off_room) of
     /// it; both counted by [`EventTapReader::take_lost`]).
@@ -1804,7 +1804,8 @@ impl<F: Float> Midi<'_, F> {
     /// # Errors
     ///
     /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes no MIDI,
-    /// and [`MidiError::Tap`] when the live input's port is gone from the graph.
+    /// [`MidiError::NoLiveInput`] when it is no instrument and has no live input
+    /// yet, and [`MidiError::Tap`] when the live input's port is gone from the graph.
     pub fn tap(
         &mut self,
         target: impl Into<NodeKey>,
@@ -1815,7 +1816,10 @@ impl<F: Float> Midi<'_, F> {
             self.takes_midi(target)?;
             queue
         } else {
-            self.live_inlet(target)?
+            self.takes_midi(target)?;
+            self.fed_by(target, Feeder::LiveInput, &self.state.live)
+                .map(|(node, _)| node)
+                .ok_or(MidiError::NoLiveInput(target))?
         };
         let source = EventOutPort::new(node, 0);
         self.graph
