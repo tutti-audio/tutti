@@ -540,9 +540,10 @@ fn fm() {
         modulator: operator,
         target: operator,
     };
-    let algorithm = Algorithm::new(OperatorCount::of(1), &[route], &[operator]).unwrap();
+    let algorithm =
+        Algorithm::try_from((OperatorCount::of(1), &[route][..], &[operator][..])).unwrap();
     let ratio = OperatorFrequency::Ratio(FrequencyRatio::UNISON);
-    let patch = FmPatch::new(algorithm, &[OperatorSpec::new(ratio)]).unwrap();
+    let patch = FmPatch::new(algorithm).operators(&[OperatorSpec::new(ratio)]);
     IsolateRow::new("FmNode", move || {
         FmNode::<f32>::from(FmConfig::new(patch).frequency(Hz::new(300.0)))
     })
@@ -566,7 +567,7 @@ fn additive() {
             Amplitude::new(amplitude),
         )
     };
-    let partials = Partials::new(&[partial(1.0, 0.5), partial(2.5, 0.25)]).unwrap();
+    let partials = Partials::try_from(&[partial(1.0, 0.5), partial(2.5, 0.25)][..]).unwrap();
     IsolateRow::new("AdditiveNode", move || {
         AdditiveNode::<f32>::from(AdditiveConfig::new(partials.clone()).frequency(Hz::new(300.0)))
     })

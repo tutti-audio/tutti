@@ -12,7 +12,7 @@ fn partials() -> Partials {
             Amplitude::new(amplitude),
         )
     };
-    Partials::new(&[p(1.0, 0.5), p(3.0, 0.25), p(60.0, 0.9)]).unwrap()
+    Partials::try_from(&[p(1.0, 0.5), p(3.0, 0.25), p(60.0, 0.9)][..]).unwrap()
 }
 
 #[test]

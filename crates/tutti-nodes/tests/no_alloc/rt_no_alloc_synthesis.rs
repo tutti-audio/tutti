@@ -16,15 +16,11 @@ fn ratio(x: f64) -> OperatorFrequency {
 /// moved before each.
 #[test]
 fn fm_process_is_allocation_free_with_the_frequency_and_index_moving() {
-    let patch = FmPatch::new(
-        Algorithm::chain(OperatorCount::of(3)),
-        &[
-            OperatorSpec::new(ratio(1.0)),
-            OperatorSpec::new(ratio(2.0)).level(Amplitude::new(0.5)),
-            OperatorSpec::new(ratio(1.0)),
-        ],
-    )
-    .unwrap();
+    let patch = FmPatch::new(Algorithm::chain(OperatorCount::of(3))).operators(&[
+        OperatorSpec::new(ratio(1.0)),
+        OperatorSpec::new(ratio(2.0)).level(Amplitude::new(0.5)),
+        OperatorSpec::new(ratio(1.0)),
+    ]);
     let node = FmNode::<f32>::from(FmConfig::new(patch).index(ModulationIndex::of(2.0)));
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 480);
     let set = |i: usize| {
@@ -60,7 +56,8 @@ fn additive_process_is_allocation_free_with_the_frequency_moving() {
         )
     };
     let partials =
-        Partials::new(&[partial(1.0, 0.5), partial(2.0, 0.25), partial(40.0, 0.1)]).unwrap();
+        Partials::try_from(&[partial(1.0, 0.5), partial(2.0, 0.25), partial(40.0, 0.1)][..])
+            .unwrap();
     let (mut rig, controls) = BlockRig::new(
         AdditiveNode::<f32>::from(AdditiveConfig::new(partials)),
         SampleRate::SR_48K,

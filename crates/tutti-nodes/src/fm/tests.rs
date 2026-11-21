@@ -16,14 +16,10 @@ fn ratio(x: f64) -> OperatorFrequency {
 
 /// Operator 0 at `fm`, modulating operator 1 at `fc`, a carrier.
 fn two_operators() -> FmPatch {
-    FmPatch::new(
-        Algorithm::chain(OperatorCount::of(2)),
-        &[
-            OperatorSpec::new(ratio(1.0)),
-            OperatorSpec::new(ratio(10.0)),
-        ],
-    )
-    .unwrap()
+    FmPatch::new(Algorithm::chain(OperatorCount::of(2))).operators(&[
+        OperatorSpec::new(ratio(1.0)),
+        OperatorSpec::new(ratio(10.0)),
+    ])
 }
 
 /// One operator that modulates itself.
@@ -32,8 +28,9 @@ fn feedback_operator() -> FmPatch {
         modulator: Operator::of(0),
         target: Operator::of(0),
     };
-    let algorithm = Algorithm::new(OperatorCount::of(1), &[route], &[Operator::of(0)]).unwrap();
-    FmPatch::new(algorithm, &[OperatorSpec::new(ratio(1.0))]).unwrap()
+    let algorithm =
+        Algorithm::try_from((OperatorCount::of(1), &[route][..], &[Operator::of(0)][..])).unwrap();
+    FmPatch::new(algorithm).operators(&[OperatorSpec::new(ratio(1.0))])
 }
 
 /// `J_n(x)` from its series, for `n >= 0`.
@@ -106,8 +103,8 @@ fn the_shape_is_a_mono_source_declaring_frequency_level_index_and_feedback() {
     assert_eq!(bases, [Some(220.0), Some(0.5), Some(2.0), Some(0.75)]);
 }
 
-/// The node plays the voice: at index `I` the carrier line is `J_0(I)` and its first
-/// sidebands `+-J_1(I)` (`J_{-1} = -J_1`), at the output level.
+/// The node plays the voice: at index `I` the carrier line is J_0(I) and its first
+/// sidebands +-J_1(I) (J_{-1} = -J_1), at the output level.
 #[test]
 fn the_node_plays_the_bessel_lines_of_its_index() {
     let (index, level) = (1.8, 0.5);
@@ -134,7 +131,7 @@ fn the_node_plays_the_bessel_lines_of_its_index() {
 }
 
 /// The first `Index` param is the index of modulation and the second the feedback: set
-/// through the cells, a driven single operator has the second harmonic `J_1(beta)` that
+/// through the cells, a driven single operator has the second harmonic J_1(beta) that
 /// `sin(theta + beta sin(theta))` has, to the first order in the two-sample average's lag of
 /// `1.5` samples (`1.5 w = 0.01 rad` at 100 Hz and 96 kHz, a few parts in a thousand of
 /// `beta`).

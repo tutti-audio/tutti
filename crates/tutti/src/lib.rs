@@ -280,8 +280,7 @@ pub mod nodes {
     pub use tutti_dsp::{
         AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice,
         MAX_OPERATORS, MAX_PARTIALS, Operator, OperatorCount, OperatorCountError, OperatorError,
-        OperatorFrequency, OperatorSpec, Partial, PartialCount, PartialCountError, Partials,
-        PatchError, Route,
+        OperatorFrequency, OperatorSpec, Partial, PartialCount, PartialCountError, Partials, Route,
     };
     pub use tutti_dsp::{
         AllPassFilter, CombBank, CombControls, CombFilter, CombForm, FrequencyShifterBank,

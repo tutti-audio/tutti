@@ -18,7 +18,7 @@ fn partial(ratio: f64, amplitude: f64) -> Partial {
 }
 
 fn render(partials: &[Partial], controls: &AdditiveControls) -> Vec<f64> {
-    let mut bank = AdditiveBank::<f64>::new(Partials::new(partials).unwrap(), RATE);
+    let mut bank = AdditiveBank::<f64>::new(Partials::try_from(partials).unwrap(), RATE);
     bank.retarget(controls);
     let mut out = vec![0.0; WINDOW];
     bank.process(MonoMut::new(&mut out));
@@ -87,7 +87,7 @@ fn a_frequency_that_pushes_a_partial_past_the_nyquist_drops_it() {
 #[test]
 fn the_phase_runs_on_across_blocks() {
     let partials = [partial(1.0, 1.0)];
-    let mut bank = AdditiveBank::<f64>::new(Partials::new(&partials).unwrap(), RATE);
+    let mut bank = AdditiveBank::<f64>::new(Partials::try_from(&partials[..]).unwrap(), RATE);
     bank.retarget(&controls(480.0, 1.0));
     let mut out = vec![0.0; WINDOW];
     for half in out.chunks_mut(WINDOW / 2) {
@@ -100,9 +100,15 @@ fn the_phase_runs_on_across_blocks() {
 #[test]
 fn a_bank_has_between_one_and_256_partials() {
     let one = partial(1.0, 1.0);
-    assert!(Partials::new(&[]).is_err());
-    assert_eq!(Partials::new(&[one; 256]).unwrap().count().get(), 256);
-    assert_eq!(Partials::new(&[one; 257]), Err(PartialCountError(257)));
+    assert!(Partials::try_from(&[][..]).is_err());
+    assert_eq!(
+        Partials::try_from(&[one; 256][..]).unwrap().count().get(),
+        256
+    );
+    assert_eq!(
+        Partials::try_from(&[one; 257][..]),
+        Err(PartialCountError(257))
+    );
 }
 
 /// A partial pushed past the Nyquist by a retarget leaves no tone at the Nyquist: the phase
@@ -112,7 +118,7 @@ fn a_bank_has_between_one_and_256_partials() {
 #[test]
 fn a_partial_pushed_past_the_nyquist_mid_stream_leaves_no_nyquist_tone() {
     let mut bank = AdditiveBank::<f64>::new(
-        Partials::new(&[partial(1.0, 0.5), partial(3.0, 1.0)]).unwrap(),
+        Partials::try_from(&[partial(1.0, 0.5), partial(3.0, 1.0)][..]).unwrap(),
         RATE,
     );
     bank.retarget(&controls(5_000.0, 1.0));

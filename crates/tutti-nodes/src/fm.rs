@@ -137,7 +137,7 @@ impl<F: Float> Kernel for FmKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        self.voice = FmVoice::new(self.patch, self.oversampling, rate, max_block).ok();
+        self.voice = self.patch.voice(self.oversampling, rate, max_block).ok();
     }
 
     fn reset(&mut self) {

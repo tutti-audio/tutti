@@ -276,8 +276,7 @@ pub use fir::{
 };
 pub use fm::{
     Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice, MAX_OPERATORS, Operator,
-    OperatorCount, OperatorCountError, OperatorError, OperatorFrequency, OperatorSpec, PatchError,
-    Route,
+    OperatorCount, OperatorCountError, OperatorError, OperatorFrequency, OperatorSpec, Route,
 };
 pub use frequency_shifter::{
     FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,

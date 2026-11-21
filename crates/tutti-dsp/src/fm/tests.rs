@@ -93,14 +93,10 @@ fn line(window: &[f64], hz: f64, delay: f64) -> f64 {
 #[test]
 fn the_sidebands_of_two_operator_pm_are_bessel_functions_of_the_index() {
     let (fm, fc) = (1_000.0, 10_000.0);
-    let patch = FmPatch::new(
-        Algorithm::chain(count(2)),
-        &[
-            OperatorSpec::new(ratio(1.0)),
-            OperatorSpec::new(ratio(10.0)),
-        ],
-    )
-    .unwrap();
+    let patch = FmPatch::new(Algorithm::chain(count(2))).operators(&[
+        OperatorSpec::new(ratio(1.0)),
+        OperatorSpec::new(ratio(10.0)),
+    ]);
     for factor in [OversamplingFactor::X2, OversamplingFactor::X4] {
         for index in [0.5, 1.5, 2.4] {
             let mut v = voice(patch, factor, &controls(fm, index, 0.0));
@@ -119,17 +115,13 @@ fn the_sidebands_of_two_operator_pm_are_bessel_functions_of_the_index() {
 }
 
 /// At index 0 the carrier is a sine of unit amplitude at its frequency and nothing else:
-/// `J_0(0) = 1` and `J_k(0) = 0`.
+/// J_0(0) = 1 and J_k(0) = 0.
 #[test]
 fn at_index_zero_the_carrier_is_a_unit_sine() {
-    let patch = FmPatch::new(
-        Algorithm::chain(count(2)),
-        &[
-            OperatorSpec::new(ratio(1.0)),
-            OperatorSpec::new(ratio(10.0)),
-        ],
-    )
-    .unwrap();
+    let patch = FmPatch::new(Algorithm::chain(count(2))).operators(&[
+        OperatorSpec::new(ratio(1.0)),
+        OperatorSpec::new(ratio(10.0)),
+    ]);
     let mut v = voice(patch, OversamplingFactor::X2, &controls(1_000.0, 0.0, 0.0));
     let delay = v.delay().get();
     let out = render(&mut v, 2 * WINDOW);
@@ -150,11 +142,8 @@ fn at_index_zero_the_carrier_is_a_unit_sine() {
 /// An operator with no feedback is `sin(2 pi n f / fs)`, `n` counted from phase 0.
 #[test]
 fn without_feedback_an_operator_is_the_sine_of_its_phase() {
-    let patch = FmPatch::new(
-        Algorithm::parallel(count(1)),
-        &[OperatorSpec::new(ratio(1.0))],
-    )
-    .unwrap();
+    let patch =
+        FmPatch::new(Algorithm::parallel(count(1))).operators(&[OperatorSpec::new(ratio(1.0))]);
     let mut stack = Stack::<f64>::new(patch);
     stack.retarget(&controls(1_234.5, 0.0, 0.0), RATE);
     for n in 0..4_000 {
@@ -171,8 +160,8 @@ fn self_feedback_is_the_average_of_the_last_two_outputs() {
         modulator: op(0),
         target: op(0),
     };
-    let algorithm = Algorithm::new(count(1), &[route], &[op(0)]).unwrap();
-    let patch = FmPatch::new(algorithm, &[OperatorSpec::new(ratio(1.0))]).unwrap();
+    let algorithm = Algorithm::try_from((count(1), &[route][..], &[op(0)][..])).unwrap();
+    let patch = FmPatch::new(algorithm).operators(&[OperatorSpec::new(ratio(1.0))]);
     let beta = 1.0;
     let mut stack = Stack::<f64>::new(patch);
     stack.retarget(&controls(1_000.0, 0.0, beta), RATE);
@@ -193,8 +182,8 @@ fn the_fed_back_operator_stays_within_unit_amplitude_for_every_feedback() {
         modulator: op(0),
         target: op(0),
     };
-    let algorithm = Algorithm::new(count(1), &[route], &[op(0)]).unwrap();
-    let patch = FmPatch::new(algorithm, &[OperatorSpec::new(ratio(1.0))]).unwrap();
+    let algorithm = Algorithm::try_from((count(1), &[route][..], &[op(0)][..])).unwrap();
+    let patch = FmPatch::new(algorithm).operators(&[OperatorSpec::new(ratio(1.0))]);
     for beta in [0.0, 0.25, 1.0, 2.0, 4.0, 16.0, 1_000.0, 1e9] {
         let mut stack = Stack::<f64>::new(patch);
         stack.retarget(&controls(997.0, 0.0, beta), RATE);
@@ -213,8 +202,8 @@ fn zero_feedback_is_a_pure_sine_through_the_oversampling() {
         modulator: op(0),
         target: op(0),
     };
-    let algorithm = Algorithm::new(count(1), &[route], &[op(0)]).unwrap();
-    let patch = FmPatch::new(algorithm, &[OperatorSpec::new(ratio(1.0))]).unwrap();
+    let algorithm = Algorithm::try_from((count(1), &[route][..], &[op(0)][..])).unwrap();
+    let patch = FmPatch::new(algorithm).operators(&[OperatorSpec::new(ratio(1.0))]);
     let mut v = voice(patch, OversamplingFactor::X2, &controls(2_000.0, 0.0, 0.0));
     let delay = v.delay().get();
     let out = render(&mut v, 2 * WINDOW);
@@ -230,13 +219,9 @@ fn zero_feedback_is_a_pure_sine_through_the_oversampling() {
 /// A fixed-frequency operator plays its own frequency whatever the voice's.
 #[test]
 fn a_fixed_operator_ignores_the_voice_frequency() {
-    let patch = FmPatch::new(
-        Algorithm::parallel(count(1)),
-        &[OperatorSpec::new(OperatorFrequency::Fixed(Hz::new(
-            3_000.0,
-        )))],
-    )
-    .unwrap();
+    let patch = FmPatch::new(Algorithm::parallel(count(1))).operators(&[OperatorSpec::new(
+        OperatorFrequency::Fixed(Hz::new(3_000.0)),
+    )]);
     let mut v = voice(patch, OversamplingFactor::X2, &controls(440.0, 0.0, 0.0));
     let delay = v.delay().get();
     let out = render(&mut v, 2 * WINDOW);
@@ -255,7 +240,7 @@ fn carriers_are_heard_at_their_levels_and_modulators_are_not() {
         OperatorSpec::new(ratio(3.0)).level(Amplitude::new(0.125)),
     ];
     let mut v = voice(
-        FmPatch::new(Algorithm::parallel(count(3)), &specs).unwrap(),
+        FmPatch::new(Algorithm::parallel(count(3))).operators(&specs),
         OversamplingFactor::X2,
         &controls(1_000.0, 0.0, 0.0),
     );
@@ -268,13 +253,10 @@ fn carriers_are_heard_at_their_levels_and_modulators_are_not() {
             "line {hz}"
         );
     }
-    let muted = Algorithm::new(count(2), &[], &[op(1)]).unwrap();
+    let muted = Algorithm::try_from((count(2), &[][..], &[op(1)][..])).unwrap();
     let mut v = voice(
-        FmPatch::new(
-            muted,
-            &[OperatorSpec::new(ratio(1.0)), OperatorSpec::new(ratio(2.0))],
-        )
-        .unwrap(),
+        FmPatch::new(muted)
+            .operators(&[OperatorSpec::new(ratio(1.0)), OperatorSpec::new(ratio(2.0))]),
         OversamplingFactor::X2,
         &controls(1_000.0, 0.0, 0.0),
     );
@@ -290,25 +272,25 @@ fn an_algorithm_refuses_what_cannot_be_evaluated() {
         target: op(target),
     };
     assert_eq!(
-        Algorithm::new(count(3), &[route(2, 1)], &[op(2)]),
+        Algorithm::try_from((count(3), &[route(2, 1)][..], &[op(2)][..])),
         Err(AlgorithmError::Backwards { route: route(2, 1) })
     );
     assert_eq!(
-        Algorithm::new(count(2), &[route(0, 2)], &[op(1)]),
+        Algorithm::try_from((count(2), &[route(0, 2)][..], &[op(1)][..])),
         Err(AlgorithmError::NoSuchOperator {
             operator: op(2),
             count: count(2)
         })
     );
     assert_eq!(
-        Algorithm::new(count(2), &[], &[op(3)]),
+        Algorithm::try_from((count(2), &[][..], &[op(3)][..])),
         Err(AlgorithmError::NoSuchOperator {
             operator: op(3),
             count: count(2)
         })
     );
     assert_eq!(
-        Algorithm::new(count(2), &[route(0, 1)], &[]),
+        Algorithm::try_from((count(2), &[route(0, 1)][..], &[][..])),
         Err(AlgorithmError::NoCarrier)
     );
 }
@@ -331,14 +313,15 @@ fn the_chain_and_the_parallel_algorithm_have_their_routes() {
     }
 }
 
+/// The specs go to operators in order up to the count: one past it is unused, and an operator
+/// without one is at the voice's frequency at unity level.
 #[test]
-fn a_patch_needs_one_spec_for_each_operator() {
-    let spec = OperatorSpec::new(ratio(1.0));
-    assert_eq!(
-        FmPatch::new(Algorithm::chain(count(3)), &[spec, spec]),
-        Err(PatchError {
-            given: 2,
-            count: count(3)
-        })
-    );
+fn a_patch_gives_its_specs_to_the_operators_in_order_up_to_the_count() {
+    let spec = |r| OperatorSpec::new(ratio(r));
+    let unset = OperatorSpec::new(ratio(1.0));
+    let two = Algorithm::chain(count(2));
+    let long = FmPatch::new(two).operators(&[spec(3.0), spec(5.0), spec(7.0)]);
+    assert_eq!(long.operators[..3], [spec(3.0), spec(5.0), unset]);
+    let short = FmPatch::new(two).operators(&[spec(3.0)]);
+    assert_eq!(short.operators[..2], [spec(3.0), unset]);
 }

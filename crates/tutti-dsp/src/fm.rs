@@ -92,54 +92,17 @@ pub struct Algorithm {
 }
 
 impl Algorithm {
-    /// An algorithm of `count` operators with `routes`, the operators in `carriers` heard.
-    ///
-    /// # Errors
-    ///
-    /// A route or carrier naming an operator at or past `count`, a route running to an
-    /// operator below its modulator, or no carrier.
-    pub fn new(
-        count: OperatorCount,
-        routes: &[Route],
-        carriers: &[Operator],
-    ) -> Result<Self, AlgorithmError> {
-        let check = |operator: Operator| {
-            if usize::from(operator.get()) < usize::from(count.get()) {
-                Ok(())
-            } else {
-                Err(AlgorithmError::NoSuchOperator { operator, count })
-            }
-        };
-        let mut modulated_by = [0u8; MAX_OPERATORS];
-        for &route in routes {
-            check(route.modulator)?;
-            check(route.target)?;
-            if route.modulator > route.target {
-                return Err(AlgorithmError::Backwards { route });
-            }
-            modulated_by[usize::from(route.target.get())] |= 1 << route.modulator.get();
-        }
-        let mut heard = 0u8;
-        for &carrier in carriers {
-            check(carrier)?;
-            heard |= 1 << carrier.get();
-        }
-        if heard == 0 {
-            return Err(AlgorithmError::NoCarrier);
-        }
-        Ok(Self {
-            count,
-            modulated_by,
-            carriers: heard,
-        })
-    }
-
     /// Operator 0 modulates 1, which modulates 2, and so on; the last is the only carrier.
     #[must_use]
     pub fn chain(count: OperatorCount) -> Self {
         let mut modulated_by = [0u8; MAX_OPERATORS];
-        for k in 1..usize::from(count.get()) {
-            modulated_by[k] = 1 << (k - 1);
+        for (k, routed) in modulated_by
+            .iter_mut()
+            .enumerate()
+            .take(usize::from(count.get()))
+            .skip(1)
+        {
+            *routed = 1 << (k - 1);
         }
         Self {
             count,
@@ -177,6 +140,50 @@ impl Algorithm {
     }
 }
 
+/// An algorithm of `count` operators with `routes`, the operators in `carriers` heard.
+///
+/// # Errors
+///
+/// A route or carrier naming an operator at or past `count`, a route running to an operator
+/// below its modulator, or no carrier.
+impl TryFrom<(OperatorCount, &[Route], &[Operator])> for Algorithm {
+    type Error = AlgorithmError;
+
+    fn try_from(
+        (count, routes, carriers): (OperatorCount, &[Route], &[Operator]),
+    ) -> Result<Self, AlgorithmError> {
+        let check = |operator: Operator| {
+            if usize::from(operator.get()) < usize::from(count.get()) {
+                Ok(())
+            } else {
+                Err(AlgorithmError::NoSuchOperator { operator, count })
+            }
+        };
+        let mut modulated_by = [0u8; MAX_OPERATORS];
+        for &route in routes {
+            check(route.modulator)?;
+            check(route.target)?;
+            if route.modulator > route.target {
+                return Err(AlgorithmError::Backwards { route });
+            }
+            modulated_by[usize::from(route.target.get())] |= 1 << route.modulator.get();
+        }
+        let mut heard = 0u8;
+        for &carrier in carriers {
+            check(carrier)?;
+            heard |= 1 << carrier.get();
+        }
+        if heard == 0 {
+            return Err(AlgorithmError::NoCarrier);
+        }
+        Ok(Self {
+            count,
+            modulated_by,
+            carriers: heard,
+        })
+    }
+}
+
 /// How an operator's frequency follows the voice's.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum OperatorFrequency {
@@ -211,16 +218,6 @@ impl OperatorSpec {
     }
 }
 
-/// Why an [`FmPatch`] was refused: the operators given are not the algorithm's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{given} operators given for an algorithm of {}", .count.get())]
-pub struct PatchError {
-    /// How many operators were given.
-    pub given: usize,
-    /// How many the algorithm has.
-    pub count: OperatorCount,
-}
-
 /// An [`Algorithm`] and each of its operators' [`OperatorSpec`]: what a voice is made from.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FmPatch {
@@ -229,26 +226,41 @@ pub struct FmPatch {
 }
 
 impl FmPatch {
-    /// A patch of `algorithm` with `operators`, one for each of its operators in order.
+    /// A patch of `algorithm`, every operator at the voice's frequency (a ratio of 1) and unity
+    /// level.
+    #[must_use]
+    pub const fn new(algorithm: Algorithm) -> Self {
+        Self {
+            algorithm,
+            operators: [OperatorSpec::new(OperatorFrequency::Ratio(FrequencyRatio::UNISON));
+                MAX_OPERATORS],
+        }
+    }
+
+    /// The first operators' specs, in order: `operators[k]` is operator `k`'s. Specs past the
+    /// algorithm's count are not used, and an operator without one keeps its default.
+    #[must_use]
+    pub fn operators(mut self, operators: &[OperatorSpec]) -> Self {
+        let count = usize::from(self.algorithm.count.get());
+        for (slot, spec) in self.operators[..count].iter_mut().zip(operators) {
+            *slot = *spec;
+        }
+        self
+    }
+
+    /// A voice of this patch at `rate`, oversampled as `oversampling` says, for blocks of at
+    /// most `max_block` frames, at the default controls with every phase at 0.
     ///
     /// # Errors
     ///
-    /// When `operators` is not as long as the algorithm's count.
-    pub fn new(algorithm: Algorithm, operators: &[OperatorSpec]) -> Result<Self, PatchError> {
-        let count = algorithm.count();
-        if operators.len() != usize::from(count.get()) {
-            return Err(PatchError {
-                given: operators.len(),
-                count,
-            });
-        }
-        let mut all =
-            [OperatorSpec::new(OperatorFrequency::Ratio(FrequencyRatio::UNISON)); MAX_OPERATORS];
-        all[..operators.len()].copy_from_slice(operators);
-        Ok(Self {
-            algorithm,
-            operators: all,
-        })
+    /// When no half-band filter fits the rate ([`Oversampling::plan`]).
+    pub fn voice<F: Float>(
+        &self,
+        oversampling: Oversampling,
+        rate: SampleRate,
+        max_block: MaxBlock,
+    ) -> Result<FmVoice<F>, FirError> {
+        FmVoice::new(*self, oversampling, rate, max_block)
     }
 
     /// The algorithm.
@@ -384,13 +396,7 @@ pub struct FmVoice<F: Float> {
 }
 
 impl<F: Float> FmVoice<F> {
-    /// A voice of `patch` at `rate`, oversampled as `oversampling` says, for blocks of at most
-    /// `max_block` frames. It starts at the default controls with every phase at 0.
-    ///
-    /// # Errors
-    ///
-    /// When no half-band filter fits the rate ([`Oversampling::plan`]).
-    pub fn new(
+    fn new(
         patch: FmPatch,
         oversampling: Oversampling,
         rate: SampleRate,

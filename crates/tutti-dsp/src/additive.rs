@@ -41,17 +41,21 @@ impl Partial {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Partials(Box<[Partial]>);
 
-impl Partials {
-    /// The bank's partials, in order.
-    ///
-    /// # Errors
-    ///
-    /// When `partials` is empty or longer than [`MAX_PARTIALS`].
-    pub fn new(partials: &[Partial]) -> Result<Self, PartialCountError> {
+/// The bank's partials, in order; the error is the count that was refused.
+///
+/// # Errors
+///
+/// When the slice is empty or longer than [`MAX_PARTIALS`].
+impl TryFrom<&[Partial]> for Partials {
+    type Error = PartialCountError;
+
+    fn try_from(partials: &[Partial]) -> Result<Self, PartialCountError> {
         PartialCount::try_from(u16::try_from(partials.len()).unwrap_or(u16::MAX))?;
         Ok(Self(partials.into()))
     }
+}
 
+impl Partials {
     /// How many partials there are.
     #[must_use]
     pub fn count(&self) -> PartialCount {
