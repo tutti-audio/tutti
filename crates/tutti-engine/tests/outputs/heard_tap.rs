@@ -8,7 +8,7 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
-use tutti_engine::{Engine, OutputTapError, OutputTapOpen};
+use tutti_engine::{Engine, HeardTapError, HeardTapOpen};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TapReader, Unforkable};
 use tutti_graph::{OutPort, PortSource};
@@ -104,7 +104,7 @@ fn the_tap_is_the_device_output_on_every_channel() {
     for segment in [false, true] {
         let engine = engine(6);
         let mut tap = engine
-            .output_taps()
+            .heard_taps()
             .open(ChannelLayout::from_count(6), Samples::new(8192))
             .expect("opens")
             .reader()
@@ -130,7 +130,7 @@ fn the_tap_is_the_device_output_on_every_channel() {
 #[test]
 fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
     let engine = engine(2);
-    let taps = engine.output_taps();
+    let taps = engine.heard_taps();
     render(&engine, 64, 2, false);
     let mut tap = taps
         .open(ChannelLayout::STEREO, Samples::new(1024))
@@ -144,7 +144,7 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
     );
     assert_eq!(
         taps.open(ChannelLayout::STEREO, Samples::new(1024)).err(),
-        Some(OutputTapError::Busy)
+        Some(HeardTapError::Busy)
     );
     let second = render(&engine, 64, 2, false);
     assert_eq!(
@@ -166,7 +166,7 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
     drop(tap);
     let again = taps.open(ChannelLayout::STEREO, Samples::new(8));
     assert!(
-        matches!(again, Ok(OutputTapOpen::Opened(_))),
+        matches!(again, Ok(HeardTapOpen::Opened(_))),
         "a dropped reader frees the tap"
     );
 }
@@ -177,7 +177,7 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
 fn drops_are_counted_and_a_wrong_width_is_lost_whole() {
     let engine = engine(2);
     let mut tap = engine
-        .output_taps()
+        .heard_taps()
         .open(ChannelLayout::STEREO, Samples::new(100))
         .expect("opens")
         .reader()
@@ -194,7 +194,7 @@ fn drops_are_counted_and_a_wrong_width_is_lost_whole() {
     // The device now hands a 6-wide block to a 2-wide tap.
     let wide = engine_wide();
     let narrow = wide
-        .output_taps()
+        .heard_taps()
         .open(ChannelLayout::STEREO, Samples::new(1024))
         .expect("opens")
         .reader()
@@ -218,7 +218,7 @@ fn channels_do_not_tear_under_a_concurrent_drain() {
     const FRAMES: usize = 64;
     let engine = engine(6);
     let mut tap = engine
-        .output_taps()
+        .heard_taps()
         .open(ChannelLayout::from_count(6), Samples::new(256))
         .expect("opens")
         .reader()
@@ -268,13 +268,13 @@ fn channels_do_not_tear_under_a_concurrent_drain() {
 #[test]
 fn opening_and_closing_while_rendering_never_frees_on_the_audio_thread() {
     let engine = engine(2);
-    let taps = engine.output_taps();
+    let taps = engine.heard_taps();
     let stop = std::sync::atomic::AtomicBool::new(false);
     std::thread::scope(|scope| {
         let control = scope.spawn(|| {
             let mut opened = 0;
             while !stop.load(std::sync::atomic::Ordering::Acquire) {
-                if let Ok(OutputTapOpen::Opened(tap)) =
+                if let Ok(HeardTapOpen::Opened(tap)) =
                     taps.open(ChannelLayout::STEREO, Samples::new(64))
                 {
                     opened += 1;
@@ -302,7 +302,7 @@ fn opening_and_closing_while_rendering_never_frees_on_the_audio_thread() {
 #[test]
 fn a_close_is_not_lost_to_a_full_install_queue() {
     let engine = engine(2);
-    let taps = engine.output_taps();
+    let taps = engine.heard_taps();
     let layout = ChannelLayout::STEREO;
     // No render between: four opens, each reader dropped before the next.
     let mut last = None;
@@ -325,34 +325,34 @@ fn a_close_is_not_lost_to_a_full_install_queue() {
     // The queue drained; a new open works again.
     assert!(matches!(
         taps.open(layout, Samples::new(8)),
-        Ok(OutputTapOpen::Opened(_))
+        Ok(HeardTapOpen::Opened(_))
     ));
 }
 
 /// An open the audio thread is too far behind for is a moment, not a refusal:
 /// with the install queue full (no render since four opens) the next open
 /// returns `Retry` and opens nothing, where a refusal for good
-/// (`OutputTapError::Busy`) is an `Err`. After a render has taken the installs
+/// (`HeardTapError::Busy`) is an `Err`. After a render has taken the installs
 /// the same call opens.
 #[test]
 fn a_full_install_queue_asks_for_a_retry_and_is_not_an_error() {
     let engine = engine(2);
-    let taps = engine.output_taps();
+    let taps = engine.heard_taps();
     let layout = ChannelLayout::STEREO;
     for _ in 0..4 {
         let opened = taps.open(layout, Samples::new(256)).expect("room for four");
-        assert!(matches!(opened, OutputTapOpen::Opened(_)), "room for four");
+        assert!(matches!(opened, HeardTapOpen::Opened(_)), "room for four");
     }
     assert!(
         matches!(
             taps.open(layout, Samples::new(256)),
-            Ok(OutputTapOpen::Retry)
+            Ok(HeardTapOpen::Retry)
         ),
         "the audio thread is behind: retry, not an error"
     );
     render(&engine, 64, 2, false);
     assert!(matches!(
         taps.open(layout, Samples::new(256)),
-        Ok(OutputTapOpen::Opened(_))
+        Ok(HeardTapOpen::Opened(_))
     ));
 }

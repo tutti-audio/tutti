@@ -25,7 +25,7 @@ use crate::plugin_params::Driven;
 
 /// One parameter of the plugin hosted at a node: what `key.param(id)` returns,
 /// written and read as a position on `0..=1` ([`Normalized`]), or, from
-/// [`PluginParam::try_unit`](crate::PluginParam::try_unit), as a tutti unit `U` through the
+/// [`PluginParam::unit`](crate::PluginParam::unit), as a tutti unit `U` through the
 /// parameter's declared map.
 ///
 /// A plain reference that checks nothing when it is made. A plugin's parameter
@@ -278,7 +278,7 @@ mod unit_sealed {
 }
 
 /// A tutti unit a plugin parameter is a target in
-/// ([`PluginParam::try_unit`](crate::PluginParam::try_unit)): the [`PlainUnit`]s with a
+/// ([`PluginParam::unit`](crate::PluginParam::unit)): the [`PlainUnit`]s with a
 /// target, sealed so the units that make a target are the units that store.
 pub trait PluginUnit: PlainUnit + unit_sealed::Sealed {}
 

@@ -253,7 +253,10 @@ impl<F: Float + Lerp> Oversampled<F> {
             let end = (start + self.max_block).min(frames);
             let span = Samples::new(start)..Samples::new(end);
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
-                state.upsample(input.plane(c).slice(span.clone()));
+                // The span is at most `self.max_block`, which the channel states are built for.
+                state
+                    .upsample(input.plane(c).slice(span.clone()))
+                    .expect("a span is at most the states' max block");
             }
             let held = signal.map(|l| {
                 let high = &mut self.signal[..(end - start) * factor];
@@ -279,7 +282,9 @@ impl<F: Float + Lerp> Oversampled<F> {
                 bank.process(held, high, shaped);
             }
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
-                state.downsample(output.plane_mut(c).slice_mut(span.clone()));
+                state
+                    .downsample(output.plane_mut(c).slice_mut(span.clone()))
+                    .expect("a span is at most the states' max block");
             }
             start = end;
         }

@@ -108,9 +108,9 @@
 //! // 120 BPM, then 60 from beat 4, at 480 ticks per quarter.
 //! let four_quarters = Tick(4 * 480);
 //! let track = Track::new()
-//!     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
+//!     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)).unwrap())
 //!     .note(Tick(0), Tick(1_440), MidiChannel::FIRST, NoteNumber::of(60), U7::of(100))
-//!     .meta(four_quarters, Meta::tempo(Bpm::of(60.0)));
+//!     .meta(four_quarters, Meta::tempo(Bpm::of(60.0)).unwrap());
 //! let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
 //!
 //! let mut bytes = Vec::new();

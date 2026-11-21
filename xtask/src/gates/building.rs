@@ -267,6 +267,18 @@ pub(super) const ALLOW: &[Allow] = &[
         "two views' frame counts must agree: validity of two arguments together, which neither type can carry",
     ),
     ty(
+        "crates/tutti-dsp/src/dct.rs",
+        "Dct2::new",
+        CTOR,
+        "the coefficients kept are valid only against the points: at most the transform's input size, validity of two arguments together",
+    ),
+    ty(
+        "crates/tutti-dsp/src/mfcc.rs",
+        "Mfcc::new",
+        CTOR,
+        "the coefficients kept are valid only against the bank: at most its band count, validity of two arguments together",
+    ),
+    ty(
         "crates/tutti-plugin-types/src/channels.rs",
         "ChannelTable::of_planes",
         CTOR,

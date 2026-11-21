@@ -98,13 +98,18 @@ struct RootFolds<F: Float> {
 }
 
 impl<F: Float> RootFolds<F> {
-    /// The fold of this root at `width` channels into `device`, or none: a
-    /// declared root has the one width it was declared at, and a pair that
-    /// cannot be placed has no fold.
-    fn build(&self, width: usize, device: &DeviceEntry, routing: &Routing) -> Option<Fold<F>> {
+    /// The fold of this root at `width` channels into `device`: `None` for a
+    /// width a declared root does not have (it renders at the one it was
+    /// declared at), and the routing's refusal for a pair that cannot be placed.
+    fn build(
+        &self,
+        width: usize,
+        device: &DeviceEntry,
+        routing: &Routing,
+    ) -> Result<Option<Fold<F>>, RoutingError> {
         let default;
         let root = match &self.topology {
-            Some(root) if usize::from(root.width().count()) != width => return None,
+            Some(root) if usize::from(root.width().count()) != width => return Ok(None),
             Some(root) => root,
             None => {
                 default = ChannelTopology::default_for(
@@ -113,13 +118,16 @@ impl<F: Float> RootFolds<F> {
                 &default
             }
         };
-        routing.fold(root, &device.topology).ok()
+        routing.fold(root, &device.topology).map(Some)
     }
 
-    /// The folds of every root width this root has into `device`.
+    /// The folds of every root width this root has into `device`. A width the
+    /// routing cannot place has no fold, and renders a silent, counted block
+    /// into the device; [`OutputControl::set_routing`] refuses before that for
+    /// the pair in use.
     fn column(&self, device: &DeviceEntry, routing: &Routing) -> Box<[Option<Fold<F>>]> {
         (1..=MAX_CHANNELS)
-            .map(|w| self.build(w, device, routing))
+            .map(|w| self.build(w, device, routing).unwrap_or_default())
             .collect()
     }
 
@@ -240,6 +248,30 @@ impl<F: Float> OutputFolds<F> {
         self.previous.as_ref()
     }
 
+    /// Whether every root can be placed on the device of `device` channels
+    /// under `routing`, a root of no declared width at `width` channels.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RoutingError`] a root's fold into the device meets.
+    fn place(&self, routing: &Routing, width: usize, device: usize) -> Result<(), RoutingError> {
+        let Some(entry) = device
+            .checked_sub(1)
+            .and_then(|slot| self.devices.get(slot))
+            .and_then(Option::as_ref)
+        else {
+            return Ok(());
+        };
+        for root in &self.roots {
+            let width = root
+                .topology
+                .as_ref()
+                .map_or(width, |t| usize::from(t.width().count()));
+            root.build(width, entry, routing)?;
+        }
+        Ok(())
+    }
+
     /// Rebuilds every root's folds into every device held, from `routing`.
     fn set_routing(&mut self, routing: Routing) {
         self.routing = routing;
@@ -304,6 +336,20 @@ pub struct OutputControl<F: Float = f32> {
     /// The newest routing generation whose crossfade the audio thread has
     /// finished or cut: its `previous` table is no longer read.
     routing_ended: Arc<AtomicU64>,
+    /// The root width and the device width of the last block rendered, packed
+    /// by [`pack_in_use`]; `0` before one has. Written by the audio thread and
+    /// cleared on the control side wherever the device in use changes
+    /// ([`state_device`](Self::state_device) onto another width, a new
+    /// [`OutputBlock`](crate::OutputBlock)). A late write from the last
+    /// callback of a stream being replaced can put the old pair back, until
+    /// that stream stops.
+    in_use: Arc<AtomicU64>,
+}
+
+/// The widths of the pair a block renders, in one word: the root's width above
+/// the device's. Both are at least one in a block that renders a root.
+pub(crate) fn pack_in_use(width: usize, device: usize) -> u64 {
+    ((width as u64) << 32) | device as u64
 }
 
 impl<F: Float> OutputControl<F> {
@@ -314,7 +360,30 @@ impl<F: Float> OutputControl<F> {
             writer: Arc::default(),
             installed: Arc::default(),
             routing_ended: Arc::default(),
+            in_use: Arc::default(),
         }
+    }
+
+    pub(crate) fn in_use_cell(&self) -> &Arc<AtomicU64> {
+        &self.in_use
+    }
+
+    /// Forgets the pair in use: the device is about to change, and the next
+    /// block renders the pair that counts.
+    pub(crate) fn forget_in_use(&self) {
+        self.in_use.store(0, Ordering::Relaxed);
+    }
+
+    /// The widths of the (root, device) pair the last block rendered, once one
+    /// has: the root's, then the device's.
+    fn in_use(&self) -> Option<(usize, usize)> {
+        let packed = self.in_use.load(Ordering::Relaxed);
+        (packed != 0).then(|| {
+            (
+                (packed >> 32) as usize,
+                (packed & u64::from(u32::MAX)) as usize,
+            )
+        })
     }
 
     pub(crate) fn routing_ended(&self) -> &Arc<AtomicU64> {
@@ -413,6 +482,9 @@ impl<F: Float> OutputControl<F> {
                 placement: Placement::Default,
             },
         };
+        if self.in_use().is_some_and(|(_, d)| d != slot + 1) {
+            self.forget_in_use();
+        }
         self.update(|folds| {
             if folds.devices.get(slot).and_then(Option::as_ref) == Some(&entry) {
                 return Ok(false);
@@ -547,20 +619,32 @@ impl<F: Float> OutputControl<F> {
     /// root change is crossfading, when the last routing change (or device
     /// statement) is still fading, when the old routing has no fold for the
     /// root, or when no block has rendered yet. A root a routing cannot place on
-    /// a device has no fold into it ([`has_fold`](Self::has_fold)).
+    /// a device the stream does not render into has no fold into it
+    /// ([`has_fold`](Self::has_fold)).
     ///
     /// Control side: it allocates and publishes. A callback mid-block keeps the
     /// folds it lent.
-    pub fn set_routing(&self, routing: Routing) {
-        let _ = self.update(|folds| {
+    ///
+    /// # Errors
+    ///
+    /// The [`RoutingError`] of the first root the routing cannot place on the
+    /// device the last block rendered into (a root of no declared width at the
+    /// width that block rendered); nothing is published. Before a block has
+    /// rendered no device is in use and every routing is taken.
+    pub fn set_routing(&self, routing: Routing) -> Result<(), RoutingError> {
+        let in_use = self.in_use();
+        self.update(|folds| {
             if folds.routing == routing {
-                return Ok::<_, std::convert::Infallible>(false);
+                return Ok(false);
+            }
+            if let Some((width, device)) = in_use {
+                folds.place(&routing, width, device)?;
             }
             let in_flight = self.fade_in_flight(folds);
             folds.begin_fade(in_flight);
             folds.set_routing(routing);
             Ok(true)
-        });
+        })
     }
 
     /// The routing in force.

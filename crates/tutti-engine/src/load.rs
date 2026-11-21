@@ -76,27 +76,34 @@ pub struct BlockCounts {
     /// and sent again later counts as refused. Which port: the session's
     /// `EventsDropped`.
     pub dropped_events: u64,
+    /// Device callbacks longer than [`MAX_FRAMES`](crate::MAX_FRAMES): the head
+    /// was rendered and the tail past it written silent. A stream opened at an
+    /// [`OutputQuantum`](crate::OutputQuantum) never counts here; a backend
+    /// that hands a longer buffer than it was opened with does.
+    pub truncated: u64,
 }
 
 /// One tally per count, in field order.
 impl Count for BlockCounts {
-    type Words = [u64; 4];
+    type Words = [u64; 5];
 
-    fn to_words(self) -> [u64; 4] {
+    fn to_words(self) -> [u64; 5] {
         [
             self.blocks,
             self.over_budget,
             self.silenced,
             self.dropped_events,
+            self.truncated,
         ]
     }
 
-    fn from_words([blocks, over_budget, silenced, dropped_events]: [u64; 4]) -> Self {
+    fn from_words([blocks, over_budget, silenced, dropped_events, truncated]: [u64; 5]) -> Self {
         Self {
             blocks,
             over_budget,
             silenced,
             dropped_events,
+            truncated,
         }
     }
 }
@@ -159,6 +166,14 @@ impl Writers {
                 ..BlockCounts::default()
             });
         }
+    }
+
+    /// Counts one device callback longer than the ceiling, its tail silenced.
+    pub(crate) fn truncated(&mut self) {
+        self.counts.add(BlockCounts {
+            truncated: 1,
+            ..BlockCounts::default()
+        });
     }
 
     /// Counts one block rendered silent, refused the graph.

@@ -133,8 +133,8 @@ impl<F: Float> ManualStream<F> {
         Some(out)
     }
 
-    /// Returns the frames the last callback actually rendered, after the
-    /// [`MAX_FRAMES`](crate::MAX_FRAMES) clamp.
+    /// Returns the frames the last callback actually rendered: its own, at most
+    /// [`MAX_FRAMES`](crate::MAX_FRAMES).
     pub fn last_rendered_frames(&self) -> Option<usize> {
         self.with_block(|b| b.last_rendered_frames())
     }

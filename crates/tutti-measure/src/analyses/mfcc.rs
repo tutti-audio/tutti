@@ -28,7 +28,7 @@ pub struct MfccConfig {
 }
 
 impl MfccConfig {
-    /// `coefficients` cepstral coefficients (at most `bands`) from a bank of `bands` mel
+    /// `coefficients` cepstral coefficients (at most `bands`, or [`mfcc`] refuses) from a bank of `bands` mel
     /// filters.
     #[must_use]
     pub fn new(bands: MelBandCount, coefficients: NonZeroUsize) -> Self {
@@ -69,6 +69,8 @@ impl MfccConfig {
 /// # Errors
 /// [`Error::Mel`](crate::Error::Mel) when the bank does not fit the transform: a range
 /// above Nyquist, or a band that holds no bin (a longer window cures it).
+/// [`Error::Coefficients`](crate::Error::Coefficients) when `config` asks for more
+/// coefficients than the bank has bands.
 pub fn mfcc(config: &MfccConfig, transform: &StftMagnitude) -> Result<Grid<f64>> {
     let geometry = transform.geometry();
     let mut mel = MelConfig::new(
@@ -81,7 +83,7 @@ pub fn mfcc(config: &MfccConfig, transform: &StftMagnitude) -> Result<Grid<f64>>
     if let Some((low, high)) = config.range {
         mel = mel.range(low, high);
     }
-    let mut kernel = Mfcc::new(MelFilterbank::try_from(mel)?, config.coefficients);
+    let mut kernel = Mfcc::new(MelFilterbank::try_from(mel)?, config.coefficients)?;
     let input = transform.magnitudes().grid();
     let mut out = Grid::filled(0.0, input.frames(), BinCount(kernel.coefficients()));
     for frame in input.frames().indices() {
