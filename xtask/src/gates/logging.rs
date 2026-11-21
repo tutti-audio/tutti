@@ -10,6 +10,8 @@
 //!   test, ..))]`). Only `src/main.rs` and `src/bin/**` count as a `main`: the other
 //!   modules of a binary crate are library code. Comments and string literals are not
 //!   code.
+//! - **No `stderr()` or `stdout()`** in the same library code: a write to a standard
+//!   stream through a handle is a print.
 //!
 //! A finding that is a row of [`ALLOW`], `(path, reason)`, is exempt: the path is the
 //! manifest (for a `log` dependency) or the source file (for a print). A row that
@@ -33,6 +35,9 @@ fn skipped(dir: &str) -> bool {
 pub(super) const MIN_MANIFESTS: usize = 20;
 
 const MACROS: &[&str] = &["println", "eprintln", "print", "eprint", "dbg"];
+
+/// The functions that hand out a standard stream.
+const STREAMS: &[&str] = &["stderr", "stdout"];
 
 /// `(manifest or source path, reason)`. The reason starts with `permanent:` or
 /// `temporary:`.
@@ -89,6 +94,23 @@ fn prints(path: &str, text: &str) -> Vec<String> {
                 continue;
             }
             out.push(format!("{path}:{}: `{name}!`", line_of(&code, at)));
+        }
+    }
+    for name in STREAMS {
+        let mut from = 0;
+        while let Some(at) = find_word_from(&code, name, from) {
+            from = at + name.len();
+            let before = code[..at].trim_end();
+            if !code[from..].trim_start().starts_with('(')
+                || before.ends_with('.')
+                || before.ends_with("fn")
+            {
+                continue;
+            }
+            if ranges.iter().any(|&(s, e)| at >= s && at <= e) {
+                continue;
+            }
+            out.push(format!("{path}:{}: `{name}()`", line_of(&code, at)));
         }
     }
     out.sort();
@@ -286,6 +308,20 @@ mod tests {
         assert!(findings(&[(LIB, src)], &[]).is_empty());
         let live = "#[cfg(not(test))] fn f(x: [u8; 3]) { println!(); }\n";
         assert_eq!(findings(&[(LIB, live)], &[]).len(), 2);
+    }
+
+    #[test]
+    fn a_write_to_a_standard_stream_handle_is_a_print() {
+        let src = "fn f() { let _ = writeln!(std::io::stderr(), \"x\"); }\n";
+        let f = findings(&[(LIB, src)], &[]);
+        assert!(f[1].contains("`stderr()`"), "{f:?}");
+        let out = "fn f() { std::io::stdout().flush(); }\n";
+        assert_eq!(findings(&[(LIB, out)], &[]).len(), 2);
+        assert!(findings(&[("crates/c1/src/main.rs", src)], &[]).is_empty());
+        let method = "fn f(c: &mut C) { c.stdout(1).stderr(2); }\nfn stderr() {}\n";
+        assert!(findings(&[(LIB, method)], &[]).is_empty());
+        let named = "fn f(stderr: u8, stdout_lines: u8) { let _ = (stderr, stdout_lines); }\n";
+        assert!(findings(&[(LIB, named)], &[]).is_empty());
     }
 
     #[test]
