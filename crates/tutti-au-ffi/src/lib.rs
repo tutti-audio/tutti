@@ -47,7 +47,7 @@ mod unit;
 // allocation inside `assert_no_alloc::assert_no_alloc(..)` scopes.
 #[cfg(test)]
 #[global_allocator]
-static NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static NO_ALLOC_HARNESS: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 pub use bundle::{BundleError, DeclaredComponent, declared_components};
 pub use cf::{

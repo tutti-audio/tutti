@@ -684,6 +684,7 @@ mod plan;
 mod play;
 mod pool;
 mod preroll;
+mod rates;
 #[cfg(feature = "testing")]
 mod reference;
 mod render_mode;
@@ -766,6 +767,7 @@ pub use plan::{
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
+pub use rates::SampleRates;
 #[cfg(feature = "testing")]
 pub use reference::Reference;
 pub use render_mode::RenderMode;

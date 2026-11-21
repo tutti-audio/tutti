@@ -623,7 +623,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     // The plugin has its Processor in the graph before the re-prepare.
     let _ = s.update();
     side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
     probe().set(ClapSwitch::PortLayout, 1);
     probe().set(ClapSwitch::RequestPortsRescan, 0x24);
