@@ -13,7 +13,9 @@
 //!
 //! **Lists.** [`BASELINE`] holds `<kind>  <name>  <crates or paths, comma separated>` rows,
 //! sorted, one per known collision. [`ALLOW`] holds `<name>  <crates>  <spec citation>: <why>`
-//! rows for a `crates` collision that is a spec's own name. A collision with no row fails,
+//! rows for a `crates` collision where every crate's item is the same spec's own concept: a
+//! spec name lets the crate whose item the spec defines keep it, never another crate's
+//! different item share it (that is a baseline row, for its rename to delete). A collision with no row fails,
 //! and a row with no collision (or an allow row that also has a baseline row, or a baseline
 //! row for an unsorted or repeated key) fails as stale, so the lists only shrink.
 

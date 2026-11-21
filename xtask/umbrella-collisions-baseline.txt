@@ -35,9 +35,12 @@ crates  Placement  tutti_buffers,tutti_midi_file
 crates  Preset  tutti_plugin_types,tutti_sf2
 crates  ProbeError  tutti_plugin_types,tutti_sampler
 crates  RecoveryFailure  tutti_plugin_db,tutti_session
+crates  ResourceId  tutti_midi_ci,tutti_session
 crates  Stage  tutti_dsp,tutti_session
 crates  Stamp  tutti_graph,tutti_platform
+crates  Stream  tutti_sampler,tutti_ump
 crates  StreamFault  tutti_engine,tutti_sampler
+crates  System  tutti_dsp,tutti_ump
 crates  Taps  tutti_dsp,tutti_session
 crates  TempoError  tutti_session,tutti_tempo
 crates  TextError  tutti_ump,tutti_units

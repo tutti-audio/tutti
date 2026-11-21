@@ -1,7 +1,6 @@
-# Umbrella names a spec itself gives to items of more than one crate
-# (`cargo xtask check-umbrella`). One `<name>  <crates>  <spec citation>: <reason>` row per
-# collision; a row that no longer collides fails, so the list only shrinks.
-
-Stream  tutti_sampler,tutti_ump  M2-104: the UMP Stream is the spec's own term for a stream of UMP packets
-System  tutti_dsp,tutti_ump  M2-104: the UMP System message group is the spec's own name
-ResourceId  tutti_midi_ci,tutti_session  M2-103 §8.5: the Property Exchange resource id is the spec's own name
+# Umbrella names a spec gives to items of more than one crate, where every crate's item is
+# that spec's own concept (`cargo xtask check-umbrella`). A spec name justifies the crate
+# whose item the spec defines keeping it; it never justifies another crate's different item
+# sharing it: that collision is a baseline row, for the rename to delete.
+# One `<name>  <crates>  <spec citation>: <reason>` row per collision; a row that no longer
+# collides fails, so the list only shrinks. Empty today.
