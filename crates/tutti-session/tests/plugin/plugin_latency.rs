@@ -323,7 +323,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     set_server();
     let (driver, stream) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec(512), driver)
         .expect("builds with no device");
 

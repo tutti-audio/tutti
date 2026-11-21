@@ -64,7 +64,7 @@ fn spec() -> OutputSpec {
 fn rig(wire: &Wire) -> (LiveSession, ManualStream, tutti_session::MidiSink) {
     let (driver, stream) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec(), driver)
         .expect("builds with no device");
     let _ = s.update();

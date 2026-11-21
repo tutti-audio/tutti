@@ -93,7 +93,7 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
     );
     let live = Session::builder()
         .input_opener(Opener(Arc::clone(&capture)))
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec, driver)
         .expect("builds with no device");
     let mut session = live;

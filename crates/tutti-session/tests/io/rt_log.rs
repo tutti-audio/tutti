@@ -17,7 +17,7 @@ use support::{Noisy, SITE, rt_events};
 fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(
             OutputSpec::new(
                 SampleRate::of(48_000.0),
@@ -72,7 +72,7 @@ fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update
 fn nothing_is_logged_when_no_subscriber_takes_the_target() {
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(
             OutputSpec::new(
                 SampleRate::of(48_000.0),

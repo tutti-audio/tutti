@@ -188,8 +188,8 @@ pub struct MicConfig {
 impl Default for MicConfig {
     fn default() -> Self {
         Self {
-            host: AudioHost::default(),
-            device: DeviceSelector::default(),
+            host: AudioHost::Default,
+            device: DeviceSelector::Default,
             inputs: None,
             sample_format: None,
             latency: None,

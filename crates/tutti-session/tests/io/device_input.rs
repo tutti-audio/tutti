@@ -94,7 +94,7 @@ fn live(record: &Arc<Mutex<Record>>) -> (LiveSession, ManualStream) {
     let (driver, stream) = ManualStreamDriver::new();
     let live = Session::builder()
         .input_opener(Capture(Arc::clone(record)))
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     (live, stream)
@@ -404,7 +404,7 @@ fn a_capture_refusing_the_sessions_width_fails_the_add_input_call() {
     let mut session = Session::builder()
         .float::<f64>()
         .input_opener(Capture(Arc::clone(&record)))
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec, driver)
         .expect("builds with no device");
 

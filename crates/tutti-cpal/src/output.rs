@@ -32,10 +32,17 @@ use crate::roster::{DeviceDirection, DeviceId};
 /// let config = OutputConfig::new(DeviceSelector::named("Interface"))
 ///     .sample_format(SampleFormat::I16);
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputConfig {
     pub(crate) device: DeviceSelector,
     pub(crate) sample_format: Option<SampleFormat>,
+}
+
+impl Default for OutputConfig {
+    /// The host's default device, at its default sample format.
+    fn default() -> Self {
+        Self::new(DeviceSelector::Default)
+    }
 }
 
 impl OutputConfig {

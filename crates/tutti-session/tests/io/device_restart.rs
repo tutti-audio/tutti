@@ -39,7 +39,7 @@ fn spec_with(rate: f64, channels: usize) -> OutputSpec {
 fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
     let (driver, stream) = ManualStreamDriver::new();
     let mut s = Session::builder()
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(OLD), driver)
         .expect("builds with no device");
     let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));

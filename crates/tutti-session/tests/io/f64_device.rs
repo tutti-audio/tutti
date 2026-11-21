@@ -26,7 +26,7 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
     let mut s = Session::builder()
         .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec, driver)
         .expect("an f64 device session builds with no device");
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
@@ -63,7 +63,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     let mut live = Session::builder()
         .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
-        .device(Default::default())
+        .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec, driver)
         .expect("an f64 device session builds with no device");
     let (dc, _) = live.graph().add(ForkByClone(Dc(FINE)));

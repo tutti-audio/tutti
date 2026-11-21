@@ -203,7 +203,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
         D::Error: Into<tutti_cpal::DeviceError>,
     {
         let channels = spec.channels;
-        self.switch_to_device(channels, DeviceSelector::default(), move |host, session| {
+        self.switch_to_device(channels, DeviceSelector::Default, move |host, session| {
             AudioEngine::from_spec(spec)
                 .start_on(host, driver, |spec, stopped| {
                     session.rerate(spec, stopped, None, None)
@@ -507,7 +507,7 @@ mod tests {
     fn a_double_failure_on_the_card_leaves_it_stopped_agreeing_with_the_graph() {
         let (driver, _stream) = ManualStreamDriver::new();
         let live = Session::builder()
-            .device(Default::default())
+            .device(tutti_cpal::DeviceSelector::Default)
             .build_device_on(spec(SampleRate::SR_48K, 256), driver)
             .expect("builds with no device");
         let err = live

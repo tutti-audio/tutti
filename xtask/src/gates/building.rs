@@ -194,11 +194,6 @@ const MONO_IN_STEREO_OUT: &str = "a reverb with a fixed shape, mono in and stere
     is not a choice and the config takes none";
 const OVER_A_LAYOUT: &str = "a node over a checked dsp layout: the layout's bus is the width, \
     and the config takes the layout";
-const NAMES_THE_DEVICE: &str = "the selector or host names the device or host the call acts on, and \
-    its default (the system's default) is a value, not an option";
-const NAMES_THE_WATCH: &str = "the selector or host names the device or host the watch follows, and \
-    its default (the system's default) is a value, not an option; the policy is the watch's one setting, \
-    taken where the watch starts";
 const TEST_SUPPORT: &str =
     "test support behind the `testing` or `contract` feature, not an app's type";
 
@@ -802,60 +797,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "MpeTranslator::set_profile",
         SETTER,
         "a live command on a running translator: a Profile change stops and resets the channels that leave MPE and sends the events that say so",
-    ),
-    ty(
-        "crates/tutti-cpal/src/driver.rs",
-        "TuttiDriver::restart_with",
-        DEFAULT_ENUM,
-        NAMES_THE_DEVICE,
-    ),
-    ty(
-        "crates/tutti-cpal/src/host.rs",
-        "DeviceHost::supported_configs",
-        DEFAULT_ENUM,
-        NAMES_THE_DEVICE,
-    ),
-    ty(
-        "crates/tutti-cpal/src/poller.rs",
-        "DevicePoller::new",
-        DEFAULT_ENUM,
-        NAMES_THE_WATCH,
-    ),
-    ty(
-        "crates/tutti-session/src/device.rs",
-        "Session::watch_devices_on",
-        DEFAULT_ENUM,
-        NAMES_THE_WATCH,
-    ),
-    ty(
-        "crates/tutti-session/src/device.rs",
-        "Session::watch_host",
-        DEFAULT_ENUM,
-        NAMES_THE_WATCH,
-    ),
-    ty(
-        "crates/tutti-session/src/watch.rs",
-        "DeviceWatch::new",
-        DEFAULT_ENUM,
-        NAMES_THE_WATCH,
-    ),
-    ty(
-        "crates/tutti-session/src/watch.rs",
-        "DeviceWatch::without_stream",
-        DEFAULT_ENUM,
-        NAMES_THE_WATCH,
-    ),
-    ty(
-        "crates/tutti-session/src/watch.rs",
-        "Follow::running",
-        DEFAULT_ENUM,
-        NAMES_THE_WATCH,
-    ),
-    ty(
-        "crates/tutti-session/src/watch.rs",
-        "Follow::not_started",
-        DEFAULT_ENUM,
-        NAMES_THE_WATCH,
     ),
     ty(
         "crates/tutti-session/src/graph/observe.rs",
