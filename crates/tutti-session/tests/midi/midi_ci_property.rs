@@ -1,4 +1,4 @@
-//! Property Exchange with a MIDI-CI peer as typed jobs (M2-103): a Get and a Set
+//! Property Exchange with a MIDI-CI peer as futures (M2-103): a Get and a Set
 //! of a Resource the peer's ResourceList names, each driven over the fake OS by a
 //! peer that serves a store, refuses or stays silent, with the session's clock set
 //! by the test.
@@ -318,25 +318,25 @@ fn the_info_lists_the_resources_of_the_peers_resource_list() {
     assert_eq!(listed, [PeResource::LocalOn, PeResource::DeviceInfo]);
 }
 
-/// M2-103 section 8: a Get lands the Property Data the peer replied with, and the
+/// M2-103 section 8: a Get resolves the Property Data the peer replied with, and the
 /// peer was asked once, by the Resource's name.
 #[test]
 fn a_fetch_lands_the_peers_property_data() {
     let mut wire = Wire::new(store());
-    let mut job = wire.listed(&PeResource::LocalOn).fetch();
+    let mut request = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(60);
-    assert_eq!(wire.result(&mut job), Some(Ok(on(false))));
+    assert_eq!(wire.result(&mut request), Some(Ok(on(false))));
     assert_eq!(wire.peer.asked, [Asked::Get("LocalOn".to_owned())]);
 }
 
-/// M2-103 section 10: a Set lands the status of the reply, 200, and the peer
+/// M2-103 section 10: a Set resolves the status of the reply, 200, and the peer
 /// holds the data afterward.
 #[test]
 fn a_write_lands_status_200_and_the_peer_holds_the_data() {
     let mut wire = Wire::new(store());
-    let mut job = wire.listed(&PeResource::LocalOn).write(on(true));
+    let mut request = wire.listed(&PeResource::LocalOn).write(on(true));
     wire.run(60);
-    let Some(Ok(status)) = wire.result(&mut job) else {
+    let Some(Ok(status)) = wire.result(&mut request) else {
         panic!("a status");
     };
     assert_eq!(status.code(), 200);
@@ -346,13 +346,14 @@ fn a_write_lands_status_200_and_the_peer_holds_the_data() {
 }
 
 /// M2-103 section 7.4.1: a Resource the peer lists with no data replies 404, which
-/// lands as the peer's status with its header, and is not a NAK.
+/// resolves as the peer's status with its header, and is not a NAK.
 #[test]
 fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
     let mut wire = Wire::new(store());
-    let mut job = wire.listed(&PeResource::DeviceInfo).fetch();
+    let mut request = wire.listed(&PeResource::DeviceInfo).fetch();
     wire.run(60);
-    let Some(Err(PeerError::Refused(PeFailure::Status(status, header)))) = wire.result(&mut job)
+    let Some(Err(PeerError::Refused(PeFailure::Status(status, header)))) =
+        wire.result(&mut request)
     else {
         panic!("a status");
     };
@@ -361,20 +362,20 @@ fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
     assert_eq!(header.status, PeStatus::NotFound);
 }
 
-/// M2-103 section 12.2: a Get no one answers lands `TimedOut` after the Property
+/// M2-103 section 12.2: a Get no one answers resolves `TimedOut` after the Property
 /// Exchange timeout since it was sent, and not before.
 #[test]
 fn a_fetch_nothing_answers_times_out_after_the_property_exchange_timeout() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let mut job = wire.listed(&PeResource::LocalOn).fetch();
+    let mut request = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(5);
     let wait = PE_TIMEOUT.as_millis() as u64;
     wire.step(wait - 20);
-    assert_eq!(wire.result(&mut job), None, "still waiting");
+    assert_eq!(wire.result(&mut request), None, "still waiting");
     wire.step(40);
     wire.run(1);
-    assert_eq!(wire.result(&mut job), Some(Err(PeerError::TimedOut)));
+    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
 }
 
 /// A peer that leaves before it answers ends the call as `Disconnected`.
@@ -382,7 +383,7 @@ fn a_fetch_nothing_answers_times_out_after_the_property_exchange_timeout() {
 fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let mut job = wire.listed(&PeResource::LocalOn).fetch();
+    let mut request = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(5);
     let muid = wire.peer.muid;
     for ump in (CiMessage::InvalidateMuid {
@@ -396,10 +397,13 @@ fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
         assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
     }
     wire.run(5);
-    assert_eq!(wire.result(&mut job), Some(Err(PeerError::Disconnected)));
+    assert_eq!(
+        wire.result(&mut request),
+        Some(Err(PeerError::Disconnected))
+    );
 }
 
-/// An identical Get is not sent again: both jobs land with its answer.
+/// An identical Get is not sent again: both requests resolve with its answer.
 #[test]
 fn an_identical_repeated_fetch_shares_the_answer_and_is_sent_once() {
     let mut wire = Wire::new(store());
@@ -441,9 +445,9 @@ fn a_write_behind_a_fetch_is_sent_after_it_and_a_later_fetch_reads_it() {
 #[test]
 fn a_write_of_another_resources_data_ends_at_the_call_and_sends_nothing() {
     let mut wire = Wire::new(store());
-    let mut job = wire.listed(&PeResource::DeviceInfo).write(on(true));
+    let mut request = wire.listed(&PeResource::DeviceInfo).write(on(true));
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&mut job)
+        wire.result(&mut request)
     else {
         panic!("not sent");
     };
@@ -506,16 +510,16 @@ fn a_session_dropped_with_a_call_pending_resolves_disconnected() {
 }
 
 /// M2-103 section 8.5: a Resource whose entries are named by a `resId` is not
-/// fetched without one: the job ends at the call as not sent, and the peer hears
+/// fetched without one: the request ends at the call as not sent, and the peer hears
 /// nothing.
 #[test]
 fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
     let mut states = ResourceStore::new();
     states.declare(ResourceEntry::builder(PeResource::State).build().unwrap());
     let mut wire = Wire::new(states);
-    let mut job = wire.listed(&PeResource::State).fetch();
+    let mut request = wire.listed(&PeResource::State).fetch();
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&mut job)
+        wire.result(&mut request)
     else {
         panic!("not sent");
     };
@@ -569,7 +573,7 @@ fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
 }
 
 /// M2-103 section 14.2: a Set of a Resource the peer's entry says is read only is
-/// refused by the Initiator before anything is sent, and lands as not sent with
+/// refused by the Initiator before anything is sent, and resolves as not sent with
 /// the rule it broke.
 #[test]
 fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
@@ -582,10 +586,10 @@ fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
     .expect("json");
     let info = PeData::decode(&PeResource::DeviceInfo, &table_6).expect("DeviceInfo");
     let mut wire = Wire::new(store());
-    let mut job = wire.listed(&PeResource::DeviceInfo).write(info);
+    let mut request = wire.listed(&PeResource::DeviceInfo).write(info);
     wire.run(30);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&mut job)
+        wire.result(&mut request)
     else {
         panic!("not sent");
     };
@@ -596,7 +600,7 @@ fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
     assert!(wire.peer.asked.is_empty());
 }
 
-/// An identical Set joins the Set in flight: one is sent and both land.
+/// An identical Set joins the Set in flight: one is sent and both resolve.
 #[test]
 fn an_identical_repeated_write_shares_the_answer_and_is_sent_once() {
     let mut wire = Wire::new(store());
@@ -793,9 +797,9 @@ impl Wire {
     /// Subscribes to `resource` and runs until the lease and its first Property
     /// Data have come.
     fn subscribed(&mut self, resource: &PeResource) -> Subscription {
-        let mut job = self.listed(resource).subscribe();
+        let mut request = self.listed(resource).subscribe();
         self.run(80);
-        match self.result(&mut job) {
+        match self.result(&mut request) {
             Some(Ok(lease)) => lease,
             other => panic!("a lease: {other:?}"),
         }
@@ -815,7 +819,7 @@ impl Wire {
     }
 }
 
-/// M2-103 section 11: a Subscription lands a live lease once the peer accepts, the
+/// M2-103 section 11: a Subscription resolves a live lease once the peer accepts, the
 /// peer is asked to start it and then to send the Resource, and the peer's record
 /// holds the Property Data the Get returned.
 #[test]
@@ -943,7 +947,7 @@ fn dropping_the_lease_ends_the_subscription_with_the_peer() {
     assert_eq!(wire.held(&PeResource::LocalOn), None);
 }
 
-/// A job dropped before the peer accepts lands nowhere, and the Subscription it
+/// A request dropped before the peer accepts resolves nowhere, and the Subscription it
 /// started ends as the lease it would have carried drops.
 #[test]
 fn a_dropped_subscribe_job_does_not_leave_a_subscription_with_the_peer() {
@@ -1007,7 +1011,7 @@ fn a_subscription_whose_port_is_lost_reads_port_lost() {
 }
 
 /// A Subscription counts against the peer's simultaneous requests like a Get: with
-/// a peer that takes one, a Get and two Subscriptions all land, in the order asked.
+/// a peer that takes one, a Get and two Subscriptions all resolve, in the order asked.
 #[test]
 fn subscriptions_past_the_peers_simultaneous_requests_wait_for_room() {
     let mut wire = Wire::taking(subscribable(), 1);
@@ -1032,14 +1036,14 @@ fn subscriptions_past_the_peers_simultaneous_requests_wait_for_room() {
 }
 
 /// M2-103 section 14.2: a Resource whose entry does not allow a Subscription is not
-/// asked: the job lands as not sent, and the peer hears nothing.
+/// asked: the request resolves as not sent, and the peer hears nothing.
 #[test]
 fn a_subscribe_to_a_resource_the_entry_forbids_is_not_sent() {
     let mut wire = Wire::new(store());
-    let mut job = wire.listed(&PeResource::LocalOn).subscribe();
+    let mut request = wire.listed(&PeResource::LocalOn).subscribe();
     wire.run(30);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
-        wire.result(&mut job)
+        wire.result(&mut request)
     else {
         panic!("not sent");
     };
@@ -1244,7 +1248,7 @@ mod state {
         wire.port().info().peers()[0].clone()
     }
 
-    /// **A save lands the bytes the device holds** (M2-111 §3): with the media
+    /// **A save resolves the bytes the device holds** (M2-111 §3): with the media
     /// type it declared, as the state of this device.
     #[test]
     fn a_save_lands_the_bytes_and_media_type_the_device_holds() {

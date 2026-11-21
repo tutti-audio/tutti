@@ -53,8 +53,8 @@ use crate::midi::{
     Claim, Departure, Held, LossReaders, LossWriters, Retiring, Sweepable, UmpOut, loss_cells,
 };
 use crate::midi_ci::{
-    Landing, ListedPeer, Pending, PortLink, ProfilePeer, ReportPeer, ResourcePeer, Subscription,
-    at_peer, land,
+    ListedPeer, Pending, PortLink, ProfilePeer, ReplySender, ReportPeer, ResourcePeer,
+    Subscription, at_peer, resolve,
 };
 use crate::{
     EventInPort, EventOutPort, MidiReport, Peer, PeerError, Presence, Resource, ResourceFact,
@@ -255,14 +255,14 @@ pub(crate) struct InputShared {
 }
 
 /// What a handle asked of the device, for the session to send at its next poll,
-/// with the `Landing` that resolves the future that asked. The end of a
+/// with the `ReplySender` that resolves the future that asked. The end of a
 /// Subscription asks for no answer.
 pub(crate) enum InputRequest {
-    Profile(ProfileSwitch, Landing<ProfileState, Nak>),
-    Report(ReportAsk, Landing<(), Nak>),
-    Get(PropertyAsk, Landing<PeData>),
-    Set(PropertyAsk, Landing<PeStatus>),
-    Subscribe(PropertyAsk, Landing<Subscription>),
+    Profile(ProfileSwitch, ReplySender<ProfileState, Nak>),
+    Report(ReportAsk, ReplySender<(), Nak>),
+    Get(PropertyAsk, ReplySender<PeData>),
+    Set(PropertyAsk, ReplySender<PeStatus>),
+    Subscribe(PropertyAsk, ReplySender<Subscription>),
     Unsubscribe(PropertyAsk),
 }
 
@@ -270,11 +270,11 @@ impl InputRequest {
     /// The request ends as `why`.
     fn end(self, why: Ended) {
         match self {
-            Self::Profile(_, ticket) => land(ticket, Err(why.error())),
-            Self::Report(_, ticket) => land(ticket, Err(why.error())),
-            Self::Get(_, ticket) => land(ticket, Err(why.error())),
-            Self::Set(_, ticket) => land(ticket, Err(why.error())),
-            Self::Subscribe(_, ticket) => land(ticket, Err(why.error())),
+            Self::Profile(_, reply) => resolve(reply, Err(why.error())),
+            Self::Report(_, reply) => resolve(reply, Err(why.error())),
+            Self::Get(_, reply) => resolve(reply, Err(why.error())),
+            Self::Set(_, reply) => resolve(reply, Err(why.error())),
+            Self::Subscribe(_, reply) => resolve(reply, Err(why.error())),
             Self::Unsubscribe(_) => {}
         }
     }
@@ -290,7 +290,7 @@ pub(crate) enum Ended {
 }
 
 impl Ended {
-    /// The error a job of any kind ends with.
+    /// The error a request of any kind ends with.
     pub(crate) const fn error<E>(self) -> PeerError<E> {
         match self {
             Self::Disconnected => PeerError::Disconnected,
@@ -321,16 +321,16 @@ struct Inbox {
 }
 
 impl InputShared {
-    /// Queues `request` with its `ticket` when the port can take it now and
+    /// Queues `request` with its `reply` when the port can take it now and
     /// `lists` says the peer and what is asked of it are still listed in the
-    /// port's info; otherwise hands the ticket back with why: [`Ended::Released`]
+    /// port's info; otherwise hands the reply back with why: [`Ended::Released`]
     /// once every handle is dropped, [`Ended::Disconnected`] while the device is
     /// away or when `lists` is false, since the peer or the Profile it lists has
     /// gone.
     pub(crate) fn push<R, L>(
         &self,
         request: R,
-        ticket: L,
+        reply: L,
         lists: impl FnOnce(&MidiInputInfo, &R) -> bool,
         make: impl FnOnce(R, L) -> InputRequest,
     ) -> Result<(), (L, Ended)> {
@@ -344,9 +344,9 @@ impl InputShared {
             Gate::Open => None,
         };
         match refused {
-            Some(why) => Err((ticket, why)),
+            Some(why) => Err((reply, why)),
             None => {
-                inbox.queue.push(make(request, ticket));
+                inbox.queue.push(make(request, reply));
                 Ok(())
             }
         }
@@ -1192,14 +1192,14 @@ impl Ports {
         for port in &mut self.inputs {
             for request in port.shared.drain() {
                 match request {
-                    InputRequest::Profile(switch, ticket) => {
-                        port.pending.switch(io, switch, ticket);
+                    InputRequest::Profile(switch, reply) => {
+                        port.pending.switch(io, switch, reply);
                     }
-                    InputRequest::Report(ask, ticket) => port.pending.report(io, ask, ticket),
-                    InputRequest::Get(ask, ticket) => port.pending.get(io, ask, ticket),
-                    InputRequest::Set(ask, ticket) => port.pending.set(io, ask, ticket),
-                    InputRequest::Subscribe(ask, ticket) => {
-                        port.pending.subscribe(io, ask, ticket);
+                    InputRequest::Report(ask, reply) => port.pending.report(io, ask, reply),
+                    InputRequest::Get(ask, reply) => port.pending.get(io, ask, reply),
+                    InputRequest::Set(ask, reply) => port.pending.set(io, ask, reply),
+                    InputRequest::Subscribe(ask, reply) => {
+                        port.pending.subscribe(io, ask, reply);
                     }
                     InputRequest::Unsubscribe(ask) => port.pending.unsubscribe(io, ask),
                 }
@@ -1214,7 +1214,7 @@ impl Ports {
             .find(|port| port.open.as_ref() == Some(device))
     }
 
-    /// Lands what a peer of `device` answered on the requests waiting for it.
+    /// Resolves the requests waiting for what a peer of `device` answered.
     fn answer(
         &mut self,
         io: &mut MidiSession,

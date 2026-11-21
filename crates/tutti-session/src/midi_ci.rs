@@ -46,8 +46,8 @@ use crate::PeerError;
 use crate::SessionEvent;
 use crate::midi_port::{Ended, InputRequest, InputShared};
 use crate::peer::{ResourceId, ResourceIds};
-pub(crate) use reply::{Landing, land};
 use reply::{PeerReply, peer_future};
+pub(crate) use reply::{ReplySender, resolve};
 
 mod state;
 pub use state::{RestorePeerState, SavePeerState};
@@ -161,11 +161,11 @@ impl PortLink {
         &self,
         request: R,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Landing<T, E>) -> InputRequest,
+        make: impl FnOnce(R, ReplySender<T, E>) -> InputRequest,
     ) -> PeerReply<T, E> {
         let (sender, asked) = PeerReply::new();
         if let Err((sender, why)) = self.queue(request, sender, lists, make) {
-            land(sender, Err(why.error()));
+            resolve(sender, Err(why.error()));
         }
         asked
     }
@@ -182,21 +182,21 @@ impl PortLink {
         let _ = self.queue(request, (), lists, make);
     }
 
-    /// Queues `request` with its `ticket`, or hands the ticket back with why the
+    /// Queues `request` with its `reply`, or hands the reply back with why the
     /// port could not take it.
     fn queue<R, L>(
         &self,
         request: R,
-        ticket: L,
+        reply: L,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
         make: impl FnOnce(R, L) -> InputRequest,
     ) -> Result<(), (L, Ended)> {
         match self.shared.upgrade() {
             // The port is gone: released when every handle was dropped and the
             // session took it out, disconnected when the session itself ended.
-            None if self.session.strong_count() > 0 => Err((ticket, Ended::Released)),
-            None => Err((ticket, Ended::Disconnected)),
-            Some(shared) => shared.push(request, ticket, lists, make),
+            None if self.session.strong_count() > 0 => Err((reply, Ended::Released)),
+            None => Err((reply, Ended::Disconnected)),
+            Some(shared) => shared.push(request, reply, lists, make),
         }
     }
 }
@@ -412,7 +412,7 @@ impl ChannelProfile {
     /// The count is not checked against [`ListedProfile::channels`]: that is the
     /// count of the peer's last Report, not a limit the peer declared, and the
     /// limit of a Profile Details reply is never inquired. A peer that cannot
-    /// comply answers with its Disabled Report, which lands as
+    /// comply answers with its Disabled Report, which resolves as
     /// [`ProfileState::Disabled`].
     pub fn enable(&self, channels: ChannelCount) -> SwitchProfile {
         self.switch(self.inner.enable(channels))
@@ -689,7 +689,7 @@ struct Slot<R, T, E> {
     peer: PeerId,
     request: R,
     sent: bool,
-    tickets: Vec<Landing<T, E>>,
+    replies: Vec<ReplySender<T, E>>,
 }
 
 /// The requests a port has made of its peers and they have not answered.
@@ -697,7 +697,7 @@ struct Slot<R, T, E> {
 /// A peer answers one switch of a Profile at an address, and one report, at a
 /// time, so a request that differs from the one in flight for the same target
 /// waits behind it and is sent when that one ends. An identical request joins the
-/// last request for its target, in flight or waiting, and lands with its answer;
+/// last request for its target, in flight or waiting, and resolves with its answer;
 /// one that follows a different request queues its own.
 pub(crate) struct Pending {
     switches: Vec<Slot<ProfileSwitch, ProfileState, Nak>>,
@@ -824,7 +824,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         switch: ProfileSwitch,
-        ticket: Landing<ProfileState, Nak>,
+        reply: ReplySender<ProfileState, Nak>,
     ) {
         let key = (switch.peer(), switch_at(&switch.request()));
         let last = self
@@ -833,14 +833,14 @@ impl Pending {
             .rev()
             .find(|s| (s.peer, switch_at(&s.request.request())) == key);
         if let Some(slot) = last.filter(|s| s.request == switch) {
-            slot.tickets.push(ticket);
+            slot.replies.push(reply);
             return;
         }
         self.switches.push(Slot {
             peer: switch.peer(),
             request: switch,
             sent: false,
-            tickets: vec![ticket],
+            replies: vec![reply],
         });
         self.send(io);
     }
@@ -851,34 +851,39 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: ReportAsk,
-        ticket: Landing<(), Nak>,
+        reply: ReplySender<(), Nak>,
     ) {
         let last = self.reports.iter_mut().rev().find(|s| s.peer == ask.peer());
         if let Some(slot) = last.filter(|s| s.request == ask) {
-            slot.tickets.push(ticket);
+            slot.replies.push(reply);
             return;
         }
         self.reports.push(Slot {
             peer: ask.peer(),
             request: ask,
             sent: false,
-            tickets: vec![ticket],
+            replies: vec![reply],
         });
         self.send(io);
     }
 
     /// Takes in a Get the app asked for: sent now when nothing else is out for its
     /// peer's Resource.
-    pub(crate) fn get(&mut self, io: &mut MidiSession, ask: PropertyAsk, ticket: Landing<PeData>) {
+    pub(crate) fn get(
+        &mut self,
+        io: &mut MidiSession,
+        ask: PropertyAsk,
+        reply: ReplySender<PeData>,
+    ) {
         if let Some(PropertySlot::Get(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
-            slot.tickets.push(ticket);
+            slot.replies.push(reply);
             return;
         }
         self.properties.push(PropertySlot::Get(Slot {
             peer: peer_of(&ask),
             request: ask,
             sent: false,
-            tickets: vec![ticket],
+            replies: vec![reply],
         }));
         self.send(io);
     }
@@ -889,17 +894,17 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Landing<PeStatus>,
+        reply: ReplySender<PeStatus>,
     ) {
         if let Some(PropertySlot::Set(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
-            slot.tickets.push(ticket);
+            slot.replies.push(reply);
             return;
         }
         self.properties.push(PropertySlot::Set(Slot {
             peer: peer_of(&ask),
             request: ask,
             sent: false,
-            tickets: vec![ticket],
+            replies: vec![reply],
         }));
         self.send(io);
     }
@@ -910,13 +915,13 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Landing<Subscription>,
+        reply: ReplySender<Subscription>,
     ) {
         self.properties.push(PropertySlot::Subscribe(Slot {
             peer: peer_of(&ask),
             request: ask,
             sent: false,
-            tickets: vec![ticket],
+            replies: vec![reply],
         }));
         self.send(io);
     }
@@ -927,7 +932,7 @@ impl Pending {
             peer: peer_of(&ask),
             request: ask,
             sent: false,
-            tickets: Vec::new(),
+            replies: Vec::new(),
         }));
         self.send(io);
     }
@@ -1006,7 +1011,7 @@ impl Pending {
         }
     }
 
-    /// Lands `answer` on the request of `peer` it ends, and sends what waited
+    /// Resolves the request of `peer` it ends, and sends what waited
     /// behind it.
     pub(crate) fn answer(
         &mut self,
@@ -1173,8 +1178,8 @@ impl Pending {
         self.subs
             .started(peer, weak, resource.clone(), subscribe_id.clone());
         // One future asked for it: a Subscription is never joined.
-        if let Some(ticket) = slot.tickets.into_iter().next() {
-            land(ticket, Ok(lease));
+        if let Some(reply) = slot.replies.into_iter().next() {
+            resolve(reply, Ok(lease));
         }
     }
 
@@ -1268,10 +1273,10 @@ impl Pending {
     }
 }
 
-/// Lands what `result` makes on every future of `slot`.
+/// Resolves every future of `slot` with what `result` makes of `slot`.
 fn end_slot<R, T, E>(slot: Slot<R, T, E>, result: impl Fn() -> Result<T, PeerError<E>>) {
-    for ticket in slot.tickets {
-        land(ticket, result());
+    for reply in slot.replies {
+        resolve(reply, result());
     }
 }
 

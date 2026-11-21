@@ -1,4 +1,4 @@
-//! A request to a MIDI-CI peer is a typed job (M2-101 sections 7 and 9): a
+//! A request to a MIDI-CI peer is a future (M2-101 sections 7 and 9): a
 //! Profile switch and a MIDI Message Report, each driven over the fake OS by a
 //! peer that answers, refuses or stays silent, with the session's clock set by
 //! the test.
@@ -90,7 +90,6 @@ impl Wire {
         blocks(&self.s, 1);
     }
 
-    /// What `job` landed with, once.
     /// What `request` resolved to, or `None` while it is pending: polled without
     /// an update.
     fn result<F: Future + Unpin>(&mut self, request: &mut F) -> Option<F::Output> {
@@ -145,28 +144,28 @@ fn everything() -> ReportRequest {
     )
 }
 
-/// The peer's Enabled Report lands the switch with the state it reports, and
+/// The peer's Enabled Report resolves the switch with the state it reports, and
 /// the port's list holds it.
 #[test]
 fn a_switch_the_peer_enables_lands_enabled() {
     let mut wire = Wire::new(Reply::Answer, Reply::Answer);
     assert_eq!(wire.state(), ProfileState::Disabled);
-    let mut job = wire.profile().enable(four());
+    let mut request = wire.profile().enable(four());
     wire.run(30);
-    assert_eq!(wire.result(&mut job), Some(Ok(ProfileState::Enabled)));
+    assert_eq!(wire.result(&mut request), Some(Ok(ProfileState::Enabled)));
     assert_eq!(wire.state(), ProfileState::Enabled);
 }
 
-/// The peer's Disabled Report lands the switch with the state it reports.
+/// The peer's Disabled Report resolves the switch with the state it reports.
 #[test]
 fn a_switch_the_peer_disables_lands_disabled() {
     let mut wire = Wire::new(Reply::Answer, Reply::Answer);
     let mut enable = wire.profile().enable(four());
     wire.run(30);
     assert_eq!(wire.result(&mut enable), Some(Ok(ProfileState::Enabled)));
-    let mut job = wire.profile().disable();
+    let mut request = wire.profile().disable();
     wire.run(30);
-    assert_eq!(wire.result(&mut job), Some(Ok(ProfileState::Disabled)));
+    assert_eq!(wire.result(&mut request), Some(Ok(ProfileState::Disabled)));
     assert_eq!(wire.state(), ProfileState::Disabled);
 }
 
@@ -175,35 +174,35 @@ fn a_switch_the_peer_disables_lands_disabled() {
 #[test]
 fn a_switch_the_peer_naks_is_refused_with_its_nak() {
     let mut wire = Wire::new(Reply::Refuse, Reply::Answer);
-    let mut job = wire.profile().enable(four());
+    let mut request = wire.profile().enable(four());
     wire.run(30);
-    let Some(Err(PeerError::Refused(nak))) = wire.result(&mut job) else {
+    let Some(Err(PeerError::Refused(nak))) = wire.result(&mut request) else {
         panic!("a refusal");
     };
     assert_eq!(nak.status, NakStatus::ProfileNotSupported);
     assert_eq!(wire.state(), ProfileState::Disabled);
 }
 
-/// A switch no one answers lands `TimedOut` once the peer reply timeout has
+/// A switch no one answers resolves `TimedOut` once the peer reply timeout has
 /// passed since it was sent, and not before.
 #[test]
 fn a_switch_nothing_answers_times_out_after_the_peer_reply_timeout() {
     let mut wire = Wire::new(Reply::Silent, Reply::Answer);
-    let mut job = wire.profile().enable(four());
+    let mut request = wire.profile().enable(four());
     wire.run(5);
     let wait = PEER_REPLY_TIMEOUT.as_millis() as u64;
     wire.step(wait - 20);
-    assert_eq!(wire.result(&mut job), None, "still waiting");
+    assert_eq!(wire.result(&mut request), None, "still waiting");
     wire.step(20);
     wire.run(1);
-    assert_eq!(wire.result(&mut job), Some(Err(PeerError::TimedOut)));
+    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
 }
 
 /// A peer that leaves before it answers ends the switch as `Disconnected`.
 #[test]
 fn a_switch_whose_peer_leaves_before_it_answers_is_disconnected() {
     let mut wire = Wire::new(Reply::Silent, Reply::Answer);
-    let mut job = wire.profile().enable(four());
+    let mut request = wire.profile().enable(four());
     wire.run(5);
     let muid = wire.peer.muid;
     for ump in (CiMessage::InvalidateMuid {
@@ -220,7 +219,10 @@ fn a_switch_whose_peer_leaves_before_it_answers_is_disconnected() {
         );
     }
     wire.run(5);
-    assert_eq!(wire.result(&mut job), Some(Err(PeerError::Disconnected)));
+    assert_eq!(
+        wire.result(&mut request),
+        Some(Err(PeerError::Disconnected))
+    );
 }
 
 /// A request of a port that is lost fails at the call: its future is resolved as
@@ -249,14 +251,14 @@ fn a_dropped_switch_is_still_sent_and_the_peers_answer_still_applies() {
     assert_eq!(wire.state(), ProfileState::Enabled);
 }
 
-/// A report lands at the peer's End, and the messages it carried reached the
+/// A report resolves at the peer's End, and the messages it carried reached the
 /// graph as the input's MIDI.
 #[test]
 fn a_report_lands_at_the_peers_end_and_its_messages_reach_the_graph() {
     let mut wire = Wire::new(Reply::Answer, Reply::Answer);
-    let mut job = wire.reporter().request(everything());
+    let mut request = wire.reporter().request(everything());
     wire.run(30);
-    assert_eq!(wire.result(&mut job), Some(Ok(())));
+    assert_eq!(wire.result(&mut request), Some(Ok(())));
     let reported = wire
         .seen
         .lock()
@@ -277,30 +279,30 @@ fn a_report_lands_at_the_peers_end_and_its_messages_reach_the_graph() {
 #[test]
 fn a_report_the_peer_naks_is_refused_with_its_nak() {
     let mut wire = Wire::new(Reply::Answer, Reply::Refuse);
-    let mut job = wire.reporter().request(everything());
+    let mut request = wire.reporter().request(everything());
     wire.run(30);
-    let Some(Err(PeerError::Refused(nak))) = wire.result(&mut job) else {
+    let Some(Err(PeerError::Refused(nak))) = wire.result(&mut request) else {
         panic!("a refusal");
     };
     assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Responder));
 }
 
-/// A report no one answers lands `TimedOut` after the peer reply timeout.
+/// A report no one answers resolves `TimedOut` after the peer reply timeout.
 #[test]
 fn a_report_nothing_answers_times_out_after_the_peer_reply_timeout() {
     let mut wire = Wire::new(Reply::Answer, Reply::Silent);
-    let mut job = wire.reporter().request(everything());
+    let mut request = wire.reporter().request(everything());
     wire.run(5);
     wire.step(PEER_REPLY_TIMEOUT.as_millis() as u64);
     wire.run(1);
-    assert_eq!(wire.result(&mut job), Some(Err(PeerError::TimedOut)));
+    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
 }
 
-/// A peer that leaves while its report is out ends the job as `Disconnected`.
+/// A peer that leaves while its report is out ends the request as `Disconnected`.
 #[test]
 fn a_report_whose_peer_leaves_before_its_end_is_disconnected() {
     let mut wire = Wire::new(Reply::Answer, Reply::Silent);
-    let mut job = wire.reporter().request(everything());
+    let mut request = wire.reporter().request(everything());
     wire.run(5);
     let muid = wire.peer.muid;
     for ump in (CiMessage::InvalidateMuid {
@@ -317,7 +319,10 @@ fn a_report_whose_peer_leaves_before_its_end_is_disconnected() {
         );
     }
     wire.run(5);
-    assert_eq!(wire.result(&mut job), Some(Err(PeerError::Disconnected)));
+    assert_eq!(
+        wire.result(&mut request),
+        Some(Err(PeerError::Disconnected))
+    );
 }
 
 /// A report with another scope than `everything`.
@@ -336,7 +341,7 @@ fn scope(request: ReportRequest) -> ReportScope {
     request.scope
 }
 
-/// A request identical to the one in flight is not sent again: both jobs land
+/// A request identical to the one in flight is not sent again: both requests resolve
 /// with its answer.
 #[test]
 fn an_identical_repeated_switch_shares_the_answer_and_is_sent_once() {
@@ -350,7 +355,7 @@ fn an_identical_repeated_switch_shares_the_answer_and_is_sent_once() {
 }
 
 /// A disable asked while an enable is out waits behind it: the peer is asked
-/// Set On and then Set Off, in that order, and each job lands the state of its
+/// Set On and then Set Off, in that order, and each request resolves the state of its
 /// own answer.
 #[test]
 fn a_disable_behind_an_enable_is_sent_after_it_and_lands_its_own_state() {
@@ -517,7 +522,7 @@ fn settled_by<F: Future + Unpin>(wire: &mut Wire, request: &mut F) -> F::Output 
 }
 
 /// An identical request that follows a different one is its own: enable, disable,
-/// enable sends all three in order, and each job lands the state of its own
+/// enable sends all three in order, and each request resolves the state of its own
 /// answer.
 #[test]
 fn an_enable_after_a_disable_is_sent_again_and_lands_enabled() {
@@ -556,7 +561,7 @@ fn a_report_after_another_kind_is_asked_again() {
             Asked::Report(scope(everything()))
         ]
     );
-    for job in [&mut a1, &mut b, &mut a2] {
-        assert_eq!(wire.result(job), Some(Ok(())));
+    for request in [&mut a1, &mut b, &mut a2] {
+        assert_eq!(wire.result(request), Some(Ok(())));
     }
 }

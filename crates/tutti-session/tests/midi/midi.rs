@@ -1186,7 +1186,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 /// make the Profiles the port's info lists (`MidiReport::CiProfiles`, `Known`
 /// at the final Reply on the Function Block); `enable` of a listed handle is
 /// sent as a Set Profile On (Sub-ID#2 `0x22`) with the Channel count asked, and
-/// the peer's Profile Enabled Report lands the job with `Enabled` and updates
+/// the peer's Profile Enabled Report resolves the request with `Enabled` and updates
 /// the list. A request of a Profile the peer took off, of a lost port or of a
 /// released one fails at the call.
 #[cfg(feature = "midi-hardware")]
@@ -1261,9 +1261,9 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
             }
         }
         if enabled.is_none()
-            && let Some(job) = enable.as_mut()
+            && let Some(call) = enable.as_mut()
         {
-            enabled = polled(job);
+            enabled = polled(call);
         }
         if enable.is_none() && seen.iter().any(|c| matches!(c, ProfilesChange::Known)) {
             let info = port.info();
@@ -1358,7 +1358,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     assert_eq!(
         enabled,
         Some(Ok(ProfileState::Enabled)),
-        "the Enabled Report lands the job"
+        "the Enabled Report resolves the request"
     );
     let info = port.info();
     let listed: Vec<_> = info.peers()[0]
@@ -1894,7 +1894,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
 /// with MIDI Message Report makes it a `MidiInputInfo::report_peers` handle
 /// (`MidiReport::CiProcess`); `ReportPeer::request` sends an Inquiry: MIDI
 /// Message Report (Sub-ID#2 `0x42`) with the bitmaps asked, and the peer's End
-/// lands the job.
+/// resolves the request.
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
@@ -1965,9 +1965,9 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
             }
         }
         if ended.is_none()
-            && let Some(job) = request.as_mut()
+            && let Some(call) = request.as_mut()
         {
-            ended = polled(job);
+            ended = polled(call);
         }
         if request.is_none()
             && seen

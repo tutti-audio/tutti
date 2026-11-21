@@ -39,7 +39,7 @@ fn a_failure_status_keeps_its_code_and_header() {
 }
 
 /// M2-103 section 7.4.1, Table 15: 341 to 343 are the statuses to retry, and they
-/// land as such, not as failures.
+/// resolve as such, not as failures.
 #[test]
 fn a_retry_status_lands_as_a_retry() {
     for status in [
@@ -61,7 +61,7 @@ fn a_retry_status_lands_as_a_retry() {
 }
 
 /// M2-103 section 12.1: a transaction a Terminate NAK ended names which device
-/// ended it, and one past its size limit says so; a timeout is the job's own.
+/// ended it, and one past its size limit says so; a timeout is the request's own.
 #[test]
 fn a_terminate_a_too_large_body_and_a_timeout_are_their_own() {
     let of = |outcome| PeFailure::of(&ResourceFailure::Peer(Box::new(outcome)));
@@ -89,7 +89,7 @@ fn a_nak_that_does_not_terminate_lands_as_its_signal() {
     );
 }
 
-/// A reply or Property Data that cannot be used lands as unreadable, with the
+/// A reply or Property Data that cannot be used resolves as unreadable, with the
 /// failure that says why, whichever layer found it.
 #[test]
 fn an_unusable_reply_or_body_lands_as_unreadable_with_its_failure() {
@@ -105,7 +105,7 @@ fn an_unusable_reply_or_body_lands_as_unreadable_with_its_failure() {
     }
 }
 
-/// A body that is not JSON, and JSON that is not the Resource's data, land as
+/// A body that is not JSON, and JSON that is not the Resource's data, resolve as
 /// unreadable with the failure that names which.
 #[test]
 fn a_body_that_is_not_json_or_not_the_resources_lands_as_unreadable() {
@@ -186,7 +186,7 @@ fn a_pending_that_ends_as_disconnected_resolves_its_property_calls_disconnected(
             peer: id,
             request: ask.clone(),
             sent,
-            tickets: vec![sender],
+            replies: vec![sender],
         }));
     }
     pending.end(Ended::Disconnected);

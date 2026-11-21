@@ -276,7 +276,7 @@ impl ResourcePeer {
     /// `None` while none holds it (before its first Get, after it ended).
     ///
     /// After a `notify`, or an update that does not decode, the session Gets the
-    /// Resource, and this reads the data held before until that Get lands or
+    /// Resource, and this reads the data held before until that Get resolves or
     /// times out (an `Updated` replaces it, a failed Get clears it): the window is
     /// bounded by the Get's timeout.
     #[must_use]

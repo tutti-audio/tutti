@@ -16,10 +16,10 @@ mod tempo;
 // Clips, live inputs, routes and the outputs (`Session::midi`).
 #[cfg(feature = "midi")]
 mod midi;
-// A request to a MIDI-CI peer is a typed job: a Profile switch, a Message Report.
+// A request to a MIDI-CI peer is a future: a Profile switch, a Message Report.
 #[cfg(feature = "midi-hardware")]
-mod midi_ci_jobs;
-// Property Exchange with a MIDI-CI peer as typed jobs: a Get and a Set of a listed Resource.
+mod midi_ci_requests;
+// Property Exchange with a MIDI-CI peer as futures: a Get and a Set of a listed Resource.
 #[cfg(feature = "midi-hardware")]
 mod midi_ci_property;
 // A build that fails after the session's executor exists leaves nothing of it.

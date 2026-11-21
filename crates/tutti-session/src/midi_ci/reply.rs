@@ -13,12 +13,12 @@ use crate::PeerError;
 /// The end of a request the session answers: the sender of the future that
 /// asked. A request that ends without an answer drops it, and the future
 /// resolves to [`PeerError::Disconnected`].
-pub(crate) type Landing<T, E = PeFailure> = Sender<Result<T, PeerError<E>>>;
+pub(crate) type ReplySender<T, E = PeFailure> = Sender<Result<T, PeerError<E>>>;
 
-/// Lands `result` on the future that asked: it goes nowhere when the future was
+/// Resolves the future that asked with `result`: it goes nowhere when the future was
 /// dropped, since no one reads what it asked for.
-pub(crate) fn land<T, E>(landing: Landing<T, E>, result: Result<T, PeerError<E>>) {
-    drop(landing.send(result));
+pub(crate) fn resolve<T, E>(reply: ReplySender<T, E>, result: Result<T, PeerError<E>>) {
+    drop(reply.send(result));
 }
 
 /// Declares the public future of one kind of request: a [`PeerReply`] that
@@ -76,7 +76,7 @@ pub(crate) struct PeerReply<T, E = PeFailure> {
 
 impl<T, E> PeerReply<T, E> {
     /// A reply to await and the sender that answers it.
-    pub(crate) fn new() -> (Landing<T, E>, Self) {
+    pub(crate) fn new() -> (ReplySender<T, E>, Self) {
         let (sender, reply) = channel();
         (sender, Self { reply })
     }
