@@ -177,13 +177,28 @@ fn a_stretched_voice_follows_a_loop_wrap_that_falls_on_a_tempo_change() {
     );
 }
 
-/// A disk voice re-seeks at the same wrap: the ramp falls to the loop's start within 512
-/// frames of frame 67 680. The disk voice reads its ring by the playhead and takes a
-/// transport jump as the reader's re-seek, so a wrap the clock did not report would play
-/// the ring on past the loop's end.
+/// A disk voice re-seeks at the same wrap, on its frame. The disk voice reads its ring at
+/// the positions placed over each run of the block, and a run that starts at the loop's
+/// start jumps from the one before, which the reader crossfades from the old position.
+/// The wrap is due at frame 67 680, in the middle of a block (67 680 = 1 057.5 blocks), so
+/// the wrap's crossfade is on its frame, not a block later: up to frame 67 679 the output
+/// is the ramp `i / 131072` itself, and 30 frames into the wrap's crossfade (frame 67 710,
+/// before the next block starts at 67 712) the output is already below the ramp's
+/// continuation by 1e-4, a tenth of what the fade takes by then. A position carried
+/// across the cut stays on the ramp until the next block.
 #[test]
-fn a_disk_voice_follows_a_loop_wrap_that_falls_on_a_tempo_change() {
+fn a_disk_voice_re_seeks_on_the_frame_of_a_loop_wrap_that_falls_on_a_tempo_change() {
     let x = render(&[(0.0, 60.0), (1.38, 240.0)], Tier::Disk, 130_000);
+    let ramp = |i: usize| i as f32 / SCALE;
+    assert!(
+        (67_000..67_680).all(|i| (x[i] - ramp(i)).abs() < 1e-6),
+        "the output leaves the ramp before the wrap at 67 680"
+    );
+    let below = ramp(67_710) - x[67_710];
+    assert!(
+        below > 1e-4,
+        "30 frames into the wrap the output is {below} below the ramp, want over 1e-4"
+    );
     let falls = falls(&x);
     assert!(
         falls
