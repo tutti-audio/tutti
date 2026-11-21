@@ -19,11 +19,11 @@ use tutti_graph::ForkByClone;
 use tutti_modulation::Lfo;
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{MultibandBands, MultibandCompressorConfig, MultibandCompressorNode};
-use tutti_session::RouteSpec;
 use tutti_session::{InPort, Key, OutPort, Root, Session};
+use tutti_session::{RouteSpec, ValueErrorKind};
 use tutti_units::{Amplitude, SampleRate};
 use tutti_units::{BeatsPerCycle, Depth};
-use tutti_units::{CompressionRatio, Db, Hz, Seconds, UnitAddr, UnitParam};
+use tutti_units::{CompressionRatio, Db, Hz, Seconds};
 
 const RATE: f64 = 48_000.0;
 /// The tones' amplitude.
@@ -146,45 +146,32 @@ fn a_write_to_band_1_moves_band_1_only() {
     );
 }
 
-/// The graph declares every band's ports, each modulatable on its own, and
-/// no more: 6 per band and one per crossover, none for the toggles.
+/// The node declares every band's params, each writable on its own, and no
+/// more: a read of a declared target is `Ok` at both bands and
+/// `NoSuchTarget` at a third; the crossover (`Cutoff`) is declared at index
+/// 0 only.
 #[test]
-fn the_graph_declares_each_band_and_crossover() {
-    let (mut s, mb) = rig();
-    let g = s.graph();
-    for band in 0..2u8 {
-        for kind in tutti_nodes::BAND_PARAMS {
-            assert!(
-                g.testing()
-                    .declares_param(mb, UnitAddr::new(kind, band))
-                    .unwrap(),
-                "{kind:?} {band}"
-            );
-        }
-        for kind in [UnitParam::Bypass, UnitParam::Solo] {
-            assert!(
-                !g.testing()
-                    .declares_param(mb, UnitAddr::new(kind, band))
-                    .unwrap(),
-                "{kind:?}"
-            );
-        }
+fn the_node_declares_each_band_and_crossover() {
+    let (s, mb) = rig();
+    let no_such = ValueErrorKind::NoSuchTarget;
+    macro_rules! band_declared {
+        ($($at:ident),+) => {$(
+            for band in 0..2u8 {
+                assert!(s.get(mb.$at(band)).is_ok(), "{} {band}", stringify!($at));
+            }
+            assert_eq!(s.get(mb.$at(2)).unwrap_err().kind, no_such, "{} 2", stringify!($at));
+        )+};
     }
-    assert!(
-        g.testing()
-            .declares_param(mb, UnitAddr::new(UnitParam::Cutoff, 0))
-            .unwrap()
+    band_declared!(
+        threshold_at,
+        knee_at,
+        ratio_at,
+        attack_at,
+        release_at,
+        gain_db_at
     );
-    assert!(
-        !g.testing()
-            .declares_param(mb, UnitAddr::new(UnitParam::Cutoff, 1))
-            .unwrap()
-    );
-    assert!(
-        !g.testing()
-            .declares_param(mb, UnitAddr::new(UnitParam::Threshold, 2))
-            .unwrap()
-    );
+    assert!(s.get(mb.cutoff_at(0)).is_ok());
+    assert_eq!(s.get(mb.cutoff_at(1)).unwrap_err().kind, no_such);
 }
 
 /// A write at index 1 reaches the band meter of band 1 through the

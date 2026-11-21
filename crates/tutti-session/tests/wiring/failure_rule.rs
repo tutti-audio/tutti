@@ -10,7 +10,7 @@ use tutti_session::{
     ConnectError, DetachedSession, EventInPort, EventOutPort, InPort, OutPort, ReplaceRefused,
     Replacement, Root, Session,
 };
-use tutti_units::{SampleRate, UnitParam};
+use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const GHOST: NodeKey = NodeKey(u64::MAX);
@@ -36,18 +36,6 @@ fn a_query_of_a_node_that_is_not_there_names_it() {
     assert_eq!(named(g.node_latency(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.node_tail(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.node_buses(GHOST).unwrap_err()), GHOST);
-    assert_eq!(
-        named(
-            g.testing()
-                .declares_param(GHOST, UnitParam::Cutoff)
-                .unwrap_err()
-        ),
-        GHOST
-    );
-    assert_eq!(
-        named(g.testing().param_mod(GHOST, UnitParam::Cutoff).unwrap_err()),
-        GHOST
-    );
 }
 
 /// **A node that is there answers.** The same queries on a real node are `Ok`,
@@ -63,10 +51,6 @@ fn a_query_of_a_node_that_is_there_answers() {
     assert_eq!(g.node_outputs(through).unwrap(), 2);
     assert_eq!(g.node_event_inputs(through).unwrap(), 0);
     assert!(g.node_buses(through).is_ok());
-    assert_eq!(
-        g.testing().param_mod(through, UnitParam::Cutoff).unwrap(),
-        None
-    );
 }
 
 /// **A wire taken out names a node that is not there, and says when an edge
