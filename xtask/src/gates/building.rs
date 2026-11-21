@@ -398,18 +398,6 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-cpal/",
-        "DeviceListing::outputs",
-        CTOR,
-        "enumerating devices on a thread the OS lends: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-cpal/",
-        "DeviceListing::spawn_with",
-        CTOR,
-        "enumerating devices on a thread the OS lends: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-cpal/",
         "AudioEngine::new",
         CTOR,
         "opening an output device: the failure is the OS's, not a value's",
@@ -419,12 +407,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "AudioEngine::open",
         CTOR,
         "opening an output device: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-cpal/",
-        "DevicePoller::spawn",
-        CTOR,
-        "spawning the device poller and reading the host: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-hardware/",
