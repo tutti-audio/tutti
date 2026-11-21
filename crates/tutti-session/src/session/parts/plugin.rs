@@ -12,7 +12,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle};
 use tutti_rt::LockExt;
 
 use crate::graph::Graph;
-use crate::plugin::{RenderModeState, SNAPSHOT_INTERVAL};
+use crate::plugin::{Inbox, RenderModeState, SNAPSHOT_INTERVAL};
 use crate::pool::Defer;
 use crate::{HangPolicy, PoolKey, RecoveryPolicy};
 
@@ -57,9 +57,11 @@ pub(crate) struct PluginPart {
     /// What every plugin this session loads hands to the main thread: the closes of
     /// a drop off the main thread. The handle is cloned into each load.
     pub(crate) work: MainWorkHandle,
-    /// The session's executor, reached by the loads this session queues without
-    /// keeping it alive.
+    /// The session's executor, reached by the loads and loops this session queues
+    /// without keeping it alive: a task upgrades it only to spawn.
     pub(crate) executor: WeakExecutor,
+    /// What the plugin loops sent back, drained by `Phase::Plugins`.
+    pub(crate) inbox: Inbox,
     /// The receiving end of `work`, drained on the main thread by the session's
     /// update. Declared last, so it drops after everything the part holds: a
     /// close handed over while the session drops is still collected, and
@@ -87,10 +89,28 @@ impl PluginPart {
                 pooled_swaps: BTreeSet::new(),
                 work,
                 executor: executor.downgrade(),
+                inbox: Inbox::new(),
                 main_work,
             },
             early,
         )
+    }
+
+    /// Runs `task`, a blocking round trip of the loop `what`, on the session's executor.
+    ///
+    /// The executor is upgraded for this call only; the task holds none. A task the
+    /// executor refuses (it shut down, or the OS refused a thread) is dropped unrun, which
+    /// is how each loop's task answers a refusal: the token it holds frees the plugin for
+    /// the next ask, and a reload ends as dropped.
+    pub(crate) fn spawn(&self, what: &str, task: impl FnOnce() + Send + 'static) {
+        let Some(executor) = self.executor.upgrade() else {
+            tracing::warn!("a plugin {what} was not started: the executor has shut down");
+            return;
+        };
+        match executor.unblock(task) {
+            Ok(running) => running.detach(),
+            Err(error) => tracing::warn!("a plugin {what} was not started: {error}"),
+        }
     }
 
     /// What a main stage dropped off the main thread hands its discard to: this

@@ -63,6 +63,39 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     Key::new(node)
 }
 
+/// Blocks until every plugin loop task the session started has sent its end, and leaves
+/// the ends in the inbox for the next update: each task holds a token of its plugin's
+/// record, so the tokens held beyond the records' own count the ends owed.
+pub(super) fn await_tasks<K: crate::AppKey, C: Clock<Float = f32>>(session: &Session<K, C>) {
+    let owed: usize = session
+        .graph
+        .plugins
+        .values()
+        .map(|hosted| {
+            [
+                &hosted.mirror_token,
+                &hosted.snapshot_token,
+                &hosted.reload.token,
+            ]
+            .into_iter()
+            .map(|token| Arc::strong_count(token) - 1)
+            .sum::<usize>()
+        })
+        .sum();
+    let inbox = &session.plugins.inbox;
+    let ends: Vec<_> = (0..owed)
+        .map(|_| {
+            inbox
+                .rx
+                .recv_timeout(std::time::Duration::from_secs(60))
+                .expect("a plugin task sent its end")
+        })
+        .collect();
+    for end in ends {
+        inbox.tx.send(end).expect("the inbox holds both ends");
+    }
+}
+
 /// A backend that answers nothing: the editor route is the fake control's.
 #[derive(Default)]
 pub(super) struct Inert {
