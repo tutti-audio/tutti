@@ -230,6 +230,12 @@ impl Default for Workers {
 /// What every build path shares: the graph, the transport, the click, the
 /// MIDI nodes, and what the engine's callback state holds.
 pub(crate) struct Parts<F: Float> {
+    /// The session's executor, the one the MIDI hardware opened on: `session()`
+    /// clones it into the session's jobs, sampler and plugins.
+    executor: tutti_platform::Executor,
+    /// What drives `executor` (threads of its own, or the app's `update`); the
+    /// session's jobs take it over in `session()`.
+    drive: crate::drive::Drive,
     graph: Graph<F>,
     transport: Transport,
     click: Option<NodeKey>,
@@ -433,8 +439,11 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         );
         graph.set_render_workers(self.opts.render_workers);
         graph.declare_root(self.opts.root.clone(), true)?;
+        let (executor, drive) = self.session_executor()?;
         self.session(
             Parts {
+                executor,
+                drive,
                 graph,
                 transport,
                 click: None,
@@ -751,8 +760,9 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The [`Executor`](tutti_platform::Executor) that runs the session's background
-    /// work: its jobs (a file load, a plugin round trip), its disk streamer and a
-    /// recording's pump. Each is a future, and what a job reports lands in
+    /// work: its jobs (a file load, a plugin round trip), its disk streamer, a
+    /// recording's pump and the MIDI hardware's (an input's pump, the device watch,
+    /// Active Sensing, the legacy poll). Each is a future, and what a job reports lands in
     /// [`Session::update`].
     ///
     /// Without one the session makes its own and, where a thread can start, drives it
@@ -761,7 +771,8 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`Session::update`] drives the queue (up to a fixed count of tasks per call) or
     /// the app does, with [`Executor::spawn_threads`](tutti_platform::Executor) or its own
     /// calls. Nothing runs between updates then, so a live stream is fed only as often
-    /// as the app updates.
+    /// as the app updates, and so is the MIDI hardware's background work (until
+    /// core-engine's R2-last).
     ///
     /// Dropping the session drops its clone of the executor: every task still queued is
     /// dropped unrun, and its job ends `Dropped` for whoever awaits it. Dropping the
@@ -796,6 +807,13 @@ impl<C: Clock> SessionBuilder<C> {
     /// inlet of its own, with `config` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
     /// [`MidiPolicy`](crate::MidiPolicy). Default off.
+    ///
+    /// The layer's background work (an input's pump, the device watch, Active
+    /// Sensing, the legacy ports' poll) runs on the session's
+    /// [`executor`](Self::executor). Until core-engine's R2-last, a
+    /// session built with the app's own executor drives it inside
+    /// [`Session::update`], so in that mode this work advances only while the app
+    /// calls `update`.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
     pub fn midi_hardware(mut self, config: tutti_midi_hardware::MidiHardwareConfig) -> Self {
@@ -920,6 +938,7 @@ impl<C: Clock> SessionBuilder<C> {
         quantum: Option<MaxBlock>,
         outputs: usize,
     ) -> Result<Parts<C::Float>> {
+        let (executor, drive) = self.session_executor()?;
         // Built first so its port list can feed the graph's MIDI input.
         #[cfg(feature = "midi-hardware")]
         let backend = self.opts.midi_backend.take();
@@ -934,10 +953,10 @@ impl<C: Clock> SessionBuilder<C> {
             );
             let io = match backend {
                 Some(MidiBackend(backend)) => {
-                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, options)
+                    tutti_midi_hardware::MidiSession::open_over(&executor, backend, inlets, options)
                         .map_err(crate::Error::MidiHardware)?
                 }
-                None => tutti_midi_hardware::MidiSession::open(inlets, options)
+                None => tutti_midi_hardware::MidiSession::open(&executor, inlets, options)
                     .map_err(crate::Error::MidiHardware)?,
             };
             // Subscribed before anything can plug in unseen: `Phase::Poll`
@@ -988,6 +1007,8 @@ impl<C: Clock> SessionBuilder<C> {
         };
 
         Ok(Parts {
+            executor,
+            drive,
             graph,
             transport,
             click: Some(click.erase()),
@@ -1001,6 +1022,18 @@ impl<C: Clock> SessionBuilder<C> {
         })
     }
 
+    /// The session's executor, the app's or a new one, and what drives it.
+    fn session_executor(&self) -> Result<(tutti_platform::Executor, crate::drive::Drive)> {
+        Ok(match &self.opts.executor {
+            Some(executor) => (executor.clone(), crate::drive::Drive::update()),
+            None => {
+                let executor = tutti_platform::Executor::new();
+                let drive = crate::drive::Drive::background(&executor)?;
+                (executor, drive)
+            }
+        })
+    }
+
     /// The session over `parts`, `engine` its offline engine if any, with
     /// (`sampler`) a disk streamer when `streamer`.
     fn session<N: Clock<Float = C::Float>>(
@@ -1010,14 +1043,7 @@ impl<C: Clock> SessionBuilder<C> {
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
         let bells = tutti_rt::Bells::new().map_err(crate::Error::Bells)?;
-        let (executor, drive) = match &self.opts.executor {
-            Some(executor) => (executor.clone(), crate::drive::Drive::update()),
-            None => {
-                let executor = tutti_platform::Executor::new();
-                let drive = crate::drive::Drive::background(&executor)?;
-                (executor, drive)
-            }
-        };
+        let executor = parts.executor.clone();
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),
@@ -1053,7 +1079,7 @@ impl<C: Clock> SessionBuilder<C> {
             devices: Default::default(),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
-            jobs: crate::jobs::Jobs::new(executor, drive, bells),
+            jobs: crate::jobs::Jobs::new(executor, parts.drive, bells),
             plugins,
         };
         session.provide_values(&table, click_settings);

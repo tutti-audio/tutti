@@ -198,6 +198,57 @@ pub fn wide_signal(frames: usize) -> Vec<f64> {
         .collect()
 }
 
+/// The Hann-windowed DFT of `x` at exactly `at`, as `(re, im)`: the sum over `n` of
+/// `w[n] x[n] e^{-j 2 pi at n / rate}`, with `w` the periodic Hann window of `x.len()` points.
+pub fn hann_dft(x: &[f64], at: Hz, rate: SampleRate) -> (f64, f64) {
+    let m = x.len() as f64;
+    let step = -std::f64::consts::TAU * at.get() / rate.get();
+    x.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &v)| {
+        let w = 0.5 - 0.5 * (std::f64::consts::TAU * n as f64 / m).cos();
+        let a = step * n as f64;
+        (re + v * w * a.cos(), im + v * w * a.sin())
+    })
+}
+
+/// The frequency of the sine in `x`, to within `measure` samples of it: the phase advance of
+/// its exact-bin DFT ([`hann_dft`]) at `near` between the segments of `measure` samples at 0
+/// and at `step`, read as a deviation from `near` (unambiguous within `rate / (2 step)` of it).
+///
+/// The estimator's only systematic error is the window's leakage of the tone's
+/// negative-frequency image ([`hann_image_leak`]), a phase error of at most that many radians
+/// in each segment.
+///
+/// # Panics
+///
+/// If `x` is shorter than `step + measure`.
+pub fn sine_frequency(
+    x: &[f64],
+    near: Hz,
+    rate: SampleRate,
+    measure: Samples,
+    step: Samples,
+) -> Hz {
+    let (measure, step) = (measure.get(), step.get());
+    let (a, b) = (&x[..measure], &x[step..step + measure]);
+    let (ar, ai) = hann_dft(a, near, rate);
+    let (br, bi) = hann_dft(b, near, rate);
+    // The phase of `b * conj(a)`.
+    let advance = (bi * ar - br * ai).atan2(br * ar + bi * ai);
+    let expected = std::f64::consts::TAU * near.get() * step as f64 / rate.get();
+    let deviation = (advance - expected + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+        - std::f64::consts::PI;
+    Hz::new(near.get() + deviation * rate.get() / (std::f64::consts::TAU * step as f64))
+}
+
+/// The leakage of a Hann window of `length` samples at the negative-frequency image of a tone
+/// at `f`, `2 f` away, relative to the window's gain at the tone: the closed form
+/// `|sin(pi v) / (pi v (1 - v^2))|` at `v` bins, bounded by `1 / (pi v (v^2 - 1))`, which is
+/// returned.
+pub fn hann_image_leak(f: Hz, length: Samples, rate: SampleRate) -> f64 {
+    let v = 2.0 * f.get() * length.get() as f64 / rate.get();
+    1.0 / (std::f64::consts::PI * v * (v * v - 1.0))
+}
+
 /// Asserts `got` and `want` have one length and agree to `tolerance` at every frame; the
 /// failure names the first frame that does not (a NaN never agrees), with both values.
 ///
@@ -223,6 +274,24 @@ pub fn assert_close_f64(got: &[f64], want: &[f64], tolerance: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sine at a frequency off every bin is found to within the image leakage of its two
+    /// segments, by the closed-form bound.
+    #[test]
+    fn sine_frequency_finds_the_sine_within_the_image_leakage() {
+        let rate = SampleRate::SR_48K;
+        let (f, measure, step) = (1234.5, Samples::new(16_384), Samples::new(4096));
+        let x: Vec<f64> = sine(Hz::new(f), Amplitude::new(0.5), rate, Samples::new(30_000))
+            .iter()
+            .map(|&v| f64::from(v))
+            .collect();
+        let found = sine_frequency(&x, Hz::new(1240.0), rate, measure, step).get();
+        let bound = 2.0 * hann_image_leak(Hz::new(f), measure, rate) * rate.get()
+            / (std::f64::consts::TAU * step.get() as f64);
+        // The `f32` samples' rounding adds `2^-24` of phase per segment.
+        let rounding = 2.0 * 2f64.powi(-24) * rate.get() / (std::f64::consts::TAU * 4096.0);
+        assert!((found - f).abs() < bound + rounding, "{found} for {f}");
+    }
 
     /// A sine starts at 0, peaks at the amplitude a quarter period in, and its
     /// RMS is the amplitude over root two across whole periods.

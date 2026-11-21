@@ -287,8 +287,11 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
             "a piece longer than the scratch"
         );
         let mut from = range.start;
-        // Most blocks hold no jump, and then no range of them does.
-        if clock.jumps() {
+        // Most blocks hold no jump, and then no range of them does. A stretching voice
+        // reads a piece a run at a time as well: where the transport stops or starts
+        // inside the block it primes in the stopped run, as it would in a block of its
+        // own, so what it sounds does not depend on how the output was split.
+        if clock.jumps() || self.stretch.is_some() {
             for run in clock.runs_in(range.clone()) {
                 if run.jump {
                     if run.start > from {
@@ -296,6 +299,9 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                         from = run.start;
                     }
                     self.jumped(run.wrap.is_some_and(|wrap| wrap.ago == 0));
+                } else if self.stretch.is_some() && run.start > from {
+                    self.render_piece(clock, from..run.start, n, scratch, out);
+                    from = run.start;
                 }
             }
         }
@@ -362,23 +368,22 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         // silent meanwhile. The vocoder's output is passed on as it is: a non-finite
         // source sample does not latch in it (the vocoder's own invariant), so no
         // reset follows a block that wrote one.
-        let consumption = stretched::consumption(play.stretch);
         let (stretch, mut spare) = match self.stretch.as_deref_mut() {
             Some(Vocoders { live, spare }) => {
                 live.retarget(&stretched::controls(&play));
                 spare.retarget(&stretched::controls(&play));
                 (
                     Some(Stretch {
+                        consumption: live.read_rate(),
                         vocoder: live,
                         cursor: &mut self.cursor,
                         seats: &mut self.seats,
-                        consumption,
                     }),
                     Some(Stretch {
+                        consumption: spare.read_rate(),
                         vocoder: spare,
                         cursor: &mut self.spare_cursor,
                         seats: &mut self.spare_seats,
-                        consumption,
                     }),
                 )
             }

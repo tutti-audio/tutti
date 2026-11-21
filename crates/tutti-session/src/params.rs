@@ -82,6 +82,7 @@ param_methods! {
     bit_depth, bit_depth_at => BitDepth;
     hold_factor, hold_factor_at => HoldFactor;
     semitones, semitones_at => Semitones;
+    pitch, pitch_at => Pitch;
     knee, knee_at => Knee;
     decay, decay_at => Decay;
     diffusion, diffusion_at => Diffusion;
