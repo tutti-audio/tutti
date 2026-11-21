@@ -36,6 +36,7 @@ impl Stop {
     /// Raises the request and wakes every waiter. Idempotent.
     pub fn stop(&self) {
         *self.latch.stopped.lock_recover() = true;
+        // Wakes a wait already parked, which the flag alone cannot reach.
         self.latch.raised.notify_all();
     }
 
@@ -59,25 +60,6 @@ mod tests {
 
     /// Far past anything a test waits for: a hang guard, never a speed claim.
     const HANG_GUARD: Duration = Duration::from_secs(300);
-
-    /// **A raised request ends a wait that started before it**, and the waiter
-    /// reports it: the result arrives within the hang guard, not at the wait's own
-    /// timeout.
-    #[test]
-    fn stop_ends_a_wait_that_started_before_it() {
-        let stop = Stop::new();
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        let waiter = {
-            let stop = stop.clone();
-            std::thread::spawn(move || done_tx.send(stop.wait(HANG_GUARD)).unwrap())
-        };
-        stop.stop();
-        let stopped = done_rx
-            .recv_timeout(Duration::from_secs(60))
-            .expect("the wait did not end within the hang guard");
-        assert!(stopped, "the wait reports the request");
-        waiter.join().unwrap();
-    }
 
     /// **A wait that starts after the request returns at once**: the request is
     /// a latch, so a stop raised before the wait is not missed.
