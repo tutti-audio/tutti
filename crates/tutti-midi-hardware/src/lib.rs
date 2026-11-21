@@ -27,6 +27,7 @@
 //! the other order, and their ordinals swap).
 //!
 //! ```rust,no_run
+//! use futures_lite::StreamExt;
 //! use tutti_midi_device::DeviceEvent;
 //! use tutti_midi_hardware::Devices;
 //!
@@ -37,13 +38,13 @@
 //! // of its own): `start()` is a future the app awaits, on whatever executor it has,
 //! // and the list is seeded when it resolves. Every other backend is ready at once.
 //! devices.start().await?;
-//! let events = devices.subscribe();
+//! let mut events = devices.subscribe();
 //! for device in events.initial() {
 //!     println!("{}: {}", device.id, device.name);
 //! }
-//! // `recv()` is a future the watch wakes when a device comes or goes; it resolves to
-//! // an error once the watch has ended.
-//! while let Ok(event) = events.recv().await {
+//! // The events are a `Stream` the watch wakes when a device comes or goes; it ends once
+//! // the watch has ended.
+//! while let Some(event) = events.next().await {
 //!     match event {
 //!         DeviceEvent::Added(device) => println!("plugged in: {}", device.name),
 //!         DeviceEvent::Removed(device) => println!("gone: {}", device.name),
@@ -66,8 +67,8 @@
 //!   for setup notifications (the ports still use a second client, until they
 //!   move to that crate), and each [`Devices`] registers with it. A
 //!   [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the endpoint's `MIDIUniqueID`. Untested by the author.
-//! - If the watch ends on its own, [`DeviceEvents::recv`] says why, once the events the watch reported are taken, and the list
-//!   stays as it was.
+//! - If the watch ends on its own, the [`DeviceEvents`] stream ends once the events the watch reported are taken,
+//!   [`DeviceEvents::failure`] says why, and the list stays as it was.
 //! - **Windows:** Windows Multimedia has no notification, so the watch lists the
 //!   ports once a second and reports the difference; a device shows within about
 //!   that long. A [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the device interface path the driver reports,
@@ -320,8 +321,7 @@ pub use answer::{Answer, ReportEnd};
 pub use capability::OsEndpoint;
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
-    ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, Recv, SeedError,
-    WatchFailure,
+    ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, SeedError, WatchFailure,
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{MidiHardwareError, MidiThread, NotFound, Result};

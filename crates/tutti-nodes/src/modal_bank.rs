@@ -138,6 +138,7 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
             Some(bank) => bank.process(block),
             None => Ok(()),
         }
+        Ok(())
     }
 
     /// The bank's ring-out at an unbounded decay ratio is unbounded: the ceiling is

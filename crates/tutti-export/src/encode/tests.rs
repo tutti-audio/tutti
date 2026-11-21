@@ -66,7 +66,7 @@ fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
     assert!(
         matches!(
             err,
-            RenderError::Encode(tutti_codec::Error::WavTooLarge { limit_frames }) if limit_frames < 1 << 32
+            RenderError::Encode(tutti_codec::EncodeError::WavTooLarge { limit_frames }) if limit_frames < 1 << 32
         ),
         "{err}"
     );
@@ -102,7 +102,7 @@ fn the_limit_is_judged_at_the_output_rate() {
     assert!(
         matches!(
             err,
-            RenderError::Encode(tutti_codec::Error::WavTooLarge { .. })
+            RenderError::Encode(tutti_codec::EncodeError::WavTooLarge { .. })
         ),
         "{err}"
     );

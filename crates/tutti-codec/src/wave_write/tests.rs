@@ -99,7 +99,7 @@ fn an_integer_wave_writes_the_integers_it_holds() {
 /// refuses it with `AlreadyExists`, leaving the old bytes and no temporary.
 #[test]
 fn a_path_replaces_by_default_and_create_new_refuses() {
-    use crate::{Error, Pcm};
+    use crate::{EncodeError, Pcm};
     let wave = Wave::from_mono(SampleRate::SR_48K, tutti_buffers::Mono::new(&[0.5f32; 8]));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("take.wav");
@@ -109,7 +109,7 @@ fn a_path_replaces_by_default_and_create_new_refuses() {
         Destination::from(&path).create_new(),
         Format::Wav(Pcm::Float32),
     );
-    let Err(Error::Commit(e)) = refused else {
+    let Err(EncodeError::Commit(e)) = refused else {
         panic!("an existing file is refused: {refused:?}");
     };
     let kept = e.kept().to_path_buf();

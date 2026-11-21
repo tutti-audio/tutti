@@ -11,8 +11,9 @@ use tutti_graph::{
 };
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
-    DeviceGeneration, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiInputNode, MidiKeys,
-    MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony, TimedMidiEvent,
+    DeviceGeneration, HarmonyChanges, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode,
+    MidiInputNode, MidiKeys, MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony,
+    TimedMidiEvent,
 };
 use tutti_music::{FrameClock, LoopRange};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
@@ -456,10 +457,13 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
     ed.insert(
         NodeKey(2),
         "harmony",
-        HarmonyNode::new([
-            TimedHarmony::new(Beat::new(0.0), Harmony::chord(60, 60, 0b1001_0001)),
-            TimedHarmony::new(beat(1_032.0), Harmony::chord(67, 67, 0b1001_0001)),
-        ]),
+        HarmonyNode::new(
+            HarmonyChanges::new([
+                TimedHarmony::new(Beat::new(0.0), Harmony::chord(60, 60, 0b1001_0001)),
+                TimedHarmony::new(beat(1_032.0), Harmony::chord(67, 67, 0b1001_0001)),
+            ])
+            .expect("two chords at distinct finite beats"),
+        ),
     );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (2, 0)]);
     ed.commit().unwrap();

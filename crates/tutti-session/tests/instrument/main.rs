@@ -19,3 +19,4 @@ mod polysynth;
 mod loading;
 mod refusal;
 mod soundfont;
+mod soundfont_rates;

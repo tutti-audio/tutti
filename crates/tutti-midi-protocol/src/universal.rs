@@ -264,14 +264,15 @@ impl MtcTimeCode {
         )
     }
 
-    /// The position of the frame nearest `seconds` at `rate`
-    /// ([`SmpteTimecode::from_seconds`]).
+    /// The position of the frame nearest `seconds` at `rate`, the hours
+    /// wrapping at 24 as MTC's do ([`SmpteTimecode::from_seconds_wrapping`]);
+    /// `None` before zero and for NaN.
     #[must_use]
-    pub fn at(seconds: Seconds, rate: MtcRate) -> Self {
-        Self::at_rate(
-            SmpteTimecode::from_seconds(seconds, rate.frame_rate()),
+    pub fn at(seconds: Seconds, rate: MtcRate) -> Option<Self> {
+        Some(Self::at_rate(
+            SmpteTimecode::from_seconds_wrapping(seconds, rate.frame_rate())?,
             rate,
-        )
+        ))
     }
 
     /// The position of frame number `count` since `00:00:00:00` at `rate`

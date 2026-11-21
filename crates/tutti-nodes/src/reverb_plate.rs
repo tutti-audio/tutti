@@ -213,6 +213,7 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
             Some(r) => r.bank.process(&mut r.ramps, block),
             None => Ok(()),
         }
+        Ok(())
     }
 
     /// The bank's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a
