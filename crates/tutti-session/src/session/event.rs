@@ -11,8 +11,7 @@ use tutti_units::SampleRate;
 
 use crate::graph::CrossfadeId;
 use crate::{
-    BusSink, CrossfadeRefused, Edge, EventEdge, JobOutput, Problem, ResourceFact, ResourceId,
-    RootReader,
+    BusSink, CrossfadeRefused, Edge, EventEdge, Problem, ResourceFact, ResourceId, RootReader,
 };
 
 /// The controls a landed crossfade hands the app: the incoming node's
@@ -47,10 +46,6 @@ impl std::fmt::Debug for CrossfadeControls {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum SessionEvent {
-    /// A [`Job`](crate::Job) finished: take its result with
-    /// [`JobOutput::take`](crate::JobOutput::take). Reported once, in the update
-    /// that found it, unless a [`Job::wait`](crate::Job::wait) took it.
-    JobDone(JobOutput),
     /// The graph's edits could not be committed: the plan sent last keeps
     /// playing. Each update tries again; a refusal is reported once, until a
     /// commit is sent or it fails another way.

@@ -86,16 +86,6 @@ mod hang;
 mod input;
 #[cfg(feature = "midi")]
 mod instrument;
-#[cfg_attr(
-    not(any(test, feature = "midi-hardware")),
-    expect(
-        dead_code,
-        unused_imports,
-        unused_macros,
-        reason = "a typed job has a user only in MIDI-CI's requests (feature `midi-hardware`)"
-    )
-)]
-mod job;
 mod jobs;
 mod key;
 #[cfg(any(feature = "capture", feature = "midi"))]
@@ -207,7 +197,7 @@ pub use graph::{
 pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
-pub use job::{Job, JobId, JobKind, JobOutput, JobStatus, WaitError, WorkerError};
+pub use jobs::WorkerError;
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,

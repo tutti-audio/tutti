@@ -180,8 +180,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     pub(super) fn update_in(&mut self, cx: PhaseCx<'_>) -> Vec<SessionEvent> {
-        // What a `Job::wait` updated through comes first: it happened first.
-        let mut out = self.jobs.take_held();
+        let mut out = Vec::new();
         for &phase in PHASES {
             self.run_phase(phase, cx, &mut out);
         }
@@ -220,8 +219,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.plugins.run_main_work(cx.main);
                 self.graph.report_event_losses(out);
                 self.output.report_silenced(out);
-                // Last: the landings this update's own stages queued.
-                self.jobs.report_landed(out);
             }
             Phase::Commit => {
                 self.apply_output_policy();
