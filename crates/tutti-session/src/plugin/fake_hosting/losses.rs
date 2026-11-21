@@ -324,3 +324,39 @@ fn losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_lost() {
         "the incoming plugin's losses add"
     );
 }
+
+/// **A plugin's refused off-thread callbacks are read per plugin, and a swap
+/// keeps the outgoing plugin's count.** Two hosted plugins count apart; the
+/// count a replaced plugin made stays in the record.
+#[test]
+fn refused_off_thread_calls_are_counted_per_plugin() {
+    let (mut s, node, _counters, fake) = hosted();
+    let (_other, _, _, other_fake) = hosted();
+    let read = |s: &DetachedSession, node: NodeKey| {
+        s.plugin_view(node)
+            .expect("hosted")
+            .diagnostics()
+            .refused_off_thread_calls()
+    };
+    assert_eq!(read(&s, node), 0);
+    fake.refuse_off_thread_calls(2);
+    other_fake.refuse_off_thread_calls(7);
+    assert_eq!(
+        read(&s, node),
+        2,
+        "another plugin's count is not this one's"
+    );
+
+    let (incoming, incoming_fake) = handle();
+    let swapped = Counters::new();
+    let outgoing = s.graph.plugins.get_mut(&node).unwrap().replace(
+        incoming,
+        swapped.controls.clone(),
+        plugin(),
+        None,
+    );
+    drop(outgoing);
+    assert_eq!(read(&s, node), 2, "the outgoing plugin's count stays");
+    incoming_fake.refuse_off_thread_calls(3);
+    assert_eq!(read(&s, node), 5, "the incoming plugin's adds");
+}

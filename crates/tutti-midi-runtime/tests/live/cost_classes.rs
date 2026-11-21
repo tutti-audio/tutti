@@ -14,7 +14,9 @@ use tutti_graph::{
     Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, PortSource};
-use tutti_midi_runtime::{HarmonyNode, MidiClipNode, MidiInputNode, SyncOut, TimedMidiEvent};
+use tutti_midi_runtime::{
+    HarmonyChanges, HarmonyNode, MidiClipNode, MidiInputNode, SyncOut, TimedMidiEvent,
+};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -170,7 +172,7 @@ fn sent(outs: &mut [common::Sink], seen: &[Seen]) -> Vec<Vec<(u64, [u32; 4])>> {
 fn every_midi_node_is_light() {
     assert_eq!(tutti_graph::Node::<f32>::shape(&clip(0)).cost, Cost::Light);
     assert_eq!(
-        tutti_graph::Node::<f32>::shape(&HarmonyNode::new([])).cost,
+        tutti_graph::Node::<f32>::shape(&HarmonyNode::new(HarmonyChanges::default())).cost,
         Cost::Light
     );
     assert_eq!(

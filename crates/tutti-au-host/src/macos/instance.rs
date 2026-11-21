@@ -126,7 +126,8 @@ impl AuLoaded {
     /// # Errors
     /// [`AuError::LoadFailed`](crate::AuError::LoadFailed) or
     /// [`AuError::RequiresAsyncInstantiation`](crate::AuError::RequiresAsyncInstantiation)
-    /// if the component cannot be instantiated, or the stream-configuration
+    /// if the component cannot be instantiated, the error of a bus format the
+    /// unit refuses to report, or the stream-configuration
     /// errors of [`StreamConfig`]'s `apply`.
     pub fn new(
         component: AuComponentRef,
@@ -136,7 +137,7 @@ impl AuLoaded {
     ) -> Result<Self> {
         let handle = AuHandle::new(component, work)?;
 
-        let probed = StreamConfig::probe(&handle);
+        let probed = StreamConfig::probe(&handle)?;
         // The stereo floor lives HERE, in the layout-less constructor, because
         // this is the one entry point with no caller-supplied answer to "how
         // wide?" and it has to pick a default. Stereo is the right default for a
@@ -444,17 +445,23 @@ impl AuLoaded {
     /// Configured input channel count (`0` for generators / instruments, which
     /// have no input bus).
     pub fn num_inputs(&self) -> u32 {
-        let channels = self.config.channels;
-        if channels.has_input {
-            channels.inputs.count() as u32
-        } else {
-            0
-        }
+        self.configured_layout(BusDirection::Input).count() as u32
     }
 
     /// Configured output channel count.
     pub fn num_outputs(&self) -> u32 {
-        self.config.channels.outputs.count() as u32
+        self.configured_layout(BusDirection::Output).count() as u32
+    }
+
+    /// The channel layout of bus 0 on `direction` as configured, empty for the
+    /// input of a unit with no input bus.
+    pub(crate) fn configured_layout(&self, direction: BusDirection) -> ChannelLayout {
+        let channels = self.config.channels;
+        match direction {
+            BusDirection::Input if channels.has_input => channels.inputs,
+            BusDirection::Input => ChannelLayout::EMPTY,
+            BusDirection::Output => channels.outputs,
+        }
     }
 
     /// Configured sample rate in Hz.

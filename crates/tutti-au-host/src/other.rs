@@ -10,7 +10,15 @@ pub(crate) mod discovery {
     /// make one, so a component that carries it cannot exist either.
     #[derive(Debug, Clone, Copy)]
     pub enum AuComponentRef {}
+
+    /// Stands in for `tutti_au_ffi::NotRegistered`: no lookup runs off macOS,
+    /// so none fails.
+    #[derive(Debug, Clone, Copy, thiserror::Error)]
+    #[error("no Audio Unit is registered")]
+    pub enum NotRegistered {}
 }
+
+pub(crate) use discovery::NotRegistered;
 
 /// How an [`AuType::Unknown`](crate::component::AuType::Unknown) code reads:
 /// the hex value (there is no four-char-code decoder off macOS).

@@ -1,5 +1,6 @@
 use super::*;
 use core::f64::consts::TAU;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 /// The magnitude of the DTFT `sum h[n] e^{-j w n}` of an impulse response at the angular
 /// frequency `w`, in radians a frame.
@@ -95,9 +96,13 @@ fn a_bank_retargets_every_channel() {
     x[1][0] = 1.0;
     let mut y = vec![vec![0.0f32; 16]; 2];
     bank.process(
-        Planes::from_vecs(&x).unwrap(),
-        PlanesMut::from_vecs(&mut y).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::from_vecs(&x).unwrap(),
+            PlanesMut::from_vecs(&mut y).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     for ch in &y {
         assert_eq!((ch[4], ch[8], ch[12]), (1.0, 0.25, 0.0625));
     }

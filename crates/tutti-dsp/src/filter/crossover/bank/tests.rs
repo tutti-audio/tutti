@@ -6,6 +6,7 @@ use tutti_units::{Hz, SampleRate};
 
 use super::*;
 use crate::{Complex64, CrossoverBands, CrossoverControls, CrossoverModel, SOLVE_CEILING};
+use tutti_buffers::{BlockSide, InputOutput};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -42,9 +43,13 @@ fn run_ramp(
         let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             ramp,
-            Planes::new(&ins).expect("equal planes"),
-            PlanesMut::new(&mut outs).expect("equal planes"),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&ins).expect("equal planes"),
+                PlanesMut::new(&mut outs).expect("equal planes"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -355,47 +360,54 @@ fn a_reset_bank_is_silent() {
     assert!(out.iter().flatten().all(|&s| s == 0.0));
 }
 
-/// An output view with fewer planes than `bands * width` is filled as far as it goes, with the
-/// planes the full view would give, and a view of more channels than the input has leaves the
-/// rest untouched.
+/// A block whose output has fewer planes than `bands * width`, or whose input has fewer
+/// channels than the bank, is refused whole: nothing is written, and nothing is filled as far
+/// as it goes.
 #[test]
-fn a_narrow_view_is_filled_as_far_as_it_goes() {
+fn a_block_of_another_shape_is_refused_untouched() {
     let m = model(&[500.0, 4_000.0]);
-    let input: Vec<Vec<f64>> = (0..2)
-        .map(|c| {
-            (0..300)
-                .map(|i| ((i + c * 5) % 23) as f64 / 11.0 - 1.0)
-                .collect()
-        })
-        .collect();
-    let full = run(
-        &mut CrossoverBank::<f64>::new(ChannelLayout::STEREO),
-        &m,
-        &input,
-        &[300],
-    );
-    // Planes 0..=3: bands 0 and 1 of both channels; band 2 is missing.
-    let mut out = vec![vec![9.0f64; 300]; 4];
+    let input: Vec<Vec<f64>> = (0..2).map(|_| vec![0.5f64; 300]).collect();
     let ins: Vec<&[f64]> = input.iter().map(|c| &c[..]).collect();
+    // Planes 0..=3 are bands 0 and 1 of both channels; band 2 is missing.
+    let mut out = vec![vec![9.0f64; 300]; 4];
     let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[..]).collect();
-    CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
+    let refused = CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
         &mut at_rest(&m),
-        Planes::new(&ins).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
+        &mut InputOutput::paired(
+            Planes::new(&ins).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
     );
-    assert_eq!(out, full[..4]);
-    // One input channel into a stereo bank: channel 1's planes are not touched.
+    assert_eq!(
+        refused,
+        Err(BlockMismatch::Width {
+            side: BlockSide::Output,
+            expected: 6,
+            found: 4
+        })
+    );
+    assert!(out.iter().flatten().all(|&s| s == 9.0));
+    // One input channel into a stereo bank.
     let mut out = vec![vec![9.0f64; 300]; 6];
     let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[..]).collect();
-    CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
+    let refused = CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
         &mut at_rest(&m),
-        Planes::new(&ins[..1]).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
+        &mut InputOutput::paired(
+            Planes::new(&ins[..1]).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        )
+        .unwrap(),
     );
-    for b in 0..3 {
-        assert_eq!(out[b * 2], full[b * 2]);
-        assert!(out[b * 2 + 1].iter().all(|&s| s == 9.0), "band {b}");
-    }
+    assert_eq!(
+        refused,
+        Err(BlockMismatch::Width {
+            side: BlockSide::Input,
+            expected: 2,
+            found: 1
+        })
+    );
+    assert!(out.iter().flatten().all(|&s| s == 9.0));
 }
 
 /// A set at the limits of the controls is solved without leaving the bank's bound: every
@@ -479,11 +491,16 @@ fn a_five_hz_split_at_192_khz_holds_its_bands_and_noise_in_f32() {
         .collect();
     let mut out = vec![vec![0.0f32; 2 * whole]; 2];
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-    CrossoverBank::<f32>::new(ChannelLayout::MONO).process(
-        &mut at_rest(&model),
-        Planes::new(&[&input[..]]).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
+    CrossoverBank::<f32>::new(ChannelLayout::MONO)
+        .process(
+            &mut at_rest(&model),
+            &mut InputOutput::paired(
+                Planes::new(&[&input[..]]).unwrap(),
+                PlanesMut::new(&mut outs).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     let g = libm::tan(PI * FC / FS);
     let tau = 1.0 / (g * SQRT_2);
     let sigma = 2.0 * 2f64.powi(-24) / 12f64.sqrt() * (3.0 * tau).sqrt();

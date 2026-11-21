@@ -5,9 +5,11 @@
 //! the brickwall clamps in place, which costs nothing and distorts. Reach for the
 //! first to limit musically, the second as a safety catch.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{BrickwallBank, BrickwallControls, BrickwallSignals, COEFF_INTERVAL};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_dsp::{
+    BlockMismatch, BrickwallBank, BrickwallControls, BrickwallSignals, COEFF_INTERVAL,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Tail};
 
@@ -145,14 +147,13 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
         let signals = BrickwallSignals {
             ceiling: signals.get(BrickwallSet::CEILING_SIGNAL),
         };
-        self.bank.process(signals, input, output);
+        self.bank.process(signals, block)
     }
 
     fn tail(&self) -> Tail {
@@ -173,6 +174,7 @@ mod tests {
         RATE_44K, fed_sample_gain, prepared, prepared_at, sample_gain, tick, tick_fed,
     };
     use tutti_buffers::ChannelLayout;
+    use tutti_buffers::Planes;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Tail, UnitParam};

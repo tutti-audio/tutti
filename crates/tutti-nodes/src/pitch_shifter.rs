@@ -1,8 +1,9 @@
 //! [`PitchShifterNode`]: a pitch shift in cents over a phase vocoder, at the input's duration.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Planes, PlanesMut};
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
-    ColaGeometry, FftFloat, HopSize, PhaseVocoder, PhaseVocoderControls, StftGeometry, WindowLength,
+    BlockMismatch, ColaGeometry, FftFloat, HopSize, PhaseVocoder, PhaseVocoderControls,
+    StftGeometry, WindowLength,
 };
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Cents, SampleRate, Samples, Tail};
@@ -186,11 +187,12 @@ impl<F: FftFloat> Kernel for PitchShifterKernel<F> {
     /// Runs the vocoder over the block: `n` frames in give `n` frames out.
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         let _ = self.vocoder.process(input, output);
+        Ok(())
     }
 
     fn latency(&self) -> Samples {

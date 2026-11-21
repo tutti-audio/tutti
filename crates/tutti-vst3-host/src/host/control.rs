@@ -561,6 +561,11 @@ impl Control for Vst3Loaded {
     fn dropped_reported_edits(&self) -> u64 {
         self.plugin.handler().dropped_notifications()
     }
+
+    /// VST3 has no host-side main-thread refusal: none is counted.
+    fn refused_off_thread_calls(&self) -> u64 {
+        0
+    }
 }
 
 impl EditorWindow for Vst3Loaded {

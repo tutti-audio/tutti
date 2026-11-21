@@ -4,10 +4,11 @@
 //! latency and sounds transparent. For a hard clip that costs nothing and distorts,
 //! a safety catch, see [`BrickwallLimiterNode`](super::BrickwallLimiterNode).
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
-    COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterSignals, Lookahead, PeakDetection,
+    BlockMismatch, COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterSignals, Lookahead,
+    PeakDetection,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Samples, Seconds, Tail};
@@ -230,16 +231,16 @@ impl<F: Float> Kernel for LimiterKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
         let signals = LimiterSignals {
             threshold: signals.get(LimiterSet::THRESHOLD_SIGNAL),
             ceiling: signals.get(LimiterSet::CEILING_SIGNAL),
         };
-        if let Some(bank) = &mut self.bank {
-            bank.process(signals, input, output);
+        match &mut self.bank {
+            Some(bank) => bank.process(signals, block),
+            None => Ok(()),
         }
     }
 
@@ -267,6 +268,7 @@ mod tests {
     use super::*;
     use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, sample_gain, tick, tick_fed};
+    use tutti_buffers::Planes;
     use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode, Prepare};

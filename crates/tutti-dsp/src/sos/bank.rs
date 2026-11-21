@@ -1,8 +1,10 @@
 //! [`SosBank`]: a [`Sos`] run as a cascade of state-variable sections per channel, its
 //! coefficients [`SosCoefficients`] ramping between designs.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 
 use super::{Sos, svf_form};
 use crate::{Lerp, Ramp, SimdLanes, SvfCoefficients, svf_step};
@@ -88,20 +90,35 @@ impl<F: Float + SimdLanes> SosBank<F> {
 
     /// Runs `input` into `output`, frame `i` at `coefficients.at(taken + 1 + i)`, then
     /// takes the block's steps from the ramp. Channel `c` of `input` feeds channel `c` of
-    /// `output`; a channel past the bank's width or the narrower view is not touched. No
-    /// allocation.
+    /// `output`. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
     pub fn process(
         &mut self,
         coefficients: &mut Ramp<SosCoefficients<F>>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        expect_widths(block, self.state.len(), self.state.len())?;
+        let (input, mut output) = block.split();
+        self.run(coefficients, &input, &mut output);
+        Ok(())
+    }
+
+    /// [`process`](Self::process) over views the caller has checked: the same frames and
+    /// channels on both sides, at most the bank's width (a key narrower than the bank is
+    /// filtered on its own channels).
+    pub(crate) fn run(
+        &mut self,
+        coefficients: &mut Ramp<SosCoefficients<F>>,
+        input: &Planes<'_, F>,
+        output: &mut PlanesMut<'_, '_, F>,
     ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = self
-            .state
-            .len()
-            .min(input.channels())
-            .min(output.channels());
+        debug_assert_eq!(input.frames(), output.frames());
+        let frames = input.frames().get();
+        let width = input.channels();
+        debug_assert!(width <= self.state.len() && output.channels() == width);
         let blended = coefficients.blended_frames(frames);
         let first = coefficients.steps_taken().saturating_add(1);
         // The frames the ramp still blends read a set of their own, once for every channel.

@@ -1,11 +1,11 @@
 //! [`CutFilterNode`]: a Butterworth, Linkwitz-Riley, Chebyshev or elliptic high-pass or
 //! low-pass, run as a cascade of state-variable sections.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
-    Butterworth, ButterworthOrder, ChebyshevI, ChebyshevII, CutResponse, DecayTime, Elliptic,
-    EllipticTolerances, LinkwitzRiley, PassbandRipple, SimdLanes, SosCoefficients,
+    BlockMismatch, Butterworth, ButterworthOrder, ChebyshevI, ChebyshevII, CutResponse, DecayTime,
+    Elliptic, EllipticTolerances, LinkwitzRiley, PassbandRipple, SimdLanes, SosCoefficients,
     StopbandAttenuation, System, TAIL_FLOOR,
 };
 use tutti_graph::Shape;
@@ -250,11 +250,10 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.sos.render(input, output);
+    ) -> Result<(), BlockMismatch> {
+        self.sos.render(block)
     }
 
     /// The ring-out at the lowest cutoff: the longest over every control.

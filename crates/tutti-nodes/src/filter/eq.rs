@@ -1,9 +1,9 @@
 //! [`EqKernel`]: the kernel of the bell and the tilt, a one-section closed-form design run
 //! as a state-variable section.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{DecayTime, SimdLanes, Sos, SosError, TAIL_FLOOR};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_dsp::{BlockMismatch, DecayTime, SimdLanes, Sos, SosError, TAIL_FLOOR};
 use tutti_graph::Shape;
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
@@ -150,11 +150,10 @@ impl<C: EqControls, F: Float + SimdLanes> Kernel for EqKernel<C, F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.sos.render(input, output);
+    ) -> Result<(), BlockMismatch> {
+        self.sos.render(block)
     }
 
     /// The longest ring-out over the controls, found in `prepare`.

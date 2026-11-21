@@ -88,6 +88,10 @@ pub struct ClapLoaded {
     /// The collector of this instance's owner: where a drop off the main
     /// thread hands its destruction, and what a reopen gives its new instance.
     pub(crate) work: tutti_plugin_types::MainWorkHandle,
+    /// The events this instance's [`flush_params`](ClapLoaded::flush_params)
+    /// calls output past their room, summed: what
+    /// [`dropped_reported_edits`](tutti_plugin_types::Control::dropped_reported_edits) reads.
+    pub(crate) flush_lost: u64,
 }
 
 impl std::fmt::Debug for ClapLoaded {

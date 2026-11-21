@@ -348,7 +348,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// own thread are counted in
     /// [`deferred_drops()`](tutti_plugin_types::MainWork::deferred_drops). Both counts are
     /// process-wide, as is [`contained_panics()`](tutti_plugin_types::contained_panics),
-    /// the panics plugin callbacks caused and the host contained.
+    /// the panics plugin callbacks caused and the host contained. The
+    /// main-thread callbacks a plugin made from another thread are per plugin:
+    /// [`Diagnostics::refused_off_thread_calls`](crate::Diagnostics::refused_off_thread_calls).
     #[cfg(feature = "plugin")]
     pub fn close(self, main: tutti_plugin_types::MainThreadMarker) {
         let mut session = self;

@@ -3,6 +3,7 @@ use tutti_units::{Db, SampleRate, Seconds};
 
 use super::*;
 use crate::testing::noise;
+use tutti_buffers::InputOutput;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -32,7 +33,11 @@ fn run(bank: &mut TransientBank<f32>, audio: &[&[f32]], block: usize) -> Vec<Vec
         let end = (at + block).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
-        bank.process(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap());
+        bank.process(
+            &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -284,8 +289,12 @@ fn an_f64_shaper_at_zero_amounts_is_the_identity() {
     bank.jump_to_target();
     let mut out = vec![0.0f64; x.len()];
     bank.process(
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_close_f64(&out, &x, 0.0);
 }

@@ -1,15 +1,21 @@
 use super::*;
 use crate::Complex64;
+use tutti_buffers::InputOutput;
 use tutti_buffers::{Planes, PlanesMut};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn run(blocker: &mut DcBlocker<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut out = vec![vec![0.0; input[0].len()]; input.len()];
-    blocker.process(
-        Planes::from_vecs(input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+    blocker
+        .process(
+            &mut InputOutput::paired(
+                Planes::from_vecs(input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     out
 }
 
@@ -245,10 +251,15 @@ fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
     });
     blocker.jump_to_target();
     let mut out = vec![0.0f32; x.len()];
-    blocker.process(
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+    blocker
+        .process(
+            &mut InputOutput::paired(
+                Planes::new(&[&x[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     let y: Vec<f64> = out.iter().map(|&v| f64::from(v)).collect();
     // The sine's phase is `h`'s: the fit is `a sin + b cos` with `H = a + j b`.
     let fit = sine_fit(&y, w, 3 * whole);
@@ -292,10 +303,15 @@ fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
         corner: worst_corner,
     });
     blocker.jump_to_target();
-    blocker.process(
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-    );
+    blocker
+        .process(
+            &mut InputOutput::paired(
+                Planes::new(&[&x[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     let y: Vec<f64> = out.iter().map(|&v| f64::from(v)).collect();
     let complement_error = (sine_fit(&y, w, 3 * whole).norm() - h.norm()).abs();
     assert!(

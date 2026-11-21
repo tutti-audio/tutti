@@ -279,7 +279,8 @@ pub enum MidiError {
     #[error("a clip beat must be finite, not {0}")]
     BeatNotFinite(tutti_units::Beat),
 
-    /// `Midi::retarget_input` named a target with no live input.
+    /// `Midi::retarget_input` or `Midi::tap` named a target with no live
+    /// input; `Midi::input` opens one.
     #[error("{0:?} has no live input")]
     NoLiveInput(tutti_graph::NodeKey),
 

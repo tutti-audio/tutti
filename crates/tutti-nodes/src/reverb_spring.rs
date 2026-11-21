@@ -4,9 +4,11 @@
 //! its low-pass); this file holds the kernel that retargets it, the cells and how the graph
 //! reaches them.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{
+    BlockMismatch, SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages,
+};
 use tutti_graph::{MAX_NODE_TAIL, Shape};
 use tutti_units::{Hz, Mix, SampleRate, Seconds, Tail};
 
@@ -188,11 +190,12 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
+    ) -> Result<(), BlockMismatch> {
+        let (input, output) = block.split();
         self.spring.process(input, output);
+        Ok(())
     }
 
     /// The spring's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a

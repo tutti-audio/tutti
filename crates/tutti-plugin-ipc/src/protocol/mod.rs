@@ -190,7 +190,10 @@ pub(crate) mod wire;
 ///   `PluginStateNotRestored`, and `ServerLosses` (the server's cumulative
 ///   counts of commands it could not give its render thread and of one-way
 ///   edits the plugin refused), after them.
-pub const PROTOCOL_VERSION: u32 = 59;
+/// - **Version 60** adds `refused_off_thread_calls` to `ServerLosses` (the
+///   callbacks the plugin made from a thread its format forbids, which the
+///   server refused).
+pub const PROTOCOL_VERSION: u32 = 60;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -560,7 +563,8 @@ mod tests {
         assert_eq!(
             news(News::ServerLosses {
                 commands_refused: 0,
-                edits_refused: 0
+                edits_refused: 0,
+                refused_off_thread_calls: 0
             }),
             14
         );

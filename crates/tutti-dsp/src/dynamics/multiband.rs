@@ -24,8 +24,10 @@
 
 use core::ops::Range;
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::{BusTopology, ChannelLayout};
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::compressor::{CompressorBank, CompressorControls, CompressorSignals};
@@ -329,24 +331,27 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
 
     /// Runs `input` into `output`: the bands of each channel, compressed and summed.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; an input channel the bank is
-    /// wider than reads as silence, an output channel past the bank's width is not touched,
-    /// and the frames rendered are the fewer of the two views'. Frame `i` reads the
-    /// weights at the ramp's step `taken + 1 + i`, then the block's steps are taken. No
-    /// allocation.
+    /// Channel `c` of `input` feeds channel `c` of `output`. Frame `i` reads the weights at
+    /// the ramp's step `taken + 1 + i`, then the block's steps are taken. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
     pub fn process(
         &mut self,
         signals: MultibandSignals<'_, F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        expect_widths(block, self.width, self.width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let mut start = 0;
         while start < frames {
             let end = (start + CHUNK).min(frames);
             self.chunk(&signals, &input, &mut output, start..end);
             start = end;
         }
+        Ok(())
     }
 
     /// Runs frames `at` of the views, at most [`CHUNK`] of them.
@@ -378,11 +383,16 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             ) else {
                 return;
             };
-            self.crossover.process(
-                &mut self.blend,
+            let Ok(mut block) = InputOutput::new(
+                Samples::new(n),
                 heard.slice(frames.clone()),
                 split.slice_mut(frames.clone()),
-            );
+            ) else {
+                debug_assert!(false, "the scratch planes are `n` frames long");
+                return;
+            };
+            let crossed = self.crossover.process(&mut self.blend, &mut block);
+            debug_assert!(crossed.is_ok(), "the scratch is the crossover's width");
         }
         let mut by = [F::ZERO; CHUNK];
         let mut au = [F::ZERO; CHUNK];
@@ -406,12 +416,15 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
                     }
                     Mono::new(&signal[..n])
                 });
-                self.compressors[b].process(
-                    CompressorSignals { threshold },
-                    band,
-                    band,
-                    squeezed.slice_mut(frames.clone()),
-                );
+                let Ok(mut block) =
+                    InputOutput::new(Samples::new(n), band, squeezed.slice_mut(frames.clone()))
+                else {
+                    debug_assert!(false, "the scratch planes are `n` frames long");
+                    return;
+                };
+                let squeezed =
+                    self.compressors[b].process(CompressorSignals { threshold }, band, &mut block);
+                debug_assert!(squeezed.is_ok(), "the scratch is the compressor's width");
             }
             // The meter counts a band unless the whole chunk is bypassed.
             let deepest = self.compressors[b].take_deepest();
@@ -450,10 +463,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             self.bypass[b].advance(steps);
             self.audible[b].advance(steps);
         }
-        for (c, sum) in scratch.sum[..width.min(output.channels())]
-            .iter()
-            .enumerate()
-        {
+        for (c, sum) in scratch.sum[..width].iter().enumerate() {
             let mut plane = output.plane_mut(c);
             plane.samples_mut()[at.clone()].copy_from_slice(&sum[..n]);
         }

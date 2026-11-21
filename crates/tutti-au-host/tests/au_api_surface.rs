@@ -123,10 +123,10 @@ use tutti_rt::LockExt;
 mod support;
 use support::corpus::{DELAY, DISTORTION, MULTI_CHANNEL_MIXER, N_BAND_EQ};
 
-use tutti_au_host::component::{self, AuType};
+use tutti_au_host::component::{self, AuType, ComponentKey};
 use tutti_au_host::midi_out::MidiOutputInfo;
 use tutti_au_host::parameters::{self, ParamAddress};
-use tutti_au_host::{AuEvent, AuParameterListener, EventAddress};
+use tutti_au_host::{AuError, AuEvent, AuParameterListener, EventAddress};
 use tutti_au_host::{BusDirection, TransportInfo, TransportState};
 
 /// Serializes AudioToolbox discovery / instantiate / dispose, exactly as the
@@ -930,66 +930,61 @@ fn stream_count_is_the_length_of_the_name_list_including_unnamed_slots() {
 
 // -------------------------------------------------------------- find_component
 
-/// An exact component description that matches nothing must yield `None`.
+/// An exact key that matches nothing is `ComponentNotRegistered`, naming the key.
 ///
-/// `find_component` returns `Option<AudioComponent>` by turning a null
-/// `AudioComponentFindNext` result into `None`. If that null check were dropped —
-/// or inverted — the function would hand back a null `AudioComponent`, and
-/// `Au::new` would call `AudioComponentInstanceNew` on it. The corpus's
-/// `AuRef::require` is built directly on this path, so a null slipping through
-/// turns every "unit is missing" diagnostic into a crash inside AudioToolbox.
+/// `find_component` turns a null `AudioComponentFindNext` result into that
+/// error. If the null check were dropped or inverted, the function would hand
+/// back a null `AudioComponent`, and `Au::new` would call
+/// `AudioComponentInstanceNew` on it. The corpus's `AuRef::require` is built
+/// directly on this path, so a null slipping through turns every "unit is
+/// missing" diagnostic into a crash inside AudioToolbox.
 ///
 /// `zzzz`/`zzzz` was measured absent on macOS 15.6, which is unsurprising but is
 /// the measurement the assertion rests on.
 #[test]
-fn find_component_reports_absence_rather_than_a_null_handle() {
+fn find_component_reports_absence_as_a_named_error() {
     let _g = lock();
-    let missing = AudioComponentDescription {
-        componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-        componentSubType: u32::from_be_bytes(*b"zzzz"),
-        componentManufacturer: u32::from_be_bytes(*b"zzzz"),
-        componentFlags: 0,
-        componentFlagsMask: 0,
-    };
-    assert!(
-        component::find_component(&missing).is_none(),
-        "no AU is registered as aufx/zzzz/zzzz"
-    );
+    let missing = ComponentKey::new(
+        K_AUDIO_UNIT_TYPE_EFFECT,
+        u32::from_be_bytes(*b"zzzz"),
+        u32::from_be_bytes(*b"zzzz"),
+    )
+    .expect("an exact key");
+    match component::find_component(missing) {
+        Err(AuError::ComponentNotRegistered(absent)) => {
+            assert_eq!(absent.0, missing, "the error names the key asked for");
+        }
+        other => panic!("no AU is registered as aufx/zzzz/zzzz, got {other:?}"),
+    }
 }
 
-/// An all-zero description is AudioToolbox's **wildcard**, not an empty query.
+/// A zero code is AudioToolbox's **wildcard**, so it is no key: the lookup takes
+/// only a [`ComponentKey`], and a wildcard search is a listing the caller filters.
 ///
-/// This is the trap the function's shape invites: `AudioComponentDescription`
-/// derives `Default`, so `find_component(&Default::default())` reads like "find
-/// nothing in particular" and in fact returns the first AU on the system. A
-/// caller that built a description field-by-field and forgot one would silently
-/// bind to an unrelated plugin — which is exactly why `support/corpus.rs` matches
-/// on subtype **and** manufacturer, and why the corpus rule is codes rather than
-/// display names.
+/// The trap this closes: `AudioComponentDescription` derives `Default`, and a
+/// lookup over a description with a forgotten field silently bound to the first
+/// unrelated plugin on the system. `support/corpus.rs` matches on subtype **and**
+/// manufacturer for the same reason.
 ///
-/// Measured on macOS 15.6: the all-zero description matches (the system has ~138
-/// components registered, so the wildcard always finds one).
+/// Measured on macOS 15.6: the all-zero description matches every component
+/// (about 138 registered).
 #[test]
-fn an_all_zero_description_is_a_wildcard_that_matches() {
+fn a_wildcard_is_no_key_and_is_listed_by_all_matching() {
     let _g = lock();
-    assert!(
-        component::find_component(&AudioComponentDescription::default()).is_some(),
-        "an all-zero description is AudioToolbox's wildcard and matches the first \
-         registered component; a caller must not treat Default as 'no query'"
-    );
+    let (delay, apple) = (u32::from_be_bytes(*b"dely"), u32::from_be_bytes(*b"appl"));
+    assert!(ComponentKey::new(0, delay, apple).is_none());
+    assert!(ComponentKey::from_description(&AudioComponentDescription::default()).is_none());
 
-    // And a wildcard *type* with a real subtype still resolves the corpus unit,
-    // which is what makes the wildcard semantics concrete rather than incidental.
-    let by_subtype_only = AudioComponentDescription {
-        componentType: 0,
-        componentSubType: u32::from_be_bytes(*b"dely"),
-        componentManufacturer: u32::from_be_bytes(*b"appl"),
-        componentFlags: 0,
-        componentFlagsMask: 0,
+    let wildcard = AudioComponentDescription {
+        componentSubType: delay,
+        componentManufacturer: apple,
+        ..Default::default()
     };
+    let exact = ComponentKey::new(K_AUDIO_UNIT_TYPE_EFFECT, delay, apple).expect("an exact key");
     assert!(
-        component::find_component(&by_subtype_only).is_some(),
-        "zero in the type field matches any type, so appl/dely still resolves"
+        component::AuComponentRef::all_matching(&wildcard)
+            .contains(&component::find_component(exact).expect("AUDelay ships with macOS")),
+        "zero in the type field matches any type, so the listing holds AUDelay"
     );
 }
 
@@ -1004,14 +999,13 @@ fn an_all_zero_description_is_a_wildcard_that_matches() {
 #[test]
 fn find_component_agrees_with_the_enumerator() {
     let _g = lock();
-    let desc = AudioComponentDescription {
-        componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-        componentSubType: u32::from_be_bytes(*b"dely"),
-        componentManufacturer: u32::from_be_bytes(*b"appl"),
-        componentFlags: 0,
-        componentFlagsMask: 0,
-    };
-    let found = component::find_component(&desc).expect("AUDelay ships with macOS");
+    let desc = ComponentKey::new(
+        K_AUDIO_UNIT_TYPE_EFFECT,
+        u32::from_be_bytes(*b"dely"),
+        u32::from_be_bytes(*b"appl"),
+    )
+    .expect("an exact key");
+    let found = component::find_component(desc).expect("AUDelay ships with macOS");
 
     let enumerated = component::enumerate_components_of_type(AuType::Effect)
         .into_iter()

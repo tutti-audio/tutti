@@ -1,7 +1,7 @@
 //! [`MidSideNode`]: a stereo pair converted to mid/side or back.
 
 use tutti_buffers::BusTopology;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::MidSide;
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
 
@@ -60,14 +60,9 @@ impl<F: Float> Node<F> for MidSideNode {
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
-        through_planes(
-            &mut io,
-            2,
-            2,
-            |input: Planes<'_, F>, output: PlanesMut<'_, '_, F>| {
-                self.direction.process(input, output);
-            },
-        );
+        through_planes(&mut io, 2, 2, |block: &mut InputOutput<'_, F>| {
+            self.direction.process(block)
+        });
         Status::Modified
     }
 

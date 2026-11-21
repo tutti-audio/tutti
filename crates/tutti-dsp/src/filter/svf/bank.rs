@@ -1,8 +1,10 @@
 //! [`SvfBank`]: one state-variable filter per channel, all channels at one set of
 //! coefficients, over buffers views.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 
 use super::kernel::{SvfCoefficients, svf_step};
 use crate::channel_group::group_size;
@@ -40,22 +42,42 @@ impl<F: Float + SimdLanes> SvfBank<F> {
     /// Runs `input` into `output`, frame `i` at `coefficients.at(taken + 1 + i)`, then
     /// takes the block's steps from the ramp.
     ///
-    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's
-    /// width, or past the narrower of the two views, is not touched. Channels run in
-    /// groups of up to eight, each group's planes taken once per block; while the ramp
-    /// moves, a group reads the coefficients once per frame. No allocation.
+    /// Channel `c` of `input` feeds channel `c` of `output`. Channels run in groups of up to
+    /// eight, each group's planes taken once per block; while the ramp moves, a group reads
+    /// the coefficients once per frame. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
     pub fn process(
         &mut self,
         coefficients: &mut Ramp<SvfCoefficients<F>>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        expect_widths(block, self.state.len(), self.state.len())?;
+        let (input, mut output) = block.split();
+        self.run(coefficients, &input, &mut output);
+        Ok(())
+    }
+
+    /// The channels the bank filters.
+    pub(crate) fn channels(&self) -> usize {
+        self.state.len()
+    }
+
+    /// [`process`](Self::process) over views the caller has checked: the same frames and
+    /// channels on both sides, at most the bank's width (a key narrower than the bank is
+    /// filtered on its own channels).
+    pub(crate) fn run(
+        &mut self,
+        coefficients: &mut Ramp<SvfCoefficients<F>>,
+        input: &Planes<'_, F>,
+        output: &mut PlanesMut<'_, '_, F>,
     ) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = self
-            .state
-            .len()
-            .min(input.channels())
-            .min(output.channels());
+        debug_assert_eq!(input.frames(), output.frames());
+        let frames = input.frames().get();
+        let width = input.channels();
+        debug_assert!(width <= self.state.len() && output.channels() == width);
         let mut first = 0;
         while first < width {
             let n = group_size(width - first);
@@ -65,8 +87,8 @@ impl<F: Float + SimdLanes> SvfBank<F> {
                         coefficients,
                         &mut self.state[first..first + $n],
                         first,
-                        &input,
-                        &mut output,
+                        input,
+                        output,
                         frames,
                     )
                 };

@@ -7,6 +7,7 @@ use tutti_units::{Drive, Hz, Resonance, SampleRate};
 use super::*;
 use crate::Complex64;
 use crate::{LadderControls, LadderDesign};
+use tutti_buffers::InputOutput;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const TYPES: [LadderType; 4] = [
@@ -46,9 +47,13 @@ fn run<F: Float + SimdLanes>(
         let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             ramp,
-            Planes::new(&ins).expect("equal planes"),
-            PlanesMut::new(&mut outs).expect("equal planes"),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&ins).expect("equal planes"),
+                PlanesMut::new(&mut outs).expect("equal planes"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out

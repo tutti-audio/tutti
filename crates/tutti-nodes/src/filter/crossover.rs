@@ -2,11 +2,11 @@
 //! [`CrossoverKernel`]. The algorithm is `tutti-dsp`'s ([`CrossoverBank`]); this file holds the
 //! kernel, the cells and how a block reads them.
 
-use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
-    CrossoverBands, CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError,
-    CrossoverModel, MAX_SPLITS, Ramp, SimdLanes, fit_to_rate,
+    BlockMismatch, CrossoverBands, CrossoverBank, CrossoverBlend, CrossoverControls,
+    CrossoverError, CrossoverModel, MAX_SPLITS, Ramp, SimdLanes, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_rt::Param;
@@ -252,11 +252,10 @@ impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.bank.process(&mut self.blend, input, output);
+    ) -> Result<(), BlockMismatch> {
+        self.bank.process(&mut self.blend, block)
     }
 
     /// An IIR's sections ring after the input stops, as long as the slowest split says,
@@ -298,7 +297,9 @@ mod tests {
     use crate::test_support::{amplitude_at, sine};
     use crate::test_support::{prepared, render_chunked};
     use tutti_buffers::ChannelLayout;
+    use tutti_buffers::{InputOutput, Planes};
     use tutti_graph::{Cost, Node, ParamNode};
+    use tutti_units::Samples;
     use tutti_units::Tail;
 
     // The node under test is `f32` (the session's audio format), so its tolerances are `f32`'s;
@@ -566,10 +567,10 @@ mod tests {
         let mut out = vec![vec![0.0f64; x.len()]; 3];
         let mut views: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
         k.render(
-            Planes::new(&[&x[..]]).unwrap(),
+            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut views).unwrap(),
             ControlSignals::NONE,
-            PlanesMut::new(&mut views).unwrap(),
-        );
+        )
+        .unwrap();
         // 200 Hz's section has radius 0.987: 1e-12 in about 2 100 frames.
         let sum = out[0][3_999] + out[1][3_999] + out[2][3_999];
         assert!((sum - c).abs() < 1e-12, "{sum} against {c}");

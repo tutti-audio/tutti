@@ -2613,3 +2613,36 @@ fn the_track_the_host_sends_reaches_the_served_plugin() {
     assert_eq!(cap.track_changed_calls, 1);
     assert_eq!(cap.track_at_changed.name_str(), "Drums");
 }
+
+/// **A served CLAP plugin's refused off-thread callbacks reach the host as news,
+/// once per change**: the count the instance's host state holds is told with
+/// its cumulative total at the next poll, and a poll after tells nothing.
+#[test]
+fn the_refused_off_thread_calls_are_told_to_the_host_when_they_change() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let path = Path::new(clap_plugin());
+    let mut instance =
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
+    let told = |news: &[News]| {
+        news.iter()
+            .filter_map(|news| match news {
+                News::ServerLosses {
+                    refused_off_thread_calls,
+                    ..
+                } => Some(*refused_off_thread_calls),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        told(&instance.poll(main_thread())).is_empty(),
+        "nothing refused yet"
+    );
+    instance
+        .clap_loaded()
+        .host_state()
+        .refused_off_thread
+        .add(3);
+    assert_eq!(told(&instance.poll(main_thread())), [3]);
+    assert!(told(&instance.poll(main_thread())).is_empty(), "told once");
+}

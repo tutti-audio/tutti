@@ -366,7 +366,7 @@ pub mod dsp {
     pub use tutti_dsp::{
         Absorption, AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, AllPass,
         AllPassFilter, AllPassForm, AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, Band,
-        Biquad, BlockTooLong, BrickwallControls, Butterworth, ButterworthOrder,
+        Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth, ButterworthOrder,
         ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, CombBank, CombControls,
         CombFilter, CombForm, Cookbook, CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator,
         Distance, DistanceControls, DistanceSpec, EarlyReflections, EarlyReflectionsError,
@@ -854,10 +854,10 @@ pub mod midi {
         TuningFrequency,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyControls, HarmonyNode,
-        MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
-        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
-        TimedHarmony,
+        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
+        HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
+        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
+        SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]

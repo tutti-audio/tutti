@@ -10,6 +10,7 @@ use crate::design::prewarp;
 use crate::filter::svf::model::tests::{TYPES, rbj};
 use crate::testing::{sine_fit, steady_deviation};
 use crate::{Lerp, SvfControls, SvfDesign, SvfModel, SvfType};
+use tutti_buffers::InputOutput;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -43,9 +44,13 @@ fn run(
         let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             ramp,
-            Planes::new(&ins).expect("equal planes"),
-            PlanesMut::new(&mut outs).expect("equal planes"),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&ins).expect("equal planes"),
+                PlanesMut::new(&mut outs).expect("equal planes"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out

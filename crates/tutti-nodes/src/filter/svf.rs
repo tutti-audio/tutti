@@ -7,9 +7,11 @@
 //! ([`SvfBank`]); the node is a [`KernelNode`] over it, and this file holds the
 //! kernel, the cells and how a block reads them.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Ramp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
+use tutti_buffers::Float;
+use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_dsp::{
+    BlockMismatch, Ramp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, Hz, Q, SampleRate, Tail};
 
@@ -230,11 +232,10 @@ impl<F: Float + SimdLanes> Kernel for SvfKernel<F> {
 
     fn render(
         &mut self,
-        input: Planes<'_, F>,
+        block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
-        output: PlanesMut<'_, '_, F>,
-    ) {
-        self.bank.process(&mut self.coefficients, input, output);
+    ) -> Result<(), BlockMismatch> {
+        self.bank.process(&mut self.coefficients, block)
     }
 
     /// A resonant filter rings for as long as its Q says, which is too dear to find per
@@ -267,6 +268,7 @@ control_set! {
 
 #[cfg(test)]
 mod tests {
+    use tutti_buffers::Planes;
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use super::*;
     use crate::filter::test_utils::{generate_sine, impulse, rms};

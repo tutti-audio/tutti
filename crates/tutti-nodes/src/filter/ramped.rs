@@ -3,7 +3,8 @@
 //! [`EqKernel`](crate::EqKernel).
 
 use tutti_buffers::BusTopology;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
+use tutti_dsp::BlockMismatch;
 use tutti_dsp::{MAX_SECTIONS, Ramp, SimdLanes, Sos, SosBank, SosCoefficients, SosError};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::SampleRate;
@@ -93,8 +94,8 @@ impl<F: Float + SimdLanes> RampedSos<F> {
         }
     }
 
-    /// Runs `input` into `output`.
-    pub(super) fn render(&mut self, input: Planes<'_, F>, output: PlanesMut<'_, '_, F>) {
-        self.bank.process(&mut self.coefficients, input, output);
+    /// Runs the block's input into its output.
+    pub(super) fn render(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        self.bank.process(&mut self.coefficients, block)
     }
 }
