@@ -6,10 +6,10 @@
 //! stream. The child's stdout and stderr go to the null device, because plugins
 //! print from their init code. With the result file the outcomes are
 //! unambiguous: a file means the probe finished, with a descriptor or a typed
-//! refusal; no file and an exit means it died, and its [`ExitStatus`] says how
+//! refusal; no file and an exit means it died, and its [`ExitStatus`](std::process::ExitStatus) says how
 //! (a signal, a panic, one of its own failing codes, a plugin's `exit`); no file
 //! at the deadline means it hung. The host states its pid to the child
-//! ([`HOST_PID_ENV`]), which ends itself with the host.
+//! ([`HOST_PID_ENV`](tutti_plugin_ipc_ffi::HOST_PID_ENV)), which ends itself with the host.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -96,7 +96,7 @@ pub(crate) async fn probe_metadata_with(
 /// # Errors
 ///
 /// As [`probe_metadata_with`]; a plugin that refuses `state` is
-/// [`ProbeRefusal::StateRefused`].
+/// [`ProbeRefusal::StateRefused`](tutti_plugin_types::ProbeRefusal::StateRefused).
 pub(crate) async fn measure_metadata_with(
     executor: &WeakExecutor,
     locator: &Locator,

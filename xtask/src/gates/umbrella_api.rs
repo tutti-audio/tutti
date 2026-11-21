@@ -72,6 +72,11 @@ const INTERNAL: &[(&str, &str, &str)] = &[
         "a device backend's driver; the session runs it",
     ),
     (
+        "tutti_platform",
+        "WeakExecutor",
+        "the executor a `Catalog` scan runs on; an app scans through `Session::scan_plugins`",
+    ),
+    (
         "tutti_plugin_host",
         "PluginHandle",
         "the host's control handle of a plugin; `Plugin` wraps it",

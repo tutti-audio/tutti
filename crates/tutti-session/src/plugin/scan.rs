@@ -4,7 +4,7 @@
 //!
 //! The executor reaches the scan weakly: the scan's blocking walk and the exit wake of
 //! each probe run on it, and it never keeps the session's executor alive. A session that
-//! drops while a scan is pending ends the scan with [`ScanError::ShutDown`]
+//! drops while a scan is pending ends the scan with [`ScanError::ShutDown`](tutti_plugin_db::ScanError::ShutDown)
 //! (`tutti_plugin_db`), never a hang and never a partial list.
 
 use std::path::Path;
