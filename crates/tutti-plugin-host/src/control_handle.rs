@@ -11,9 +11,9 @@ use dpi::Size;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
-    Health, PluginError, PluginFailure, RenderMode, StateError, TerminationReason, UnknownParam,
-    WindowHandle,
+    Answer, AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities,
+    EditorError, Health, PluginError, PluginFailure, RenderMode, StateError, TerminationReason,
+    UnknownParam, WindowHandle,
 };
 use tutti_plugin_types::{BlockCounts, BypassWrite};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
@@ -362,6 +362,30 @@ impl PluginHandle {
             Some(Err(error)) => Err(error.into()),
             None => Err(StateError::PluginCrashed),
         }
+    }
+
+    /// Queues the save of the plugin's state for `state_use` with a served
+    /// plugin's bridge and returns the [`Answer`] its reader thread fills
+    /// ([`AnyThread::save_state_answer`]); `None` for a plugin that runs in
+    /// this process. Nothing waits and no main thread is needed.
+    pub fn save_state_answer(
+        &self,
+        state_use: StateUse,
+    ) -> Option<Answer<Result<Vec<u8>, StateError>>> {
+        self.any_thread.save_state_answer(state_use)
+    }
+
+    /// Queues the restore of `data` as [`save_state_answer`](Self::save_state_answer)
+    /// queues a save ([`AnyThread::load_state_answer`]).
+    pub fn load_state_answer(&self, data: &[u8]) -> Option<Answer<Result<(), StateError>>> {
+        self.any_thread.load_state_answer(data)
+    }
+
+    /// Queues the load of the preset `id` as
+    /// [`save_state_answer`](Self::save_state_answer) queues a save
+    /// ([`AnyThread::load_preset_answer`]).
+    pub fn load_preset_answer(&self, id: &PresetId) -> Option<Answer<Result<(), PresetError>>> {
+        self.any_thread.load_preset_answer(id)
     }
 
     /// Tells the plugin whether it renders offline and returns whether it

@@ -6,10 +6,17 @@
 //! in-flight `SaveState` calls can't accidentally swap their results — the
 //! one-shot semantics are enforced by the type system, not by hoping
 //! responses come back in the order requests went out.
+//!
+//! A reply is answered into a blocking [`Ask`] or into an [`Answer`] (a
+//! `futures_channel` oneshot) a caller awaits: the lane's thread that sends the
+//! reply wakes the awaiting task, and a reply dropped unanswered resolves it as
+//! canceled.
 
+use futures_channel::oneshot;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
+use tutti_plugin_types::Answer;
 use tutti_rt::LockExt;
 
 /// Whether a control request is owed a reply: at most one is, and a caller who
@@ -44,9 +51,16 @@ impl Drop for Owing {
 /// delivered, and forgetting to send is a compile error in any branch
 /// that should have consumed `self`.
 pub(super) struct Reply<T> {
-    tx: SyncSender<T>,
+    tx: Sink<T>,
     /// The slot this reply holds, for a request that owes one.
     owing: Option<Owing>,
+}
+
+/// Where a reply's value goes: the blocking caller's channel, or the oneshot a
+/// future awaits.
+enum Sink<T> {
+    Blocking(SyncSender<T>),
+    Awaited(oneshot::Sender<T>),
 }
 
 impl<T> Reply<T> {
@@ -56,7 +70,11 @@ impl<T> Reply<T> {
     pub(super) fn send(self, value: T) {
         let Self { tx, owing } = self;
         drop(owing);
-        let _ = tx.try_send(value);
+        // A caller that stopped waiting (a dropped future) has no one to tell.
+        match tx {
+            Sink::Blocking(tx) => drop(tx.try_send(value)),
+            Sink::Awaited(tx) => drop(tx.send(value)),
+        }
     }
 }
 
@@ -85,7 +103,28 @@ impl<T> Ask<T> {
 /// Make a paired one-shot channel.
 pub(super) fn ask<T>() -> (Ask<T>, Reply<T>) {
     let (tx, rx) = sync_channel(1);
-    (Ask(rx), Reply { tx, owing: None })
+    (
+        Ask(rx),
+        Reply {
+            tx: Sink::Blocking(tx),
+            owing: None,
+        },
+    )
+}
+
+/// Make a paired reply and the [`Answer`] a future awaits: the thread that
+/// sends the reply fills it. It holds no slot ([`ControlSlot`]): the request
+/// queues behind an owed one and the lane's deadline bounds each in turn, with
+/// no caller waiting for either.
+pub(super) fn awaited<T>() -> (Answer<T>, Reply<T>) {
+    let (tx, rx) = oneshot::channel();
+    (
+        rx,
+        Reply {
+            tx: Sink::Awaited(tx),
+            owing: None,
+        },
+    )
 }
 
 impl ControlSlot {
@@ -160,6 +199,18 @@ mod tests {
         let (ask, reply) = ask::<u32>();
         reply.send(42);
         assert_eq!(ask.recv_timeout(Duration::from_millis(10)).unwrap(), 42);
+    }
+
+    /// **An awaited reply fills its answer, and a dropped one cancels it.**
+    #[test]
+    fn an_awaited_reply_fills_the_answer_and_a_dropped_one_cancels_it() {
+        let (mut answer, reply) = awaited::<u32>();
+        assert_eq!(answer.try_recv(), Ok(None), "nothing sent yet");
+        reply.send(7);
+        assert_eq!(answer.try_recv(), Ok(Some(7)));
+        let (mut answer, reply) = awaited::<u32>();
+        drop(reply);
+        assert!(answer.try_recv().is_err(), "dropped unanswered: canceled");
     }
 
     #[test]

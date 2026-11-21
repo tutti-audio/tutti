@@ -263,7 +263,7 @@ pub use layout_support::LayoutSupport;
 pub use tutti_music::{BeatsPerBar, NoteValue, TimeSignature};
 pub use tutti_units::{BarNumber, Seconds};
 
-pub use any_thread::{AnyThread, Health};
+pub use any_thread::{Answer, AnyThread, Health};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{IpcError, IpcResult, PluginForkError};

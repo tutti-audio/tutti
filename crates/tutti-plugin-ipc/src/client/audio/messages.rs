@@ -1,11 +1,11 @@
 //! In-process messages between the audio thread and the bridge thread.
 //! Distinct from wire-format `AudioRequest`/`ControlRequest` and their replies in `protocol/`.
 
-use super::ask::Reply;
+use super::ask::{Ask, Reply};
 use crate::SlabHandle;
 use dpi::Size;
 use tutti_plugin_types::{
-    BlockStatus, ContentScale, PluginFailure, ResyncKind, StateError, StateUse,
+    BlockStatus, ContentScale, PluginFailure, PresetError, ResyncKind, StateError, StateUse,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -117,6 +117,10 @@ pub(super) enum ControlCommand {
     /// The plugin's state, as one object the server sends.
     SaveState {
         state_use: StateUse,
+        /// The audio lane's answer to the flush of the host's writes, when the
+        /// asker did not wait for it: the control lane waits for it (up to the
+        /// parameter wait) before it reads the state.
+        flush: Option<Ask<bool>>,
         reply: Reply<std::result::Result<Vec<u8>, StateError>>,
     },
     /// A state for the plugin, made into the object that is sent.
@@ -138,7 +142,7 @@ pub(super) enum ControlCommand {
     },
     LoadPreset {
         id: PresetId,
-        reply: Reply<bool>,
+        reply: Reply<std::result::Result<(), PresetError>>,
     },
     /// Tell the server to open the slab `slab` names and render through
     /// it from its next block: answered `true` once it has.
@@ -181,6 +185,19 @@ pub(super) enum ControlCommand {
         size: Size,
         reply: Reply<std::result::Result<Size, String>>,
     },
+}
+
+impl ControlCommand {
+    /// Answers a request the queue refused with the error that says it was not
+    /// sent, so an awaiting caller is told `Busy` and not that the plugin died.
+    pub(super) fn refuse(self) {
+        match self {
+            Self::SaveState { reply, .. } => reply.send(Err(StateError::Busy)),
+            Self::LoadState { reply, .. } => reply.send(Err(StateError::Busy)),
+            Self::LoadPreset { reply, .. } => reply.send(Err(PresetError::Busy)),
+            _ => {}
+        }
+    }
 }
 
 /// Bridge-thread → audio-thread (RT response path).

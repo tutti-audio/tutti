@@ -722,13 +722,19 @@ impl Channels {
     /// server after it: holding the block for the command would let a stuck
     /// control request stall audio.
     pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
+        self.push_control_back(cmd).is_ok()
+    }
+
+    /// [`push_control`](Self::push_control), giving the command back when the
+    /// queue is full (counted).
+    pub(super) fn push_control_back(&self, cmd: ControlCommand) -> Result<(), ControlCommand> {
         let after = self.pushed();
-        if self.controls.push(Sequenced { after, cmd }).is_err() {
+        if let Err(refused) = self.controls.push(Sequenced { after, cmd }) {
             self.note_command_refused();
-            return false;
+            return Err(refused.cmd);
         }
         self.control_unparker.unpark();
-        true
+        Ok(())
     }
 
     /// Records that block `seq` is in the block queue. Called after the push
