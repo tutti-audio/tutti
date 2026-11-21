@@ -691,10 +691,10 @@ impl Shape {
         Tail::Finite(self.latency.samples()).then(self.tail)
     }
 
-    /// This shape for a node that runs at `rates` only: a session's graph
-    /// refuses to re-rate to another, so the node's [`prepare`](Node::prepare)
-    /// is not handed one it cannot run at. A node's rates do not depend on
-    /// its `prepare`. Every rate unless set.
+    /// This shape for a node that runs at `rates` only: a session's
+    /// `Graph::set_sample_rate` refuses a rate outside them and changes
+    /// nothing. A node's rates do not depend on its `prepare`. Every rate
+    /// unless set.
     ///
     /// ```
     /// use tutti_graph::{SampleRates, Shape};

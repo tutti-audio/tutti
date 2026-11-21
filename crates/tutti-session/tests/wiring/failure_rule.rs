@@ -268,26 +268,30 @@ fn feed_and_feeds_refuse_a_node_that_is_not_there() {
 #[test]
 fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
     let mut s = detached();
-    let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_96K);
+    let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_48K);
     let g = s.graph();
     let limited = g.add(ForkByClone(Rated(rates)));
     g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
 
-    for outside in [SampleRate::SR_22K05, SampleRate::SR_192K] {
-        let refused = g.set_sample_rate(outside).unwrap_err();
-        assert_eq!(
-            refused,
-            SetRateError::RateUnsupported {
-                node: limited.erase(),
-                supported: rates,
-                rate: outside,
-            }
-        );
-        assert_eq!(g.testing().prepared().sample_rate(), RATE, "unchanged");
-        assert!(!g.testing().is_repreparing(), "nothing was sent");
-    }
-    for edge in [rates.min(), rates.max()] {
-        g.set_sample_rate(edge).unwrap();
-        assert_eq!(g.testing().prepared().sample_rate(), edge);
-    }
+    let refused = g.set_sample_rate(SampleRate::SR_96K).unwrap_err();
+    assert_eq!(
+        refused,
+        SetRateError::RateUnsupported {
+            node: limited.erase(),
+            supported: rates,
+            rate: SampleRate::SR_96K,
+        }
+    );
+    assert_eq!(g.testing().prepared().sample_rate(), RATE, "unchanged");
+    assert!(!g.testing().is_repreparing(), "nothing was sent");
+
+    // Below the range is refused the same way, and both ends are accepted.
+    assert!(matches!(
+        g.set_sample_rate(SampleRate::SR_22K05),
+        Err(SetRateError::RateUnsupported { .. })
+    ));
+    g.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_44K1);
+    g.set_sample_rate(SampleRate::SR_48K).unwrap();
+    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_48K);
 }

@@ -6,9 +6,8 @@ use tutti_units::SampleRate;
 /// included. [`Shape::with_rates`](crate::Shape::with_rates) declares it,
 /// [`SampleRates::ALL`] being the default of a node that runs at any.
 ///
-/// A session's graph refuses to re-rate under a node whose rates leave out
-/// the new one, so a node's [`prepare`](crate::Node::prepare) is not handed a
-/// rate it does not support.
+/// A session's `Graph::set_sample_rate` refuses a rate that a node's rates
+/// leave out, and changes nothing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SampleRates {
     min: SampleRate,
