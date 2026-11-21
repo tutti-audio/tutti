@@ -92,6 +92,17 @@ pub(super) struct Gone {
     pub(super) held_refused: CappedVec<(NodeKey, u32)>,
 }
 
+impl Gone {
+    /// Items its lists refused: the ones the apply leaked.
+    pub(super) fn refused(&self) -> usize {
+        self.held.refused()
+            + self.spare.refused()
+            + self.replaced.refused()
+            + self.chased.refused()
+            + self.held_refused.refused()
+    }
+}
+
 pub(crate) enum Ring<F: Float = f32> {
     Audio(AudioRing<F>),
     Event(EventFifo),

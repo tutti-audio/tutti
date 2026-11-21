@@ -104,6 +104,11 @@ pub(crate) struct Crossfade<F: Float = f32> {
 }
 
 impl<F: Float> Crossfade<F> {
+    /// Items its chase list refused when it was applied: leaked, not freed.
+    pub(crate) fn refused(&self) -> usize {
+        self.chase.refused()
+    }
+
     /// The units it carries back: the outgoing one, a waiting one that
     /// never ran, or both after a re-prepare's cut.
     pub(crate) fn units(&self) -> usize {
@@ -357,6 +362,20 @@ impl<F: Float> Commit<F> {
             .any(|i| i.fade.as_ref().is_some_and(|x| x.key == key))
     }
 
+    /// Items the lists this box carries back refused when it was applied:
+    /// each was leaked, not freed on the audio thread. Control side, once
+    /// the box is back.
+    pub(crate) fn refused(&self) -> usize {
+        self.retired.refused()
+            + self.spare_params.refused()
+            + self.spare_modes.refused()
+            + self.spare_lines.refused()
+            + self.spare_held.refused()
+            + self.parked.refused()
+            + self.gone.refused()
+            + self.staged.as_ref().map_or(0, |s| s.refused())
+    }
+
     /// Whether this box is a re-prepare's first half.
     pub(crate) fn is_suspend(&self) -> bool {
         self.suspend.is_some()
@@ -511,4 +530,26 @@ pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
             root_fade_ended,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_buffers::MaxBlock;
+    use tutti_units::{SampleRate, Samples};
+
+    /// A box's `refused` is the sum over every list it carries: the commit's
+    /// own, those of `gone`, and none for a box nothing was refused in.
+    #[test]
+    fn a_commits_refused_sums_every_list_it_carries() {
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
+        let mut c = Commit::<f32>::suspend(1, prepare, 0);
+        assert_eq!(c.refused(), 0);
+        c.spare_held.mark_overflowed();
+        c.spare_held.mark_overflowed();
+        c.parked.mark_overflowed();
+        c.gone.spare.mark_overflowed();
+        c.gone.replaced.mark_overflowed();
+        assert_eq!(c.refused(), 5);
+    }
 }
