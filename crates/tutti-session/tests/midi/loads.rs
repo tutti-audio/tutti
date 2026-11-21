@@ -251,7 +251,7 @@ fn a_missing_file_is_an_io_read_error() {
 mod soundfont {
     use super::*;
     use tutti_session::LoadError;
-    use tutti_soundfont::SoundFontConfig;
+    use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 
     /// The record count of the `phdr` chunk of the SoundFont `bytes` (SF2 2.04
     /// section 7.2): a 38-byte record per preset, and a terminal record.

@@ -28,7 +28,7 @@ use tutti_midi_runtime::MidiInputNode;
 use tutti_session::Stamp;
 use tutti_session::{EventInPort, MidiRouteRule, Session};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::SoundFontConfig;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::MidiChannel;
 use tutti_units::{Beat, BeatDuration, SampleRate, Samples};
 

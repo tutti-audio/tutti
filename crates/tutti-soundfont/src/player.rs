@@ -14,12 +14,10 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 
 use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
 use tutti_midi_protocol::{Universal, UniversalReader};
-use tutti_sf2::SoundFont;
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
 use tutti_voicing::{MasterGain, VoiceAllocator, VoiceConfig};

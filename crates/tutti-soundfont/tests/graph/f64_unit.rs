@@ -7,7 +7,7 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Node, Offset, Status};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::SoundFontConfig;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::MidiChannel;
 use tutti_units::{SampleRate, Samples, Tail};
 

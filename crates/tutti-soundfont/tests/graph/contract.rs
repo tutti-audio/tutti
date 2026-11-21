@@ -15,7 +15,7 @@ use tutti_fixtures::midi;
 use tutti_graph::EventKind;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::SoundFontConfig;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::MidiChannel;
 use tutti_units::Samples;
 

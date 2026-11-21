@@ -74,7 +74,7 @@
 //! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
-//! | `tutti::soundfont` | the SoundFont playback node and its settings | `soundfont` |
+//! | `tutti::soundfont` | the SoundFont playback node and its config | `soundfont` |
 //! | `tutti::plugin` | hosting settings, the main-thread proof and the plugin catalog | `plugin` + a format |
 //!
 //! `cargo xtask check-umbrella` holds the rule: no crate is re-exported whole,
@@ -751,7 +751,9 @@ pub mod soundfont {
         LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader, SamplePool, Side,
         SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator, WrongLevelGenerator,
     };
-    pub use tutti_soundfont::{Polyphony, PolyphonyError, SoundFontConfig, SoundFontUnit};
+    pub use tutti_soundfont::{
+        Error as SoundFontUnitError, Polyphony, PolyphonyError, SoundFontConfig, SoundFontUnit,
+    };
 }
 
 /// Plugin hosting (`tutti-plugin`): the main-thread proof, the bridge and

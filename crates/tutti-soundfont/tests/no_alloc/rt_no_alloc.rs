@@ -30,7 +30,7 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Polyphony, SoundFontConfig};
+use tutti_soundfont::{Polyphony, SoundFontConfig, SoundFontUnit};
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, Data128, Flex, Message, MidiChannel, MidiGroup, NoteNumber,
     NoteVelocity, PerNoteManagement, RegisteredPerNoteController, Stream, Sysex7Packet,

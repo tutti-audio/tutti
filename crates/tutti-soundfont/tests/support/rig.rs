@@ -10,7 +10,7 @@ use super::{BLOCK, Hand};
 
 use tutti_fixtures::midi;
 use tutti_sf2::SoundFont;
-use tutti_soundfont::SoundFontConfig;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{CCNumber, Message, MidiChannel, U7, U14, Ump, Voice1, Voice2};
 use tutti_units::SampleRate;
 

@@ -12,7 +12,7 @@ use crate::support;
 
 use support::Hand;
 use tutti_sf2::SoundFont;
-use tutti_soundfont::SoundFontConfig;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{
     Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     RegisteredPerNoteController, U7, U14, Ump, Voice1, Voice2,

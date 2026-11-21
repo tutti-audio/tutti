@@ -7,7 +7,7 @@ use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_session::{InstrumentHandle, OfflineSession, OutPort, Root, Session, Stamp};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::SoundFontConfig;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity};
 use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
