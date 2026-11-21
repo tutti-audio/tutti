@@ -15,41 +15,46 @@ const PHASES: usize = 512;
 /// The input frames kept before the head: the window less the frame it ends on.
 const HISTORY: usize = TAPS - 1;
 
-/// The slowest read, 0.95 input frames per output frame.
-pub const VARIABLE_MIN_RATE: ReadRate = ReadRate::new(0.95);
-/// The fastest read, 1.05 input frames per output frame.
-pub const VARIABLE_MAX_RATE: ReadRate = ReadRate::new(1.05);
-/// The latency in input frames at any ratio in range: the output at `n` is the input at
-/// `r n - VARIABLE_LATENCY`.
-pub const VARIABLE_LATENCY: Samples = Samples::new(CROSSINGS);
-/// The frequency, as a fraction of the input Nyquist frequency, up to which the gain is
-/// within [`VARIABLE_PASSBAND_RIPPLE`] of unity.
-pub const VARIABLE_PASSBAND_EDGE: f64 = 0.85;
-/// The most the gain departs from unity below [`VARIABLE_PASSBAND_EDGE`], in dB.
-pub const VARIABLE_PASSBAND_RIPPLE: f64 = 0.001;
-/// The least attenuation of the images of a component under [`VARIABLE_PASSBAND_EDGE`], in dB.
-pub const VARIABLE_STOPBAND_ATTENUATION: f64 = 100.0;
+tutti_units::ranged! {
+    /// The input frames a [`VariableResampler`] reads per output frame: `0.95..=1.05`, 50 000
+    /// ppm either side of unity, fifty times the drift of a pair of free-running audio clocks.
+    /// [`new`](Self::new) refuses NaN and anything outside the range.
+    VariableRate(f64), VariableRateError, "a read rate from 0.95 to 1.05",
+    |raw| raw >= 0.95 && raw <= 1.05
+}
 
-/// A resampler of any width whose ratio is set per call.
-///
-///
-/// It reads the input as a band-limited signal, `x(t) = sum_m x[m] K(t - m)`, at the
-/// positions `p_n = p_0 + r n` of the output frames. `K` is a [`WindowedSinc`] with its
-/// cutoff at Nyquist (so `K(m) = 0` at every other integer and the kernel reads an input
-/// frame back unchanged where the head sits on it) and a Blackman-Harris window over
+impl VariableRate {
+    /// The slowest read, 0.95 input frames per output frame.
+    pub const MIN: Self = Self(0.95);
+    /// The fastest read, 1.05 input frames per output frame.
+    pub const MAX: Self = Self(1.05);
+    /// One input frame per output frame.
+    pub const UNITY: Self = Self(1.0);
+
+    /// `raw` held within the range: the controller's output saturates here, so a fill the
+    /// ratio cannot correct holds the ratio at its end.
+    pub(super) fn clamped(raw: f64) -> Self {
+        Self(raw.clamp(Self::MIN.0, Self::MAX.0))
+    }
+}
+
+impl From<VariableRate> for ReadRate {
+    fn from(rate: VariableRate) -> Self {
+        ReadRate::new(rate.get())
+    }
+}
+
 /// `CROSSINGS` zero crossings each side: `TAPS` input frames per output frame. The
 /// kernel is tabulated once, control-side, at `PHASES` fractional offsets, and a read
 /// interpolates linearly between the two nearest rows, so a call allocates nothing.
 ///
 /// # Ratio
 ///
-/// The ratio is a [`ReadRate`]: input frames consumed per output frame. It is read within
-/// [`VARIABLE_MIN_RATE`]..=[`VARIABLE_MAX_RATE`] (0.95 to 1.05, 50 000 ppm either side of unity,
-/// fifty times the drift of a pair of free-running audio clocks) and a ratio that is not
-/// finite is unity. It is constant within a call and may differ between calls; the head is a
+/// The ratio is a [`VariableRate`] (0.95 to 1.05; it converts to the [`ReadRate`] it is):
+/// input frames consumed per output frame. It is constant within a call and may differ between calls; the head is a
 /// [`ReadPosition`], a `2^-32` frame count, so a head moved a million times keeps its
 /// place. A ratio of exactly 1 reads every frame at phase 0: the output is the input
-/// delayed by [`VARIABLE_LATENCY`] frames, to the round-off of the table's zeros.
+/// delayed by [`LATENCY`](Self::LATENCY) frames, to the round-off of the table's zeros.
 ///
 /// # Input and output
 ///
@@ -66,10 +71,10 @@ pub const VARIABLE_STOPBAND_ATTENUATION: f64 = 100.0;
 ///
 /// | figure | value |
 /// |---|---|
-/// | passband edge | [`VARIABLE_PASSBAND_EDGE`] (`0.85 f_N`; 20.4 kHz at 48 kHz) |
-/// | passband ripple | at most [`VARIABLE_PASSBAND_RIPPLE`] dB to the edge |
-/// | stopband attenuation | at least [`VARIABLE_STOPBAND_ATTENUATION`] dB for the images of a component at or under the edge (everything at or above `2 f_N` minus the edge) |
-/// | latency | [`VARIABLE_LATENCY`] input frames |
+/// | passband edge | [`PASSBAND_EDGE`](Self::PASSBAND_EDGE) (`0.85 f_N`; 20.4 kHz at 48 kHz) |
+/// | passband ripple | at most [`PASSBAND_RIPPLE`](Self::PASSBAND_RIPPLE) dB to the edge |
+/// | stopband attenuation | at least [`STOPBAND_ATTENUATION`](Self::STOPBAND_ATTENUATION) dB for the images of a component at or under the edge (everything at or above `2 f_N` minus the edge) |
+/// | latency | [`LATENCY`](Self::LATENCY) input frames |
 ///
 /// An image is the mirror a sampled signal has about `fs`: a component at `f` under the
 /// edge has its image at `2 f_N - f`, which the kernel attenuates. A component between the
@@ -94,6 +99,18 @@ pub struct VariableResampler<F: Float> {
 }
 
 impl<F: Float> VariableResampler<F> {
+    /// The latency in input frames at any ratio in range: the output at `n` is the input at
+    /// `r n - LATENCY`.
+    pub const LATENCY: Samples = Samples::new(CROSSINGS);
+    /// The frequency, as a fraction of the input Nyquist frequency, up to which the gain is
+    /// within [`PASSBAND_RIPPLE`](Self::PASSBAND_RIPPLE) of unity.
+    pub const PASSBAND_EDGE: f64 = 0.85;
+    /// The most the gain departs from unity below [`PASSBAND_EDGE`](Self::PASSBAND_EDGE), in dB.
+    pub const PASSBAND_RIPPLE: f64 = 0.001;
+    /// The least attenuation of the images of a component under
+    /// [`PASSBAND_EDGE`](Self::PASSBAND_EDGE), in dB.
+    pub const STOPBAND_ATTENUATION: f64 = 100.0;
+
     /// A resampler of `width` channels, silent, its head at the first frame.
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
@@ -138,10 +155,10 @@ impl<F: Float> VariableResampler<F> {
         self.head = ReadPosition::START;
     }
 
-    /// The delay in input frames: [`VARIABLE_LATENCY`].
+    /// The delay in input frames: [`LATENCY`](Self::LATENCY).
     #[must_use]
     pub const fn latency(&self) -> Samples {
-        VARIABLE_LATENCY
+        Self::LATENCY
     }
 
     /// The channel count.
@@ -154,7 +171,7 @@ impl<F: Float> VariableResampler<F> {
     /// from here: the call fails with fewer, and the extra frames it reads (at most one
     /// over what it consumes) are offered again by the next call.
     #[must_use]
-    pub fn input_needed(&self, output: Samples, ratio: ReadRate) -> Samples {
+    pub fn input_needed(&self, output: Samples, ratio: VariableRate) -> Samples {
         let Some(last) = output.get().checked_sub(1) else {
             return Samples::new(0);
         };
@@ -177,7 +194,7 @@ impl<F: Float> VariableResampler<F> {
         &mut self,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
-        ratio: ReadRate,
+        ratio: VariableRate,
     ) -> Result<Samples, ResampleError> {
         for got in [input.channels(), output.channels()] {
             if got != self.channels {
@@ -258,11 +275,10 @@ fn read<F: Float>(table: &[F], window: &[F], fraction: f64) -> F {
     value + between * slope
 }
 
+// `ReadPosition` has no step from a `ReadRate` and no sum with one, so the head's arithmetic is
+// these two functions.
 /// The head's move per output frame, in `2^-32` frames.
-fn step_of(ratio: ReadRate) -> u64 {
-    let ratio = ratio
-        .finite_or(ReadRate::UNITY)
-        .clamp(VARIABLE_MIN_RATE, VARIABLE_MAX_RATE);
+fn step_of(ratio: VariableRate) -> u64 {
     ReadPosition::from_span(SampleSpan::clamped(ratio.get())).get()
 }
 

@@ -316,10 +316,9 @@ pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
-    ChunkSize, FillController, ResampleError, StreamingResampler, StreamingResamplerConfig,
-    VARIABLE_LATENCY, VARIABLE_MAX_RATE, VARIABLE_MIN_RATE, VARIABLE_PASSBAND_EDGE,
-    VARIABLE_PASSBAND_RIPPLE, VARIABLE_STOPBAND_ATTENUATION, VariableResampler, WindowedSinc,
-    needs_resampling, resampled_frames,
+    ChunkSize, FillController, LoopBandwidth, LoopBandwidthError, ResampleError,
+    StreamingResampler, StreamingResamplerConfig, VariableRate, VariableRateError,
+    VariableResampler, WindowedSinc, needs_resampling, resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnRamps};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, FreezeMode, MAX_PRE_DELAY, MIN_DECAY};

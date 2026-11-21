@@ -1,15 +1,37 @@
 //! A PI controller from a buffer's fill to a resampler's read ratio.
 
-use tutti_units::{Hz, ReadRate, SampleRate, Samples};
+use tutti_units::{Hz, SampleRate, Samples};
 
-use super::{VARIABLE_MAX_RATE, VARIABLE_MIN_RATE};
+use super::VariableRate;
 
 /// The most a block may span of the loop's time constant: `w B` is held to at most this,
 /// so the integration step stays small against the loop's own time.
 const MAX_STEP: f64 = 0.25;
 
+tutti_units::ranged! {
+    /// The natural frequency of a [`FillController`]'s loop: `0.001..=1` Hz.
+    /// [`new`](Self::new) refuses NaN and anything outside the range.
+    LoopBandwidth(Hz), LoopBandwidthError, "a bandwidth from 0.001 to 1 Hz",
+    |raw| raw.get() >= 0.001 && raw.get() <= 1.0
+}
+
+impl LoopBandwidth {
+    /// The slowest bandwidth, 0.001 Hz.
+    pub const MIN: Self = Self(Hz::new(0.001));
+    /// The fastest bandwidth, 1 Hz.
+    pub const MAX: Self = Self(Hz::new(1.0));
+    /// The bandwidth of a controller that is given none: 0.05 Hz, slow enough to follow the
+    /// drift of a clock and not the jitter of a block.
+    pub const DEFAULT: Self = Self(Hz::new(0.05));
+
+    /// The bandwidth in hertz.
+    #[must_use]
+    pub const fn hz(self) -> Hz {
+        self.0
+    }
+}
+
 /// A PI loop from a buffer's fill to a read ratio.
-///
 ///
 /// # Model
 ///
@@ -39,7 +61,7 @@ const MAX_STEP: f64 = 0.25;
 /// The ratio is held within the resampler's range, and the sum stops where the held ratio
 /// stops so it does not wind up.
 ///
-/// The ratio is a [`ReadRate`], input frames per output frame: the one quantity the fill
+/// The ratio is a [`VariableRate`], input frames per output frame: the one quantity the fill
 /// loop and the resampler share, with no sample rate or pitch in it. The rate in
 /// [`new`](Self::new) turns the bandwidth in hertz into radians per frame; the block
 /// cadence is the argument of [`observe`](Self::observe), so the controller holds no clock.
@@ -47,40 +69,29 @@ const MAX_STEP: f64 = 0.25;
 pub struct FillController {
     target: Samples,
     rate: SampleRate,
-    bandwidth: Hz,
+    bandwidth: LoopBandwidth,
     /// `ki` times the error summed over the frames so far: the ratio offset the loop has
     /// learned, dimensionless.
     integral: f64,
 }
 
 impl FillController {
-    /// The loop bandwidth of a controller that is given none: 0.05 Hz, slow enough to follow
-    /// the drift of a clock and not the jitter of a block.
-    pub const DEFAULT_BANDWIDTH: Hz = Hz::new(0.05);
-    /// The slowest bandwidth, 0.001 Hz.
-    pub const MIN_BANDWIDTH: Hz = Hz::new(0.001);
-    /// The fastest bandwidth, 1 Hz.
-    pub const MAX_BANDWIDTH: Hz = Hz::new(1.0);
-
     /// A controller holding `target` frames of fill, at the output `rate`, with the
-    /// [`DEFAULT_BANDWIDTH`](Self::DEFAULT_BANDWIDTH).
+    /// [`LoopBandwidth::DEFAULT`].
     #[must_use]
     pub const fn new(target: Samples, rate: SampleRate) -> Self {
         Self {
             target,
             rate,
-            bandwidth: Self::DEFAULT_BANDWIDTH,
+            bandwidth: LoopBandwidth::DEFAULT,
             integral: 0.0,
         }
     }
 
-    /// The loop bandwidth, its natural frequency, read within [`MIN_BANDWIDTH`](Self::MIN_BANDWIDTH)..=
-    /// [`MAX_BANDWIDTH`](Self::MAX_BANDWIDTH) (a value that is not finite is the default).
+    /// The loop bandwidth, its natural frequency.
     #[must_use]
-    pub fn bandwidth(mut self, bandwidth: Hz) -> Self {
-        self.bandwidth = bandwidth
-            .finite_or(Self::DEFAULT_BANDWIDTH)
-            .clamp(Self::MIN_BANDWIDTH, Self::MAX_BANDWIDTH);
+    pub const fn bandwidth(mut self, bandwidth: LoopBandwidth) -> Self {
+        self.bandwidth = bandwidth;
         self
     }
 
@@ -102,18 +113,19 @@ impl FillController {
     /// The bandwidth is held under a quarter of the block rate (`w B <= 1/4`) so a long
     /// block does not make the loop unstable.
     #[must_use]
-    pub fn observe(&mut self, fill: Samples, block: Samples) -> ReadRate {
+    pub fn observe(&mut self, fill: Samples, block: Samples) -> VariableRate {
         let error = fill.get() as f64 - self.target.get() as f64;
         let span = block.get() as f64;
         let omega = self
             .bandwidth
+            .hz()
             .angle_per_frame(self.rate)
             .get()
             .min(MAX_STEP / span.max(1.0));
-        let limit = VARIABLE_MAX_RATE.get() - 1.0;
+        let limit = VariableRate::MAX.get() - 1.0;
         self.integral = (self.integral + omega * omega * span * error).clamp(-limit, limit);
         let ratio = 1.0 + 2.0 * omega * error + self.integral;
-        ReadRate::new(ratio).clamp(VARIABLE_MIN_RATE, VARIABLE_MAX_RATE)
+        VariableRate::clamped(ratio)
     }
 }
 

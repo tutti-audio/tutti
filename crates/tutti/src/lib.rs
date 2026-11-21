@@ -306,8 +306,7 @@ pub mod nodes {
         EnvelopeStages, EnvelopeStep,
     };
     pub use tutti_dsp::{
-        FillController, VARIABLE_LATENCY, VARIABLE_MAX_RATE, VARIABLE_MIN_RATE,
-        VARIABLE_PASSBAND_EDGE, VARIABLE_PASSBAND_RIPPLE, VARIABLE_STOPBAND_ATTENUATION,
+        FillController, LoopBandwidth, LoopBandwidthError, VariableRate, VariableRateError,
         VariableResampler,
     };
     pub use tutti_dsp::{Lfo, LfoWave};

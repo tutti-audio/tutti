@@ -44,7 +44,7 @@ fn simulate(
 /// within a frame of the target and the ratio within `kp + w` of `1 + d`.
 #[test]
 fn the_fill_and_the_ratio_follow_the_critically_damped_response() {
-    let w = natural(FillController::DEFAULT_BANDWIDTH);
+    let w = natural(LoopBandwidth::DEFAULT.hz());
     for drift in [50e-6, -50e-6, 1000e-6] {
         let mut c = FillController::new(Samples::new(TARGET), RATE);
         let trace = simulate(&mut c, drift, 8000, BLOCK);
@@ -86,9 +86,9 @@ fn the_fill_and_the_ratio_follow_the_critically_damped_response() {
 fn the_peak_error_is_the_drift_over_e_times_the_bandwidth() {
     let drift = 50e-6;
     for bandwidth in [0.005, 0.05, 0.5] {
-        let bandwidth = Hz::new(bandwidth);
+        let bandwidth = LoopBandwidth::of(Hz::new(bandwidth));
         let mut c = FillController::new(Samples::new(TARGET), RATE).bandwidth(bandwidth);
-        let w = natural(bandwidth);
+        let w = natural(bandwidth.hz());
         let trace = simulate(&mut c, drift, (6.0 / w / BLOCK as f64) as usize, BLOCK);
         let (at, top) = trace
             .iter()
@@ -98,12 +98,12 @@ fn the_peak_error_is_the_drift_over_e_times_the_bandwidth() {
         let peak = drift / (std::f64::consts::E * w);
         assert!(
             (top - peak).abs() <= 1.0 + 0.02 * peak,
-            "{bandwidth}: peak {top} vs {peak}"
+            "{bandwidth:?}: peak {top} vs {peak}"
         );
         let when = at as f64 * BLOCK as f64 * w;
         assert!(
             (when - 1.0).abs() <= 0.1 + 2.0 / peak,
-            "{bandwidth}: at {when} time constants"
+            "{bandwidth:?}: at {when} time constants"
         );
     }
 }
@@ -116,40 +116,43 @@ fn the_peak_error_is_the_drift_over_e_times_the_bandwidth() {
 #[test]
 fn the_ratio_is_held_to_the_resamplers_range_and_does_not_wind_up() {
     let block = Samples::new(BLOCK);
-    let w = natural(FillController::DEFAULT_BANDWIDTH);
+    let w = natural(LoopBandwidth::DEFAULT.hz());
     let mut c = FillController::new(Samples::new(TARGET), RATE);
-    assert_eq!(c.observe(Samples::new(TARGET), block), ReadRate::UNITY);
+    assert_eq!(c.observe(Samples::new(TARGET), block), VariableRate::UNITY);
     for _ in 0..2000 {
-        assert_eq!(c.observe(Samples::new(1_000_000), block), VARIABLE_MAX_RATE);
+        assert_eq!(c.observe(Samples::new(1_000_000), block), VariableRate::MAX);
     }
     let back = c.observe(Samples::new(0), block).get();
     let want = 1.05 - 2.0 * w * 512.0 - w * w * BLOCK as f64 * 512.0;
     assert!((back - want).abs() < 1e-12, "{back} vs {want}");
     let mut low = FillController::new(Samples::new(1_000_000), RATE);
     for _ in 0..2000 {
-        assert_eq!(low.observe(Samples::new(0), block), VARIABLE_MIN_RATE);
+        assert_eq!(low.observe(Samples::new(0), block), VariableRate::MIN);
     }
     let back = low.observe(Samples::new(1_000_000 + 512), block).get();
     let want = 0.95 + 2.0 * w * 512.0 + w * w * BLOCK as f64 * 512.0;
     assert!((back - want).abs() < 1e-12, "{back} vs {want}");
     c.reset();
-    assert_eq!(c.observe(Samples::new(TARGET), block), ReadRate::UNITY);
+    assert_eq!(c.observe(Samples::new(TARGET), block), VariableRate::UNITY);
 }
 
-/// A bandwidth outside the range is the nearest end of it and one that is not finite the
-/// default.
+/// A bandwidth is `0.001..=1` Hz, refusing NaN and everything outside it.
 #[test]
-fn the_bandwidth_is_held_within_its_range() {
-    let new = || FillController::new(Samples::new(TARGET), RATE);
-    assert_eq!(
-        new().bandwidth(Hz::new(0.0)),
-        new().bandwidth(FillController::MIN_BANDWIDTH)
-    );
-    assert_eq!(
-        new().bandwidth(Hz::new(50.0)),
-        new().bandwidth(FillController::MAX_BANDWIDTH)
-    );
-    assert_eq!(new().bandwidth(Hz::new(f64::NAN)), new());
+fn the_bandwidth_is_range_checked() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: LoopBandwidth::new,
+        get: Hz::from,
+        of: Some(LoopBandwidth::of),
+        valid: &[Hz::new(0.001), Hz::new(0.05), Hz::new(1.0)],
+        invalid: &[
+            Hz::new(0.000_999),
+            Hz::new(1.001),
+            Hz::ZERO,
+            Hz::new(-0.05),
+            Hz::new(f64::NAN),
+            Hz::new(f64::INFINITY),
+        ],
+    });
 }
 
 /// A block longer than a quarter of the loop's time constant would make the discrete loop
@@ -157,8 +160,7 @@ fn the_bandwidth_is_held_within_its_range() {
 /// to within a frame of the target (200 blocks, the loop at `w = 0.25 / B`).
 #[test]
 fn a_long_block_does_not_destabilise_the_loop() {
-    let mut c =
-        FillController::new(Samples::new(TARGET), RATE).bandwidth(FillController::MAX_BANDWIDTH);
+    let mut c = FillController::new(Samples::new(TARGET), RATE).bandwidth(LoopBandwidth::MAX);
     let trace = simulate(&mut c, 50e-6, 400, 48_000);
     for &(fill, ratio) in &trace[300..] {
         assert!((fill as f64 - TARGET as f64).abs() <= 1.0, "{fill}");

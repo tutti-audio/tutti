@@ -18,7 +18,7 @@ fn run<F: Float>(
     let mut out = vec![Vec::new(); signals.len()];
     let mut popped = 0;
     for &(frames, ratio) in blocks {
-        let ratio = ReadRate::new(ratio);
+        let ratio = VariableRate::of(ratio);
         let needed = r.input_needed(Samples::new(frames), ratio).get();
         let input: Vec<&[F]> = signals
             .iter()
@@ -91,7 +91,7 @@ fn at_unity_the_output_is_the_input_delayed_by_the_latency() {
         .collect();
     let total: usize = blocks.iter().map(|b| b.0).sum();
     let x = noise(total + 64, 7);
-    let latency = VARIABLE_LATENCY.get();
+    let latency = VariableResampler::<f64>::LATENCY.get();
     let (y, popped) = run(
         &mut VariableResampler::<f64>::new(ChannelLayout::MONO),
         std::slice::from_ref(&x),
@@ -189,11 +189,11 @@ fn the_passband_ripple_and_the_stopband_attenuation_meet_the_figures() {
         let ripple = (20.0 * amplitude.log10()).abs();
         let images = 20.0 * (rest * 2f64.sqrt()).log10();
         assert!(
-            ripple <= VARIABLE_PASSBAND_RIPPLE,
+            ripple <= VariableResampler::<f64>::PASSBAND_RIPPLE,
             "{edge_fraction}: {ripple} dB"
         );
         assert!(
-            images <= -VARIABLE_STOPBAND_ATTENUATION,
+            images <= -VariableResampler::<f64>::STOPBAND_ATTENUATION,
             "{edge_fraction}: images at {images} dB"
         );
     }
@@ -210,29 +210,28 @@ fn a_component_past_the_edge_is_outside_the_figures() {
         &[(20_000, 1.0123)],
     );
     let (amplitude, rest) = fit(&y[0][200..], 0.475 * 1.0123);
-    assert!((20.0 * amplitude.log10()).abs() > 10.0 * VARIABLE_PASSBAND_RIPPLE);
-    assert!(20.0 * (rest * 2f64.sqrt()).log10() > -VARIABLE_STOPBAND_ATTENUATION);
+    assert!((20.0 * amplitude.log10()).abs() > 10.0 * VariableResampler::<f64>::PASSBAND_RIPPLE);
+    assert!(20.0 * (rest * 2f64.sqrt()).log10() > -VariableResampler::<f64>::STOPBAND_ATTENUATION);
 }
 
-/// The ratio is read within the range: a ratio over it reads as the top, one under as the
-/// bottom, and one that is not finite as unity. At unity `n` output frames take `n` input.
+/// The ratio is a [`VariableRate`]: `0.95..=1.05`, refusing NaN and everything outside it. At
+/// unity `n` output frames take `n` input; at the top, 999 steps of 1.05 from 0 are 1048.95, so
+/// the last window starts at 1048 (1049 frames) and the head after 1000 steps is 1050.
 #[test]
-fn a_ratio_outside_the_range_is_held_to_it() {
+fn the_ratio_is_range_checked_and_sets_the_input_needed() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: VariableRate::new,
+        get: f64::from,
+        of: Some(VariableRate::of),
+        valid: &[0.95, 1.0, 1.000_05, 1.05],
+        invalid: &[0.949_999, 1.050_001, 0.0, 2.0, f64::NAN, f64::INFINITY],
+    });
+    assert_eq!(VariableRate::MIN.get(), 0.95);
+    assert_eq!(VariableRate::MAX.get(), 1.05);
     let r = VariableResampler::<f32>::new(ChannelLayout::MONO);
     let n = Samples::new(1000);
-    assert_eq!(r.input_needed(n, ReadRate::UNITY), n);
-    assert_eq!(r.input_needed(n, ReadRate::new(f64::NAN)), n);
-    assert_eq!(
-        r.input_needed(n, ReadRate::new(2.0)),
-        r.input_needed(n, VARIABLE_MAX_RATE)
-    );
-    assert_eq!(
-        r.input_needed(n, ReadRate::new(0.0)),
-        r.input_needed(n, VARIABLE_MIN_RATE)
-    );
-    // 999 steps of 1.05 from 0 is 1048.95: the last window starts at 1048, so 1049 frames,
-    // and the head after 1000 steps is 1050.
-    assert_eq!(r.input_needed(n, VARIABLE_MAX_RATE), Samples::new(1050));
+    assert_eq!(r.input_needed(n, VariableRate::UNITY), n);
+    assert_eq!(r.input_needed(n, VariableRate::MAX), Samples::new(1050));
 }
 
 /// A view of another width, or an input short of what `input_needed` says, is refused and
@@ -247,7 +246,7 @@ fn a_refused_call_changes_nothing() {
         .process(
             Planes::new(&mono).unwrap(),
             PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-            ReadRate::UNITY,
+            VariableRate::UNITY,
         )
         .unwrap_err();
     assert_eq!(
@@ -263,7 +262,7 @@ fn a_refused_call_changes_nothing() {
         .process(
             Planes::new(&two).unwrap(),
             PlanesMut::new(&mut [&mut a[..], &mut b[..]]).unwrap(),
-            ReadRate::UNITY,
+            VariableRate::UNITY,
         )
         .unwrap_err();
     assert_eq!(
@@ -275,7 +274,7 @@ fn a_refused_call_changes_nothing() {
         }
     );
     assert_eq!(
-        r.input_needed(Samples::new(100), ReadRate::UNITY),
+        r.input_needed(Samples::new(100), VariableRate::UNITY),
         Samples::new(100)
     );
 }
