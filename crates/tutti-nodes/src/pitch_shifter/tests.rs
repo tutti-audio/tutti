@@ -79,7 +79,7 @@ fn a_fork_shares_no_cell() {
 }
 
 /// The shape is the width in and out, declares the shift as `Pitch` starting as configured,
-/// reports the fixed-rate vocoder's latency, and a finite tail; an empty layout is mono.
+/// reports the fixed-rate vocoder's latency, and a finite tail; an empty layout is no channels.
 #[test]
 fn the_shape_declares_the_shift_the_latency_and_a_finite_tail() {
     let hop = HopSize::new(Samples::new(256)).unwrap();
@@ -101,8 +101,8 @@ fn the_shape_declares_the_shift_the_latency_and_a_finite_tail() {
     assert!(matches!(shape.tail, Tail::Finite(_)));
     assert_eq!(shape.params.as_slice(), &[UnitParam::Pitch][..]);
     assert_eq!(n.param_base(0), Some(-250.0));
-    let mono = PitchShifterNode::<f32>::from(PitchShifterConfig::new(ChannelLayout::EMPTY));
-    assert_eq!(mono.shape().audio_in().count(), 1);
+    let empty = PitchShifterNode::<f32>::from(PitchShifterConfig::new(ChannelLayout::EMPTY));
+    assert_eq!(empty.shape().audio_in().count(), 0);
 }
 
 /// An impulse rings for the window read at the shift's ratio: a frame's window is `WINDOW`
