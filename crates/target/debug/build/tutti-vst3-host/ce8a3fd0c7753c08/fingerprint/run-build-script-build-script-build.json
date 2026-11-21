@@ -1,1 +1,0 @@
-{"rustc":2642861616376027855,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[3571209346318874075,"build_script_build",false,6477879746833455877]],"local":[{"RerunIfEnvChanged":{"var":"VST3_SDK_DIR","val":"/home/pohsuanlai/tutti/vendor/vst3-sdk"}}],"rustflags":[],"config":0,"compile_kind":0}

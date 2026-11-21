@@ -1,4 +1,0 @@
-cargo::rerun-if-changed=build.rs
-cargo::rustc-check-cfg=cfg(encode)
-cargo::rustc-check-cfg=cfg(decode)
-cargo::rustc-cfg=encode
