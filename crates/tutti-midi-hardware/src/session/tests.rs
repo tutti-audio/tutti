@@ -67,7 +67,9 @@ fn enumeration_passes_the_backend_through() {
 fn connecting_an_input_makes_it_connected() {
     let (mut s, _, _) = session();
     assert!(!s.is_any_input_connected());
-    let _ = s.connect_input(&input(&s, "Keystep Pro")).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
+        .unwrap();
     assert!(s.is_any_input_connected());
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
 }
@@ -77,8 +79,12 @@ fn connecting_an_input_makes_it_connected() {
 #[test]
 fn connecting_an_open_input_is_idempotent() {
     let (mut s, _, opens) = session();
-    let _ = s.connect_input(&input(&s, "Keystep Pro")).unwrap();
-    let _ = s.connect_input(&input(&s, "Keystep Pro")).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
+        .unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
+        .unwrap();
     assert_eq!(opens.load(Ordering::SeqCst), 1, "the port opens once");
     assert_eq!(s.connected_input_names().len(), 1);
 }
@@ -86,7 +92,9 @@ fn connecting_an_open_input_is_idempotent() {
 #[test]
 fn by_name_matching_is_case_insensitive_substring() {
     let (mut s, _, _) = session();
-    let _ = s.connect_input("keystep").unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), "keystep")
+        .unwrap();
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
 }
 
@@ -102,14 +110,16 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
     .unwrap();
     // A name that matches nothing says what it searched, so a typo shows what
     // was there.
-    let Err(MidiHardwareError::NoDeviceNamed { name, searched }) = s.connect_input("nonexistent")
+    let Err(MidiHardwareError::NoDeviceNamed { name, searched }) =
+        s.connect_input(crate::testing::started(), "nonexistent")
     else {
         panic!("a name that matches no input is NoDeviceNamed");
     };
     assert_eq!(name, "nonexistent");
     assert_eq!(searched, ["IAC Bus 1", "Keystep Pro"], "the inputs, by id");
     // The output side searches the outputs.
-    let Err(MidiHardwareError::NoDeviceNamed { searched, .. }) = s.connect_output("nonexistent")
+    let Err(MidiHardwareError::NoDeviceNamed { searched, .. }) =
+        s.connect_output(crate::testing::started(), "nonexistent")
     else {
         panic!("a name that matches no output is NoDeviceNamed");
     };
@@ -123,15 +133,19 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
             .recv_timeout(std::time::Duration::from_secs(10))
             .is_ok()
     );
-    assert!(s.connect_input(&gone).is_err());
+    assert!(s.connect_input(crate::testing::started(), &gone).is_err());
     assert!(!s.is_any_input_connected());
 }
 
 #[test]
 fn disconnecting_closes_only_the_named_input() {
     let (mut s, _, _) = session();
-    let _ = s.connect_input(&input(&s, "Keystep Pro")).unwrap();
-    let _ = s.connect_input(&input(&s, "IAC Bus 1")).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
+        .unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "IAC Bus 1"))
+        .unwrap();
     s.disconnect_input("iac");
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
     s.disconnect_all_inputs();
@@ -146,7 +160,7 @@ fn disconnecting_closes_only_the_named_input() {
 fn a_query_by_id_and_by_name_reach_the_same_device() {
     let (mut s, _, _) = session();
     let keystep = input(&s, "Keystep Pro");
-    let _ = s.connect_input("pro").unwrap();
+    let _ = s.connect_input(crate::testing::started(), "pro").unwrap();
     assert!(s.is_input_connected(&keystep), "by name");
     assert!(s.disconnect_input(&keystep), "by id");
     assert!(!s.disconnect_input("pro"), "nothing is open to close");
@@ -154,8 +168,10 @@ fn a_query_by_id_and_by_name_reach_the_same_device() {
     // Both open inputs' names contain an "s"; the disconnect closes the
     // lowest id.
     let iac = input(&s, "IAC Bus 1");
-    let _ = s.connect_input(&keystep).unwrap();
-    let _ = s.connect_input(&iac).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &keystep)
+        .unwrap();
+    let _ = s.connect_input(crate::testing::started(), &iac).unwrap();
     assert!(
         iac < keystep,
         "the fixture's ids: {iac:?} below {keystep:?}"
@@ -182,8 +198,10 @@ fn a_dead_inputs_fault_is_read_through_the_session() {
     .unwrap();
     let keystep = input(&s, "Keystep Pro");
     let iac = input(&s, "IAC Bus 1");
-    let _ = s.connect_input(&keystep).unwrap();
-    let _ = s.connect_input(&iac).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &keystep)
+        .unwrap();
+    let _ = s.connect_input(crate::testing::started(), &iac).unwrap();
     assert_eq!(s.input_fault(&keystep), None);
 
     let fault = InputFault::WaitFailed(crate::fault::Errno::new(19));
@@ -203,7 +221,9 @@ fn an_input_that_is_not_held_reads_no_fault() {
     let keystep = input(&s, "Keystep Pro");
     assert_eq!(s.input_fault(&keystep), None);
     assert!(!s.is_input_connected(&keystep));
-    let _ = s.connect_input(&keystep).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &keystep)
+        .unwrap();
     assert!(s.disconnect_input(&keystep));
     assert_eq!(s.input_fault(&keystep), None);
 }
@@ -211,7 +231,9 @@ fn an_input_that_is_not_held_reads_no_fault() {
 #[test]
 fn an_output_reaches_its_device() {
     let (s, sent, _) = session();
-    let mut output = s.connect_output("synth a").unwrap();
+    let mut output = s
+        .connect_output(crate::testing::started(), "synth a")
+        .unwrap();
     assert_eq!(output.name(), "Synth A");
     let synth_a = s
         .outputs()
@@ -239,7 +261,9 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
-    let mut output = s.connect_output("synth a").unwrap();
+    let mut output = s
+        .connect_output(crate::testing::started(), "synth a")
+        .unwrap();
     let raw = EndpointId::from_raw(10);
     let t = tutti_platform::Instant::now() + std::time::Duration::from_secs(1);
     let (at, ump) = note();
@@ -274,7 +298,9 @@ fn a_refusing_output_reports_zero_accepted() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
-    let mut output = s.connect_output("synth a").unwrap();
+    let mut output = s
+        .connect_output(crate::testing::started(), "synth a")
+        .unwrap();
 
     assert_eq!(
         output.queue(&[note(), note()]).packets(),
@@ -299,7 +325,9 @@ fn a_partial_accept_reports_what_landed() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
-    let mut output = s.connect_output("synth a").unwrap();
+    let mut output = s
+        .connect_output(crate::testing::started(), "synth a")
+        .unwrap();
 
     assert_eq!(output.queue(&[note(), note(), note()]).packets(), 1);
 }
@@ -332,7 +360,9 @@ fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
-    let mut output = s.connect_output("synth a").unwrap();
+    let mut output = s
+        .connect_output(crate::testing::started(), "synth a")
+        .unwrap();
     let raw = EndpointId::from_raw(10);
     let [start, middle, end] = sysex();
     let batch = [note(), start, middle, end, note()];
@@ -362,8 +392,12 @@ fn each_connected_output_is_its_own_value_on_its_own_device() {
     )
     .unwrap();
     let id = |name: &str| s.outputs().into_iter().find(|d| d.name == name).unwrap().id;
-    let mut synth = s.connect_output(&id("Synth A")).unwrap();
-    let mut iac = s.connect_output(&id("IAC Bus 1")).unwrap();
+    let mut synth = s
+        .connect_output(crate::testing::started(), &id("Synth A"))
+        .unwrap();
+    let mut iac = s
+        .connect_output(crate::testing::started(), &id("IAC Bus 1"))
+        .unwrap();
     assert_eq!(synth.id(), &id("Synth A"));
     assert_eq!(iac.name(), "IAC Bus 1");
 
@@ -380,12 +414,18 @@ fn each_connected_output_is_its_own_value_on_its_own_device() {
 #[test]
 fn hot_plug_cycles_keep_the_port_set_bounded() {
     let (mut s, _, opens) = session();
-    let _ = s.connect_input(&input(&s, "Keystep Pro")).unwrap();
-    let _ = s.connect_input(&input(&s, "IAC Bus 1")).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
+        .unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "IAC Bus 1"))
+        .unwrap();
     for cycle in 0..100 {
         s.disconnect_input(&input(&s, "Keystep Pro"));
         assert_eq!(s.ports().list_input_ports().len(), 1, "cycle {cycle}");
-        let _ = s.connect_input(&input(&s, "Keystep Pro")).unwrap();
+        let _ = s
+            .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
+            .unwrap();
         assert_eq!(s.ports().list_input_ports().len(), 2, "cycle {cycle}");
         assert_eq!(s.ports().port_count(), 2, "cycle {cycle}");
     }
@@ -439,6 +479,7 @@ impl MidiEndpoints for LoggingBackend {
     }
     fn open_input(
         &self,
+        _started: crate::Started,
         _id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
@@ -450,7 +491,7 @@ impl MidiEndpoints for LoggingBackend {
             _producer: producer,
         }))
     }
-    fn open_output(&self, _id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: crate::Started, _id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         Err(MidiHardwareError::Unsupported("no outputs"))
     }
 }
@@ -479,7 +520,9 @@ fn logging_session(refuse: bool) -> (MidiSession, Arc<Mutex<Vec<&'static str>>>)
 #[test]
 fn dropping_the_session_closes_inputs_then_the_backend_and_retires_ports() {
     let (mut s, log) = logging_session(false);
-    let _ = s.connect_input(&input(&s, "Logged")).unwrap();
+    let _ = s
+        .connect_input(crate::testing::started(), &input(&s, "Logged"))
+        .unwrap();
     let ports = Arc::clone(s.ports());
     assert_eq!(ports.list_input_ports().len(), 1);
 
@@ -496,7 +539,10 @@ fn dropping_the_session_closes_inputs_then_the_backend_and_retires_ports() {
 fn a_refused_open_leaves_no_port() {
     let (mut s, _log) = logging_session(true);
     for _ in 0..3 {
-        assert!(s.connect_input(&input(&s, "Logged")).is_err());
+        assert!(
+            s.connect_input(crate::testing::started(), &input(&s, "Logged"))
+                .is_err()
+        );
     }
     assert!(!s.is_any_input_connected());
     assert!(s.ports().list_input_ports().is_empty());

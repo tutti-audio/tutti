@@ -2,7 +2,7 @@
 //!
 //! CoreMIDI sends a client's notifications to the run loop of the thread that
 //! created the process's first client, and only while that thread runs the loop
-//! ([`SharedClient::start`]). [`run_notifications`] is that run. A loop with no
+//! ([`StartClient`](crate::StartClient)). [`run_notifications`] is that run. A loop with no
 //! source returns at once, which is what a process whose first client was not this
 //! thread's has; there a timer on the loop keeps the thread in it, and its ticks are
 //! the thread's chance to look for what no notification told it.
@@ -38,7 +38,7 @@ impl Drop for Armed {
 /// It returns when the loop is stopped, which nothing here does, so a thread that
 /// calls it serves notifications for its life.
 ///
-/// `client` is the one [`SharedClient::start`] returned, which must have been
+/// `client` is the one [`StartClient`](crate::StartClient) returned, which must have been
 /// started on this thread: notifications reach the loop of the thread that created
 /// the process's first client. When the loop has a source (the client's), the
 /// thread simply runs it and `on_tick` is never called. When it has none, a timer

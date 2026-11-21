@@ -3,7 +3,8 @@
 use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
+use crate::start::Started;
+use crate::virtual_endpoint::{AtOnce, OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Why no virtual endpoint can be published here.
@@ -14,14 +15,17 @@ pub(crate) fn active(executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::winmm::WinMmEndpoints::new(executor))
 }
 
-/// Refuses: winmm has no virtual ports.
+/// Refuses on the first poll: winmm has no virtual ports.
 pub(crate) fn open_virtual_endpoint(
     _executor: &Executor,
     _spec: &VirtualSpec,
     _producer: InputProducerHandle,
+    _started: Started,
     _main: MainThreadMarker,
-) -> Result<(Box<dyn EndpointBackend>, VirtualProtocol)> {
-    Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
+) -> Result<Box<dyn OpeningBackend>> {
+    Ok(Box::new(AtOnce::new(Err(MidiHardwareError::Unsupported(
+        VIRTUAL_REASON,
+    )))))
 }
 
 /// The platform's own error, as [`MidiHardwareError::Os`] carries it.

@@ -78,7 +78,8 @@
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
 //!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
 //!   feedback delay network, over an [`FdnLayout`]) and
-//!   [`PlateBank`] (Dattorro's plate), their parameters [`Ramp`]s in [`FreeverbRamps`],
+//!   [`PlateBank`] (Dattorro's plate), [`SpringReverb`] (Valimaki, Parker and Abel's spring:
+//!   stretched all-pass cascades in a loop with a delay and a low-pass), their parameters [`Ramp`]s in [`FreeverbRamps`],
 //!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
 //!   given gain.
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
@@ -302,6 +303,10 @@ pub use reverb::network::{
 };
 pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
+pub use reverb::spring::{
+    SpringControls, SpringLayout, SpringLength, SpringLengthError, SpringReverb, SpringStages,
+    SpringStagesError,
+};
 pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;

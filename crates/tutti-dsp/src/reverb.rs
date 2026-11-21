@@ -15,6 +15,7 @@ pub(crate) mod fdn;
 pub(crate) mod freeverb;
 pub(crate) mod network;
 pub(crate) mod plate;
+pub(crate) mod spring;
 
 use tutti_units::{SampleRate, Seconds, Tail};
 
@@ -29,8 +30,13 @@ const RAMP: Seconds = Seconds::new(0.020);
 
 /// A 20 ms ramp at `rate`, in whole chunks (at least one).
 pub(crate) fn ramp(rate: SampleRate) -> Steps {
+    Steps::Fixed(ramp_chunks(rate))
+}
+
+/// The chunks of a 20 ms ramp at `rate` (at least one).
+pub(crate) fn ramp_chunks(rate: SampleRate) -> u32 {
     let chunks = RAMP.to_samples_ceil(rate).get().div_ceil(CHUNK);
-    Steps::Fixed(u32::try_from(chunks).unwrap_or(u32::MAX).max(1))
+    u32::try_from(chunks).unwrap_or(u32::MAX).max(1)
 }
 
 /// The tail a decay time is, in whole frames at `rate`: unbounded when it never ends or is not a

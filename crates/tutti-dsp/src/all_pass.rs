@@ -42,6 +42,11 @@ impl<F: Float> AllPassFilter<F> {
         Samples::new(self.ring.len())
     }
 
+    /// Takes the coefficient `gain`; the ring is kept. No allocation.
+    pub fn retarget(&mut self, gain: Feedback) {
+        self.gain = F::from_unit(gain);
+    }
+
     /// Back to silence. No allocation.
     pub fn reset(&mut self) {
         self.ring.clear();

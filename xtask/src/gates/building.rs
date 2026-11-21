@@ -55,13 +55,30 @@
 //!   `Into<Option<..>>`: "none" is said by not
 //!   calling the option. A terminal `build(self)` whose built type is not its owner is
 //!   not one.
+//! - `default-enum-arg`: a parameter (after the receiver, any when there is none) whose
+//!   type, with `&`, `&mut`, `impl Into<_>` and a `T: Into<_>` bound peeled, names an
+//!   enum that has a usual value, in the crate the name resolves to: a `pub enum` with
+//!   `#[derive(.. Default ..)]` and a `#[default]` variant, or a `pub enum` with a
+//!   hand `impl Default for` (any generics, any path prefix) in its crate. A name
+//!   that resolves to a struct, to an enum with no usual value, or to a crate
+//!   outside `crates/` is no hit. The usual
+//!   value is the option's default, so it is said by not calling the option. Not
+//!   one: a receiver by value whose built type (`Self`, the owner, any wrapper) is
+//!   its owner, which is how a chained option takes its value, a function whose owner
+//!   is the enum itself, a function with no other parameter beside the receiver
+//!   (`set_mode(&mut self, mode)`), and a `set_*` function's last parameter (a keyed
+//!   setter, `set_mode(&mut self, key, mode)`): those calls exist to pass that value.
 //!
 //! **Blind spots.** The scan is lexical: it does not see an item a macro writes (the
 //! `with-prefix` of a macro-made method), an owner reached through a type alias, a
 //! re-export, whether a `pub` type is reachable from the crate root, or what a type
 //! is beyond its name's suffix (`node-ctor` reads the suffix, and `config-width` reads
 //! the suffix of the node a config converts into or is passed to, matched by name
-//! across the tree).
+//! across the tree). `default-enum-arg` resolves a parameter's type name to its crate
+//! from the file's `use` items (any form, `as` renames by local name), a qualified
+//! path's first segment, or else the file's own crate; a glob import (`use x::*`) or
+//! a re-export chain resolves to the importing path's crate only, and a type alias is
+//! not seen.
 //!
 //! **Keys.** `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`. No line
 //! numbers; items that share a key and a rule (an `impl Foo<f32>` and an
@@ -94,9 +111,10 @@ pub(super) enum Rule {
     CtorResult,
     RangeMacro,
     OptionArg,
+    DefaultEnumArg,
 }
 
-const RULES: [(Rule, &str); 8] = [
+const RULES: [(Rule, &str); 9] = [
     (Rule::WithPrefix, "with-prefix"),
     (Rule::ChainResult, "chain-result"),
     (Rule::Setter, "setter"),
@@ -105,6 +123,7 @@ const RULES: [(Rule, &str); 8] = [
     (Rule::CtorResult, "ctor-result"),
     (Rule::RangeMacro, "range-macro"),
     (Rule::OptionArg, "option-arg"),
+    (Rule::DefaultEnumArg, "default-enum-arg"),
 ];
 
 impl Rule {
@@ -257,12 +276,6 @@ pub(super) const ALLOW: &[Allow] = &[
         owner: "FunctionBlock::from_info",
         rules: &[Rule::CtorResult],
         reason: "a conversion from a Function Block Info Notification and a name, not a configuration: it refuses what no block can hold, with a named error",
-    },
-    Allow {
-        path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
-        owner: "VirtualEndpoint::open",
-        rules: &[Rule::CtorResult],
-        reason: "opening an OS endpoint: the OS refuses, not a value a type could forbid",
     },
     ty(
         "crates/tutti-vst2-host/",
@@ -431,12 +444,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "MidiSession::open_over",
         CTOR,
         "opening the OS MIDI ports: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-midi-hardware/",
-        "VirtualEndpoint::open",
-        CTOR,
-        "opening an OS endpoint: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-network/",
@@ -939,6 +946,156 @@ fn takes_option(param: &str, bounds: &str) -> bool {
     b.contains(&format!("{ty}:Into<Option<")) || b.contains(&format!("{ty}: Into<Option<"))
 }
 
+/// The type path a parameter `pat: ty` takes, without generics, with `&`, `&mut`, a
+/// lifetime, `impl Into<_>` and a generic's `Into<_>` bound peeled.
+fn param_path(param: &str, bounds: &str) -> Option<String> {
+    let p = squash(strip_attrs(param));
+    let (_, ty) = p.split_once(':')?;
+    let peel = |t: &str| -> String {
+        let mut t = t.trim().trim_start_matches('&').trim_start();
+        if let Some(r) = t.strip_prefix('\'') {
+            t = r
+                .trim_start_matches(|c: char| c.is_alphanumeric() || c == '_')
+                .trim_start();
+        }
+        t.strip_prefix("mut ").unwrap_or(t).trim().to_owned()
+    };
+    let inner = |t: &str| -> Option<String> {
+        let r = t.strip_prefix("Into<")?.strip_suffix('>')?;
+        Some(peel(r))
+    };
+    let ty = peel(ty);
+    let ty = if let Some(t) = ty.strip_prefix("impl ") {
+        inner(t.trim())?
+    } else {
+        let b = squash(bounds);
+        let at = b
+            .find(&format!("{ty}:Into<"))
+            .or_else(|| b.find(&format!("{ty}: Into<")));
+        match at {
+            Some(i) => {
+                let rest = &b[i + ty.len()..];
+                let rest = rest.trim_start_matches(':').trim_start();
+                let close = matching(rest, 4, b'<', b'>')?;
+                inner(&rest[..=close]).unwrap_or(ty)
+            }
+            None => ty,
+        }
+    };
+    let path = ty[..ty.find('<').unwrap_or(ty.len())]
+        .trim()
+        .trim_start_matches("::");
+    (!path.is_empty()
+        && path
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == ':'))
+    .then(|| path.to_owned())
+}
+
+/// The crate directory name a path's first segment names: `tutti_x` is `tutti-x`,
+/// `crate`, `self`, `super` and a local module are `own`; `None` for `std`, `core`
+/// and `alloc`.
+fn first_crate(seg: &str, own: &str) -> Option<String> {
+    match seg {
+        "std" | "core" | "alloc" => None,
+        s if s.starts_with("tutti_") => Some(s.replace('_', "-")),
+        _ => Some(own.to_owned()),
+    }
+}
+
+/// What a file's `use` items bring in: each local name with the crate it comes from,
+/// and the crates of its glob imports.
+#[derive(Default)]
+struct Imports {
+    /// A local name: the crate it comes from and the name it has there.
+    names: BTreeMap<String, (Option<String>, String)>,
+    globs: BTreeSet<String>,
+}
+
+impl Imports {
+    fn add(&mut self, tree: &str, prefix: &[String], own: &str) {
+        let t = tree.trim();
+        if let Some(b) = t.find('{') {
+            let Some(close) = matching(t, b, b'{', b'}') else {
+                return;
+            };
+            let mut pre = prefix.to_vec();
+            pre.extend(segments(&t[..b]));
+            for part in split_top(&t[b + 1..close]) {
+                self.add(part, &pre, own);
+            }
+            return;
+        }
+        let (path, alias) = match find_word_from(t, "as", 0) {
+            Some(a) => (&t[..a], Some(t[a + 2..].trim())),
+            None => (t, None),
+        };
+        let mut full = prefix.to_vec();
+        full.extend(segments(path));
+        let Some(first) = full.first() else { return };
+        let krate = first_crate(first, own);
+        match full.last().map(String::as_str) {
+            Some("*") => {
+                self.globs.extend(krate);
+            }
+            Some("self") if full.len() >= 2 => {
+                let local = full[full.len() - 2].clone();
+                let orig = local.clone();
+                self.names.insert(local, (krate, orig));
+            }
+            Some(last) => {
+                let local = alias.unwrap_or(last).to_owned();
+                self.names.insert(local, (krate, last.to_owned()));
+            }
+            None => {}
+        }
+    }
+
+    /// The `(crate, name)` a type path may name, in a file of crate `own`.
+    fn resolve(&self, path: &str, own: &str) -> Vec<(String, String)> {
+        let segs = segments(path);
+        let Some(last) = segs.last() else {
+            return Vec::new();
+        };
+        let pair = |c: &String| (c.clone(), last.clone());
+        match segs.as_slice() {
+            [name] => match self.names.get(name) {
+                Some((c, orig)) => c.iter().map(|c| (c.clone(), orig.clone())).collect(),
+                None => std::iter::once(own.to_owned())
+                    .chain(self.globs.iter().cloned())
+                    .map(|c| (c, last.clone()))
+                    .collect(),
+            },
+            [first, ..] => match self.names.get(first) {
+                Some((c, _)) => c.iter().map(pair).collect(),
+                None => first_crate(first, own).iter().map(pair).collect(),
+            },
+            [] => Vec::new(),
+        }
+    }
+}
+
+fn segments(path: &str) -> Vec<String> {
+    path.split("::")
+        .map(|x| x.trim().to_owned())
+        .filter(|x| !x.is_empty())
+        .collect()
+}
+
+/// The type an `impl Default for X` header (generics, a path prefix and a `where`
+/// clause allowed) is for.
+fn default_target(header: &str) -> Option<String> {
+    let mut h = header.trim();
+    if h.starts_with('<') {
+        h = h[matching(h, 0, b'<', b'>')? + 1..].trim();
+    }
+    if let Some(w) = find_word_from(h, "where", 0) {
+        h = h[..w].trim();
+    }
+    let f = find_word_from(h, "for", 0)?;
+    (bare(&h[..f]) == "Default").then(|| bare(h[f + 3..].trim()).to_owned())
+}
+
 fn macro_bodies(code: &str) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
     let mut from = 0;
@@ -1007,22 +1164,62 @@ fn writes_range_type(body: &str) -> bool {
 pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
     let parsed = parse_file(path, src);
     let nodes = parsed.nodes.clone();
-    parsed.finish(&nodes)
+    let usual = Usual::of(std::iter::once(&parsed));
+    parsed.finish(&nodes, &usual)
 }
 
 /// One file's reading: its violations, its `config-width` candidates (kept apart until
 /// the tree's node configs are known) and the `*Config` names it converts into a node.
 struct Parsed {
+    krate: String,
     sites: BTreeSet<Site>,
     widths: Vec<Site>,
     nodes: BTreeSet<String>,
+    /// `default-enum-arg` candidates: a site and the `(crate, name)` each parameter's
+    /// type may be.
+    args: Vec<(Site, Vec<(String, String)>)>,
+    /// The `pub enum`s that derive `Default`, and every `pub enum`.
+    derived: BTreeSet<String>,
+    pub_enums: BTreeSet<String>,
+    /// The types an `impl Default for` names.
+    hand: BTreeSet<String>,
+}
+
+/// The `(crate, name)` of every `pub enum` that has a usual value: a derived `Default`
+/// with a `#[default]` variant, or a hand `impl Default for` in its crate.
+#[derive(Default)]
+struct Usual {
+    enums: BTreeSet<(String, String)>,
+}
+
+impl Usual {
+    fn of<'a>(files: impl Iterator<Item = &'a Parsed> + Clone) -> Usual {
+        let mut u = Usual::default();
+        let mut impls = BTreeSet::new();
+        let mut enums = BTreeSet::new();
+        for p in files {
+            u.enums
+                .extend(p.derived.iter().map(|n| (p.krate.clone(), n.clone())));
+            impls.extend(p.hand.iter().map(|n| (p.krate.clone(), n.clone())));
+            enums.extend(p.pub_enums.iter().map(|n| (p.krate.clone(), n.clone())));
+        }
+        u.enums.extend(impls.intersection(&enums).cloned());
+        u
+    }
 }
 
 impl Parsed {
-    /// The violations, with a `config-width` candidate kept when its owner is in `nodes`.
-    fn finish(self, nodes: &BTreeSet<String>) -> Vec<Site> {
+    /// The violations, with a `config-width` candidate kept when its owner is in `nodes`
+    /// and a `default-enum-arg` candidate kept when a parameter's type is in `usual`.
+    fn finish(self, nodes: &BTreeSet<String>, usual: &Usual) -> Vec<Site> {
         let mut sites = self.sites;
         sites.extend(self.widths.into_iter().filter(|s| nodes.contains(&s.owner)));
+        sites.extend(self.args.into_iter().filter_map(|(s, names)| {
+            names
+                .iter()
+                .any(|c| c.1 != s.owner && usual.enums.contains(c))
+                .then_some(s)
+        }));
         sites.into_iter().collect()
     }
 }
@@ -1081,6 +1278,21 @@ fn parse_file(path: &str, src: &str) -> Parsed {
     let mut sites = BTreeSet::new();
     let mut widths = Vec::new();
     let mut nodes = BTreeSet::new();
+    let own = crate_of(path);
+    let mut imports = Imports::default();
+    let mut u = 0;
+    while let Some(p) = find_word_from(&code, "use", u) {
+        u = p + 3;
+        if in_test(p) || in_macro(p) {
+            continue;
+        }
+        let end = code[u..].find(';').map_or(code.len(), |i| u + i);
+        imports.add(&code[u..end], &[], own);
+    }
+    let mut args = Vec::new();
+    let mut derived = BTreeSet::new();
+    let mut pub_enums = BTreeSet::new();
+    let mut hand = BTreeSet::new();
     let mut at = 0;
     while let Some(p) = find_word_from(&code, "impl", at) {
         at = p + 4;
@@ -1094,6 +1306,40 @@ fn parse_file(path: &str, src: &str) -> Parsed {
         }
         let end = code[at..].find(['{', ';']).map_or(code.len(), |i| at + i);
         nodes.extend(converted_config(&code[at..end]));
+        hand.extend(default_target(&code[at..end]));
+    }
+    let mut at = 0;
+    while let Some(e) = find_word_from(&code, "enum", at) {
+        at = e + 4;
+        let before = code[..e].trim_end();
+        let Some(pub_at) = before.len().checked_sub(3) else {
+            continue;
+        };
+        if !before.ends_with("pub")
+            || in_test(e)
+            || before[..pub_at].ends_with(|c: char| c.is_alphanumeric() || c == '_')
+        {
+            continue;
+        }
+        let (name, after) = ident_at(&code, e + 4);
+        if name.is_empty() {
+            continue;
+        }
+        pub_enums.insert(name.to_owned());
+        let start = code[..pub_at].rfind(['}', ';', '{']).map_or(0, |i| i + 1);
+        let attrs = &code[start..pub_at];
+        let Some(open) = code[after..].find('{').map(|i| after + i) else {
+            continue;
+        };
+        let Some(close) = matching(&code, open, b'{', b'}') else {
+            continue;
+        };
+        if attrs.contains("derive")
+            && find_word_from(attrs, "Default", 0).is_some()
+            && squash(&code[open..close]).contains("#[default]")
+        {
+            derived.insert(name.to_owned());
+        }
     }
     if !in_macro_home {
         for (open, close, name) in &macros {
@@ -1173,6 +1419,28 @@ fn parse_file(path: &str, src: &str) -> Parsed {
                 rule,
             });
         };
+        let chained = recv == Recv::Value && ty.is_some();
+        let skip = usize::from(recv != Recv::None);
+        if !chained && params.len() > skip + 1 {
+            // A keyed setter's last parameter is the value it sets.
+            let set = params.len() - usize::from(name.starts_with("set_"));
+            let names: Vec<(String, String)> = params[..set]
+                .iter()
+                .skip(skip)
+                .filter_map(|p| param_path(p, &bounds))
+                .flat_map(|path| imports.resolve(&path, own))
+                .collect();
+            if !names.is_empty() {
+                args.push((
+                    Site {
+                        key: key.clone(),
+                        owner: owner.to_owned(),
+                        rule: Rule::DefaultEnumArg,
+                    },
+                    names,
+                ));
+            }
+        }
         match recv {
             Recv::Value => {
                 if name.starts_with("with_") {
@@ -1220,9 +1488,14 @@ fn parse_file(path: &str, src: &str) -> Parsed {
         from = close;
     }
     Parsed {
+        krate: crate_of(path).to_owned(),
         sites,
         widths,
         nodes,
+        args,
+        derived,
+        pub_enums,
+        hand,
     }
 }
 
@@ -1295,8 +1568,9 @@ fn found(tree: &dyn Tree, allow: &[Allow]) -> (BTreeSet<Row>, BTreeSet<usize>) {
         nodes.extend(p.nodes.iter().cloned());
         parsed.push((path, p));
     }
+    let usual = Usual::of(parsed.iter().map(|(_, p)| p));
     for (path, p) in parsed {
-        for s in p.finish(&nodes) {
+        for s in p.finish(&nodes, &usual) {
             let covered: Vec<usize> = (0..allow.len())
                 .filter(|&i| allowed(&path, &s, &allow[i]))
                 .collect();
@@ -1453,6 +1727,163 @@ mod tests {
         ] {
             assert_eq!(rules(ok), vec![], "{ok}");
         }
+    }
+
+    const HOSTING: &str =
+        "#[derive(Debug, Default)] pub enum Hosting { #[default] Auto, InProcess }\n";
+
+    fn tree_rules(files: &[(&str, &str)]) -> Vec<String> {
+        let mut all = vec![(LIST, "")];
+        all.extend_from_slice(files);
+        let r = check(&Mem::with(&all), &[], 0);
+        r.findings
+            .into_iter()
+            .filter(|l| l.contains("default-enum-arg"))
+            .collect()
+    }
+
+    #[test]
+    fn a_derived_default_enum_taken_by_a_ref_method_is_a_violation() {
+        let src =
+            format!("{HOSTING}impl S {{ pub fn load(&self, id: u8, h: Hosting) -> u8 {{ 0 }} }}");
+        assert_eq!(rules(&src), one("load", "default-enum-arg"));
+        for peeled in [
+            "h: &Hosting",
+            "h: &mut Hosting",
+            "h: impl Into<Hosting>",
+            "h: crate::Hosting",
+        ] {
+            let src = format!("{HOSTING}impl S {{ pub fn load(&self, id: u8, {peeled}) {{}} }}");
+            assert_eq!(rules(&src), one("load", "default-enum-arg"), "{peeled}");
+        }
+        let src =
+            format!("{HOSTING}impl S {{ pub fn new(id: u8, h: Hosting) -> Self {{ todo!() }} }}");
+        assert_eq!(rules(&src), one("new", "default-enum-arg"));
+        let src = format!(
+            "{HOSTING}impl S {{ pub fn load<H: Into<Hosting>>(&self, id: u8, h: H) {{}}\n\
+             pub fn open<H>(&self, id: u8, h: H) where H: Into<Hosting> {{}} }}"
+        );
+        assert_eq!(
+            rules(&src),
+            vec![
+                ("load".to_owned(), "default-enum-arg"),
+                ("open".to_owned(), "default-enum-arg")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hand_default_enum_is_known_in_its_own_crate_only() {
+        let en = "pub enum Mode { A, B }\nimpl<T> Default for Mode { fn default() -> Self { Mode::A } }\n";
+        let user = "impl S { pub fn go(&self, id: u8, m: Mode) {} }";
+        let same = tree_rules(&[("crates/a/src/lib.rs", user), ("crates/a/src/mode.rs", en)]);
+        assert_eq!(same.len(), 1, "{same:?}");
+        let other = tree_rules(&[("crates/a/src/lib.rs", user), ("crates/b/src/mode.rs", en)]);
+        assert!(other.is_empty(), "{other:?}");
+        let prefixed = "pub enum Mode { A }\nimpl core::default::Default for Mode { fn default() -> Self { Mode::A } }\n";
+        let same = tree_rules(&[
+            ("crates/a/src/lib.rs", user),
+            ("crates/a/src/mode.rs", prefixed),
+        ]);
+        assert_eq!(same.len(), 1, "{same:?}");
+    }
+
+    #[test]
+    fn a_chained_option_taking_a_default_enum_and_the_enums_own_methods_are_not_violations() {
+        for ok in [
+            "impl C { pub fn hosting(self, id: u8, h: Hosting) -> Self { self } }",
+            "impl C { pub fn hosting(mut self, id: u8, h: Hosting) -> C { self } }",
+            "impl Hosting { pub fn same(&self, id: u8, h: Hosting) -> bool { true } }",
+            "impl C { pub fn hosting(&self, n: u8) {} }",
+        ] {
+            assert_eq!(rules(&format!("{HOSTING}{ok}")), vec![], "{ok}");
+        }
+        // A by-value receiver that does not build its owner takes the option positionally.
+        let src = format!(
+            "{HOSTING}impl C {{ pub fn spawn(self, id: u8, h: Hosting) -> Product {{ todo!() }} }}"
+        );
+        assert_eq!(rules(&src), one("spawn", "default-enum-arg"));
+    }
+
+    #[test]
+    fn a_setter_taking_only_the_default_enum_passes_and_with_a_second_parameter_fails() {
+        let only = format!(
+            "{HOSTING}impl S {{ pub fn set_mode(&mut self, h: Hosting) {{}}\n\
+                            pub fn pick(h: Hosting) -> u8 {{ 0 }} }}"
+        );
+        assert_eq!(rules(&only), one("set_mode", "setter"));
+        let two = format!("{HOSTING}impl S {{ pub fn load(&mut self, id: u8, h: Hosting) {{}} }}");
+        assert_eq!(rules(&two), one("load", "default-enum-arg"));
+    }
+
+    #[test]
+    fn a_keyed_setter_sets_its_last_parameter_and_an_enum_before_it_is_an_option() {
+        let keyed =
+            format!("{HOSTING}impl S {{ pub fn set_mode(&mut self, id: u8, h: Hosting) {{}} }}");
+        assert_eq!(rules(&keyed), one("set_mode", "setter"));
+        let first =
+            format!("{HOSTING}impl S {{ pub fn set_mode(&mut self, h: Hosting, id: u8) {{}} }}");
+        let found = rules(&first);
+        assert!(
+            found.iter().any(|(_, r)| *r == "default-enum-arg"),
+            "an enum before the set value is an option: {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_name_resolves_to_the_crate_it_is_imported_from() {
+        let en = "#[derive(Default)] pub enum Direction { #[default] Up, Down }";
+        let st = "pub struct Direction(f64);";
+        let user = |imp: &str, ty: &str| {
+            format!("{imp}\nimpl S {{ pub fn go(&self, id: u8, d: {ty}) {{}} }}")
+        };
+        let run = |imp: &str, ty: &str| {
+            tree_rules(&[
+                ("crates/tutti-a/src/lib.rs", &user(imp, ty)),
+                ("crates/tutti-e/src/lib.rs", en),
+                ("crates/tutti-s/src/lib.rs", st),
+            ])
+            .len()
+        };
+        assert_eq!(run("use tutti_s::Direction;", "Direction"), 0);
+        assert_eq!(run("use tutti_e::Direction;", "Direction"), 1);
+        assert_eq!(run("use tutti_e::{Other, Direction};", "Direction"), 1);
+        assert_eq!(run("use tutti_s::{a::{Other}, Direction};", "Direction"), 0);
+        assert_eq!(run("use tutti_e::module::Direction;", "Direction"), 1);
+        assert_eq!(run("use tutti_e;", "tutti_e::Direction"), 1);
+        assert_eq!(run("", "tutti_s::Direction"), 0);
+        assert_eq!(run("", "tutti_e::Direction"), 1);
+        // No import and no path: the file's own crate, which has no `Direction`.
+        assert_eq!(run("", "Direction"), 0);
+        assert_eq!(run("use std::fmt::Direction;", "Direction"), 0);
+    }
+
+    #[test]
+    fn an_as_rename_resolves_by_its_local_name() {
+        let en = "#[derive(Default)] pub enum Direction { #[default] Up, Down }";
+        let st = "pub struct Direction(f64);";
+        let run = |imp: &str, ty: &str| {
+            let user = format!("{imp}\nimpl S {{ pub fn go(&self, id: u8, d: {ty}) {{}} }}");
+            tree_rules(&[
+                ("crates/tutti-a/src/lib.rs", &user),
+                ("crates/tutti-e/src/lib.rs", en),
+                ("crates/tutti-s/src/lib.rs", st),
+            ])
+            .len()
+        };
+        assert_eq!(run("use tutti_e::Direction as Heading;", "Heading"), 1);
+        assert_eq!(run("use tutti_s::Direction as Heading;", "Heading"), 0);
+        // The original name is no longer in scope: it is the file's own crate's.
+        assert_eq!(run("use tutti_e::Direction as Heading;", "Direction"), 0);
+    }
+
+    #[test]
+    fn an_enum_without_a_default_is_not_a_usual_value() {
+        let src = "pub enum Kind { A, B }\nimpl S { pub fn go(&self, k: Kind) {} }";
+        assert_eq!(rules(src), vec![]);
+        let src =
+            "#[derive(Debug)] pub enum Kind { A, B }\nimpl S { pub fn go(&self, k: Kind) {} }";
+        assert_eq!(rules(src), vec![]);
     }
 
     #[test]

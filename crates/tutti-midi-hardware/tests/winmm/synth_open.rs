@@ -29,6 +29,11 @@ fn drained(out: &OpenOutput) {
     }
 }
 
+/// The proof that `devices`' backend is ready: winmm has nothing to start.
+fn started(devices: &Devices) -> tutti_midi_hardware::Started {
+    tutti_fixtures::block_on(devices.start()).expect("winmm has nothing to start")
+}
+
 #[test]
 fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
     let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
@@ -41,7 +46,7 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
         .collect();
     for round in 0..2 {
         let mut out = devices
-            .open_output(&id)
+            .open_output(started(&devices), &id)
             .unwrap_or_else(|e| panic!("the synth opens in round {round}: {e:?}"));
         let now = Instant::now();
         let later = now + Duration::from_millis(90);
@@ -72,11 +77,13 @@ fn an_output_dropped_before_the_executors_last_clone_frees_the_synth_for_a_reope
     let executor = tutti_platform::Executor::new();
     let devices = Devices::open(&executor).unwrap();
     let id = synth(&devices).id;
-    let out = devices.open_output(&id).expect("the synth opens");
+    let out = devices
+        .open_output(started(&devices), &id)
+        .expect("the synth opens");
     drop(devices);
     drop(out);
     drop(executor);
     let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
-    let again = devices.open_output(&id);
+    let again = devices.open_output(started(&devices), &id);
     assert!(again.is_ok(), "the synth opens again: {:?}", again.err());
 }

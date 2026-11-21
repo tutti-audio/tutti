@@ -274,6 +274,7 @@ param_session_node!(
     FdnNode,
     ShimmerNode,
     PlateReverbNode,
+    SpringReverbNode,
     ConvolverNode,
     NoiseNode,
 );

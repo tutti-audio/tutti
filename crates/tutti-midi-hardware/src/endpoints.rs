@@ -40,6 +40,7 @@
 use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::error::Result;
+use crate::start::{Start, Started};
 use crate::{InputFault, InputProducerHandle};
 use tutti_graph::Losses;
 use tutti_midi_device::EndpointId;
@@ -95,9 +96,25 @@ impl Watch for NoWatch {}
 
 /// This OS's MIDI endpoints.
 pub trait MidiEndpoints: Send + Sync {
-    /// Starts reporting the device list to `sink`: every device present now,
-    /// seeded before this returns, then each change from a thread of the
-    /// backend's own.
+    /// The wait for the backend to be ready to open endpoints and ports.
+    ///
+    /// A backend that has something to start (CoreMIDI's client, made on a thread
+    /// of its own) returns a [`Start`] that resolves when it is made, or with the
+    /// error it failed with. The default is for a backend with nothing to start: a
+    /// start that is ready on its first poll. The [`Started`] it resolves to is what
+    /// [`open_input`](Self::open_input) and [`open_output`](Self::open_output) take.
+    fn start(&self) -> Start {
+        Start::ready()
+    }
+
+    /// Starts reporting the device list to `sink`: every device present, once the
+    /// backend can list them, then each change from a thread of the backend's own.
+    /// A backend with nothing to start (ALSA, winmm, the stub) lists them before this
+    /// returns; one that has a start to wait for (CoreMIDI) lists them when its
+    /// [`start`](Self::start) has resolved, and the watch stays registered if a start
+    /// fails and seeds when a later one succeeds. A reader of
+    /// [`DeviceEvents::initial`](crate::DeviceEvents::initial) after the start has
+    /// resolved sees the seeded list on every backend.
     ///
     /// Where the OS cannot be asked (no sequencer to open) the watch reports
     /// nothing, as [`inputs`](Self::inputs) lists nothing there.
@@ -131,6 +148,7 @@ pub trait MidiEndpoints: Send + Sync {
     /// a present input.)
     fn open_input(
         &self,
+        started: Started,
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>>;
@@ -146,7 +164,7 @@ pub trait MidiEndpoints: Send + Sync {
     /// As [`open_input`](Self::open_input), plus
     /// [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported) from the stub backend
     /// on a platform with no backend.
-    fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>>;
+    fn open_output(&self, started: Started, id: EndpointId) -> Result<Box<dyn DeviceOut>>;
 }
 
 /// A device's output as a backend opens it: a [`MidiOut`] that is also told the

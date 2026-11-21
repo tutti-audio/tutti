@@ -1351,7 +1351,12 @@ mod tests {
         .unwrap();
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         let id = session.outputs().first().expect("the device").id.clone();
-        (session.connect_output(&id).unwrap(), counters)
+        (
+            session
+                .connect_output(crate::testing::started(), &id)
+                .unwrap(),
+            counters,
+        )
     }
 
     // A MIDI-CI message is SysEx7 packets, and a device with room for some of

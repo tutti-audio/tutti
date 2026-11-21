@@ -683,12 +683,13 @@ impl MidiEndpoints for Polled {
     }
     fn open_input(
         &self,
+        _started: crate::Started,
         _: EndpointId,
         _: crate::InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         Err(MidiHardwareError::Unsupported("test"))
     }
-    fn open_output(&self, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: crate::Started, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
         Err(MidiHardwareError::Unsupported("test"))
     }
 }
@@ -750,12 +751,13 @@ impl MidiEndpoints for Captured {
     }
     fn open_input(
         &self,
+        _started: crate::Started,
         _: EndpointId,
         _: crate::InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         Err(MidiHardwareError::Unsupported("test"))
     }
-    fn open_output(&self, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: crate::Started, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
         Err(MidiHardwareError::Unsupported("test"))
     }
 }

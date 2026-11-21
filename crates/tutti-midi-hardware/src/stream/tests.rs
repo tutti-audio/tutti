@@ -135,8 +135,10 @@ impl Wire {
     /// Connects the wire's input, keeping its inlet so what the device sends
     /// has somewhere to go.
     fn open(&mut self) {
-        if let crate::Connected::Opened(inlet) =
-            self.session.connect_input(&self.id.clone()).unwrap()
+        if let crate::Connected::Opened(inlet) = self
+            .session
+            .connect_input(crate::testing::started(), &self.id.clone())
+            .unwrap()
         {
             self.inlet = Some(inlet);
         }
@@ -159,7 +161,11 @@ impl Wire {
 
     /// Connects the output of the device, held by the wire.
     fn connect_output(&mut self) {
-        self.output = Some(self.session.connect_output(&self.id).unwrap());
+        self.output = Some(
+            self.session
+                .connect_output(crate::testing::started(), &self.id)
+                .unwrap(),
+        );
     }
 
     /// Queues `events` to the held output: how many the device took.
@@ -407,7 +413,11 @@ fn midi1_wire_ci(ci: Option<tutti_ump::DeviceIdentity>) -> Wire {
         })),
         ci,
     );
-    if let crate::Connected::Opened(inlet) = wire.session.connect_input(&wire.id.clone()).unwrap() {
+    if let crate::Connected::Opened(inlet) = wire
+        .session
+        .connect_input(crate::testing::started(), &wire.id.clone())
+        .unwrap()
+    {
         wire.inlet = Some(inlet);
     }
     wire
@@ -576,7 +586,10 @@ fn the_asking_output_is_the_inputs_own_and_closes_with_it() {
     assert!(received(&wire).is_empty(), "no retry after the input went");
     assert!(wire.session.stream(&wire.id).is_none());
 
-    let output = wire.session.connect_output(&wire.id.clone()).unwrap();
+    let output = wire
+        .session
+        .connect_output(crate::testing::started(), &wire.id.clone())
+        .unwrap();
     assert_eq!(output.id(), &wire.id);
 }
 
