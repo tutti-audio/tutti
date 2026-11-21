@@ -22,8 +22,8 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    CrossfadeRefused, DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState,
-    PluginCause, PluginHealth, PluginNode, Presence, RecoveryPolicy, Resource, RestoreState,
+    DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
+    PluginHealth, PluginNode, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState,
     SaveState, Session, SessionEvent, StateStartError, SwapPluginError,
 };
 use tutti_units::Normalized;
@@ -835,7 +835,7 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
         panic!("{refused:?}");
     };
     assert!(
-        matches!(*refused, CrossfadeRefused::Poisoned(_)),
+        matches!(*refused, ReplaceRefused::Poisoned(_)),
         "{refused:?}"
     );
     assert_eq!(

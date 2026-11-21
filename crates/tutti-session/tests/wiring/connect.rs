@@ -122,7 +122,7 @@ fn a_width_mismatch_is_refused_and_stores_nothing() {
             to_width: 1
         }
     );
-    assert!(!s.graph().is_edited(), "nothing was wired");
+    assert!(!s.graph().has_uncommitted_edits(), "nothing was wired");
 }
 
 /// **A node cannot feed itself, and an absent node is named.**
@@ -176,5 +176,5 @@ fn topology_shows_the_edge_a_connect_wrote() {
             "channel {c} is fed by the source's channel {c}"
         );
     }
-    assert!(s.graph().is_edited(), "and no commit has run");
+    assert!(s.graph().has_uncommitted_edits(), "and no commit has run");
 }

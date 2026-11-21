@@ -57,9 +57,12 @@ fn drain(tap: &mut EventTapReader) -> Vec<(u64, u8)> {
 fn pushed_events_come_out_at_their_frames() {
     let mut s = session();
     let _ = s.update();
-    assert!(!s.graph().is_edited());
+    assert!(!s.graph().has_uncommitted_edits());
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(64));
-    assert!(s.graph().is_edited(), "the open inserted a node");
+    assert!(
+        s.graph().has_uncommitted_edits(),
+        "the open inserted a node"
+    );
     let (node, mut prebuilt) = EventInletNode::pair(EventCapacity::of(64));
     let key2 = s.graph().add(node);
     assert_ne!(key, key2);

@@ -92,7 +92,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
     let mut old = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("the outputs exist");
     assert_eq!(old.width(), 2);
     for _ in 0..3 {
@@ -161,7 +161,7 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("the outputs exist");
     let _ = block(&mut s);
     s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
@@ -231,7 +231,7 @@ fn only_the_last_of_two_changes_before_an_update_is_reported() {
     let mut old = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("opens");
     let _ = block(&mut s);
     s.declare_root_topology(Some(mono()))
@@ -260,7 +260,7 @@ fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
     let _old = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("opens");
     s.declare_root_topology(Some(mono()))
         .expect("mono")
@@ -291,7 +291,7 @@ fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
     let _old = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("opens");
     s.declare_root_topology(Some(mono()))
         .expect("mono")
@@ -325,7 +325,7 @@ fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopene
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
@@ -353,7 +353,7 @@ fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
     let old = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
@@ -377,7 +377,7 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
     let mut old = s
         .graph()
         .taps()
-        .open_output(Samples::new(4096))
+        .open_root(Samples::new(4096))
         .expect("opens");
     let id = old.id().expect("named");
     let _ = block(&mut s);

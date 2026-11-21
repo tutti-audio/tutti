@@ -2,13 +2,13 @@
 
 use thiserror::Error;
 
-/// Why [`Session::open_output_tap`](crate::Session::open_output_tap) or
-/// [`Session::close_output_tap`](crate::Session::close_output_tap) refused.
+/// Why [`Session::open_heard_tap`](crate::Session::open_heard_tap) or
+/// [`Session::close_heard_tap`](crate::Session::close_heard_tap) refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Error)]
 #[non_exhaustive]
-pub enum SessionOutputTapError {
+pub enum SessionHeardTapError {
     /// The session has no engine, so nothing renders to tap (a detached
-    /// session; a plan tap, [`Taps::open`](crate::Taps::open), is
+    /// session; a plan tap, [`Taps::open_ports`](crate::Taps::open_ports), is
     /// fed by its `render_frame`).
     #[error("this session has no engine to tap")]
     Detached,
@@ -423,9 +423,9 @@ pub enum Error {
     Inlet(#[from] InletError),
 
     /// A swap of one node for another was refused
-    /// ([`Graph::crossfade`](crate::Graph::crossfade)).
+    /// ([`Graph::replace`](crate::Graph::replace)).
     #[error(transparent)]
-    Crossfade(#[from] crate::CrossfadeRefused),
+    Replace(#[from] crate::ReplaceRefused),
 
     /// The graph refused a re-prepare: a device restart asked for a block
     /// past the engine's capacity, came while another re-prepare was between

@@ -112,7 +112,7 @@ fn rig() -> Rig {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    assert!(!s.graph_ref().is_edited());
+    assert!(!s.graph_ref().has_uncommitted_edits());
     Rig {
         s,
         stereo: stereo.erase(),
@@ -128,12 +128,12 @@ fn rig() -> Rig {
 fn connecting_and_disconnecting_a_bus_edge_round_trips() {
     let mut r = rig();
     let g = r.s.graph();
-    let (ins, outs) = g.buses(r.stereo).expect("declared");
+    let (ins, outs) = g.node_buses(r.stereo).expect("declared");
     assert!(ins.is_empty(), "no input channels, no input bus");
     assert_eq!(outs.len(), 1);
     assert_eq!(outs.get(0).unwrap().topology, named(2));
     assert_eq!(
-        g.buses(NodeKey(u64::MAX)).unwrap_err().node(),
+        g.node_buses(NodeKey(u64::MAX)).unwrap_err().node(),
         NodeKey(u64::MAX)
     );
 
@@ -146,7 +146,7 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
         .unwrap()
         .unfaded();
-    assert!(g.is_edited());
+    assert!(g.has_uncommitted_edits());
     assert_eq!(
         g.bus_sources(BusRef::new(r.sink, 0)).unwrap(),
         [BusSource::Node(bus(r.stereo))]
@@ -175,7 +175,7 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
             .unfaded()
             .was_connected()
     );
-    assert!(g.is_edited());
+    assert!(g.has_uncommitted_edits());
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
     assert_eq!(
         g.sources(InPort::new(r.sink, 0)).unwrap(),
@@ -263,7 +263,7 @@ fn a_refused_bus_edge_changes_nothing() {
         g.connect(BusSource::Node(bus(NodeKey(u64::MAX))), bus(r.sink)),
         Err(ConnectError::Bus(BusError::NoSuchNode { .. }))
     ));
-    assert!(!g.is_edited());
+    assert!(!g.has_uncommitted_edits());
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
 }
 
@@ -332,7 +332,7 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
     g.connect(BusSource::Node(bus(src)), Root)
         .expect("5.1 folds to stereo")
         .unfaded();
-    assert!(g.is_edited());
+    assert!(g.has_uncommitted_edits());
     assert_eq!(g.bus_sources(Root).unwrap(), [BusSource::Node(bus(src))]);
     let [l, r] = stereo_block(&mut s);
     // The unity lane is a plain addend, the others weighted, in source order.
@@ -354,7 +354,7 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
             .unfaded()
             .was_connected()
     );
-    assert!(g.is_edited());
+    assert!(g.has_uncommitted_edits());
     let [l, r] = stereo_block(&mut s);
     assert!(all_are(&l, 0.0) && all_are(&r, 0.0));
 }
@@ -370,7 +370,7 @@ fn an_undeclared_root_refuses_a_bus_edge() {
         g.connect(BusSource::Node(bus(r.stereo)), Root).err(),
         Some(ConnectError::Bus(BusError::RootUndeclared))
     );
-    assert!(!g.is_edited());
+    assert!(!g.has_uncommitted_edits());
     assert!(g.bus_sources(Root).unwrap().is_empty());
 }
 
@@ -452,7 +452,7 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     s.declare_root_topology(Some(ChannelTopology::unassigned(layout(2))))
         .expect("an unassigned pair")
         .unfaded();
-    assert!(s.graph_ref().is_edited());
+    assert!(s.graph_ref().has_uncommitted_edits());
     let [l, r] = stereo_block(&mut s);
     assert!(all_are(&l, 0.25) && all_are(&r, 0.75));
 
@@ -460,7 +460,7 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     s.declare_root_topology(Some(smpte(1)))
         .expect("mono")
         .unfaded();
-    assert!(s.graph_ref().is_edited());
+    assert!(s.graph_ref().has_uncommitted_edits());
     let [l, _] = stereo_block(&mut s);
     assert!(all_are(&l, 0.5), "{:?}", &l[..2]);
 

@@ -215,7 +215,7 @@ impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
         transport: &tutti_graph::TransportPosition,
         output: tutti_buffers::InterleavedMut<'_, F>,
     ) {
-        if self.graph.is_edited() {
+        if self.graph.has_uncommitted_edits() {
             self.commit();
         }
         self.graph.render_local(transport, output);
