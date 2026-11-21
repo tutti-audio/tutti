@@ -12,7 +12,6 @@
 0 1 crates/tutti-midi-hardware/src/backend/alsa/input.rs
 1 10 crates/tutti-midi-hardware/src/backend/alsa/tests.rs
 0 1 crates/tutti-midi-hardware/src/backend/legacy_port/tests.rs
-1 1 crates/tutti-midi-hardware/src/devices/tests.rs
 0 1 crates/tutti-midi-hardware/src/stamp/tests.rs
 0 2 crates/tutti-midi-hardware/tests/input/listener.rs
 0 1 crates/tutti-midi-hardware/tests/input/virtual_endpoint.rs
@@ -34,7 +33,6 @@
 0 1 crates/tutti-session/tests/main_thread/vst2_modulation.rs
 0 2 crates/tutti-session/tests/main_thread/vst2_off_main_handle.rs
 0 1 crates/tutti-session/tests/midi/loads.rs
-0 4 crates/tutti-session/tests/midi/midi_ports.rs
 0 1 crates/tutti-session/tests/midi/system_clock.rs
 0 5 crates/tutti-session/tests/nodes/sampler_loads.rs
 0 1 crates/tutti-session/tests/nodes/silenced_event.rs
