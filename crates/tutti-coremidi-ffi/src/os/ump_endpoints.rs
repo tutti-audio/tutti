@@ -86,6 +86,10 @@ pub enum UmpEndpointsError {
 /// [`UmpEndpointsError::Unsupported`] before macOS 15, and
 /// [`UmpEndpointsError::Exception`] when CoreMIDI raises an Objective-C
 /// exception.
+///
+/// It takes no [`SharedClient`](crate::SharedClient): the listing is reached
+/// where no client may be started, and the exception CoreMIDI raises here with
+/// no MIDI server is one [`catch`](super::objc_exception::catch) catches.
 pub fn ump_endpoints() -> Result<Vec<UmpEndpointInfo>, UmpEndpointsError> {
     // `ClassType::class` panics on a missing class; the lookup by name is the
     // availability check.

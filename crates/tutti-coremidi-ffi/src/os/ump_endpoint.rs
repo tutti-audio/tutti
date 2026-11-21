@@ -12,8 +12,8 @@
 //! # Main thread
 //!
 //! Apple documents every interaction with a `MIDIUMPMutableEndpoint` as
-//! main-thread only. [`UmpEndpoint::new`] takes a [`MainThreadMarker`] and the
-//! endpoint is `!Send` and `!Sync`, so creating, enabling, disabling and
+//! main-thread only. [`UmpEndpoint::new`] takes a [`MainThreadMarker`] (and the
+//! process's [`SharedClient`], see its docs) and the endpoint is `!Send` and `!Sync`, so creating, enabling, disabling and
 //! releasing it all happen on the main thread. What may cross threads is the
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
@@ -68,9 +68,6 @@ pub struct UmpEndpoint {
     endpoint: Option<Retained<MIDIUMPMutableEndpoint>>,
     sender: UmpSender,
     blocks: Vec<FunctionBlockId>,
-    // The process's client, which holds the connection to the MIDI server for as long as the
-    // endpoint exists.
-    _client: SharedClient,
     // Makes the type `!Send` and `!Sync` whatever its fields are.
     _main: MainThreadMarker,
     // Dropped after the endpoint is disabled and released (see `Drop`).
@@ -146,11 +143,11 @@ impl UmpEndpoint {
     /// and enables it. `on_ump` gets each message sent to it, on CoreMIDI's
     /// delivery thread. `main` proves the caller is on the main thread.
     ///
-    /// `client` is the process's [`SharedClient`]: the endpoint API takes no client, and
-    /// CoreMIDI raises an exception that Objective-C's handler does not catch when the MIDI
-    /// server is gone and the process has no connection to it. A process that holds a
-    /// client has the connection, and one whose [`SharedClient::start`] failed has no
-    /// way to create an endpoint.
+    /// `client` proves that [`SharedClient::start`] succeeded, so the process has
+    /// connected to the MIDI server. The endpoint API takes no client, and with no
+    /// connection and the server gone, CoreMIDI raises an exception that [`catch`]
+    /// cannot catch: the process aborts. A process whose start failed has no way to
+    /// call this. The proof does not cover a server that dies after the start.
     ///
     /// CoreMIDI numbers the blocks itself, in registration order. `blocks` are
     /// given in number order with their numbers running from 0 without a gap, and
@@ -161,17 +158,18 @@ impl UmpEndpoint {
     ///
     /// Before any call into CoreMIDI: [`Error::ReservedProtocol`] for a reserved
     /// `protocol`, [`Error::Block`] for a block CoreMIDI cannot carry (checked
-    /// before the class lookup, so it is the same on every macOS), and
-    /// Then [`Error::UmpEndpointUnsupported`] before
-    /// macOS 15, [`Error::Exception`] when CoreMIDI raises an Objective-C
-    /// exception, [`Error::Objc`] or [`Error::NoObject`] when CoreMIDI refuses
-    /// the endpoint, [`Error::BlockNumber`] for a number the spec cannot hold, and
-    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the registered ones.
-    /// [`Error::NotPermitted`] when CoreMIDI answers a call with `kMIDINotPermitted`.
+    /// before the class lookup, so it is the same on every macOS). Then
+    /// [`Error::UmpEndpointUnsupported`] before macOS 15, [`Error::Exception`] when
+    /// CoreMIDI raises an Objective-C exception, [`Error::NotPermitted`] when it
+    /// answers a call with `kMIDINotPermitted`, [`Error::Objc`] or
+    /// [`Error::NoObject`] when it refuses the endpoint otherwise,
+    /// [`Error::BlockNumber`] for a number the spec cannot hold, and
+    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the
+    /// registered ones.
     /// An `Err` leaves no endpoint published.
     pub fn new<F>(
         main: MainThreadMarker,
-        client: SharedClient,
+        _client: SharedClient,
         name: &str,
         protocol: Protocol,
         device: &DeviceIdentity,
@@ -222,7 +220,6 @@ impl UmpEndpoint {
                 counts: receiver.counts(),
             },
             blocks: numbers,
-            _client: client,
             _main: main,
             _receiver: receiver,
         })

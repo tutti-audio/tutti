@@ -173,7 +173,7 @@ impl Error {
         domain: String,
         description: String,
     ) -> Self {
-        if code == isize::try_from(OsStatus::NOT_PERMITTED.get()).unwrap_or(isize::MIN) {
+        if i32::try_from(code) == Ok(OsStatus::NOT_PERMITTED.get()) {
             return Self::NotPermitted(operation);
         }
         Self::Objc {
