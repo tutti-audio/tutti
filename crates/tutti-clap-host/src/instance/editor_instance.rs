@@ -7,9 +7,9 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, MainThreadMarker, MainWorkHandle, ParamEdit, ParamMapping, PluginError, PluginRef,
-    PluginResult, Request, RescanScope, WindowHandle,
+    AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorOpened,
+    EditorWindow, InProcess, MainThreadMarker, MainWorkHandle, ParamEdit, ParamMapping,
+    PluginError, PluginRef, PluginResult, Request, RescanScope, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -153,13 +153,14 @@ impl EditorWindow for ClapEditor {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<Size> {
+    ) -> PluginResult<EditorOpened<Size>> {
         self.inner
             .embed_editor(main, parent, scale)
+            .map(EditorOpened::new)
             .map_err(|e| editor_error(format!("CLAP open_editor failed: {e}")))
     }
 
-    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<()> {
+    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<EditorOpened<()>> {
         // No transient parent: this crate does not hold the host's window, and
         // `set_transient` is a stacking hint the plugin may ignore anyway. The
         // title is what the host would have put on a window it owned.
@@ -167,6 +168,7 @@ impl EditorWindow for ClapEditor {
             .unwrap_or_else(|_| c"Plugin Editor".to_owned());
         self.inner
             .open_floating_editor_with(main, None, &title)
+            .map(EditorOpened::new)
             .map_err(|e| editor_error(format!("CLAP floating open failed: {e}")))
     }
 

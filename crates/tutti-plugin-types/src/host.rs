@@ -29,10 +29,10 @@ use dpi::Size;
 use tutti_buffers::{Float, InputOutput};
 
 use crate::{
-    AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorWindow,
-    KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError,
-    PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
-    SampleRate, Samples, WindowHandle,
+    AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorOpened,
+    EditorWindow, KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor,
+    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
+    ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, ParameterChanges, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -913,11 +913,11 @@ impl<W: Wraps> EditorWindow for W {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<Size> {
+    ) -> PluginResult<EditorOpened<Size>> {
         self.plugin_mut().open_editor(main, parent, scale)
     }
 
-    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<()> {
+    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<EditorOpened<()>> {
         self.plugin_mut().open_floating_editor(main)
     }
 

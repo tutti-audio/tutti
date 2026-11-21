@@ -16,12 +16,12 @@ pub struct FrequencyShifterConfig {
 }
 
 impl FrequencyShifterConfig {
-    /// A frequency shifter of `width` channels (an empty layout is taken as mono) at
+    /// A frequency shifter of `width` channels at
     /// [`FrequencyShifterControls::DEFAULT`] (no shift).
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             controls: FrequencyShifterControls::DEFAULT,
         }
     }
@@ -91,7 +91,7 @@ impl<F: Float> FrequencyShifterKernel<F> {
     fn new(width: ChannelLayout) -> Self {
         Self {
             width,
-            bank: FrequencyShifterBank::new(usize::from(width.count()), SampleRate::SR_48K),
+            bank: FrequencyShifterBank::new(width, SampleRate::SR_48K),
         }
     }
 }
@@ -110,7 +110,7 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = FrequencyShifterBank::new(usize::from(self.width.count()), rate);
+        self.bank = FrequencyShifterBank::new(self.width, rate);
     }
 
     fn reset(&mut self) {
@@ -153,7 +153,7 @@ mod tests {
     }
 
     /// The shape is the width in and out with no latency and a finite tail, and declares the
-    /// shift as `Frequency`, which starts as configured; an empty layout is mono.
+    /// shift as `Frequency`, which starts as configured.
     #[test]
     fn the_shape_declares_the_shift_and_a_finite_tail() {
         let n = prepared(
@@ -172,9 +172,9 @@ mod tests {
         assert!(matches!(shape.tail, Tail::Finite(_)));
         assert_eq!(shape.params.as_slice(), &[UnitParam::Frequency][..]);
         assert_eq!(n.param_base(0), Some(-12.5));
-        let mono =
+        let empty =
             FrequencyShifterNode::<f32>::from(FrequencyShifterConfig::new(ChannelLayout::EMPTY));
-        assert_eq!(mono.shape().audio_in().count(), 1);
+        assert_eq!(empty.shape().audio_in().count(), 0);
     }
 
     /// The declared tail covers the ring-out.

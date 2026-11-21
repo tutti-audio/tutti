@@ -89,8 +89,9 @@ pub use datagram::{
     Commands, DatagramBuilder, MAX_DATAGRAM_BYTES, Refused, SIGNATURE, SignatureError, parse,
 };
 pub use discovery::{
-    Advertisement, Browser, DiscoveryError, FoundHost, HostEvent, KEY_ENDPOINT_NAME,
-    KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, identity_from_txt, instance_name, txt_properties,
+    Advertisement, Browser, DiscoveryError, FoundHost, HostEvent, InstanceName, InstanceNameError,
+    KEY_ENDPOINT_NAME, KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, identity_from_txt, instance_name,
+    txt_properties,
 };
 pub use endpoint::{Client, Host, HostConfig, MAX_QUEUED_EVENTS, NetworkEndpoint};
 pub use event::{AuthFailure, EndedBy, Event, SendError, SessionState, Transmit};

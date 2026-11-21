@@ -1,6 +1,6 @@
 //! Plugin bridge — a served plugin's audio and its editor.
 
-use super::audio::{AudioBridge, IpcThread, Replies};
+use super::audio::{AudioBridge, IpcThread, Replies, WriteRefused};
 use super::editor_site::EditorSite;
 use crate::ServerWatch;
 use std::path::PathBuf;
@@ -136,7 +136,13 @@ impl PluginBridge {
         // authoritative delivery is the slot below; a dropped mirror write
         // self-heals on the next edit.
         self.editor.show_parameter(param_id, value);
-        self.audio.write_parameter(param_id, value)
+        match self.audio.write_parameter(param_id, value) {
+            Err(WriteRefused::Unknown(unknown)) => Err(unknown),
+            // A crashed plugin, or one with no parameter list, stores nothing;
+            // its recovery restores from the host's mirror, so the caller's
+            // write is not an error.
+            Ok(()) | Err(WriteRefused::Crashed | WriteRefused::Unlisted) => Ok(()),
+        }
     }
 
     /// Sends the host's automation mode to the plugin, mirrored into an open

@@ -113,7 +113,7 @@ use tutti_graph::{
 
 use crate::block_clock::{BlockClock, BlockClockReader, BlockDates, DateKeeper, Pose};
 use crate::load::{self, BlockCounts, Budget, Load, Writers};
-use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
+use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds, pack_in_use};
 use crate::routing::StageTargets;
 use crate::stage::OutputStage;
 use std::sync::Arc;
@@ -201,7 +201,7 @@ pub struct Engine<F: Float = f32> {
     /// The tap after the fader, the audio thread's ends.
     hearing: AudioThreadCell<crate::hearing::Hearing<F>>,
     /// Its control side.
-    output_taps: crate::OutputTaps<F>,
+    heard_taps: crate::HeardTaps<F>,
     /// A reader of the block clock the graph render writes.
     clock_reader: BlockClockReader,
     /// The folds from the root to the device, published by
@@ -250,6 +250,9 @@ struct GraphRender<F: Float> {
     /// The root of the plan the last block rendered, for the control side to
     /// retire the older roots' folds by ([`OutputControl::reclaim`]).
     installed: Arc<AtomicU64>,
+    /// The widths of the pair the last block rendered
+    /// ([`OutputControl::set_routing`] checks the new routing against it).
+    in_use: Arc<AtomicU64>,
     /// Where each device output's gain ramp stands.
     stage: OutputStage,
     /// Where the crossfade of the last routing change stands.
@@ -505,7 +508,7 @@ impl<F: Float> Engine<F> {
         // executor is always fresh at `Engine::new`.
         let dropped_seen = executor.dropped_event_count();
         let (writers, load, blocks) = load::link();
-        let (output_taps, hearing) = crate::hearing::link();
+        let (heard_taps, hearing) = crate::hearing::link();
         let clock = BlockClock::new();
         let clock_reader = clock.reader();
         // Every bare root width places into every bare device width up to
@@ -525,6 +528,7 @@ impl<F: Float> Engine<F> {
                 clock,
                 dates: DateKeeper::new(BlockDates::default()),
                 installed: Arc::clone(output.installed()),
+                in_use: Arc::clone(output.in_use_cell()),
                 stage: OutputStage::new(),
                 routing: RoutingRun {
                     seen: None,
@@ -537,7 +541,7 @@ impl<F: Float> Engine<F> {
             load: AudioThreadCell::new(writers),
             readings: (load, blocks),
             hearing: AudioThreadCell::new(hearing),
-            output_taps,
+            heard_taps,
             clock_reader,
             output,
             folds,
@@ -652,9 +656,9 @@ impl<F: Float> Engine<F> {
     /// The control side of the tap after the fader ("what I'm hearing"): the
     /// device-width output of every [`process`](Self::process) and
     /// [`process_segment`](Self::process_segment) call, read through a
-    /// [`TapReader`](tutti_graph::TapReader). See [`OutputTaps`](crate::OutputTaps).
-    pub fn output_taps(&self) -> crate::OutputTaps<F> {
-        self.output_taps.clone()
+    /// [`TapReader`](tutti_graph::TapReader). See [`HeardTaps`](crate::HeardTaps).
+    pub fn heard_taps(&self) -> crate::HeardTaps<F> {
+        self.heard_taps.clone()
     }
 
     /// Renders the whole of `output` with no transport motion and no declick.
@@ -801,6 +805,23 @@ impl<F: Float> Engine<F> {
     #[inline]
     pub(crate) fn process_at(&self, output: &mut InterleavedMut<'_, F>, os_ns: i64) {
         self.process_stamped(output, Some(os_ns));
+    }
+
+    /// Forgets the device the last block rendered into, for a stream about to
+    /// open. Control side.
+    pub(crate) fn forget_device_in_use(&self) {
+        self.output.forget_in_use();
+    }
+
+    /// Counts one device callback longer than the ceiling in
+    /// [`BlockCounts::truncated`]. Audio thread.
+    #[inline]
+    pub(crate) fn count_truncated(&self) {
+        // Only the audio callback borrows `load`, and this runs on that same
+        // callback outside any other borrow of it, so the borrow is always free.
+        if let Some(mut load) = self.load.try_borrow_mut() {
+            load.truncated();
+        }
     }
 
     /// Writes frames `done..done + len` of the rendered `output` to the heard
@@ -1464,6 +1485,10 @@ impl<F: Float> GraphRender<F> {
         self.installed.store(held.get(), Ordering::Relaxed);
         debug_assert!(width <= MAX_CHANNELS, "the editor's limits refuse this");
         let width = width.min(MAX_CHANNELS);
+        if width > 0 && out_ch > 0 {
+            self.in_use
+                .store(pack_in_use(width, out_ch), Ordering::Relaxed);
+        }
         let block = &mut output[at * out_ch..(at + len) * out_ch];
         let stride = self.stride;
         let mut chunks = self.scratch.chunks_mut(stride);
@@ -1773,7 +1798,7 @@ mod tests {
         ));
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let mut tap = engine
-            .output_taps()
+            .heard_taps()
             .open(ChannelLayout::STEREO, Samples::new(256))
             .expect("opens")
             .reader()
@@ -2626,11 +2651,13 @@ mod tests {
             [61.0, 62.0, 63.0, 64.0, 65.0, 66.0],
             "no routing: the identity by speaker"
         );
-        control.set_routing(Routing {
-            monitor: Some(tutti_buffers::Bed::Stereo.topology()),
-            map: OutputMap::channels([2, 3]).unwrap(),
-            ..Routing::default()
-        });
+        control
+            .set_routing(Routing {
+                monitor: Some(tutti_buffers::Bed::Stereo.topology()),
+                map: OutputMap::channels([2, 3]).unwrap(),
+                ..Routing::default()
+            })
+            .expect("the routing places the roots");
         let (l, r) = (61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0);
         assert_eq!(
             first_frame_after_fade(&engine, 6),
@@ -2640,11 +2667,95 @@ mod tests {
         // no fold, so a commit or restart would name it.
         assert!(!control.has_fold(RootId::GENESIS, 6, ChannelLayout::STEREO));
         // Taken back: by speaker again.
-        control.set_routing(Routing::default());
+        control
+            .set_routing(Routing::default())
+            .expect("the routing places the roots");
         assert_eq!(
             first_frame_after_fade(&engine, 6),
             [61.0, 62.0, 63.0, 64.0, 65.0, 66.0]
         );
+    }
+
+    /// **A routing that cannot place the root on the device in use is refused
+    /// and installs nothing.** A map sending a heard channel to output 3 of a
+    /// device of two names that channel and that device, and the routing in
+    /// force still folds the next block.
+    #[test]
+    fn a_routing_that_cannot_place_the_root_on_the_device_in_use_is_refused() {
+        use crate::{OutputMap, Routing, RoutingError};
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(64)),
+        ));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let control = engine.output_control();
+        let past = || Routing {
+            map: OutputMap::channels([0, 2]).unwrap(),
+            ..Routing::default()
+        };
+        let before = first_frame(&engine, 2);
+        assert_eq!(
+            control.set_routing(past()),
+            Err(RoutingError::MapPast {
+                output: 2,
+                device: ChannelLayout::STEREO
+            })
+        );
+        assert_eq!(
+            control.routing(),
+            Routing::default(),
+            "nothing is installed"
+        );
+        assert_eq!(first_frame(&engine, 2), before, "the block folds as before");
+    }
+
+    /// **A routing is judged against the device the stream renders into now.**
+    /// After a block at 2 channels, stating the 8-channel device moves the
+    /// device in use, so a map to output 5 is taken instead of refused against
+    /// the 2-channel device.
+    #[test]
+    fn a_device_statement_forgets_the_device_the_last_block_rendered_into() {
+        use crate::{OutputMap, Routing};
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(64)),
+        ));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let _ = first_frame(&engine, 2);
+        let control = engine.output_control();
+        let to_five = Routing {
+            map: OutputMap::channels([0, 5]).unwrap(),
+            ..Routing::default()
+        };
+        assert!(control.set_routing(to_five.clone()).is_err(), "device 2");
+        control
+            .state_device(ChannelLayout::from(8u16), None)
+            .unwrap();
+        assert_eq!(control.set_routing(to_five), Ok(()));
+    }
+
+    /// Before a block has rendered there is no device in use, so a routing the
+    /// narrowest device could not take is installed.
+    #[test]
+    fn a_routing_is_taken_before_any_block_has_rendered() {
+        use crate::{OutputMap, Routing};
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(64)),
+        ));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        let routing = Routing {
+            map: OutputMap::channels([0, 5]).unwrap(),
+            ..Routing::default()
+        };
+        let control = engine.output_control();
+        assert_eq!(control.set_routing(routing.clone()), Ok(()));
+        assert_eq!(control.routing(), routing);
     }
 
     /// The monitor fold takes the policy's levels: the centre and the surrounds
@@ -2662,15 +2773,18 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 2);
-        engine.output_control().set_routing(Routing {
-            monitor: Some(tutti_buffers::Bed::Stereo.topology()),
-            levels: FoldLevels {
-                centre: Amplitude::new(0.5),
-                surround: Amplitude::new(0.25),
-                ..FoldLevels::default()
-            },
-            ..Routing::default()
-        });
+        engine
+            .output_control()
+            .set_routing(Routing {
+                monitor: Some(tutti_buffers::Bed::Stereo.topology()),
+                levels: FoldLevels {
+                    centre: Amplitude::new(0.5),
+                    surround: Amplitude::new(0.25),
+                    ..FoldLevels::default()
+                },
+                ..Routing::default()
+            })
+            .expect("the routing places the roots");
         // Channels 61..66: L = 61 + 0.5 * 63 + 0.25 * 65, R likewise.
         assert_eq!(
             first_frame_after_fade(&engine, 2),
@@ -2957,10 +3071,13 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 4);
-        engine.output_control().set_routing(Routing {
-            map: OutputMap::channels(map).unwrap(),
-            ..Routing::default()
-        });
+        engine
+            .output_control()
+            .set_routing(Routing {
+                map: OutputMap::channels(map).unwrap(),
+                ..Routing::default()
+            })
+            .expect("the routing places the roots");
         let _ = first_frame_after_fade(&engine, 4);
         engine
     }
@@ -2976,10 +3093,13 @@ mod tests {
 
     fn move_map(engine: &Engine, map: [usize; 2]) {
         use crate::{OutputMap, Routing};
-        engine.output_control().set_routing(Routing {
-            map: OutputMap::channels(map).unwrap(),
-            ..Routing::default()
-        });
+        engine
+            .output_control()
+            .set_routing(Routing {
+                map: OutputMap::channels(map).unwrap(),
+                ..Routing::default()
+            })
+            .expect("the routing places the roots");
     }
 
     /// A map change from outputs 0 and 1 to 2 and 3 ramps: frame `k` of the
@@ -3039,10 +3159,12 @@ mod tests {
         let control = engine.output_control();
         move_root(&mut ed, &control, None, 2, 1);
         let mut heard = block_with(&engine, 2, || {});
-        control.set_routing(Routing {
-            map: OutputMap::channels([1, 0]).unwrap(),
-            ..Routing::default()
-        });
+        control
+            .set_routing(Routing {
+                map: OutputMap::channels([1, 0]).unwrap(),
+                ..Routing::default()
+            })
+            .expect("the routing places the roots");
         heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
         for (k, frame) in frames_of(&heard, 2).enumerate() {
             let (out, new) = if k < 20 {
@@ -3114,12 +3236,15 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let _ = first_frame(&engine, 2);
-        control.set_routing(change());
+        control
+            .set_routing(change())
+            .expect("the routing places the roots");
         assert!(control.cell().current().previous().is_some());
         let _ = first_frame(&engine, 2);
         let _ = control.reclaim();
         assert!(control.cell().current().previous().is_none(), "width 0");
-        // Five buses into three outputs have no fold.
+        // Five buses into three outputs have no fold, and a routing that
+        // cannot place them is refused; a device statement fades all the same.
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -3130,7 +3255,17 @@ mod tests {
         let control = engine.output_control();
         let _ = first_frame(&engine, 3);
         assert!(!control.has_fold(RootId::GENESIS, 5, ChannelLayout::from(3u16)));
-        control.set_routing(change());
+        assert!(control.set_routing(change()).is_err());
+        let swapped = ChannelTopology::new([
+            tutti_buffers::Speaker::FrontRight,
+            tutti_buffers::Speaker::FrontLeft,
+            tutti_buffers::Speaker::FrontCenter,
+        ])
+        .unwrap();
+        control
+            .state_device(ChannelLayout::from(3u16), Some(swapped))
+            .unwrap();
+        assert!(!control.has_fold(RootId::GENESIS, 5, ChannelLayout::from(3u16)));
         assert!(control.cell().current().previous().is_some());
         let _ = first_frame(&engine, 3);
         let _ = control.reclaim();

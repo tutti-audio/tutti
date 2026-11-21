@@ -18,13 +18,13 @@ pub struct DistanceConfig {
 }
 
 impl DistanceConfig {
-    /// A distance node of `width` channels (an empty layout is taken as mono) for sources up
+    /// A distance node of `width` channels for sources up
     /// to `max` away (it sets the delay line's length), at the default distance of 1 m, with a
     /// reference of 1 m, the speed of sound in air and no air absorption.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>, max: Metres) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             spec: DistanceSpec::new(max),
             controls: DistanceControls::DEFAULT,
         }

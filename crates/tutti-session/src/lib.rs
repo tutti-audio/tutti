@@ -209,7 +209,7 @@ pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
     Bus, BusSink, Channel, Connection, Disconnection, Edge, Event, EventEdge, EventInPort,
     EventOutPort, EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet,
-    Root, RootDeclaration, SetSources, Weighted, Wire,
+    Removal, Root, RootDeclaration, SetSources, Weighted, Wire,
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
@@ -312,7 +312,7 @@ pub use transport_handle::TransportHandle;
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, NoiseShaping};
-pub use tutti_engine::{BlockDates, OutputPlacement, OutputTapOpen, Playhead};
+pub use tutti_engine::{BlockDates, HeardTapOpen, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,

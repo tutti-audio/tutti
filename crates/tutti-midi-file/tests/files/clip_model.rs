@@ -404,7 +404,7 @@ fn what_a_clip_cannot_hold_is_refused() {
         Err(TracksError::Refused { .. })
     ));
     assert!(matches!(
-        one(FileEvent::Meta(Meta::tempo(Bpm::of(120.0)))),
+        one(FileEvent::Meta(Meta::tempo(Bpm::of(120.0)).unwrap())),
         Err(TracksError::Refused { .. })
     ));
     // The file's own structure is not an event.

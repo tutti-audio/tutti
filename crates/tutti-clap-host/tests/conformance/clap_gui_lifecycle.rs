@@ -389,7 +389,7 @@ fn open_editor_runs_the_spec_embed_sequence() {
         .expect("embeddable plugin opens");
 
     assert_eq!(
-        size,
+        size.window,
         native_size(GUI_WIDTH, GUI_HEIGHT),
         "the host must report the plugin's own `get_size`, not its 800x600 \
          fallback — the probe deliberately reports neither 800 nor 600"
@@ -425,7 +425,7 @@ fn open_editor_runs_the_spec_embed_sequence() {
 fn set_editor_scale_reaches_the_plugin_on_a_physical_pixel_api_only() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     let mut loaded = probe.load();
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -471,7 +471,7 @@ fn open_editor_calls_set_scale_only_on_a_physical_pixel_api() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     let mut loaded = probe.load();
 
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -555,7 +555,7 @@ fn close_editor_destroys_exactly_once() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     let mut loaded = probe.load();
 
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -614,7 +614,7 @@ fn close_editor_destroys_after_plugin_window_was_destroyed() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     let mut loaded = probe.load();
 
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -679,7 +679,7 @@ fn close_editor_destroys_after_window_was_destroyed_during_show() {
     // Latched, not run by hand: the probe fires it from `show`, the last call
     // of the host's embed sequence.
     probe.command(GUI_CMD_CLOSED_AND_DESTROYED_FROM_SHOW);
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -734,7 +734,7 @@ fn close_editor_hides_and_destroys_when_window_was_not_destroyed() {
     let mut loaded = probe.load();
 
     probe.command(GUI_CMD_CLOSED_NOT_DESTROYED);
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -783,7 +783,7 @@ fn close_editor_hides_and_destroys_when_window_was_not_destroyed() {
 fn editor_capabilities_reports_plugin_hints() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     let mut loaded = probe.load();
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -846,7 +846,7 @@ fn editor_capabilities_touches_nothing_before_create() {
 fn resize_editor_converts_a_size_in_the_other_unit_at_the_open_scale() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     let mut loaded = probe.load();
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -879,7 +879,7 @@ fn resize_editor_converts_a_size_in_the_other_unit_at_the_open_scale() {
 fn resize_editor_forwards_the_adjusted_size() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     let mut loaded = probe.load();
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -940,7 +940,7 @@ fn resize_editor_forwards_the_adjusted_size() {
 fn resize_editor_fails_when_plugin_cannot_adjust() {
     let probe = Probe::acquire(GuiMode::FixedSize);
     let mut loaded = probe.load();
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -982,7 +982,7 @@ fn resize_editor_fails_when_plugin_cannot_adjust() {
 fn editor_capabilities_reports_fixed_size_as_not_resizable() {
     let probe = Probe::acquire(GuiMode::FixedSize);
     let mut loaded = probe.load();
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -1023,7 +1023,7 @@ fn take_editor_resize_request_delivers_once() {
     // The probe calls host.gui.request_resize from inside `show`, i.e. while
     // the host still considers the editor live.
     probe.command(GUI_CMD_REQUEST_RESIZE);
-    loaded
+    let _opened = loaded
         .open_editor(
             main_thread(),
             StandInWindow.handle(),
@@ -1058,7 +1058,7 @@ fn drop_destroys_a_live_editor() {
     let probe = Probe::acquire(GuiMode::Embeddable);
     {
         let mut loaded = probe.load();
-        loaded
+        let _opened = loaded
             .open_editor(
                 main_thread(),
                 StandInWindow.handle(),

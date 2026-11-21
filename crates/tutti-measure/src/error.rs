@@ -25,6 +25,9 @@ pub enum Error {
     /// A mel filterbank that does not fit the transform it was asked to read.
     #[error(transparent)]
     Mel(#[from] tutti_dsp::MelError),
+    /// More cepstral coefficients asked of a bank than it has bands.
+    #[error(transparent)]
+    Coefficients(#[from] tutti_dsp::TooManyOutputs),
     /// A zero window: a frame would hold nothing.
     #[error("analysis window is zero-length")]
     ZeroWindow,

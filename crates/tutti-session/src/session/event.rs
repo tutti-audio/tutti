@@ -33,6 +33,13 @@ pub enum SessionEvent {
         /// Why.
         refused: ReplaceRefused,
     },
+    /// A node was removed while a [`replace`](crate::Graph::replace) of it
+    /// waited out a re-prepare: the waiting replacement was dropped with its
+    /// incoming node, one event for each.
+    ReplaceDropped {
+        /// The node that was removed.
+        node: NodeKey,
+    },
     /// A node re-inserted with a narrower shape (a plugin whose ports changed,
     /// a node re-declared at a new width) lost wiring to the ports it no
     /// longer has. Reported once, by the update that commits the re-insert,
@@ -127,6 +134,12 @@ pub enum SessionEvent {
     /// budget are not silenced and have no event: that is the polled
     /// [`BlockCounts::over_budget`](tutti_engine::BlockCounts::over_budget).
     BlocksSilenced(u64),
+    /// A staged [`OutputPolicy`](crate::OutputPolicy)'s routing was checked
+    /// when it was set, and the engine refused it when it came to apply: it has
+    /// no place for a root on the device the stream renders into. The routing
+    /// in force is unchanged and the policy's levels are applied; set a routing
+    /// that places the root.
+    OutputRoutingRefused(tutti_engine::RoutingError),
     /// The session's rate changed with its clock: a switch onto a sound card
     /// that runs at another rate, or the card's rate carried to the timer. A
     /// capture a host holds itself (not one the session added) is at the old
