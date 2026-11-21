@@ -573,8 +573,9 @@ impl Drop for AlsaWatch {
 ///
 /// Subscribing comes first, so a device that appears during the first
 /// enumeration is announced too. A sequencer that will not open starts no
-/// thread: there are no devices to watch, as enumeration reports. A watch that
-/// later fails, by an error or a panic, tells `sink` ([`ChangeSink::fail`]).
+/// thread: the list stays empty. Either that refusal or a later failure of
+/// the watch, by an error or a panic, is told to `sink` ([`ChangeSink::fail`]),
+/// so the app can read why.
 pub(super) fn start(
     executor: &Executor,
     sink: ChangeSink,
@@ -587,7 +588,7 @@ pub(super) fn start(
     let mut announce = match Announce::open(stop_rx) {
         Ok(announce) => announce,
         Err(e) => {
-            tracing::debug!("ALSA device watch: {}", crate::error::chain(&e));
+            sink.fail(e);
             return Ok(Box::new(crate::endpoints::NoWatch));
         }
     };
