@@ -5,13 +5,14 @@
 //! summing unit: adding or removing a voice then costs a queued command instead
 //! of a graph edit, which is what keeps voice churn off the commit path.
 
-use crate::nonempty;
+use crate::PlaceError;
 use crate::streamer::StreamId;
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
-    COMMAND_CAPACITY, MAX_RESIDENT_VOICES, Queued, VoiceCommand, VoicePoolHandle,
+    COMMAND_CAPACITY, GainError, Live, MAX_RESIDENT_VOICES, Queued, Tier, VoiceCommand,
+    VoicePoolHandle,
 };
 use super::loop_span::Loop;
 use super::memory_source::MemorySource;
@@ -105,6 +106,11 @@ pub(crate) enum Retired<F: SamplerFloat> {
     /// callback), and dropping it would free the box, the source and the
     /// vocoder there. Counted as [`PoolDrops::voices_refused`].
     Refused {
+        /// The slot the add named, which the handle frees on collecting this.
+        id: SlotId,
+        /// The stamp of the add, so the handle frees the slot only if it is
+        /// still that add's.
+        generation: u64,
         voice: Box<Voice<F>>,
         stretch: Option<Box<Vocoders<F>>>,
     },
@@ -205,18 +211,6 @@ impl<F: SamplerFloat> Voice<F> {
             VoiceSource::Disk(disk) => LoopRoute::Stream(disk.stream()),
         }
     }
-}
-
-/// A [`VoicePool`] asked for more channels than the sampler reads
-/// ([`MAX_CHANNELS`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "a voice pool {} channels wide: the sampler reads at most {MAX_CHANNELS}",
-    channels.count()
-)]
-pub struct PoolTooWide {
-    /// The width asked for.
-    pub channels: ChannelLayout,
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +355,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         // thread waiting to collect).
         let (retired, _) = ring(0, Overflow::Refuse);
         let sample_rate = SampleRate::SR_44K1;
-        let channels = nonempty(channels.into());
+        let channels = channels.into();
         Self {
             retired,
             counters: Arc::default(),
@@ -424,15 +418,13 @@ impl<F: SamplerFloat> VoicePool<F> {
     ///
     /// # Errors
     ///
-    /// [`PoolTooWide`] past [`MAX_CHANNELS`]: the pool's read stacks
-    /// and lanes are that wide, so a wider pool would declare outputs it never
-    /// writes (a caller reading them sees whatever the buffer held).
-    pub fn with_channels(channels: impl Into<ChannelLayout>) -> Result<Self, PoolTooWide> {
-        let channels = channels.into();
-        if channels.count() as usize > MAX_CHANNELS {
-            return Err(PoolTooWide { channels });
-        }
-        Ok(Self::from_parts(channels))
+    /// [`PlaceError::WidthTooWide`] past [`MAX_CHANNELS`]: the pool's read
+    /// stacks and lanes are that wide, so a wider pool would declare outputs
+    /// it never writes (a caller reading them sees whatever the buffer held).
+    /// [`PlaceError::EmptyWidth`] for no channels: a node with no outputs is
+    /// one nothing can be wired to.
+    pub fn with_channels(channels: impl Into<ChannelLayout>) -> Result<Self, PlaceError> {
+        Ok(Self::from_parts(crate::voice_width(channels.into())?))
     }
 
     /// This pool with a fresh command queue and retirement ring, and the
@@ -459,6 +451,27 @@ impl<F: SamplerFloat> VoicePool<F> {
             counters: Arc::clone(&self.counters),
             streams: Arc::default(),
             free: Arc::default(),
+            // Voices inserted before the handle was made are live too.
+            live: Arc::new(Mutex::new(
+                self.voices
+                    .iter()
+                    .map(|s| {
+                        let tier = match s.voice.source {
+                            VoiceSource::Memory(_) => Tier::Memory,
+                            VoiceSource::Disk(_) => Tier::Disk,
+                        };
+                        // Stamp 0: no add of the handle's, never refused.
+                        (
+                            s.id,
+                            Live {
+                                tier,
+                                generation: 0,
+                            },
+                        )
+                    })
+                    .collect(),
+            )),
+            stamps: Arc::default(),
         };
         (self, handle)
     }
@@ -624,7 +637,18 @@ impl<F: SamplerFloat> VoicePool<F> {
     ///
     /// Allocates (the vocoder, when the voice stretches, and the slot's box):
     /// control thread only.
-    pub fn insert(&mut self, id: SlotId, source: MemorySource<F>, play: Playback) {
+    ///
+    /// # Errors
+    ///
+    /// [`GainError::NotFinite`] for a `play` gain that is not finite; nothing
+    /// is inserted.
+    pub fn insert(
+        &mut self,
+        id: SlotId,
+        source: MemorySource<F>,
+        play: Playback,
+    ) -> Result<(), GainError> {
+        GainError::check(play.gain)?;
         self.insert_voice(
             id,
             Voice {
@@ -632,6 +656,7 @@ impl<F: SamplerFloat> VoicePool<F> {
                 play,
             },
         );
+        Ok(())
     }
 
     /// [`insert`](Self::insert) for a voice of either tier. The `Playback` is
@@ -715,7 +740,12 @@ impl<F: SamplerFloat> VoicePool<F> {
     }
 
     fn drain_commands(&mut self) {
-        while let Some(Queued { cmd, forwarded }) = self.rx.pop() {
+        while let Some(Queued {
+            cmd,
+            forwarded,
+            generation,
+        }) = self.rx.pop()
+        {
             match cmd {
                 VoiceCommand::AddVoice { id, voice, stretch } => {
                     // A new slot in a full vector would grow it here, in the
@@ -724,7 +754,12 @@ impl<F: SamplerFloat> VoicePool<F> {
                     let replaces = self.voices.iter().any(|s| s.id == id);
                     if !replaces && self.voices.len() == self.voices.capacity() {
                         DrainCounters::bump(&self.counters.voices_refused);
-                        self.retire(Retired::Refused { voice, stretch });
+                        self.retire(Retired::Refused {
+                            id,
+                            generation,
+                            voice,
+                            stretch,
+                        });
                         continue;
                     }
                     // The vocoder arrives prebuilt from `send` (control thread);

@@ -52,6 +52,12 @@ pub enum PluginFailure {
         /// How it exited.
         status: std::process::ExitStatus,
     },
+    /// The server's process was woken as ended but its exit status cannot be
+    /// read ([`IpcError::Io`]): the host cannot tell whether it is alive.
+    StatusUnreadable {
+        /// What reading the status returned.
+        source: Arc<IpcError>,
+    },
     /// The server did not answer within an operation's deadline
     /// ([`IpcError::Timeout`]).
     TimedOut {
@@ -97,6 +103,12 @@ impl std::fmt::Display for PluginFailure {
             Self::Handshake { source } => write!(f, "plugin-server handshake failed: {source}"),
             Self::StreamClosed => f.write_str("the plugin-server's stream closed"),
             Self::ServerExited { status } => write!(f, "plugin-server exited: {status}"),
+            Self::StatusUnreadable { source } => {
+                write!(
+                    f,
+                    "the plugin-server's exit status cannot be read: {source}"
+                )
+            }
             Self::TimedOut { source } => {
                 write!(f, "the plugin-server stopped answering: {source}")
             }
@@ -124,6 +136,7 @@ impl std::error::Error for PluginFailure {
         match self {
             Self::Connect { source }
             | Self::Handshake { source }
+            | Self::StatusUnreadable { source }
             | Self::TimedOut { source }
             | Self::Io { source }
             | Self::Protocol { source }

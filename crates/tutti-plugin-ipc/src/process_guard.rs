@@ -23,7 +23,7 @@ use tutti_platform::{
     Executor, Instant, Task, WeakExecutor, join_within, monotonic_ns, sleep_until_ns,
 };
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
-use tutti_plugin_types::{Deadline, PluginFailure};
+use tutti_plugin_types::{Deadline, IpcError, PluginFailure};
 use tutti_rt::LockExt;
 
 /// How long the exit task waits on the OS between looks at its stop flag.
@@ -262,6 +262,7 @@ impl Drop for ProcessGuard {
                 && let Err(exit) = join_within(exit, EXIT_STOP_PATIENCE)
             {
                 tracing::warn!("plugin-ipc: the plugin-exit task did not stop; leaving it");
+                self.watch.note_detached();
                 exit.detach();
             }
             let left = process.lock_recover().take();
@@ -412,6 +413,13 @@ async fn exit_task(
                 Ok(None) => pause(Duration::from_millis(2)),
                 Err(e) => {
                     tracing::warn!("the server's exit status cannot be read: {e}");
+                    // Not a death the guard caused: its drop sets `ending` first.
+                    fence(Ordering::SeqCst);
+                    if !flow.ending.load(Ordering::Acquire) {
+                        watch.declare(PluginFailure::StatusUnreadable {
+                            source: Arc::new(IpcError::Io(e)),
+                        });
+                    }
                     return;
                 }
             }
@@ -481,6 +489,38 @@ mod tests {
         assert!(
             !guard.watch().declare(PluginFailure::StreamClosed),
             "the latch is set already: a later signal does not set it again"
+        );
+    }
+
+    /// **A server whose exit status cannot be read is declared**, not left
+    /// unwatched: the process is reaped behind the guard's back, so the exit
+    /// task's status read fails, and the host learns it from the watch.
+    #[test]
+    fn a_server_whose_status_cannot_be_read_is_declared() {
+        let guard = guard_over(sleeper());
+        let pid = guard.pid().expect("a launched guard has a pid");
+        let launched = guard.launched.as_ref().expect("a launched guard");
+        {
+            // The exit task waits for this lock once the process has ended, so the
+            // reap below is before its status read.
+            let _held = launched.process.lock_recover();
+            let pid = rustix::process::Pid::from_raw(i32::try_from(pid).expect("a pid"))
+                .expect("a pid is not zero");
+            rustix::process::kill_process(pid, rustix::process::Signal::KILL).expect("kill");
+            rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty())
+                .expect("the child is reaped by the test");
+        }
+        assert!(
+            guard.watch().wait_dead(HANG_GUARD),
+            "the unreadable status was never declared"
+        );
+        assert!(
+            matches!(
+                guard.watch().cause(),
+                Some(PluginFailure::StatusUnreadable { .. })
+            ),
+            "{:?}",
+            guard.watch().cause()
         );
     }
 

@@ -30,11 +30,11 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
-    Direction, MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
-    VoicePoolHandle, VoiceSource, VoiceWindow,
+    Direction, MemorySource, MemorySourceConfig, Playback, SendError, SlotId, Voice, VoiceNode,
+    VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow,
 };
 use tutti_units::{
-    Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
+    Amplitude, Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -354,7 +354,8 @@ fn voice_pool_process_steady_state_is_allocation_free() {
                 stretch: StretchFactor::new(1.0),
                 pitch: Cents::new(0.0),
             };
-            unit.insert(SlotId(i), sampler, play);
+            unit.insert(SlotId(i), sampler, play)
+                .expect("a finite gain and a nonempty width");
         };
     }
     assert_eq!(unit.voice_count(), 2);
@@ -402,7 +403,9 @@ fn cloned_voice_pool_with_stretch_is_allocation_free() {
             stretch: StretchFactor::new(2.0),
             pitch: Cents::new(0.0),
         };
-        original.insert(SlotId(0), sampler, play);
+        original
+            .insert(SlotId(0), sampler, play)
+            .expect("a finite gain and a nonempty width");
     };
 
     let mut rig = Rig::new(original.clone(), 64);
@@ -439,7 +442,8 @@ fn voice_pool_one_frame_blocks_are_allocation_free() {
                 stretch: StretchFactor::new(1.0),
                 pitch: Cents::new(0.0),
             };
-            unit.insert(SlotId(i), sampler, play);
+            unit.insert(SlotId(i), sampler, play)
+                .expect("a finite gain and a nonempty width");
         };
     }
 
@@ -511,7 +515,8 @@ fn placed_voice(wave: &Arc<Wave>, stretch: f64) -> Voice<f32> {
 
 /// Inserts `parts` in `pool` at `id`.
 fn insert(pool: &mut VoicePool<f32>, id: u128, (source, play): (MemorySource<f32>, Playback)) {
-    pool.insert(SlotId(id), source, play);
+    pool.insert(SlotId(id), source, play)
+        .expect("a finite gain and a nonempty width");
 }
 
 /// Every memory voice node, re-prepared at a 512-frame `max_block`,
@@ -549,7 +554,9 @@ fn voice_nodes_at_max_block_512_in_ragged_blocks_are_allocation_free() {
     insert(&mut pool, 2, (late, silent));
     ragged_at_512(pool);
 
-    ragged_at_512(VoiceNode::new(placed_voice(&wave, 0.5)));
+    ragged_at_512(
+        VoiceNode::new(placed_voice(&wave, 0.5)).expect("a finite gain and a nonempty width"),
+    );
 
     ragged_at_512(
         MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
@@ -621,12 +628,18 @@ fn a_loop_wrap_crossfade_is_allocation_free() {
     let mut pool = VoicePool::new();
     insert(&mut pool, 0, placed_parts(&wave, 1.0));
     wraps_without_allocating(pool, true);
-    wraps_without_allocating(VoiceNode::new(placed_voice(&wave, 1.0)), true);
+    wraps_without_allocating(
+        VoiceNode::new(placed_voice(&wave, 1.0)).expect("a finite gain and a nonempty width"),
+        true,
+    );
     // Stretched: every wrap is a reseat, which primes inside the guard.
     let mut stretched = VoicePool::new();
     insert(&mut stretched, 0, placed_parts(&wave, 1.5));
     wraps_without_allocating(stretched, false);
-    wraps_without_allocating(VoiceNode::new(placed_voice(&wave, 1.5)), false);
+    wraps_without_allocating(
+        VoiceNode::new(placed_voice(&wave, 1.5)).expect("a finite gain and a nonempty width"),
+        false,
+    );
     wraps_without_allocating(
         MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave"),
@@ -838,7 +851,9 @@ fn six_channel_clip_reaches_six_reader_outputs_without_allocating() {
             stretch: StretchFactor::new(1.0),
             pitch: Cents::new(0.0),
         };
-        reader.insert(SlotId(1), sampler, play);
+        reader
+            .insert(SlotId(1), sampler, play)
+            .expect("a finite gain and a nonempty width");
     };
     assert_eq!(reader.shape().audio_out().count(), 6);
     let mut rig = Rig::new(reader, 64);
@@ -1198,10 +1213,62 @@ fn an_add_past_the_voice_cap_is_refused_without_allocating() {
         extra_weak.upgrade().is_some(),
         "the refused voice waits in the retirement channel"
     );
+    assert_eq!(
+        handle.set_gain(SlotId(CAP as u128), Amplitude::new(0.5)),
+        Ok(()),
+        "until collected, the handle counts the refused id as live"
+    );
     assert_eq!(handle.collect_retired(), 1, "it is handed back");
     assert!(
         extra_weak.upgrade().is_none(),
         "and freed here, on the control thread"
+    );
+    assert_eq!(
+        handle.set_gain(SlotId(CAP as u128), Amplitude::new(0.5)),
+        Err(SendError::NoSuchSlot(SlotId(CAP as u128))),
+        "the refused add holds no slot, so its id is free again"
+    );
+}
+
+/// A refusal for an id that was removed and added again since does not free
+/// the new voice's id: the collect frees an id only when it is still the add
+/// that was refused.
+#[test]
+fn a_stale_refusal_leaves_a_readded_id_live() {
+    const CAP: u128 = 64;
+    let wave = sine_wave(0.5, 48_000.0);
+    let (pool, handle) = VoicePool::new().with_handle();
+    let mut rig = Rig::new(pool, 64);
+    let add = |id: u128| {
+        let source = MemorySource::new(wave.clone())
+            .expect("a placeable wave")
+            .placed_at(VoiceWindow::default());
+        handle
+            .add(SlotId(id), source, Playback::default())
+            .expect("room");
+    };
+    for batch in 0..2 {
+        for i in 0..32 {
+            add(batch * 32 + i);
+        }
+        rig.block();
+    }
+    add(CAP);
+    rig.block();
+    assert_eq!(handle.drops().voices_refused, 1, "the pool was full");
+
+    // Room, then the refused id again: this add is taken.
+    handle.remove(SlotId(0)).expect("room");
+    handle.remove(SlotId(CAP)).expect("still counted live");
+    add(CAP);
+    rig.block();
+    assert_eq!(rig.node().voice_count(), CAP as usize, "the re-add landed");
+
+    assert_eq!(handle.collect_retired(), 2, "the old slot and the refusal");
+    assert_eq!(
+        handle.set_gain(SlotId(CAP), Amplitude::new(0.5)),
+        Ok(()),
+        "the refusal was the earlier add's: the re-added voice stays live"
     );
 }
 
@@ -1230,9 +1297,9 @@ fn update_loop_drain_is_allocation_free_at_six_channels() {
         },
     )
     .expect("a placeable wave");
-    reader
-        .node()
-        .insert(SlotId(1), sampler, Playback::default());
+    handle
+        .add(SlotId(1), sampler, Playback::default())
+        .expect("the command queue has room in a test");
 
     for _ in 0..16 {
         reader.block();
@@ -1293,6 +1360,7 @@ fn voice_node_command_drain_does_not_allocate() {
         },
         ChannelLayout::STEREO,
     )
+    .expect("a finite gain and a nonempty width")
     .with_handle();
     let mut rig = Rig::new(node, 64);
 
@@ -1374,14 +1442,15 @@ fn replacing_a_wave_retires_the_old_one_rather_than_freeing_it_in_the_drain() {
         "collect_retired must free the old wave, on the control side"
     );
 
-    // A `ReplaceWave` for a slot that does not exist sheds its own wave.
+    // A swap for a slot that does not exist is refused at the call: the wave
+    // is dropped by the caller's own call, and nothing is queued.
     let orphan = sine_wave(0.5, 48_000.0);
     let orphan_weak = Arc::downgrade(&orphan);
-    handle
-        .replace_wave(SlotId(99), orphan)
-        .expect("the command queue has room in a test");
+    assert_eq!(
+        handle.replace_wave(SlotId(99), orphan),
+        Err(SendError::NoSuchSlot(SlotId(99)))
+    );
+    assert_eq!(orphan_weak.strong_count(), 0, "freed here, never queued");
     assert_no_alloc::assert_no_alloc(|| rig.block());
-    assert_eq!(orphan_weak.strong_count(), 1, "retired, not freed");
-    assert_eq!(handle.collect_retired(), 1);
-    assert_eq!(orphan_weak.strong_count(), 0);
+    assert_eq!(handle.collect_retired(), 0, "nothing reached the pool");
 }

@@ -76,7 +76,8 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
         match host {
             Host::Pool => {
                 let mut pool = VoicePool::new();
-                pool.insert(SlotId(1), source, Playback::default());
+                pool.insert(SlotId(1), source, Playback::default())
+                    .expect("a finite gain and a nonempty width");
                 ed.insert(key, "pool", pool);
             }
             Host::Node => {

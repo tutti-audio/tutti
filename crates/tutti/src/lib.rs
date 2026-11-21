@@ -668,8 +668,8 @@ pub mod sampler {
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        ControlCell, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
-        StreamingAddError, VoiceWindow,
+        ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
+        SlotId, StreamingAddError, VoiceNodeError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",
@@ -940,9 +940,9 @@ pub mod midi {
     pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
-        InputFault, MidiHardwareConfig, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError,
-        ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
+        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, Errno, ErrnoOutOfRange, InputFault,
+        MidiHardwareConfig, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError, ProfileSwitch,
+        ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

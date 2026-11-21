@@ -1,5 +1,6 @@
 use super::*;
 use crate::InputProducerHandle;
+use crate::NotFound;
 use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
@@ -90,15 +91,6 @@ fn connecting_an_open_input_is_idempotent() {
 }
 
 #[test]
-fn by_name_matching_is_case_insensitive_substring() {
-    let (mut s, _, _) = session();
-    let _ = s
-        .connect_input(crate::testing::started(), "keystep")
-        .unwrap();
-    assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
-}
-
-#[test]
 fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
     let (backend, counters) = FakeBackend::build();
     let mut s = MidiSession::open_over(
@@ -108,23 +100,7 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
-    // A name that matches nothing says what it searched, so a typo shows what
-    // was there.
-    let Err(MidiHardwareError::NoDeviceNamed { name, searched }) =
-        s.connect_input(crate::testing::started(), "nonexistent")
-    else {
-        panic!("a name that matches no input is NoDeviceNamed");
-    };
-    assert_eq!(name, "nonexistent");
-    assert_eq!(searched, ["IAC Bus 1", "Keystep Pro"], "the inputs, by id");
-    // The output side searches the outputs.
-    let Err(MidiHardwareError::NoDeviceNamed { searched, .. }) =
-        s.connect_output(crate::testing::started(), "nonexistent")
-    else {
-        panic!("a name that matches no output is NoDeviceNamed");
-    };
-    assert_eq!(searched, ["IAC Bus 1", "Synth A"], "the outputs, by id");
-    // An id that was listed and is gone: the shape of a stale id.
+    // An id that was listed and is gone: the shape of a stale id, on both sides.
     let gone = input(&s, "IAC Bus 1");
     let events = s.devices().subscribe();
     counters.unplug(EndpointId::from_raw(2));
@@ -133,7 +109,18 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
             .expect("an event before the guard")
             .is_ok()
     );
-    assert!(s.connect_input(crate::testing::started(), &gone).is_err());
+    let Err(MidiHardwareError::NotFound(NotFound::Device(id))) =
+        s.connect_input(crate::testing::started(), &gone)
+    else {
+        panic!("an id that names no present input is NotFound");
+    };
+    assert_eq!(id, gone);
+    let Err(MidiHardwareError::NotFound(NotFound::Device(id))) =
+        s.connect_output(crate::testing::started(), &gone)
+    else {
+        panic!("an id that names no present output is NotFound");
+    };
+    assert_eq!(id, gone);
     assert!(!s.is_any_input_connected());
 }
 
@@ -146,96 +133,27 @@ fn disconnecting_closes_only_the_named_input() {
     let _ = s
         .connect_input(crate::testing::started(), &input(&s, "IAC Bus 1"))
         .unwrap();
-    s.disconnect_input("iac").unwrap();
+    s.disconnect_input(&input(&s, "IAC Bus 1")).unwrap();
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
     s.disconnect_all_inputs();
     assert!(!s.is_any_input_connected());
 }
 
-/// **A name and an id pick the same device**: one `connect` and one
-/// `disconnect` take either, and a disconnect that names no open input is the
-/// named error, not a no-op.
+/// **A disconnect that names no open input is the named error**, not a no-op.
 #[test]
-fn a_query_by_id_and_by_name_reach_the_same_device() {
+fn disconnecting_an_id_that_is_not_open_is_not_connected() {
     let (mut s, _, _) = session();
     let keystep = input(&s, "Keystep Pro");
-    let _ = s.connect_input(crate::testing::started(), "pro").unwrap();
-    assert!(s.is_input_connected(&keystep), "by name");
-    s.disconnect_input(&keystep).expect("by id");
+    let _ = s
+        .connect_input(crate::testing::started(), &keystep)
+        .unwrap();
+    s.disconnect_input(&keystep).expect("it was open");
     assert!(!s.is_input_connected(&keystep));
 
     let Err(MidiHardwareError::NotConnected(id)) = s.disconnect_input(&keystep) else {
         panic!("an id that is not open is NotConnected");
     };
     assert_eq!(id, keystep);
-    let Err(MidiHardwareError::NoDeviceNamed { name, searched }) = s.disconnect_input("pro") else {
-        panic!("a name matching no open input is NoDeviceNamed");
-    };
-    assert_eq!(
-        (name.as_str(), searched.len()),
-        ("pro", 0),
-        "nothing is open"
-    );
-}
-
-/// **A name matching several devices picks none**: connect and disconnect both
-/// refuse it with the devices it matched, and change nothing. Both inputs'
-/// names contain an "s".
-#[test]
-fn a_whole_name_picks_its_device_beside_one_it_is_a_substring_of() {
-    let (s, _, _) = session();
-    let one = input(&s, "IAC Bus 1");
-    let ten = input(&s, "Keystep Pro");
-    let candidates = [(&one, "IAC Bus 1"), (&ten, "IAC Bus 10")];
-    assert_eq!(
-        DeviceQuery::from("iac bus 1").pick(candidates).unwrap(),
-        one,
-        "the whole name, in any case, wins"
-    );
-    assert_eq!(
-        DeviceQuery::from("IAC Bus 10").pick(candidates).unwrap(),
-        ten
-    );
-    let Err(MidiHardwareError::AmbiguousDeviceName { matches, .. }) =
-        DeviceQuery::from("IAC Bus").pick(candidates)
-    else {
-        panic!("a part of both names is still ambiguous");
-    };
-    assert_eq!(matches, ["IAC Bus 1", "IAC Bus 10"]);
-}
-
-#[test]
-fn a_name_matching_several_devices_is_ambiguous() {
-    let (mut s, _, _) = session();
-    let Err(MidiHardwareError::AmbiguousDeviceName { name, matches }) =
-        s.connect_input(crate::testing::started(), "s")
-    else {
-        panic!("a name matching two inputs is AmbiguousDeviceName");
-    };
-    assert_eq!(name, "s");
-    assert_eq!(matches, ["IAC Bus 1", "Keystep Pro"], "by id");
-    assert!(!s.is_any_input_connected(), "nothing opened");
-
-    let keystep = input(&s, "Keystep Pro");
-    let iac = input(&s, "IAC Bus 1");
-    let _ = s
-        .connect_input(crate::testing::started(), &keystep)
-        .unwrap();
-    let _ = s.connect_input(crate::testing::started(), &iac).unwrap();
-    let Err(MidiHardwareError::AmbiguousDeviceName { matches, .. }) = s.disconnect_input("s")
-    else {
-        panic!("a name matching two open inputs is AmbiguousDeviceName");
-    };
-    assert_eq!(matches, ["IAC Bus 1", "Keystep Pro"]);
-    assert!(
-        s.is_input_connected(&keystep) && s.is_input_connected(&iac),
-        "neither closed"
-    );
-    let Err(MidiHardwareError::AmbiguousDeviceName { .. }) =
-        s.connect_output(crate::testing::started(), "s")
-    else {
-        panic!("a name matching two outputs is AmbiguousDeviceName");
-    };
 }
 
 /// **An output that is there and will not open fails the connect**, and the
@@ -327,16 +245,16 @@ fn an_input_that_is_not_held_reads_no_fault() {
 #[test]
 fn an_output_reaches_its_device() {
     let (s, sent, _) = session();
-    let mut output = s
-        .connect_output(crate::testing::started(), "synth a")
-        .unwrap();
-    assert_eq!(output.name(), "Synth A");
     let synth_a = s
         .outputs()
         .into_iter()
         .find(|d| d.name == "Synth A")
         .unwrap()
         .id;
+    let mut output = s
+        .connect_output(crate::testing::started(), &synth_a)
+        .unwrap();
+    assert_eq!(output.name(), "Synth A");
     assert_eq!(output.id(), &synth_a);
     assert_eq!(output.queue(&[note(), note()]).packets(), 2);
     assert_eq!(sent.load(Ordering::SeqCst), 2);
@@ -357,8 +275,14 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
+    let synth_a = s
+        .outputs()
+        .into_iter()
+        .find(|d| d.name == "Synth A")
+        .unwrap()
+        .id;
     let mut output = s
-        .connect_output(crate::testing::started(), "synth a")
+        .connect_output(crate::testing::started(), &synth_a)
         .unwrap();
     let raw = EndpointId::from_raw(10);
     let t = tutti_platform::Instant::now() + std::time::Duration::from_secs(1);
@@ -394,8 +318,14 @@ fn a_refusing_output_reports_zero_accepted() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
+    let synth_a = s
+        .outputs()
+        .into_iter()
+        .find(|d| d.name == "Synth A")
+        .unwrap()
+        .id;
     let mut output = s
-        .connect_output(crate::testing::started(), "synth a")
+        .connect_output(crate::testing::started(), &synth_a)
         .unwrap();
 
     assert_eq!(
@@ -421,8 +351,14 @@ fn a_partial_accept_reports_what_landed() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
+    let synth_a = s
+        .outputs()
+        .into_iter()
+        .find(|d| d.name == "Synth A")
+        .unwrap()
+        .id;
     let mut output = s
-        .connect_output(crate::testing::started(), "synth a")
+        .connect_output(crate::testing::started(), &synth_a)
         .unwrap();
 
     assert_eq!(output.queue(&[note(), note(), note()]).packets(), 1);
@@ -456,8 +392,14 @@ fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
         crate::MidiHardwareConfig::new(),
     )
     .unwrap();
+    let synth_a = s
+        .outputs()
+        .into_iter()
+        .find(|d| d.name == "Synth A")
+        .unwrap()
+        .id;
     let mut output = s
-        .connect_output(crate::testing::started(), "synth a")
+        .connect_output(crate::testing::started(), &synth_a)
         .unwrap();
     let raw = EndpointId::from_raw(10);
     let [start, middle, end] = sysex();

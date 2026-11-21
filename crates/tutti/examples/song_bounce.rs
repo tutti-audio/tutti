@@ -77,7 +77,8 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
         Clip::new(wave)?
             .channels(ChannelLayout::STEREO)?
             .at(Beat::new(4.0))
-            .gain(Amplitude::new(0.8)),
+            .gain(Amplitude::new(0.8))
+            .expect("a finite gain"),
     );
 
     // A stereo low-pass, then a reverb whose input is mono: that width change
