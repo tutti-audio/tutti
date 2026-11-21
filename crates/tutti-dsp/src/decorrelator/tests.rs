@@ -1,5 +1,6 @@
 use super::*;
 use tutti_buffers::Float;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// 2048 impulses a second over 62.5 ms: 128 impulses, a period of 23.4375 frames (exact in
@@ -42,9 +43,13 @@ fn response(d: &Decorrelator<f64>, c: usize) -> Vec<f64> {
 fn run(d: &mut Decorrelator<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut out = vec![vec![0.0; input[0].len()]; input.len()];
     d.process(
-        Planes::from_vecs(input).unwrap(),
-        PlanesMut::from_vecs(&mut out).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::from_vecs(input).unwrap(),
+            PlanesMut::from_vecs(&mut out).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     out
 }
 

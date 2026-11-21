@@ -23,7 +23,9 @@
 //!
 //! The delay is musical, not processing latency: the node reports none.
 
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_widths;
+use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Amplitude, Hz, Metres, ReadPosition, SampleRate, SampleSpan, Samples, Speed};
 
 use crate::onepole::{cutoff_complement, cutoff_pole, ring_frames};
@@ -234,17 +236,17 @@ impl<F: Float> Distance<F> {
         })
     }
 
-    /// Runs `input` into `output`, channel `c` of one into channel `c` of the other; the
-    /// channels rendered are the fewest of the two views' and the line's, the frames the fewer
-    /// of the two views'. Frame `i` of the block reads the delay's step after the steps taken.
-    /// No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = self
-            .lines
-            .len()
-            .min(input.channels())
-            .min(output.channels());
+    /// Runs `input` into `output`, channel `c` of one into channel `c` of the other. Frame `i`
+    /// of the block reads the delay's step after the steps taken. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.lines.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let (ramp, reference) = (self.delay, self.reference);
         let step = |i: usize| {
             ramp.steps_taken()
@@ -276,6 +278,7 @@ impl<F: Float> Distance<F> {
         }
         self.delay
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        Ok(())
     }
 }
 

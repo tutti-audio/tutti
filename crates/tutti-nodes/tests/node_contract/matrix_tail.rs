@@ -20,8 +20,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, ChannelTopology, MaxBlock,
-    Mono, Planes, PlanesMut,
+    AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, ChannelTopology, InputOutput,
+    MaxBlock, Mono, Planes, PlanesMut,
 };
 
 use tutti_dsp::MatrixConvolver;
@@ -631,9 +631,13 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
         );
         let mut out = vec![vec![0.0f32; input[0].len()]; 2];
         m.process(
-            Planes::from_vecs(input).unwrap(),
-            PlanesMut::from_vecs(&mut out).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::from_vecs(input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         out
     };
     let node = || {

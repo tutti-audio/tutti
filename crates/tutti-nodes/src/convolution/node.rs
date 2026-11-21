@@ -15,12 +15,12 @@
 //! running state.
 
 use tutti_buffers::{
-    AmbisonicFormat, BusTopology, ChannelLayout, ChannelTopology, Fold, FoldError, MAX_CHANNELS,
-    Mono, MonoMut, Planes, PlanesMut, Sample,
+    AmbisonicFormat, BusTopology, ChannelLayout, ChannelTopology, Fold, FoldError, InputOutput,
+    MAX_CHANNELS, Mono, MonoMut, Planes, PlanesMut, Sample,
 };
 use tutti_graph::{
-    Buses, Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape,
-    Status,
+    Buses, Cx, Inputs, IntoNode, Io, MAX_PORTS, Node, NodeParts, Outputs, ParamNode, ParamSet,
+    Prepare, Shape, Status,
 };
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Samples, UnitParam};
@@ -707,14 +707,25 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                 let frames = at..at + size;
                 let (heard, heard_n) = slice_in((0..n_in).map(|c| inputs.get(c)), &frames);
                 let (mut wet, wet_n) = slice_out(outputs.iter_mut(), &frames);
-                let rendered = Planes::new(&heard[..heard_n]).and_then(|input| {
-                    PlanesMut::new(&mut wet[..wet_n]).map(|output| matrix.process(input, output))
-                });
+                let rendered = {
+                    // The planes reborrowed for the block alone, so `wet` is free after it.
+                    let mut views: [&mut [F]; MAX_PORTS] =
+                        core::array::from_fn(|_| Default::default());
+                    for (view, plane) in views.iter_mut().zip(&mut wet[..wet_n]) {
+                        *view = &mut **plane;
+                    }
+                    Planes::new(&heard[..heard_n])
+                        .and_then(|input| {
+                            PlanesMut::new(&mut views[..wet_n])
+                                .and_then(|output| InputOutput::paired(input, output))
+                        })
+                        .map(|mut block| matrix.process(&mut block))
+                };
                 debug_assert!(
-                    rendered.is_ok(),
-                    "every plane is a block long: {rendered:?}"
+                    matches!(rendered, Ok(Ok(()))),
+                    "every plane is a block long and the node's width: {rendered:?}"
                 );
-                if rendered.is_err() {
+                if !matches!(rendered, Ok(Ok(()))) {
                     // Not rendered: silent, never stale output.
                     for plane in &mut wet[..wet_n] {
                         plane.fill(F::ZERO);

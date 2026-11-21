@@ -264,9 +264,13 @@ fn the_cut_discards_only_what_is_below_the_floor() {
         let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
         bank.process(
             &mut ramps,
-            tutti_buffers::Planes::new(&ins).unwrap(),
-            tutti_buffers::PlanesMut::new(&mut outs).unwrap(),
-        );
+            &mut tutti_buffers::InputOutput::paired(
+                tutti_buffers::Planes::new(&ins).unwrap(),
+                tutti_buffers::PlanesMut::new(&mut outs).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let peak = l.iter().chain(&r).fold(0.0f32, |m, s| m.max(s.abs()));
         let after = l[tail + 1..]
             .iter()
