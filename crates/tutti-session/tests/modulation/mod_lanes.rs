@@ -23,7 +23,7 @@ use tutti_platform::Instant;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
 use tutti_graph::NodeKey;
-use tutti_graph::{Cx, Event, ForkByClone, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
     Adsr, CompileError, Curve, Declarations, Follower, Lfo, NoteEnvelope, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetKey,
@@ -740,14 +740,15 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
 
 // ----------------------------------------------------------- rebind --
 
-/// **A node crossfaded to one with another param list keeps modulating.** A
-/// macro's `+250` on a cutoff probe (knob 500); the node is crossfaded to a
-/// probe that declares the cutoff and a Q (another param list, knob 400).
+/// **A node swapped for one with another param list keeps modulating.** A
+/// macro's `+250` on a cutoff probe (knob 500); the node is swapped, with a
+/// zero fade (a fade over another shape is refused), for a probe that
+/// declares the cutoff and a Q (another param list, knob 400).
 /// After the re-apply that follows the commit (doc 014 §8.2: the rebound
 /// target is unresolved until its node is in a plan) the new node plays
 /// `400 + 250`, and a range edit after it lands on the new node (`+500`).
 #[test]
-fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
+fn a_node_swapped_for_another_param_list_keeps_modulating() {
     let (mut s, mut side) = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     master(&mut s, &[probe.erase()]);
@@ -765,9 +766,10 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
     s.graph()
         .replace(
             probe,
-            Replacement::new(ProbeUnit::new(400.0).with_extra(UnitParam::Q)),
+            Replacement::new(ProbeUnit::new(400.0).with_extra(UnitParam::Q))
+                .fade(Fade::new(Samples::ZERO)),
         )
-        .expect("the crossfade starts");
+        .expect("the swap is accepted");
     // The update that commits the new node re-applies after its commit: the
     // first block it plays is modulated.
     let _ = s.update();

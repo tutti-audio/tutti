@@ -255,7 +255,7 @@ pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
 };
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
-pub use dct::Dct2;
+pub use dct::{Dct2, TooManyOutputs};
 pub use decorrelator::{
     Decorrelator, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise,
     VelvetPulse,
@@ -335,7 +335,8 @@ pub use novelty::{
 };
 pub use oscillator::{Oscillator, OscillatorStep, OscillatorWave};
 pub use oversample::{
-    Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
+    BlockTooLong, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband,
+    PassbandError,
 };
 pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
@@ -372,10 +373,10 @@ pub use sos::{
     SosBank, SosCoefficients, SosError, StopbandAttenuation, StopbandAttenuationError, Tilt,
 };
 pub use spatial::{
-    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HRTF_LATENCY, HRTF_STEP,
-    HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
-    MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation, SpeakerGeometryError,
-    SpeakerLayout, VbapGains, VbapKernel,
+    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, GainsLengthMismatch, HRTF_LATENCY,
+    HRTF_STEP, HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinaural,
+    HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation,
+    SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
 };
 pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
 pub use stereo::{MidSide, WidthBank, WidthControls};

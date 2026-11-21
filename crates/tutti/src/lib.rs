@@ -291,14 +291,18 @@ pub mod nodes {
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
     pub use tutti_dsp::{
-        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics,
-        Rotation, SpeakerLayout,
+        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, GainsLengthMismatch,
+        HarmonicNormalization, Harmonics, Rotation, SpeakerLayout,
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
         Cookbook, CutResponse, Elliptic, EllipticTolerances, FirError, LinearPhaseDesign,
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
+    };
+    pub use tutti_dsp::{
+        BlockTooLong, MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+        Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{
         DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ModulationRate,
@@ -328,10 +332,6 @@ pub mod nodes {
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
-    };
-    pub use tutti_dsp::{
-        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes, Oversampler,
-        Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_dsp::{
@@ -566,9 +566,9 @@ pub mod session {
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
         DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, Removal,
         RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
         RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
         SetSources, Taps, TempoError, Weighted, Wire, root_width,
@@ -714,7 +714,7 @@ pub mod measure {
     pub use tutti_dsp::{
         BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
         CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
-        StftGeometry, WindowLength, WindowLengthError,
+        StftGeometry, TooManyOutputs, WindowLength, WindowLengthError,
     };
 }
 

@@ -11,6 +11,16 @@ use core::num::NonZeroUsize;
 
 use tutti_buffers::{Float, Sample};
 
+/// More coefficients asked of a DCT-II than it has points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{outputs} coefficients asked of a transform of {inputs} points")]
+pub struct TooManyOutputs {
+    /// The coefficients asked for.
+    pub outputs: usize,
+    /// The points of the transform, the most it can give.
+    pub inputs: usize,
+}
+
 /// A DCT-II of `inputs` points that keeps the first `outputs` coefficients.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dct2 {
@@ -20,11 +30,20 @@ pub struct Dct2 {
 }
 
 impl Dct2 {
-    /// The transform of `inputs` points keeping `outputs` coefficients, at most `inputs`.
-    #[must_use]
-    pub fn new(inputs: NonZeroUsize, outputs: NonZeroUsize) -> Self {
+    /// The transform of `inputs` points keeping `outputs` coefficients.
+    ///
+    /// # Errors
+    ///
+    /// [`TooManyOutputs`] when `outputs` is more than `inputs`.
+    pub fn new(inputs: NonZeroUsize, outputs: NonZeroUsize) -> Result<Self, TooManyOutputs> {
         let n = inputs.get();
-        let k_count = outputs.get().min(n);
+        let k_count = outputs.get();
+        if k_count > n {
+            return Err(TooManyOutputs {
+                outputs: k_count,
+                inputs: n,
+            });
+        }
         let table = (0..k_count)
             .flat_map(|k| {
                 let s = if k == 0 {
@@ -37,11 +56,11 @@ impl Dct2 {
                 })
             })
             .collect();
-        Self {
+        Ok(Self {
             inputs: n,
             outputs: k_count,
             table,
-        }
+        })
     }
 
     /// The points transformed.
