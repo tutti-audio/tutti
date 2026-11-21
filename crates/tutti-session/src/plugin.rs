@@ -1191,9 +1191,22 @@ impl HostedPlugin {
         self.plugin = plugin;
         self.answers = None;
         let outgoing = self.adopt(handle, Placement::InProcess);
+        // A plugin in process is not reloaded: nothing of an out-of-process
+        // outgoing plugin's way back carries over.
+        self.set_reload(None, None);
         self.set_node(node);
         self.controls = None;
         outgoing
+    }
+
+    /// How a plugin that died is brought back: the load it came from and the
+    /// recovery policy's state, both of the out-of-process kind, and `None` for
+    /// each when the plugin is not reloaded (hosted in process, or recovery off).
+    /// The one place the pair is written, so a record never holds the one
+    /// kind's origin with the other kind's recovery.
+    fn set_reload(&mut self, origin: Option<Origin>, recovery: Option<Recovery>) {
+        self.origin = origin;
+        self.recovery = recovery;
     }
 
     /// This record, retired: an in-process plugin's waits for the main
@@ -1724,8 +1737,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 client.controls().set_meter(meter);
                 let (key, rebinder) = self.graph.insert_plugin_with_rebinder(client);
                 if let Some(hosted) = self.graph.plugins.get_mut(&key.erase()) {
-                    hosted.origin = Some(origin);
-                    hosted.recovery = self.plugins.recovery.map(Recovery::new);
+                    hosted.set_reload(Some(origin), self.plugins.recovery.map(Recovery::new));
                 }
                 (key, rebinder)
             }
@@ -4092,6 +4104,27 @@ mod tests {
         rig.settle();
         let events = rig.land();
         assert!(events.is_empty(), "nothing is reported: {events:?}");
+    }
+
+    /// **A swap to an in-process plugin drops the served kind's way back.** The
+    /// record of a served plugin holds the load it came from and its recovery's
+    /// budget; the in-process plugin that replaces it is never reloaded, so
+    /// neither is left to act on.
+    #[test]
+    fn a_replacement_in_process_holds_no_origin_and_no_recovery() {
+        let (outgoing, _) = fake_handle(None, Vec::new());
+        let mut hosted = HostedPlugin::new(outgoing, PluginRef::file("fake.clap"), node_controls());
+        hosted.set_reload(
+            Some(Origin {
+                config: AudioConfig::default(),
+                loadable: Loadable::uncatalogued(PluginRef::file("fake.clap")),
+            }),
+            Some(Recovery::new(RecoveryPolicy::default())),
+        );
+        let (incoming, _) = fake_handle(None, Vec::new());
+        let _ = hosted.replace_hosted(incoming, node_controls(), PluginRef::file("other.clap"));
+        assert!(hosted.origin.is_none(), "no load to repeat");
+        assert!(hosted.recovery.is_none(), "no budget to spend");
     }
 
     /// **A plugin that replaces another starts its own bypass episode.** The

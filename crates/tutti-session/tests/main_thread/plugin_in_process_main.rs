@@ -20,7 +20,7 @@ use tutti_buffers::MaxBlock;
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_types::{Locator, PluginId};
-use tutti_session::{Session, SessionEvent};
+use tutti_session::{PluginChange, Session, SessionEvent};
 use tutti_units::{SampleRate, Samples};
 
 use crate::support::clap_probe;
@@ -114,6 +114,56 @@ fn a_swap_replaces_an_in_process_nodes_plugin() {
         thread::yield_now();
     }
     assert!(deactivation().is_main, "{:?}", deactivation());
+    s.close(main);
+}
+
+/// **A swap from an in-process plugin to a served one takes the served kind's
+/// recovery.** The node was hosted in process, which is never reloaded; once a
+/// served plugin is swapped in and its server dies, the session reloads it, as
+/// it does a served plugin it loaded itself.
+fn a_served_plugin_swapped_over_an_in_process_one_is_reloaded_when_it_dies() {
+    let mut env = tutti_fixtures::ScopedEnv::new();
+    env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    let main = tutti_fixtures::main_thread();
+    let (_, node) = s
+        .load_from(main, &catalog, &id(), Hosting::InProcess, None)
+        .unwrap();
+    let served = {
+        use crate::loading::Block as _;
+        s.load_out_of_process(&second_id(), &catalog)
+            .block()
+            .expect("the served plugin loads")
+    };
+    s.swap_plugin(node, served, main).unwrap();
+    s.plugin_view(node).unwrap().diagnostics().terminate(
+        tutti_plugin_types::TerminationReason::Hung {
+            blocks: 16,
+            held: Duration::from_secs(5),
+        },
+    );
+    // Only a hang guards this loop: the session reports what it does about
+    // the death, a reload or the end of the node's plugin.
+    let guard = Instant::now() + Duration::from_secs(60);
+    let change = 'seen: loop {
+        for event in s.update() {
+            if let SessionEvent::Plugin(event) = event
+                && matches!(
+                    event.change,
+                    PluginChange::Reloading { .. } | PluginChange::Died { .. }
+                )
+            {
+                break 'seen event.change;
+            }
+        }
+        assert!(Instant::now() < guard, "the death was never seen");
+        thread::yield_now();
+    };
+    assert!(
+        matches!(change, PluginChange::Reloading { .. }),
+        "a served plugin is reloaded: {change:?}"
+    );
     s.close(main);
 }
 
@@ -780,6 +830,7 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
 
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_in_process_main";
 a_swap_replaces_an_in_process_nodes_plugin,
+a_served_plugin_swapped_over_an_in_process_one_is_reloaded_when_it_dies,
 an_in_process_swap_to_other_ports_is_refused,
 a_restore_applies_the_saved_state_to_an_in_process_plugin,
 a_restore_applies_the_saved_state_to_a_served_plugin,

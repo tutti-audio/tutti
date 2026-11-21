@@ -803,6 +803,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     ) -> Result<tutti_plugin::catalog::PluginRebinder, CrossfadeRefused> {
         let (fade, law) = (tutti_graph::DECLICK, tutti_graph::FadeLaw::default());
         let meter = self.transport.settings().project_meter().clone();
+        let recovery = self.plugins.recovery.map(crate::Recovery::new);
         match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
@@ -812,7 +813,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 if swapped.is_ok()
                     && let Some(hosted) = self.graph.plugins.get_mut(&node)
                 {
-                    hosted.origin = Some(origin);
+                    hosted.set_reload(Some(origin), recovery);
                 }
                 swapped.map_err(|refused| match refused {
                     ReplaceRefused::Failed(refused) => refused,
