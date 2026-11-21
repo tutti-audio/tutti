@@ -21,7 +21,7 @@ use tutti_plugin_ipc::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest,
     ProcessAudioData, ReqId, Request, read_frame, write_frame,
 };
-use tutti_plugin_types::{ContentScale, IpcError, IpcResult};
+use tutti_plugin_types::{ContentScale, EditorError, IpcError, IpcResult};
 
 use super::{Native, Stream, serve_every};
 
@@ -523,7 +523,7 @@ fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
             [
                 ControlFrame::Reply { reply: ControlReply::EditorOpened { result: Err(open) }, .. },
                 ControlFrame::Reply { reply: ControlReply::EditorSized { result: Err(size) }, .. },
-            ] if open.contains("no plugin") && size.contains("not open")
+            ] if *open == EditorError::NoPlugin && *size == EditorError::NotOpen
         ),
         "{:?}",
         script.heard

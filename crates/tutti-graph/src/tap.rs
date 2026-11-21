@@ -38,30 +38,28 @@ use std::sync::{Arc, Weak};
 use crate::{TapAlign, TapId};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
-use tutti_rt::{Bell, ControlDrop, FaultLatch};
+use tutti_rt::{Bell, ControlDrop, FaultLatch, Listener};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_units::{Frame, Samples};
 
 use crate::slots::AudioSlots;
 use tutti_buffers::Float;
 
-/// How a tap is opened: its ring capacity, where its copy sits in time and who
-/// is rung as it writes. Taken by [`Editor::open_tap`](crate::Editor::open_tap).
+/// How a tap is opened: its ring capacity and where its copy sits in time.
+/// Taken by [`Editor::open_tap`](crate::Editor::open_tap).
 #[derive(Debug)]
 pub struct TapOptions {
     capacity: Samples,
     align: TapAlign,
-    bell: Option<Bell>,
 }
 
 impl TapOptions {
     /// Options for a tap whose every lane is a ring of `capacity` frames:
-    /// aligned to the output ([`TapAlign::ToOutput`]), ringing no bell.
+    /// aligned to the output ([`TapAlign::ToOutput`]).
     pub fn new(capacity: Samples) -> Self {
         Self {
             capacity,
             align: TapAlign::default(),
-            bell: None,
         }
     }
 
@@ -72,17 +70,8 @@ impl TapOptions {
         self
     }
 
-    /// Rings `bell` after each block the writer writes, when the tap ends and
-    /// when the writer drops: a reader awaiting its frames wakes on the audio
-    /// thread's ring and never polls.
-    #[must_use]
-    pub fn bell(mut self, bell: Bell) -> Self {
-        self.bell = Some(bell);
-        self
-    }
-
-    pub(crate) fn into_parts(self) -> (Samples, TapAlign, Option<Bell>) {
-        (self.capacity, self.align, self.bell)
+    pub(crate) fn into_parts(self) -> (Samples, TapAlign) {
+        (self.capacity, self.align)
     }
 }
 
@@ -336,6 +325,9 @@ pub struct TapReader<F: Float = f32> {
     left: usize,
     /// The editor holds a `Weak` of this: when it dies, the reader is gone.
     alive: Arc<()>,
+    /// The wait side of the bell the writer rings; `None` for a tap opened
+    /// without one.
+    listener: Option<Listener>,
     /// Raised when the tap was taken out of the plan for good.
     end: Arc<TapEnd>,
 }
@@ -360,12 +352,27 @@ impl<F: Float> TapReader<F> {
         Self::build(None, width, capacity, None)
     }
 
+    /// As [`pair`](Self::pair), with the writer ringing `bell` and the reader
+    /// awaiting it ([`notified`](Self::notified)): the bell and its listener
+    /// come from one [`Bells`](tutti_rt::Bells) set. Hidden: the engine's heard
+    /// tap is its one caller, and no app names a bell, so the umbrella exports
+    /// neither half of one.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn pair_notified(
+        width: usize,
+        capacity: Samples,
+        bell: (Bell, Listener),
+    ) -> (Self, TapWriter<F>) {
+        Self::build(None, width, capacity, Some(bell))
+    }
+
     /// The reader of the tap `id` names, and its writer.
     pub(crate) fn named(
         id: TapId,
         width: usize,
         capacity: Samples,
-        bell: Option<Bell>,
+        bell: Option<(Bell, Listener)>,
     ) -> (Self, TapWriter<F>) {
         Self::build(Some(id), width, capacity, bell)
     }
@@ -374,8 +381,12 @@ impl<F: Float> TapReader<F> {
         id: Option<TapId>,
         width: usize,
         capacity: Samples,
-        bell: Option<Bell>,
+        bell: Option<(Bell, Listener)>,
     ) -> (Self, TapWriter<F>) {
+        let (bell, listener) = match bell {
+            Some((bell, listener)) => (Some(bell), Some(listener)),
+            None => (None, None),
+        };
         let lost = Arc::new(AtomicU64::new(0));
         let end = Arc::new(TapEnd::new(bell.clone()));
         let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
@@ -392,6 +403,7 @@ impl<F: Float> TapReader<F> {
             at: Frame::ZERO,
             left: 0,
             alive: Arc::new(()),
+            listener,
             end,
         };
         let writer = TapWriter {
@@ -404,6 +416,18 @@ impl<F: Float> TapReader<F> {
             bell,
         };
         (reader, writer)
+    }
+
+    /// A future that resolves once the tap has written a block or ended since
+    /// the last time one resolved: await it, then drain the reader. Two
+    /// writes before it resolves it once, so drain until the reader is
+    /// [`Starved`](Pull::Starved) after it.
+    ///
+    /// `None` for a tap opened without a bell (a graph used without a
+    /// session, such as an offline render's, or [`pair`](Self::pair)'s): it
+    /// has nothing to await, so poll it.
+    pub fn notified(&mut self) -> Option<impl Future<Output = ()> + '_> {
+        self.listener.as_mut().map(Listener::rung)
     }
 
     /// A handle to see whether this reader is still alive: its strong count
@@ -672,16 +696,19 @@ mod tests {
         let executor = tutti_platform::Executor::new();
 
         let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
-        let (bell, mut listener) = bells.bell();
+        let bell = bells.bell();
         let (mut reader, mut writer) =
             TapReader::<f32>::named(TapId::of(2), 1, Samples::new(8), Some(bell));
         writer.push_interleaved(Interleaved::new(&[1.0, 2.0], writer.layout()).unwrap());
         let mut cx = Context::from_waker(Waker::noop());
-        assert_eq!(pin!(listener.rung()).poll(&mut cx), Poll::Ready(()));
+        assert_eq!(
+            pin!(reader.notified().expect("a tap opened with a bell")).poll(&mut cx),
+            Poll::Ready(())
+        );
         assert!(!reader.writer_gone());
         drop(writer);
         assert_eq!(
-            pin!(listener.rung()).poll(&mut cx),
+            pin!(reader.notified().expect("a tap opened with a bell")).poll(&mut cx),
             Poll::Ready(()),
             "the drop rings"
         );
@@ -709,19 +736,19 @@ mod tests {
         let executor = tutti_platform::Executor::new();
 
         let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
-        let (bell, mut listener) = bells.bell();
-        let (reader, mut writer) =
+        let bell = bells.bell();
+        let (mut reader, mut writer) =
             TapReader::<f32>::named(TapId::of(1), 1, Samples::new(4), Some(bell));
         let mut cx = Context::from_waker(Waker::noop());
         assert_eq!(
-            pin!(listener.rung()).poll(&mut cx),
+            pin!(reader.notified().expect("a tap opened with a bell")).poll(&mut cx),
             Poll::Pending,
             "nothing written"
         );
 
         writer.push_interleaved(Interleaved::new(&[1.0, 2.0], writer.layout()).unwrap());
         assert_eq!(
-            pin!(listener.rung()).poll(&mut cx),
+            pin!(reader.notified().expect("a tap opened with a bell")).poll(&mut cx),
             Poll::Ready(()),
             "a block rings"
         );
@@ -729,21 +756,32 @@ mod tests {
         // The ring holds four frames: a block of eight finds room for none of it once
         // it is full.
         writer.push_interleaved(Interleaved::new(&[0.0; 4], writer.layout()).unwrap());
-        assert_eq!(pin!(listener.rung()).poll(&mut cx), Poll::Ready(()));
+        assert_eq!(
+            pin!(reader.notified().expect("a tap opened with a bell")).poll(&mut cx),
+            Poll::Ready(())
+        );
         writer.push_interleaved(Interleaved::new(&[0.0; 4], writer.layout()).unwrap());
         assert_eq!(
-            pin!(listener.rung()).poll(&mut cx),
+            pin!(reader.notified().expect("a tap opened with a bell")).poll(&mut cx),
             Poll::Pending,
             "a block with no room wrote nothing and rings nothing"
         );
 
         reader.end_latch().raise();
         assert_eq!(
-            pin!(listener.rung()).poll(&mut cx),
+            pin!(reader.notified().expect("a tap opened with a bell")).poll(&mut cx),
             Poll::Ready(()),
             "the end rings"
         );
         assert!(reader.source_gone());
+    }
+
+    /// **A tap opened without a bell has nothing to await**: `notified` is `None`,
+    /// never a future that hangs or resolves at once.
+    #[test]
+    fn a_tap_opened_without_a_bell_has_no_notified_future() {
+        let (mut reader, _writer) = TapReader::<f32>::pair(1, Samples::new(4));
+        assert!(reader.notified().is_none());
     }
 
     /// An `f64` block reaches an `f64` tap sample for sample, with the

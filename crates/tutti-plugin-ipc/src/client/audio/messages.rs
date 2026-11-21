@@ -5,7 +5,8 @@ use super::ask::{Ask, Reply};
 use crate::SlabHandle;
 use dpi::Size;
 use tutti_plugin_types::{
-    BlockStatus, ContentScale, PluginFailure, PresetError, ResyncKind, StateError, StateUse,
+    BlockStatus, ContentScale, EditorError, PluginFailure, PresetError, ResyncKind, StateError,
+    StateUse,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -179,12 +180,12 @@ pub(super) enum ControlCommand {
     OpenEditor {
         parent: Option<u64>,
         scale: ContentScale,
-        reply: Reply<std::result::Result<Option<Size>, String>>,
+        reply: Reply<std::result::Result<Option<Size>, EditorError>>,
     },
     CloseEditor,
     SetEditorSize {
         size: Size,
-        reply: Reply<std::result::Result<Size, String>>,
+        reply: Reply<std::result::Result<Size, EditorError>>,
     },
 }
 

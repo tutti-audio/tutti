@@ -137,7 +137,7 @@ use tutti_units::{Latency, SampleRate};
 use super::{Bound, PluginClient, Unbound};
 use tutti_plugin_host::{ForkState, ForkedSources, PluginControls};
 use tutti_plugin_ipc::{LaunchSpec, Launched, OfflineWait, PluginBridge, PluginRenderFault};
-use tutti_plugin_types::{Features, RenderMode, StateError, StateUse};
+use tutti_plugin_types::{Features, RenderMode, StateUse};
 use tutti_plugin_types::{PluginFailure, PluginForkError};
 
 /// Whether a forked instance has failed while rendering: its
@@ -317,8 +317,8 @@ impl Capture {
                 path: path.clone(),
                 source,
             })?;
-        if let Some(Err(reason)) = restored {
-            return Err(PluginForkError::LoadState(StateError::Rejected(reason)));
+        if let Some(Err(error)) = restored {
+            return Err(PluginForkError::LoadState(error));
         }
         // A current preset goes in over it, in `ForkState::restore`'s order
         // (the preset, then the state, which is the live plugin's now). The

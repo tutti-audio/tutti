@@ -1,6 +1,9 @@
 //! [`Normalized`], a neutral value on `0..=1`.
 
+// `Normalized` is a `Unit` (below), which is already a `Quantity`, so it takes the type
+// and its error without the macro's own `Quantity` impl.
 crate::ranged! {
+    @items []
     /// A position on the unit interval, `0..=1`, with no meaning beyond it.
     ///
     /// It is what a plugin parameter's normalized value and a MIDI velocity or
@@ -32,6 +35,20 @@ crate::ranged! {
     #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
     Normalized(f64), NormalizedOutOfRange, "on 0..=1",
     |raw| raw >= 0.0 && raw <= 1.0
+}
+
+/// `from_raw` saturates ([`Normalized::clamped`]): a parameter cell holds any float, and a
+/// unit's `from_raw` cannot refuse.
+impl crate::Unit for Normalized {
+    type Raw = f64;
+    #[inline]
+    fn from_raw(v: f64) -> Self {
+        Self::clamped(v)
+    }
+    #[inline]
+    fn to_raw(self) -> f64 {
+        self.get()
+    }
 }
 
 impl Normalized {

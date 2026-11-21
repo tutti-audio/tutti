@@ -897,7 +897,8 @@ impl<'g, W: Wire, F: Float> Disconnection<'g, W, F> {
     pub fn unfaded(self) -> Self {
         // The call that made this value found both ends, and the edge's
         // fade is all that is left of it: cutting it again cannot refuse.
-        let _ = W::disconnect(self.graph, self.ends.0, self.ends.1, true);
+        let recut = W::disconnect(self.graph, self.ends.0, self.ends.1, true);
+        debug_assert!(recut.is_ok(), "re-cutting a disconnected edge refused");
         self
     }
 
@@ -972,7 +973,8 @@ impl<'g, P: Fanin, F: Float> SetSources<'g, P, F> {
         self.graph.cut_edges(&self.cut);
         // The call that made this value found the sink and every source:
         // setting the same sources again cannot refuse.
-        let _ = self.to.set_sources(self.graph, self.from.clone(), true);
+        let reset = self.to.set_sources(self.graph, self.from.clone(), true);
+        debug_assert!(reset.is_ok(), "setting the same sources again refused");
         self
     }
 }

@@ -14,8 +14,11 @@
 //! is read-only, or frozen by its fork when it is not — its own unit test
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
+use std::sync::Arc;
 use tutti_buffers::Mono;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
+use tutti_buffers::{Interleaved, Wave};
+use tutti_dsp::Wavetable;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
@@ -30,6 +33,7 @@ use tutti_nodes::{
     LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
     PitchShifterConfig, PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig,
     ShimmerNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -37,14 +41,16 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TransientShaperConfig,
     TransientShaperNode,
 };
+use tutti_nodes::{GranularConfig, GranularNode};
 use tutti_nodes::{
     GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
     SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
     TiltFilterNode,
 };
+use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
 use tutti_units::{
-    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Metres, Q, Resonance,
-    Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
+    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Gain, Hz, Metres, Normalized,
+    Q, Resonance, SampleRate, Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -488,6 +494,28 @@ fn comb_filter() {
 }
 
 #[test]
+fn modal_bank() {
+    let modes = [(440.0, 0.4), (1_130.0, 0.2)].map(|(f, t)| Mode {
+        frequency: Hz::new(f),
+        decay: Seconds::new(t),
+        gain: Gain::new(1.0),
+    });
+    IsolateRow::new("ModalBankNode (stereo)", move || {
+        ModalBankNode::from(ModalBankConfig::new(
+            ChannelLayout::STEREO,
+            Modes::try_from(&modes[..]).unwrap(),
+        ))
+    })
+    .control("frequency", |r| {
+        assert!(r.param_set().set(UnitParam::Frequency, 660.0))
+    })
+    .control("decay", |r| {
+        assert!(r.param_set().set(UnitParam::Decay, 0.1))
+    })
+    .check();
+}
+
+#[test]
 fn frequency_shifter() {
     IsolateRow::new("FrequencyShifterNode (stereo)", || {
         FrequencyShifterNode::from(
@@ -529,6 +557,28 @@ fn distance() {
 }
 
 #[test]
+fn granular() {
+    IsolateRow::new("GranularNode (stereo)", || {
+        let mut wave = Wave::<f32>::new(2, SampleRate::SR_48K);
+        let frames: Vec<f32> = (0..2 * 4_800).map(|i| (i as f32 * 0.05).sin()).collect();
+        wave.append(Interleaved::new(&frames, ChannelLayout::STEREO).unwrap())
+            .unwrap();
+        GranularNode::<f32>::try_from(
+            GranularConfig::new(ChannelLayout::STEREO, Arc::new(wave))
+                .density(Hz::new(80.0))
+                .position_jitter(Normalized::of(0.2))
+                .timing_jitter(Normalized::of(0.3))
+                .seed(5),
+        )
+        .unwrap()
+    })
+    .control("density", |r| {
+        assert!(r.param_set().set(UnitParam::Rate, 300.0))
+    })
+    .check();
+}
+
+#[test]
 fn shimmer() {
     IsolateRow::new("ShimmerNode", || {
         ShimmerNode::<f32>::from(
@@ -553,6 +603,30 @@ fn ring_mod() {
     })
     .control("frequency", |r| {
         assert!(r.param_set().set(UnitParam::Frequency, 900.0))
+    })
+    .check();
+}
+
+#[test]
+fn wavetable() {
+    let one: Vec<f32> = (0..64).map(|i| (i as f32 / 64.0) * 2.0 - 1.0).collect();
+    let two: Vec<f32> = (0..64).map(|i| 1.0 - (i as f32 / 64.0) * 2.0).collect();
+    let table = Wavetable::new(&[Mono::new(&one), Mono::new(&two)]).expect("two frames");
+    IsolateRow::new("WavetableNode (two frames, 3 channels)", move || {
+        WavetableNode::<f32>::from(
+            WavetableConfig::new(3u16, std::sync::Arc::clone(&table))
+                .frequency(Hz::new(300.0))
+                .level(Amplitude::new(0.8)),
+        )
+    })
+    .control("frequency", |w| {
+        assert!(ParamNode::<f32>::param_set(w).set(UnitParam::Frequency, 700.0))
+    })
+    .control("level", |w| {
+        assert!(ParamNode::<f32>::param_set(w).set(UnitParam::Volume, 0.2))
+    })
+    .control("position", |w| {
+        assert!(ParamNode::<f32>::param_set(w).set(UnitParam::Position, 1.0))
     })
     .check();
 }

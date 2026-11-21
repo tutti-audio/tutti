@@ -17,7 +17,7 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_ipc_ffi::{Blob, Lease};
 use tutti_plugin_types::{
-    Deadline, IpcError, IpcResult, MAX_STATE_BYTES, ServerError, SlabError, StateUse,
+    Deadline, IpcError, IpcResult, MAX_STATE_BYTES, ServerError, SlabError, StateError, StateUse,
 };
 
 use crate::main_loop::Bell;
@@ -85,7 +85,7 @@ pub(crate) enum Incoming {
         /// Whether it was a `StageState`.
         staging: bool,
         /// Why the object was refused.
-        error: String,
+        error: StateError,
     },
 }
 
@@ -135,7 +135,7 @@ impl Inbound for Incoming {
                 Err(e) => Self::StateRefused {
                     id,
                     staging: false,
-                    error: e.to_string(),
+                    error: refusal(e),
                 },
             }),
             ControlRequest::StageState { len, blob } => Ok(match take_state(stream, len, blob)? {
@@ -143,11 +143,26 @@ impl Inbound for Incoming {
                 Err(e) => Self::StateRefused {
                     id,
                     staging: true,
-                    error: e.to_string(),
+                    error: refusal(e),
                 },
             }),
             body => Ok(Self::Request(Request { id, body })),
         }
+    }
+}
+
+/// A state object's refusal as the [`StateError`] the host is answered with:
+/// the lengths it refused on, and the transport's own message for any other.
+fn refusal(e: SlabError) -> StateError {
+    match e {
+        SlabError::BlobTooLarge { declared, limit } => StateError::TooLarge {
+            bytes: usize::try_from(declared).unwrap_or(usize::MAX),
+            limit,
+        },
+        SlabError::BlobSize { declared, actual } => StateError::ObjectLength { declared, actual },
+        other => StateError::ObjectRefused {
+            reason: other.to_string(),
+        },
     }
 }
 
@@ -681,7 +696,13 @@ mod state_object_tests {
                     error,
                     ..
                 } => {
-                    assert!(error.contains("declared"), "{error}");
+                    assert!(
+                        matches!(
+                            error,
+                            StateError::ObjectLength { declared: said, .. } if said == declared
+                        ),
+                        "{error:?}"
+                    );
                 }
                 other => panic!("expected the refusal, got {other:?}"),
             }
@@ -717,7 +738,10 @@ mod state_object_tests {
         );
         match transport.recv().expect("a refusal") {
             Incoming::StateRefused { error, .. } => {
-                assert!(error.contains("limit"), "{error}");
+                assert!(
+                    matches!(error, StateError::TooLarge { limit, .. } if limit == MAX_STATE_BYTES),
+                    "{error:?}"
+                );
             }
             other => panic!("expected the refusal, got {other:?}"),
         }

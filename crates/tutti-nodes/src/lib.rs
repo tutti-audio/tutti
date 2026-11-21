@@ -58,8 +58,14 @@
 //!   transport beat (a span fixed at build); its depth and rate are read per frame.
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
+//! - **Wavetable** — [`WavetableNode`], a source playing a mipmapped `tutti_dsp::Wavetable` (frames
+//!   morphed by position, the mip level crossfaded from the frequency); its frequency (`Frequency`),
+//!   level (`Volume`) and frame position (`Position`) are read per frame.
 //! - **Noise** — [`NoiseNode`], a mono source of white, pink or brown noise
 //!   (`tutti_dsp::Noise`) from a seed; its level (`Volume`) is read per frame.
+//! - **Granular** — [`GranularNode`], a cloud of Hann-windowed grains of a shared source
+//!   (`tutti_dsp::Granular`): its density (`Rate`), pitch (`Pitch`), grain length (`GrainLength`)
+//!   and two jitters (`Jitter[0]`, `Jitter[1]`) are read per block.
 //! - **Spring reverb** — `SpringReverbNode`, a spring's chirp (stretched all-pass cascades) in a
 //!   loop with a delay and a low-pass, any width, from a `SpringReverbConfig`.
 //! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser, spring and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
@@ -308,8 +314,13 @@ pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 mod oscillator;
 pub use oscillator::{OscillatorConfig, OscillatorNode};
 
+mod granular;
+pub use granular::{GranularConfig, GranularError, GranularNode};
 mod noise;
 pub use noise::{NoiseConfig, NoiseNode};
+
+mod wavetable;
+pub use wavetable::{WavetableConfig, WavetableNode};
 
 mod delay;
 pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
@@ -403,6 +414,12 @@ pub use tremolo::{TremoloConfig, TremoloKernel, TremoloNode, TremoloSet};
 pub use tutti_dsp::{
     AutoPanControls, NoiseColour, OscillatorWave, PanLaw, RingModControls, TremoloControls,
 };
+
+// A modal bank: damped resonators excited by the input.
+mod modal_bank;
+pub use modal_bank::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
+// The modes of a bank and the controls it starts at.
+pub use tutti_dsp::{MAX_MODES, ModalControls, Mode, ModeCount, ModeCountError, Modes};
 
 // Comb filter and frequency shifter.
 mod comb;
