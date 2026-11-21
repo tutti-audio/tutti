@@ -1,8 +1,6 @@
 //! macOS: an Audio Unit's editor loads through `tutti-au-host`.
 
-use tutti_plugin_types::{
-    Editor, IpcError, IpcResult, MainThreadMarker, MainWorkHandle, PluginRef,
-};
+use tutti_plugin_types::{Editor, IpcResult, MainThreadMarker, MainWorkHandle, PluginRef};
 
 /// The editor-only instance of the Audio Unit at `path`.
 #[cfg(feature = "au")]
@@ -24,8 +22,8 @@ pub(super) fn audio_unit(
     _work: &MainWorkHandle,
     plugin: &PluginRef,
 ) -> IpcResult<Box<dyn Editor>> {
-    Err(IpcError::NoEditorHost {
+    Err(tutti_plugin_types::IpcError::NoEditorHost {
         path: plugin.path().to_path_buf(),
-        why: NoEditorHost::AudioUnitFeatureOff,
+        why: tutti_plugin_types::NoEditorHost::AudioUnitFeatureOff,
     })
 }
