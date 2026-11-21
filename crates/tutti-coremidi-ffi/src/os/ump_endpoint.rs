@@ -18,7 +18,9 @@
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
 use super::client::SharedClient;
-use super::error::{Error, Operation};
+use super::client_retry::Retry;
+use super::enable_retry::EnableRetry;
+use super::error::{Error, Operation, OsStatus};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
 use super::source::{protocol_id, publish};
@@ -36,7 +38,7 @@ use objc2_core_midi::{
 use objc2_foundation::{NSArray, NSError, NSString};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{
     DeviceIdentity, FunctionBlockId, FunctionBlockInfo, ProductInstanceId, Protocol, U7, Ump,
 };
@@ -162,12 +164,22 @@ impl UmpEndpoint {
     /// before the class lookup, so it is the same on every macOS). Then
     /// [`Error::UmpEndpointUnsupported`] before macOS 15, [`Error::Exception`] when
     /// CoreMIDI raises an Objective-C exception, [`Error::NotPermitted`] when it
-    /// answers a call with `kMIDINotPermitted`, [`Error::Objc`] or
+    /// answers a call with `kMIDINotPermitted` (the enable is tried again for up
+    /// to two seconds first, see below), [`Error::Objc`] or
     /// [`Error::NoObject`] when it refuses the endpoint otherwise,
     /// [`Error::BlockNumber`] for a number the spec cannot hold, and
     /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the
     /// registered ones.
     /// An `Err` leaves no endpoint published.
+    ///
+    /// # Concurrent creations
+    ///
+    /// CoreMIDI's server can refuse an enable with `kMIDINotPermitted` while it
+    /// serves another process's endpoint change, and accepts the same call a few
+    /// milliseconds later. This call retries the enable, waiting 10 ms and then
+    /// longer, for two seconds from its first attempt, and returns
+    /// [`Error::NotPermitted`] only if the refusal lasts that long. The wait
+    /// happens on the calling thread, which is the main thread.
     pub fn new<F>(
         main: MainThreadMarker,
         _client: SharedClient,
@@ -296,9 +308,7 @@ fn create(
     // SAFETY: plain messages to the live endpoint with an array of live blocks.
     unsafe { endpoint.registerFunctionBlocks_markAsStatic_error(&function_blocks, true) }
         .map_err(|e| objc(Operation::RegisterFunctionBlocks, &e))?;
-    // SAFETY: a plain message to the live endpoint.
-    unsafe { endpoint.setEnabled_error(true) }
-        .map_err(|e| objc(Operation::EnableUmpEndpoint, &e))?;
+    enable(endpoint)?;
     // SAFETY: plain getters on the live endpoint and its blocks.
     let (source, listed) = unsafe {
         (
@@ -319,6 +329,26 @@ fn create(
         .map(|number| FunctionBlockId::new(number).ok_or(Error::BlockNumber(number)))
         .collect::<Result<Vec<_>, _>>()?;
     Ok((source, numbers))
+}
+
+/// Enables `endpoint`, trying again while CoreMIDI refuses with `kMIDINotPermitted`
+/// (see [`EnableRetry`]). Called inside [`catch`].
+fn enable(endpoint: &MIDIUMPMutableEndpoint) -> Result<(), Error> {
+    let mut rule = EnableRetry::new(Instant::now());
+    loop {
+        // SAFETY: a plain message to the live endpoint.
+        let Err(refused) = (unsafe { endpoint.setEnabled_error(true) }) else {
+            return Ok(());
+        };
+        let error = objc(Operation::EnableUmpEndpoint, &refused);
+        if !matches!(error, Error::NotPermitted(_)) {
+            return Err(error);
+        }
+        match rule.after(OsStatus::NOT_PERMITTED, Instant::now()) {
+            Retry::At(at) => std::thread::sleep(at.saturating_duration_since(Instant::now())),
+            Retry::GiveUp => return Err(error),
+        }
+    }
 }
 
 /// The Objective-C Function Block for `block`.

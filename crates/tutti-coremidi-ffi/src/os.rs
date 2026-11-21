@@ -2,6 +2,7 @@
 
 mod client;
 mod client_retry;
+mod enable_retry;
 mod endpoint;
 mod error;
 mod event_list;
