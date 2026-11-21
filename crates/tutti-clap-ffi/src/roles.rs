@@ -2,13 +2,13 @@
 //!
 //! A plugin asks the host (`clap.thread-check`) which thread a call is on,
 //! and the audio-side entries of one plugin must never overlap. Both are one
-//! object's job: the claim on the `[audio-thread]` role is a lock, and holding
+//! object's job: the claim on the `[audio-thread]` role is a [`Claim`], which
+//! the audio thread takes without locking, waiting or allocating, and holding
 //! it publishes the claiming thread's identity.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::thread::ThreadId;
-use tutti_rt::LockExt;
+use tutti_rt::{Claim, ClaimGuard};
 
 use tutti_plugin_types::MainThreadMarker;
 
@@ -21,7 +21,7 @@ pub struct ThreadRoles {
     // one-slot `Arc` cache is evicted whenever a GUI thread claims the role
     // between two blocks. A hash in an atomic allocates nothing.
     audio: AtomicU64,
-    lock: Mutex<()>,
+    claim: Claim,
 }
 
 const NO_AUDIO_THREAD: u64 = 0;
@@ -39,18 +39,22 @@ fn thread_id_hash(id: ThreadId) -> u64 {
 
 /// RAII claim on the `[audio-thread]` role for one plugin instance.
 ///
-/// While alive it holds the instance's role lock and has published the
+/// While alive it holds the instance's role claim and has published the
 /// claiming thread, so [`ThreadRoles::is_audio_thread`] answers `true` on
 /// this thread and `false` everywhere else, and
 /// [`ThreadRoles::is_main_thread`] answers `false` on this thread even when it
 /// is the OS main thread (the spec lets a host drive `start_processing` from
-/// there). Not re-entrant: claiming twice on one thread deadlocks.
+/// there). Not re-entrant: claiming twice on one thread never returns.
+///
+/// It holds no guard once the claim is dead (a holder panicked): a dead
+/// claim admits no audio-side entry again, so the waiting entries that
+/// still run are alone without one.
 #[derive(Debug)]
 pub(crate) struct AudioClaim<'a> {
     roles: &'a ThreadRoles,
     // Held for the claim's lifetime; declared last so it releases only after
     // `Drop` has cleared the published identity.
-    _guard: MutexGuard<'a, ()>,
+    _guard: Option<ClaimGuard<'a>>,
 }
 
 impl Drop for AudioClaim<'_> {
@@ -62,16 +66,17 @@ impl Drop for AudioClaim<'_> {
     }
 }
 
-/// The roles lock held for `deactivate` and `destroy`, which are
+/// The roles claim held for `deactivate` and `destroy`, which are
 /// `[main-thread]` entries: no audio-side entry can run beside them, but the
 /// holder stays the main thread, so the callbacks a plugin makes from them
 /// (`unregister_timer`, `latency.changed`, `params.rescan`, ...) are legal and
 /// answered as such. The one audio-side entry in the sequence, `stop_processing`,
-/// runs inside [`audio`](Self::audio).
+/// runs inside [`audio`](Self::audio). Like an [`AudioClaim`], it holds no
+/// guard once the claim is dead.
 #[derive(Debug)]
 pub(crate) struct LifecycleClaim<'a> {
     roles: &'a ThreadRoles,
-    _guard: MutexGuard<'a, ()>,
+    _guard: Option<ClaimGuard<'a>>,
 }
 
 impl LifecycleClaim<'_> {
@@ -94,13 +99,13 @@ impl LifecycleClaim<'_> {
 }
 
 impl ThreadRoles {
-    /// Takes the roles lock without becoming the audio thread: for the
-    /// `[main-thread]` entries that must not overlap audio-side ones.
+    /// Takes the roles claim without becoming the audio thread, waiting for
+    /// any other holder: for the `[main-thread]` entries that must not overlap
+    /// audio-side ones.
     pub(crate) fn claim_lifecycle(&self) -> LifecycleClaim<'_> {
-        let guard = self.lock.lock_recover();
         LifecycleClaim {
             roles: self,
-            _guard: guard,
+            _guard: self.claim.claim(),
         }
     }
 
@@ -114,7 +119,7 @@ impl ThreadRoles {
         Self {
             main: std::thread::current().id(),
             audio: AtomicU64::new(NO_AUDIO_THREAD),
-            lock: Mutex::new(()),
+            claim: Claim::new(),
         }
     }
 
@@ -125,10 +130,9 @@ impl ThreadRoles {
     }
 
     /// Claim the `[audio-thread]` role, waiting until any other claim has
-    /// been released. A poisoned lock is taken as is: the guarded value is
-    /// `()`, so a panicking claimant broke no invariant.
+    /// been released. Control side.
     pub(crate) fn claim(&self) -> AudioClaim<'_> {
-        let guard = self.lock.lock_recover();
+        let guard = self.claim.claim();
         // `Release` pairs with the `Acquire` in `is_audio_thread`.
         self.audio.store(
             thread_id_hash(std::thread::current().id()),
@@ -142,15 +146,12 @@ impl ThreadRoles {
 
     /// Claims the `[audio-thread]` role if no other claim is held, and never
     /// waits: `None` while a claim is held, by the main thread's lifecycle
-    /// and parameter calls or by another audio entry. What the audio thread
-    /// takes, so a main-thread call never stalls a block. A poisoned lock is
-    /// taken as is, as [`claim`](Self::claim) takes it.
+    /// and parameter calls or by another audio entry, and for good once the
+    /// claim is dead. What the audio thread takes: one compare-exchange, so
+    /// a main-thread call never stalls a block and a block never locks or
+    /// allocates.
     pub(crate) fn try_claim(&self) -> Option<AudioClaim<'_>> {
-        let guard = match self.lock.try_lock() {
-            Ok(guard) => guard,
-            Err(TryLockError::Poisoned(p)) => p.into_inner(),
-            Err(TryLockError::WouldBlock) => return None,
-        };
+        let guard = self.claim.try_claim()?;
         // `Release` pairs with the `Acquire` in `is_audio_thread`.
         self.audio.store(
             thread_id_hash(std::thread::current().id()),
@@ -158,7 +159,7 @@ impl ThreadRoles {
         );
         Some(AudioClaim {
             roles: self,
-            _guard: guard,
+            _guard: Some(guard),
         })
     }
 
@@ -269,18 +270,18 @@ mod tests {
         assert!(roles.try_claim().is_some());
     }
 
-    /// Claiming repeatedly from one thread does not allocate.
+    /// Claiming allocates nothing from the first claim of fresh roles on: an
+    /// audio claim is one compare-exchange, with no lock to set up on first
+    /// use.
     #[test]
-    fn repeated_claims_from_one_thread_do_not_allocate() {
+    fn claims_allocate_nothing_from_the_first() {
         let roles = roles();
-        for _ in 0..8 {
-            drop(roles.claim());
-        }
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..1024 {
-                let claim = roles.claim();
+                let claim = roles.try_claim().expect("nothing else holds it");
                 assert!(roles.is_audio_thread());
                 drop(claim);
+                drop(roles.claim());
             }
         });
     }
