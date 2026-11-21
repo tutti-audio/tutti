@@ -180,7 +180,6 @@
 
 mod array_math;
 mod channel;
-mod envelope_stage;
 mod error;
 mod lfo;
 mod modulation_envelope;

@@ -121,7 +121,7 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
         .expect("the file reads");
     let (stream, reader) = s.apply(opened).expect("the session serves it");
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
-    let (key, handle) = s
+    let (key, _) = s
         .graph()
         .add(tutti_sampler::Clip::<f64>::streaming(reader, stream).at(Beat::new(0.0)));
     s.graph()
@@ -129,8 +129,9 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
         .expect("both into the root");
     let _ = s.update();
     wait_until("the stream to prime", Duration::from_secs(10), || {
-        handle
-            .status()
+        s.graph_ref()
+            .handle(&key)
+            .and_then(|handle| handle.status())
             .is_none_or(|status| status.phase != tutti_sampler::StreamPhase::Opening)
     });
     s.play().expect("room");

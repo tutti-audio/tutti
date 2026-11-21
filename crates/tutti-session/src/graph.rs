@@ -183,6 +183,14 @@ struct Entry {
     /// What frees the values its published cells retired
     /// ([`SessionNode::reclaimer`]), run by [`Graph::reclaim`].
     reclaimer: Option<crate::Reclaimer>,
+    /// The node's controls ([`IntoNode::Controls`]), a clone of what
+    /// [`Graph::add`] handed out, kept for the node's life: a removal or a
+    /// swap moves them to the graph's retiring list, dropped once the
+    /// outgoing node has left the render, so a handle whose last drop releases
+    /// something (a voice's stream) holds it while the node still renders.
+    /// `None` for a node placed without [`SessionNode`]. Read by
+    /// [`Graph::controls`].
+    controls: Option<Box<dyn Any + Send>>,
 }
 
 /// The executor, while this side still holds it, and what a local render
@@ -391,6 +399,11 @@ pub struct Graph<F: Float = f32> {
     /// main thread drains it (`Session::update` there).
     #[cfg(feature = "plugin")]
     pub(crate) graveyard: crate::plugin::Graveyard,
+    /// The controls of a node removed or swapped out, held until the editor
+    /// hands back its retired unit ([`Editor::collect`]): a node whose edges
+    /// fade out keeps rendering until then, and its controls (a voice's
+    /// stream) live as long.
+    retiring: Vec<(NodeKey, Box<dyn Any + Send>)>,
     /// A reader of the session's tempo map, the template each plugin and
     /// each sampler node inserted through the graph is bound with (a clone
     /// of it: the node lends the map once per block and a fork clones its
@@ -567,6 +580,7 @@ impl<F: Float> Graph<F> {
             plugins: BTreeMap::new(),
             #[cfg(feature = "plugin")]
             graveyard: crate::plugin::Graveyard::default(),
+            retiring: Vec::new(),
             tempo,
             resumed: false,
             compensation: Arc::default(),
@@ -578,6 +592,11 @@ impl<F: Float> Graph<F> {
     /// device's callback size when the session knows it.
     pub(crate) fn prepared(&self) -> Prepare {
         *self.editor.prepare()
+    }
+
+    /// Makes every tap the graph opens from now on carry a bell from `bells`.
+    pub(crate) fn notify_with(&mut self, bells: tutti_rt::BellsHandle) {
+        self.editor.notify_with(bells);
     }
 
     pub(crate) fn set_render_workers(&mut self, workers: crate::Workers) {
@@ -740,7 +759,8 @@ impl<F: Float> Graph<F> {
                 break;
             }
             local.exec.apply_pending();
-            self.editor.collect();
+            let retired = self.editor.collect();
+            Self::bury(&mut self.retiring, &retired);
         }
     }
 
@@ -766,6 +786,40 @@ impl<F: Float> Graph<F> {
         (key, controls)
     }
 
+    /// The controls [`add`](Self::add) kept for the node at `key`; `None` when
+    /// the node is gone.
+    pub(crate) fn controls<N: SessionNode<F>>(&self, key: &Key<N>) -> Option<&N::Controls> {
+        self.nodes
+            .get(&key.erase())?
+            .controls
+            .as_deref()?
+            .downcast_ref()
+    }
+
+    /// The sampler handle of the node at `key`, the controls
+    /// [`add`](Self::add) returned for it, until its commands become targets
+    /// ([`Handled`](crate::Handled) names the nodes). `None` when the node is gone.
+    ///
+    /// The graph keeps a clone for the node's life, so a handle's last drop
+    /// (a streamed voice's release) waits until the node has left the render:
+    /// after its removal's fade-out, or a replacement's crossfade.
+    #[cfg(feature = "sampler")]
+    pub fn handle<N: crate::Handled<F>>(&self, key: &Key<N>) -> Option<&N::Controls> {
+        self.controls(key)
+    }
+
+    /// Band `band`'s largest gain reduction in the last block, the meter of
+    /// the multiband compressor at `key`: [`Db::UNITY`](tutti_units::Db::UNITY)
+    /// for no reduction. `None` when the node is gone or `band` is past its
+    /// last band.
+    pub fn gain_reduction<N>(&self, key: &Key<N>, band: usize) -> Option<tutti_units::Db>
+    where
+        N: SessionNode<F, Controls = tutti_nodes::MultibandControls>,
+    {
+        let controls = self.controls(key)?;
+        (band < controls.bands()).then(|| controls.gain_reduction_db(band))
+    }
+
     /// Puts `node` in the editor under a fresh key, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half, for the nodes that
     /// are not a [`SessionNode`] (a bound plugin).
@@ -773,7 +827,13 @@ impl<F: Float> Graph<F> {
         let id = NodeKey::fresh();
         // A fresh key has no wiring recorded, so nothing is unwired.
         let controls = self.editor.insert(id, N::kind(), node).controls;
-        self.nodes.insert(id, Entry { reclaimer: None });
+        self.nodes.insert(
+            id,
+            Entry {
+                reclaimer: None,
+                controls: None,
+            },
+        );
         self.note_pass(id);
         self.edited = true;
         (Key::new(id), controls)
@@ -892,6 +952,7 @@ impl<F: Float> Graph<F> {
     /// params, its slots and its reclaimer.
     fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: &N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
+            entry.controls = Some(Box::new(controls.clone()));
             if let Some(set) = N::params(controls) {
                 self.values.address(node, std::any::TypeId::of::<N>(), set);
             }
@@ -944,7 +1005,13 @@ impl Graph {
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
-        self.nodes.insert(node, Entry { reclaimer: None });
+        self.nodes.insert(
+            node,
+            Entry {
+                reclaimer: None,
+                controls: None,
+            },
+        );
         self.note_pass(node);
         self.plugins.insert(node, hosted);
         self.provide_plugin(node);
@@ -1344,11 +1411,34 @@ impl<F: Float> Graph<F> {
         if let Some(entry) = self.nodes.get_mut(&node) {
             self.values.retire(node);
             entry.reclaimer = None;
+            if let Some(controls) = entry.controls.take() {
+                self.retiring.push((node, controls));
+            }
         }
         self.note_pass(node);
         self.sweep_gain_targets();
         self.edited = true;
         Ok(controls)
+    }
+
+    /// Drops the retiring controls of the nodes whose units the editor handed
+    /// back: one, the oldest, per key in `retired` (a node of several units
+    /// names its key once per unit).
+    ///
+    /// Two swaps at one key whose units both come back in one `retired` drop
+    /// only the older box; the other is held until that key retires again or
+    /// the graph drops.
+    fn bury(retiring: &mut Vec<(NodeKey, Box<dyn Any + Send>)>, retired: &[NodeKey]) {
+        let mut seen: Vec<NodeKey> = Vec::new();
+        for &key in retired {
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            if let Some(at) = retiring.iter().position(|(k, _)| *k == key) {
+                retiring.remove(at);
+            }
+        }
     }
 
     /// Records what a re-insert at `node` unwired, in the session's port
@@ -1939,8 +2029,11 @@ impl<F: Float> Graph<F> {
         self.values.retire(node);
         self.values.retire_node_controls(node);
         self.values.retire_declared_on(node);
-        if self.nodes.remove(&node).is_none() {
+        let Some(entry) = self.nodes.remove(&node) else {
             return Err(RemoveError::NoSuchNode(node));
+        };
+        if let Some(controls) = entry.controls {
+            self.retiring.push((node, controls));
         }
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
@@ -3737,7 +3830,8 @@ impl<F: Float> Graph<F> {
     /// this is: off the main thread it hands its close to the session's
     /// `MainWork`.
     pub(crate) fn collect(&mut self) {
-        self.editor.collect();
+        let retired = self.editor.collect();
+        Self::bury(&mut self.retiring, &retired);
         // An edge whose declick fade has ended leaves the spec (or forgets the
         // fade); the commit that follows compiles it away.
         if self.editor.finish_fades() {

@@ -16,6 +16,7 @@
 
 use tutti_buffers::Mono;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
+use tutti_dsp::Wavetable;
 use tutti_dsp::{
     Algorithm, FmPatch, Operator, OperatorCount, OperatorFrequency, OperatorSpec, Partial,
     Partials, Route,
@@ -35,6 +36,7 @@ use tutti_nodes::{
     LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode,
     PitchShifterConfig, PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig,
     ShimmerNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -605,6 +607,30 @@ fn ring_mod() {
     })
     .control("frequency", |r| {
         assert!(r.param_set().set(UnitParam::Frequency, 900.0))
+    })
+    .check();
+}
+
+#[test]
+fn wavetable() {
+    let one: Vec<f32> = (0..64).map(|i| (i as f32 / 64.0) * 2.0 - 1.0).collect();
+    let two: Vec<f32> = (0..64).map(|i| 1.0 - (i as f32 / 64.0) * 2.0).collect();
+    let table = Wavetable::new(&[Mono::new(&one), Mono::new(&two)]).expect("two frames");
+    IsolateRow::new("WavetableNode (two frames, 3 channels)", move || {
+        WavetableNode::<f32>::from(
+            WavetableConfig::new(3u16, std::sync::Arc::clone(&table))
+                .frequency(Hz::new(300.0))
+                .level(Amplitude::new(0.8)),
+        )
+    })
+    .control("frequency", |w| {
+        assert!(ParamNode::<f32>::param_set(w).set(UnitParam::Frequency, 700.0))
+    })
+    .control("level", |w| {
+        assert!(ParamNode::<f32>::param_set(w).set(UnitParam::Volume, 0.2))
+    })
+    .control("position", |w| {
+        assert!(ParamNode::<f32>::param_set(w).set(UnitParam::Position, 1.0))
     })
     .check();
 }

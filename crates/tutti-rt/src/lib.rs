@@ -205,7 +205,7 @@ pub use atomic_cell::{AtomicCell, AtomicWord};
 pub use atomic_rate::{AtomicSampleRate, PendingSampleRate};
 #[cfg(loom)]
 pub use bells::Ticker;
-pub use bells::{Bell, Bells, Listener};
+pub use bells::{Bell, Bells, BellsHandle, Listener};
 pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use claim_lock::{Claim, ClaimGuard};

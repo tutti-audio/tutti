@@ -11,8 +11,8 @@ use std::any::TypeId;
 use tutti_session::HasParam;
 use tutti_units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CompressionRatio, Db, Depth, Drive, Elevation,
-    Feedback, HoldFactor, Hz, Metres, Mix, ModulationIndex, Q, Resonance, Seconds, Semitones,
-    Spread, StereoWidth, UnitParam,
+    Feedback, HoldFactor, Hz, Metres, Mix, ModulationIndex, Normalized, Q, Resonance, Seconds,
+    Semitones, Spread, StereoWidth, UnitParam,
 };
 
 /// Whether `N`'s param of kind `P` is in `U`: the unit a key's method for it
@@ -102,6 +102,7 @@ units! {
         tutti_nodes::LfoNode { Depth => Depth, Rate => Hz }
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
         tutti_nodes::NoiseNode<f32> { Volume => Amplitude }
+        tutti_nodes::WavetableNode<f32> { Frequency => Hz, Volume => Amplitude, Position => Normalized }
         tutti_nodes::FreeverbNode<f32> { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode<f32> { Volume => Amplitude }
         tutti_nodes::PlateReverbNode<f32> {

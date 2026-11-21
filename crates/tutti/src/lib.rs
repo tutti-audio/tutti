@@ -165,6 +165,10 @@ pub use tutti_cpal::{AudioHost, DeviceId};
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::Clip;
 
+// The sampler nodes `Graph::handle` reaches by key.
+#[cfg(feature = "sampler")]
+pub use tutti_session::Handled;
+
 // A decoded wave, and what a bounce writes.
 #[cfg(feature = "codec")]
 pub use tutti_buffers::Wave;
@@ -303,6 +307,11 @@ pub mod nodes {
         VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
     };
     pub use tutti_dsp::{
+        Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
+        EnvelopeStages, EnvelopeStep,
+    };
+    pub use tutti_dsp::{Lfo, LfoWave};
+    pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
     };
@@ -310,6 +319,9 @@ pub mod nodes {
         Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
+    pub use tutti_dsp::{
+        TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
+    };
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
@@ -365,7 +377,8 @@ pub mod nodes {
         Stagger, StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep,
         SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
         TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
-        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode, WavetableConfig,
+        WavetableNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -427,9 +440,8 @@ pub mod types {
         StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
-        AtomicCell, AtomicWord, Bell, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
-        LevelSpan, Listener, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter,
-        Words,
+        AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
+        LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
     };
     pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
@@ -715,10 +727,9 @@ pub mod polysynth {
 #[cfg(feature = "soundfont")]
 pub mod soundfont {
     pub use tutti_sf2::{
-        Bank as SoundFontBank, BankError, Error, GeneratorType, Instrument, InstrumentGenerator,
-        InstrumentRegion, LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader,
-        SamplePool, Side, SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator,
-        WrongLevelGenerator,
+        Bank, BankError, Error, GeneratorType, Instrument, InstrumentGenerator, InstrumentRegion,
+        LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader, SamplePool, Side,
+        SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator, WrongLevelGenerator,
     };
     pub use tutti_soundfont::{Polyphony, PolyphonyError, Settings, SoundFontUnit};
 }

@@ -110,6 +110,11 @@
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
+//! - **Envelope** (`envelope.rs`): an [`EnvelopeStages`] description, designed once into an
+//!   [`EnvelopeDesign`] of [`EnvelopeLeg`]s (linear or dB-linear, [`EnvelopeCurve`], timed by an
+//!   [`EnvelopePace`]), and the [`Envelope`] runner that reads it a chunk at a time.
+//! - **LFO** (`lfo.rs`): [`Lfo`], a sine or triangle ([`LfoWave`]) on a running phase, after a
+//!   delay and fading in; a control signal, not band-limited.
 //! - **Noise** (`noise.rs`): [`Noise`], a seeded white, pink (Kellet's filter) or brown
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
@@ -118,6 +123,8 @@
 //!   as an [`Algorithm`] says, run oversampled, with two-sample-average feedback.
 //! - **Additive** (`additive.rs`): [`AdditiveBank`], sine [`Partials`] as ratios of a frequency,
 //!   a partial at or above the Nyquist dropped.
+//! - **Wavetable** (`wavetable.rs`): [`Wavetable`], single-cycle frames mipmapped by FFT bin
+//!   zeroing, played by a [`WavetableOscillator`] with the level crossfaded from the frequency.
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
 //!   channels a block inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a ramped
 //!   [`StereoWidth`](tutti_units::StereoWidth)); [`PanLaw`] and [`pan_gains`].
@@ -180,6 +187,7 @@ mod distance;
 mod dither;
 mod dynamics;
 mod early_reflections;
+mod envelope;
 mod fft;
 mod filter;
 mod fir;
@@ -188,6 +196,7 @@ mod follower;
 mod frequency_shifter;
 mod interp;
 mod level;
+mod lfo;
 mod loudness;
 mod modulation;
 mod noise;
@@ -205,6 +214,7 @@ mod shoebox;
 mod stereo;
 mod tremolo;
 mod waveshape;
+mod wavetable;
 
 mod mel;
 mod mfcc;
@@ -262,6 +272,10 @@ pub use dynamics::{
     TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use early_reflections::{EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY};
+pub use envelope::{
+    Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
+    EnvelopeStages, EnvelopeStep,
+};
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBands, CrossoverBandsError, CrossoverBank, CrossoverBlend, CrossoverControls,
@@ -283,6 +297,7 @@ pub use frequency_shifter::{
 };
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
+pub use lfo::{Lfo, LfoWave};
 pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};
 pub use mel::{
     MelBandCount, MelBandCountError, MelConfig, MelError, MelFilterbank, MelNorm, MelScale,
@@ -358,3 +373,6 @@ pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
 pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
+pub use wavetable::{
+    TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
+};

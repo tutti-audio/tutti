@@ -172,6 +172,9 @@ pub enum UnitParam {
     /// A source's distance from the listener (`Metres`, at least zero): how far a distance
     /// node places its input, which sets its delay and its level.
     Distance = 41,
+    /// A position within a source, 0 at its start and 1 at its end (`Normalized`): a
+    /// wavetable's frame position, a granular source's read point.
+    Position = 42,
     /// A modulation index (`ModulationIndex`, at least zero, in radians): how far a modulator
     /// swings the phase of the operator it modulates. A frequency-modulation source numbers its
     /// indices: 0 is the index of modulation the carrier receives, and 1 is the feedback
@@ -237,6 +240,7 @@ impl TryFrom<u16> for UnitParam {
             39 => Semitones,
             40 => Pitch,
             41 => Distance,
+            42 => Position,
             45 => Index,
             other => return Err(UnitParamOutOfRange(other)),
         })
@@ -652,6 +656,7 @@ impl<U> From<ParamKey<U>> for UnitAddr {
     }
 }
 
+use super::Normalized;
 use super::units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
     Elevation, Feedback, HoldFactor, Hz, Metres, Mix, ModulationIndex, Q, Seconds, Semitones,
@@ -772,6 +777,10 @@ param_keys! {
         /// A source's distance from the listener.
         DISTANCE = Distance;
     }
+    Normalized {
+        /// A position within a source: a wavetable's frame position.
+        POSITION = Position;
+    }
     ModulationIndex {
         /// A modulation index: the swing of one operator's output on another's phase.
         INDEX = Index;
@@ -832,6 +841,22 @@ mod tests {
             UnitAddr::from(UnitParam::Index)
         );
         assert_ne!(ParamKey::<Hz>::CUTOFF, ParamKey::<Hz>::RATE);
+    }
+
+    /// The frame position is keyed as a `Normalized`, whose `from_raw` saturates onto `0..=1`
+    /// and sends NaN to 0, as a parameter cell holding any float needs.
+    #[test]
+    fn the_position_key_is_a_normalized_whose_from_raw_saturates() {
+        use crate::Unit;
+        assert_eq!(
+            ParamKey::<Normalized>::POSITION.addr(),
+            UnitAddr::from(UnitParam::Position)
+        );
+        assert_eq!(Normalized::from_raw(0.25), Normalized::of(0.25));
+        assert_eq!(Normalized::from_raw(7.0), Normalized::of(1.0));
+        assert_eq!(Normalized::from_raw(-7.0), Normalized::of(0.0));
+        assert_eq!(Normalized::from_raw(f64::NAN), Normalized::of(0.0));
+        assert_eq!(Normalized::of(0.25).to_raw(), 0.25);
     }
 
     /// Every keyed param has exactly one key: no id appears twice (under the
@@ -922,7 +947,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 42] = [
+    const PINNED: [(UnitParam, u16); 43] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -964,6 +989,7 @@ mod tests {
         (UnitParam::Semitones, 39),
         (UnitParam::Pitch, 40),
         (UnitParam::Distance, 41),
+        (UnitParam::Position, 42),
         (UnitParam::Index, 45),
     ];
 

@@ -1,5 +1,4 @@
 use super::*;
-use tutti_rt::SplitMix64;
 use wide::{f32x8, f64x4};
 
 /// The `f32` lanes: the aliasing measurements and the width-specific tolerances run here.
@@ -63,31 +62,6 @@ fn tanh_is_close_to_libm_and_never_overshoots() {
     assert!(worst < 3e-4, "worst tanh error {worst}");
 }
 
-/// White noise on `-1..1` is uniform: mean 0 and variance 1/3. The mean of `n` samples
-/// has standard deviation `sqrt(1/3 / n)`; the bound is five of them.
-fn white_noise_is_uniform_and_centred<L: Lane>(mut state: L::Rng) {
-    let (mut sum, mut sum_sq, mut n) = (0.0f64, 0.0f64, 0usize);
-    for _ in 0..10_000 {
-        for &s in L::white(&mut state).as_slice() {
-            let s: f64 = s.into();
-            assert!((-1.0..1.0).contains(&s), "white sample {s} out of range");
-            sum += s;
-            sum_sq += s * s;
-            n += 1;
-        }
-    }
-    let n = n as f64;
-    let bound = 5.0 * (1.0 / 3.0 / n).sqrt();
-    assert!((sum / n).abs() < bound, "white noise mean {}", sum / n);
-    // The variance of `n` squares of a uniform is `4/45 / n`: five standard deviations.
-    let var_bound = 5.0 * (4.0 / 45.0 / n).sqrt();
-    assert!(
-        (sum_sq / n - 1.0 / 3.0).abs() < var_bound,
-        "white noise power {}",
-        sum_sq / n
-    );
-}
-
 /// The generators of a group seeded `k + 1` in lane order.
 fn noise_state<L: Lane>() -> L::Rng {
     L::seed_rng({
@@ -99,37 +73,102 @@ fn noise_state<L: Lane>() -> L::Rng {
     })
 }
 
-#[test]
-fn white_noise_at_f32_is_in_range_uniform_and_centred() {
-    white_noise_is_uniform_and_centred::<f32x8>(noise_state::<f32x8>());
-}
+/// Segments of the periodogram average and the length of each, a power of two.
+const SEGMENTS: usize = 1024;
+const SEGMENT: usize = 1024;
 
-#[test]
-fn white_noise_at_f64_is_in_range_uniform_and_centred() {
-    white_noise_is_uniform_and_centred::<f64x4>(noise_state::<f64x4>());
-}
-
-/// Lane `k` draws from its own stream, seeded `k + 1`, and its output is the word's high
-/// bits as a unit fraction of the float's own resolution, mapped onto `-1..1` by `2u - 1`:
-/// `word >> 40` over `2^24` at `f32`, `word >> 11` over `2^53` at `f64`.
-#[test]
-fn each_noise_lane_scales_its_own_stream_onto_minus_one_to_one() {
-    let mut f32_state = noise_state::<f32x8>();
-    let mut f64_state = noise_state::<f64x4>();
-    let mut f32_ref: [SplitMix64; 8] = core::array::from_fn(|k| SplitMix64::new(k as u64 + 1));
-    let mut f64_ref: [SplitMix64; 4] = core::array::from_fn(|k| SplitMix64::new(k as u64 + 1));
-    for _ in 0..64 {
-        let out = f32x8::white(&mut f32_state).to_array();
-        for (k, g) in f32_ref.iter_mut().enumerate() {
-            let unit = (g.next_u64() >> 40) as f32 / (1u32 << 24) as f32;
-            assert_eq!(out[k], 2.0 * unit - 1.0, "f32 lane {k}");
-        }
-        let out = f64x4::white(&mut f64_state).to_array();
-        for (k, g) in f64_ref.iter_mut().enumerate() {
-            let unit = (g.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
-            assert_eq!(out[k], 2.0 * unit - 1.0, "f64 lane {k}");
+/// The Hann-windowed periodogram of lane 0's stream at the bin `k` of a `SEGMENT`-point DFT,
+/// averaged over `SEGMENTS` segments.
+fn band_power<L: Lane>(state: &mut L::Rng, bins: &[usize]) -> Vec<f64> {
+    let hann: Vec<f64> = (0..SEGMENT)
+        .map(|n| 0.5 - 0.5 * (core::f64::consts::TAU * n as f64 / SEGMENT as f64).cos())
+        .collect();
+    let mut power = vec![0.0; bins.len()];
+    for _ in 0..SEGMENTS {
+        let segment: Vec<f64> = (0..SEGMENT)
+            .map(|_| L::noise(state).as_slice()[0].into())
+            .collect();
+        for (p, &k) in power.iter_mut().zip(bins) {
+            let (mut re, mut im) = (0.0, 0.0);
+            for (n, (&x, &w)) in segment.iter().zip(&hann).enumerate() {
+                let angle = core::f64::consts::TAU * (k * n % SEGMENT) as f64 / SEGMENT as f64;
+                re += w * x * angle.cos();
+                im -= w * x * angle.sin();
+            }
+            *p += (re * re + im * im) / SEGMENTS as f64;
         }
     }
+    power
+}
+
+/// The polysynth's noise oscillator is pink: its power per bin falls 3.01 dB each octave
+/// across the band in which `tutti_dsp::Noise` holds the slope (47 Hz to 1.5 kHz at 48 kHz; bins
+/// 8, 16 and 32 of a 1024-point DFT are 375 Hz, 750 Hz and 1.5 kHz). Each averaged bin power
+/// has a relative standard deviation of `1 / sqrt(SEGMENTS)` (an exponential per segment), a
+/// ratio of two bins `sqrt(2 / SEGMENTS)`; the bound is five of them each way, and the 0.1 dB
+/// the filter's own response departs from the slope.
+fn pink_power_falls_three_db_an_octave<L: Lane>() {
+    let mut state = noise_state::<L>();
+    let power = band_power::<L>(&mut state, &[8, 16, 32]);
+    let deviation = 5.0 * (2.0 / SEGMENTS as f64).sqrt();
+    let (high, low) = (
+        10.0 * (1.0 + deviation).log10() + 0.1,
+        10.0 * (1.0 - deviation).log10() - 0.1,
+    );
+    for octave in 0..2 {
+        let fall = 10.0 * (power[octave] / power[octave + 1]).log10();
+        let slope = 10.0 * 2.0_f64.log10();
+        assert!(
+            fall - slope < high && fall - slope > low,
+            "octave {octave} falls {fall} dB, want {slope}"
+        );
+    }
+}
+
+#[test]
+fn pink_noise_at_f32_falls_three_db_an_octave() {
+    pink_power_falls_three_db_an_octave::<f32x8>();
+}
+
+#[test]
+fn pink_noise_at_f64_falls_three_db_an_octave() {
+    pink_power_falls_three_db_an_octave::<f64x4>();
+}
+
+/// Kellet's refined filter as `(pole, input gain)` per one-pole section, the delayed direct term
+/// and the direct term, from the published coefficients the pink source is built on, and its
+/// output scale.
+const KELLET_SECTIONS: [(f64, f64); 6] = [
+    (0.99886, 0.055_517_9),
+    (0.99332, 0.075_075_9),
+    (0.969, 0.153_852),
+    (0.8665, 0.310_485_6),
+    (0.55, 0.532_952_2),
+    (-0.7616, -0.016_898),
+];
+const KELLET_DIRECT: f64 = 0.115_926 + 0.5362;
+const KELLET_SCALE: f64 = 0.11;
+
+/// The noise is zero-mean. It is the white stream (uniform on `[-1, 1)`, variance 1/3) through a
+/// filter of DC gain `H(1) = 0.11 (sum g / (1 - a) + direct)`, so the mean of `n` samples has a
+/// standard deviation of `sqrt(H(1)^2 / 3 / n)` for `n` far beyond the filter's longest
+/// correlation time (`1 / (1 - 0.99886)` = 877 samples); the bound is five of them.
+#[test]
+fn pink_noise_has_a_mean_of_zero_within_its_standard_error() {
+    let dc_gain = KELLET_SCALE
+        * (KELLET_SECTIONS
+            .iter()
+            .map(|&(a, g)| g / (1.0 - a))
+            .sum::<f64>()
+            + KELLET_DIRECT);
+    let mut state = noise_state::<f32x8>();
+    let n = 1 << 20;
+    let sum: f64 = (0..n)
+        .map(|_| f64::from(f32x8::noise(&mut state).as_slice()[0]))
+        .sum();
+    let mean = sum / n as f64;
+    let bound = 5.0 * (dc_gain * dc_gain / 3.0 / n as f64).sqrt();
+    assert!(mean.abs() < bound, "mean {mean} over {bound}");
 }
 
 /// Sample rate and pitch for the aliasing measurements: 2990 Hz is exactly

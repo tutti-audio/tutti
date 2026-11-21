@@ -1,6 +1,8 @@
 use super::*;
-use tutti_rt::SplitMix64;
-use tutti_units::{Amplitude, Normalized, PhaseIncrement, Seconds};
+use tutti_buffers::Float;
+use tutti_dsp::EnvelopeCurve;
+use tutti_dsp::Noise;
+use tutti_units::{Amplitude, Db, Normalized, PhaseIncrement, Seconds};
 
 const SR: f64 = 48_000.0;
 
@@ -502,6 +504,53 @@ fn a_retrigger_at_a_boosted_sustain_does_not_drop() {
     );
 }
 
+/// A dB-linear release runs on the lanes as a multiply per frame: `n` frames in, the level is
+/// `10^(-depth n / (20 R))` of the level it began from, to the recurrence's rounding: each
+/// multiply errs by half an epsilon relative and the factor's own rounding adds the same
+/// per frame, so `n` frames stay within `(n + 1) epsilon` relative.
+fn a_db_linear_release_is_a_straight_line_in_decibels<F: SynthFloat>(epsilon: f64) {
+    let depth = 60.0;
+    let release = 4800.0;
+    let mut b = bank::<F>(OscillatorType::Sine, FilterType::None, flat());
+    let stages = EnvelopeStages::new(
+        Seconds::new(0.0),
+        Seconds::new(0.0),
+        Amplitude::UNITY,
+        Seconds::new(release / SR),
+    )
+    .release_curve(EnvelopeCurve::db_linear(Db::new(depth)).expect("a depth above zero"));
+    b.design = EnvelopeDesign::new(&stages, sr());
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
+    let _ = envelope_trace(&mut b, 0, 10);
+    b.gate_off(0);
+    let trace = envelope_trace(&mut b, 0, 2400);
+    for n in [1_usize, 100, 1200, 2400] {
+        let want = 10.0_f64.powf(-depth * n as f64 / release / 20.0);
+        let bound = (n as f64 + 1.0) * epsilon * want;
+        assert!(
+            (trace[n - 1] - want).abs() <= bound,
+            "{n} frames: {} against {want}",
+            trace[n - 1]
+        );
+    }
+}
+
+#[test]
+fn a_db_linear_release_is_a_straight_line_in_decibels_at_f64() {
+    a_db_linear_release_is_a_straight_line_in_decibels::<f64>(f64::EPSILON);
+}
+
+#[test]
+fn a_db_linear_release_is_a_straight_line_in_decibels_at_f32() {
+    a_db_linear_release_is_a_straight_line_in_decibels::<f32>(f64::from(f32::EPSILON));
+}
+
 /// A pulse width of 0 still renders a pulse, not DC.
 #[test]
 fn a_zero_pulse_width_still_oscillates() {
@@ -525,11 +574,19 @@ fn a_zero_pulse_width_still_oscillates() {
     assert!(ac > 0.05, "a zero-width pulse rendered DC (AC rms {ac})");
 }
 
-/// The first word of every lane's stream. The output is a bijection of the state, so two
-/// lanes agree on it only if they share a seed.
-fn first_words<const N: usize>(rng: &[[SplitMix64; N]]) -> Vec<u64> {
+/// The first four samples of every lane's stream, as bits: two lanes agree on them only if
+/// they share a seed (the stream is a bijection of the seed, and a four-sample prefix of
+/// 24 or 53 bits each is distinct for distinct seeds with overwhelming probability).
+fn first_samples<F: Float, const N: usize>(rng: &[[Noise<F>; N]]) -> Vec<[u64; 4]> {
     rng.iter()
-        .flat_map(|g| g.clone().map(|mut lane| lane.next_u64()))
+        .flat_map(|g| {
+            g.clone().map(|mut lane| {
+                core::array::from_fn(|_| {
+                    let sample: f64 = lane.next_sample().into();
+                    sample.to_bits()
+                })
+            })
+        })
         .collect()
 }
 
@@ -546,7 +603,7 @@ fn every_lane_starts_on_its_own_noise_seed() {
         16,
         UnisonVoices::of(7),
     );
-    let seeds = first_words(&bank.rng);
+    let seeds = first_samples(&bank.rng);
     assert!(seeds.len() >= 16 * 7);
     let mut sorted = seeds.clone();
     sorted.sort_unstable();
@@ -840,7 +897,7 @@ fn every_lane_of_an_f64_bank_starts_on_its_own_noise_seed() {
         16,
         UnisonVoices::of(7),
     );
-    let seeds = first_words(&bank.rng);
+    let seeds = first_samples(&bank.rng);
     assert!(seeds.len() >= 16 * 7);
     let mut sorted = seeds.clone();
     sorted.sort_unstable();

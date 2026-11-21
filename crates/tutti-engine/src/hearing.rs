@@ -98,6 +98,8 @@ struct Control<F: Float> {
     /// A close the install queue had no room for, owed to the audio thread:
     /// sent on the next open, close or reclaim, whichever comes first.
     owed_close: bool,
+    /// Where each tap opened takes its bell ([`OutputTaps::notify_with`]).
+    bells: Option<tutti_rt::BellsHandle>,
 }
 
 impl<F: Float> std::fmt::Debug for Control<F> {
@@ -156,6 +158,7 @@ pub(crate) fn link<F: Float>() -> (OutputTaps<F>, Hearing<F>) {
             retired: retire_rx,
             reader: None,
             owed_close: false,
+            bells: None,
         }))),
         Hearing {
             install: install_rx,
@@ -168,6 +171,14 @@ pub(crate) fn link<F: Float>() -> (OutputTaps<F>, Hearing<F>) {
 impl<F: Float> OutputTaps<F> {
     fn control(&self) -> std::sync::MutexGuard<'_, Control<F>> {
         self.0.lock_recover()
+    }
+
+    /// Makes every tap opened from now on carry a bell from `bells`: the audio
+    /// thread rings it after each block it writes and when the writer drops, and
+    /// the reader awaits it ([`TapReader::notified`]). Without it a tap carries
+    /// none.
+    pub fn notify_with(&self, bells: tutti_rt::BellsHandle) {
+        self.control().bells = Some(bells);
     }
 
     /// Opens the tap: `width` channels (the device's, so every output channel
@@ -196,7 +207,11 @@ impl<F: Float> OutputTaps<F> {
         if c.owed_close || c.install.vacant() <= 1 {
             return Ok(OutputTapOpen::Retry);
         }
-        let (reader, writer) = TapReader::pair(usize::from(width.count()), capacity);
+        let width = usize::from(width.count());
+        let (reader, writer) = match c.bells.as_ref().map(tutti_rt::BellsHandle::bell) {
+            Some(bell) => TapReader::pair_notified(width, capacity, bell),
+            None => TapReader::pair(width, capacity),
+        };
         // Full cannot happen (the vacancy was checked). With the engine gone the
         // writer is dropped here and the reader stays open, as one opened just
         // before the engine went would be.
