@@ -68,6 +68,25 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     }
 }
 
+/// The [`ControlSet`] of a kernel with no controls: no cells, and the unit `()` for its
+/// `Controls`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoControls;
+
+impl ControlSet for NoControls {
+    type Controls = ();
+
+    fn addrs(&self) -> &'static [UnitAddr] {
+        &[]
+    }
+
+    fn defaults(&self) {}
+
+    fn flatten(&self, _: &(), _: &mut [f64]) {}
+
+    fn assemble(&self, _: &[f64]) {}
+}
+
 /// How the reader takes a control from its cell and its port.
 #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
 pub enum ControlRead {

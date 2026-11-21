@@ -9,6 +9,7 @@
 //! it.
 //!
 //! Units with no live cell are not rows — there is nothing to move:
+//! `EarlyReflectionsNode` and `DecorrelatorNode` (their taps are fixed at construction),
 //! `AutomationLaneNode` (its `Arc<dyn Curve>`
 //! is read-only, or frozen by its fork when it is not — its own unit test
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.

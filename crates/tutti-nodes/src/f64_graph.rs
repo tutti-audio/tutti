@@ -10,7 +10,8 @@ use crate::{
     BrickwallLimiterConfig, BrickwallLimiterNode, ButterworthOrder, CompressorConfig,
     CompressorControls, CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    DelayConfig, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode,
+    DecorrelatorConfig, DecorrelatorNode, DelayConfig, DelayNode, DistortionConfig, DistortionNode,
+    DynamicEqConfig, DynamicEqNode, EarlyReflectionsConfig, EarlyReflectionsNode,
     EnvelopeFilterConfig, EnvelopeFilterNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode,
     GateConfig, GateControls, GateNode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
     LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig,
@@ -24,6 +25,7 @@ use tutti_dsp::{
     DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, InterpolationMode,
     LadderType, ShapeKind, Stages, SvfType,
 };
+use tutti_dsp::{Inline, Tap, Taps};
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::Direct;
@@ -31,6 +33,7 @@ use tutti_units::{
     BitDepth, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix, Q, Resonance, SampleRate,
     Seconds, Semitones,
 };
+use tutti_units::{Gain, SampleSpan};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -387,6 +390,38 @@ fn the_linear_nodes_satisfy_superposition() {
         SampleRate::SR_44K1,
         1,
         6_000,
+    );
+    assert_linear(
+        || {
+            EarlyReflectionsNode::<f64>::try_from(EarlyReflectionsConfig::new(
+                ChannelLayout::MONO,
+                Taps {
+                    taps: Inline::from_slice(&[
+                        Tap {
+                            delay: SampleSpan::new(37.5).unwrap(),
+                            gain: Gain::new(0.7),
+                            channel: 0,
+                        },
+                        Tap {
+                            delay: SampleSpan::new(410.0).unwrap(),
+                            gain: Gain::new(-0.3),
+                            channel: 1,
+                        },
+                    ])
+                    .unwrap(),
+                },
+            ))
+            .unwrap()
+        },
+        RATE,
+        1,
+        2_400,
+    );
+    assert_linear(
+        || DecorrelatorNode::<f64>::from(DecorrelatorConfig::new(ChannelLayout::STEREO)),
+        RATE,
+        2,
+        2_400,
     );
     assert_linear(
         || DcBlockerNode::<f64>::from(DcBlockerConfig::new(ChannelLayout::MONO)),
