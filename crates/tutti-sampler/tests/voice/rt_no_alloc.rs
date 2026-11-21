@@ -193,6 +193,42 @@ fn guarded<N: Node>(rig: &mut Rig<N>, blocks: usize) {
     }
 }
 
+/// A loop set while a stretching voice plays allocates nothing: the spare vocoder that
+/// primes for the wrap is built with the voice, so setting the loop only changes what the
+/// blocks read, and the priming, the swap at the wraps and the reset of the vocoder the
+/// swap replaces all run inside the guard.
+#[test]
+fn a_loop_set_while_a_stretching_voice_plays_does_not_allocate() {
+    use tutti_graph::TransportPosition;
+    use tutti_music::{FrameClock, LoopRange};
+    let region = LoopRange::new(Beat::new(0.125), Beat::new(0.376)).expect("a loop");
+    let wave = sine_wave(4.0, 48_000.0);
+    let mut pool = VoicePool::new();
+    insert(&mut pool, 0, placed_parts(&wave, 1.5));
+    let node = tutti_graph::contract::prepared(pool, RATE, 64);
+    let mut direct = Direct::new(node, RATE, 64);
+    let mut clock = FrameClock::new(Beat::new(0.0), Bpm::of(120.0), RATE);
+    let mut block = |looping: Option<LoopRange>, direct: &mut Direct<VoicePool<f32>>| {
+        direct.set_transport(TransportPosition::new(
+            true,
+            Bpm::of(120.0),
+            clock.beat(),
+            looping,
+        ));
+        direct.block();
+        clock.advance(tutti_units::Samples::new(64), looping);
+    };
+    // Past the vocoder's priming, no loop yet.
+    for _ in 0..80 {
+        block(None, &mut direct);
+    }
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..600 {
+            block((i >= 10).then_some(region), &mut direct);
+        }
+    });
+}
+
 /// A stretching voice allocates nothing wherever it seats: its priming (several
 /// blocks of vocoder work, in the scratch the owner built) runs inside the guard, at
 /// a seek mid-play, at a stop and a start, at a window's end and its re-entry, and in

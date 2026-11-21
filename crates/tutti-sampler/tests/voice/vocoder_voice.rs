@@ -12,13 +12,14 @@ use std::sync::Arc;
 
 use tutti_buffers::{ChannelLayout, Interleaved, Planes, Wave};
 use tutti_dsp::{ColaGeometry, HopSize, PhaseVocoder, StftGeometry, WindowLength};
-use tutti_graph::{Node, contract};
+use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition, contract};
+use tutti_music::{FrameClock, LoopRange};
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
     MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
     VoicePoolHandle, VoiceSource, VoiceWindow,
 };
-use tutti_units::{Beat, Bpm, Cents, SampleRate, Samples, StretchFactor};
+use tutti_units::{Beat, Bpm, Cents, Frame, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -656,4 +657,93 @@ fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
             silent + k
         );
     }
+}
+
+/// `wave` placed at beat 0 with a vocoder at unity (a voice turned back to 1.0 keeps it),
+/// rendered `frames` frames under a transport that rolls from beat 0 at 120 BPM and wraps
+/// the loop `region_at(block)` names, `None` for no loop; as the host's clock moves it.
+fn render_looped(
+    wave: &Arc<Wave>,
+    frames: usize,
+    region_at: impl Fn(usize) -> Option<(f64, f64)>,
+) -> Vec<Vec<f32>> {
+    let (pool, handle) = VoicePool::with_channels(wave.layout())
+        .expect("a width the sampler reads")
+        .with_handle();
+    let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
+    handle
+        .add(
+            SlotId(1),
+            source(wave),
+            Playback {
+                stretch: StretchFactor::new(1.5),
+                ..Default::default()
+            },
+        )
+        .expect("the command queue has room in a test");
+    handle
+        .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+        .expect("the command queue has room in a test");
+    let mut clock = FrameClock::new(Beat::new(0.0), Bpm::of(120.0), SampleRate::of(SR));
+    let mut out = vec![Vec::new(); usize::from(wave.layout().count())];
+    for index in 0..frames / BLOCK {
+        let region = region_at(index)
+            .map(|(a, b)| LoopRange::new(Beat::new(a), Beat::new(b)).expect("a loop"));
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: SampleRate::of(SR),
+            block_len: Samples::new(BLOCK),
+            transport: TransportPosition::new(true, Bpm::of(120.0), clock.beat(), region),
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        let block = contract::drive_input(&mut pool, &env, Planes::default(), &[], &[]).audio;
+        for (channel, plane) in out.iter_mut().zip(&block) {
+            channel.extend_from_slice(plane);
+        }
+        clock.advance(Samples::new(BLOCK), region);
+    }
+    out
+}
+
+/// Every 128-frame block of `x` from frame `from` is the 1500 Hz sine of amplitude 0.5,
+/// by its RMS within 1 dB (four periods a block, so the RMS is exact; 1 dB is two overlapped
+/// frames' phase mismatch of `acos(10^(-1/20)) = 0.48` rad).
+fn assert_sine_blocks(x: &[f32], from: usize) {
+    let steady = 0.5 / 2.0f64.sqrt();
+    for (b, block) in x[from..].as_chunks::<128>().0.iter().enumerate() {
+        let rms = (block.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>() / 128.0).sqrt();
+        let db = 20.0 * (rms / steady).log10();
+        assert!(
+            db.abs() < 1.0,
+            "block {b} from {from} (frame {}): {db} dB",
+            from + b * 128
+        );
+    }
+}
+
+/// A stretched clip that loops sounds on across its wraps: the loop is half a beat
+/// (12 000 frames, 375 periods of the tone), the voice's window covers its start, and the
+/// vocoder for the wrap primes ahead of it and takes over at the wrap, so no block of 128
+/// frames around any of the four wraps (18 000, 30 000, 42 000 and 54 000) is silent or
+/// off the sine's level.
+#[test]
+fn a_looping_stretched_clip_sounds_continuously_across_its_wraps() {
+    let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
+    let out = render_looped(&source, 60_000, |_| Some((0.25, 0.75)));
+    assert_sine_blocks(&out[0], 6_016);
+}
+
+/// A loop set while the voice plays: set 6 000 frames before the first wrap (beat 0.75,
+/// frame 18 000), after the voice has sounded, it is primed for in time (`prime / 2` is
+/// 2 049), and every wrap from that first one on is seamless. The spare vocoder is built
+/// with the voice, so nothing is allocated when the loop is set.
+#[test]
+fn a_loop_set_while_playing_is_swapped_in_without_a_gap() {
+    let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
+    // Block 187 starts at frame 11 968: the loop is set from there.
+    let out = render_looped(&source, 60_000, |index| {
+        (index >= 187).then_some((0.25, 0.75))
+    });
+    assert_sine_blocks(&out[0], 6_016);
 }
