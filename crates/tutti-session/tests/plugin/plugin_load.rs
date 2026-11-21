@@ -1,6 +1,6 @@
-//! A plugin as a load: `load_plugin(id, &catalog)`, run, returns a handle,
-//! `add_plugin(handle.node())` puts it in the graph, and the plugin closes with
-//! the last clone of its handle. The reference CLAP bundle in a real
+//! A plugin as a load: `load_plugin(id, &catalog)`, awaited, gives a
+//! `LoadedPlugin`; `session.apply(loaded)` puts it in the graph, and the plugin
+//! closes with the last clone of its `PluginInstance`. The reference CLAP bundle in a real
 //! `plugin-server`; the in-process half is `tests/main_thread/plugin_load_main.rs`.
 //!
 //! Build the server and the probe first: `cargo build -p tutti-plugin-server
