@@ -13,9 +13,9 @@
 //! Product Instance Id, the UMP protocol it carries, and the Function Blocks it
 //! declares. What a platform cannot do is an
 //! error from the call that asks for it: creating on a platform with no backend
-//! is [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported), and declaring Function
+//! is [`MidiHardwareError::Unsupported`], and declaring Function
 //! Blocks where the platform cannot publish them is
-//! [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported). The protocol is
+//! [`MidiHardwareError::VirtualBlocksUnsupported`]. The protocol is
 //! the exception, because a platform may carry the other one than asked for:
 //! [`VirtualEndpoint::protocol`] reports the one the endpoint was created with.
 //!
@@ -33,15 +33,31 @@
 //! On macOS a peer reads from the endpoint's source and writes to its destination;
 //! on Linux it subscribes to the one port in either direction.
 //!
+//! # Opening is polled
+//!
+//! [`VirtualEndpoint::open`] takes the [`Started`] a [`Start`](crate::Start)
+//! resolved to and returns an [`OpeningVirtualEndpoint`], which is polled with the
+//! current time until it yields the endpoint. Most platforms are ready on the first
+//! poll. macOS 15 with Function Blocks registers and enables the endpoint, which
+//! CoreMIDI has been seen to refuse for a few milliseconds while other processes
+//! create endpoints: a poll then reports `Pending`, and
+//! [`deadline`](OpeningVirtualEndpoint::deadline) is the instant the next poll can
+//! make progress. Nothing waits inside it, and there is no blocking form: the
+//! caller polls from its own loop or timer.
+//!
 //! # Main thread
 //!
-//! Opening an endpoint takes a [`MainThreadMarker`], and a [`VirtualEndpoint`] is
-//! `!Send` and `!Sync` on every platform: macOS 15's UMP endpoint with Function
-//! Blocks is a main-thread object, and the traits an endpoint has do not differ by
-//! operating system. Other backends ignore the marker. What sends from another
-//! thread is a [`VirtualSender`] ([`VirtualEndpoint::sender`]).
+//! Opening an endpoint takes a [`MainThreadMarker`] at each poll, and a
+//! [`VirtualEndpoint`] and its opening are `!Send` and `!Sync` on every platform:
+//! macOS 15's UMP endpoint with Function Blocks is a main-thread object, and the
+//! traits an endpoint has do not differ by operating system. Other backends ignore
+//! the marker. What sends from another thread is a [`VirtualSender`]
+//! ([`VirtualEndpoint::sender`]).
 
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use tutti_midi_device::FunctionBlock;
@@ -51,7 +67,8 @@ use tutti_ump::{DeviceIdentity, EndpointName, FunctionBlockId, Message, ProductI
 
 use crate::InputProducerHandle;
 use crate::backend;
-use crate::error::Result;
+use crate::error::{MidiHardwareError, Result};
+use crate::start::Started;
 use crate::wire::translate_voice;
 
 /// The UMP protocol an endpoint carries.
@@ -154,7 +171,7 @@ impl VirtualSpec {
 pub(crate) trait EndpointBackend {
     /// What sends on the endpoint from any thread. It does not keep the endpoint
     /// alive: once the endpoint is dropped a send is
-    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone).
+    /// [`MidiHardwareError::EndpointGone`].
     /// The drop waits for a send in flight, and no send reaches the OS after it.
     fn sender(&self) -> Arc<dyn SenderBackend>;
 
@@ -174,6 +191,53 @@ pub(crate) trait SenderBackend: Send + Sync {
     /// from the endpoint's own receive callback: a send holds the endpoint's
     /// live lock, which its drop waits on.
     fn send(&self, ump: &Ump) -> Result<()>;
+}
+
+/// The platform's creation of an endpoint, polled until it is made.
+pub(crate) trait OpeningBackend {
+    /// One poll at `now`: the endpoint and the protocol it carries, or `Pending`
+    /// until [`deadline`](Self::deadline).
+    fn poll(
+        &mut self,
+        main: MainThreadMarker,
+        now: Instant,
+    ) -> Poll<Result<(Box<dyn EndpointBackend>, VirtualProtocol)>>;
+
+    /// When the next poll can make progress.
+    fn deadline(&self) -> Instant;
+}
+
+/// A creation that is ready on the first poll: the endpoint, or why there is none.
+pub(crate) struct Immediate {
+    made: Option<Result<(Box<dyn EndpointBackend>, VirtualProtocol)>>,
+    created_at: Instant,
+}
+
+impl Immediate {
+    pub(crate) fn new(made: Result<(Box<dyn EndpointBackend>, VirtualProtocol)>) -> Self {
+        Self {
+            made: Some(made),
+            created_at: Instant::now(),
+        }
+    }
+}
+
+impl OpeningBackend for Immediate {
+    fn poll(
+        &mut self,
+        _main: MainThreadMarker,
+        _now: Instant,
+    ) -> Poll<Result<(Box<dyn EndpointBackend>, VirtualProtocol)>> {
+        Poll::Ready(
+            self.made
+                .take()
+                .unwrap_or(Err(MidiHardwareError::EndpointGone)),
+        )
+    }
+
+    fn deadline(&self) -> Instant {
+        self.created_at
+    }
 }
 
 /// The numbers other applications read for `spec`'s blocks, in the order the spec
@@ -275,44 +339,34 @@ impl core::fmt::Debug for VirtualEndpoint {
 }
 
 impl VirtualEndpoint {
-    /// Publishes the endpoint `spec` describes, delivering what peers write to it
-    /// into `producer`; a backend that reads on a thread of its own starts it on
-    /// `executor`. `main` proves the caller is on the main thread, where macOS
-    /// requires an endpoint with Function Blocks to be made and dropped.
+    /// Starts publishing the endpoint `spec` describes, delivering what peers write
+    /// to it into `producer`; a backend that reads on a thread of its own starts it
+    /// on `executor`. `started` is the proof the backend is ready
+    /// ([`Start`](crate::Start)). The returned [`OpeningVirtualEndpoint`] is polled to
+    /// the endpoint; it takes the `main` that proves the caller is on the main
+    /// thread, where macOS requires an endpoint with Function Blocks to be made and
+    /// dropped, at each poll.
     ///
     /// # Errors
     ///
-    /// [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported) on a platform with no
-    /// backend, [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported)
-    /// when `spec` declares Function Blocks the platform cannot publish, and the
-    /// platform's own error when the OS refuses the endpoint.
+    /// [`MidiHardwareError::BackendStarting`]
+    /// when the backend is not ready after all. A platform with no backend, a
+    /// `spec` that declares Function Blocks the platform cannot publish and an OS
+    /// that refuses the endpoint are the polls' errors
+    /// ([`OpeningVirtualEndpoint::poll`]).
     pub fn open(
         executor: &Executor,
         spec: &VirtualSpec,
         producer: InputProducerHandle,
+        started: Started,
         main: MainThreadMarker,
-    ) -> Result<Self> {
-        let (backend, protocol) = backend::open_virtual_endpoint(executor, spec, producer, main)?;
-        let conversion = match protocol {
-            VirtualProtocol::Midi1 => {
-                Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new())))
-            }
-            VirtualProtocol::Midi2 => {
-                Conversion::ToMidi2(Box::new(Mutex::new(Midi2Translator::new())))
-            }
-        };
-        let outbound = Arc::new(Outbound {
-            sender: backend.sender(),
-            conversion,
-        });
-        let blocks = published_numbers(spec, backend.block_numbers());
-        Ok(Self {
-            backend,
-            outbound,
-            name: spec.name,
-            protocol,
-            blocks,
+    ) -> Result<OpeningVirtualEndpoint> {
+        let opening = backend::open_virtual_endpoint(executor, spec, producer, started, main)?;
+        Ok(OpeningVirtualEndpoint {
+            opening: Some(opening),
+            spec: spec.clone(),
             _main: main,
+            _thread: PhantomData,
         })
     }
 
@@ -337,7 +391,7 @@ impl VirtualEndpoint {
     ///
     /// # Errors
     ///
-    /// [`MidiHardwareError::NoMidi1Form`](crate::MidiHardwareError::NoMidi1Form) for a MIDI 2.0 message
+    /// [`MidiHardwareError::NoMidi1Form`] for a MIDI 2.0 message
     /// on a MIDI 1.0 endpoint that has no MIDI 1.0 form even in sequence (a
     /// per-note controller, per-note management); nothing is sent. Otherwise
     /// the platform's error when the OS refuses the message.
@@ -347,7 +401,7 @@ impl VirtualEndpoint {
 
     /// A handle that sends as [`send`](Self::send) does from any thread. It does
     /// not keep the endpoint alive: after the endpoint is dropped its sends are
-    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone).
+    /// [`MidiHardwareError::EndpointGone`].
     pub fn sender(&self) -> VirtualSender {
         VirtualSender {
             outbound: Arc::clone(&self.outbound),
@@ -383,6 +437,101 @@ impl VirtualEndpoint {
     }
 }
 
+/// A [`VirtualEndpoint`] being made: polled until the platform has published it.
+///
+/// [`VirtualEndpoint::open`] makes one. Most platforms are ready on the first
+/// poll; macOS 15 with Function Blocks retries a refused registration or enable
+/// ([`deadline`](Self::deadline) is the instant of the next attempt). It waits for
+/// nothing itself. Dropping it before it finished removes what it had published.
+///
+/// ```compile_fail,E0277
+/// fn crosses_threads<T: Send>() {}
+/// crosses_threads::<tutti_midi_hardware::OpeningVirtualEndpoint>();
+/// ```
+#[must_use = "an opening that is not polled publishes nothing"]
+pub struct OpeningVirtualEndpoint {
+    // `None` once it has finished.
+    opening: Option<Box<dyn OpeningBackend>>,
+    spec: VirtualSpec,
+    _main: MainThreadMarker,
+    // Makes the type `!Send` and `!Sync` whatever its fields are.
+    _thread: PhantomData<*const ()>,
+}
+
+impl core::fmt::Debug for OpeningVirtualEndpoint {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OpeningVirtualEndpoint")
+            .field("name", &self.spec.name().as_str())
+            .finish_non_exhaustive()
+    }
+}
+
+impl OpeningVirtualEndpoint {
+    /// When the next poll can make progress: the next attempt's instant.
+    #[must_use]
+    pub fn deadline(&self) -> Instant {
+        self.opening
+            .as_ref()
+            .map_or_else(Instant::now, |opening| opening.deadline())
+    }
+
+    /// One poll at `now`: the endpoint once the platform has published it, `Pending`
+    /// until [`deadline`](Self::deadline) while it retries. `main` proves the caller
+    /// is on the main thread.
+    ///
+    /// A poll after it finished, with the endpoint or an error, is
+    /// [`MidiHardwareError::EndpointGone`].
+    ///
+    /// # Errors
+    ///
+    /// [`MidiHardwareError::Unsupported`] on a
+    /// platform with no backend,
+    /// [`MidiHardwareError::VirtualBlocksUnsupported`]
+    /// when the spec declares Function Blocks the platform cannot publish, and the
+    /// platform's own error when the OS refuses the endpoint (on macOS a refusal
+    /// that outlasts the retries is the platform's timeout).
+    pub fn poll(&mut self, main: MainThreadMarker, now: Instant) -> Poll<Result<VirtualEndpoint>> {
+        let Some(opening) = self.opening.as_mut() else {
+            return Poll::Ready(Err(MidiHardwareError::EndpointGone));
+        };
+        let made = match opening.poll(main, now) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(made) => made,
+        };
+        self.opening = None;
+        Poll::Ready(made.map(|(backend, protocol)| self.published(backend, protocol, main)))
+    }
+
+    fn published(
+        &self,
+        backend: Box<dyn EndpointBackend>,
+        protocol: VirtualProtocol,
+        main: MainThreadMarker,
+    ) -> VirtualEndpoint {
+        let conversion = match protocol {
+            VirtualProtocol::Midi1 => {
+                Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new())))
+            }
+            VirtualProtocol::Midi2 => {
+                Conversion::ToMidi2(Box::new(Mutex::new(Midi2Translator::new())))
+            }
+        };
+        let outbound = Arc::new(Outbound {
+            sender: backend.sender(),
+            conversion,
+        });
+        let blocks = published_numbers(&self.spec, backend.block_numbers());
+        VirtualEndpoint {
+            backend,
+            outbound,
+            name: self.spec.name,
+            protocol,
+            blocks,
+            _main: main,
+        }
+    }
+}
+
 /// A [`VirtualEndpoint`]'s send, from any thread.
 ///
 /// ```
@@ -406,7 +555,7 @@ impl VirtualSender {
     /// # Errors
     ///
     /// As [`VirtualEndpoint::send`], and
-    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone)
+    /// [`MidiHardwareError::EndpointGone`]
     /// once the endpoint is dropped.
     pub fn send(&self, ump: Ump) -> Result<()> {
         self.outbound.send(ump)

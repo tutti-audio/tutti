@@ -155,8 +155,16 @@ pub(in crate::backend::coremidi) fn plain(
         None,
     )
     .protocol(protocol);
-    UmpVirtualEndpoint::create(&spec, tutti_fixtures::main_thread(), move |ump, _| {
+    let main = tutti_fixtures::main_thread();
+    // The client is the hub's: it exists once the start resolved.
+    tutti_fixtures::block_on(start()).expect("the hub makes its client");
+    let mut opening = UmpVirtualEndpoint::create(&spec, main, move |ump, _| {
         on_event(ump);
     })
-    .expect("a virtual UMP endpoint")
+    .expect("an opening");
+    // No Function Blocks: nothing is retried, so the first poll is the endpoint.
+    match opening.poll_endpoint(main, tutti_platform::Instant::now()) {
+        std::task::Poll::Ready(made) => made.expect("a virtual UMP endpoint"),
+        std::task::Poll::Pending => panic!("an endpoint with no blocks is ready on the first poll"),
+    }
 }

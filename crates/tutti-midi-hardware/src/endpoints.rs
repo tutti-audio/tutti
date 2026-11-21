@@ -40,6 +40,7 @@
 use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::error::Result;
+use crate::start::Start;
 use crate::{InputFault, InputProducerHandle};
 use tutti_graph::Losses;
 use tutti_midi_device::EndpointId;
@@ -95,6 +96,17 @@ impl Watch for NoWatch {}
 
 /// This OS's MIDI endpoints.
 pub trait MidiEndpoints: Send + Sync {
+    /// The wait for the backend to be ready to open endpoints and ports.
+    ///
+    /// A backend that has something to start (CoreMIDI's client, made on a thread
+    /// of its own) returns a [`Start`] that resolves when it is made, or with the
+    /// error it failed with. The default is for a backend with nothing to start: a
+    /// start that is ready on its first poll. Opening before the start resolved is
+    /// [`MidiHardwareError::BackendStarting`](crate::MidiHardwareError::BackendStarting).
+    fn start(&self) -> Start {
+        Start::ready()
+    }
+
     /// Starts reporting the device list to `sink`: every device present now,
     /// seeded before this returns, then each change from a thread of the
     /// backend's own.

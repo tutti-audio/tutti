@@ -293,6 +293,16 @@ impl Devices {
         })
     }
 
+    /// The wait for the backend to be ready to open endpoints and ports: resolves
+    /// when it is, or with the error the backend failed to start with. On macOS the
+    /// process's CoreMIDI client is made on a thread of the backend's own, and the
+    /// device list is seeded when it resolves; opening a device before then is
+    /// [`MidiHardwareError::BackendStarting`]. Every other backend is ready on the
+    /// first poll.
+    pub fn start(&self) -> crate::Start {
+        self.inner.backend.start()
+    }
+
     fn state(&self) -> MutexGuard<'_, State> {
         self.inner.shared.state()
     }

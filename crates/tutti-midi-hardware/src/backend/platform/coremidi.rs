@@ -3,7 +3,8 @@
 use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
+use crate::start::{Start, Started};
+use crate::virtual_endpoint::{OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend.
@@ -11,15 +12,22 @@ pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::coremidi::CoreMidiEndpoints::new())
 }
 
-/// Publishes the virtual endpoint `spec` describes, delivering into `producer`.
+/// The wait for the process's one CoreMIDI client, made on the hub's thread.
+pub(crate) fn start() -> Start {
+    super::coremidi::start()
+}
+
+/// Starts publishing the virtual endpoint `spec` describes, delivering into
+/// `producer`. `started` is the proof the hub's client is made.
 pub(crate) fn open_virtual_endpoint(
     _executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
+    _started: Started,
     main: MainThreadMarker,
-) -> Result<(Box<dyn EndpointBackend>, VirtualProtocol)> {
-    let endpoint = super::coremidi::UmpVirtualEndpoint::open(spec, producer, main)?;
-    Ok((Box::new(endpoint), spec.protocol))
+) -> Result<Box<dyn OpeningBackend>> {
+    let opening = super::coremidi::UmpVirtualEndpoint::open(spec, producer, main)?;
+    Ok(Box::new(opening))
 }
 
 /// The platform's own error, as [`MidiHardwareError::Os`] carries it.

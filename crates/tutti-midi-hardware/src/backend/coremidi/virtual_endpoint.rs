@@ -21,18 +21,24 @@
 //! spec with none is a source and a destination under the spec's name, which is
 //! what CoreMIDI offers for an endpoint with no blocks to declare.
 //!
+//! [`Opening`] is the creation, polled: a spec with no blocks is ready on the first
+//! poll; one with blocks drives `CreateUmpEndpoint`, which retries a registration or
+//! an enable that CoreMIDI refuses and says when the next attempt is due.
 //! [`UmpVirtualEndpoint`] owns the endpoint, disposed on drop.
 
 use std::sync::{Arc, PoisonError, RwLock, Weak};
+use std::task::Poll;
 
 use tracing::debug;
-use tutti_coremidi_ffi::{UmpDestination, UmpEndpoint, UmpSender, UmpSource};
-use tutti_platform::MainThreadMarker;
+use tutti_coremidi_ffi::{CreateUmpEndpoint, UmpDestination, UmpEndpoint, UmpSender, UmpSource};
+use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{FunctionBlockId, Protocol, Ump};
 
 use crate::InputProducerHandle;
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{
+    EndpointBackend, OpeningBackend, SenderBackend, VirtualProtocol, VirtualSpec,
+};
 
 /// CoreMIDI's protocol for the spec's.
 fn protocol_of(protocol: VirtualProtocol) -> Protocol {
@@ -88,15 +94,35 @@ impl Drop for UmpVirtualEndpoint {
     }
 }
 
+/// A CoreMIDI endpoint being made. A pair of source and destination is made when it
+/// is created; one with Function Blocks is a [`CreateUmpEndpoint`] the polls drive.
+pub(crate) struct Opening {
+    made: Making,
+    name: String,
+    protocol: VirtualProtocol,
+    created_at: Instant,
+}
+
+enum Making {
+    /// The endpoint, ready on the first poll.
+    Pair(Option<UmpVirtualEndpoint>),
+    /// The endpoint with blocks, being registered and enabled.
+    Blocks(CreateUmpEndpoint),
+    /// Taken by the poll that finished it.
+    Done,
+}
+
 impl UmpVirtualEndpoint {
-    /// Publishes the endpoint `spec` describes, pushing every received message
-    /// into `producer` exactly as a hardware input port does: the events land in
-    /// the same [`HardwareMidiInputs`](crate::HardwareMidiInputs) rings a physical
+    /// Starts publishing the endpoint `spec` describes, pushing every received
+    /// message into `producer` exactly as a hardware input port does: the events land
+    /// in the same [`HardwareMidiInputs`](crate::HardwareMidiInputs) rings a physical
     /// endpoint feeds. A spec that declares Function Blocks publishes them on a UMP
     /// Endpoint. `main` is the proof the endpoint is made on the main thread.
     ///
     /// # Errors
     ///
+    /// [`MidiHardwareError::BackendStarting`](crate::MidiHardwareError::BackendStarting)
+    /// while the process's client is not made,
     /// [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported)
     /// when `spec` declares blocks and the OS is before macOS 15, and
     /// [`MidiHardwareError::Os`](crate::MidiHardwareError::Os) if CoreMIDI refuses
@@ -106,7 +132,7 @@ impl UmpVirtualEndpoint {
         spec: &VirtualSpec,
         mut producer: InputProducerHandle,
         main: MainThreadMarker,
-    ) -> Result<Self> {
+    ) -> Result<Opening> {
         Self::create(spec, main, move |event, arrived| {
             // A full inlet counts the drop itself; a log line would run on
             // CoreMIDI's thread.
@@ -114,40 +140,44 @@ impl UmpVirtualEndpoint {
         })
     }
 
-    /// Creates the endpoint `spec` describes, invoking `on_event` for every UMP
-    /// message received with the `Instant` its packet reached CoreMIDI (the
+    /// Starts creating the endpoint `spec` describes, invoking `on_event` for every
+    /// UMP message received with the `Instant` its packet reached CoreMIDI (the
     /// packet's host time). `on_event` runs on CoreMIDI's delivery thread, so it
     /// must not block.
     pub(super) fn create<F>(
         spec: &VirtualSpec,
         main: MainThreadMarker,
         mut on_event: F,
-    ) -> Result<Self>
+    ) -> Result<Opening>
     where
         F: FnMut(Ump, tutti_platform::Instant) + Send + 'static,
     {
         let name = spec.name().as_str();
         let protocol = protocol_of(spec.protocol);
-        // The device watch's client starts before either endpoint is made, a UMP
-        // Endpoint included (`hub_first`): CoreMIDI sends notifications to the run
-        // loop of the process's first client, and an endpoint's creation is what
-        // would otherwise make that client.
-        let client = super::hub_first()?;
+        // The device watch's client is made before either endpoint is (`hub_ready`),
+        // a UMP Endpoint included: CoreMIDI sends notifications to the run loop of
+        // the process's first client, and an endpoint's creation is what would
+        // otherwise make that client.
+        let client = super::hub_ready()?;
         let on_ump = move |time, event| {
             on_event(
                 event,
                 super::host_time::Pairing::now().instant_of_stamp(time),
             );
         };
-        let endpoint = if spec.function_blocks().is_empty() {
-            Endpoint::Pair {
-                source: Arc::new(UmpSource::new(client, name, protocol)?),
-                destination: UmpDestination::new(client, name, protocol, on_ump)?,
-                live: Arc::new(RwLock::new(true)),
-            }
+        let now = Instant::now();
+        let made = if spec.function_blocks().is_empty() {
+            Making::Pair(Some(Self {
+                endpoint: Endpoint::Pair {
+                    source: Arc::new(UmpSource::new(client, name, protocol)?),
+                    destination: UmpDestination::new(client, name, protocol, on_ump)?,
+                    live: Arc::new(RwLock::new(true)),
+                },
+                name: name.to_string(),
+            }))
         } else {
-            Endpoint::WithBlocks(
-                UmpEndpoint::new(
+            Making::Blocks(
+                CreateUmpEndpoint::new(
                     main,
                     client,
                     name,
@@ -156,15 +186,70 @@ impl UmpVirtualEndpoint {
                     spec.instance(),
                     &super::block_infos(spec),
                     on_ump,
+                    now,
                 )
                 .map_err(super::open_error)?,
             )
         };
-        debug!(name, protocol = ?spec.protocol, "Created virtual MIDI endpoint");
-        Ok(Self {
-            endpoint,
+        Ok(Opening {
+            made,
             name: name.to_string(),
+            protocol: spec.protocol,
+            created_at: now,
         })
+    }
+}
+
+impl Opening {
+    /// One poll at `now`: the endpoint once it is made.
+    pub(super) fn poll_endpoint(
+        &mut self,
+        main: MainThreadMarker,
+        now: Instant,
+    ) -> Poll<Result<UmpVirtualEndpoint>> {
+        let endpoint = match &mut self.made {
+            Making::Pair(pair) => pair.take(),
+            Making::Blocks(create) => match create.poll(main, now) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => {
+                    self.made = Making::Done;
+                    return Poll::Ready(Err(super::open_error(error)));
+                }
+                Poll::Ready(Ok(endpoint)) => Some(UmpVirtualEndpoint {
+                    endpoint: Endpoint::WithBlocks(endpoint),
+                    name: self.name.clone(),
+                }),
+            },
+            Making::Done => None,
+        };
+        self.made = Making::Done;
+        Poll::Ready(endpoint.ok_or(MidiHardwareError::EndpointGone).inspect(|_| {
+            debug!(name = %self.name, protocol = ?self.protocol, "Created virtual MIDI endpoint");
+        }))
+    }
+}
+
+impl OpeningBackend for Opening {
+    fn poll(
+        &mut self,
+        main: MainThreadMarker,
+        now: Instant,
+    ) -> Poll<Result<(Box<dyn EndpointBackend>, VirtualProtocol)>> {
+        self.poll_endpoint(main, now).map(|made| {
+            made.map(|endpoint| {
+                (
+                    Box::new(endpoint) as Box<dyn EndpointBackend>,
+                    self.protocol,
+                )
+            })
+        })
+    }
+
+    fn deadline(&self) -> Instant {
+        match &self.made {
+            Making::Blocks(create) => create.deadline(),
+            Making::Pair(_) | Making::Done => self.created_at,
+        }
     }
 }
 

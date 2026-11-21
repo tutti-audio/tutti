@@ -4,44 +4,7 @@ use super::objc_exception::ObjcException;
 use crate::checks::blocks::BlockRefusal;
 use std::fmt;
 
-/// A CoreMIDI `OSStatus`: the code a call returned.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct OsStatus(i32);
-
-impl OsStatus {
-    /// The status `MIDIClientCreate` returns while the MIDI server is exiting.
-    ///
-    /// `MIDIServices.h` names no constant for it. The number is the Carbon code
-    /// `smNoDir` (`MacErrors.h`), which CoreMIDI reports when its Mach connection
-    /// to the server fails.
-    pub(crate) const SERVER_GONE: Self = Self(-304);
-
-    /// `kMIDINotPermitted` (`MIDIServices.h`): CoreMIDI refuses the call.
-    pub(crate) const NOT_PERMITTED: Self = Self(-10844);
-
-    /// The status with code `raw`.
-    #[must_use]
-    pub const fn new(raw: i32) -> Self {
-        Self(raw)
-    }
-
-    /// The code.
-    #[must_use]
-    pub const fn get(self) -> i32 {
-        self.0
-    }
-
-    /// `Ok` for status 0 (`noErr`), the failing status otherwise.
-    pub(crate) fn check(raw: i32) -> Result<(), Self> {
-        if raw == 0 { Ok(()) } else { Err(Self(raw)) }
-    }
-}
-
-impl fmt::Display for OsStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "OSStatus {}", self.0)
-    }
-}
+pub use crate::checks::os_status::OsStatus;
 
 /// The CoreMIDI call that failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -153,9 +116,17 @@ pub enum Error {
     /// CoreMIDI raised an Objective-C exception.
     #[error(transparent)]
     Exception(#[from] ObjcException),
-    /// The process's client has been started: it has one, and a second is not made.
+    /// The process's client has been started, or is being: a second is not made.
     #[error("the process's CoreMIDI client is already started")]
     ClientExists,
+    /// A call kept failing with the status it is retried on until its bound passed.
+    #[error("{operation} kept failing with {last} until its retry bound passed")]
+    RetryTimedOut {
+        /// The call.
+        operation: Operation,
+        /// The last status it failed with.
+        last: OsStatus,
+    },
 }
 
 impl Error {

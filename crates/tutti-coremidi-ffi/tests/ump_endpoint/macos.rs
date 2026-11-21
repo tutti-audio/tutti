@@ -1,12 +1,13 @@
 //! The cases, on macOS.
 
 use std::sync::mpsc;
+use std::task::Poll;
 use std::time::Duration;
 use tutti_coremidi_ffi::{
-    BlockRefusal, Error, InputPort, OutputPort, SharedClient, UmpEndpoint, UmpEndpointInfo,
-    find_destination, find_source, ump_endpoints,
+    BlockRefusal, CreateUmpEndpoint, Error, InputPort, OutputPort, SharedClient, StartClient,
+    UmpEndpoint, UmpEndpointInfo, find_destination, find_source, ump_endpoints,
 };
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{
     BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockInfo,
     FunctionBlocks, GroupSpan, ManufacturerId, Message, Midi1Port, OsFunctionBlock,
@@ -26,7 +27,35 @@ const HANG_GUARD: Duration = Duration::from_secs(10);
 /// The process's client, started once: an endpoint is created on it.
 fn client() -> SharedClient {
     static CLIENT: std::sync::OnceLock<SharedClient> = std::sync::OnceLock::new();
-    *CLIENT.get_or_init(|| SharedClient::start("tutti-ffi-test", |_| {}).expect("CoreMIDI client"))
+    *CLIENT.get_or_init(|| {
+        let mut start = StartClient::new("tutti-ffi-test", |_| {}, Instant::now(), None)
+            .expect("the client is not started yet");
+        loop {
+            if let Poll::Ready(client) = start.poll(Instant::now()) {
+                return client.expect("CoreMIDI client");
+            }
+            wait_for(start.deadline());
+        }
+    })
+}
+
+/// Returns once `deadline` has passed: the instant a polled value says its next poll
+/// can make progress. The bound only guards a hang.
+fn wait_for(deadline: Instant) {
+    tutti_fixtures::wait_until("the next attempt's instant", HANG_GUARD, || {
+        Instant::now() >= deadline
+    });
+}
+
+/// Polls a creation to its end: the endpoint, or the error it failed with.
+fn finish(created: Result<CreateUmpEndpoint, Error>) -> Result<UmpEndpoint, Error> {
+    let mut creating = created?;
+    loop {
+        if let Poll::Ready(made) = creating.poll(main_thread(), Instant::now()) {
+            return made;
+        }
+        wait_for(creating.deadline());
+    }
 }
 
 fn main_thread() -> MainThreadMarker {
@@ -93,7 +122,7 @@ fn endpoint(
 ) -> Option<(UmpEndpoint, String)> {
     let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
     let id = tutti_fixtures::unique_name("tutti-ffi");
-    let created = UmpEndpoint::new(
+    let created = finish(CreateUmpEndpoint::new(
         main_thread(),
         client(),
         &tutti_fixtures::unique_name("tutti-ffi-test-endpoint"),
@@ -102,7 +131,8 @@ fn endpoint(
         Some(&instance(&id)),
         &[(keys(), Some(KEYS)), (port(), Some(PORT))],
         on_ump,
-    );
+        Instant::now(),
+    ));
     if major >= 15 {
         Some((created.expect("macOS 15 creates the endpoint"), id))
     } else {
@@ -197,7 +227,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
         midi_ci_version: 2,
         ..base(0)
     });
-    let refused = UmpEndpoint::new(
+    let refused = finish(CreateUmpEndpoint::new(
         main_thread(),
         client(),
         "tutti-ffi-test-ci",
@@ -206,7 +236,8 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
         Some(&instance("tutti-ffi-test-ci")),
         &[(ci, None)],
         |_, _| {},
-    );
+        Instant::now(),
+    ));
     assert_eq!(
         refused.err(),
         Some(Error::Block(BlockRefusal::MidiCiVersion {
@@ -222,7 +253,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
 pub fn a_42_character_instance_id_is_listed_back_intact() {
     let longest = format!("{:x<42}", tutti_fixtures::unique_name("t"));
     let major = tutti_fixtures::macos_major().expect("sw_vers names the macOS version");
-    let created = UmpEndpoint::new(
+    let created = finish(CreateUmpEndpoint::new(
         main_thread(),
         client(),
         &tutti_fixtures::unique_name("tutti-ffi-test-instance"),
@@ -231,7 +262,8 @@ pub fn a_42_character_instance_id_is_listed_back_intact() {
         Some(&instance(&longest)),
         &[(keys(), Some(KEYS))],
         |_, _| {},
-    );
+        Instant::now(),
+    ));
     if major < 15 {
         assert_eq!(created.err(), Some(Error::UmpEndpointUnsupported));
         return;

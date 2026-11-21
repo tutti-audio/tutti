@@ -23,6 +23,9 @@ use tutti_midi_hardware::{Devices, RecvTimeoutError};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let executor = tutti_platform::Executor::new();
     let devices = Devices::open(&executor)?;
+    // macOS makes CoreMIDI's client on a thread of its own; the list is seeded once it
+    // has. Every other backend is ready at once.
+    tutti_fixtures::block_on(devices.start())?;
     let events = devices.subscribe();
 
     println!("=== MIDI devices ===");

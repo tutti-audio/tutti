@@ -33,6 +33,10 @@
 //!
 //! let executor = tutti_platform::Executor::new();
 //! let devices = Devices::open(&executor)?;
+//! // The backend may need a moment to start (macOS makes CoreMIDI's client on a thread
+//! // of its own): `start()` is a future the app awaits, on whatever executor it has,
+//! // and the list is seeded when it resolves. Every other backend is ready at once.
+//! tutti_fixtures::block_on(devices.start())?;
 //! let events = devices.subscribe();
 //! for device in events.initial() {
 //!     println!("{}: {}", device.id, device.name);
@@ -78,7 +82,11 @@
 //! applications to connect to: they read what it sends and write what it
 //! receives. A [`VirtualSpec`] gives the name, the Device Identity and Product
 //! Instance Id, the [`VirtualProtocol`] and the Function Blocks. Opening one takes
-//! a `MainThreadMarker`, and the type is `!Send` and `!Sync` on every platform
+//! the [`Started`] a [`Start`] resolved to and returns an
+//! [`OpeningVirtualEndpoint`], which is polled with the current time and a
+//! `MainThreadMarker` until it yields the endpoint (macOS retries a registration
+//! CoreMIDI refuses, and `deadline()` is the next attempt's instant; the other
+//! platforms are ready on the first poll). The endpoint is `!Send` and `!Sync` on every platform
 //! (macOS's UMP Endpoint is a main-thread object); a [`VirtualSender`] sends from
 //! another thread. What peers write is delivered into an [`InputProducerHandle`],
 //! so its events take the path a device input's do. Where the platform cannot publish what the
@@ -91,6 +99,19 @@
 //! refusal named). On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
 //! client otherwise; the endpoint reports the protocol it got.
+//!
+//! ## Starting
+//!
+//! A backend may have something to start before it can open an endpoint: on macOS
+//! the process's one CoreMIDI client is made on a thread of the backend's own, and
+//! CoreMIDI's server may be restarting for several seconds. That wait ends when the
+//! backend's thread says so, so [`Devices::start`] and [`MidiSession::start`]
+//! return a [`Start`], a `Send` [`Future`] that thread wakes,
+//! with no executor of this crate behind it (the free [`start()`] is the same wait
+//! for a program that opens a virtual endpoint with no session). Opening a port
+//! before it resolved is [`MidiHardwareError::BackendStarting`]; a start that
+//! failed is [`MidiHardwareError::BackendFailed`], and asking again starts again.
+//! Every other backend is ready on the first poll.
 //!
 //! ## Background work
 //!
@@ -128,6 +149,8 @@
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
 //! let executor = tutti_platform::Executor::new();
 //! let mut session = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())?;
+//! // Awaited before any port opens: opening earlier is `BackendStarting`.
+//! tutti_fixtures::block_on(session.start())?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -269,6 +292,7 @@ mod profiles;
 mod properties;
 mod sensing;
 mod session;
+mod start;
 // Only the backends with a clock of their own to read convert its timestamp.
 #[cfg_attr(
     any(midi_backend = "none", midi_backend = "winmm"),
@@ -308,8 +332,11 @@ pub use profiles::{
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
+pub use start::{Start, Started, start};
 pub use stream::{Basis, DeviceStream, InputTiming};
-pub use virtual_endpoint::{VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec};
+pub use virtual_endpoint::{
+    OpeningVirtualEndpoint, VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec,
+};
 
 // --- Standard MIDI File codec: NOT here ---
 //

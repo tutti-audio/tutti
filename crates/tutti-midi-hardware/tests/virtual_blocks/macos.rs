@@ -20,10 +20,19 @@ use tutti_ump::{BlockName, EndpointName};
 )]
 mod listener;
 use listener::Listener;
+#[path = "../input/opening.rs"]
+mod opening;
 
 /// A bound that only guards a hang.
 const PATIENCE: Duration = Duration::from_secs(30);
 const INSTANCE: &str = "tutti-test-instance";
+
+/// `session` once its backend has started: CoreMIDI's client is made on a thread of
+/// the backend's own, and opening before then is `BackendStarting`.
+fn started(session: MidiSession) -> MidiSession {
+    tutti_fixtures::block_on(session.start()).expect("the backend starts");
+    session
+}
 
 fn main_thread() -> MainThreadMarker {
     MainThreadMarker::new().expect("a harness = false target runs on the main thread")
@@ -85,7 +94,7 @@ fn open(
 ) -> (Result<VirtualEndpoint, MidiHardwareError>, EventInletNode) {
     let (producer, inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
     (
-        VirtualEndpoint::open(executor, spec, producer, main_thread()),
+        opening::open(executor, spec, producer, main_thread()),
         inlet,
     )
 }
@@ -99,8 +108,9 @@ pub fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
     let name = &unique_name("tutti-vend-blocks");
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
-    let session =
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let session = started(
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+    );
     let (opened, _inlet) = open(&executor, &two_blocks(name), &session);
     if !has_ump_endpoints() {
         assert!(matches!(
@@ -163,11 +173,12 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     .block(block);
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
-    let session =
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let session = started(
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+    );
     let (producer, _inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
     assert!(matches!(
-        VirtualEndpoint::open(&executor, &spec, producer, main_thread()),
+        opening::open(&executor, &spec, producer, main_thread()),
         Err(MidiHardwareError::Os(Error::Block(
             BlockRefusal::MidiCiVersion { id: 0, version: 2 }
         )))
@@ -188,8 +199,9 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over(&inlets);
     let executor = Executor::new();
-    let session =
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let session = started(
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+    );
     let (opened, inlet) = open(&executor, &two_blocks(name), &session);
     if !has_ump_endpoints() {
         assert!(matches!(
@@ -226,8 +238,9 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
 pub fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let executor = Executor::new();
-    let session =
-        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session");
+    let session = started(
+        MidiSession::open(&executor, inlets, MidiHardwareConfig::new()).expect("a session"),
+    );
     let (opened, _inlet) = open(
         &executor,
         &two_blocks(&unique_name("tutti-vend-sender")),

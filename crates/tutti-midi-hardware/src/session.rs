@@ -334,6 +334,11 @@ impl MidiSession {
         })
     }
 
+    /// The wait for the backend to be ready: [`Devices::start`].
+    pub fn start(&self) -> crate::Start {
+        self.devices.start()
+    }
+
     /// The devices present. A host that wants hot-plug subscribes
     /// ([`Devices::subscribe`]); the session's `Phase::Poll` has a
     /// subscription of its own.

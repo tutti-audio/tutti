@@ -20,8 +20,12 @@ struct Watched {
 }
 
 impl Watched {
+    /// `Devices` whose backend has started: the device list is seeded once the
+    /// hub's client is made.
     fn open() -> Self {
-        Self::of(Devices::open(&tutti_platform::Executor::new()).unwrap())
+        let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
+        tutti_fixtures::block_on(devices.start()).expect("the hub makes its client");
+        Self::of(devices)
     }
 
     fn of(devices: Devices) -> Self {
@@ -133,4 +137,41 @@ fn a_change_is_reported_when_a_virtual_endpoint_comes_first() {
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
     );
     drop((destination, source));
+}
+
+/// **A hub thread that ends before it answers fails the start by name and is
+/// replaced**: the start waiting on it resolves to `ThreadEnded` and the next start
+/// makes a thread. No thread runs here: the guard's action is `thread_ended`.
+#[test]
+fn a_hub_thread_that_ends_before_answering_fails_the_start() {
+    let hub = Hub::new();
+    let start = Start::over(Arc::clone(&hub.gate), hub.gate.begin());
+    *hub.unparker.lock_recover() = Some(parker().0);
+    hub.thread_ended();
+    let Err(MidiHardwareError::BackendFailed(why)) = tutti_fixtures::block_on(start) else {
+        panic!("the start fails");
+    };
+    assert!(matches!(
+        *why,
+        MidiHardwareError::ThreadEnded {
+            thread: MidiThread::DeviceWatch
+        }
+    ));
+    assert!(
+        hub.unparker.lock_recover().is_none(),
+        "the next start makes a thread"
+    );
+    assert!(matches!(
+        hub.client(),
+        Err(MidiHardwareError::BackendFailed(_))
+    ));
+}
+
+/// A hub whose client is not made says so by name and does not wait.
+#[test]
+fn a_hub_with_no_client_yet_is_starting() {
+    assert!(matches!(
+        Hub::new().client(),
+        Err(MidiHardwareError::BackendStarting)
+    ));
 }

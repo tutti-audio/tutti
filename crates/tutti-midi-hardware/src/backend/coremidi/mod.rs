@@ -39,6 +39,7 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
+use crate::start::Start;
 use crate::virtual_endpoint::VirtualSpec;
 use tutti_coremidi_ffi::{
     Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
@@ -53,16 +54,21 @@ mod virtual_endpoint;
 mod watch;
 pub(crate) use virtual_endpoint::UmpVirtualEndpoint;
 
-/// The process's one CoreMIDI client, started with the device watch's hub on first
-/// use. CoreMIDI sends notifications to the run loop of the thread that created the
-/// process's first client, and the hub thread creates it, so the endpoints and ports
-/// of this backend are all created on the client this returns.
+/// The process's one CoreMIDI client, which the device watch's hub made on its own
+/// thread on first use. CoreMIDI sends notifications to the run loop of the thread
+/// that created the process's first client, and the hub thread creates it, so the
+/// endpoints and ports of this backend are all created on the client this returns.
 ///
-/// Rule: nothing the hub thread runs may call back into this (it waits for the hub
-/// to start, and the hub thread's `snapshot` is `CoreMidiEndpoints::devices`, which
-/// creates no endpoint or port), or startup deadlocks.
-pub(crate) fn hub_first() -> Result<SharedClient> {
-    watch::client()
+/// It never waits: a hub whose client is not made yet is
+/// [`MidiHardwareError::BackendStarting`], and one whose start failed is
+/// [`MidiHardwareError::BackendFailed`]. A caller awaits [`start`] first.
+pub(crate) fn hub_ready() -> Result<SharedClient> {
+    watch::hub()?.client()
+}
+
+/// The wait for the hub's client to be made: see [`Start`].
+pub(crate) fn start() -> Start {
+    watch::begin_start()
 }
 
 /// The Function Blocks `spec` declares, as the Function Block Info and name
@@ -187,17 +193,20 @@ impl Default for CoreMidiEndpoints {
 }
 
 impl CoreMidiEndpoints {
-    /// Creates the backend on the process's one CoreMIDI client.
+    /// Creates the backend, and starts the hub thread that makes the process's one
+    /// CoreMIDI client. Returns at once: the client is made on that thread, and
+    /// [`start`](MidiEndpoints::start) resolves when it is.
     ///
-    /// A failed client is not kept: enumeration then reports nothing and opening
-    /// reports the error it failed with, which is what a headless machine or a
-    /// sandbox without MIDI access should look like.
+    /// A client CoreMIDI refuses is not kept: enumeration then reports nothing,
+    /// opening reports the error the start failed with, and the next `start` asks the
+    /// hub for a new one, which is what a headless machine or a sandbox without MIDI
+    /// access should look like.
     ///
     /// While the MIDI server restarts (CoreMIDI refuses clients for about five
-    /// seconds) the first call waits, up to 10 s once per process window; calls
-    /// made within 10 s of a failed wait fail at once.
+    /// seconds) the hub thread retries for up to 10 s once per process window;
+    /// starts asked within 10 s of a failed window make one attempt.
     pub fn new() -> Self {
-        let _ = hub_first();
+        let _ = watch::hub();
         Self
     }
 
@@ -221,8 +230,8 @@ impl CoreMidiEndpoints {
 }
 
 impl CoreMidiEndpoints {
-    /// Every device now. Run by the hub thread: it must not create a client
-    /// (`hub_first`).
+    /// Every device now. Run by the hub thread and by a watch registered after the
+    /// client exists.
     fn devices() -> Vec<OsDevice> {
         os_devices(&list_inputs(), &list_outputs())
     }
@@ -276,6 +285,10 @@ fn list_outputs() -> Vec<OsEndpoint> {
 }
 
 impl MidiEndpoints for CoreMidiEndpoints {
+    fn start(&self) -> Start {
+        start()
+    }
+
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
         watch::start(sink, Self::devices)
     }
@@ -293,7 +306,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         id: EndpointId,
         mut producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        let client = hub_first()?;
+        let client = hub_ready()?;
         let endpoint = Self::find_source(id).ok_or(NotFound::Endpoint(id))?;
 
         // The port speaks the source's protocol: a MIDI 1.0 source is delivered
@@ -329,7 +342,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
     }
 
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        let client = hub_first()?;
+        let client = hub_ready()?;
         let destination = Self::find_destination(id).ok_or(NotFound::Endpoint(id))?;
         let port = OutputPort::new(client, "tutti-out")?;
         Ok(Box::new(CoreMidiOutput {

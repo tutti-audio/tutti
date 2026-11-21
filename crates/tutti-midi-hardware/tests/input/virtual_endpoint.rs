@@ -57,7 +57,7 @@ fn open_sending(executor: &tutti_platform::Executor, spec: &VirtualSpec) -> Virt
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let ports = HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
-    VirtualEndpoint::open(executor, spec, producer, plain_endpoint_main())
+    super::opening::open(executor, spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint")
 }
 
@@ -127,7 +127,7 @@ fn a_virtual_endpoint_delivers_what_a_client_sends_to_the_graph_in_order() {
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+    let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the endpoint is listed");
@@ -154,7 +154,7 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let _endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+    let _endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the endpoint is listed");
@@ -262,7 +262,7 @@ fn a_midi1_endpoint_reports_midi1_and_its_messages_arrive_widened() {
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+    let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("an endpoint");
     assert_eq!(endpoint.protocol(), VirtualProtocol::Midi1);
 
@@ -469,7 +469,7 @@ fn a_virtual_endpoint_sends_to_a_subscriber_and_delivers_what_the_same_peer_writ
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+    let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let (peer, port) = peer(PortCaps::READ | PortCaps::WRITE);
     let found = find(&peer, &spec).expect("the endpoint is listed");

@@ -31,6 +31,8 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 thiserror = { workspace = true, features = ["std"] }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+# `Instant`, which the OS-free retry rules take as the `now` they are given.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-foundation = { workspace = true, features = ["NSDictionary"] }

@@ -80,6 +80,16 @@ pub enum MidiHardwareError {
         thread: MidiThread,
     },
 
+    /// The backend is still starting: an endpoint or a port cannot be made until
+    /// the [`Start`](crate::Start) the backend gave resolves.
+    #[error("the MIDI backend is still starting")]
+    BackendStarting,
+
+    /// The backend could not start, or its thread ended; the error is the one every
+    /// waiter of that start gets, shared.
+    #[error(transparent)]
+    BackendFailed(std::sync::Arc<MidiHardwareError>),
+
     /// What was asked for is not there: a stale or foreign id.
     #[error(transparent)]
     NotFound(#[from] NotFound),
