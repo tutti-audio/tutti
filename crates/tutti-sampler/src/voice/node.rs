@@ -14,7 +14,6 @@ use std::sync::Arc;
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
 use crate::nonempty;
 use crate::streamer::{ControlCell, Stream};
-use crate::stretch;
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
@@ -24,6 +23,7 @@ use super::disk_voice::VoiceHealth;
 use super::loop_span::Loop;
 use super::memory_source::VoiceWindow;
 use super::slot::{PlaybackSlot, stretch_wanted};
+use super::stretched;
 use super::types::{Direction, Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
@@ -33,7 +33,7 @@ use tutti_graph::{
 };
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_timeline::TempoReader;
-use tutti_units::{Amplitude, PlaybackRate, SampleRate, Tail, UnitParam};
+use tutti_units::{Amplitude, Latency, PlaybackRate, Tail, UnitParam};
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
 /// outputs.
@@ -65,11 +65,17 @@ use tutti_units::{Amplitude, PlaybackRate, SampleRate, Tail, UnitParam};
 /// fork is that copy made to share nothing with the live node
 /// (`Voice::fork_copy`: its own gain cell; a disk voice reading its file
 /// itself), moved to the window, loop and speed the handle last published and
-/// set to the gain last set, with a stretch filter of its own. It reads its render's
+/// set to the gain last set, with a vocoder of its own. It reads its render's
 /// transport from its block's `Env`. A disk voice's node
 /// forks only for an offline render.
+///
+/// A stretching voice's seat (a seek, a loop wrap, play from a position the transport
+/// has not stood at for 2 049 frames) primes the vocoder over blocks and is silent for
+/// 4 097 frames (85 ms at 48 kHz) before it sounds on the timeline; a clip placed ahead
+/// of the playhead, or at a position the transport has stood at, primes before it
+/// plays and is not silent.
 pub struct VoiceNode<F: SamplerFloat> {
-    /// The single voice plus its resident stretch filter and the per-sample
+    /// The single voice plus its resident vocoder and the per-sample
     /// read, shared with the pool's slots.
     pub(crate) slot: PlaybackSlot<F>,
     /// Output width — the node's audio outputs, fixed at construction.
@@ -129,10 +135,10 @@ impl<F: SamplerFloat> VoiceNode<F> {
 
     /// Wraps a single [`Voice`] as a `channels`-wide graph node.
     ///
-    /// Builds the stretch filter here when `voice.play` asks for one. This
+    /// Builds the vocoder here when `voice.play` asks for one. This
     /// is a control-thread constructor, so the allocation is free; the
     /// audio-thread drain in [`VoicePool`](super::pool::VoicePool) cannot do the
-    /// same and takes a pre-built filter from the sender instead.
+    /// same and takes a pre-built vocoder from the sender instead.
     ///
     /// Skipping that step is how a standalone stretched voice reads DRY forever
     /// — no stretch, no pitch shift, and no error — because
@@ -140,19 +146,11 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// else on this path fills it in.
     pub fn with_channels(voice: Voice<F>, channels: impl Into<ChannelLayout>) -> Self {
         let channels = nonempty(channels.into());
-        // `prepare` re-rates the filter to the graph's rate.
-        let sample_rate = SampleRate::SR_44K1;
-        let stretch = stretch_wanted(&voice.play).then(|| {
-            let unit = stretch::Unit::<F>::with_channels(sample_rate, channels);
-            unit.set_stretch_factor(voice.play.stretch);
-            unit.set_pitch_cents(voice.play.pitch);
-            unit
-        });
+        let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels));
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;
-        let mut slot =
-            PlaybackSlot::with_channels(SlotId(0), Box::new(voice), sample_rate, channels);
+        let mut slot = PlaybackSlot::with_channels(SlotId(0), Box::new(voice), channels);
         slot.stretch = stretch;
         Self {
             slot,
@@ -277,7 +275,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// borrow that cannot free, dropped before the block's read), a `Copy`
     /// value, and a field write when one changed. The pool's drain has to be
     /// more careful because its commands carry owned payloads (a `Voice`, a
-    /// wave, a stretch filter), which is why it retires what it lets go of.
+    /// wave, a vocoder), which is why it retires what it lets go of.
     /// A node takes no such payload: there is nothing for it to drop.
     ///
     /// `driven` is the block's gain from the node's param port when a lane
@@ -367,12 +365,24 @@ impl<F: SamplerFloat> VoiceNode<F> {
         self.slot.voice.ring_out(self.reach)
     }
 
+    /// The processing latency the node declares ([`Shape::latency`]). A memory
+    /// voice reads its source a vocoder's latency ahead, so it has none; a disk
+    /// voice cannot read before its seat, so it declares its vocoder's, which
+    /// is built with the node or never and always runs, so the figure is the same
+    /// for the node's life.
+    fn latency(&self) -> Latency {
+        match (&self.slot.voice.source, &self.slot.stretch) {
+            (VoiceSource::Disk(_), Some(vocoder)) => Latency::new(vocoder.latency()),
+            _ => Latency::ZERO,
+        }
+    }
+
     /// What the node declares to the cost model: `Moderate` for a plain
-    /// read, `Heavy` with a time-stretch filter.
+    /// read, `Heavy` with a vocoder.
     ///
     /// Measured: a plain memory voice 13 ns
     /// per frame and channel, a stretched one 288 (the phase vocoder),
-    /// against `SvfFilterNode`'s 7.2 and `Heavy`'s 256. A node's filter is
+    /// against `SvfFilterNode`'s 7.2 and `Heavy`'s 256. A node's vocoder is
     /// built with it or never (`UpdateStretch` reaches only a pool's
     /// slots), so every read of the shape (at insert and at each
     /// re-prepare) gives the same class. A disk voice reads through the
@@ -422,11 +432,12 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
             .with_tail(self.ring_out())
+            .with_latency(self.latency())
             .with_cost(self.cost())
             .with_param_addrs(self.declared_ports().as_slice())
     }
 
-    /// The rate the voice's source and its stretch filter run at, and the
+    /// The rate the voice's source runs at, and the
     /// block scratch sized from `max_block` (a re-prepare at another size
     /// resizes it).
     fn prepare(&mut self, p: &Prepare) {
@@ -437,10 +448,6 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
             .voice
             .source
             .set_render(sample_rate, p.render_mode());
-        self.slot.sample_rate = sample_rate;
-        if let Some(unit) = &mut self.slot.stretch {
-            unit.set_sample_rate(sample_rate);
-        }
     }
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -613,7 +620,7 @@ mod tests {
     use super::*;
     use crate::{MemorySource, Playback, VoiceSource, VoiceWindow};
     use tutti_buffers::Mono;
-    use tutti_units::Beat;
+    use tutti_units::{Beat, SampleRate};
 
     /// A window the node held across the next publish is freed by the next
     /// `reclaim`, with no further publish.
@@ -721,6 +728,36 @@ mod tests {
             play: Playback::default(),
         };
         assert_eq!(VoiceNode::new(placed).shape().tail, Tail::None);
+    }
+
+    /// A standalone disk voice that stretches declares its vocoder's latency (its ring
+    /// cannot be read ahead of its seat), and one that does not declares none.
+    #[test]
+    fn a_standalone_disk_voice_declares_its_vocoders_latency() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("tone.wav");
+        tutti_fixtures::signal::write_wav_f32(&path, SampleRate::SR_48K, 1, &vec![0.25f32; 4_800]);
+        let mut streamer =
+            crate::DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default())
+                .expect("streamer builds");
+        let mut latency = |play: Playback| {
+            let opening = streamer.open_stream(&path, crate::StreamStart::HEAD);
+            let (stream, reader) =
+                crate::testing::wait_for_open(&mut streamer, opening).expect("opens");
+            let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
+            VoiceNode::streaming(voice, stream, play).shape().latency
+        };
+        let stretched = latency(Playback {
+            stretch: tutti_units::StretchFactor::new(1.5),
+            ..Playback::default()
+        });
+        let want = stretched::vocoder::<f32>(ChannelLayout::MONO).latency();
+        assert!(want.get() > 0);
+        assert_eq!(stretched.samples(), want);
+        assert_eq!(
+            latency(Playback::default()).samples(),
+            tutti_units::Samples::new(0)
+        );
     }
 
     /// **A streaming node's handle owns its stream.** With every other holder

@@ -16,7 +16,7 @@
 //!
 //! # Jumps
 //!
-//! Buffered state — a stretch filter's FIFOs, the live disk reader's
+//! Buffered state — a vocoder's rings, the live disk reader's
 //! crossfade — needs to know where the playhead moved discontinuously,
 //! which one block cannot say: a block starting at beat 4 continues a block
 //! that ended at beat 4, and jumps from one that ended at 7. So the node that
@@ -68,7 +68,7 @@ use std::ops::Range;
 use tutti_graph::{Env, TransportPosition, declick_frames};
 use tutti_music::{FrameClock, LoopRange, first_frame_at_or_after};
 use tutti_tempo::TempoMap;
-use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
 
 /// How far from where the playhead would have been, in frames, a run may
 /// start and still continue it. Far below anything audible (a thousandth of
@@ -421,6 +421,21 @@ impl<'e> BlockClock<'e> {
         }
     }
 
+    /// The frames the playhead takes to go from beat `from` to beat `to` (none when `to`
+    /// is not after `from`), at `rate`: [`seconds`](Self::seconds) through the project's
+    /// tempo map, so the tempo changes between the two count, and the whole frames of it.
+    /// Without a map the playhead's `tempo` is taken to go on unchanged.
+    #[inline]
+    pub(crate) fn frames_between(
+        &self,
+        from: Beat,
+        to: Beat,
+        tempo: Bpm,
+        rate: SampleRate,
+    ) -> Samples {
+        Seconds::new(self.seconds(from, to, tempo)).to_samples_floor(rate)
+    }
+
     /// The block's runs, in order, covering it.
     pub(crate) fn runs(&self) -> Runs<'e> {
         let t = self.env.transport;
@@ -433,6 +448,7 @@ impl<'e> BlockClock<'e> {
             generation: self.generation,
             jump: self.jump,
             wrap: self.wrap.filter(|_| rolls(&t)),
+            wrapped: false,
         }
     }
 
@@ -461,6 +477,11 @@ pub(crate) struct Runs<'e> {
     jump: bool,
     /// The wrap crossfade running at `cur`.
     wrap: Option<Wrap>,
+    /// Whether the clock wrapped the loop in advancing over the last run, to its end: a
+    /// wrap that falls on the end of a segment is not inside any run, and a transport
+    /// change on that frame (the engine cuts one where the tempo changes) has the clock
+    /// already at the loop's start.
+    wrapped: bool,
 }
 
 impl Runs<'_> {
@@ -488,9 +509,10 @@ impl Iterator for Runs<'_> {
                 // playhead would have been (or stood, stopped).
                 let prev = Next {
                     beat: self.clock.beat(),
-                    wrapped: false,
+                    wrapped: self.wrapped,
                     wrap: None,
                 };
+                self.wrapped = false;
                 self.transport = change.to;
                 self.clock = change.to.clock(self.env.sample_rate);
                 let broke = breaks(prev, &change.to, self.env.sample_rate);
@@ -498,9 +520,18 @@ impl Iterator for Runs<'_> {
                     self.jump = true;
                     self.generation += 1;
                 }
-                // A seek or a stop ends the crossfade on its frame.
+                // A seek or a stop ends the crossfade on its frame; a wrap that fell on the
+                // change's frame starts one.
                 if broke || !rolls(&change.to) {
-                    self.wrap = None;
+                    self.wrap =
+                        prev.wrapped
+                            .then(|| {
+                                change.to.looping.and_then(|r| {
+                                    Wrap::new(r, change.to.tempo, self.env.sample_rate)
+                                })
+                            })
+                            .flatten()
+                            .filter(|_| rolls(&change.to));
                 }
                 if self.cur >= self.env.block_len.get() {
                     return None;
@@ -523,7 +554,10 @@ impl Iterator for Runs<'_> {
                 wrap: self.wrap,
             };
             if rolling {
+                let before = self.clock.generation();
                 self.clock.advance(Samples::new(stop - self.cur), region);
+                // (A wrap inside the segment is the run's own: it is a jump already.)
+                self.wrapped = wrap.is_none() && self.clock.generation() != before;
             }
             self.wrap = match region.filter(|_| wrap.is_some()) {
                 Some(r) => Wrap::new(r, self.transport.tempo, self.env.sample_rate),
@@ -662,6 +696,32 @@ mod tests {
         assert_eq!(run.beat_at(0), Beat::new(10_032.0 / FPB));
     }
 
+    /// A loop wrap that falls on a transport change is a jump on the change's frame. Over a
+    /// tempo map the engine cuts a block where the tempo changes, and a wrap can fall
+    /// there: the first segment ends at the loop's end (one frame short of a wrap inside
+    /// it) and the change puts the playhead at the loop's start, at the tempo there. The
+    /// clock has wrapped on reaching the segment's end, so what is left of the wrap is a
+    /// change to the beat it already stands at; the run after it still starts with a jump
+    /// and a wrap crossfade.
+    #[test]
+    fn a_loop_wrap_on_a_transport_change_is_a_jump_on_the_changes_frame() {
+        let looping = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
+        let before =
+            TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.0 - 32.0 / FPB), looping);
+        let after = TransportPosition::new(true, Bpm::of(60.0), Beat::new(0.0), looping);
+        let mut clock = Clock::new();
+        let e = env(before, &[(32, after)]);
+        let block = clock.observe(&e);
+        let got: Vec<_> = block.runs().collect();
+        assert_eq!(
+            got.iter()
+                .map(|r| (r.start, r.end, r.jump))
+                .collect::<Vec<_>>(),
+            [(0, 32, false), (32, 64, true)]
+        );
+        assert_eq!(got[1].wrap.map(|w| w.ago), Some(0), "a crossfade starts");
+    }
+
     /// A loop wrap inside a block is a jump on the wrap's frame, the
     /// run after it starting at the loop's start.
     #[test]
@@ -683,7 +743,7 @@ mod tests {
 
     /// `BlockClock::jumps` is whether any run of the block jumps: the
     /// slot walks a range's runs for a reset only when it says so, so a
-    /// `false` over a jump would leave a stretch filter or a live read
+    /// `false` over a jump would leave a stretch vocoder or a live read
     /// holding stale state. Over a continuation, a seek back, a seek inside
     /// a block, a stop and a restart.
     #[test]
