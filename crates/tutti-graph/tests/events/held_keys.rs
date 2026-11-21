@@ -28,7 +28,7 @@ use tutti_units::Samples;
 type Words = [u32; 4];
 type Mail = Arc<Mutex<Vec<(u32, Words)>>>;
 /// `(sink, frame, words)`.
-type Log = Arc<Mutex<Vec<(u64, u64, Words)>>>;
+type Log = tutti_fixtures::Record<(u64, u64, Words)>;
 
 const MAX: usize = 64;
 
@@ -193,7 +193,7 @@ impl Rig {
     fn with_lag(mode: Mode, sinks: &[u64], lag: bool) -> Self {
         let prep = common::prepare(MAX);
         let mail: Mail = Arc::default();
-        let log: Log = Arc::default();
+        let log: Log = tutti_fixtures::Record::new();
         let (ed, exec, reference) = match mode {
             Mode::Reference => (None, None, Some(Reference::new(prep))),
             _ => {
@@ -456,7 +456,7 @@ fn on_all(scenario: impl Fn(&mut Rig), sinks: &[u64]) -> Vec<Vec<(u64, u64, Word
         .map(|&m| {
             let mut r = Rig::new(m, sinks);
             scenario(&mut r);
-            r.log.lock().unwrap().clone()
+            r.log.lock().unwrap().to_vec()
         })
         .collect()
 }
@@ -809,7 +809,7 @@ fn on_all_lagged(scenario: impl Fn(&mut Rig), sinks: &[u64]) -> Vec<Vec<(u64, u6
         .map(|&m| {
             let mut r = Rig::with_lag(m, sinks, true);
             scenario(&mut r);
-            r.log.lock().unwrap().clone()
+            r.log.lock().unwrap().to_vec()
         })
         .collect()
 }
@@ -1018,7 +1018,7 @@ fn a_cut_feedback_edge_delivers_what_is_in_flight_then_closes() {
             r.block();
             let words = r.words(2);
             assert_eq!(words, vec![on60(), off60()], "{m:?}");
-            r.log.lock().unwrap().clone()
+            r.log.lock().unwrap().to_vec()
         })
         .collect();
     same(&logs);
@@ -1843,7 +1843,7 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
 /// fork's source sends the note and its edge cut closes it.
 #[test]
 fn a_fork_closes_what_it_has_seen() {
-    let log: Log = Arc::default();
+    let log: Log = tutti_fixtures::Record::new();
     let (mut fed, mut fexec) = forked(&log, 0, false);
     let mut out_buf = [0.0f32; MAX];
     let t = TransportPosition::default();
@@ -1866,7 +1866,7 @@ fn a_fork_closes_what_it_has_seen() {
 /// the limit is ever lifted.
 #[test]
 fn a_fork_does_not_close_a_key_held_at_fork_time() {
-    let log: Log = Arc::default();
+    let log: Log = tutti_fixtures::Record::new();
     let (mut fed, mut fexec) = forked(&log, 1, true);
     assert_eq!(
         sink_words(&log.lock().unwrap(), 2),
@@ -2045,7 +2045,7 @@ mod random {
         r.wire(&[]);
         r.block();
         r.block();
-        let log = r.log.lock().unwrap().clone();
+        let log = r.log.lock().unwrap().to_vec();
         (log, sent)
     }
 

@@ -478,3 +478,93 @@ fn a_render_mode_not_applied_arrives_in_the_stream() {
     );
     assert!(plugin_events(&mut s).is_empty(), "reported once");
 }
+
+/// **A graph that refuses the silent stand-in is heard, once, and the node is
+/// not counted silenced.** The node is not in the graph, so the swap is refused
+/// ([`ReplaceRefused::NoSuchNode`]): the session reports it as
+/// `NodeNotSilenced`, and the node is no longer pending, which is what the
+/// update phase asks again.
+#[test]
+fn a_graph_that_refuses_the_silent_stand_in_is_reported_and_the_node_is_not_silenced() {
+    use crate::ReplaceRefused;
+    use crate::plugin::Silence;
+
+    let (mut s, _hosted) = session_with(None);
+    let gone = s.graph().add(ForkByClone(Const::mono(0.0))).erase();
+    s.remove(gone).expect("a plain node is removed");
+    host(
+        &mut s,
+        gone,
+        handle_with(None),
+        tutti_plugin_types::PluginRef::file("fake.clap"),
+    );
+
+    let mut out = Vec::new();
+    s.silence_node(gone, &mut out);
+
+    assert!(
+        matches!(
+            out.as_slice(),
+            [SessionEvent::Plugin(PluginEvent {
+                node,
+                change: PluginChange::NodeNotSilenced { why: ReplaceRefused::NoSuchNode(missing) },
+                ..
+            })] if *node == gone && *missing == gone
+        ),
+        "{out:?}"
+    );
+    assert_eq!(
+        s.graph.plugins[&gone].silence,
+        Silence::Refused,
+        "refused is not silenced: the update phase asks only a pending node again"
+    );
+}
+
+/// **A snapshot the plugin failed is counted for the app**
+/// ([`Diagnostics::failed_snapshots`](crate::Diagnostics::failed_snapshots)); one
+/// it took is not.
+#[test]
+fn a_failed_periodic_snapshot_is_counted() {
+    let (mut s, node) = session_with(None);
+    let token = Arc::clone(&s.graph.plugins[&node].snapshot_token);
+    let diagnostics = |s: &DetachedSession| {
+        s.plugin_view(node)
+            .expect("hosted")
+            .diagnostics()
+            .failed_snapshots()
+    };
+    assert_eq!(diagnostics(&s), 0);
+    assert!(s.land_snapshot(node, &token, Instant::now(), Ok(vec![1, 2, 3]),));
+    assert_eq!(diagnostics(&s), 0, "a taken snapshot is not a failure");
+    assert!(!s.land_snapshot(
+        node,
+        &token,
+        Instant::now(),
+        Err(tutti_plugin_types::StateError::Lost),
+    ));
+    assert_eq!(diagnostics(&s), 1);
+}
+
+/// **A round trip that panicked is counted for the app**
+/// ([`Diagnostics::panicked_round_trips`](crate::Diagnostics::panicked_round_trips)),
+/// and the round trip that did not panic is not.
+#[test]
+fn a_panicked_round_trip_is_counted() {
+    let (s, node) = session_with(None);
+    let panics = s.graph.plugins[&node].panicked_round_trips.writer();
+    let count = |s: &DetachedSession| {
+        s.plugin_view(node)
+            .expect("hosted")
+            .diagnostics()
+            .panicked_round_trips()
+    };
+    assert_eq!(
+        super::super::contained("fine", node, &panics, || 7),
+        Some(7)
+    );
+    assert_eq!(count(&s), 0);
+    let lost: Option<()> =
+        super::super::contained("state snapshot", node, &panics, || panic!("a plugin panic"));
+    assert!(lost.is_none());
+    assert_eq!(count(&s), 1);
+}

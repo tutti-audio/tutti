@@ -184,7 +184,13 @@ pub(crate) mod wire;
 /// - **Version 58** adds the control news `PluginStateNotRestored`, after
 ///   `PluginReloaded`: a rebuilt plugin that refused the state it was saved
 ///   with, and the reason.
-pub const PROTOCOL_VERSION: u32 = 58;
+/// - **Version 59** adds the control news `RenderModeNotApplied` (a plugin that
+///   refused the render mode it was asked for, and the mode) and
+///   `PluginWouldNotStop` (a restart the plugin would not make, and why), after
+///   `PluginStateNotRestored`, and `ServerLosses` (the server's cumulative
+///   counts of commands it could not give its render thread and of one-way
+///   edits the plugin refused), after them.
+pub const PROTOCOL_VERSION: u32 = 59;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -538,6 +544,25 @@ mod tests {
                 reason: String::new()
             }),
             11
+        );
+        assert_eq!(
+            news(News::RenderModeNotApplied {
+                mode: RenderMode::Realtime
+            }),
+            12
+        );
+        assert_eq!(
+            news(News::PluginWouldNotStop {
+                reason: String::new()
+            }),
+            13
+        );
+        assert_eq!(
+            news(News::ServerLosses {
+                commands_refused: 0,
+                edits_refused: 0
+            }),
+            14
         );
         assert_eq!(news(News::ProcessRequested), 9);
 

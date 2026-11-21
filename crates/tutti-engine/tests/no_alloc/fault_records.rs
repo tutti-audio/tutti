@@ -1,4 +1,4 @@
-//! The render-thread fault records under `AllocDisabler`.
+//! The render-thread fault records under `RtAllocCheck`.
 
 use tutti_platform::Instant;
 

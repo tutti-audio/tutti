@@ -356,6 +356,21 @@ impl PluginControls {
         self.chunks.commands_refused()
     }
 
+    /// Commands the plugin's server could not give its own render thread (an
+    /// unseat, a mode, a rate or a barrier that never reached it), as the server
+    /// last told them. Not [`refused_commands`](Self::refused_commands), which
+    /// are the host side's. Zero for a plugin that runs in this process.
+    pub fn server_refused_commands(&self) -> u64 {
+        self.chunks.server_refused_commands()
+    }
+
+    /// One-way edits the plugin refused in its server (an automation state, a
+    /// track's info, a parameter write the wire has no reply for), as the
+    /// server last told them. Zero for a plugin that runs in this process.
+    pub fn server_refused_edits(&self) -> u64 {
+        self.chunks.server_refused_edits()
+    }
+
     /// Audio responses (a block's MIDI-out and status) the bridge could not
     /// queue for the audio thread because its queue was full. Lost.
     /// RT-safe: one relaxed load.

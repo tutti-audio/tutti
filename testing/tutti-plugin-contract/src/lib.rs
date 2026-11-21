@@ -24,7 +24,6 @@ pub mod spec;
 mod transcript;
 
 pub use active::{Active, BLOCK, RATE, Render, Width, prepare};
-pub use assert_no_alloc::AllocDisabler;
 pub use cases::*;
 pub use format::{Format, Gap, ParamTiming, run};
 #[cfg(target_os = "macos")]
@@ -38,6 +37,7 @@ pub use transcript::{
     patch_mode, replace_blob, select, set_level, set_mode, state_with_fault, state_with_rings,
     transcript,
 };
+pub use tutti_fixtures::RtAllocCheck;
 pub use tutti_plugin_types::{InProcess, OutOfProcess};
 
 /// The case list, once: a test per case, and the names a [`Gap`] may use.
@@ -97,7 +97,7 @@ macro_rules! contract {
     (@each $fmt:ty, $gaps:expr, $($case:ident),*) => {
         // One allocator per test binary, for `process_does_not_allocate`.
         #[global_allocator]
-        static ALLOCATOR: $crate::AllocDisabler = $crate::AllocDisabler;
+        static ALLOCATOR: $crate::RtAllocCheck = $crate::RtAllocCheck;
 
         $( #[test] fn $case() { $crate::run::<$fmt>(stringify!($case), $crate::$case::<$fmt>) } )*
 

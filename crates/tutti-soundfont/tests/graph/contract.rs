@@ -15,7 +15,7 @@ use tutti_fixtures::midi;
 use tutti_graph::EventKind;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::Settings;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::MidiChannel;
 use tutti_units::Samples;
 
@@ -45,8 +45,10 @@ fn soundfont_row() -> Row {
     Row::new(
         "SoundFontUnit",
         move || {
-            let settings = Settings::new();
-            Box::new(settings.build(Arc::clone(&font)).expect("the unit builds"))
+            Box::new(
+                SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(&font)))
+                    .expect("the unit builds"),
+            )
         },
         Excite::Event {
             port: 0,

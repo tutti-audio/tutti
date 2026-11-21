@@ -63,6 +63,7 @@ coremidi-sys = { workspace = true }
 
 [dev-dependencies]
 assert_no_alloc = { version = "1", default-features = false }
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [package.metadata.docs.rs]
 all-features = true
