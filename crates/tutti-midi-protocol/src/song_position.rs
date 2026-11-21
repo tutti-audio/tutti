@@ -9,7 +9,8 @@ const MIDI_BEATS_PER_BEAT: f64 = 4.0;
 
 /// The Song Position Pointer that names `beat`: sixteenths from the start,
 /// rounded to the nearest. `None` for a beat the field cannot hold: before the
-/// start, NaN or infinite, or past the 14-bit field (the largest position is
+/// start (however slightly: a position before the start is refused, never
+/// rounded up to it), NaN or infinite, or past the 14-bit field (the largest position is
 /// 16383 sixteenths, a beat short of 4096).
 ///
 /// ```

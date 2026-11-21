@@ -996,6 +996,33 @@ fn a_locate_past_the_song_position_field_is_skipped_and_counted() {
     assert_eq!(cm.cm.take_refused(), 0);
 }
 
+/// **A refused timecode sends no quarter-frame of its cycle and counts one
+/// refusal a cycle**: a transport at a time no frame count holds (a beat of
+/// 1e300) has no timecode, so piece 0 is refused and pieces 1 to 7 are not
+/// sent either, not even the previous cycle's. (A beat before the start reads
+/// as time 0 on the MTC timeline, so it is a refusal only for the pointer.)
+#[test]
+fn a_refused_timecode_sends_no_quarter_frame_and_counts_one_refusal_a_cycle() {
+    let (mut rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
+    rig.messages = SyncMessages {
+        mtc: true,
+        rate: MtcRate::Fps25,
+        ..SyncMessages::OFF
+    };
+    transport.set_beat(1e300);
+    transport.set_playing(true);
+    // 4 800 frames hold 10 quarter-frames at 25 fps (one every 480): piece 0
+    // of two cycles (frames 0 and 3 840), and a Full Message at the start.
+    rig.tick(4_800);
+    let events = drain_all(&cons);
+    let sent = events
+        .iter()
+        .filter(|e| matches!(system(e.1), Some(System::TimeCode(_))))
+        .count();
+    assert_eq!(sent, 0, "{events:?}");
+    assert_eq!(rig.cm.take_refused(), 3, "two cycles and the Full Message");
+}
+
 /// **A master sends on the Group it was built with**: Start, Timing Clocks,
 /// Song Position and MTC quarter-frames all carry that Group, not the first.
 #[test]

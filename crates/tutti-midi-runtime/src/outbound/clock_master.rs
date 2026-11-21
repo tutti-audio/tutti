@@ -96,7 +96,7 @@ pub(crate) struct ClockMaster {
     /// The Song Position Pointers and MTC timecodes not sent since the host
     /// last took the count ([`take_refused`](Self::take_refused)): a position
     /// the 14-bit pointer or a timecode cannot name.
-    refused: u32,
+    refused: u64,
 }
 
 /// What the Flex output has stated to the receiver, and what it has seen of
@@ -182,6 +182,10 @@ struct MtcGrid {
     /// The grid was just restarted: its first piece 0 is still to be placed
     /// on an even frame ([`ClockMaster::tick_mtc`]).
     align: bool,
+    /// The cycle in progress had no timecode to state (its piece 0 was refused):
+    /// its remaining pieces are not sent either, so no receiver reads half of
+    /// a position or the previous cycle's.
+    skipped: bool,
 }
 
 impl MtcGrid {
@@ -192,6 +196,7 @@ impl MtcGrid {
         lead: 0.0,
         cycle: QuarterFrameCycle::ZERO,
         align: true,
+        skipped: false,
     };
 }
 
@@ -220,7 +225,7 @@ impl ClockMaster {
     /// Pointer for a beat past its 14-bit field (4096 beats) or before the
     /// start, and an MTC position for a time before zero or NaN. Each is
     /// skipped, never sent clamped to a position the transport is not at.
-    pub(crate) fn take_refused(&mut self) -> u32 {
+    pub(crate) fn take_refused(&mut self) -> u64 {
         std::mem::take(&mut self.refused)
     }
 
@@ -672,6 +677,7 @@ impl ClockMaster {
             self.mtc.lead = (k * period - block_pos).max(0.0);
         }
         let mut cycle = self.mtc.cycle;
+        let mut skipped = self.mtc.skipped;
 
         // Quarter-frames due inside [0, len), each on the first frame at or
         // after its time (`first_frame_at_or_after`, the rule the clock ticks
@@ -687,24 +693,31 @@ impl ClockMaster {
             // A cycle's timecode is that of the sample piece 0 goes out on;
             // the receiver adds the two frames the cycle takes.
             if piece == 0 {
-                match mtc_cycle(
+                let position = mtc_cycle(
                     Seconds::new((block_pos + qf_sample as f64) / rate.get()),
                     fps,
-                ) {
-                    Some(next_cycle) => cycle = next_cycle,
-                    None => self.refused = self.refused.saturating_add(1),
+                );
+                skipped = position.is_none();
+                if let Some(next_cycle) = position {
+                    cycle = next_cycle;
+                } else {
+                    // One refusal for the whole cycle: nothing of it goes out.
+                    self.refused = self.refused.saturating_add(1);
                 }
             }
-            emit((
-                frame_offset(sample_offset, block_size),
-                self.system(System::TimeCode(
-                    cycle.frame(QuarterFramePiece::masked(piece)).data(),
-                )),
-            ));
+            if !skipped {
+                emit((
+                    frame_offset(sample_offset, block_size),
+                    self.system(System::TimeCode(
+                        cycle.frame(QuarterFramePiece::masked(piece)).data(),
+                    )),
+                ));
+            }
             next += 1;
         }
 
         self.mtc.cycle = cycle;
+        self.mtc.skipped = skipped;
         self.mtc.next = next;
         self.mtc.frames = at + len as u64;
     }
@@ -760,6 +773,7 @@ fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
 /// even one (a cycle's eight pieces span two frames). Rounding, not flooring,
 /// so a position a float's width short of a frame boundary still reads as that
 /// frame.
+///
 /// `None` for a time before zero or NaN; the hours wrap at 24 as MTC's do.
 fn mtc_cycle(position: Seconds, fps: MtcRate) -> Option<QuarterFrameCycle> {
     let nearest = SmpteTimecode::from_seconds_wrapping(position, fps.frame_rate())?;

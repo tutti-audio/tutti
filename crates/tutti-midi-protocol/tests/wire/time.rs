@@ -60,34 +60,44 @@ fn a_time_just_short_of_a_frame_rounds_up_to_it() {
     assert_eq!(at(1.0 - 1e-12).unwrap().to_string(), "00:00:01:00");
 }
 
-/// A time no label names has none: before zero, NaN, infinite, and 24 hours
-/// or more; the last frame of the day is `Some`.
+/// A time no label names has none: before zero, NaN and infinite, and past the
+/// last label of the day, each rate at its own edge. The label count of a day
+/// is 24, 25 or 30 labels a second for 86 400 s; drop-frame 29.97 skips two
+/// labels a minute but ten, so its day is 2 589 408 frames; non-drop 29.97
+/// counts 30 labels a second at 30 000/1001 frames a second, so its labels
+/// last 2 592 000 frames, to 86 486.4 s.
 #[test]
-fn a_time_is_none_before_zero_for_nan_and_from_24_hours() {
-    for rate in [
-        SmpteFrameRate::Fps24,
-        SmpteFrameRate::Fps25,
-        SmpteFrameRate::Fps2997Df,
-        SmpteFrameRate::Fps2997Ndf,
-        SmpteFrameRate::Fps30,
+fn a_time_is_none_before_zero_for_nan_and_past_the_last_label_of_the_day() {
+    for (rate, frames_in_day, last) in [
+        (SmpteFrameRate::Fps24, 24 * 86_400u64, "23:59:59:23"),
+        (SmpteFrameRate::Fps25, 25 * 86_400, "23:59:59:24"),
+        (SmpteFrameRate::Fps30, 30 * 86_400, "23:59:59:29"),
+        (SmpteFrameRate::Fps2997Df, 2_589_408, "23:59:59:29"),
+        (SmpteFrameRate::Fps2997Ndf, 2_592_000, "23:59:59:29"),
     ] {
         let at = |s: f64| SmpteTimecode::from_seconds(Seconds::new(s), rate);
+        let (num, den) = rate.ratio();
+        let frame = |n: u64| n as f64 * den as f64 / num as f64;
         assert_eq!(at(-5.0), None, "{rate:?}");
         assert_eq!(at(-1e-12), None, "{rate:?}");
         assert_eq!(at(f64::NAN), None, "{rate:?}");
         assert_eq!(at(f64::INFINITY), None, "{rate:?}");
-        assert_eq!(at(86_400.0), None, "{rate:?}");
-        assert_eq!(at(86_400.0 + 1.0), None, "{rate:?}");
-        // Under half a frame short of 24 h rounds up to the 24th hour. (Non-drop
-        // 29.97 counts its labels at face value: its 24th hour is later.)
-        if rate != SmpteFrameRate::Fps2997Ndf {
-            assert_eq!(at(86_400.0 - 1e-9), None, "{rate:?}");
-        }
         assert!(at(0.0).is_some(), "{rate:?}");
-        assert!(at(86_399.0).is_some(), "{rate:?}");
+        assert_eq!(
+            at(frame(frames_in_day - 1)).unwrap().to_string(),
+            last,
+            "{rate:?}"
+        );
+        assert_eq!(at(frame(frames_in_day)), None, "{rate:?}");
+        assert_eq!(at(frame(frames_in_day) + 1.0), None, "{rate:?}");
     }
-    let last = SmpteTimecode::from_seconds(Seconds::new(86_399.9), SmpteFrameRate::Fps30);
-    assert_eq!(last.unwrap().to_string(), "23:59:59:27");
+    // Non-drop 29.97 still names 24 hours of wall clock: its label for 86 400 s.
+    let ndf = SmpteFrameRate::Fps2997Ndf;
+    assert!(SmpteTimecode::from_seconds(Seconds::new(86_400.0), ndf).is_some());
+    assert_eq!(
+        SmpteTimecode::from_seconds(Seconds::new(86_486.4), ndf),
+        None
+    );
 }
 
 /// MIDI Time Code's hours count 0 to 23 and start again (M1 p.53): the
@@ -101,6 +111,18 @@ fn a_wrapping_time_carries_hours_past_24_and_refuses_before_zero_and_nan() {
     assert_eq!(at(-1.0), None);
     assert_eq!(at(f64::NAN), None);
     assert_eq!(at(f64::INFINITY), None);
+    // The wrapping form agrees with `from_seconds` on every time `from_seconds`
+    // names, at the day's last label of non-drop 29.97 included.
+    let ndf = SmpteFrameRate::Fps2997Ndf;
+    for s in [0.0, 3_661.5, 86_399.0, 86_400.0, 86_486.3] {
+        assert_eq!(
+            SmpteTimecode::from_seconds_wrapping(Seconds::new(s), ndf),
+            SmpteTimecode::from_seconds(Seconds::new(s), ndf),
+            "{s}"
+        );
+    }
+    let past = SmpteTimecode::from_seconds_wrapping(Seconds::new(86_486.4), ndf);
+    assert_eq!(past.unwrap().to_string(), "00:00:00:00");
 }
 
 /// Drop-frame 29.97 labels skip `;00` and `;01` at a minute not divisible by

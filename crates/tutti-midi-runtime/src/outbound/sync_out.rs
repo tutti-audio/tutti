@@ -283,7 +283,7 @@ impl<F: Float> Node<F> for SyncOut {
             );
             let refused = self.clock.take_refused();
             if refused > 0 {
-                self.losses.add(Losses::refused(u64::from(refused)));
+                self.losses.add(Losses::refused(refused));
             }
             let at = Offset::clamped(base, block_len);
             match messages.mmc {

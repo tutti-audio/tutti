@@ -253,7 +253,7 @@ fn a_change_on_the_loops_start_is_each_passs_context() {
 fn replaced_lanes_restate_and_the_same_lanes_do_not() {
     let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     block(&mut exec, 512, rolling(0));
-    // The same changes, beat order kept (at one beat, order is meaning).
+    // The same changes, sorted by beat as they were.
     publish(&controls, lanes());
     block(&mut exec, 512, rolling(512));
     assert_eq!(seen.lock().unwrap().len(), 2, "the same lanes: nothing new");

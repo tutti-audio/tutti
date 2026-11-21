@@ -415,8 +415,11 @@ impl SmpteTimecode {
     /// The label of the frame nearest `seconds` at `frame_rate`: rounding, not
     /// flooring, so a time a float's width short of a frame boundary reads as
     /// that frame. `None` for a time no label names: before zero, NaN or
-    /// infinite, or 24 hours and beyond (a time that rounds up to the 24th
-    /// hour included).
+    /// infinite, or past the last label of the day, whose hours field ends at
+    /// 23 (a time that rounds up to the 24th hour included). That last label
+    /// is the day's end at 24, 25 and 30 fps and at drop-frame 29.97; non-drop
+    /// 29.97 counts its labels at face value, 30 a second, so its labels run on
+    /// to 86 486.4 s.
     ///
     /// ```
     /// use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
@@ -430,9 +433,6 @@ impl SmpteTimecode {
     /// ```
     #[must_use]
     pub fn from_seconds(seconds: Seconds, frame_rate: SmpteFrameRate) -> Option<Self> {
-        if seconds.get() >= SECONDS_PER_DAY {
-            return None;
-        }
         let count = nearest_frame(seconds, frame_rate)?;
         let label = Self::from_frame_count(count, frame_rate);
         // A time that rounds up to the 24th hour wrapped its hours: its label
@@ -474,9 +474,6 @@ impl SmpteTimecode {
         }
     }
 }
-
-/// Seconds in the 24 hours a timecode's hours field spans.
-const SECONDS_PER_DAY: f64 = 86_400.0;
 
 /// The frame count of the frame nearest `seconds`: `None` before zero, for NaN
 /// and the infinities, and past 2^53 frames (where a count is no longer exact).
