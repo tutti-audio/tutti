@@ -24,7 +24,7 @@ use tutti_session::{
     Bounce, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session, Stem,
 };
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples, Seconds};
@@ -100,8 +100,8 @@ fn font() -> Arc<SoundFont> {
 
 /// A SoundFont unit on [`PRESET`].
 fn sf2(font: &Arc<SoundFont>) -> SoundFontUnit<f32> {
-    let settings = Settings::new();
-    let mut unit = settings.build(Arc::clone(font)).expect("the unit builds");
+    let mut unit =
+        SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).expect("the unit builds");
     unit.program_change(MidiChannel::FIRST, PRESET);
     unit
 }

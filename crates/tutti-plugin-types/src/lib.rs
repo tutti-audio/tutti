@@ -177,6 +177,7 @@
     )
 )]
 
+mod answer;
 mod any_thread;
 mod automation;
 mod automation_mode;
@@ -254,7 +255,7 @@ mod written_values;
 // allocation inside `assert_no_alloc::assert_no_alloc(..)` scopes.
 #[cfg(test)]
 #[global_allocator]
-static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+static RT_NO_ALLOC_HARNESS: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 pub use tutti_buffers::MaxBlock;
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
@@ -272,7 +273,8 @@ pub use layout_support::LayoutSupport;
 pub use tutti_music::{BeatsPerBar, NoteValue, TimeSignature};
 pub use tutti_units::{BarNumber, Seconds};
 
-pub use any_thread::{Answer, AnyThread, Health, answered};
+pub use answer::{Answer, AnswerSender};
+pub use any_thread::{AnyThread, Health};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{IpcError, IpcResult, NoEditorHost, PluginForkError};

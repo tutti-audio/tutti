@@ -2547,6 +2547,7 @@ dependencies = [
  "objc2-foundation",
  "thiserror 2.0.21",
  "tutti-buffers",
+ "tutti-fixtures",
  "tutti-midi-protocol",
  "tutti-plugin-types",
  "tutti-rt",
@@ -2800,6 +2801,7 @@ dependencies = [
 name = "tutti-fixtures"
 version = "0.0.1"
 dependencies = [
+ "assert_no_alloc",
  "coreaudio-sys",
  "hound",
  "raw-window-handle",
@@ -3099,7 +3101,6 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "dpi",
- "futures-channel",
  "futures-lite",
  "interprocess",
  "libc",
@@ -3198,7 +3199,6 @@ dependencies = [
  "assert_no_alloc",
  "criterion",
  "dpi",
- "futures-channel",
  "futures-lite",
  "libloading 0.9.1",
  "parking_lot",
@@ -3231,7 +3231,6 @@ dependencies = [
  "bytemuck",
  "crossbeam-queue",
  "dpi",
- "futures-channel",
  "futures-lite",
  "getrandom",
  "interprocess",
@@ -3329,6 +3328,7 @@ dependencies = [
  "bitflags 2.13.2",
  "dpi",
  "futures-channel",
+ "futures-lite",
  "keyboard-types",
  "postcard",
  "proptest",
@@ -3621,6 +3621,7 @@ dependencies = [
  "assert_no_alloc",
  "libm",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-midi-protocol",
  "tutti-rt",
  "tutti-ump",

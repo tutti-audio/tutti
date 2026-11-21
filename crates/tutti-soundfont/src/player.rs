@@ -20,17 +20,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
 use tutti_midi_protocol::{Universal, UniversalReader};
-use tutti_sf2::SoundFont;
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
 use tutti_voicing::{MasterGain, VoiceAllocator, VoiceConfig};
 
 use crate::array_math::ArrayMath;
 use crate::channel::Channel;
+use crate::config::SoundFontConfig;
 use crate::error::{Error, Result};
 use crate::patch::PresetPatch;
 use crate::render::Render;
-use crate::settings::Settings;
 use crate::soundfont_math::SoundFontMath;
 use crate::voices::Voices;
 use tutti_ump::ControlValue;
@@ -176,9 +175,8 @@ impl MissingPresets {
 /// place: [`rerated`](Self::rerated) builds another.
 #[derive(Debug, Clone)]
 pub(crate) struct Player<F: Float + SimdLanes> {
-    font: Arc<SoundFont>,
+    config: SoundFontConfig,
     render: Render,
-    settings: Settings,
 
     presets: HashMap<i32, usize>,
     default_preset: usize,
@@ -216,13 +214,14 @@ impl<F: Float + SimdLanes> Player<F> {
     ///
     /// [`Error::NoPlayablePreset`] when no preset of the font has a MIDI bank
     /// and program (SF2 2.04 section 7.2).
-    pub(crate) fn new(font: &Arc<SoundFont>, settings: Settings) -> Result<Self> {
-        Self::at(font, settings, Render::new(INITIAL_RATE))
+    pub(crate) fn new(config: SoundFontConfig) -> Result<Self> {
+        Self::at(config, Render::new(INITIAL_RATE))
     }
 
     /// Builds a player over `font` on the grid `render`.
-    fn at(font: &Arc<SoundFont>, settings: Settings, render: Render) -> Result<Self> {
-        let polyphony = settings.polyphony;
+    fn at(config: SoundFontConfig, render: Render) -> Result<Self> {
+        let polyphony = config.polyphony;
+        let font = &config.font;
 
         let mut presets: HashMap<i32, usize> = HashMap::new();
         let mut min_preset_id = i32::MAX;
@@ -260,17 +259,17 @@ impl<F: Float + SimdLanes> Player<F> {
             .map(|i| Channel::new(i == PERCUSSION_CHANNEL.get()))
             .collect();
 
+        let universal = UniversalReader::new(config.group, config.device);
         Ok(Self {
-            font: Arc::clone(font),
+            config,
             render,
-            settings,
             presets,
             default_preset,
             channels,
             missing: MissingPresets::default(),
             allocator: VoiceAllocator::new(voice_config(polyphony.voices())),
             voices: Voices::new(&render, polyphony.get()),
-            universal: UniversalReader::new(settings.group, settings.device),
+            universal,
             master_applied: MasterGain::UNITY,
             block: std::array::from_fn(|_| vec![F::ZERO; render.block_len()]),
             block_heard: Heard::default(),
@@ -283,7 +282,7 @@ impl<F: Float + SimdLanes> Player<F> {
 
     /// The Group this player's sixteen channels are.
     pub(crate) fn group(&self) -> MidiGroup {
-        self.settings.group
+        self.config.group
     }
 
     /// The preset `channel` plays: its bank and program, else General MIDI's
@@ -371,7 +370,7 @@ impl<F: Float + SimdLanes> Player<F> {
             return;
         };
         let commands = self.allocator.universal(heard);
-        self.voices.execute(commands, &self.font);
+        self.voices.execute(commands, &self.config.font);
         if matches!(heard.message, Universal::GeneralMidi(_)) {
             self.channels = (0..MidiChannel::COUNT)
                 .map(|i| Channel::new(i == PERCUSSION_CHANNEL.get()))
@@ -415,14 +414,14 @@ impl<F: Float + SimdLanes> Player<F> {
     /// says.
     fn dispatch(&mut self, channel: MidiChannel, message: Voice2) {
         let patch = PresetPatch {
-            font: &self.font,
+            font: &self.config.font,
             preset: self.preset_of(channel),
         };
         let voices = &self.voices;
         let commands = self
             .allocator
             .step(channel, message, &patch, |id| voices.level(id));
-        self.voices.execute(commands, &self.font);
+        self.voices.execute(commands, &self.config.font);
     }
 
     /// What a Control Change sets in the channel.
@@ -537,7 +536,7 @@ impl<F: Float + SimdLanes> Player<F> {
                 .map_or(Semitones::new(0.0), |c| self.allocator.channel_pitch(c))
         });
         self.voices.process(
-            self.font.sample_pool(),
+            self.config.font.sample_pool(),
             &self.channels,
             self.allocator.channels(),
             &bends,
@@ -613,7 +612,7 @@ impl<F: Float + SimdLanes> Player<F> {
             return None;
         }
         // The font has a playable preset, or `self` was not built.
-        let mut player = Self::at(&self.font, self.settings, render).ok()?;
+        let mut player = Self::at(self.config.clone(), render).ok()?;
         player.channels = self.channels.clone();
         player.missing = self.missing.clone();
         // The core's channel state (wheel, sensitivity); its notes are not
@@ -634,9 +633,9 @@ impl<F: Float + SimdLanes> Player<F> {
     /// graph's: each node declares its own tail.
     pub(crate) fn ring_out(&self) -> Option<Seconds> {
         let mut longest = Seconds::new(0.0);
-        for preset in self.font.presets() {
+        for preset in self.config.font.presets() {
             for preset_zone in preset.regions() {
-                let instrument = &self.font.instruments()[preset_zone.instrument_id()];
+                let instrument = &self.config.font.instruments()[preset_zone.instrument_id()];
                 for instrument_zone in instrument.regions() {
                     let pair = crate::region_pair::RegionPair::new(preset_zone, instrument_zone);
                     longest = longest.max(pair.release_time());

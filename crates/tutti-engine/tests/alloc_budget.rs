@@ -17,7 +17,7 @@
 //!
 //! Not an RT gate. `rt_no_alloc*.rs` asserts that the audio callback allocates
 //! **nothing**, which is a stronger and different claim, and it uses
-//! `assert_no_alloc::AllocDisabler`. This file is about the *control* thread:
+//! `RtAllocCheck`. This file is about the *control* thread:
 //! building and committing a graph is allowed to allocate, and the question is
 //! whether it has quietly started allocating far more than its budget.
 //!

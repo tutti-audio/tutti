@@ -705,7 +705,7 @@ fn a_stray_status_from_a_plugin_allocates_nothing() {
 /// which it stopped. The queue's storage is allocated once, at
 /// construction, outside the gate.
 ///
-/// `src/lib.rs` installs `AllocDisabler` for the unit-test binary, so this
+/// `src/lib.rs` installs `RtAllocCheck` for the unit-test binary, so this
 /// observes something.
 #[test]
 fn both_audio_thread_callbacks_are_allocation_free() {

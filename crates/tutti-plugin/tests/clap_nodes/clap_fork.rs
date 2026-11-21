@@ -1109,7 +1109,7 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
 /// renders a silent mono output so a `Master` fork takes it. Forked by clone:
 /// the fork records into the same list.
 #[derive(Clone)]
-struct MidiSink(Arc<std::sync::Mutex<Vec<(u64, u32)>>>);
+struct MidiSink(tutti_fixtures::Record<(u64, u32)>);
 
 impl tutti_graph::Node for MidiSink {
     fn shape(&self) -> tutti_graph::Shape {
@@ -1177,11 +1177,11 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
                     .expect("a tempo"),
             ),
         );
-        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = tutti_fixtures::Record::new();
         live.insert(
             sink,
             "sink",
-            tutti_graph::ForkByClone(MidiSink(Arc::clone(&seen))),
+            tutti_graph::ForkByClone(MidiSink(seen.clone())),
         );
         live.spec_mut().connect_events(
             EventIn { node: key, port: 0 },

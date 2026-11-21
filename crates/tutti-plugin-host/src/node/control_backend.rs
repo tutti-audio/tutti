@@ -166,7 +166,7 @@ where
         &self,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> Option<R> + Send + 'static,
     ) -> Answer<Option<R>> {
-        let (tx, answer) = futures_channel::oneshot::channel();
+        let (tx, answer) = Answer::channel();
         if let Some(main) = MainThreadMarker::new() {
             // The receiver is held here: the send cannot fail.
             drop(tx.send(self.flushed(main, work)));
@@ -281,16 +281,12 @@ where
 {
     /// `None` for a lost plugin, for a plugin that exposes no value to read,
     /// for an id it does not have, and when the main thread does not answer.
-    fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
-        self.on_main(move |main, instance| instance.control()?.parameter(main, id))?
+    fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
+        self.on_main_answer(move |main, instance| instance.control()?.parameter(main, id))
     }
 
     fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
         self.on_main_answer(|main, instance| Some(instance.control()?.parameters(main)))
-    }
-
-    fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
-        self.on_main_answer(move |main, instance| instance.control()?.parameter(main, id))
     }
 
     fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
@@ -675,7 +671,8 @@ mod off_main_tests {
             std::thread::spawn(move || {
                 (
                     handle.any_thread().save_state(StateUse::Project),
-                    handle.any_thread().parameter_value(id),
+                    futures_lite::future::block_on(handle.any_thread().parameter_value(id))
+                        .flatten(),
                 )
             })
         };
@@ -694,7 +691,7 @@ mod off_main_tests {
         let (state, value) = std::thread::spawn(move || {
             (
                 handle.any_thread().save_state(StateUse::Project),
-                handle.any_thread().parameter_value(id),
+                futures_lite::future::block_on(handle.any_thread().parameter_value(id)).flatten(),
             )
         })
         .join()
@@ -717,7 +714,9 @@ mod off_main_tests {
             .expect("the probe lists");
         assert!(catalog.iter().any(|p| p.id() == ParamId::new(1)));
         assert_eq!(
-            any.parameter_value(ParamId::new(1)).map(Normalized::get),
+            futures_lite::future::block_on(any.parameter_value(ParamId::new(1)))
+                .flatten()
+                .map(Normalized::get),
             Some(0.75)
         );
         let text = any.parameter_text(ParamId::new(1), Normalized::of(0.75));
@@ -742,9 +741,8 @@ mod off_main_tests {
             .expect("a declared parameter");
         unit.block();
         assert_eq!(
-            handle
-                .any_thread()
-                .parameter_value(ParamId::new(1))
+            futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(1)))
+                .flatten()
                 .map(Normalized::get),
             Some(0.25)
         );
@@ -772,9 +770,8 @@ mod off_main_tests {
         unit.block();
         let _pump = tutti_fixtures::pump(collector);
         assert_eq!(
-            handle
-                .any_thread()
-                .parameter_value(ParamId::new(1))
+            futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(1)))
+                .flatten()
                 .map(Normalized::get),
             Some(0.25)
         );
@@ -793,7 +790,9 @@ mod off_main_tests {
             .set_parameter_value(id, Normalized::of(0.25))
             .expect("a declared parameter");
         assert_eq!(
-            handle.any_thread().parameter_value(id).map(Normalized::get),
+            futures_lite::future::block_on(handle.any_thread().parameter_value(id))
+                .flatten()
+                .map(Normalized::get),
             Some(0.25),
             "the read flushes the first write into the plugin"
         );
@@ -803,7 +802,9 @@ mod off_main_tests {
             .expect("a declared parameter");
         unit.block();
         assert_eq!(
-            handle.any_thread().parameter_value(id).map(Normalized::get),
+            futures_lite::future::block_on(handle.any_thread().parameter_value(id))
+                .flatten()
+                .map(Normalized::get),
             Some(0.75)
         );
     }
@@ -925,7 +926,6 @@ mod off_main_tests {
         let (catalog, text, from_text, mode, automation) = std::thread::spawn(move || {
             (
                 futures_lite::future::block_on(handle.any_thread().parameter_descriptors())
-                    .ok()
                     .flatten(),
                 handle
                     .any_thread()

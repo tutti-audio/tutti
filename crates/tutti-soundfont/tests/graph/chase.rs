@@ -17,7 +17,7 @@ use tutti_graph::{NodeKey, Stamp};
 
 use tutti_polysynth::{PolySynth, SynthConfig};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{
     Address, Bank, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteVelocity, U7, Ump,
     Voice2,
@@ -36,7 +36,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    Settings::new().build(font()).expect("builds")
+    SoundFontUnit::try_from(SoundFontConfig::new(font())).expect("builds")
 }
 
 fn cc(channel: u8, controller: u8, value: u8) -> Ump {

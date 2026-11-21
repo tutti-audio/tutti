@@ -6,8 +6,8 @@
 //! caught exactly that once: a `note_on_7bit` that crushed the value and
 //! widened it back).
 
-use crate::common::{MF, Seen, Tap, note, offline};
-use std::sync::Arc;
+use crate::common::{MF, Tap, note, offline};
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_protocol::channel_voice;
@@ -17,8 +17,8 @@ use tutti_units::{Beat, BeatDuration};
 #[test]
 fn velocity_keeps_its_full_width() {
     let mut s = offline();
-    let seen = Seen::default();
-    let tap = s.graph().add(Tap(Arc::clone(&seen)));
+    let seen = tutti_fixtures::Record::new();
+    let tap = s.graph().add(Tap(seen.clone()));
     let mut events = note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)).to_vec();
     events.extend(note(64, MF + 1, Beat::new(0.0), BeatDuration::new(1.0)));
     s.midi()

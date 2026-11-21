@@ -754,9 +754,8 @@ mod owed_tests {
     const BLOCK: usize = 64;
 
     fn read(handle: &PluginHandle, i: i32) -> Option<f64> {
-        handle
-            .any_thread()
-            .parameter_value(ParamId::new(i as u32))
+        futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(i as u32)))
+            .flatten()
             .map(|v| v.get())
     }
 

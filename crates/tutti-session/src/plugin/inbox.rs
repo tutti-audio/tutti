@@ -194,9 +194,14 @@ impl Drop for ReloadPost {
     }
 }
 
-/// Runs a loop's round trip, warning when it panics: the token it held drops with it,
-/// which frees the plugin for its next ask.
-pub(crate) fn contained<R>(what: &str, node: NodeKey, work: impl FnOnce() -> R) -> Option<R> {
+/// Runs a loop's round trip, warning and counting into `panics` when it panics:
+/// the token it held drops with it, which frees the plugin for its next ask.
+pub(crate) fn contained<R>(
+    what: &str,
+    node: NodeKey,
+    panics: &tutti_rt::TallyWriter<u64>,
+    work: impl FnOnce() -> R,
+) -> Option<R> {
     match catch_unwind(AssertUnwindSafe(work)) {
         Ok(done) => Some(done),
         Err(payload) => {
@@ -204,6 +209,7 @@ pub(crate) fn contained<R>(what: &str, node: NodeKey, work: impl FnOnce() -> R) 
                 "plugin {node:?}: its {what} panicked: {}",
                 tutti_platform::panic_message(payload.as_ref())
             );
+            panics.add(1);
             None
         }
     }
