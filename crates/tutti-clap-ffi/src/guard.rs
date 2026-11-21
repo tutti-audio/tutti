@@ -4,7 +4,6 @@
 //! [`ffi_guard`](tutti_plugin_types::ffi_guard).
 
 use std::ffi::{CStr, c_char, c_void};
-use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Run `f`; if it panics, abort the process.
@@ -13,16 +12,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 /// to run all its tasks itself, but a panic can come after some already ran
 /// (or while a pool participant is still inside the job), which would run a
 /// task twice or leave one racing. Nothing before the pool runs can panic;
-/// a panic after it is not recoverable, so it aborts.
+/// a panic after it is not recoverable, so it aborts. It prints nothing: the
+/// panic hook has already written the panic's message to stderr.
 pub(crate) fn or_abort<R>(f: impl FnOnce() -> R) -> R {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(r) => r,
         Err(payload) => {
             std::mem::forget(payload);
-            let _ = writeln!(
-                std::io::stderr(),
-                "[tutti-clap-ffi] a panic inside clap.thread-pool request_exec; aborting"
-            );
             std::process::abort()
         }
     }

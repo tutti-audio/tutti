@@ -12,13 +12,13 @@ pub use tutti_au_ffi::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::find_component;
+    use crate::component::{ComponentKey, find_component};
     use crate::controller::AuController;
     use crate::instance::AuLoaded;
     use crate::listener::EventAddress;
     use crate::parameters::ParamAddress;
     use crate::processor::AuProcessor;
-    use crate::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
+    use crate::types::K_AUDIO_UNIT_TYPE_EFFECT;
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_plugin_types::{Loaded, MaxBlock, Prepare, SampleRate};
 
@@ -44,14 +44,13 @@ mod tests {
     }
 
     fn delay() -> (AuProcessor, AuController) {
-        let desc = AudioComponentDescription {
-            componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-            componentSubType: u32::from_be_bytes(*b"dely"),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = find_component(&desc).expect("AUDelay ships with macOS");
+        let desc = ComponentKey::new(
+            K_AUDIO_UNIT_TYPE_EFFECT,
+            u32::from_be_bytes(*b"dely"),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        let comp = find_component(desc).expect("AUDelay ships with macOS");
         let au = AuLoaded::new(
             comp,
             SampleRate::SR_48K,

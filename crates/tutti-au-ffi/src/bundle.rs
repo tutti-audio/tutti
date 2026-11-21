@@ -35,9 +35,9 @@ const AUDIO_UNIT_TYPES: [[u8; 4]; 9] = [
 /// One entry of a bundle's `AudioComponents` array.
 #[derive(Debug, Clone)]
 pub struct DeclaredComponent {
-    /// The entry's type, subtype and manufacturer; flags and mask are zero, so
-    /// it is an exact description for [`ComponentRef::first_matching`](crate::ComponentRef::first_matching).
-    pub desc: coreaudio_sys::AudioComponentDescription,
+    /// The entry's type, subtype and manufacturer, the key
+    /// [`ComponentRef::find`](crate::ComponentRef::find) resolves.
+    pub key: crate::ComponentKey,
     /// The `name` key, when the entry has one.
     pub name: Option<String>,
     /// The `version` key (`major << 16 | minor << 8 | bugfix`), when the entry
@@ -70,23 +70,21 @@ fn entry(dict: &PresetDict) -> Option<DeclaredComponent> {
     if !AUDIO_UNIT_TYPES.contains(&kind_code.to_be_bytes()) {
         return None;
     }
-    let desc = coreaudio_sys::AudioComponentDescription {
-        componentType: kind_code,
-        componentSubType: fourcc(&dict_string(dict, "subtype")?)?,
-        componentManufacturer: fourcc(&dict_string(dict, "manufacturer")?)?,
-        componentFlags: 0,
-        componentFlagsMask: 0,
-    };
+    let key = crate::ComponentKey::new(
+        kind_code,
+        fourcc(&dict_string(dict, "subtype")?)?,
+        fourcc(&dict_string(dict, "manufacturer")?)?,
+    )?;
     Some(DeclaredComponent {
-        desc,
+        key,
         name: dict_string(dict, "name"),
         version: dict_i64(dict, "version").and_then(|v| u32::try_from(v).ok()),
     })
 }
 
 /// The Audio Units the bundle at `path` declares, in the order of its
-/// `AudioComponents` array. An entry that is malformed (a missing or
-/// mis-sized code) or whose type is not an Audio Unit type is skipped.
+/// `AudioComponents` array. An entry that is malformed (a missing, mis-sized or
+/// zero code) or whose type is not an Audio Unit type is skipped.
 ///
 /// # Errors
 /// [`BundleError::NotABundle`] when CoreFoundation does not open `path`;

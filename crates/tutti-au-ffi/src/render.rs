@@ -1544,14 +1544,13 @@ mod tests {
     /// samples on a `block_size` buffer and the unit would write past it.
     #[test]
     fn a_render_past_the_block_size_is_refused() {
-        let desc = coreaudio_sys::AudioComponentDescription {
-            componentType: coreaudio_sys::kAudioUnitType_Effect,
-            componentSubType: u32::from_be_bytes(*b"dely"),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
+        let key = crate::ComponentKey::new(
+            coreaudio_sys::kAudioUnitType_Effect,
+            u32::from_be_bytes(*b"dely"),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        let comp = crate::ComponentRef::find(key).expect("AUDelay ships with macOS");
         let (_work, handle) = tutti_plugin_types::MainWork::new();
         let unit = Unit::new(comp, &handle).expect("instantiate");
         let mut renderer = Renderer::new(

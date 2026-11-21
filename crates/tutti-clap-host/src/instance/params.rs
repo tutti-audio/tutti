@@ -147,7 +147,9 @@ impl ClapLoaded {
     ///
     /// Returns no events if the plugin does not implement params or lacks a
     /// flush function. Events the plugin output past the flush's room are not
-    /// returned and are counted in [`Flushed::lost`]. The events returned are the caller's to use: the
+    /// returned and are counted in [`Flushed::lost`] and in
+    /// [`dropped_reported_edits`](tutti_plugin_types::Control::dropped_reported_edits).
+    /// The events returned are the caller's to use: the
     /// flush a plugin's `request_flush` causes while inactive drops them,
     /// since only a block's output is reported.
     ///
@@ -202,6 +204,7 @@ impl ClapLoaded {
         }
 
         let lost = output_list.lost();
+        self.flush_lost += lost;
         Flushed {
             events: output_list.take_events(),
             lost,

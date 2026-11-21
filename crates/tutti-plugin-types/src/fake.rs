@@ -282,6 +282,7 @@ struct Shared {
     /// The edits the fake reports the host did not hear
     /// (`FakePlugin::drop_reported_edits`).
     dropped_edits: AtomicU64,
+    refused_off_thread: AtomicU64,
     /// The parameters the fake declares and whether each is read-only. None
     /// until [`FakePlugin::declare`]: the fake refuses a write to an id it does
     /// not declare, as every format does.
@@ -361,6 +362,7 @@ impl FakePlugin {
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
             dropped_edits: AtomicU64::new(0),
+            refused_off_thread: AtomicU64::new(0),
             declared: Mutex::new(Vec::new()),
             mirror_failure: Mutex::new(None),
         });
@@ -521,6 +523,12 @@ impl FakePlugin {
     /// ([`Control::dropped_reported_edits`]).
     pub fn drop_reported_edits(&self, n: u64) {
         self.0.dropped_edits.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// The plugin reports `n` more callbacks the host refused for their thread
+    /// ([`Control::refused_off_thread_calls`]).
+    pub fn refuse_off_thread_calls(&self, n: u64) {
+        self.0.refused_off_thread.fetch_add(n, Ordering::Relaxed);
     }
 
     /// The output channel count the plugin reports from now on.
@@ -765,6 +773,11 @@ macro_rules! fake_control {
             /// CLAP and VST3).
             fn dropped_reported_edits(&self) -> u64 {
                 self.shared.dropped_edits.load(Ordering::Relaxed)
+            }
+
+            /// As [`FakePlugin::refuse_off_thread_calls`] counted them.
+            fn refused_off_thread_calls(&self) -> u64 {
+                self.shared.refused_off_thread.load(Ordering::Relaxed)
             }
         }
 

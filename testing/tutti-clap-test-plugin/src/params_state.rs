@@ -586,7 +586,7 @@ pub unsafe extern "C" fn tutti_test_plugin_queue_output(kind: u32, param_id: u32
     }
 }
 
-const MAX_QUEUED_OUTPUT: usize = 8;
+const MAX_QUEUED_OUTPUT: usize = 512;
 
 #[derive(Clone, Copy, Default)]
 struct QueuedOutput {

@@ -372,6 +372,14 @@ pub trait Control: EditorWindow {
     /// [`ProcessOutput`] says `0` in its own impl.
     fn dropped_reported_edits(&self) -> u64;
 
+    /// How many callbacks the plugin made from a thread its format's rules
+    /// forbid, which the host refused and answered with the callback's
+    /// fallback, over the plugin's life. Monotonic. A nonzero count is a plugin
+    /// that breaks its format's thread rules. Required, because zero is a
+    /// claim: a format whose host refuses no callback by thread says `0` in
+    /// its own impl.
+    fn refused_off_thread_calls(&self) -> u64;
+
     /// Gives the plugin's host the [`ProcessWake`] to raise when the plugin
     /// asks to be processed again (CLAP's `request_process`, which a plugin
     /// that returned `CLAP_PROCESS_SLEEP` calls from any thread). Any thread;
@@ -897,6 +905,10 @@ impl<W: Wraps> Control for W {
 
     fn dropped_reported_edits(&self) -> u64 {
         self.plugin().dropped_reported_edits() + self.lost_reports()
+    }
+
+    fn refused_off_thread_calls(&self) -> u64 {
+        self.plugin().refused_off_thread_calls()
     }
 
     fn bind_wake(&self, wake: ProcessWake) {

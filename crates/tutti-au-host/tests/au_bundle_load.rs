@@ -58,6 +58,22 @@ fn each_declared_id_loads_the_unit_with_that_triple() {
     }
 }
 
+/// A loaded unit has been offered the host transport callbacks, as its load
+/// promises: Apple's delay takes them, so its transport state exists and its
+/// features say so.
+/// Spec: au.prop.HostCallbacks
+#[test]
+fn a_loaded_unit_has_been_offered_the_host_callbacks() {
+    use tutti_plugin_types::{Control, Features};
+    let loaded = load_id(&id("au.aufx.dely.appl")).expect("the delay loads");
+    assert!(loaded.transport().is_some());
+    assert!(
+        Control::wiring(&loaded, main_thread())
+            .features
+            .contains(Features::TRANSPORT)
+    );
+}
+
 /// No choice loads the bundle's first Audio Unit, and the `afil` entry that
 /// precedes it in `CoreAudio.component` is never chosen.
 #[test]
