@@ -51,6 +51,26 @@ pub fn join<T>(task: Task<T>) -> Option<T> {
     os::join(task)
 }
 
+/// [`join`] with a bound: waits at most `bound` for `task` to end, and hands the task back
+/// when it has not.
+///
+/// The caller keeps the task while it waits, so nothing is cancelled by the wait. An owner
+/// that stops a future (a stop flag it reads) and must not wait for it without end calls
+/// this, then waits again, [`detach`](Task::detach)es or drops (cancels) what comes back.
+///
+/// The web cannot block: there it looks once, whatever the bound.
+///
+/// # Errors
+///
+/// The task itself when it has not ended within `bound`.
+///
+/// # Panics
+///
+/// As [`join`]: on a thread that drives an executor.
+pub fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
+    os::join_within(task, bound)
+}
+
 /// Threads that drive an [`Executor`]'s queue, started by `Executor::spawn_threads` on a
 /// native target. The web has no constructor for it.
 ///

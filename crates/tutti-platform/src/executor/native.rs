@@ -13,7 +13,7 @@ use std::future::Future;
 use std::io;
 use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll, Wake, Waker};
@@ -110,21 +110,56 @@ impl Drop for Driving {
 
 /// Parks the calling thread until `task` ends: the task's waker unparks it.
 pub(super) fn join<T>(task: Task<T>) -> Option<T> {
+    match wait(task, None) {
+        Ok(output) => output,
+        Err(_) => unreachable!("a wait with no deadline only ends with the task"),
+    }
+}
+
+/// Parks the calling thread until `task` ends or `bound` has passed.
+pub(super) fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
+    wait(task, Some(Instant::now() + bound))
+}
+
+/// Polls `task`'s handle, parking between polls, until it ends or `deadline` passes.
+fn wait<T>(mut task: Task<T>, deadline: Option<Instant>) -> Result<Option<T>, Task<T>> {
     assert!(
         !DRIVING.with(Cell::get),
         "join on a thread that drives an executor: the wait would stop the tasks it runs"
     );
-    let mut ended = pin!(task.fallible());
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
     let mut cx = Context::from_waker(&waker);
     loop {
-        // A task whose future panicked hands the panic back to its poll; the panic hook
-        // already reported it on the task's thread, so the wait ends as `None`.
-        match catch_unwind(AssertUnwindSafe(|| ended.as_mut().poll(&mut cx))) {
-            Ok(Poll::Ready(output)) => return output,
-            Ok(Poll::Pending) => thread::park(),
-            Err(_) => return None,
+        if task.is_finished() {
+            return Ok(ended(task, &mut cx));
         }
+        // A poll registers the waker. One that finds the task dropped without ending, in
+        // the moment since the look above, panics with `async_task`'s message: `None`.
+        match catch_unwind(AssertUnwindSafe(|| Pin::new(&mut task).poll(&mut cx))) {
+            Ok(Poll::Ready(output)) => return Ok(Some(output)),
+            Err(_) => return Ok(None),
+            Ok(Poll::Pending) => match deadline {
+                None => thread::park(),
+                Some(deadline) => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(task);
+                    }
+                    thread::park_timeout(left);
+                }
+            },
+        }
+    }
+}
+
+/// The outcome of a task that has finished: its output, or `None` when its future
+/// panicked (the hook already reported it on the task's thread, and the poll hands the
+/// panic back) or was dropped without ending.
+fn ended<T>(task: Task<T>, cx: &mut Context<'_>) -> Option<T> {
+    let mut ended = pin!(task.fallible());
+    match catch_unwind(AssertUnwindSafe(|| ended.as_mut().poll(cx))) {
+        Ok(Poll::Ready(output)) => output,
+        Ok(Poll::Pending) | Err(_) => None,
     }
 }
 
