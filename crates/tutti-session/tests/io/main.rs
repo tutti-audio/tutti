@@ -1,4 +1,8 @@
 //! The session's I/O edges: devices and their restart, the pump, the inlets and the taps.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 // The device-free device tests (`ManualStreamDriver`): `device` is a feature,
 // so this suite runs under it (CI's dark-features job runs the crate with every

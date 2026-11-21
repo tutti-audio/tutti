@@ -323,6 +323,7 @@ impl PlateControls {
                 matrix: Matrix::Dense(ring),
                 input,
                 output: NetworkOutputMap::default(),
+                loop_delay: SampleSpan::ZERO,
             }))
             .expect("five stages fit MAX_STAGES");
     }

@@ -58,6 +58,13 @@
     not(encode),
     allow(unreachable_code, unused_mut, unused_variables, dead_code)
 )]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 #[cfg(feature = "encode-aiff")]
 mod aiff;

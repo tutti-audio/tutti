@@ -1,4 +1,8 @@
 //! A hosted CLAP plugin as a graph node (feature `clap`).
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[cfg(feature = "clap")]
 #[path = "../support/clap_probe.rs"]

@@ -34,7 +34,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
 atomic_float = "1.1"
-# `with_no_denormals`, `spawn_named`, `Scheduling`: the render guard and the pool's helper threads.
+# `with_no_denormals`, `Scheduling`: the render guard and the pool's helpers' priority.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `Law`, the closed set of easings a param segment and a ramp move along.

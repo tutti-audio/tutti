@@ -5,8 +5,8 @@
 //! them.
 
 use tutti_buffers::{BusTopology, MaxBlock};
-use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FdnRamps, FreezeMode, Lerp};
+use tutti_buffers::{Planes, PlanesMut};
+use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
@@ -79,7 +79,7 @@ impl Default for FdnConfig {
     }
 }
 
-impl<F: Float + Lerp> From<FdnConfig> for FdnNode<F> {
+impl<F: FftFloat + Lerp> From<FdnConfig> for FdnNode<F> {
     /// Allocates: build it before the node goes live.
     fn from(config: FdnConfig) -> Self {
         let set = FdnSet {
@@ -121,7 +121,7 @@ control_set! {
 
 /// A [`FdnBank`] and its ramps, once the rate is known.
 #[derive(Clone, Debug)]
-struct Running<F: Float> {
+struct Running<F: FftFloat> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
     bank: FdnBank<F>,
@@ -133,7 +133,7 @@ struct Running<F: Float> {
 ///
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
-pub struct FdnKernel<F: Float> {
+pub struct FdnKernel<F: FftFloat> {
     layout: FdnLayout,
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
@@ -141,9 +141,9 @@ pub struct FdnKernel<F: Float> {
     applied: bool,
 }
 
-impl<F: Float + Lerp> FdnKernel<F> {
+impl<F: FftFloat + Lerp> FdnKernel<F> {
     /// A network of `layout`. It has no lines until `prepare` gives it a rate.
-    fn new(layout: FdnLayout) -> Self {
+    pub(crate) fn new(layout: FdnLayout) -> Self {
         Self {
             layout,
             running: None,
@@ -152,7 +152,7 @@ impl<F: Float + Lerp> FdnKernel<F> {
     }
 }
 
-impl<F: Float + Lerp> Kernel for FdnKernel<F> {
+impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
     type Float = F;
     type Set = FdnSet;
 

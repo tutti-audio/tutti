@@ -4,6 +4,10 @@
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency,
 //! so this binary counts allocations with its own global allocator, per thread.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 use tutti_fixtures::{ThreadCounting, allocations};
 use tutti_units::{Mix, SampleRate, Seconds};
@@ -78,6 +82,7 @@ fn the_fdn_retargets_and_renders_without_allocating() {
             width: StereoWidth::new(2.0 * k),
             wet: Db::new(-12.0 * k),
             freeze: block % 11 == 0,
+            ..FdnControls::DEFAULT
         };
         let n = allocations(|| {
             bank.retarget(&mut ramps, &c);

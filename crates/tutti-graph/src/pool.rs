@@ -272,6 +272,11 @@ impl WorkerPoolBuilder {
             // A raw thread: a helper stops by the pool's own flag and unparker and
             // joins in the pool's drop, and `spawn_named`'s handle would own a
             // second stop and join, and its own priority request, beside them.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "a real-time render worker: it must not allocate, lock or wait on a waker, \
+                          so it is no executor's task"
+            )]
             let thread = std::thread::Builder::new()
                 .name((self.thread_name)(i))
                 .spawn(move || {

@@ -18,7 +18,7 @@ use tutti_nodes::{
     ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
     MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
     PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
-    SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
+    ShimmerConfig, ShimmerNode, SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -248,6 +248,14 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(FdnNode::<f32>::from(FdnConfig::new().layout(
                 FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
             ))),
+        ),
+        (
+            "shimmer",
+            Box::new(ShimmerNode::<f32>::from(
+                ShimmerConfig::new()
+                    .pitch(Cents::new(1200.0))
+                    .send(Feedback::new_clamped(0.9)),
+            )),
         ),
         (
             "freeverb",
