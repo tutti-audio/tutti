@@ -24,15 +24,23 @@
 //! Pulkki's published method, not from any implementation of it: see
 //! `vbap/select.rs`.
 //!
+//! ## Ambisonics
+//!
+//! `ambisonic/`: the AmbiX encoder and rotation, see [`Harmonics`].
+//!
 //! ## HRTF
 //!
 //! [`HrtfBinaural`] convolves a mono input with the HRIR pair blended for the
 //! direction it is told to render, `HRTF_STEP` frames at a time. The caller
 //! smooths the direction and hands it over per step.
 
+mod ambisonic;
 mod hrtf;
 mod vbap;
 
+pub use ambisonic::{
+    AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics, Rotation,
+};
 pub use hrtf::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
     MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE,

@@ -280,6 +280,9 @@ pub mod nodes {
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
     pub use tutti_dsp::{
+        AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics, Rotation,
+    };
+    pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
         Cookbook, CutResponse, Elliptic, EllipticTolerances, FirError, LinearPhaseDesign,
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
@@ -294,6 +297,10 @@ pub mod nodes {
         AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
+    };
+    pub use tutti_nodes::{
+        AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
+        AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, DirectionSet,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
