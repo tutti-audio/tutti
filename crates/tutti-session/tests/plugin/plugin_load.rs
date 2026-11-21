@@ -19,6 +19,7 @@ use tutti_units::Samples;
 
 use crate::loading::{Block as _, Hosted as _};
 use crate::support::clap_probe;
+use std::future::IntoFuture as _;
 
 const BLOCK: usize = 512;
 
@@ -250,6 +251,60 @@ mod process {
         drop(opened);
         render_until(&mut s, "the server's end", |_| !alive(pid));
         assert!(matches!(clone.presence(), Presence::Closed));
+    }
+
+    /// The pids of this process's child processes, from every thread's list.
+    fn children() -> Vec<u32> {
+        let mut pids = Vec::new();
+        for task in std::fs::read_dir("/proc/self/task").expect("the thread list") {
+            let Ok(list) = std::fs::read_to_string(task.unwrap().path().join("children")) else {
+                continue;
+            };
+            pids.extend(
+                list.split_whitespace()
+                    .filter_map(|pid| pid.parse::<u32>().ok()),
+            );
+        }
+        pids
+    }
+
+    /// **A load future dropped while the server launches releases the server**:
+    /// the launch finishes, finds its reply refused, and closes the plugin it
+    /// opened, which reaps the server. The child process is what is observed.
+    #[test]
+    fn a_dropped_load_future_releases_its_server() {
+        let (catalog, _dir) = catalog();
+        let s = session();
+        assert!(children().is_empty(), "no child before the launch");
+        let mut load = Box::pin(s.load_out_of_process(&first_id(), &catalog).into_future());
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            std::future::Future::poll(load.as_mut(), &mut cx).is_pending(),
+            "the launch takes the server's time"
+        );
+        tutti_fixtures::wait_until("the server to start", Duration::from_secs(120), || {
+            !children().is_empty()
+        });
+        drop(load);
+        tutti_fixtures::wait_until("the server to be reaped", Duration::from_secs(120), || {
+            children().is_empty()
+        });
+    }
+
+    /// **A load whose session is gone fails as shut down, and starts nothing**:
+    /// the future holds the executor weakly.
+    #[test]
+    fn a_load_of_a_dropped_session_fails_shut_down_and_starts_no_server() {
+        let (catalog, _dir) = catalog();
+        let s = session();
+        let load = s.load_out_of_process(&first_id(), &catalog);
+        drop(s);
+        let error = tutti_fixtures::block_on(load).expect_err("the session is gone");
+        assert!(
+            matches!(&error, LoadError::Plugin(e) if matches!(**e, tutti_plugin_types::IpcError::ShutDown)),
+            "{error:?}"
+        );
+        assert!(children().is_empty(), "no server was launched");
     }
 
     /// **A node keeps its plugin alive after the app drops its handle**, and the

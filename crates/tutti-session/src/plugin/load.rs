@@ -27,8 +27,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::task::{Context as TaskContext, Poll};
 
+use futures_channel::oneshot;
 use tutti_graph::NodeKey;
-use tutti_platform::{Asset, Task};
+use tutti_platform::Asset;
 use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::{Catalog, Hosting, Loadable};
@@ -205,22 +206,29 @@ impl IntoFuture for LoadOutOfProcess {
 /// An out-of-process load being awaited ([`LoadOutOfProcess`]): resolves to
 /// the [`PluginNode`] once the plugin's server has launched and loaded it.
 ///
-/// The first poll starts the launch as a task on the session's executor, which
-/// takes the plugin module's [`Identity`](tutti_platform::Identity) before the
-/// open, so a rewrite during it shows in [`LoadedPlugin::changed`]. A poll
-/// never blocks; the task wakes the future. Dropped before it resolves, it
-/// cancels a launch that has not begun, and one that has begun finishes and
-/// closes its plugin, which reaps the server: no server outlives the drop.
+/// The first poll starts the launch as a task on the session's executor (the
+/// session's weak handle, upgraded for the spawn only) and awaits the receiver
+/// of a oneshot. **The launch task fills the sender**: it takes the plugin
+/// module's [`Identity`](tutti_platform::Identity), opens the plugin, and sends
+/// the node or the error when the open ends, which wakes the future. Nothing
+/// else drives it and no caller waits on code the app does not run: a poll
+/// never blocks, and `Session::update` is not needed.
+///
+/// Dropped before it resolves, the future drops the receiver. A launch that has
+/// not begun then sees the receiver gone and opens nothing; one in flight
+/// finishes, finds `send` refused, and drops the node it gets back, which closes
+/// the plugin and reaps its server: no server outlives the drop.
 ///
 /// # Errors
 ///
 /// The output is [`LoadError::Module`] when the bundle holds no module for this
 /// target; [`LoadError::Plugin`] when the catalog blacklisted the plugin since
 /// the load was built, the session is gone
-/// ([`IpcError::ShutDown`]), or the
-/// plugin does not open; [`LoadError::Job`] when the executor could not start
-/// the task; [`LoadError::Panicked`] when a plugin or the host panicked in the
-/// open.
+/// ([`IpcError::ShutDown`]), or the plugin does not open;
+/// [`LoadError::Job`] ([`WorkerError::Dropped`]) when the launch task ended
+/// without an answer (the executor went away before or while it ran), and
+/// [`WorkerError::NotStarted`] when the executor could not start it;
+/// [`LoadError::Panicked`] when a plugin or the host panicked in the open.
 ///
 /// [`IpcError::ShutDown`]: tutti_plugin_types::IpcError::ShutDown
 #[must_use = "a load does nothing unless it is awaited"]
@@ -228,9 +236,11 @@ pub struct LoadingOutOfProcess {
     stage: Stage,
 }
 
+type Reply = oneshot::Receiver<Result<PluginNode, LoadError>>;
+
 enum Stage {
     Unstarted(Request),
-    Running(Task<Result<PluginNode, LoadError>>),
+    Running(Reply),
     Finished,
 }
 
@@ -241,45 +251,62 @@ impl fmt::Debug for LoadingOutOfProcess {
     }
 }
 
-impl Future for LoadingOutOfProcess {
-    type Output = Result<PluginNode, LoadError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
-        let this = &mut *self;
-        if let Stage::Unstarted(_) = this.stage {
-            let Stage::Unstarted(request) = std::mem::replace(&mut this.stage, Stage::Finished)
-            else {
-                unreachable!("matched above");
-            };
-            // Upgraded for the spawn only: the task holds no strong handle.
-            let Some(executor) = request.cx.executor.upgrade() else {
-                return Poll::Ready(Err(plugin_failed(IpcError::ShutDown)));
-            };
-            let launched = executor.unblock(move || {
-                caught(|| {
+impl LoadingOutOfProcess {
+    /// Starts the launch of `request` on the session's executor: the task owns
+    /// the sender of the reply this returns the receiver of.
+    fn launch(request: Request) -> Result<Reply, LoadError> {
+        // Upgraded for the spawn only: the task holds no strong handle.
+        let Some(executor) = request.cx.executor.upgrade() else {
+            return Err(plugin_failed(IpcError::ShutDown));
+        };
+        let (reply, receiver) = oneshot::channel();
+        let task = executor
+            .unblock(move || {
+                // A future dropped before the launch began has nobody to answer.
+                if reply.is_canceled() {
+                    return;
+                }
+                let node = caught(|| {
                     request.open(PluginLoad::run_out_of_process, |plugin| {
                         plugin
                             .client()
                             .and_then(PluginClient::presets)
                             .ok_or(PresetError::Lost)
                     })
-                })
-            });
-            match launched {
-                Ok(task) => this.stage = Stage::Running(task),
-                Err(refused) => {
-                    return Poll::Ready(Err(LoadError::Job(WorkerError::NotStarted(
-                        refused.kind(),
-                    ))));
-                }
+                });
+                // Refused when the future was dropped meanwhile: the node comes
+                // back and closes here, which reaps its server.
+                drop(reply.send(node));
+            })
+            .map_err(|refused| LoadError::Job(WorkerError::NotStarted(refused.kind())))?;
+        // The task runs on without the future: its end is the reply.
+        task.detach();
+        Ok(receiver)
+    }
+}
+
+impl Future for LoadingOutOfProcess {
+    type Output = Result<PluginNode, LoadError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        if matches!(this.stage, Stage::Unstarted(_)) {
+            let Stage::Unstarted(request) = std::mem::replace(&mut this.stage, Stage::Finished)
+            else {
+                unreachable!("matched above");
+            };
+            match Self::launch(request) {
+                Ok(receiver) => this.stage = Stage::Running(receiver),
+                Err(refused) => return Poll::Ready(Err(refused)),
             }
         }
-        let Stage::Running(task) = &mut this.stage else {
+        let Stage::Running(receiver) = &mut this.stage else {
             panic!("a load future is polled after it resolved");
         };
-        let done = std::task::ready!(Pin::new(task).poll(cx));
+        let answered = std::task::ready!(Pin::new(receiver).poll(cx));
         this.stage = Stage::Finished;
-        Poll::Ready(done)
+        // A sender dropped unanswered: the launch task never ran to its end.
+        Poll::Ready(answered.unwrap_or(Err(LoadError::Job(WorkerError::Dropped))))
     }
 }
 
@@ -751,6 +778,22 @@ mod tests {
         std::fs::create_dir_all(bundle.join("Contents")).unwrap();
         let error = module_of(&PluginRef::file(&bundle)).expect_err("no module inside");
         assert!(matches!(error, LoadError::Module(_)), "{error:?}");
+    }
+
+    /// **A launch task that ends without sending resolves as a dropped job**,
+    /// never a wait without end: the reply's sender is gone.
+    #[test]
+    fn a_dropped_sender_resolves_as_a_dropped_job() {
+        let (reply, receiver) = oneshot::channel();
+        drop(reply);
+        let load = LoadingOutOfProcess {
+            stage: Stage::Running(receiver),
+        };
+        let error = tutti_fixtures::block_on(load).expect_err("nobody answered");
+        assert!(
+            matches!(error, LoadError::Job(WorkerError::Dropped)),
+            "{error:?}"
+        );
     }
 
     /// **A plain file is its own module.**
