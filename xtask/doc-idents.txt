@@ -94,7 +94,6 @@
 1 crates/tutti-sampler/src/voice/types.rs
 1 crates/tutti-sampler/tests/voice/gain.rs
 1 crates/tutti-sampler/tests/voice/reverse_and_loop.rs
-1 crates/tutti-session/src/builder.rs
 1 crates/tutti-session/src/fork.rs
 1 crates/tutti-session/src/plugin.rs
 1 crates/tutti-session/src/session/root.rs
