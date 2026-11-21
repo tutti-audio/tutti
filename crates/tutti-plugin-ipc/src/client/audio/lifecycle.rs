@@ -34,8 +34,10 @@ pub(super) struct Lifecycle {
     /// without the lock or the reason's clone. Stored after the
     /// slot, so a reader that sees it set finds the reason.
     refused: Arc<AtomicBool>,
-    /// The fork's wait, which hears every refusal and clearing from the bridge
-    /// thread before `refused` changes. Set once, by the control side.
+    /// The fork's wait, which hears every refusal from the bridge
+    /// thread before `refused` rises. One fork per bridge: `Ipc::watch`
+    /// takes `&mut self` once, a fork reopens its own `Ipc` (and so its own
+    /// bridge), and its `Link` holds a single wait.
     offered_to: Arc<Mutex<Option<Arc<OfflineWait>>>>,
     /// The size the server's editor asked its window to take
     /// (`EditorWantsSize`), until the host takes it.
@@ -113,7 +115,9 @@ impl Lifecycle {
     /// Offers every refusal and clearing to `wait` from now on, the standing
     /// one included. Control side.
     pub(super) fn offer_refusals_to(&self, wait: Arc<OfflineWait>) {
-        wait.offer_refusal(self.rate_refusal());
+        if let Some(refusal) = self.rate_refusal() {
+            wait.offer_refusal(refusal);
+        }
         *self.offered_to.lock_recover() = Some(wait);
     }
 
@@ -125,8 +129,11 @@ impl Lifecycle {
     pub(super) fn set_rate_refusal(&self, refusal: Option<RateRefusal>) {
         let refused = refusal.is_some();
         // The fork's wait first: the flag is raised after it, so a reader of
-        // the flag finds the reason offered.
-        if let Some(wait) = self.offered_to.lock_recover().as_ref() {
+        // the flag finds the reason offered. A clearing is not offered: the
+        // wait's slot is only filled, and its latch decides what is reported.
+        if let Some(refusal) = &refusal
+            && let Some(wait) = self.offered_to.lock_recover().as_ref()
+        {
             wait.offer_refusal(refusal.clone());
         }
         *self.refusal.lock_recover() = refusal;
@@ -245,5 +252,44 @@ mod tests {
         assert!(refused);
         life.set_rate_refusal(None);
         assert!(!life.is_rate_refused());
+    }
+
+    /// **A refusal cleared between the audio thread's flag read and its latch
+    /// still reads back**: the wait's slot is filled by the refusal and never
+    /// emptied by its clearing.
+    #[test]
+    fn a_refusal_cleared_before_the_audio_latch_is_still_reported() {
+        let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
+        let wait = Arc::new(OfflineWait::new(
+            std::time::Duration::from_secs(1),
+            Arc::new(ServerWatch::new()),
+        ));
+        life.offer_refusals_to(Arc::clone(&wait));
+        let refusal = RateRefusal::new(
+            tutti_units::SampleRate::SR_44K1,
+            tutti_plugin_types::RateRefusalCause::Unconfigured,
+        );
+        life.set_rate_refusal(Some(refusal.clone()));
+        // The audio thread saw the flag, then the bridge cleared the refusal.
+        life.set_rate_refusal(None);
+        wait.latch_refusal();
+        assert_eq!(wait.refusal(), Some(refusal));
+    }
+
+    /// A refusal cleared before any latch is never reported.
+    #[test]
+    fn a_refusal_cleared_and_never_latched_is_not_reported() {
+        let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
+        let wait = Arc::new(OfflineWait::new(
+            std::time::Duration::from_secs(1),
+            Arc::new(ServerWatch::new()),
+        ));
+        life.offer_refusals_to(Arc::clone(&wait));
+        life.set_rate_refusal(Some(RateRefusal::new(
+            tutti_units::SampleRate::SR_44K1,
+            tutti_plugin_types::RateRefusalCause::Unconfigured,
+        )));
+        life.set_rate_refusal(None);
+        assert_eq!(wait.refusal(), None);
     }
 }

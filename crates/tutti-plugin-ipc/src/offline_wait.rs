@@ -25,12 +25,12 @@ pub struct OfflineWait {
     /// Latched when a block first misses `budget`.
     gave_up: AtomicBool,
     /// The plugin's standing rate refusal, offered by the bridge thread
-    /// ([`offer_refusal`](Self::offer_refusal)) before it raises its flag.
+    /// (`offer_refusal`) before it raises its flag; filled, never emptied.
     /// Written and freed only off the audio thread.
     refusal: Mutex<Option<RateRefusal>>,
     /// Latched by the audio thread when the fork rendered silence because of a
-    /// refusal: a scalar store, no lock, no clone. Once set, the reported
-    /// refusal is the first one offered.
+    /// refusal: a scalar store, no lock, no clone. Once set, the slot holds a
+    /// refusal, since it was filled before the bridge's flag rose.
     refused: AtomicBool,
     /// The latency the fork's graph was compiled against, recorded once the
     /// plugin has settled (`usize::MAX`: not planned yet).
@@ -110,8 +110,8 @@ impl OfflineWait {
         self.server.cause()
     }
 
-    /// The rate refusal the fork rendered silence for, if any: the standing
-    /// one, once the audio thread has latched.
+    /// The rate refusal the fork rendered silence for, if any: the latest
+    /// one offered, once the audio thread has latched.
     pub fn refusal(&self) -> Option<RateRefusal> {
         if !self.refused.load(Ordering::Acquire) {
             return None;
@@ -119,18 +119,15 @@ impl OfflineWait {
         self.refusal.lock_recover().clone()
     }
 
-    /// The bridge thread's record of the plugin's refusal (`Some`) or of its
-    /// clearing (`None`). Called before the bridge's flag changes, so the audio
-    /// thread never sees the flag without the reason. A refusal already latched
-    /// is kept: the first one stands. The value it replaces drops here.
-    pub(crate) fn offer_refusal(&self, refusal: Option<RateRefusal>) {
-        let latched = self.refused.load(Ordering::Acquire);
-        let mut slot = self.refusal.lock_recover();
-        if latched && slot.is_some() {
-            return;
-        }
-        let old = std::mem::replace(&mut *slot, refusal);
-        drop(slot);
+    /// The bridge thread's record of a plugin refusal, called before the
+    /// bridge's flag is raised, so the audio thread never sees the flag
+    /// without a reason. The slot is only ever filled, never emptied: a
+    /// clearing is not offered, and whether a refusal is reported is the
+    /// latch's. A refusal offered again replaces the held one (both are real
+    /// refusals of this fork), also after the latch; the replaced value drops
+    /// here, on the bridge thread.
+    pub(crate) fn offer_refusal(&self, refusal: RateRefusal) {
+        let old = self.refusal.lock_recover().replace(refusal);
         drop(old);
     }
 
@@ -168,5 +165,23 @@ mod tests {
         let wait = wait();
         wait.give_up();
         assert_eq!(wait.reply_wait(), None);
+    }
+
+    /// **A refusal that was offered and then latched is still
+    /// reported**: the slot is never emptied, so a latch that lands between the
+    /// bridge's clearing and its flag still has its reason. One never latched
+    /// reports nothing.
+    #[test]
+    fn a_refusal_cleared_before_the_latch_is_still_reported_once_latched() {
+        use tutti_plugin_types::RateRefusalCause;
+        let wait = wait();
+        let refusal = RateRefusal::new(
+            tutti_units::SampleRate::SR_96K,
+            RateRefusalCause::Unconfigured,
+        );
+        wait.offer_refusal(refusal.clone());
+        assert_eq!(wait.refusal(), None, "not latched, not reported");
+        wait.latch_refusal();
+        assert_eq!(wait.refusal(), Some(refusal));
     }
 }
