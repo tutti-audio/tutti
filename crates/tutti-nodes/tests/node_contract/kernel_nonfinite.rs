@@ -15,8 +15,9 @@ use tutti_nodes::{
     FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode, LadderFilterConfig,
     LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
     ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
-    PeakDetection, PhaserConfig, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
-    RingModNode, SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
+    PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig, PitchShifterNode,
+    PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode, SvfFilterConfig, SvfFilterNode,
+    TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -30,8 +31,8 @@ use tutti_nodes::{
 use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{
-    BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
-    Seconds, Semitones,
+    BitDepth, Cents, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate,
+    Samples, Seconds, Semitones,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -286,6 +287,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "frequency shifter",
             Box::new(FrequencyShifterNode::<f32>::from(
                 FrequencyShifterConfig::new(ChannelLayout::STEREO).shift(Hz::new(300.0)),
+            )),
+        ),
+        (
+            "pitch shifter",
+            Box::new(PitchShifterNode::<f32>::from(
+                PitchShifterConfig::new(ChannelLayout::STEREO).pitch(Cents::new(700.0)),
             )),
         ),
         (

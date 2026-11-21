@@ -7,7 +7,7 @@
 )]
 
 use tutti_graph::NodeKey;
-use tutti_timeline::{MotionFsm, Transport, TransportSettings};
+use tutti_timeline::{Transport, TransportSettings};
 use tutti_units::SampleRate;
 
 use crate::TransportHandle;
@@ -44,7 +44,8 @@ impl TransportPart {
     }
 
     /// The transport's motion state machine.
-    pub(crate) fn motion(&self) -> &MotionFsm {
+    #[cfg(feature = "export")]
+    pub(crate) fn motion(&self) -> &tutti_timeline::MotionFsm {
         self.transport.motion()
     }
 

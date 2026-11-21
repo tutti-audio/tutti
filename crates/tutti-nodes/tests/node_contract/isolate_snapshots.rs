@@ -25,8 +25,9 @@ use tutti_nodes::{
     EqBandNode, FrequencyShifterConfig, FrequencyShifterNode, GateConfig, GateControls, GateNode,
     InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
     LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
-    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, RingModConfig, RingModNode, ShapeKind,
-    Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
+    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
+    RingModConfig, RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
+    TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -39,8 +40,8 @@ use tutti_nodes::{
     StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode,
 };
 use tutti_units::{
-    Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
-    Semitones, StereoWidth, UnitAddr, UnitParam,
+    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples,
+    Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -458,6 +459,19 @@ fn frequency_shifter() {
     })
     .control("shift", |r| {
         assert!(r.param_set().set(UnitParam::Frequency, -90.0))
+    })
+    .check();
+}
+
+#[test]
+fn pitch_shifter() {
+    IsolateRow::new("PitchShifterNode (stereo)", || {
+        PitchShifterNode::<f32>::from(
+            PitchShifterConfig::new(ChannelLayout::STEREO).pitch(Cents::new(200.0)),
+        )
+    })
+    .control("pitch", |r| {
+        assert!(r.param_set().set(UnitParam::Pitch, -900.0))
     })
     .check();
 }
