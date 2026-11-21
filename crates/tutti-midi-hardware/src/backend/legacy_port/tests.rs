@@ -16,7 +16,9 @@ use crate::capability::{OsEndpoint, legacy};
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, Result};
-use tutti_midi_device::{DeviceEvent, EndpointId, Identity, OsDevice, PortDirection, WinMmDevice};
+use tutti_midi_device::{
+    DeviceEvent, EndpointId, OsDevice, OsEndpointIdentity, PortDirection, WinMmDevice,
+};
 use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
 
 fn named(name: &str, product: u16) -> WinMmDevice {
@@ -250,10 +252,13 @@ fn the_input_and_the_output_of_one_unit_have_different_ids_and_identities() {
     let output = endpoint(Side::Output, 0, info("USB MIDI"));
     assert_ne!(input.id, output.id);
     assert_ne!(input.identity, output.identity);
-    assert_eq!(input.identity, Identity::winmm_input(named("USB MIDI", 7)));
+    assert_eq!(
+        input.identity,
+        OsEndpointIdentity::winmm_input(named("USB MIDI", 7))
+    );
     assert_eq!(
         output.identity,
-        Identity::winmm_output(named("USB MIDI", 7))
+        OsEndpointIdentity::winmm_output(named("USB MIDI", 7))
     );
 }
 
@@ -657,7 +662,7 @@ static LISTED: Mutex<Vec<OsDevice>> = Mutex::new(Vec::new());
 fn device(n: u64, name: &str) -> OsDevice {
     OsDevice {
         handle: EndpointId::from_raw(n),
-        identity: Identity::winmm_input(named(name, 1)),
+        identity: OsEndpointIdentity::winmm_input(named(name, 1)),
         name: name.to_owned(),
         direction: PortDirection::Input,
     }

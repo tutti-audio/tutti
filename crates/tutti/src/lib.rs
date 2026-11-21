@@ -822,7 +822,7 @@ pub mod plugin {
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
-/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`DeviceId`,
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports a session opens for them
 /// (`MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
@@ -850,16 +850,16 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::EndpointId;
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{Identity, PortDirection, WinMmDevice};
+    pub use tutti_midi_device::{OsEndpointIdentity, PortDirection, WinMmDevice};
     pub use tutti_midi_file::{
-        Altered, Converted, DropReason, Dropped, Layout, Lead, LeadTrack, LyricChange,
+        Altered, Converted, DropReason, Dropped, Layout, Lead, LeadRepair, LeadTrack, LyricChange,
         MalformedMeta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
-        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, Normalized, OtherMetaKind,
-        OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
-        Pattern, Placement, RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame,
-        SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmfTimeline,
-        SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
-        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, TimelineDrop,
+        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, OtherMetaKind, OtherMetaKindOutOfRange,
+        OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote, Pattern, ReadRepair,
+        RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
+        SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmfTimeline, SmpteFractionalFrames,
+        SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView,
+        SysEx, TextKind, Timebase, TimelineDrop,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
@@ -894,8 +894,8 @@ pub mod midi {
         BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
         ChordType, ControlValue, Data128, DeltaTicks, DiscoveryFilter, EndpointInfoNotification,
         Field, FirstGroup, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, Framed,
-        FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
-        KeySignature, Lane, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
+        FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupChannelIndex,
+        GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
         Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan,
         NotChunkSize, NotManufacturerId, NoteKey, NoteKeyEvent, PerNoteManagement, Pitch,
         RegisteredData, RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute,
@@ -915,10 +915,10 @@ pub mod midi {
         SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange, U4OutOfRange, U7OutOfRange,
         U14OutOfRange,
     };
-    pub use tutti_ump::{Join, PacketSpan, Spans};
     pub use tutti_ump::{
-        LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
+        FlexTextError, LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision,
     };
+    pub use tutti_ump::{Join, PacketSpan, Spans};
 
     /// The session's one MIDI error: each cause (hardware, send, route) is its
     /// source.
@@ -942,12 +942,14 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice};
+    pub use tutti_midi_device::{
+        DeviceInfo, Learned, Match, MidiDeviceId, MidiIdentity, SavedDevice,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, Errno, ErrnoOutOfRange, InputFault,
-        MidiHardwareConfig, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError, ProfileSwitch,
-        ProfilesChange, Switcher, WholeSwitcher,
+        MidiHardwareConfig, PeerId, PeerProfiles, PeerRef, PeerRequestError, ProfileError,
+        ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

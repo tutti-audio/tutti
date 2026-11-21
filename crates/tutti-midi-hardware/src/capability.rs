@@ -8,7 +8,9 @@
 //! a plain value that travels with the endpoint, read from the OS rather than
 //! assumed, and code that depends on it is an ordinary `match`.
 
-use tutti_midi_device::{Capabilities, Endpoint, EndpointId, FunctionBlock, Identity, Supports};
+use tutti_midi_device::{
+    Capabilities, Endpoint, EndpointId, FunctionBlock, OsEndpointIdentity, Supports,
+};
 use tutti_ump::{EndpointInfoNotification, FunctionBlockInfo, Protocol, StreamConfig};
 
 /// One endpoint as enumeration found it.
@@ -16,8 +18,8 @@ use tutti_ump::{EndpointInfoNotification, FunctionBlockInfo, Protocol, StreamCon
 pub struct OsEndpoint {
     /// Opaque handle to open it by.
     pub id: EndpointId,
-    /// What the OS knows it by, for a [`DeviceId`](tutti_midi_device::DeviceId).
-    pub identity: Identity,
+    /// What the OS knows it by, for a [`MidiDeviceId`](tutti_midi_device::MidiDeviceId).
+    pub identity: OsEndpointIdentity,
     /// Display name, as the OS reports it.
     pub name: String,
     /// What the OS says it is: the protocol it speaks now, the protocols it

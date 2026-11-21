@@ -11,7 +11,9 @@ use crate::{Devices, HardwareMidiInputs};
 use tutti_alsa_ffi::Client;
 use tutti_alsa_ffi::{Address, Event, PortCaps, PortId, PortKind};
 use tutti_graph::Losses;
-use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Endpoint, Identity, UMP_VERSION};
+use tutti_midi_device::{
+    DeviceEvent, DeviceInfo, Endpoint, MidiDeviceId, OsEndpointIdentity, UMP_VERSION,
+};
 use tutti_midi_runtime::DeviceWriters;
 use tutti_ump::{
     BlockDirection, EndpointInfoNotification, Field, FirstGroup, FunctionBlockCount,
@@ -127,7 +129,7 @@ fn added(name: &str) -> impl Fn(&DeviceEvent) -> bool {
     move |e| matches!(e, DeviceEvent::Added(i) if i.name == want)
 }
 
-fn removed(id: DeviceId) -> impl Fn(&DeviceEvent) -> bool {
+fn removed(id: MidiDeviceId) -> impl Fn(&DeviceEvent) -> bool {
     move |e| matches!(e, DeviceEvent::Removed(i) if i.id == id)
 }
 
@@ -153,7 +155,7 @@ fn when_listed<T>(devices: &Watched, open: impl Fn() -> crate::Result<T>) -> T {
 
 fn open_input_when_listed(
     devices: &Watched,
-    id: &DeviceId,
+    id: &MidiDeviceId,
     ports: &std::sync::Arc<HardwareMidiInputs>,
 ) -> crate::OpenInput {
     when_listed(devices, || {
@@ -219,7 +221,10 @@ fn a_client_that_appears_is_added_and_listed() {
     let _device = plug(&name);
     let device = info(until(&devices, added(&name)));
     assert!(devices.list().contains(&device));
-    assert_eq!(device.id.identity(), &Identity::alsa(name.as_str(), "port"));
+    assert_eq!(
+        device.id.identity(),
+        &OsEndpointIdentity::alsa(name.as_str(), "port")
+    );
     assert_eq!(device.id.ordinal(), 0);
 }
 
@@ -390,7 +395,7 @@ fn the_engines_own_clients_are_not_listed() {
     // any other copy of the suite running beside it; another test's device
     // (`tutti-loop-<pid>-source`, `tutti-in-<pid>`) is a device and is listed.
     let engine = |i: &DeviceInfo| match i.id.identity() {
-        Identity::Alsa { client, .. } => {
+        OsEndpointIdentity::Alsa { client, .. } => {
             client == super::input::CLIENT || client == super::output::CLIENT
         }
         _ => false,
@@ -416,7 +421,7 @@ fn a_device_called_like_an_engine_client_is_listed() {
     let _device = plug(&name);
     let device = info(until(
         &devices,
-        |e| matches!(e, DeviceEvent::Added(i) if i.id.identity() == &Identity::alsa(&name, "port")),
+        |e| matches!(e, DeviceEvent::Added(i) if i.id.identity() == &OsEndpointIdentity::alsa(&name, "port")),
     ));
     assert!(devices.list().contains(&device));
 }
@@ -483,7 +488,7 @@ fn a_renamed_client_replaced_by_an_identical_one_is_removed_then_added() {
 #[test]
 fn the_kernels_system_client_is_not_listed() {
     let devices = Watched::open();
-    let system = |d: &DeviceInfo| matches!(d.id.identity(), Identity::Alsa { client, .. } if client == "System");
+    let system = |d: &DeviceInfo| matches!(d.id.identity(), OsEndpointIdentity::Alsa { client, .. } if client == "System");
     assert!(!devices.list().iter().any(system), "{:?}", devices.list());
 }
 

@@ -1,5 +1,5 @@
 //! What a source has started and not ended: a bit per [`NoteKey`], the controllers
-//! per [`Lane`], and [`Held`], the two together.
+//! per [`GroupChannelIndex`], and [`Held`], the two together.
 
 use alloc::boxed::Box;
 
@@ -11,9 +11,9 @@ use crate::{
 /// table of 512 entries, MIDI 1.0 lanes first. The index is the one a
 /// [`NoteKey`] packs above its note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Lane(u16);
+pub struct GroupChannelIndex(u16);
 
-impl Lane {
+impl GroupChannelIndex {
     /// How many lanes there are: two protocols, sixteen Groups, sixteen Channels.
     pub const COUNT: usize = 512;
 
@@ -36,13 +36,13 @@ impl Lane {
     /// Every lane, in table order.
     ///
     /// ```
-    /// use tutti_ump::Lane;
+    /// use tutti_ump::GroupChannelIndex;
     ///
-    /// assert_eq!(Lane::all().count(), Lane::COUNT);
-    /// assert_eq!(Lane::all().next().map(Lane::index), Some(0));
+    /// assert_eq!(GroupChannelIndex::all().count(), GroupChannelIndex::COUNT);
+    /// assert_eq!(GroupChannelIndex::all().next().map(GroupChannelIndex::index), Some(0));
     /// ```
-    pub fn all() -> impl Iterator<Item = Lane> {
-        (0..Self::COUNT as u16).map(Lane)
+    pub fn all() -> impl Iterator<Item = GroupChannelIndex> {
+        (0..Self::COUNT as u16).map(GroupChannelIndex)
     }
 
     /// The lane at table position `index`, or `None` from [`COUNT`](Self::COUNT) up.
@@ -434,8 +434,8 @@ mod tests {
     #[test]
     fn a_lane_is_the_protocol_then_the_address_and_names_both_back() {
         let address = Address::from_index(0x2B).unwrap();
-        let m1 = Lane::new(Protocol::Midi1, address).unwrap();
-        let m2 = Lane::new(Protocol::Midi2, address).unwrap();
+        let m1 = GroupChannelIndex::new(Protocol::Midi1, address).unwrap();
+        let m2 = GroupChannelIndex::new(Protocol::Midi2, address).unwrap();
         assert_eq!((m1.index(), m2.index()), (0x2B, 256 + 0x2B));
         assert_eq!(
             (m1.protocol(), m2.protocol()),
@@ -443,11 +443,14 @@ mod tests {
         );
         assert_eq!((m1.address(), m2.address()), (address, address));
         assert_eq!(
-            Lane::new(Protocol::Reserved(crate::Reserved::wire(3)), address),
+            GroupChannelIndex::new(Protocol::Reserved(crate::Reserved::wire(3)), address),
             None
         );
-        assert_eq!(Lane::from_index(511).map(Lane::index), Some(511));
-        assert_eq!(Lane::from_index(512), None);
+        assert_eq!(
+            GroupChannelIndex::from_index(511).map(GroupChannelIndex::index),
+            Some(511)
+        );
+        assert_eq!(GroupChannelIndex::from_index(512), None);
         assert_eq!(key(Protocol::Midi2, 0x2B, 5).lane(), m2);
     }
 

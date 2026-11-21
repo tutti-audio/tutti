@@ -56,7 +56,7 @@ tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", opti
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
 tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
-# The device vocabulary (`DeviceId`, `DeviceInfo`, ...) the OS MIDI layer reports in,
+# The device vocabulary (`MidiDeviceId`, `DeviceInfo`, ...) the OS MIDI layer reports in,
 # and the `MediaType` a peer's saved state names its encoding by.
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", optional = true }

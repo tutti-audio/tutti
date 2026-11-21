@@ -54,8 +54,8 @@ fn a_state_round_trips_through_serde() {
 mod device {
     use super::*;
     use tutti_midi_device::{
-        DeviceEvent, DeviceInfo, DeviceTable, EndpointId, Identity, Learned, OsChange, OsDevice,
-        PortDirection,
+        DeviceEvent, DeviceInfo, DeviceTable, EndpointId, Learned, OsChange, OsDevice,
+        OsEndpointIdentity, PortDirection,
     };
     use tutti_ump::ProductInstanceId;
     use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
@@ -65,7 +65,9 @@ mod device {
         let mut table = DeviceTable::default();
         let Some(DeviceEvent::Added(info)) = table.apply(OsChange::Present(OsDevice {
             handle: EndpointId::from_raw(handle),
-            identity: Identity::Product(ProductInstanceId::new(&format!("os-{handle}")).unwrap()),
+            identity: OsEndpointIdentity::Product(
+                ProductInstanceId::new(&format!("os-{handle}")).unwrap(),
+            ),
             name: name.into(),
             direction: PortDirection::Input,
         })) else {
