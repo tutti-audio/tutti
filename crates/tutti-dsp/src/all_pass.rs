@@ -8,6 +8,7 @@
 //! unit magnitude. A chain of them at one delay with different coefficients is the phase
 //! network of the [`FrequencyShifterBank`](crate::FrequencyShifterBank).
 
+use core::num::NonZeroUsize;
 use tutti_buffers::Float;
 use tutti_units::{Feedback, Samples};
 
@@ -25,13 +26,13 @@ pub struct AllPassFilter<F: Float> {
 }
 
 impl<F: Float> AllPassFilter<F> {
-    /// A silent all-pass of `form`, its delay `delay` frames (at least one) and `gain` the
+    /// A silent all-pass of `form`, its delay `delay` frames and `gain` the
     /// coefficient `g`, below 1 ([`Feedback`]'s own contract).
     #[must_use]
-    pub fn new(form: AllPassForm, delay: Samples, gain: Feedback) -> Self {
+    pub fn new(form: AllPassForm, delay: NonZeroUsize, gain: Feedback) -> Self {
         Self {
             form,
-            ring: DelayRing::new(delay.get().max(1)),
+            ring: DelayRing::new(delay.get()),
             gain: F::from_unit(gain),
         }
     }

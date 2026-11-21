@@ -418,3 +418,30 @@ fn a_plugins_refreshes_and_invalidations_arrive_in_the_stream() {
         "{changes:?}"
     );
 }
+
+/// **A render mode a prepare off the main thread could not apply reaches the
+/// app** as `RenderModeNotApplied` with the mode the prepare carried, once, at
+/// the plugin's node.
+#[test]
+fn a_render_mode_not_applied_arrives_in_the_stream() {
+    use tutti_plugin_types::{PluginInvalidation, RenderMode};
+    let _ = tutti_fixtures::main_thread();
+    let (mut s, node, _, _, invalidate) = session_reporting();
+    invalidate.fire(PluginInvalidation::RenderModeNotApplied {
+        mode: RenderMode::Offline,
+    });
+    let events = plugin_events(&mut s);
+    assert!(
+        matches!(
+            events.as_slice(),
+            [PluginEvent {
+                node: at,
+                change: PluginChange::RenderModeNotApplied {
+                    mode: RenderMode::Offline
+                }
+            }] if *at == node
+        ),
+        "{events:?}"
+    );
+    assert!(plugin_events(&mut s).is_empty(), "reported once");
+}

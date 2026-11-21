@@ -5,8 +5,8 @@
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
-    AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, Loaded, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit,
+    AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
+    KeyEvent, KeyUse, Loaded, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit,
     ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
     PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
     StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
@@ -624,8 +624,9 @@ impl EditorWindow for Vst3Loaded {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<dpi::Size> {
+    ) -> PluginResult<EditorOpened<dpi::Size>> {
         self.embed_editor(main, parent, scale)
+            .map(EditorOpened::new)
             .map_err(|error| match error {
                 Vst3Error::PluginError { source, .. } => {
                     PluginError::Editor(tutti_plugin_types::EditorError::PluginError(format!(

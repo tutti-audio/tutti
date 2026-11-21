@@ -93,12 +93,12 @@ pub struct WavetableConfig<F: Float> {
 }
 
 impl<F: Float> WavetableConfig<F> {
-    /// `table` on `width` channels (an empty layout is taken as mono), at 440 Hz, unity
+    /// `table` on `width` channels, at 440 Hz, unity
     /// level and the first frame.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>, table: Arc<Wavetable<F>>) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             table,
             frequency: Hz::new(440.0),
             level: Amplitude::UNITY,
