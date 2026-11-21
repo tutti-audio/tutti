@@ -15,6 +15,7 @@ use super::*;
 // - `Metres / Seconds -> Speed` — not yet used.
 // - `Speed + Speed`, `Speed * f64` — the speed of sound is one medium's
 //   constant, not an amount.
+// - `Metres::{min, max, clamp}`, `Display` — not yet used; `PartialOrd` compares.
 
 /// **A distance over the speed of sound is the delay `r / c`**: 343 m at 343 m/s
 /// is one second, and the delay is linear in the distance.
@@ -67,14 +68,10 @@ fn scaled_refuses_a_product_that_is_not_a_distance() {
     assert_eq!(Metres::of(f64::MAX).scaled(2.0), None);
 }
 
-/// A distance orders and bounds in its own unit.
+/// A distance and a speed order in their own unit.
 #[test]
-fn a_distance_orders_and_bounds() {
-    let (lo, hi) = (Metres::of(1.0), Metres::of(3.0));
-    assert!(lo < hi);
-    assert_eq!(lo.max(hi), hi);
-    assert_eq!(lo.min(hi), lo);
-    assert_eq!(Metres::of(9.0).clamp(lo, hi), hi);
+fn a_distance_and_a_speed_order() {
+    assert!(Metres::of(1.0) < Metres::of(3.0));
     assert!(Speed::of(300.0) < Speed::SOUND_IN_AIR_20C);
     assert_eq!(Metres::default(), Metres::ZERO);
 }

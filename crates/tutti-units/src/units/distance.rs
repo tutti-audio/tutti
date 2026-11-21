@@ -76,31 +76,6 @@ impl Metres {
     pub fn abs_diff(self, other: Self) -> Self {
         Self((self.0 - other.0).abs())
     }
-
-    /// Returns the smaller of the two, in this unit.
-    #[inline]
-    #[must_use]
-    pub fn min(self, other: Self) -> Self {
-        Self(self.0.min(other.0))
-    }
-
-    /// Returns the larger of the two, in this unit.
-    #[inline]
-    #[must_use]
-    pub fn max(self, other: Self) -> Self {
-        Self(self.0.max(other.0))
-    }
-
-    /// Clamps into `lo..=hi`, in this unit.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `lo > hi`, matching `f64::clamp`.
-    #[inline]
-    #[must_use]
-    pub fn clamp(self, lo: Self, hi: Self) -> Self {
-        Self(self.0.clamp(lo.0, hi.0))
-    }
 }
 
 impl Speed {
@@ -129,22 +104,8 @@ impl PartialOrd for Speed {
     }
 }
 
-impl core::fmt::Display for Metres {
-    #[inline]
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl core::fmt::Display for Speed {
-    #[inline]
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-/// Distances add; a sum that overflows `f64` stays at the largest finite
-/// distance, so the range holds.
+/// Distances add. A sum that overflows `f64` stays at the largest finite
+/// distance, so the range holds; that is unreachable for a physical distance.
 impl core::ops::Add for Metres {
     type Output = Self;
     #[inline]
