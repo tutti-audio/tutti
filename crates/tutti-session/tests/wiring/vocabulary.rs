@@ -163,9 +163,9 @@ fn a_connections_gain_weights_the_edge_it_added() {
 }
 
 /// **`disconnect` takes out exactly the edge named**, says whether it was
-/// there, and `disconnect_all` takes out the rest.
+/// there, and an empty `set_sources` takes out the rest.
 #[test]
-fn disconnect_removes_one_edge_and_disconnect_all_the_rest() {
+fn disconnect_removes_one_edge_and_an_empty_set_sources_the_rest() {
     let mut s = offline();
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let b = s.graph().add(ForkByClone(Const::mono(0.25)));
@@ -192,7 +192,7 @@ fn disconnect_removes_one_edge_and_disconnect_all_the_rest() {
     assert_eq!(s.graph_ref().sources(sink).unwrap(), [b.out(0)]);
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
 
-    assert!(s.graph().disconnect_all(sink).unwrap());
+    s.graph().set_sources(sink, []).unwrap();
     assert!(s.graph_ref().sources(sink).unwrap().is_empty());
     // The edge fades out over 256 frames: the fifth 64-frame block starts
     // past it.

@@ -1,8 +1,8 @@
 //! Event ports on typed keys (doc 013, "The session graph's surface"; doc 030
 //! step 2c): `key.events_in()` and `key.events_out()` are the main (index 0)
 //! event ports, `events_in_at(i)` and `events_out_at(i)` take an index, and
-//! the one `connect`, `disconnect`, `sources`, `set_sources` and
-//! `disconnect_all` cover an event edge as they do an audio one.
+//! the one `connect`, `disconnect`, `sources`, and `set_sources`
+//! cover an event edge as they do an audio one.
 //!
 //! The figures are the graph's own: which edges it holds.
 
@@ -108,7 +108,7 @@ fn a_missing_event_port_is_refused_and_stores_nothing() {
     let sink = g.add(ForkByClone(Events::<1, 0>));
     let both = g.add(ForkByClone(Events::<1, 1>));
     let gone = g.add(ForkByClone(Events::<1, 1>));
-    g.remove(gone).unwrap();
+    s.remove(gone).unwrap();
     let _ = s.update();
     let g = s.graph();
 
@@ -140,10 +140,10 @@ fn a_missing_event_port_is_refused_and_stores_nothing() {
 }
 
 /// **`set_sources` sets exactly what feeds an event input, and
-/// `disconnect_all` takes it all**: a source listed is kept, one not listed
+/// an empty set takes it all**: a source listed is kept, one not listed
 /// goes, an empty set clears.
 #[test]
-fn set_sources_and_disconnect_all_cover_event_inputs() {
+fn set_sources_covers_event_inputs() {
     let mut s = detached();
     let g = s.graph();
     let a = g.add(ForkByClone(Events::<0, 1>));
@@ -161,9 +161,8 @@ fn set_sources_and_disconnect_all_cover_event_inputs() {
     g.set_sources(input, [b.events_out()]).unwrap();
     assert_eq!(g.sources(input).unwrap(), [b.events_out()]);
 
-    assert!(g.disconnect_all(input).unwrap());
+    g.set_sources(input, []).unwrap();
     assert!(g.sources(input).unwrap().is_empty());
-    assert!(!g.disconnect_all(input).unwrap(), "nothing left to take");
 
     // The refusal names the port and changes nothing.
     assert_eq!(

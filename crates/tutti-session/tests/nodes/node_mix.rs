@@ -134,10 +134,8 @@ fn mix_reads_back_what_was_set() {
     assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::new(0.25));
     r.s.set(r.halve.mix().to(Mix::DRY)).unwrap();
     assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::DRY);
-    // The editor takes it with the next update.
-    assert_eq!(r.s.graph_ref().mix(r.halve).unwrap(), Mix::WET);
     let _ = r.settled();
-    assert_eq!(r.s.graph_ref().mix(r.halve).unwrap(), Mix::DRY);
+    assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::DRY);
 }
 
 /// A mix is a control: setting one marks nothing edited, and the next update
@@ -183,14 +181,9 @@ fn a_removed_node_and_a_bad_mix_are_refused() {
     }
     assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::new(0.5));
 
-    r.s.graph().remove(r.halve).unwrap();
+    r.s.remove(r.halve).unwrap();
     let refused = r.s.set(r.halve.mix().to(Mix::DRY)).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
-    assert_eq!(
-        r.s.graph_ref().mix(r.halve).unwrap_err().node(),
-        r.halve.erase(),
-        "a removed node's mix goes with it, and asking for it is refused"
-    );
 }
 
 /// `out = (in * 0.25, in * 0.25)`: one input, two outputs that name no
