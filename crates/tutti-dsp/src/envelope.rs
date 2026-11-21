@@ -63,7 +63,7 @@ pub enum EnvelopeCurve {
 }
 
 /// What a decay or release time measures.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EnvelopePace {
     /// The time of a fall over the whole scale; a shorter fall takes proportionally less.
     FullScale,
