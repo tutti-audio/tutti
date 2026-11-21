@@ -52,11 +52,34 @@ fn every_control_designs_a_stable_network() {
                 width: StereoWidth::new(x),
                 wet: Db::new(x),
                 freeze: x > 0.5,
+                ..FdnControls::DEFAULT
             };
             let n = design_of(&d, &c);
             assert!(n.is_stable(), "{x}");
             assert!(n.pre_delay <= pre_delay_frames(MAX_PRE_DELAY, SampleRate::SR_48K));
         }
+    }
+}
+
+/// A shimmering layout is the plain one with a shifter in the loop: even lines from 2 to 16 as
+/// the plain layout's, never freezable, and every control, a send and a shift past their ranges
+/// or not finite included, designs a stable network.
+#[test]
+fn a_shimmering_layout_designs_a_stable_network_that_never_freezes() {
+    assert!(FdnLayout::shimmering(3, MaxDecay::DEFAULT).is_none());
+    assert!(FdnLayout::shimmering(18, MaxDecay::DEFAULT).is_none());
+    let d = FdnLayout::shimmering(8, MaxDecay::DEFAULT).unwrap();
+    assert!(d.shimmers() && !FdnLayout::default().shimmers());
+    assert_eq!(d.freeze_mode(), FreezeMode::Decaying);
+    for x in [f64::NAN, f64::INFINITY, -3.0, 40.0, 0.0] {
+        let c = FdnControls {
+            shimmer_pitch: Cents::new(x),
+            shimmer_send: Feedback::new(x),
+            freeze: true,
+            ..FdnControls::DEFAULT
+        };
+        let n = design_of(&d, &c);
+        assert!(n.is_stable() && !n.is_lossless(), "{x}");
     }
 }
 
@@ -191,7 +214,7 @@ fn a_configuration_refuses_a_line_count_it_cannot_hold() {
 fn the_capacity_dominates_where_rounding_matters() {
     let d = FdnLayout::default();
     let rate = SampleRate::SR_192K;
-    let bound = d.capacity(rate);
+    let bound = d.capacity(rate, Samples::ZERO);
     for k in 1..100 {
         let c = FdnControls {
             decay: [d.max_decay; 3],

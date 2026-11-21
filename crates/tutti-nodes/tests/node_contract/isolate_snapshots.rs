@@ -26,8 +26,8 @@ use tutti_nodes::{
     InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LfoConfig,
     LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
     ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig, PitchShifterNode,
-    RingModConfig, RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
-    TremoloConfig, TremoloNode,
+    RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages, SvfFilterConfig,
+    SvfFilterNode, SvfType, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -472,6 +472,24 @@ fn pitch_shifter() {
     })
     .control("pitch", |r| {
         assert!(r.param_set().set(UnitParam::Pitch, -900.0))
+    })
+    .check();
+}
+
+#[test]
+fn shimmer() {
+    IsolateRow::new("ShimmerNode", || {
+        ShimmerNode::<f32>::from(
+            ShimmerConfig::new()
+                .pitch(Cents::new(1200.0))
+                .send(Feedback::new_clamped(0.6)),
+        )
+    })
+    .control("pitch", |r| {
+        assert!(r.param_set().set(UnitParam::Pitch, 700.0))
+    })
+    .control("send", |r| {
+        assert!(r.param_set().set(UnitParam::Feedback, 0.2))
     })
     .check();
 }
