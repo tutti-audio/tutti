@@ -126,7 +126,7 @@ pub struct VoiceNode<F: SamplerFloat> {
     /// flushed where it happens.
     clock: Clock,
     /// The project's tempo map, when the node reads one: lent once per block
-    /// to its clock ([`with_tempo`](Self::with_tempo)).
+    /// to its clock ([`tempo`](Self::tempo)).
     tempo: Option<TempoReader>,
     /// The block read's lanes (`PlaybackSlot::render_into`), built here and
     /// sized from `Prepare::max_block` in `prepare`, on the control thread.
@@ -241,10 +241,10 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// Over a map whose tempo changes, how long a placed voice has played is
     /// the map's seconds between its start and the playhead, not the beats
     /// over the tempo of the moment; see
-    /// [`VoicePool::with_tempo`](super::VoicePool::with_tempo). It matters
+    /// [`VoicePool::tempo`](super::VoicePool::tempo). It matters
     /// only when the voice is placed on the transport. A fork reads the same map.
     #[must_use]
-    pub fn with_tempo(mut self, tempo: TempoReader) -> Self {
+    pub fn tempo(mut self, tempo: TempoReader) -> Self {
         self.tempo = Some(tempo);
         self
     }

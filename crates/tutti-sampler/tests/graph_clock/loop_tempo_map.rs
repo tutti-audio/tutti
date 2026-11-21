@@ -83,7 +83,7 @@ fn render_with(
         let (s, reader) = wait_for_open(&mut streamer, opening).expect("opens");
         stream = Some(s);
         let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)))
-            .with_tempo(transport.settings().tempo_reader());
+            .tempo(transport.settings().tempo_reader());
         ed.insert(NodeKey(1), "voice", voice);
     } else {
         let mut wave = Wave::new(1, SampleRate::of(SR));
@@ -93,7 +93,7 @@ fn render_with(
         }
         let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
-        let pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
+        let pool = VoicePool::new().tempo(transport.settings().tempo_reader());
         let handle = ed.insert(NodeKey(1), "voice", pool).controls;
         handle
             .add(
