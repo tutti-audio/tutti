@@ -102,12 +102,15 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
     .unwrap();
     // An id that was listed and is gone: the shape of a stale id, on both sides.
     let gone = input(&s, "IAC Bus 1");
-    let events = s.devices().subscribe();
+    let mut events = s.devices().subscribe();
     counters.unplug(EndpointId::from_raw(2));
     assert!(
-        tutti_fixtures::block_on_within(events.recv(), std::time::Duration::from_secs(10))
-            .expect("an event before the guard")
-            .is_ok()
+        tutti_fixtures::block_on_within(
+            futures_lite::StreamExt::next(&mut events),
+            std::time::Duration::from_secs(10)
+        )
+        .expect("an event before the guard")
+        .is_some()
     );
     let Err(MidiHardwareError::NotFound(NotFound::Device(id))) =
         s.connect_input(crate::testing::started(), &gone)

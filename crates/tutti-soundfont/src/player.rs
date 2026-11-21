@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
+use tutti_graph::SampleRates;
 use tutti_midi_protocol::{Universal, UniversalReader};
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
@@ -123,8 +124,19 @@ pub(crate) const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
 pub(crate) const CHASE_MESSAGES: usize =
     VoiceAllocator::CHASE_MESSAGES + MidiChannel::COUNT as usize * Channel::CHASE_MESSAGES;
 
-/// The rates a player renders at, in whole hertz.
-const RATES: std::ops::RangeInclusive<i32> = 16_000..=192_000;
+/// The lowest rate a player renders at: the voices' 8-frame chunk is 0.5 ms
+/// there, the longest control step the envelope and filter figures are
+/// made for.
+pub(crate) const MIN_RATE: SampleRate = SampleRate::of(16_000.0);
+
+/// The highest rate a player renders at: the highest the voices' long-envelope
+/// and oscillator-position figures are held at (the 192 kHz tests in `voice`
+/// and `oscillator`).
+pub(crate) const MAX_RATE: SampleRate = SampleRate::of(192_000.0);
+
+/// The rates a player renders at, as the node declares them
+/// ([`Shape::with_rates`](tutti_graph::Shape::with_rates)).
+pub(crate) const RATES: SampleRates = SampleRates::of(MIN_RATE, MAX_RATE);
 
 /// A SoundFont's [`VoiceConfig`]. Where the SoundFont
 /// 2.04 specification says, the rule is the spec's; where it is silent, it is
@@ -608,7 +620,7 @@ impl<F: Float + SimdLanes> Player<F> {
     /// `None` if `sample_rate` is outside 16 to 192 kHz.
     pub(crate) fn rerated(&self, sample_rate: SampleRate) -> Option<Self> {
         let render = Render::new(sample_rate);
-        if !RATES.contains(&render.hz()) {
+        if !RATES.contains(render.rate()) {
             return None;
         }
         // The font has a playable preset, or `self` was not built.

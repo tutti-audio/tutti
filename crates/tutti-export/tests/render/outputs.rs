@@ -618,7 +618,7 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
     match err {
         RenderError::NotCommitted { landed, cause } => {
             assert_eq!(landed, std::slice::from_ref(&first));
-            let tutti_codec::Error::Commit(commit) = &cause else {
+            let tutti_codec::EncodeError::Commit(commit) = &cause else {
                 panic!("a failed rename is a commit error, got {cause:?}");
             };
             let kept = commit.kept().to_path_buf();
@@ -659,7 +659,7 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &mut Control::none(),
     )
     .expect_err("a file cannot replace a directory");
-    let RenderError::Encode(tutti_codec::Error::Commit(commit)) = &err else {
+    let RenderError::Encode(tutti_codec::EncodeError::Commit(commit)) = &err else {
         panic!("a failed first rename is a commit error, got {err:?}");
     };
     std::fs::remove_file(commit.kept()).unwrap();

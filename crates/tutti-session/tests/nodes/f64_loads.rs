@@ -74,11 +74,7 @@ fn a_loaded_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     let path = dir.path().join("ramp64.wav");
     write_f64_ramp(&path);
     let mut s = session();
-    let audio = s
-        .load_audio(&path)
-        .tier(Tier::Resident)
-        .run()
-        .expect("loads");
+    let audio = tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Resident)).expect("loads");
     let AudioData::Resident(wave) = audio.data() else {
         panic!("a resident load");
     };
@@ -114,11 +110,9 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    let opened = s
-        .open_stream(&path, StreamStart::HEAD)
-        .expect("a streamer")
-        .run()
-        .expect("the file reads");
+    let opened =
+        tutti_fixtures::block_on(s.open_stream(&path, StreamStart::HEAD).expect("a streamer"))
+            .expect("the file reads");
     let (stream, reader) = s.apply(opened).expect("the session serves it");
     let dc = s.graph().add(ForkByClone(Dc(FINE)));
     let key = s

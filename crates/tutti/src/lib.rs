@@ -205,7 +205,8 @@ pub use tutti_session::{
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
-    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
+    BindError,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -241,7 +242,7 @@ pub use tutti_session::{
     LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
 };
 #[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream};
+pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream, OpeningStream};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
@@ -422,15 +423,15 @@ pub mod types {
     pub use tutti_curve::Breakpoint;
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
-        Adsr, BarPosition, BeatsPerBar, FRAME_TOLERANCE, FrameClock, InvalidBeatsPerBar,
-        InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, NotOnMidiScale, Note,
-        NoteDuration, NoteModifier, NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass,
-        SegmentOrigin, TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
-        snap_to_whole_frame,
+        Adsr, BarPosition, BeatsPerBar, ClockPass, ClockPassEnd, FRAME_TOLERANCE, FrameClock,
+        InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange,
+        NotOnMidiScale, Note, NoteDuration, NoteModifier, NoteNumberOutOfRange, NoteValue,
+        PitchClass, SegmentOrigin, TimelineSegment, beats_per_sample, first_frame_at_or_after,
+        frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
-        StagedCommitError, StagedFile, StagedKeep, Stamp,
+        Asset, Destination, FileStamp, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
+        StagedCommitError, StagedFile, StagedKeep,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
@@ -526,15 +527,8 @@ pub mod session {
     #[cfg(any(
         feature = "plugin",
         feature = "soundfont",
-        all(
-            feature = "sampler",
-            any(
-                feature = "decode-wav",
-                feature = "decode-flac",
-                feature = "decode-mp3",
-                feature = "decode-ogg"
-            )
-        )
+        feature = "sampler",
+        feature = "midi"
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
@@ -583,7 +577,7 @@ pub mod session {
             feature = "decode-ogg"
         )
     ))]
-    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, Tier};
+    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
@@ -605,7 +599,7 @@ pub mod session {
         RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
-    pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};
+    pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont, LoadingSoundFont};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
@@ -620,7 +614,7 @@ pub mod codec {
         feature = "encode-aiff"
     ))]
     pub use tutti_codec::write_wave;
-    pub use tutti_codec::{Codec, Error, Kept, Unfinished};
+    pub use tutti_codec::{Codec, EncodeError, Kept, Unfinished};
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, Spec, SpecError, can_decode, decodable_extensions,
     };
@@ -862,10 +856,10 @@ pub mod midi {
         TuningFrequency,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyControls, HarmonyNode,
-        MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
-        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
-        TimedHarmony,
+        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
+        HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
+        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
+        SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]
@@ -910,7 +904,7 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport, MidiRouteId,
+        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiReport, MidiRouteId,
         MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
         TrackError,
     };

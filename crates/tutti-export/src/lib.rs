@@ -335,7 +335,7 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// the one step that is not undone: if one fails after others succeeded the
 /// error is [`RenderError::NotCommitted`] and the files already in place are kept.
 /// The finished file whose rename failed is kept beside its path, named by
-/// the error ([`tutti_codec::Error::Commit`]): moving or deleting it is the
+/// the error ([`tutti_codec::EncodeError::Commit`]): moving or deleting it is the
 /// caller's.
 ///
 /// `control` is how a host watches and stops the render: it is told the

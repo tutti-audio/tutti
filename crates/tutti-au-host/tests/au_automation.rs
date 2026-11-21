@@ -13,8 +13,8 @@
 
 #![cfg(target_os = "macos")]
 
-use tutti_au_host::component::find_component;
-use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
+use tutti_au_host::component::{ComponentKey, find_component};
+use tutti_au_host::types::K_AUDIO_UNIT_TYPE_EFFECT;
 use tutti_au_host::{AuController, AuLoaded, AuProcessor};
 use tutti_buffers::InputOutput;
 use tutti_plugin_types::{
@@ -27,14 +27,13 @@ const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: usize = 512;
 
 fn delay_loaded() -> AuLoaded {
-    let desc = AudioComponentDescription {
-        componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-        componentSubType: u32::from_be_bytes(*b"dely"),
-        componentManufacturer: u32::from_be_bytes(*b"appl"),
-        componentFlags: 0,
-        componentFlagsMask: 0,
-    };
-    let comp = find_component(&desc).expect("AUDelay ships with macOS");
+    let desc = ComponentKey::new(
+        K_AUDIO_UNIT_TYPE_EFFECT,
+        u32::from_be_bytes(*b"dely"),
+        u32::from_be_bytes(*b"appl"),
+    )
+    .expect("an exact key");
+    let comp = find_component(desc).expect("AUDelay ships with macOS");
     AuLoaded::new(comp, RATE, BLOCK as u32, &tutti_fixtures::detached_work()).unwrap()
 }
 

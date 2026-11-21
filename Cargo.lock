@@ -2958,6 +2958,8 @@ name = "tutti-midi-hardware"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "futures-core",
+ "futures-lite",
  "getrandom",
  "serde",
  "serde_json",
@@ -2984,6 +2986,8 @@ dependencies = [
 name = "tutti-midi-network"
 version = "0.0.1"
 dependencies = [
+ "futures-core",
+ "futures-lite",
  "getrandom",
  "mdns-sd",
  "proptest",

@@ -19,22 +19,21 @@ use support::au::Au;
 use tutti_au_ffi::property::StreamFormat;
 use tutti_au_ffi::{Element, Scope};
 use tutti_au_host::AuLoaded;
-use tutti_au_host::component::{AuComponentRef, find_component};
-use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
+use tutti_au_host::component::{AuComponentRef, ComponentKey, find_component};
+use tutti_au_host::types::K_AUDIO_UNIT_TYPE_EFFECT;
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::{MainWork, MaxBlock, PluginRef, Prepare, SampleRate};
 use tutti_units::Samples;
 
-fn find_apple_delay() -> Option<AuComponentRef> {
-    let desc = AudioComponentDescription {
-        componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-        componentSubType: u32::from_be_bytes(*b"dely"),
-        componentManufacturer: u32::from_be_bytes(*b"appl"),
-        componentFlags: 0,
-        componentFlagsMask: 0,
-    };
-    find_component(&desc)
+fn find_apple_delay() -> Result<AuComponentRef, tutti_au_host::AuError> {
+    let desc = ComponentKey::new(
+        K_AUDIO_UNIT_TYPE_EFFECT,
+        u32::from_be_bytes(*b"dely"),
+        u32::from_be_bytes(*b"appl"),
+    )
+    .expect("an exact key");
+    find_component(desc)
 }
 
 #[test]
@@ -265,14 +264,13 @@ fn test_render_callback_installed_once() {
 /// the test says so rather than passing silently.
 #[test]
 fn a_refused_initialize_leaves_the_instance_usable() {
-    let desc = AudioComponentDescription {
-        componentType: K_AUDIO_UNIT_TYPE_EFFECT,
-        componentSubType: u32::from_be_bytes(*b"vois"),
-        componentManufacturer: u32::from_be_bytes(*b"appl"),
-        componentFlags: 0,
-        componentFlagsMask: 0,
-    };
-    let comp = find_component(&desc).expect("AUSoundIsolation ships with macOS");
+    let desc = ComponentKey::new(
+        K_AUDIO_UNIT_TYPE_EFFECT,
+        u32::from_be_bytes(*b"vois"),
+        u32::from_be_bytes(*b"appl"),
+    )
+    .expect("an exact key");
+    let comp = find_component(desc).expect("AUSoundIsolation ships with macOS");
     let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     let unit_before = inst.unit().clone();
 
@@ -641,14 +639,13 @@ mod tail {
 
         // An instrument rejects the property outright: that is "no tail
         // concept", which must read as `Unknown` rather than as a zero tail.
-        let instrument = AudioComponentDescription {
-            componentType: K_AUDIO_UNIT_TYPE_MUSIC_DEVICE,
-            componentSubType: u32::from_be_bytes(*b"dls "),
-            componentManufacturer: u32::from_be_bytes(*b"appl"),
-            componentFlags: 0,
-            componentFlagsMask: 0,
-        };
-        let comp = find_component(&instrument).expect("DLSMusicDevice ships with macOS");
+        let instrument = ComponentKey::new(
+            K_AUDIO_UNIT_TYPE_MUSIC_DEVICE,
+            u32::from_be_bytes(*b"dls "),
+            u32::from_be_bytes(*b"appl"),
+        )
+        .expect("an exact key");
+        let comp = find_component(instrument).expect("DLSMusicDevice ships with macOS");
         let mut inner =
             Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).expect("Should create instance");
         inner.initialize().expect("Should initialize");

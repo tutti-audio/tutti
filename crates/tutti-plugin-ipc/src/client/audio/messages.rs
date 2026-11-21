@@ -5,8 +5,8 @@ use super::ask::{Ask, Reply};
 use crate::SlabHandle;
 use dpi::Size;
 use tutti_plugin_types::{
-    BlockStatus, ContentScale, EditorError, PluginFailure, PresetError, ResyncKind, StateError,
-    StateUse,
+    BlockStatus, ContentScale, EditorError, PluginFailure, PresetError, ResyncKind, ServerLosses,
+    StateError, StateUse,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -304,12 +304,7 @@ pub enum IpcEvent {
         reason: String,
     },
     /// What the server's own work lost, cumulative.
-    ServerLosses {
-        /// Commands the server could not give its render thread.
-        commands_refused: u64,
-        /// One-way edits the plugin refused.
-        edits_refused: u64,
-    },
+    ServerLosses(ServerLosses),
     /// The plugin refused the rate it was asked to run at (`Some`: the rate in
     /// Hz and the plugin's reason), or took a rate after refusing one (`None`).
     RateRefusal(Option<RateRefusal>),
@@ -402,8 +397,8 @@ pub(super) struct Unsolicited {
     /// Why the plugin last would not stop, until drained; a later one replaces
     /// it.
     would_not_stop: Option<String>,
-    /// The server's latest cumulative losses (commands, edits), until drained.
-    server_losses: Option<(u64, u64)>,
+    /// The server's latest cumulative losses, until drained.
+    server_losses: Option<ServerLosses>,
     io: bool,
     /// The buses the last `PluginIoChanged` carried, until drained.
     io_layout: Option<tutti_plugin_types::Layout>,
@@ -548,8 +543,8 @@ impl Unsolicited {
 
     /// The server's cumulative losses, replacing any held: a figure that is
     /// cumulative loses nothing by being replaced.
-    pub(super) fn server_losses(&mut self, commands_refused: u64, edits_refused: u64) {
-        self.server_losses = Some((commands_refused, edits_refused));
+    pub(super) fn server_losses(&mut self, losses: ServerLosses) {
+        self.server_losses = Some(losses);
     }
 
     /// A resync request; a second of the same kind adds nothing.
@@ -604,13 +599,7 @@ impl Unsolicited {
             .would_not_stop
             .take()
             .map(|reason| IpcEvent::WouldNotStop { reason });
-        let losses = self
-            .server_losses
-            .take()
-            .map(|(commands_refused, edits_refused)| IpcEvent::ServerLosses {
-                commands_refused,
-                edits_refused,
-            });
+        let losses = self.server_losses.take().map(IpcEvent::ServerLosses);
         layout
             .into_iter()
             .chain(structural.into_iter().flatten())

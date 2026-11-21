@@ -210,6 +210,35 @@ fn a_quad_request_is_honoured_where_the_au_takes_it() {
     }
 }
 
+/// The wiring reports the widths the unit was configured at: a mono request a
+/// unit keeps reads mono, never a made-up stereo, and an instrument's input side
+/// is no bus.
+/// Spec: au.prop.StreamFormat
+#[test]
+fn the_wiring_reports_the_configured_widths() {
+    use tutti_plugin_types::Control;
+    let _g = lock();
+    for unit in ACCEPTS_MONO {
+        let info = unit.require();
+        let has_input = unit.au_type == tutti_au_host::AuType::Effect;
+        let au = Au::new_with_config(info.component, config_at(ChannelLayout::MONO, has_input))
+            .unwrap_or_else(|e| panic!("{}: instantiate in mono failed: {e:?}", unit.label));
+        let wiring = Control::wiring(&*au, tutti_fixtures::main_thread());
+        assert_eq!(
+            wiring.total_outputs(),
+            au.num_outputs() as usize,
+            "{}: the wiring's outputs are the configured width",
+            unit.label
+        );
+        assert_eq!(
+            wiring.total_inputs(),
+            au.num_inputs() as usize,
+            "{}: the wiring's inputs are the configured width, none for an instrument",
+            unit.label
+        );
+    }
+}
+
 /// `new` must keep its stereo default, because the `tutti-plugin-server` loader
 /// calls it and a silent narrowing there would change every existing host's
 /// channel count.
