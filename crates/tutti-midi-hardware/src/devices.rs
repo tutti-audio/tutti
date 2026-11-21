@@ -110,8 +110,12 @@ impl Inbox {
             .collect()
     }
 
-    fn forget(&mut self, id: u64) {
-        self.wakers.retain(|(held, _)| *held != id);
+    /// Removes the waker registered under `id`; the caller drops it once it
+    /// holds no lock, since a waker's drop can run its executor's code.
+    #[must_use = "drop it after releasing the inbox lock"]
+    fn forget(&mut self, id: u64) -> Option<Waker> {
+        let at = self.wakers.iter().position(|(held, _)| *held == id)?;
+        Some(self.wakers.swap_remove(at).1)
     }
 }
 
@@ -558,11 +562,15 @@ impl Future for Recv<'_> {
         let this = self.get_mut();
         let mut inbox = this.events.queue.inbox();
         if let Some(event) = inbox.events.pop_front() {
-            this.id.take().into_iter().for_each(|id| inbox.forget(id));
+            let old = this.id.take().and_then(|id| inbox.forget(id));
+            drop(inbox);
+            drop(old);
             return Poll::Ready(Ok(event));
         }
         if let Some(failure) = inbox.ended.clone() {
-            this.id.take().into_iter().for_each(|id| inbox.forget(id));
+            let old = this.id.take().and_then(|id| inbox.forget(id));
+            drop(inbox);
+            drop(old);
             return Poll::Ready(Err(failure));
         }
         // A re-poll replaces this future's own waker; a waker already taken by a
@@ -571,10 +579,17 @@ impl Future for Recv<'_> {
             inbox.next_id += 1;
             inbox.next_id
         });
-        match inbox.wakers.iter_mut().find(|(held, _)| *held == id) {
-            Some((_, waker)) => waker.clone_from(cx.waker()),
-            None => inbox.wakers.push((id, cx.waker().clone())),
-        }
+        // The replaced waker is dropped once the inbox lock is released.
+        let old = match inbox.wakers.iter_mut().find(|(held, _)| *held == id) {
+            Some((_, waker)) if waker.will_wake(cx.waker()) => None,
+            Some((_, waker)) => Some(std::mem::replace(waker, cx.waker().clone())),
+            None => {
+                inbox.wakers.push((id, cx.waker().clone()));
+                None
+            }
+        };
+        drop(inbox);
+        drop(old);
         Poll::Pending
     }
 }
@@ -582,7 +597,8 @@ impl Future for Recv<'_> {
 impl Drop for Recv<'_> {
     fn drop(&mut self) {
         if let Some(id) = self.id {
-            self.events.queue.inbox().forget(id);
+            let old = self.events.queue.inbox().forget(id);
+            drop(old);
         }
     }
 }
