@@ -395,11 +395,11 @@ impl Session {
                 Ok(ControlReply::SampleRateSet { rate, refusal }.into())
             }
             M::SetRenderMode { mode } => {
-                // The plugin's answer is deliberately not returned to the host:
-                // whether a plugin honours the mode is a load-time capability
-                // (`Features::RENDER_MODE`), not a per-call outcome, and the
-                // host already has it. Logged rather than dropped so a refusal
-                // is greppable when a bounce sounds like the live path.
+                // A plugin that has the capability (`Features::RENDER_MODE`) and
+                // refuses the mode tells the host as news
+                // (`News::RenderModeNotApplied`), through the plugin's poll; one
+                // without it is left in its mode and says nothing, since the
+                // host has the capability.
                 if let Some(plugin) = self.plugin.as_mut()
                     && !plugin.plugin_mut().set_render_mode(main, mode)
                 {

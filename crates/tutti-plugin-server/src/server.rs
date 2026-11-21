@@ -69,6 +69,10 @@ pub enum Ended {
     /// until the process ends: how many. Only a supervisor that runs the server
     /// itself reads it, as [`EXIT_TASKS_DETACHED`].
     TasksDetached(u64),
+    /// Every plugin was destroyed, but a render lane ended without handing its
+    /// state back (it panicked, or was dropped under the executor's shutdown):
+    /// how many. Read as [`EXIT_RENDER_LANE_LOST`].
+    RenderLaneLost(u64),
 }
 
 /// The exit status of a server whose session ended with [`Ended::PluginLeaked`].
@@ -80,6 +84,25 @@ pub const EXIT_PLUGIN_LEAKED: u8 = 3;
 /// No host reads it, as for [`EXIT_PLUGIN_LEAKED`]: the host's own detached
 /// tasks are its count, `PluginControls::detached_tasks`.
 pub const EXIT_TASKS_DETACHED: u8 = 4;
+
+/// The exit status of a server whose session ended with [`Ended::RenderLaneLost`].
+/// No host reads it, as for [`EXIT_PLUGIN_LEAKED`].
+pub const EXIT_RENDER_LANE_LOST: u8 = 6;
+
+/// The exit status of a server that did not start because the thread that
+/// watches its host could not start ([`IpcError::HostUnwatched`]). The host
+/// reads it as how its server ended.
+pub const EXIT_HOST_UNWATCHED: u8 = 5;
+
+/// The exit status of a server whose session failed with `error`:
+/// [`EXIT_HOST_UNWATCHED`] for [`IpcError::HostUnwatched`], and 1 for any other.
+#[must_use]
+pub fn failure_status(error: &IpcError) -> u8 {
+    match error {
+        IpcError::HostUnwatched(_) => EXIT_HOST_UNWATCHED,
+        _ => 1,
+    }
+}
 
 /// The subprocess-side server: one hosted plugin, one host connection.
 ///
@@ -130,8 +153,9 @@ impl PluginServer {
     ///
     /// # Errors
     ///
-    /// The thread is not the process's main thread, or the OS refused the
-    /// session's bells.
+    /// The thread is not the process's main thread, the OS refused the
+    /// session's bells, or the thread that watches the host could not start
+    /// ([`IpcError::HostUnwatched`], [`EXIT_HOST_UNWATCHED`]).
     pub fn new(socket: PathBuf) -> IpcResult<Self> {
         let main = MainThreadMarker::new().ok_or(IpcError::ProtocolError(
             "the plugin server must be built on the process's main thread",
@@ -145,7 +169,8 @@ impl PluginServer {
             Arc::clone(&session.ties().host_gone),
             session.ties().bell.clone(),
             shutdown_under_way,
-        );
+        )
+        .map_err(IpcError::HostUnwatched)?;
         Ok(Self {
             socket,
             session,
@@ -196,13 +221,18 @@ impl PluginServer {
         // The plugin and the session go with the server: what they leak, they
         // leak here.
         drop(self);
-        served.map(
-            |()| match (crate::leak::happened(), crate::leak::detached()) {
-                (true, _) => Ended::PluginLeaked,
-                (false, 0) => Ended::Clean,
-                (false, detached) => Ended::TasksDetached(detached),
-            },
-        )
+        served.map(|()| {
+            match (
+                crate::leak::happened(),
+                crate::leak::lanes_lost(),
+                crate::leak::detached(),
+            ) {
+                (true, ..) => Ended::PluginLeaked,
+                (false, lost @ 1.., _) => Ended::RenderLaneLost(lost),
+                (false, 0, 0) => Ended::Clean,
+                (false, 0, detached) => Ended::TasksDetached(detached),
+            }
+        })
     }
 
     /// The phases of [`run`](Self::run), up to the plugin's release.
@@ -264,12 +294,7 @@ impl PluginServer {
     fn take_home(&self, render: RenderThread) {
         match render.stop_within(RENDER_STOP_PATIENCE) {
             Ok(_side) => {}
-            Err(NotHome::Panicked(panicked)) => {
-                tracing::error!("plugin-server: {panicked}");
-            }
-            Err(NotHome::Dropped) => {
-                tracing::error!("plugin-server: the render lane was dropped with its state");
-            }
+            Err(lost @ (NotHome::Panicked(_) | NotHome::Dropped)) => note_lane_lost(&lost),
             Err(NotHome::Stuck) => {
                 tracing::error!(
                     "plugin-server: the render lane is stuck in the plugin; ending the process"
@@ -557,18 +582,37 @@ pub(crate) const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration
 /// ended outright: a bound on a wait for the shutdown, never a delay to it.
 const HOST_GONE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Logs and counts ([`leak::lanes_lost`](crate::leak::lanes_lost)) a render
+/// lane that ended without its state: the count is what the exit status says
+/// ([`EXIT_RENDER_LANE_LOST`]). A lane still running is not one: it ends the
+/// process.
+fn note_lane_lost(lost: &NotHome) {
+    match lost {
+        NotHome::Panicked(panicked) => tracing::error!("plugin-server: {panicked}"),
+        NotHome::Dropped => {
+            tracing::error!("plugin-server: the render lane was dropped with its state");
+        }
+        NotHome::Stuck => return,
+    }
+    crate::leak::note_lane_lost();
+}
+
 /// Starts the watch on the host. When the host ends, `host_gone` is set and
 /// `bell` rung so the main loop shuts down; if `shutdown_under_way` is not sent to within
 /// [`HOST_GONE_GRACE`] the socket file at `socket_path` is removed and the
 /// process ended outright. A server whose host is unknown cannot watch it: that
 /// is logged, and only the host's connections end it.
+///
+/// # Errors
+///
+/// The watch's thread could not be started.
 fn watch_host(
     executor: &Executor,
     socket_path: std::path::PathBuf,
     host_gone: Arc<AtomicBool>,
     bell: crate::main_loop::Bell,
     shutdown_under_way: mpsc::Receiver<()>,
-) -> Option<Task<()>> {
+) -> std::io::Result<Option<Task<()>>> {
     let watch = tutti_plugin_ipc_ffi::watch_spawner(executor, move || {
         tracing::info!("the host process is gone; shutting the server down");
         host_gone.store(true, Ordering::Release);
@@ -581,14 +625,10 @@ fn watch_host(
             tutti_plugin_ipc_ffi::terminate_process()
         }
     });
-    match watch {
-        Ok(Some(task)) => return Some(task),
-        Ok(None) => {
-            tracing::warn!("the host's process id is unknown: this server cannot notice its end");
-        }
-        Err(e) => tracing::warn!("the host watch cannot start: {e}"),
+    if let Ok(None) = watch {
+        tracing::warn!("the host's process id is unknown: this server cannot notice its end");
     }
-    None
+    watch
 }
 
 #[cfg(test)]
@@ -756,6 +796,55 @@ mod beat_tests {
         assert_eq!(
             beat_while(&executor, None, PACE, ID, &restoring(false), || 7),
             7
+        );
+    }
+}
+
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+
+    /// **A server that cannot watch its host ends with its own named status**,
+    /// distinct from every other, and any other failure ends with 1. The thread
+    /// that watches cannot be made to fail from a test, so the mapping the
+    /// binary uses is what is pinned.
+    #[test]
+    fn a_server_that_cannot_watch_its_host_has_its_own_exit_status() {
+        let unwatched = IpcError::HostUnwatched(std::io::Error::other("no thread"));
+        assert_eq!(failure_status(&unwatched), EXIT_HOST_UNWATCHED);
+        assert_eq!(
+            failure_status(&IpcError::ProtocolError("another failure")),
+            1
+        );
+        let statuses = [
+            EXIT_PLUGIN_LEAKED,
+            EXIT_TASKS_DETACHED,
+            EXIT_HOST_UNWATCHED,
+            EXIT_RENDER_LANE_LOST,
+        ];
+        for (at, status) in statuses.iter().enumerate() {
+            assert!(*status > 1, "{status} is not 0 or the generic failure");
+            assert!(!statuses[..at].contains(status), "{status} is named twice");
+        }
+    }
+
+    /// **A render lane that panicked or was dropped is counted; one still
+    /// running is not**: it ends the process, and the count is what the exit
+    /// status reads.
+    #[test]
+    fn a_render_lane_that_panicked_or_was_dropped_is_counted() {
+        assert_eq!(crate::leak::lanes_lost(), 0);
+        note_lane_lost(&NotHome::Dropped);
+        note_lane_lost(&NotHome::Panicked(tutti_platform::Panicked {
+            name: "plugin-render".to_owned(),
+            message: "boom".to_owned(),
+        }));
+        assert_eq!(crate::leak::lanes_lost(), 2);
+        note_lane_lost(&NotHome::Stuck);
+        assert_eq!(
+            crate::leak::lanes_lost(),
+            2,
+            "a stuck lane ends the process"
         );
     }
 }
