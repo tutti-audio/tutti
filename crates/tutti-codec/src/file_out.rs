@@ -34,7 +34,7 @@ use crate::spec::Spec;
 /// cannot rotate the file's channels.
 ///
 /// Writes do blocking file I/O: drive the sink from a thread of its own
-/// (`tutti-session`'s `Recorder` is one), never from the audio thread.
+/// (a session take's pump is one), never from the audio thread.
 ///
 /// # Failure
 ///

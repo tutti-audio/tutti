@@ -396,7 +396,7 @@ Going runtime cost one compile-time guarantee: "a stereo source cannot feed a
 units rule that **an omission must ship with its replacement in the same
 change**, it was replaced by two runtime checks, both landed together: the
 pump step of `tutti_session::PumpLoop` carries a `debug_assert_eq!` on the two
-layouts, and `tutti_session::Recorder::start`
+layouts, and `tutti_session::PumpLoop::new`
 — the one place both endpoints are in scope before a frame moves — returns an
 error. Neither is optional bookkeeping; deleting either re-opens the hole.
 

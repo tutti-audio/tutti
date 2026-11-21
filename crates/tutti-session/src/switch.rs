@@ -166,8 +166,9 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     ) -> std::result::Result<LiveSession<K, F>, ClockError<Self>> {
         let config = device.into();
         let device = config.device().clone();
+        let executor = self.background.executor().clone();
         let opened = DeviceHost::open(self.running.audio_host).and_then(|host| {
-            let engine = AudioEngine::open(host, config)?;
+            let engine = AudioEngine::open(&executor, host, config)?;
             let resolved = engine.resolve_device()?;
             Ok((engine, resolved))
         });

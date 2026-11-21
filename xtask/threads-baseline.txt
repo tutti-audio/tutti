@@ -17,7 +17,5 @@
 # core-foundation
 
 # core-engine
-tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/owner.rs::Owned::spawn  core-engine
-tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  core-engine
 
 # plugin

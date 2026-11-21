@@ -15,7 +15,7 @@ use super::memory_source::{MemorySource, VoiceWindow};
 use super::node::*;
 use super::pool::*;
 use super::types::*;
-use crossbeam_channel::bounded;
+use std::sync::mpsc::sync_channel;
 use std::sync::{Arc, Mutex};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
@@ -1521,9 +1521,9 @@ fn test_streamer(
     capacity: usize,
 ) -> (
     crate::streamer::StreamerPort<f32>,
-    crossbeam_channel::Receiver<crate::streamer::StreamerCommand<f32>>,
+    std::sync::mpsc::Receiver<crate::streamer::StreamerCommand<f32>>,
 ) {
-    let (tx, rx) = bounded(capacity);
+    let (tx, rx) = sync_channel(capacity);
     (crate::streamer::StreamerPort::new(tx), rx)
 }
 
@@ -1724,7 +1724,7 @@ fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
     let id = SlotId(1);
     add_with_stream(&handle, id, streaming_voice_of(1), &commands);
     assert_eq!(
-        streamer.len(),
+        streamer.try_iter().count(),
         0,
         "an add with nothing to set sends nothing"
     );

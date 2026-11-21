@@ -381,7 +381,8 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         } = self.config;
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
-        let mut parts = self.parts(rate, max_block, None, root)?;
+        let runtime = Self::session_executor()?;
+        let mut parts = self.parts(runtime, rate, max_block, None, root)?;
         // The width of every block the host pulls.
         let engine = parts.graph.engine(
             &parts.transport,
@@ -483,7 +484,8 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         } = self.config;
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
-        let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
+        let runtime = Self::session_executor()?;
+        let mut parts = self.parts(runtime, rate, max_block, Some(max_block), root)?;
         let engine = parts.graph.engine(
             &parts.transport,
             layout,
@@ -558,10 +560,11 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// built over it.
     pub fn build(self) -> Result<crate::LiveSession<&'static str, F>> {
         crate::background::require(crate::BackgroundWork::Device)?;
+        let runtime = Self::session_executor()?;
         let host = tutti_cpal::DeviceHost::open(self.opts.host)?;
-        let engine = tutti_cpal::AudioEngine::open(host, self.config.clone())?;
+        let engine = tutti_cpal::AudioEngine::open(&runtime.0, host, self.config.clone())?;
         let device = self.config.device().clone();
-        self.build_on(engine, device, |engine, state| engine.start(state))
+        self.build_on(runtime, engine, device, |engine, state| engine.start(state))
     }
 
     /// [`build`](Self::build) on a stream driver of the
@@ -584,7 +587,9 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         D::Error: Into<tutti_cpal::DeviceError>,
     {
         let device = self.config.device().clone();
+        let runtime = Self::session_executor()?;
         self.build_on(
+            runtime,
             tutti_cpal::AudioEngine::from_spec(spec),
             device,
             |engine, state| engine.start_with(state, driver),
@@ -599,6 +604,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     #[cfg(feature = "device")]
     fn build_on(
         mut self,
+        runtime: (tutti_platform::Executor, crate::background::Running),
         mut audio_engine: tutti_cpal::AudioEngine,
         chosen: tutti_cpal::DeviceSelector,
         start: impl FnOnce(
@@ -610,7 +616,13 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         let spec = audio_engine.spec().clone();
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
-        let mut parts = self.parts(spec.sample_rate, LIVE_MAX_BLOCK, spec.quantum, root)?;
+        let mut parts = self.parts(
+            runtime,
+            spec.sample_rate,
+            LIVE_MAX_BLOCK,
+            spec.quantum,
+            root,
+        )?;
         let engine = parts.graph.engine(
             &parts.transport,
             spec.channels,
@@ -891,6 +903,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// metronome and the engine's MIDI nodes.
     fn parts(
         &mut self,
+        (executor, background): (tutti_platform::Executor, crate::background::Running),
         rate: SampleRate,
         max_block: MaxBlock,
         quantum: Option<MaxBlock>,
@@ -900,7 +913,6 @@ impl<C: Clock> SessionBuilder<C> {
         if self.opts.midi_hardware.is_some() {
             crate::background::require(crate::BackgroundWork::MidiHardware)?;
         }
-        let (executor, background) = Self::session_executor()?;
         // Built first so its port list can feed the graph's MIDI input.
         #[cfg(feature = "midi-hardware")]
         let backend = self.opts.midi_backend.take();
@@ -1034,7 +1046,7 @@ impl<C: Clock> SessionBuilder<C> {
             ),
             sampler,
             devices: crate::session::parts::DevicePart::new(&executor),
-            inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
+            inputs: crate::session::parts::Inputs::from_options(&mut self.opts, &executor),
             bounce: Default::default(),
             background: crate::background::Background::new(executor, parts.background, bells),
             plugins,

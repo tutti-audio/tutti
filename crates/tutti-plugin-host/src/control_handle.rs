@@ -212,7 +212,7 @@ impl PluginStatus {
 ///
 /// These are deliberately **not** `async` and do not return futures. That would
 /// put an executor choice inside a library that needs none, and would not save
-/// a host any work: the reply arrives on a `crossbeam` channel, so a future
+/// a host any work: the reply arrives on a channel, so a future
 /// would have to be driven by *something* — which is the same something that
 /// can run the blocking call directly.
 #[derive(Clone)]

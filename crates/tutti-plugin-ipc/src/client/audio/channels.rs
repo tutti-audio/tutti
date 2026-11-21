@@ -19,7 +19,7 @@ use super::ask::ControlSlot;
 use super::ask::Reply;
 use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use crate::transport::control::{ControlUnparker, ControlWait, control_unparker};
-use crossbeam::queue::ArrayQueue;
+use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
