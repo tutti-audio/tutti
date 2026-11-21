@@ -860,7 +860,9 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
 
     let refusing = MockServer::start("slab-refused", |msg| match msg {
         ControlRequest::SetupSharedMemory { .. } => Action::Reply(Box::new(ControlReply::Error {
-            message: "the slab does not open".into(),
+            error: tutti_plugin_types::ServerError::SlabNotOpened {
+                reason: "the slab does not open".into(),
+            },
         })),
         _ => Action::Silent,
     });

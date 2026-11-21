@@ -171,7 +171,12 @@ pub(crate) mod wire;
 ///   frame. The receiver refuses an object of another length than
 ///   declared, a length over `MAX_STATE_BYTES`, and on Linux one that is not a
 ///   sealed memfd.
-pub const PROTOCOL_VERSION: u32 = 55;
+/// - **Version 56** types two replies' payloads. `SampleRateSet` carries a
+///   `refusal` (`RateRefusalCause`: unconfigured, rolled back to a running
+///   rate, deactivated, no answer) in place of the reason text, and `Error`
+///   carries a `ServerError` (a load's stage and reason, a state's two lengths,
+///   a slab setup's failure) in place of the message.
+pub const PROTOCOL_VERSION: u32 = 56;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///

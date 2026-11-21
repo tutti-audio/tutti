@@ -149,6 +149,10 @@ pub enum IpcError {
     #[error(transparent)]
     RateRefused(#[from] crate::RateRefusal),
 
+    /// The plugin-server failed a request it was asked.
+    #[error("the plugin-server failed the request: {0}")]
+    Server(#[from] crate::ServerError),
+
     /// The served plugin has no origin to load a fresh instance from.
     #[error("the served plugin has no origin")]
     NoOrigin,
@@ -449,20 +453,6 @@ impl From<PluginError> for StateError {
     }
 }
 
-impl IpcError {
-    /// Turn a server-reported error message into a `LoadFailed` at the
-    /// `Opening` stage. The stage is coarse because the server's own
-    /// error-message protocol doesn't carry a stage tag.
-    #[must_use]
-    pub fn load_from_server(path: &std::path::Path, message: String) -> Self {
-        Self::LoadFailed {
-            path: Some(path.to_path_buf()),
-            stage: LoadStage::Opening,
-            reason: message,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,7 +558,11 @@ mod tests {
     /// and reason through the narrowing.
     #[test]
     fn a_load_failure_names_its_path_only_when_it_has_one() {
-        let with = IpcError::load_from_server(std::path::Path::new("/x.vst3"), "refused".into());
+        let with = IpcError::LoadFailed {
+            path: Some(PathBuf::from("/x.vst3")),
+            stage: LoadStage::Opening,
+            reason: "refused".into(),
+        };
         assert_eq!(
             with.to_string(),
             "the plugin at /x.vst3 failed to load at the opening library stage: refused"

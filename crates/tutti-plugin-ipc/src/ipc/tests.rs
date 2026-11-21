@@ -356,7 +356,9 @@ fn mock_with(
                         id,
                         &if refusing.load(std::sync::atomic::Ordering::Acquire) {
                             ControlReply::Error {
-                                message: "the slab does not open".into(),
+                                error: tutti_plugin_types::ServerError::SlabNotOpened {
+                                    reason: "the slab does not open".into(),
+                                },
                             }
                         } else {
                             ControlReply::SharedMemoryReady

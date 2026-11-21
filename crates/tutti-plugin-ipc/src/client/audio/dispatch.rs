@@ -1130,7 +1130,7 @@ pub(super) fn handle_control(
             )?;
             let value = match wait_for(stream, inbox, state, id, None)? {
                 Waited::Reply(ControlReply::EditorOpened { result }) => result,
-                Waited::Reply(ControlReply::Error { message }) => Err(message),
+                Waited::Reply(ControlReply::Error { error }) => Err(error.to_string()),
                 Waited::Reply(other) => Err(format!("unexpected reply to OpenEditor: {other:?}")),
                 Waited::Pending | Waited::GaveUp => Err(format!(
                     "the server did not open the editor within {window:?}"
@@ -1158,7 +1158,7 @@ pub(super) fn handle_control(
             )?;
             let value = match wait_for(stream, inbox, state, id, None)? {
                 Waited::Reply(ControlReply::EditorSized { result }) => result,
-                Waited::Reply(ControlReply::Error { message }) => Err(message),
+                Waited::Reply(ControlReply::Error { error }) => Err(error.to_string()),
                 Waited::Reply(other) => {
                     Err(format!("unexpected reply to SetEditorSize: {other:?}"))
                 }
@@ -1641,7 +1641,7 @@ mod tests {
         let error = |id| ControlFrame::Reply {
             id,
             reply: ControlReply::Error {
-                message: "refused".into(),
+                error: tutti_plugin_types::ServerError::StateWithoutObject,
             },
         };
         assert!(matches!(

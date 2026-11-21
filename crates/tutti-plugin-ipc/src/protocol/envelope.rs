@@ -21,7 +21,7 @@ use tutti_plugin_types::{BlockStatus, ContentScale, PluginId, StateUse};
 use tutti_plugin_types::{
     LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
 };
-use tutti_plugin_types::{MidiEventVec, RateRefusalCause};
+use tutti_plugin_types::{MidiEventVec, RateRefusalCause, ServerError};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -497,8 +497,8 @@ pub enum ControlReply {
     /// Fire-and-forget: nothing awaits this, so a request that a caller blocks
     /// on needs its own reply variant rather than relying on this.
     Error {
-        /// Human-readable reason, already formatted subprocess-side.
-        message: String,
+        /// What failed.
+        error: ServerError,
     },
     /// The subprocess is exiting.
     Shutdown,

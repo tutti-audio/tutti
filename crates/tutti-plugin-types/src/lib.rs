@@ -236,6 +236,7 @@ mod rate_refusal;
 mod render_mode;
 mod reports;
 mod requests;
+mod server_error;
 mod state_frame;
 mod state_use;
 mod sysex;
@@ -303,6 +304,7 @@ pub use process_wake::ProcessWake;
 pub use rate_refusal::{RateRefusal, RateRefusalCause};
 pub use reports::{ReportDrain, ReportSink, reports};
 pub use requests::taken;
+pub use server_error::ServerError;
 pub use state_frame::{
     BareFrame, FrameReader, MAX_STATE_BYTES, Opened, StateFrame, StateFrameError,
 };
