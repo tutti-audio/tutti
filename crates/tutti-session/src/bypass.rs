@@ -227,8 +227,8 @@ pub(crate) mod tests {
     use tutti_plugin_host::{ParameterChangeSink, PluginHandle, PluginParamValues};
     use tutti_plugin_types::{
         AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, Health,
-        LoadedPlugin, OwnBypass, ParamFlags, ParameterInfo, PluginDescriptor, PluginFailure,
-        RenderMode, StateError, StateUse, TerminationReason, bypass_value, is_bypassed,
+        LoadedPlugin, OwnBypass, ParamFlags, ParameterInfo, PluginFailure, RenderMode, StateError,
+        StateUse, TerminationReason, bypass_value, is_bypassed,
     };
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -348,7 +348,7 @@ pub(crate) mod tests {
         let handle = PluginHandle::from_backend(
             Arc::clone(&plugin),
             None,
-            PluginDescriptor::default(),
+            tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
             loaded,
             ParameterChangeSink::default(),
         )

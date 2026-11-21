@@ -11,7 +11,8 @@ use tutti_buffers::FloatWidth;
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
     ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamAccess, ParameterInfo,
-    PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleRate, Samples,
+    PluginBus, PluginClass, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleRate,
+    Samples,
 };
 use tutti_units::ParamId;
 
@@ -391,7 +392,7 @@ fn mock_with(
         guard: Arc::new(ProcessGuard::for_test(
             crate::unique_socket_path().expect("the OS has a random source"),
         )),
-        descriptor: PluginDescriptor::default(),
+        descriptor: PluginDescriptor::new("", PluginClass::Unknown),
         loaded: LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(ChannelLayout::STEREO)],

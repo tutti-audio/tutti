@@ -17,7 +17,7 @@ use crate::{ClapFeature, PluginRole, PluginVersion, Vst3SubCategories, Widths};
 /// Distinct from [`LoadedPlugin`](crate::LoadedPlugin), which carries the
 /// runtime engine-wiring data (bus widths, latency) produced at *load* time and
 /// never persisted.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PluginDescriptor {
     /// Display name.
@@ -182,12 +182,11 @@ impl PluginDescriptor {
 /// The inner types are self-contained mirrors rather than the format host
 /// crates' own enums, so a value deserializes regardless of which format
 /// features the reading side enabled.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PluginClass {
     /// Classification unavailable — the plugin couldn't be probed (e.g. a
     /// blacklisted record) or came from a filename-only fallback.
-    #[default]
     Unknown,
     /// VST2 plugin category (`effFlagsIsSynth` / `getPlugCategory`).
     Vst2 {
@@ -390,7 +389,10 @@ mod tests {
     /// silently assert "no editor" instead of staying silent.
     #[test]
     fn a_defaulted_descriptor_claims_nothing_about_its_editor() {
-        assert_eq!(PluginDescriptor::default().editor, EditorPresence::Unknown);
+        assert_eq!(
+            PluginDescriptor::new("", PluginClass::Unknown).editor,
+            EditorPresence::Unknown
+        );
         assert_eq!(
             PluginDescriptor::new("name", PluginClass::Unknown).editor,
             EditorPresence::Unknown

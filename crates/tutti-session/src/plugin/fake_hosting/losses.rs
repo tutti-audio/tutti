@@ -26,7 +26,7 @@ fn handle() -> (PluginHandle, FakePlugin) {
     let handle = PluginHandle::from_backend(
         Arc::new(Inert::default()),
         Some(control),
-        Default::default(),
+        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         Default::default(),
     );

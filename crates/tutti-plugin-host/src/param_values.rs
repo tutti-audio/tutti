@@ -325,12 +325,12 @@ mod tests {
     }
 
     use crate::ParameterChangeSink;
-    use tutti_plugin_types::ParameterInfo;
     use tutti_plugin_types::StateError;
     use tutti_plugin_types::{
         AnyThread, AutomationMode, AutomationModeError, Health, PluginFailure, RenderMode,
         TerminationReason,
     };
+    use tutti_plugin_types::{ParameterInfo, PluginClass, PluginDescriptor};
     use tutti_units::Normalized;
     use tutti_units::ParamId;
 
@@ -409,7 +409,7 @@ mod tests {
         let handle = PluginHandle::from_backend(
             Arc::new(FakeParams { params }),
             None,
-            Default::default(),
+            PluginDescriptor::new("", PluginClass::Unknown),
             Default::default(),
             sink.clone(),
         );

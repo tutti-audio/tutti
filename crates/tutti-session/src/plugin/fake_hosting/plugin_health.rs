@@ -96,7 +96,7 @@ fn handle_with(cause: Option<PluginFailure>) -> PluginHandle {
     PluginHandle::from_backend(
         Arc::new(FakeBackend { cause }),
         None,
-        Default::default(),
+        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         Default::default(),
     )
@@ -307,7 +307,7 @@ fn session_reporting() -> (
     let handle = PluginHandle::from_backend(
         Arc::new(FakeBackend { cause: None }),
         None,
-        Default::default(),
+        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         params.clone(),
     )

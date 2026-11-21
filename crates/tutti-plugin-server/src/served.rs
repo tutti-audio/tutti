@@ -23,9 +23,9 @@ use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, LoadStage,
     LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
-    ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult, Prepare,
-    Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, SampleRate, Samples,
-    Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
+    ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult,
+    Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, SampleRate,
+    Samples, Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -346,7 +346,7 @@ impl<L: ServerSide> Server<L> {
             lifecycle: Lifecycle::new(loaded),
             state: Lifecycle::<L>::initial_state(),
             hand,
-            descriptor: PluginDescriptor::default(),
+            descriptor: PluginDescriptor::new("", PluginClass::Unknown),
             wiring: LoadedPlugin::default(),
             announced: Layout::default(),
             requests: Vec::new(),

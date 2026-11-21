@@ -208,7 +208,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
     let handle = PluginHandle::from_backend(
         Arc::clone(&fake),
         None,
-        Default::default(),
+        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         Default::default(),
     )
@@ -877,7 +877,7 @@ fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin
     let handle = PluginHandle::from_backend(
         Arc::clone(fake),
         None,
-        Default::default(),
+        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         Default::default(),
     );
