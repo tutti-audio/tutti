@@ -938,12 +938,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
         let capacity = rate.one_second();
-        let reader = self.graph.taps().open(
-            &ports,
-            TapOptions::new(capacity)
-                .align(TapAlign::Raw)
-                .bell(stop.bell.clone()),
-        )?;
+        let reader = self
+            .graph
+            .taps()
+            .open(&ports, TapOptions::new(capacity).align(TapAlign::Raw))?;
 
         let id = self.inputs.takes().next_id();
         let shared = Arc::new(Shared::default());
@@ -1151,11 +1149,7 @@ struct Pump<F: Float> {
 }
 
 impl<F: Float> Pump<F> {
-    async fn run(
-        mut self,
-        report: &Report,
-        listener: &mut Listener,
-    ) -> Result<Recorded, TakeError> {
+    async fn run(mut self, report: &Report, stop: &mut Listener) -> Result<Recorded, TakeError> {
         let layout = self.reader.layout();
         let mut scratch = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
         let silence = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
@@ -1183,8 +1177,13 @@ impl<F: Float> Pump<F> {
                     removed = true;
                     break 'pump;
                 }
-                // The tap rings as it writes a block and when it ends.
-                listener.rung().await;
+                // The tap rings as it writes a block and when it ends; the stop
+                // bell rings for a stop or the session's end.
+                let frames = self
+                    .reader
+                    .notified()
+                    .expect("a session's tap carries the session's bell");
+                futures_lite::future::or(frames, stop.rung()).await;
                 continue;
             }
             let first = self.reader.next_frame();

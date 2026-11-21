@@ -57,6 +57,18 @@ fn wire(s: &mut Session, node: NodeKey) {
     }
 }
 
+/// The graph's handle of `clip`, cloned: the cells and verbs a test reads
+/// beside the key's targets.
+fn handle_of(
+    s: &Session,
+    clip: &tutti_session::Key<Clip<f32>>,
+) -> tutti_sampler::VoiceNodeHandle<f32> {
+    s.graph_ref()
+        .handle(clip)
+        .expect("the clip is in the graph")
+        .clone()
+}
+
 /// A clip of constant level placed at `at`, wired to the output.
 fn placed(
     s: &mut Session,
@@ -70,7 +82,8 @@ fn placed(
         .expect("a placeable wave")
         .at(at)
         .gain(Amplitude::new(1.0));
-    let (key, handle) = s.graph().add(clip);
+    let (key, _) = s.graph().add(clip);
+    let handle = handle_of(s, &key);
     wire(s, key.erase());
     let _ = s.update();
     (key, handle)
@@ -139,7 +152,8 @@ fn placed_ramp(
     let clip = Clip::new(wave)
         .and_then(|c| c.channels(ChannelLayout::STEREO))
         .expect("a placeable wave");
-    let (key, handle) = s.graph().add(clip);
+    let (key, _) = s.graph().add(clip);
+    let handle = handle_of(s, &key);
     wire(s, key.erase());
     let _ = s.update();
     (key, handle)
@@ -293,7 +307,8 @@ impl Rig {
             }
             (Clip::new(wave).expect("a placeable wave"), None)
         };
-        let (clip, handle) = s.graph().add(clip.at(Beat::new(0.0)));
+        let (clip, _) = s.graph().add(clip.at(Beat::new(0.0)));
+        let handle = handle_of(&s, &clip);
         for port in 0..2 {
             s.graph()
                 .set_sources_unfaded(Root::output(port), [OutPort::new(clip.erase(), 0)])

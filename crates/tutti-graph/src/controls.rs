@@ -265,7 +265,7 @@ pub fn param_parts<F: Float, N: ParamNode<F> + Clone>(node: N) -> NodeParts<Para
 /// `IntoNode`:
 ///
 /// ```ignore
-/// let (key, params) = session.graph().add(Params(MyFilter::new()));
+/// let (key, _) = session.graph().add(Params(MyFilter::new()));
 /// ```
 ///
 /// The crate's guide ("Writing a node", "A node with params") has a whole

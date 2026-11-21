@@ -165,6 +165,10 @@ pub use tutti_cpal::{AudioHost, DeviceId};
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::Clip;
 
+// The sampler nodes `Graph::handle` reaches by key.
+#[cfg(feature = "sampler")]
+pub use tutti_session::Handled;
+
 // A decoded wave, and what a bounce writes.
 #[cfg(feature = "codec")]
 pub use tutti_buffers::Wave;
@@ -298,8 +302,13 @@ pub mod nodes {
         VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
     };
     pub use tutti_dsp::{
+        Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
+        EnvelopeStages, EnvelopeStep,
+    };
+    pub use tutti_dsp::{
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
+    pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
@@ -419,21 +428,21 @@ pub mod types {
         StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
-        AtomicCell, AtomicWord, Bell, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
-        LevelSpan, Listener, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter,
-        Words,
+        AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
+        LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
     };
     pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
-        Moment, NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep,
-        PlayReading, PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate,
-        Resonance, RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan,
-        SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
-        StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        Drive, Elevation, Feedback, FrequencyRatio, FrequencyRatioOutOfRange, Gain, HoldFactor,
+        Latency, Metres, MetresOutOfRange, Mix, ModulationIndex, ModulationIndexOutOfRange, Moment,
+        NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading,
+        PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
+        RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
+        Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
+        Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }
@@ -706,10 +715,9 @@ pub mod polysynth {
 #[cfg(feature = "soundfont")]
 pub mod soundfont {
     pub use tutti_sf2::{
-        Bank as SoundFontBank, BankError, Error, GeneratorType, Instrument, InstrumentGenerator,
-        InstrumentRegion, LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader,
-        SamplePool, Side, SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator,
-        WrongLevelGenerator,
+        Bank, BankError, Error, GeneratorType, Instrument, InstrumentGenerator, InstrumentRegion,
+        LoopMode, Pcm24, Preset, PresetGenerator, PresetRegion, SampleHeader, SamplePool, Side,
+        SoundFont, SoundFontInfo, SoundFontVersion, SummedGenerator, WrongLevelGenerator,
     };
     pub use tutti_soundfont::{Polyphony, PolyphonyError, Settings, SoundFontUnit};
 }

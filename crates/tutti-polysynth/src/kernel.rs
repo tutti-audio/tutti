@@ -148,21 +148,6 @@ pub(crate) fn triangle<V: Lane>(p: V, dt: V, inv_dt: V) -> V {
     naive + scale * (poly_blamp(q, dt, inv_dt) - poly_blamp(wrap_once(q + half), dt, inv_dt))
 }
 
-/// Pink noise from white, by Paul Kellet's three-pole "economy" filter.
-///
-/// Within about ±0.5 dB of a −3 dB/octave slope (Kellet's stated figure for the economy
-/// form, above about 10 Hz at 44.1 kHz), and three multiply-adds per lane; the refined
-/// seven-pole version is tighter than a synth voice's noise needs.
-/// The output gain of `0.12` brings the RMS to about 0.2, near a sine at −14 dBFS, so the
-/// noise oscillator sits at a level comparable to the pitched ones.
-#[inline(always)]
-pub(crate) fn pink<V: Lane>(white: V, b: &mut [V; 3]) -> V {
-    b[0] = V::lit(0.997_65).mul_add(b[0], white * V::lit(0.099_046));
-    b[1] = V::lit(0.963).mul_add(b[1], white * V::lit(0.296_516_4));
-    b[2] = V::lit(0.57).mul_add(b[2], white * V::lit(1.052_691_3));
-    (b[0] + b[1] + b[2] + white * V::lit(0.184_8)) * V::lit(0.12)
-}
-
 /// `tanh`, by the [7/6] Padé approximant clamped at its unity crossing.
 ///
 /// The approximant reaches exactly `±1` near `|x| = 4.97` and is monotonic up

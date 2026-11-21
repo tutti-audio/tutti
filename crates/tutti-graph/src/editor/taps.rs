@@ -16,15 +16,29 @@ use crate::{
 };
 
 impl<F: Float> Editor<F> {
+    /// Makes every tap this editor opens from now on carry a bell from `bells`:
+    /// its writer rings it after each block it writes, when the tap ends and
+    /// when the writer drops, and its reader awaits it
+    /// ([`TapReader::notified`]). An editor never given a set opens its taps
+    /// without one. Event taps and meters carry none.
+    pub fn notify_with(&mut self, bells: tutti_rt::BellsHandle) {
+        self.bells = Some(bells);
+    }
+
+    fn new_bell(&self) -> Option<(tutti_rt::Bell, tutti_rt::Listener)> {
+        self.bells.as_ref().map(tutti_rt::BellsHandle::bell)
+    }
+
     /// Declares a tap on `sources` (one lane each, any ports) and returns its
     /// reader. It takes effect at the next [`commit`](Self::commit), which
     /// compiles the tap's ops and hands the executor its producers; until
     /// then the reader sees nothing. `options` give each lane's ring capacity,
     /// in frames (what the reader does not drain in time is counted,
-    /// [`TapReader::take_lost`]), the alignment and a bell: with one, the writer
-    /// rings it after each block it writes, whose end rings it too, and whose
-    /// drop rings it, so a reader awaiting its frames wakes on the audio
-    /// thread's ring and never polls.
+    /// [`TapReader::take_lost`]) and the alignment. With a bell set
+    /// ([`notify_with`](Self::notify_with)) the writer rings it after each block
+    /// it writes, when the tap ends and when it drops, so a reader awaiting its
+    /// frames ([`TapReader::notified`]) wakes on the audio thread's ring and
+    /// never polls.
     ///
     /// Opening an id again ends the reader it replaces: that reader drains what
     /// its rings hold, then reads `Ended` ([`TapReader::source_gone`]). The new
@@ -54,9 +68,10 @@ impl<F: Float> Editor<F> {
         sources: Vec<PortSource>,
         options: TapOptions,
     ) -> Result<TapReader<F>, MissingSource> {
-        let (capacity, align, bell) = options.into_parts();
+        let (capacity, align) = options.into_parts();
         self.check_sources(&sources)?;
         self.end_replaced_tap(id);
+        let bell = self.new_bell();
         let (reader, writer) = TapReader::named(id, sources.len(), capacity, bell);
         let opened = TapOpened {
             width: reader.width(),
@@ -126,7 +141,8 @@ impl<F: Float> Editor<F> {
 
     fn replace_output_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader<F> {
         self.end_replaced_tap(id);
-        let (reader, writer) = TapReader::named(id, width, capacity, None);
+        let bell = self.new_bell();
+        let (reader, writer) = TapReader::named(id, width, capacity, bell);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
