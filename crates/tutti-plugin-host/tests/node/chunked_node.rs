@@ -225,7 +225,7 @@ macro_rules! rec_control {
                 _: MainThreadMarker,
                 _: WindowHandle,
                 _: ContentScale,
-            ) -> PluginResult<dpi::Size> {
+            ) -> PluginResult<tutti_plugin_types::EditorOpened<dpi::Size>> {
                 Err(PluginError::Editor(EditorError::PluginError("none".into())))
             }
             fn close_editor(&mut self, _: MainThreadMarker) {}

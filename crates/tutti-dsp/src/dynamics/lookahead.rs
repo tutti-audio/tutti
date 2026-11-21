@@ -33,7 +33,7 @@ impl<F: Float> LookaheadRing<F> {
             "a window of {window} over {n}"
         );
         Self {
-            lines: (0..channels.max(1))
+            lines: (0..channels)
                 .map(|_| DelayLine::new(Samples::new(n)))
                 .collect(),
             lookahead: n,

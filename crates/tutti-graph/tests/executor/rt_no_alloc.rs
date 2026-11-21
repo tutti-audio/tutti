@@ -3394,7 +3394,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
         .topology
         .set_outputs(vec![port(0), port(1), port(2)]);
     let mut wide = ed
-        .open_output_tap(TapId::of(1), 3, Samples::new(1024))
+        .open_heard_tap(TapId::of(1), 3, Samples::new(1024))
         .expect("the outputs exist");
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -3417,7 +3417,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     // The root narrows to one channel and its tap is opened again.
     ed.spec_mut().topology.set_outputs(vec![port(0)]);
     let mut narrow = ed
-        .open_output_tap(TapId::of(1), 1, Samples::new(1024))
+        .open_heard_tap(TapId::of(1), 1, Samples::new(1024))
         .expect("the outputs exist");
     ed.commit().expect("commits");
     apply(&mut exec);

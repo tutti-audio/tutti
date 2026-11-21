@@ -587,7 +587,7 @@ impl EditorWindow for AuLoaded {
         main: MainThreadMarker,
         parent: WindowHandle,
         _scale: ContentScale,
-    ) -> PluginResult<Size> {
+    ) -> PluginResult<tutti_plugin_types::EditorOpened<Size>> {
         self.close_editor(main);
         let editor = AuEditor::open(main, self.unit(), Some(parent), {
             let (width, height) = tutti_plugin_types::EditorUnit::DEFAULT_EXTENT;
@@ -596,7 +596,7 @@ impl EditorWindow for AuLoaded {
         .map_err(|e| editor_error("AU open_editor failed", e))?;
         let size = editor.editor_size(main);
         *self.editor_slot() = Some(editor);
-        Ok(size.into())
+        Ok(tutti_plugin_types::EditorOpened::new(size.into()))
     }
 
     /// Detaches and releases the editor view. The teardown is AppKit's

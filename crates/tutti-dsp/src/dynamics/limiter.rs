@@ -385,7 +385,7 @@ impl<F: Float> LimiterBank<F> {
         let channels = usize::from(width.count());
         let block = MaxBlock::of(Samples::new(CHUNK));
         let detector = Detector {
-            states: (0..channels.max(1)).map(|_| plan.state(block)).collect(),
+            states: (0..channels).map(|_| plan.state(block)).collect(),
             lag: vec![F::ZERO; first],
             at: 0,
         };
@@ -529,7 +529,10 @@ fn group_peaks<F: Float>(state: &mut Oversampler<F>, samples: &[F], peaks: &mut 
             x.clamp(-limit, limit)
         };
     }
-    state.upsample(Mono::new(clean));
+    // `samples` is at most `CHUNK` frames, the `max_block` the true-peak state is built for.
+    state
+        .upsample(Mono::new(clean))
+        .expect("a chunk is at most the state's max block");
     let (high, _) = state.high_rate();
     let (groups, _) = high.samples().as_chunks::<4>();
     for (p, group) in peaks.iter_mut().zip(groups) {

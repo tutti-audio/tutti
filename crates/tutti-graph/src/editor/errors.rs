@@ -120,6 +120,10 @@ pub enum CommitError {
     FadeShape {
         /// The node.
         node: NodeKey,
+        /// The running unit's shape.
+        running: Box<crate::Shape>,
+        /// The incoming unit's shape.
+        incoming: Box<crate::Shape>,
     },
     /// [`Editor::replace`](crate::Editor::replace) names a node with no running unit to fade from:
     /// not in the plan sent last, or removed since.

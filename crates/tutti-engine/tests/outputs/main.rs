@@ -4,5 +4,5 @@
     reason = "a test starts the threads it races, outside any executor"
 )]
 
+mod heard_tap;
 mod master_meter;
-mod output_tap;

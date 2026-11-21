@@ -12,10 +12,19 @@ use crate::error::Result;
 use crate::host::{AudioHost, DeviceHost};
 use crate::roster::Snapshot;
 
-/// The shortest interval a poller keeps: enumeration can open every device.
-pub const MIN_POLL_INTERVAL: Duration = Duration::from_millis(250);
+tutti_units::ranged! {
+    /// The time between two looks at a host: at least [`MIN`](PollInterval::MIN),
+    /// since enumeration can open every device.
+    PollInterval(Duration), PollIntervalTooShort, "at least 250 ms",
+    |raw| raw.as_millis() >= 250
+}
 
-/// One host looked at every `interval` (at least [`MIN_POLL_INTERVAL`]).
+impl PollInterval {
+    /// The shortest interval, 250 ms.
+    pub const MIN: Self = Self(Duration::from_millis(250));
+}
+
+/// One host looked at every `interval`.
 ///
 /// It holds no thread or task: [`look`](Self::look) is the blocking step and
 /// the caller owns the cadence ([`interval`](Self::interval)). Only a
@@ -23,28 +32,27 @@ pub const MIN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 #[derive(Debug)]
 pub struct DevicePoller {
     host: AudioHost,
-    interval: Duration,
+    interval: PollInterval,
     opened: Option<DeviceHost>,
     last: Option<Snapshot>,
 }
 
 impl DevicePoller {
-    /// A poller of `host` that looks every `interval`, at least
-    /// [`MIN_POLL_INTERVAL`]. Nothing is opened until the first
-    /// [`look`](Self::look).
+    /// A poller of `host` that looks every `interval`. Nothing is opened until
+    /// the first [`look`](Self::look).
     #[must_use]
-    pub fn new(host: AudioHost, interval: Duration) -> Self {
+    pub fn new(host: AudioHost, interval: PollInterval) -> Self {
         Self {
             host,
-            interval: interval.max(MIN_POLL_INTERVAL),
+            interval,
             opened: None,
             last: None,
         }
     }
 
-    /// The time between looks.
+    /// The time between looks, as given to [`new`](Self::new).
     #[must_use]
-    pub fn interval(&self) -> Duration {
+    pub fn interval(&self) -> PollInterval {
         self.interval
     }
 
@@ -84,12 +92,22 @@ const _: () = {
 mod tests {
     use super::*;
 
-    /// An interval under the minimum is raised to it, and a longer one is kept.
+    /// **An interval is at least 250 ms.** One a millisecond short is refused,
+    /// never raised to the minimum, and the poller reads back what it was given.
     #[test]
     fn the_interval_is_at_least_the_minimum() {
-        let short = DevicePoller::new(AudioHost::Default, Duration::from_millis(1));
-        assert_eq!(short.interval(), MIN_POLL_INTERVAL);
-        let long = DevicePoller::new(AudioHost::Default, Duration::from_secs(3));
-        assert_eq!(long.interval(), Duration::from_secs(3));
+        tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+            new: PollInterval::new,
+            get: PollInterval::get,
+            of: Some(PollInterval::of),
+            valid: &[Duration::from_millis(250), Duration::from_secs(3)],
+            invalid: &[Duration::ZERO, Duration::from_millis(249)],
+        });
+        assert_eq!(PollInterval::MIN.get(), Duration::from_millis(250));
+        let given = PollInterval::of(Duration::from_secs(3));
+        assert_eq!(
+            DevicePoller::new(AudioHost::Default, given).interval(),
+            given
+        );
     }
 }

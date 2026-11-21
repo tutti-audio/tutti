@@ -80,6 +80,16 @@ tutti_units::ranged! {
     |raw| raw.is_finite() && raw > 0.0 && raw < 1.0
 }
 
+/// A block longer than the oversampler's prepared maximum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a block of {frames} frames is longer than the prepared maximum of {max}")]
+pub struct BlockTooLong {
+    /// The frames asked for.
+    pub frames: Samples,
+    /// The `max_block` the state was built for.
+    pub max: Samples,
+}
+
 impl Passband {
     /// 0.9 of the base Nyquist: 19.8 kHz at 44.1 kHz and 21.6 kHz at 48 kHz, the audible band
     /// for a transition a tenth of the base rate wide.
@@ -440,10 +450,14 @@ impl<F: Float> Oversampler<F> {
     }
 
     /// Up-samples `input` into [`high_rate`](Self::high_rate)'s first view, which is then
-    /// `input.frames() * factor` frames. Frames past the prepared maximum are ignored. No
-    /// allocation.
-    pub fn upsample<S: Float>(&mut self, input: Mono<'_, S>) {
-        let n = input.frames().get().min(self.max_block);
+    /// `input.frames() * factor` frames. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockTooLong`] when `input` is longer than the prepared maximum; the state is
+    /// unchanged.
+    pub fn upsample<S: Float>(&mut self, input: Mono<'_, S>) -> Result<(), BlockTooLong> {
+        let n = self.check(input.frames())?;
         self.frames = n;
         for (line, x) in self.up[0].input_mut(n).iter_mut().zip(input) {
             *line = x.convert_to::<F>();
@@ -459,15 +473,30 @@ impl<F: Float> Oversampler<F> {
                 up_stage(taps, &mut self.up[j], n_in, &mut self.high[..2 * n_in]);
             }
         }
+        Ok(())
+    }
+
+    /// `frames` as a count, or [`BlockTooLong`] past the prepared maximum.
+    fn check(&self, frames: Samples) -> Result<usize, BlockTooLong> {
+        if frames.get() > self.max_block {
+            return Err(BlockTooLong {
+                frames,
+                max: Samples::new(self.max_block),
+            });
+        }
+        Ok(frames.get())
     }
 
     /// Opens a block of `frames` base frames for a generator that has no input to up-sample:
     /// returns the higher-rate view (`frames * factor` frames) to write, which
-    /// [`downsample`](Self::downsample) then reads. Frames past the prepared maximum are
-    /// ignored. No allocation.
-    pub fn source(&mut self, frames: Samples) -> MonoMut<'_, F> {
-        self.frames = frames.get().min(self.max_block);
-        self.high_rate().1
+    /// [`downsample`](Self::downsample) then reads. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockTooLong`] when `frames` is past the prepared maximum; the state is unchanged.
+    pub fn source(&mut self, frames: Samples) -> Result<MonoMut<'_, F>, BlockTooLong> {
+        self.frames = self.check(frames)?;
+        Ok(self.high_rate().1)
     }
 
     /// The block [`upsample`](Self::upsample) took, at the higher rate, and where its processed
@@ -482,10 +511,15 @@ impl<F: Float> Oversampler<F> {
     }
 
     /// Down-samples what was written to [`high_rate`](Self::high_rate)'s second view into
-    /// `output`, the same number of base frames as the block that was up-sampled. Frames past
-    /// the prepared maximum are not written. No allocation.
-    pub fn downsample<S: Float>(&mut self, mut output: MonoMut<'_, S>) {
-        let n = output.frames().get().min(self.max_block);
+    /// `output`, the same number of base frames as the block that was up-sampled. No
+    /// allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockTooLong`] when `output` is longer than the prepared maximum; nothing is written
+    /// and the state is unchanged.
+    pub fn downsample<S: Float>(&mut self, mut output: MonoMut<'_, S>) -> Result<(), BlockTooLong> {
+        let n = self.check(output.frames())?;
         let out = &mut output.as_mut()[..n];
         let stages = self.down.len();
         for k in 0..stages {
@@ -498,6 +532,7 @@ impl<F: Float> Oversampler<F> {
                 down_stage(taps, &mut self.down[k], n_out, out);
             }
         }
+        Ok(())
     }
 }
 

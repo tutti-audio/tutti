@@ -12,23 +12,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tutti_buffers::Float;
-use tutti_buffers::MaxBlock;
 use tutti_platform::{
     Executor, PriorityRequest, StopToken, Task, is_driving, join_within, monotonic_ns,
     sleep_until_ns,
 };
 use tutti_units::Samples;
 
-use crate::callback::{MAX_FRAMES, OutputBlock};
+use crate::callback::OutputBlock;
 use crate::faults::StreamFaults;
-use crate::stream::{OutputSpec, RunningStream, StreamDriver};
+use crate::stream::{OutputQuantum, OutputSpec, RunningStream, StreamDriver};
 
 pub(crate) use pacer::Timebase;
 use pacer::{Due, Pacer};
 
 /// The block a [`TimerDriver`] renders when the spec fixes no
 /// [`quantum`](OutputSpec::quantum): 256 frames, 5.3 ms at 48 kHz.
-pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples::new(256));
+pub const DEFAULT_BLOCK: OutputQuantum = OutputQuantum::of(256);
 
 /// Runs an output stream on a dedicated thread of an [`Executor`] that sleeps to
 /// each block's deadline,
@@ -138,7 +137,7 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
         mut block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
     ) -> Result<TimerRunning, TimerError> {
-        let frames = spec.quantum.unwrap_or(DEFAULT_BLOCK).get().min(MAX_FRAMES);
+        let frames = spec.quantum.unwrap_or(DEFAULT_BLOCK).get();
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
         let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples::new(frames))];

@@ -104,6 +104,14 @@ pub enum PluginInvalidation {
     RateRefused(crate::RateRefusal),
     /// The plugin took a rate after refusing one and renders again.
     RateRestored,
+    /// A render mode was not applied: the node was prepared off the main
+    /// thread, where a mode change (a main-thread call on every format) cannot
+    /// run. The plugin keeps the mode it runs in, and the next prepare on the
+    /// main thread tells it. Not a refusal by the plugin: that is not asked.
+    RenderModeNotApplied {
+        /// The mode the prepare carried.
+        mode: crate::RenderMode,
+    },
     /// A restart the host asked for (a rate or a render mode) did not happen:
     /// the plugin would not stop, and runs as it was. Not a refusal of the
     /// rate and not a death: [`RateRefused`](Self::RateRefused) and

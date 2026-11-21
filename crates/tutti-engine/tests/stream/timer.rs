@@ -12,15 +12,16 @@ use std::time::Duration;
 use tutti_platform::{Executor, Instant, join_within};
 
 use crate::fixtures::{SAMPLE_RATE, fan, graph_engine};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::SampleFormat;
-use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::{
-    AudioCallbackState, BlockClockReader, BlockReading, OutputSpec, OutputStream, TimerDriver,
+    AudioCallbackState, BlockClockReader, BlockReading, OutputQuantum, OutputSpec, OutputStream,
+    TimerDriver,
 };
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
 use tutti_timeline::Transport;
-use tutti_units::{SampleRate, Samples};
+use tutti_units::SampleRate;
 
 fn timer_state() -> (Arc<AudioCallbackState>, BlockClockReader) {
     let engine = graph_engine(&Transport::new(SampleRate::of(SAMPLE_RATE)), |ed| {
@@ -37,9 +38,7 @@ fn spec(quantum: Option<usize>) -> OutputSpec {
         ChannelLayout::STEREO,
         SampleFormat::F32,
     );
-    quantum.map_or(spec.clone(), |q| {
-        spec.with_quantum(MaxBlock::of(Samples::new(q)))
-    })
+    quantum.map_or(spec.clone(), |q| spec.with_quantum(OutputQuantum::of(q)))
 }
 
 /// Reads the block clock until `done` accepts a reading, or fails after ten

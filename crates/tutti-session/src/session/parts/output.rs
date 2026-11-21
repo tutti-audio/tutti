@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_engine::OutputTaps;
+use tutti_engine::HeardTaps;
 use tutti_engine::{BlockCounts, Load};
 use tutti_graph::RootError;
 use tutti_rt::{Counter, Gauge};
@@ -33,7 +33,7 @@ pub(crate) struct OutputPart<F: Float> {
     pub(crate) policy: Arc<Cell<OutputPolicy>>,
     /// The engine's tap after the fader and the device width it was built
     /// for; `None` detached.
-    pub(crate) taps: Option<(OutputTaps<F>, ChannelLayout)>,
+    pub(crate) taps: Option<(HeardTaps<F>, ChannelLayout)>,
     /// The engine's load and block counts, offline or on a device; `None`
     /// detached.
     pub(crate) readings: Option<(Gauge<Load>, Counter<BlockCounts>)>,

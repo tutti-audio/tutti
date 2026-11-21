@@ -18,12 +18,12 @@ pub struct TremoloConfig {
 }
 
 impl TremoloConfig {
-    /// A tremolo of `width` channels (an empty layout is taken as mono) on a sine LFO, at [`TremoloControls::DEFAULT`] (5 Hz,
+    /// A tremolo of `width` channels on a sine LFO, at [`TremoloControls::DEFAULT`] (5 Hz,
     /// half depth).
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             wave: OscillatorWave::Sine,
             controls: TremoloControls::DEFAULT,
         }
@@ -210,10 +210,10 @@ mod tests {
         assert!(out[360].abs() < 1e-4, "{}", out[360]);
     }
 
-    /// An empty layout is taken as mono.
+    /// An empty layout is no channels, not one.
     #[test]
-    fn an_empty_layout_is_mono() {
+    fn an_empty_layout_has_no_channels() {
         let n = TremoloNode::<f32>::from(TremoloConfig::new(ChannelLayout::EMPTY));
-        assert_eq!(n.shape().audio_in().count(), 1);
+        assert_eq!(n.shape().audio_in().count(), 0);
     }
 }
