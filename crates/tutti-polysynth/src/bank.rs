@@ -39,6 +39,7 @@ use crate::kernel::{self, MAX_INCREMENT};
 use crate::lane::{Lane, SynthFloat};
 use crate::{Adsr, FilterType, OscillatorType, SvfMode, UnisonVoices};
 use tutti_dsp::{
+    EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage, EnvelopeStages, EnvelopeStep,
     LadderCoefficients, LadderDesign, LadderType, SimdLanes, SvfCoefficients, SvfDesign, SvfType,
     ladder_step, svf_step,
 };
@@ -65,81 +66,45 @@ pub(crate) const CONTROL_BLOCK: usize = 16;
 const FREQ_EPS: f64 = 0.01;
 const RES_EPS: f64 = 0.0001;
 
-/// Where a lane's amplitude envelope is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EnvStage {
-    Idle,
-    Attack,
-    Decay,
-    Sustain,
-    Release,
+/// The envelope design of an [`Adsr`] at `rate`: its stages are straight lines, a decay and a
+/// release take their stated times from wherever they start, and an attack takes the share of
+/// its time the level has left to rise.
+fn envelope_design(env: &Adsr, rate: SampleRate) -> EnvelopeDesign {
+    EnvelopeDesign::new(&EnvelopeStages::from(*env).pace(EnvelopePace::Stage), rate)
 }
 
-/// The envelope shape, converted to per-sample slopes at the current rate.
-///
-/// Every stage is a straight line, as `adsr_live`'s were: attack rises at a
-/// fixed slope, decay falls from 1 to sustain, release falls from wherever the
-/// level was to zero. A stage authored as zero seconds takes one sample rather
-/// than zero, which keeps every slope finite.
-#[derive(Debug, Clone, Copy)]
-struct EnvShape<F> {
-    /// Rise per sample during attack; a full 0→1 attack takes `attack` seconds.
-    attack_step: F,
-    /// Change per sample during decay, from 1.0 to `sustain`. Zero when
-    /// `sustain` is 1.0, which makes decay a no-op.
-    decay_step: F,
-    sustain: F,
-    /// Length of the release in samples. The slope is derived per lane from the
-    /// level the release starts at, so a release always takes this long.
-    release_frames: F,
+/// One group's envelope registers: the level, and the leg each lane runs as one affine move
+/// per frame, `level * gain + slope`, until it has moved onto or past `target` in the
+/// direction `dir`. A held lane has a `dir` of zero and never reaches.
+#[derive(Clone, Copy)]
+struct EnvRegs<F: SynthFloat> {
+    level: V<F>,
+    slope: V<F>,
+    gain: V<F>,
+    dir: V<F>,
+    target: V<F>,
 }
 
-impl<F: SynthFloat> EnvShape<F> {
-    fn new(env: &Adsr, sample_rate: SampleRate) -> Self {
-        // A stage's length is a frame count and a slope a design figure: both are
-        // solved in `f64` and cross once, here, into the lane's float.
-        let frames = |s: Seconds| s.to_samples(sample_rate).get().max(1) as f64;
-        // Clamped to unity: the attack peaks at 1.0 and decay runs from there
-        // to sustain. A sustain above 1.0 would make "decay" a rise, and a
-        // retrigger from a held level above 1.0 would drop the note to the
-        // attack peak — a click. Level above unity is the voice gain's job.
-        let sustain = env.sustain.get().clamp(0.0, 1.0);
-        Self {
-            attack_step: F::from_design(1.0 / frames(env.attack)),
-            decay_step: F::from_design((sustain - 1.0) / frames(env.decay)),
-            sustain: F::from_design(sustain),
-            release_frames: F::from_design(frames(env.release)),
-        }
-    }
-
-    /// Enter `stage` from `level`, skipping any stage that is already complete.
-    /// Returns the stage actually entered and its `(level, slope, target)`.
-    fn enter(&self, mut stage: EnvStage, level: F) -> (EnvStage, F, F, F) {
-        loop {
-            match stage {
-                EnvStage::Attack if level >= F::ONE => stage = EnvStage::Decay,
-                EnvStage::Attack => return (stage, level, self.attack_step, F::ONE),
-                // Decay starts from the attack's peak, so the level is 1.
-                EnvStage::Decay if self.decay_step == F::ZERO => stage = EnvStage::Sustain,
-                EnvStage::Decay => return (stage, F::ONE, self.decay_step, self.sustain),
-                EnvStage::Sustain => return (stage, self.sustain, F::ZERO, self.sustain),
-                EnvStage::Release if level <= F::ZERO => stage = EnvStage::Idle,
-                EnvStage::Release => {
-                    return (stage, level, -level / self.release_frames, F::ZERO);
-                }
-                EnvStage::Idle => return (stage, F::ZERO, F::ZERO, F::ZERO),
-            }
-        }
-    }
-
-    /// The stage after `stage` reaches its target.
-    fn next(stage: EnvStage) -> EnvStage {
-        match stage {
-            EnvStage::Attack => EnvStage::Decay,
-            EnvStage::Decay => EnvStage::Sustain,
-            EnvStage::Release => EnvStage::Idle,
-            s => s,
-        }
+impl<F: SynthFloat> EnvRegs<F> {
+    /// Lane `k` takes `leg`: its level jumps to the leg's start.
+    fn enter(&mut self, k: usize, leg: &EnvelopeLeg) {
+        let (slope, gain) = match leg.step::<F>() {
+            EnvelopeStep::Hold => (F::ZERO, F::ONE),
+            EnvelopeStep::Add(slope) => (slope, F::ONE),
+            EnvelopeStep::Mul(gain) => (F::ZERO, gain),
+        };
+        let dir = if leg.rises() {
+            F::ONE
+        } else if leg.falls() {
+            -F::ONE
+        } else {
+            F::ZERO
+        };
+        self.level.as_mut_slice()[k] = F::from_design(leg.from().get());
+        self.slope.as_mut_slice()[k] = slope;
+        self.gain.as_mut_slice()[k] = gain;
+        self.dir.as_mut_slice()[k] = dir;
+        self.target.as_mut_slice()[k] = F::from_design(leg.to().get());
     }
 }
 
@@ -187,7 +152,7 @@ pub(crate) struct VoiceBank<F: SynthFloat> {
     osc: Osc,
     filter: Filter<F>,
     env_config: Adsr,
-    shape: EnvShape<F>,
+    design: EnvelopeDesign,
     /// Per-sample one-pole coefficient the output gains smooth with: the
     /// fraction of the gap one sample closes, a small number designed in `f64`.
     gain_coeff: F,
@@ -226,8 +191,10 @@ pub(crate) struct VoiceBank<F: SynthFloat> {
     /// 100 s release at 192 kHz does not stall.
     env_err: Vec<V<F>>,
     env_slope: Vec<V<F>>,
+    env_gain: Vec<V<F>>,
+    env_dir: Vec<V<F>>,
     env_target: Vec<V<F>>,
-    stage: Vec<EnvStage>,
+    stage: Vec<EnvelopeStage>,
 
     // Output gains (pan law × unison gain × voice gain), current and target.
     // Unlike pitch and cutoff these are smoothed by a one-pole at a fixed time
@@ -249,7 +216,7 @@ impl<F: SynthFloat> std::fmt::Debug for VoiceBank<F> {
             .field("osc", &self.osc)
             .field("filter", &self.filter)
             .field("env_config", &self.env_config)
-            .field("shape", &self.shape)
+            .field("design", &self.design)
             .field("gain_coeff", &self.gain_coeff)
             .field("sample_rate", &self.sample_rate)
             .field("stride", &self.stride)
@@ -310,7 +277,7 @@ impl<F: SynthFloat> VoiceBank<F> {
             osc,
             filter,
             env_config: *envelope,
-            shape: EnvShape::new(envelope, sample_rate),
+            design: envelope_design(envelope, sample_rate),
             gain_coeff: F::from_design(GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate)),
             sample_rate,
             stride: usize::from(stride.get()),
@@ -329,6 +296,8 @@ impl<F: SynthFloat> VoiceBank<F> {
             env: Vec::new(),
             env_err: Vec::new(),
             env_slope: Vec::new(),
+            env_gain: Vec::new(),
+            env_dir: Vec::new(),
             env_target: Vec::new(),
             stage: Vec::new(),
             gain: Vec::new(),
@@ -385,8 +354,10 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.env = vec![zero; groups];
         self.env_err = vec![zero; groups];
         self.env_slope = vec![zero; groups];
+        self.env_gain = vec![V::<F>::splat(F::ONE); groups];
+        self.env_dir = vec![zero; groups];
         self.env_target = vec![zero; groups];
-        self.stage = vec![EnvStage::Idle; lanes];
+        self.stage = vec![EnvelopeStage::Idle; lanes];
         self.gain = vec![[zero; 2]; groups];
         self.gain_target = vec![[zero; 2]; groups];
         self.live = vec![false; groups];
@@ -407,7 +378,7 @@ impl<F: SynthFloat> VoiceBank<F> {
     /// voices hold; the envelope slopes are rederived here.
     pub(crate) fn set_sample_rate(&mut self, sample_rate: SampleRate) {
         self.sample_rate = sample_rate;
-        self.shape = EnvShape::new(&self.env_config, sample_rate);
+        self.design = envelope_design(&self.env_config, sample_rate);
         self.gain_coeff = F::from_design(GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate));
         // The SVF's output mix depends on the tap and `Q`, not the rate, so
         // only the per-lane coefficients need recomputing.
@@ -430,10 +401,12 @@ impl<F: SynthFloat> VoiceBank<F> {
             &mut self.env,
             &mut self.env_err,
             &mut self.env_slope,
+            &mut self.env_dir,
             &mut self.env_target,
         ] {
             field.fill(zero);
         }
+        self.env_gain.fill(V::<F>::splat(F::ONE));
         self.pink.fill([zero; 3]);
         self.z.fill([zero; 4]);
         self.coef.fill([zero; 3]);
@@ -442,7 +415,7 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.gain_target.fill([zero; 2]);
         self.cutoff_seen.fill(Hz::new(f64::NAN));
         self.res_seen.fill(Resonance::new(f64::NAN));
-        self.stage.fill(EnvStage::Idle);
+        self.stage.fill(EnvelopeStage::Idle);
         self.live.fill(false);
     }
 
@@ -545,18 +518,18 @@ impl<F: SynthFloat> VoiceBank<F> {
 
     /// Open the lane's gate: attack from wherever the envelope is.
     pub(crate) fn gate_on(&mut self, lane: usize) {
-        self.enter(lane, EnvStage::Attack);
+        self.enter(lane, EnvelopeStage::Attack);
     }
 
     /// Close the lane's gate: release from wherever the envelope is.
     pub(crate) fn gate_off(&mut self, lane: usize) {
-        self.enter(lane, EnvStage::Release);
+        self.enter(lane, EnvelopeStage::Release);
     }
 
     /// Silence the lane immediately (All Sound Off): envelope to zero, filter
     /// cleared.
     pub(crate) fn kill(&mut self, lane: usize) {
-        self.enter_at(lane, EnvStage::Idle, F::ZERO);
+        self.enter_at(lane, EnvelopeStage::Idle, F::ZERO);
         self.start(lane, Phase::START);
         self.set_gains(lane, Amplitude::SILENT, Amplitude::SILENT);
         self.snap_gain(lane);
@@ -569,20 +542,39 @@ impl<F: SynthFloat> VoiceBank<F> {
         }
     }
 
-    fn enter(&mut self, lane: usize, stage: EnvStage) {
+    fn enter(&mut self, lane: usize, stage: EnvelopeStage) {
         let (g, k) = Self::split(lane);
         let level = self.env[g].as_slice()[k];
         self.enter_at(lane, stage, level);
     }
 
-    fn enter_at(&mut self, lane: usize, stage: EnvStage, level: F) {
-        let (stage, level, slope, target) = self.shape.enter(stage, level);
+    fn enter_at(&mut self, lane: usize, stage: EnvelopeStage, level: F) {
+        let leg = self.design.enter(stage, Amplitude::new(level.into()));
         let (g, k) = Self::split(lane);
-        self.stage[lane] = stage;
-        self.env[g].as_mut_slice()[k] = level;
+        let mut regs = self.regs(g);
+        regs.enter(k, &leg);
+        self.stage[lane] = leg.stage();
         self.env_err[g].as_mut_slice()[k] = F::ZERO;
-        self.env_slope[g].as_mut_slice()[k] = slope;
-        self.env_target[g].as_mut_slice()[k] = target;
+        self.set_regs(g, regs);
+    }
+
+    /// Group `g`'s envelope registers.
+    fn regs(&self, g: usize) -> EnvRegs<F> {
+        EnvRegs {
+            level: self.env[g],
+            slope: self.env_slope[g],
+            gain: self.env_gain[g],
+            dir: self.env_dir[g],
+            target: self.env_target[g],
+        }
+    }
+
+    fn set_regs(&mut self, g: usize, regs: EnvRegs<F>) {
+        self.env[g] = regs.level;
+        self.env_slope[g] = regs.slope;
+        self.env_gain[g] = regs.gain;
+        self.env_dir[g] = regs.dir;
+        self.env_target[g] = regs.target;
     }
 
     /// Include this lane's group in the next render.
@@ -593,7 +585,7 @@ impl<F: SynthFloat> VoiceBank<F> {
 
     /// Whether the lane's envelope has finished its release.
     pub(crate) fn is_idle(&self, lane: usize) -> bool {
-        self.stage[lane] == EnvStage::Idle
+        self.stage[lane] == EnvelopeStage::Idle
     }
 
     /// The lane's envelope level, `0.0..=1.0`.
@@ -699,10 +691,8 @@ impl<F: SynthFloat> VoiceBank<F> {
             _ => [V::<F>::ZERO; 3],
         };
 
-        let mut env = self.env[g];
+        let mut env = self.regs(g);
         let mut env_err = self.env_err[g];
-        let mut slope = self.env_slope[g];
-        let mut target = self.env_target[g];
 
         let [mut gain_l, mut gain_r] = self.gain[g];
         let [gain_l_target, gain_r_target] = self.gain_target[g];
@@ -755,23 +745,25 @@ impl<F: SynthFloat> VoiceBank<F> {
                 _ => x,
             };
 
-            // The level adds its slope compensated, as the phase does.
-            let step = slope - env_err;
-            let sum = env + step;
-            env_err = (sum - env) - step;
-            env = sum;
+            // The level scales by its gain and adds its slope compensated, as the phase does.
+            let scaled = env.level * env.gain;
+            let step = env.slope - env_err;
+            let sum = scaled + step;
+            env_err = (sum - scaled) - step;
+            env.level = sum;
             // A lane reached its stage's target when it has moved onto or past
-            // it in the direction of travel; a flat stage never "reaches".
-            let reached = ((env - target) * slope).ge(V::<F>::ZERO) & slope.ne(V::<F>::ZERO);
+            // it in the direction of travel; a held stage never "reaches".
+            let reached =
+                ((env.level - env.target) * env.dir).ge(V::<F>::ZERO) & env.dir.ne(V::<F>::ZERO);
             if reached.any() {
-                env = reached.pick(target, env);
+                env.level = reached.pick(env.target, env.level);
                 env_err = reached.pick(V::<F>::ZERO, env_err);
-                (slope, target) = self.advance_envelopes(g, env, slope, target, reached);
+                self.advance_envelopes(g, &mut env, reached);
             }
 
             gain_l = (gain_l_target - gain_l).mul_add(smoothing, gain_l);
             gain_r = (gain_r_target - gain_r).mul_add(smoothing, gain_r);
-            let out = y * env;
+            let out = y * env.level;
             frame[0] += out * gain_l;
             frame[1] += out * gain_r;
         }
@@ -785,44 +777,31 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.pink[g] = pink;
         self.z[g] = z;
         self.coef[g] = c_target;
-        self.env[g] = env;
+        self.set_regs(g, env);
         self.env_err[g] = env_err;
-        self.env_slope[g] = slope;
-        self.env_target[g] = target;
         self.gain[g] = [gain_l, gain_r];
     }
 
     /// Move every lane in `reached` on to its next envelope stage.
     ///
     /// Out of line and scalar: a lane changes stage a handful of times per
-    /// note, so this runs on a vanishing fraction of samples.
+    /// note, so this runs on a vanishing fraction of samples. The `env_err` of
+    /// every lane in `reached` was zeroed in `render_group` when it took its
+    /// target, so each next stage starts uncompensated.
     #[cold]
     #[inline(never)]
-    fn advance_envelopes(
-        &mut self,
-        g: usize,
-        env: V<F>,
-        slope: V<F>,
-        target: V<F>,
-        reached: V<F>,
-    ) -> (V<F>, V<F>) {
+    fn advance_envelopes(&mut self, g: usize, env: &mut EnvRegs<F>, reached: V<F>) {
         let reached = reached.bits();
-        let level = env;
-        let (mut slope, mut target) = (slope, target);
-        // The `env_err` of every lane in `reached` was zeroed in `render_group` when it
-        // took its target, so each next stage starts uncompensated.
         for k in 0..V::<F>::LANES {
             if reached & (1 << k) == 0 {
                 continue;
             }
             let lane = g * V::<F>::LANES + k;
-            let next = EnvShape::<F>::next(self.stage[lane]);
-            let (stage, _, s, t) = self.shape.enter(next, level.as_slice()[k]);
-            self.stage[lane] = stage;
-            slope.as_mut_slice()[k] = s;
-            target.as_mut_slice()[k] = t;
+            let level = Amplitude::new(env.level.as_slice()[k].into());
+            let leg = self.design.enter(self.stage[lane].next(), level);
+            self.stage[lane] = leg.stage();
+            env.enter(k, &leg);
         }
-        (slope, target)
     }
 }
 

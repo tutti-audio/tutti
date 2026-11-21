@@ -110,6 +110,9 @@
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
+//! - **Envelope** (`envelope.rs`): an [`EnvelopeStages`] description, designed once into an
+//!   [`EnvelopeDesign`] of [`EnvelopeLeg`]s (linear or dB-linear, [`EnvelopeCurve`], timed by an
+//!   [`EnvelopePace`]), and the [`Envelope`] runner that reads it a chunk at a time.
 //! - **Noise** (`noise.rs`): [`Noise`], a seeded white, pink (Kellet's filter) or brown
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
@@ -175,6 +178,7 @@ mod distance;
 mod dither;
 mod dynamics;
 mod early_reflections;
+mod envelope;
 mod fft;
 mod filter;
 mod fir;
@@ -252,6 +256,10 @@ pub use dynamics::{
     TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use early_reflections::{EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY};
+pub use envelope::{
+    Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
+    EnvelopeStages, EnvelopeStep,
+};
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBands, CrossoverBandsError, CrossoverBank, CrossoverBlend, CrossoverControls,

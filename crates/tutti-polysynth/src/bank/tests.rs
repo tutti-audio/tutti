@@ -1,6 +1,7 @@
 use super::*;
+use tutti_dsp::EnvelopeCurve;
 use tutti_rt::SplitMix64;
-use tutti_units::{Amplitude, Normalized, PhaseIncrement, Seconds};
+use tutti_units::{Amplitude, Db, Normalized, PhaseIncrement, Seconds};
 
 const SR: f64 = 48_000.0;
 
@@ -500,6 +501,55 @@ fn a_retrigger_at_a_boosted_sustain_does_not_drop() {
         before <= 1.0,
         "the held level {before} exceeds the clamped sustain"
     );
+}
+
+/// A dB-linear release runs on the lanes as a multiply per frame: `n` frames in, the level is
+/// `10^(-depth n / (20 R))` of the level it began from, to the recurrence's rounding: each
+/// multiply errs by half an epsilon relative and the factor's own rounding adds the same
+/// per frame, so `n` frames stay within `(n + 1) epsilon` relative.
+fn a_db_linear_release_is_a_straight_line_in_decibels<F: SynthFloat>(epsilon: f64) {
+    let depth = 60.0;
+    let release = 4800.0;
+    let mut b = bank::<F>(OscillatorType::Sine, FilterType::None, flat());
+    let stages = EnvelopeStages::new(
+        Seconds::new(0.0),
+        Seconds::new(0.0),
+        Amplitude::UNITY,
+        Seconds::new(release / SR),
+    )
+    .release_curve(EnvelopeCurve::DbLinear {
+        depth: Db::new(depth),
+    });
+    b.design = EnvelopeDesign::new(&stages, sr());
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
+    let _ = envelope_trace(&mut b, 0, 10);
+    b.gate_off(0);
+    let trace = envelope_trace(&mut b, 0, 2400);
+    for n in [1_usize, 100, 1200, 2400] {
+        let want = 10.0_f64.powf(-depth * n as f64 / release / 20.0);
+        let bound = (n as f64 + 1.0) * epsilon * want;
+        assert!(
+            (trace[n - 1] - want).abs() <= bound,
+            "{n} frames: {} against {want}",
+            trace[n - 1]
+        );
+    }
+}
+
+#[test]
+fn a_db_linear_release_is_a_straight_line_in_decibels_at_f64() {
+    a_db_linear_release_is_a_straight_line_in_decibels::<f64>(f64::EPSILON);
+}
+
+#[test]
+fn a_db_linear_release_is_a_straight_line_in_decibels_at_f32() {
+    a_db_linear_release_is_a_straight_line_in_decibels::<f32>(f64::from(f32::EPSILON));
 }
 
 /// A pulse width of 0 still renders a pulse, not DC.
