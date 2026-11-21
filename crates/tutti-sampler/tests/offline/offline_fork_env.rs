@@ -128,8 +128,11 @@ fn a_forked_pool_steals_no_commands_from_the_live_one() {
 /// transport, renders exact silence.
 #[test]
 fn a_forked_voice_node_reads_its_renders_transport_not_the_live_one() {
-    let (ed, mut exec, _handle) =
-        graph(VoiceNode::with_channels(voice(), ChannelLayout::STEREO), 2);
+    let (ed, mut exec, _handle) = graph(
+        VoiceNode::with_channels(voice(), ChannelLayout::STEREO)
+            .expect("a finite gain and a nonempty width"),
+        2,
+    );
     let mut forked = fork(&ed);
     let live_peak = peak(&mut exec, 2, rolling());
     let forked_peak = peak(&mut forked, 2, stopped());
@@ -228,7 +231,8 @@ fn a_voice_behind_another_node_is_forked_too() {
     ed.insert(
         NodeKey(1),
         "voice",
-        VoiceNode::with_channels(voice(), ChannelLayout::MONO),
+        VoiceNode::with_channels(voice(), ChannelLayout::MONO)
+            .expect("a finite gain and a nonempty width"),
     );
     ed.insert(NodeKey(2), "pass", ForkByClone(Pass));
     ed.spec_mut().topology.edges.insert(

@@ -137,7 +137,8 @@ fn render(
             )
             .expect("a placeable wave");
             let mut pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
-            pool.insert(SlotId(1), source, Playback::default());
+            pool.insert(SlotId(1), source, Playback::default())
+                .expect("a finite gain and a nonempty width");
             ed.insert(NodeKey(1), "voice", pool);
         }
         // Free-running: a node of its own, from its first frame, at its own

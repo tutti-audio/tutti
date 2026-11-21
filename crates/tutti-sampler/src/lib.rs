@@ -109,7 +109,7 @@
 //! `tutti_buffers::MAX_CHANNELS` is the widest frame a voice reads or emits, the
 //! same cap as a bus and the graph root: a voice wider than the root could
 //! render would be truncated downstream, so the sampler refuses it here instead
-//! (`VoicePool::with_channels` returns `PoolTooWide`).
+//! (`VoicePool::with_channels` returns `PlaceError::WidthTooWide`).
 //!
 //! ## Features
 //!
@@ -168,19 +168,11 @@ pub(crate) const MAX_SAMPLER_WIDTH: u16 = {
     tutti_buffers::MAX_CHANNELS as u16
 };
 
-/// Reject the empty layout for anything that is a graph node.
-///
-/// [`ChannelLayout`](tutti_buffers::ChannelLayout) can represent an empty bus
-/// (`Multi(0)`) — deliberately, because a plugin port genuinely can be zero
-/// wide. A sampler node cannot: a node that reports zero outputs is a node
-/// nothing can be wired to. So the widths a node's `Shape` declares go
-/// through here.
-///
-/// This is the one place that clamp lives: the layout carries the declaration
-/// and this carries the node-arity invariant, so no call site has to re-remember
-/// the rule. The upper bound is *not* applied here — [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is
-/// a per-read stack ceiling, not a limit on what a node may declare, and only
-/// [`DiskVoice`] needs it.
+/// An internal width with a floor of one channel, for the sites that only ever
+/// see a width a public entry already checked
+/// ([`voice_width`]: a pool, a node, a source, a stream open) or the width of
+/// a ring or topology the crate built. Never the way a caller's width
+/// is accepted: those entries refuse an empty one.
 #[inline]
 pub(crate) fn nonempty(layout: tutti_buffers::ChannelLayout) -> tutti_buffers::ChannelLayout {
     if layout.count() == 0 {
@@ -225,10 +217,10 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 // `DiskVoice`'s `inner` — one capability, and only the outer type is a doorway.
 //
 pub use voice::{
-    Direction, DiskVoice, DiskVoiceControls, Loop, LoopError, MemorySource, MemorySourceConfig,
-    PlayError, Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice,
-    VoiceNode, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
-    voice_width,
+    Direction, DiskVoice, DiskVoiceControls, GainError, Loop, LoopError, MemorySource,
+    MemorySourceConfig, PlayError, Playback, PoolDrops, SendError, SlotId, StreamingAddError,
+    Voice, VoiceNode, VoiceNodeError, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource,
+    VoiceWindow, memory_voice, voice_width,
 };
 // The async disk-streaming engine (streamer future + the `DiskStreamer` handle).
 pub(crate) mod streamer;

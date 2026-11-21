@@ -1085,7 +1085,8 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     let (stream_a, mut a) = open(&mut streamer);
     let (_stream_b, mut b) = open(&mut streamer);
 
-    a.set_gain(tutti_units::Amplitude::new(0.5));
+    a.set_gain(tutti_units::Amplitude::new(0.5))
+        .expect("a finite gain and a nonempty width");
     a.set_speed(PlaybackRate::of(2.0));
     a.set_stretch_rate(tutti_units::ReadRate::new(0.5));
     stream_a.direction_cell().publish(crate::Direction::Reverse);

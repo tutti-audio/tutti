@@ -45,21 +45,29 @@ pub fn memory_voice<F: SamplerFloat>(
     })
 }
 
-/// The width a voice should run at, given what the file has.
+/// The width a voice runs at, given what the file has: `file` itself, when the
+/// sampler can carry it.
 ///
-/// Clamped to [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) because that is the sampler's own
-/// per-read stack ceiling — deliberately equal to the graph root's, since a
-/// voice wider than the root can render is a voice nobody can hear.
+/// # Errors
 ///
-/// A zero-width file is coerced to mono rather than rejected: `ChannelLayout` can
-/// represent an empty bus (a plugin port genuinely can be zero wide), but a graph
-/// node that reports zero outputs is one nothing can be wired to.
+/// [`PlaceError::EmptyWidth`] for no channels (a graph node that reports zero
+/// outputs is one nothing can be wired to, though a layout can represent an
+/// empty bus), and [`PlaceError::WidthTooWide`] past
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), the sampler's own per-read
+/// stack ceiling, deliberately equal to the graph root's.
 ///
 /// Deliberately not a function of the device width. The graph root folds
 /// whatever reaches it, so a voice narrowed to the device here would be narrowed
-/// *twice* on a wider project. The only ceiling that applies is the sampler's.
-pub fn voice_width(file: ChannelLayout) -> ChannelLayout {
-    ChannelLayout::from_count(file.count().clamp(1, crate::MAX_SAMPLER_WIDTH))
+/// *twice* on a wider project.
+pub fn voice_width(file: ChannelLayout) -> Result<ChannelLayout, PlaceError> {
+    match file.count() {
+        0 => Err(PlaceError::EmptyWidth),
+        n if n > crate::MAX_SAMPLER_WIDTH => Err(PlaceError::WidthTooWide {
+            channels: n,
+            max: crate::MAX_SAMPLER_WIDTH,
+        }),
+        _ => Ok(file),
+    }
 }
 
 #[cfg(test)]
@@ -67,34 +75,31 @@ mod tests {
     use super::*;
     use tutti_buffers::MAX_CHANNELS;
 
-    /// `voice_width` is the file's own width clamped to `1..=MAX_CHANNELS`
-    /// — the device is deliberately not consulted, or a voice would be narrowed
+    /// `voice_width` is the file's own width, refused outside `1..=MAX_CHANNELS`:
+    /// the device is deliberately not consulted, or a voice would be narrowed
     /// twice on a wider project.
     #[test]
-    fn voice_width_clamps_to_what_the_graph_can_carry() {
-        let ceiling = MAX_CHANNELS;
-        let cases: &[(ChannelLayout, usize, &str)] = &[
-            (ChannelLayout::STEREO, 2, "a stereo file stays stereo"),
-            (
-                ChannelLayout::from(64u16),
-                ceiling,
-                "wider than the sampler's ceiling comes back at the ceiling, not \
-                 truncated silently downstream at the root's fold",
-            ),
-            (
-                ChannelLayout::from(0u16),
-                1,
-                "a zero-width file becomes mono, not a node nobody can wire",
-            ),
-        ];
-
-        for &(file, expected, why) in cases {
-            assert_eq!(
-                voice_width(file).count() as usize,
-                expected,
-                "voice_width({} channels): {why}",
-                file.count()
-            );
-        }
+    fn voice_width_refuses_what_the_graph_cannot_carry() {
+        let ceiling = MAX_CHANNELS as u16;
+        assert_eq!(
+            voice_width(ChannelLayout::STEREO),
+            Ok(ChannelLayout::STEREO)
+        );
+        assert_eq!(
+            voice_width(ChannelLayout::from(ceiling)),
+            Ok(ChannelLayout::from(ceiling)),
+            "the ceiling itself is carried"
+        );
+        assert_eq!(
+            voice_width(ChannelLayout::from(ceiling + 1)),
+            Err(PlaceError::WidthTooWide {
+                channels: ceiling + 1,
+                max: ceiling
+            })
+        );
+        assert_eq!(
+            voice_width(ChannelLayout::from(0u16)),
+            Err(PlaceError::EmptyWidth)
+        );
     }
 }

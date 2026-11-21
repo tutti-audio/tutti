@@ -400,7 +400,8 @@ mod tests {
         let mut node = VoiceNode::new(Voice {
             source: VoiceSource::Memory(source.clone()),
             play: Default::default(),
-        });
+        })
+        .expect("a finite gain and a nonempty width");
         let mut memory = source;
         assert_eq!(pool.scratch_size(), (UNPREPARED_FRAMES, 2));
         assert_eq!(node.scratch_size(), (UNPREPARED_FRAMES, 2));

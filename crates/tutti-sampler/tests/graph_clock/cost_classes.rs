@@ -56,6 +56,7 @@ fn stretched(wave: &Arc<Wave>) -> VoiceNode<f32> {
             ..Default::default()
         },
     })
+    .expect("a finite gain and a nonempty width")
 }
 
 /// `node` as a node that declares nothing: the cost model's default.
@@ -168,7 +169,8 @@ fn each_node_declares_its_class() {
                 .expect("a placeable wave"),
         ),
         play: Playback::default(),
-    });
+    })
+    .expect("a finite gain and a nonempty width");
     assert_eq!(
         MemorySource::new(Arc::clone(&wave))
             .expect("a placeable wave")

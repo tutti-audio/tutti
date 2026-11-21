@@ -236,6 +236,7 @@ fn node_of(source: VoiceSource<f32>) -> VoiceNode<f32> {
         },
         2u16,
     )
+    .expect("a finite gain and a nonempty width")
 }
 
 /// **A disk-streamed clip exports its file, from the frame its beat falls

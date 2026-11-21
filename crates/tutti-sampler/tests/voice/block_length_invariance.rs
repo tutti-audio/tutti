@@ -290,11 +290,12 @@ fn memory_voices_render_the_same_frames_at_any_block_length() {
         assert_block_invariant(&format!("pool, {name}"), || {
             let mut pool = VoicePool::new();
             let (source, play) = memory_parts(&wave, play);
-            pool.insert(SlotId(1), source, play);
+            pool.insert(SlotId(1), source, play)
+                .expect("a finite gain and a nonempty width");
             pool
         });
         assert_block_invariant(&format!("voice node, {name}"), || {
-            VoiceNode::new(memory_voice(&wave, play))
+            VoiceNode::new(memory_voice(&wave, play)).expect("a finite gain and a nonempty width")
         });
     }
 }
