@@ -58,7 +58,7 @@ use tutti_curve::FadeLaw;
 
 use atomic_float::AtomicF64;
 
-use tutti_rt::ParamCell;
+use tutti_rt::{CappedVec, ParamCell};
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 use crate::lane::{fade_in, ramp_in};
@@ -419,7 +419,7 @@ impl<F: Float> SumLane<F> {
         &mut self,
         carried: Carried<F>,
         max: usize,
-        spare: &mut Vec<ParamState<F>>,
+        spare: &mut CappedVec<ParamState<F>>,
     ) {
         let Carried { prev, drive, fade } = carried;
         self.prev = prev;
@@ -428,10 +428,14 @@ impl<F: Float> SumLane<F> {
             Some(state)
                 if (self.drive.is_some() || state.busy()) && state.fits(max, self.declick) =>
             {
-                spare.extend(self.drive.replace(state));
+                if let Some(old) = self.drive.replace(state) {
+                    crate::exec::place(spare, old);
+                }
             }
             other => {
-                spare.extend(other);
+                if let Some(old) = other {
+                    crate::exec::place(spare, old);
+                }
                 if prev.is_some()
                     && let Some(state) = &mut self.drive
                 {
