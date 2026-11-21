@@ -232,6 +232,7 @@ mod probe_failure;
 mod probe_wire;
 mod process;
 mod process_wake;
+mod rate_refusal;
 mod render_mode;
 mod reports;
 mod requests;
@@ -273,7 +274,7 @@ pub use tutti_units::{BarNumber, Seconds};
 pub use any_thread::{AnyThread, Health};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
-pub use bridge_error::{IpcError, IpcResult, PluginForkError};
+pub use bridge_error::{IpcError, IpcResult, NoEditorHost, PluginForkError};
 pub use c_string::{
     c_str_prefix, read_c_chars, read_c_str, read_utf16_str, write_c_chars, write_c_str,
     write_utf16_str, write_utf16_units,
@@ -299,6 +300,7 @@ pub use order::{StableOrder, insertion_sort_by_key};
 pub use plugin_ref::{PluginRef, canonical_path};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
+pub use rate_refusal::{RateRefusal, RateRefusalCause};
 pub use reports::{ReportDrain, ReportSink, reports};
 pub use requests::taken;
 pub use state_frame::{

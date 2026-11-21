@@ -19,8 +19,8 @@ use tutti_plugin_ipc::{
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
-    ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, SampleRate,
-    StateUse, Wakeups, WindowHandle,
+    ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, RateRefusalCause,
+    SampleRate, StateUse, Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -97,7 +97,7 @@ pub(crate) struct Session {
     /// Why the plugin is not running at the rate the host asked for, while it
     /// is not. A refused plugin renders silence (no block reaches it) and the
     /// next `SetSampleRate` retries it.
-    pub(crate) rate_refused: Option<PluginError>,
+    pub(crate) rate_refused: Option<RateRefusalCause>,
     /// The longest block the loaded plugin was activated for (`LoadPlugin`'s
     /// `block_size`), 0 with none loaded. A block past it, or past the slab's
     /// per-channel room, is refused before anything is sized for it.
@@ -382,15 +382,13 @@ impl Session {
                         Ok(()) => None,
                         Err(e) => {
                             tracing::warn!(requested = %rate, "sample rate not applied: {e}");
-                            Some(e)
+                            Some(RateRefusalCause::from(&e))
                         }
                     },
                     None => None,
                 };
-                // The wire carries the reason as text; the session keeps it typed.
-                let error = refusal.as_ref().map(ToString::to_string);
-                self.rate_refused = refusal;
-                Ok(ControlReply::SampleRateSet { rate, error }.into())
+                self.rate_refused = refusal.clone();
+                Ok(ControlReply::SampleRateSet { rate, refusal }.into())
             }
             M::SetRenderMode { mode } => {
                 // The plugin's answer is deliberately not returned to the host:
@@ -1307,7 +1305,7 @@ mod tests {
             .into_reply();
         assert!(matches!(
             r,
-            ControlReply::SampleRateSet { rate, error: None } if rate.get() == 96000.0
+            ControlReply::SampleRateSet { rate, refusal: None } if rate.get() == 96000.0
         ));
     }
 
@@ -1718,7 +1716,7 @@ mod tests {
 
         let accepted = set(&mut s, 48000.0);
         assert!(
-            matches!(accepted, ControlReply::SampleRateSet { error: None, .. }),
+            matches!(accepted, ControlReply::SampleRateSet { refusal: None, .. }),
             "{accepted:?}"
         );
         assert!(
@@ -1734,8 +1732,8 @@ mod tests {
         assert!(
             matches!(
                 &refused,
-                ControlReply::SampleRateSet { rate, error: Some(e) }
-                    if rate.get() == 96000.0 && !e.is_empty()
+                ControlReply::SampleRateSet { rate, refusal: Some(e) }
+                    if rate.get() == 96000.0 && matches!(e, RateRefusalCause::Deactivated { .. } | RateRefusalCause::RolledBack { .. })
             ),
             "the host is told, with a reason: {refused:?}"
         );
@@ -1752,7 +1750,10 @@ mod tests {
         // Refused again at the same rate: still silent.
         assert!(matches!(
             set(&mut s, 96000.0),
-            ControlReply::SampleRateSet { error: Some(_), .. }
+            ControlReply::SampleRateSet {
+                refusal: Some(_),
+                ..
+            }
         ));
         process_block(&mut s, &mut shm, 3, 0.5);
         assert!(!shm.has_output(3), "still silent");
@@ -1762,7 +1763,7 @@ mod tests {
         let _flagged = crate::test_utils::clap_probe_ports_64bit(both);
         let revived = set(&mut s, 88200.0);
         assert!(
-            matches!(revived, ControlReply::SampleRateSet { error: None, .. }),
+            matches!(revived, ControlReply::SampleRateSet { refusal: None, .. }),
             "{revived:?}"
         );
         assert!(s.rate_refused.is_none());
@@ -2580,7 +2581,10 @@ mod tests {
             )
             .unwrap()
             .into_reply();
-        assert!(matches!(r, ControlReply::SampleRateSet { error: None, .. }));
+        assert!(matches!(
+            r,
+            ControlReply::SampleRateSet { refusal: None, .. }
+        ));
     }
 
     #[test]

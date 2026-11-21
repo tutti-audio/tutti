@@ -1628,7 +1628,7 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
     assert!(
         matches!(
             fault.cause.downcast_ref::<PluginRenderFault>(),
-            Some(PluginRenderFault::RateRefused { rate, .. }) if rate.get() == 96_000.0
+            Some(PluginRenderFault::RateRefused(refusal)) if refusal.rate.get() == 96_000.0
         ),
         "{fault:?}"
     );

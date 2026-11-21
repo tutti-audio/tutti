@@ -1,8 +1,6 @@
 //! What a plugin tells its host went stale: the wire's [`ResyncKind`] and the
 //! two consequences it maps to, [`PluginRefresh`] and [`PluginInvalidation`].
 
-use tutti_units::SampleRate;
-
 use crate::{PluginFailure, PluginTail, Samples};
 
 /// Which aspect of plugin state the plugin asked the host to re-read.
@@ -103,12 +101,7 @@ pub enum PluginInvalidation {
     /// loaded and keeps its declared latency, so the plan stands. Retried at
     /// every later rate change; [`RateRestored`](Self::RateRestored) says it
     /// took one.
-    RateRefused {
-        /// The rate that was refused.
-        rate: SampleRate,
-        /// The plugin's reason, formatted subprocess-side.
-        reason: String,
-    },
+    RateRefused(crate::RateRefusal),
     /// The plugin took a rate after refusing one and renders again.
     RateRestored,
     /// A restart the host asked for (a rate or a render mode) did not happen:

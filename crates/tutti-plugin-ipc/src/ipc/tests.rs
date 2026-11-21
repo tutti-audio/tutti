@@ -326,7 +326,7 @@ fn mock_with(
                     id,
                     &ControlReply::SampleRateSet {
                         rate: *rate,
-                        error: None,
+                        refusal: None,
                     },
                 ),
                 // The server's editor: a parent of 0 is a window it cannot embed

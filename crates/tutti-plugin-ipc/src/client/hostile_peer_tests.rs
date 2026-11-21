@@ -38,7 +38,9 @@ use tutti_fixtures::main_thread;
 use tutti_platform::Instant;
 use tutti_plugin_ipc_ffi::Blob;
 use tutti_plugin_types::ChannelLayout;
-use tutti_plugin_types::{IpcError, PluginFailure, StateError, Timeouts};
+use tutti_plugin_types::{
+    IpcError, PluginFailure, RateRefusal, RateRefusalCause, StateError, Timeouts,
+};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -1324,7 +1326,7 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
             let first = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
             Action::Reply(Box::new(ControlReply::SampleRateSet {
                 rate,
-                error: first.then(|| "no".to_string()),
+                refusal: first.then_some(RateRefusalCause::Unconfigured),
             }))
         }
         _ => Action::Silent,
@@ -1335,7 +1337,10 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
     });
     assert_eq!(
         mock.bridge.audio().rate_refusal(),
-        Some((SampleRate::SR_96K, "no".to_string()))
+        Some(RateRefusal::new(
+            SampleRate::SR_96K,
+            RateRefusalCause::Unconfigured
+        ))
     );
     assert!(
         !mock.bridge.audio().is_crashed(),
@@ -1358,7 +1363,10 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
 fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
     let mock = MockServer::start_with_timeouts("late_rate", rate_timeout(300), |msg| match msg {
         ControlRequest::SetSampleRate { rate } => Action::ReplyAfter {
-            reply: ControlReply::SampleRateSet { rate, error: None },
+            reply: ControlReply::SampleRateSet {
+                rate,
+                refusal: None,
+            },
             gap: Duration::from_millis(800),
         },
         ControlRequest::GetParameter { .. } => {
@@ -1372,9 +1380,12 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_some()
     });
-    let (rate, reason) = mock.bridge.audio().rate_refusal().unwrap();
-    assert_eq!(rate, SampleRate::SR_96K);
-    assert!(reason.contains("did not answer"), "{reason}");
+    let refusal = mock.bridge.audio().rate_refusal().unwrap();
+    assert_eq!(refusal.rate, SampleRate::SR_96K);
+    assert!(
+        matches!(refusal.cause, RateRefusalCause::NoAnswer { .. }),
+        "{refusal:?}"
+    );
     assert!(
         !mock.bridge.audio().is_crashed(),
         "an unanswered rate is not a crash"
@@ -1421,11 +1432,14 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
                         if released.recv().is_err() {
                             return Action::Silent;
                         }
-                        Action::Reply(Box::new(ControlReply::SampleRateSet { rate, error: None }))
+                        Action::Reply(Box::new(ControlReply::SampleRateSet {
+                            rate,
+                            refusal: None,
+                        }))
                     } else {
                         Action::Reply(Box::new(ControlReply::SampleRateSet {
                             rate,
-                            error: Some("no".to_string()),
+                            refusal: Some(RateRefusalCause::Unconfigured),
                         }))
                     }
                 }
@@ -1448,7 +1462,7 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
         mock.bridge
             .audio()
             .rate_refusal()
-            .is_some_and(|(rate, _)| rate == SampleRate::SR_88K2)
+            .is_some_and(|refusal| refusal.rate == SampleRate::SR_88K2)
     });
     // Barrier: B's command has ended, with everything it applies.
     assert_eq!(
@@ -1457,7 +1471,10 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
     );
     assert_eq!(
         mock.bridge.audio().rate_refusal(),
-        Some((SampleRate::SR_88K2, "no".to_string())),
+        Some(RateRefusal::new(
+            SampleRate::SR_88K2,
+            RateRefusalCause::Unconfigured
+        )),
         "the later answer stands"
     );
     assert!(!mock.bridge.audio().is_crashed());
@@ -2204,7 +2221,10 @@ fn a_settle_reaches_the_server_after_the_rate_change_queued_before_it() {
         move |msg: ControlRequest| match msg {
             ControlRequest::SetSampleRate { rate } => {
                 log.lock().unwrap().push("rate");
-                Action::Reply(Box::new(ControlReply::SampleRateSet { rate, error: None }))
+                Action::Reply(Box::new(ControlReply::SampleRateSet {
+                    rate,
+                    refusal: None,
+                }))
             }
             ControlRequest::GetCurrentPreset => {
                 log.lock().unwrap().push("fence");
@@ -2480,7 +2500,10 @@ fn a_rate_change_is_applied_before_the_next_block() {
         move |msg: ControlRequest| match msg {
             ControlRequest::SetSampleRate { rate } => {
                 log_after_window(&log, &block_rx, "rate");
-                Action::Reply(Box::new(ControlReply::SampleRateSet { rate, error: None }))
+                Action::Reply(Box::new(ControlReply::SampleRateSet {
+                    rate,
+                    refusal: None,
+                }))
             }
             _ => Action::Silent,
         }

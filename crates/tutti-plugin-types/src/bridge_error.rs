@@ -145,6 +145,30 @@ pub enum IpcError {
     #[error("the host is shutting down")]
     ShutDown,
 
+    /// The plugin refused the sample rate it was asked to run at.
+    #[error(transparent)]
+    RateRefused(#[from] crate::RateRefusal),
+
+    /// The served plugin has no origin to load a fresh instance from.
+    #[error("the served plugin has no origin")]
+    NoOrigin,
+
+    /// The plugin cannot run in blocks of `frames` frames.
+    #[error("the plugin cannot run in blocks of {frames} frames")]
+    BlockUnsupported {
+        /// The block size that was asked for.
+        frames: usize,
+    },
+
+    /// No editor host can load this plugin's editor in this process.
+    #[error("no editor host for the plugin at {}: {why}", path.display())]
+    NoEditorHost {
+        /// The plugin file.
+        path: PathBuf,
+        /// Why no host can.
+        why: NoEditorHost,
+    },
+
     /// The subprocess replied with a message the host was not waiting for.
     #[error("unexpected bridge message: expected {expected}, got {got}")]
     UnexpectedMessage {
@@ -274,6 +298,30 @@ pub enum IpcError {
         #[source]
         cause: Box<IpcError>,
     },
+}
+
+/// Why no editor host loads a plugin's editor in this process.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NoEditorHost {
+    /// Audio Units exist only on macOS.
+    #[error("Audio Units exist only on macOS")]
+    AudioUnitOffMacos,
+    /// The Audio Unit host is not built: its cargo feature is off.
+    #[error("Audio Unit editors need the `au` feature")]
+    AudioUnitFeatureOff,
+    /// A VST2 plugin's editor lives in its in-process backend.
+    #[error(
+        "VST2 plugins use the in-process backend (enable the `vst2` feature); \
+         they do not go through the subprocess GUI loader"
+    )]
+    Vst2InProcess,
+    /// The format has no in-process editor host.
+    #[error("no in-process GUI support for format {0}")]
+    Format(crate::PluginFormat),
+    /// No format host is built.
+    #[error("no format feature is enabled (vst3, clap or au)")]
+    NoFormatHost,
 }
 
 /// A host operation's result, erroring as [`IpcError`].

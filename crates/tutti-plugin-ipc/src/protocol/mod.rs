@@ -242,6 +242,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use tutti_buffers::FloatWidth;
+    use tutti_plugin_types::RateRefusalCause;
 
     use tutti_plugin_types::{
         ChordValue, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue, ParameterInfo,
@@ -386,11 +387,13 @@ mod tests {
             ControlReply::ParameterValueFromText { value: None },
             ControlReply::SampleRateSet {
                 rate: SampleRate::SR_96K,
-                error: None,
+                refusal: None,
             },
             ControlReply::SampleRateSet {
                 rate: SampleRate::SR_96K,
-                error: Some("refused".to_string()),
+                refusal: Some(RateRefusalCause::Deactivated {
+                    reason: "refused".to_string(),
+                }),
             },
         ];
         for msg in responses {
