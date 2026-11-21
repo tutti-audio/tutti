@@ -28,7 +28,7 @@
 //!   SysEx7 packets; the input node translates the first as it does for any
 //!   MIDI 1.0 port. Each carries its time since the port started, placed on
 //!   the `Instant` clock.
-//! - **Output** is a thread of its own: it holds each event until its time
+//! - **Output** is a future on a dedicated thread of the executor: it holds each event until its time
 //!   (a high-resolution waitable timer; one already due goes at once) and
 //!   sends them in order, a SysEx message whole, waiting for the driver to
 //!   take it.
@@ -181,14 +181,14 @@ impl MidiEndpoints for WinMmEndpoints {
     ) -> Result<Box<dyn InputConnection>> {
         let port = resolve_input(id)?;
         Ok(Box::new(
-            input::open(&port, producer).map_err(|e| in_use_if_allocated(id, e))?,
+            input::open(&self.executor, &port, producer).map_err(|e| in_use_if_allocated(id, e))?,
         ))
     }
 
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let port = resolve_output(id)?;
         Ok(Box::new(
-            output::open(&port).map_err(|e| in_use_if_allocated(id, e))?,
+            output::open(&self.executor, &port).map_err(|e| in_use_if_allocated(id, e))?,
         ))
     }
 }
