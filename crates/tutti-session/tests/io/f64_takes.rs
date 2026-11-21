@@ -14,8 +14,7 @@ use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
-    InputConfig, InputOpener, OpenedInput, Punch, Root, Session, SessionEvent, TakeEvent,
-    TakeTarget,
+    InputConfig, InputOpener, OpenedInput, Punch, Root, Session, SessionEvent, TakeEvent, TakeFile,
 };
 use tutti_units::{Frame, SampleRate, Samples};
 
@@ -77,7 +76,7 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
             Punch::at(Frame::new(1_000))
                 .until(Frame::new(1_200))
                 .unwrap(),
-            TakeTarget::file(&path, Format::Wav(Pcm::Float64)),
+            TakeFile::new(&path, Format::Wav(Pcm::Float64)),
         )
         .expect("armed");
 
