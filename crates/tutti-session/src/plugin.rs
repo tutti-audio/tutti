@@ -584,7 +584,7 @@ pub enum PluginChange {
         /// The new tail, which may be bounded, unbounded or unreported.
         tail: PluginTail,
     },
-    /// The plugin's bus layout changed. A pooled in-process plugin's node is
+    /// The plugin's bus layout changed. An in-process plugin's node is
     /// re-inserted at its key with the new ports by the session
     /// ([`SessionEvent::Unwired`] names the wiring a narrower shape dropped);
     /// another plugin's node keeps its ports, and the app re-reads and rewires.

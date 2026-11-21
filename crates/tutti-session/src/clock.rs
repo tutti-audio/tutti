@@ -43,7 +43,7 @@ use crate::BlockConfig;
 ///
 /// The graph, its taps, meters and inlets, the transport, the metronome, MIDI,
 /// the offline, system and device clocks and the switch between them, a bounce,
-/// the session's jobs (the pool, a sampler stream, an analysis), modulation, the
+/// the session's jobs (a sampler stream, an analysis), modulation, the
 /// capture inputs and the takes work in either, as do the instruments. Only the
 /// plugins are `f32` (by their FFI) and hosted by an `f32` session alone: each is
 /// an `impl` on `Session<K, C>` where `C: Clock<Float = f32>`, and the trait is

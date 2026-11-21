@@ -10,21 +10,12 @@
 //! stream starts.
 //!
 //! - **Everything the session holds carries over:** the graph, keys, knobs, the
-//!   pool, the transport, the heard tap and the load meter. The transport keeps
+//!   transport, the heard tap and the load meter. The transport keeps
 //!   its place: a rolling one resumes at the beat the last block ended on, so
 //!   the switch costs wall-clock time and no musical time.
 //! - **Jobs in flight carry over:** a job's lander names nothing of the clock,
 //!   so a job still running when the switch begins lands on the converted
-//!   session, once. Pool loads are jobs, so the entries loading carry over and
-//!   land after the switch.
-//! - **Runs asked with [`Session::when_loaded`] cannot:** a run takes the
-//!   session of the clock it was asked of. The runs whose entry has loaded run
-//!   before the switch begins, with the session as it is (a run may ask more
-//!   runs, which run too, until none is due); a switch with a run waiting for
-//!   an entry that has not loaded is refused ([`Error::RunsPending`]), before
-//!   anything stops, and goes through once the run has fired. What a run did
-//!   to the session (the graph, the card) is what the switch then checks. A run
-//!   that panics unwinds out of the switch and drops the session.
+//!   session, once.
 //! - **Captures end** when the session leaves the sound card: each input the
 //!   session held closes and is reported as
 //!   [`DeviceEvent::InputClosed`](crate::DeviceEvent) (feature `capture`).
@@ -134,44 +125,13 @@ fn bind_inputs<K: crate::AppKey, F: crate::SessionFloat>(
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// The first of what a switch makes before anything stops:
-    ///
-    /// 1. refuse while a run waits for an entry that has not loaded
-    ///    ([`Error::RunsPending`]): it cannot follow the session to the next
-    ///    clock;
-    /// 2. run the runs asked with `when_loaded` whose entry has loaded, with
-    ///    the session as it is (they are the app's closures, and the clock they
-    ///    were asked of is the one the session is still on), until none is due:
-    ///    a run may ask another;
-    /// 3. refuse again: a run may have asked one for an entry that has not
-    ///    loaded.
-    ///
-    /// The switch reads the session after this, so what a run did to it (the
-    /// graph, the card) is what the checks and the switch see.
-    fn settle_runs(&mut self) -> Result<()> {
-        self.refuse_waiting_runs()?;
-        while self.pool.entries.has_due_run() {
-            self.pool_run_loaded();
-        }
-        self.refuse_waiting_runs()
-    }
-
-    /// The second: what a switch refuses before anything stops, so a refusal
+    /// What a switch refuses before anything stops, so a refusal
     /// leaves the session as it was. The root and the output map in force have
     /// to be placeable on the new channels, and the graph has to be able to
     /// re-prepare.
     fn check_switch(&self, channels: ChannelLayout) -> Result<()> {
         self.check_device(channels, None)?;
         self.check_restart(None)
-    }
-
-    fn refuse_waiting_runs(&self) -> Result<()> {
-        let keys = self.pool.entries.waiting_runs();
-        if keys.is_empty() {
-            Ok(())
-        } else {
-            Err(Error::RunsPending { keys })
-        }
     }
 }
 
@@ -196,7 +156,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     /// be found or opened (a chosen
     /// [`sample_format`](OutputConfig::sample_format) the device lacks is
     /// [`tutti_cpal::DeviceError::OutputFormatUnavailable`]), [`Error::Unplaceable`], [`Error::MapUnplaceable`],
-    /// [`Error::Reprepare`] or [`Error::RunsPending`] when the graph cannot
+    /// [`Error::Reprepare`] when the graph cannot
     /// take the device **before the timer stops**, the re-prepare's or the
     /// card's own failure after it, and [`Error::SwitchNotUndone`] when the
     /// timer could not be started again.
@@ -265,10 +225,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
             Box<(tutti_engine::StreamHost<F>, Error)>,
         >,
     ) -> std::result::Result<LiveSession<K, F>, ClockError<Self>> {
-        if let Err(e) = self
-            .settle_runs()
-            .and_then(|()| self.check_switch(channels))
-        {
+        if let Err(e) = self.check_switch(channels) {
             return Err(ClockError::new(self, e));
         }
         let previous = self.graph.prepared().sample_rate();
@@ -347,8 +304,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
     /// `capture`); the device watch ends with the device.
     ///
     /// **A failure gives the session back running on the card**: before the
-    /// stream stops when the graph cannot re-prepare or a run waits
-    /// ([`Error::RunsPending`]), and after it (the timer thread would not start,
+    /// stream stops when the graph cannot re-prepare, and after it (the timer thread would not start,
     /// or the re-prepare refused) by opening the card's device again, which
     /// resolves it afresh: its config is what the host reports then. The
     /// session comes back stopped only with [`Error::SwitchNotUndone`].
@@ -358,8 +314,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
     ///
     /// # Errors
     ///
-    /// A [`ClockError`] whose error is [`Error::Reprepare`] or
-    /// [`Error::RunsPending`] before the stream stops, the re-prepare's or the
+    /// A [`ClockError`] whose error is [`Error::Reprepare`] before the stream stops, the re-prepare's or the
     /// timer's own failure ([`Error::Clock`]) after it, and
     /// [`Error::SwitchNotUndone`] when the card could not be started again.
     pub fn into_system_clock(self) -> std::result::Result<SystemSession<K, F>, ClockError<Self>> {
@@ -405,11 +360,6 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
     where
         D: StreamDriver<F, Error = tutti_engine::TimerError>,
     {
-        // The runs first: they may have changed the graph or restarted the
-        // card, and the switch is of the session as they left it.
-        if let Err(e) = self.settle_runs() {
-            return Err(ClockError::new(self, e));
-        }
         let rate = self.device().graph_rate();
         let old = self.device().spec().clone();
         let mut spec = old.clone().with_quantum(self.graph.prepared().max_block());

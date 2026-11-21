@@ -4,7 +4,6 @@
 //! when it is off. `Session`'s fields and phases name the part and never the feature.
 
 mod output;
-mod pool;
 mod reports;
 mod transport;
 
@@ -51,7 +50,6 @@ pub(crate) use output::OutputPart;
 #[cfg(feature = "plugin")]
 pub(crate) use plugin::Loop;
 pub(crate) use plugin::{EarlyWork, PluginOptions, PluginPart};
-pub(crate) use pool::PoolPart;
 pub(crate) use reports::Reports;
 pub(crate) use sampler::SamplerPart;
 pub(crate) use transport::TransportPart;
