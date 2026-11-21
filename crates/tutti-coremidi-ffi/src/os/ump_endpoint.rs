@@ -18,11 +18,10 @@
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
 use super::client::SharedClient;
-use super::client_retry::Retry;
-use super::enable_retry::EnableRetry;
-use super::error::{Error, Operation, OsStatus};
+use super::error::{Error, Operation};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
+use super::retry::{Backoff, retry};
 use super::source::{protocol_id, publish};
 use crate::checks::blocks::{PlatformBlock, numbers_in_registered_order, platform_blocks};
 use block2::DynBlock;
@@ -165,7 +164,7 @@ impl UmpEndpoint {
     /// [`Error::UmpEndpointUnsupported`] before macOS 15, [`Error::Exception`] when
     /// CoreMIDI raises an Objective-C exception, [`Error::NotPermitted`] when it
     /// answers a call with `kMIDINotPermitted` (the enable is tried again for up
-    /// to two seconds first, see below), [`Error::Objc`] or
+    /// to two seconds first), [`Error::Objc`] or
     /// [`Error::NoObject`] when it refuses the endpoint otherwise,
     /// [`Error::BlockNumber`] for a number the spec cannot hold, and
     /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the
@@ -174,8 +173,8 @@ impl UmpEndpoint {
     ///
     /// # Concurrent creations
     ///
-    /// CoreMIDI's server can refuse an enable with `kMIDINotPermitted` while it
-    /// serves another process's endpoint change, and accepts the same call a few
+    /// Probes have seen CoreMIDI refuse an enable with `kMIDINotPermitted` while
+    /// other processes create endpoints, and accept the same call a few
     /// milliseconds later. This call retries the enable, waiting 10 ms and then
     /// longer, for two seconds from its first attempt, and returns
     /// [`Error::NotPermitted`] only if the refusal lasts that long. The wait
@@ -332,23 +331,21 @@ fn create(
 }
 
 /// Enables `endpoint`, trying again while CoreMIDI refuses with `kMIDINotPermitted`
-/// (see [`EnableRetry`]). Called inside [`catch`].
+/// (see [`Backoff::enable`]). Called inside [`catch`].
+///
+/// An attempt fails with the whole [`Error`], so the last refusal keeps its
+/// `NSError` domain and description; [`Error::os_status`] is the status the rule
+/// filters on.
 fn enable(endpoint: &MIDIUMPMutableEndpoint) -> Result<(), Error> {
-    let mut rule = EnableRetry::new(Instant::now());
-    loop {
-        // SAFETY: a plain message to the live endpoint.
-        let Err(refused) = (unsafe { endpoint.setEnabled_error(true) }) else {
-            return Ok(());
-        };
-        let error = objc(Operation::EnableUmpEndpoint, &refused);
-        if !matches!(error, Error::NotPermitted(_)) {
-            return Err(error);
-        }
-        match rule.after(OsStatus::NOT_PERMITTED, Instant::now()) {
-            Retry::At(at) => std::thread::sleep(at.saturating_duration_since(Instant::now())),
-            Retry::GiveUp => return Err(error),
-        }
-    }
+    retry(
+        Backoff::enable(Instant::now()),
+        || {
+            // SAFETY: a plain message to the live endpoint.
+            unsafe { endpoint.setEnabled_error(true) }
+                .map_err(|e| objc(Operation::EnableUmpEndpoint, &e))
+        },
+        Error::os_status,
+    )
 }
 
 /// The Objective-C Function Block for `block`.
