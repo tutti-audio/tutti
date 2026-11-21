@@ -197,10 +197,11 @@ impl<F: Float> Wavetable<F> {
     #[inline]
     fn read(&self, frame: usize, level: usize, phase: RunningPhase) -> F {
         let n = self.size.get();
-        let bits = n.trailing_zeros();
-        let count = phase.get();
-        let i = (count >> (64 - bits)) as usize;
-        let t = F::from_design((count << bits) as f64 * (1.0 / 18_446_744_073_709_551_616.0));
+        // The phase as `f64` cycles (53 bits, exact), times the power of two `n`: the table
+        // position, whose whole part is the index and whose rest is the Hermite fraction.
+        let position = f64::from_phase(phase) * n as f64;
+        let i = position as usize;
+        let t = F::from_design(position - i as f64);
         let start = (frame * self.levels + level) * n;
         let at = |k: usize| self.data[start + (i.wrapping_add(k) & (n - 1))];
         cubic_hermite(at(n - 1), at(0), at(1), at(2), t)
