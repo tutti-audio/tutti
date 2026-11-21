@@ -92,7 +92,7 @@ pub enum SaveState {
 #[must_use = "work does nothing until it runs"]
 pub struct SaveStateInProcess {
     gate: Gate,
-    handle: PluginHandle,
+    handle: Box<PluginHandle>,
     plugin: PluginRef,
     state_use: StateUse,
     main_thread: PhantomData<*const ()>,
@@ -256,7 +256,7 @@ pub enum RestoreState {
 #[must_use = "work does nothing until it runs"]
 pub struct RestoreStateInProcess {
     landed: Landed,
-    handle: PluginHandle,
+    handle: Box<PluginHandle>,
     state: PeerState,
     main_thread: PhantomData<*const ()>,
 }
@@ -507,7 +507,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         Ok(match &hosted.answers {
             None => SaveState::InProcess(SaveStateInProcess {
                 gate,
-                handle: hosted.handle.clone(),
+                handle: Box::new(hosted.handle.clone()),
                 plugin,
                 state_use,
                 main_thread: PhantomData,
@@ -544,7 +544,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         Ok(match &hosted.answers {
             None => RestoreState::InProcess(RestoreStateInProcess {
                 landed,
-                handle: hosted.handle.clone(),
+                handle: Box::new(hosted.handle.clone()),
                 state,
                 main_thread: PhantomData,
             }),
