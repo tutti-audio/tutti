@@ -9,13 +9,15 @@ use super::*;
 // - `Metres * f64`, `Metres / f64` — a negative or NaN factor leaves the range;
 //   `Metres::scaled` is the replacement and returns `None` for it.
 // - `-Metres`, `-Speed` — there is no signed distance or velocity type.
-// - `Metres::from(f64)`, `Speed::from(f64)`, `Unit::from_raw` — each could build
-//   a value the type refuses; `new` is the checked constructor.
+// - `Metres::from(f64)`, `Speed::from(f64)` — each could build a value the type
+//   refuses; `new` is the checked constructor. `Metres` is a `Unit` whose `from_raw`
+//   is `clamped`; `Speed` is not a `Unit`.
 // - `Speed * Seconds -> Metres` — not yet used.
 // - `Metres / Seconds -> Speed` — not yet used.
 // - `Speed + Speed`, `Speed * f64` — the speed of sound is one medium's
 //   constant, not an amount.
-// - `Metres::{min, max, clamp}`, `Display` — not yet used; `PartialOrd` compares.
+// - `Metres::{min, clamp}`, `Display` — not yet used; `PartialOrd` compares, and `max` is
+//   the floor a reference distance puts under a distance.
 
 /// **A distance over the speed of sound is the delay `r / c`**: 343 m at 343 m/s
 /// is one second, and the delay is linear in the distance.
@@ -74,4 +76,18 @@ fn a_distance_and_a_speed_order() {
     assert!(Metres::of(1.0) < Metres::of(3.0));
     assert!(Speed::of(300.0) < Speed::SOUND_IN_AIR_20C);
     assert_eq!(Metres::default(), Metres::ZERO);
+}
+
+/// **`clamped` saturates into the range**, NaN is zero, and it is what a parameter cell's
+/// `from_raw` reads; `max` is the larger distance.
+#[test]
+fn clamped_saturates_and_max_is_the_larger() {
+    assert_eq!(Metres::clamped(2.5), Metres::of(2.5));
+    assert_eq!(Metres::clamped(-3.0), Metres::ZERO);
+    assert_eq!(Metres::clamped(f64::NAN), Metres::ZERO);
+    assert_eq!(Metres::clamped(f64::INFINITY), Metres::of(f64::MAX));
+    assert_eq!(Metres::from_raw(-1.0), Metres::ZERO);
+    assert_eq!(Metres::of(2.5).to_raw(), 2.5);
+    assert_eq!(Metres::of(1.0).max(Metres::of(4.0)), Metres::of(4.0));
+    assert_eq!(Metres::of(5.0).max(Metres::of(4.0)), Metres::of(5.0));
 }

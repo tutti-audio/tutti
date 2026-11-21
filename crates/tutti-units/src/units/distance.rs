@@ -1,6 +1,9 @@
 // Distance and the speed of sound.
 
+// `Metres` is a `Unit` (below), which is already a `Quantity`, so it takes the type and its
+// error without the macro's own `Quantity` impl.
 crate::ranged! {
+    @items []
     /// A distance in metres: finite and at least zero.
     ///
     /// [`new`](Self::new) refuses NaN, the infinities and anything negative, and so
@@ -46,7 +49,7 @@ crate::ranged! {
     |raw| raw > 0.0 && raw <= f64::MAX
 }
 
-use crate::Seconds;
+use crate::{Seconds, Unit};
 
 // Deliberately absent, and the omissions are load-bearing:
 //
@@ -54,8 +57,9 @@ use crate::Seconds;
 //   no `Metres` is. `abs_diff` is the replacement.
 // - `Mul<f64>` / `Div<f64>` (`Scalable`) — a negative or NaN factor leaves the
 //   range. `scaled` is the replacement: it refuses the result `new` refuses.
-// - `Unit::from_raw`, `From<f64>` — a bare number cannot be refused there; `new`
-//   is the checked constructor.
+// - `From<f64>` — a bare number cannot be refused there; `new` is the checked
+//   constructor. `Unit::from_raw` is `clamped`, the one saturating constructor, since
+//   a parameter cell holds any float.
 // - `Speed * Seconds -> Metres` and `Metres / Seconds -> Speed` — not yet used.
 impl Metres {
     /// No distance.
@@ -67,6 +71,28 @@ impl Metres {
     #[must_use]
     pub const fn scaled(self, factor: f64) -> Option<Self> {
         Self::new(self.0 * factor)
+    }
+
+    /// `raw` constrained into the range; NaN is [`ZERO`](Self::ZERO). The saturating
+    /// constructor, for a value that arrives from a parameter cell, which holds any
+    /// float.
+    #[inline]
+    #[must_use]
+    pub const fn clamped(raw: f64) -> Self {
+        if raw.is_nan() || raw < 0.0 {
+            Self::ZERO
+        } else if raw > f64::MAX {
+            Self(f64::MAX)
+        } else {
+            Self(raw)
+        }
+    }
+
+    /// The larger of the two distances.
+    #[inline]
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
     }
 
     /// The gap between two distances, `|self - other|`: the replacement for
@@ -81,6 +107,20 @@ impl Metres {
 impl Speed {
     /// The speed of sound in dry air at 20 degrees Celsius, 343 m/s.
     pub const SOUND_IN_AIR_20C: Self = Self(343.0);
+}
+
+/// `from_raw` saturates ([`Metres::clamped`]): a parameter cell holds any float, and a
+/// unit's `from_raw` cannot refuse.
+impl Unit for Metres {
+    type Raw = f64;
+    #[inline]
+    fn from_raw(v: f64) -> Self {
+        Self::clamped(v)
+    }
+    #[inline]
+    fn to_raw(self) -> f64 {
+        self.0
+    }
 }
 
 impl Default for Metres {

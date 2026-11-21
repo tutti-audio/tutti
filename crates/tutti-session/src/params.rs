@@ -83,6 +83,7 @@ param_methods! {
     hold_factor, hold_factor_at => HoldFactor;
     semitones, semitones_at => Semitones;
     pitch, pitch_at => Pitch;
+    distance, distance_at => Distance;
     knee, knee_at => Knee;
     decay, decay_at => Decay;
     diffusion, diffusion_at => Diffusion;

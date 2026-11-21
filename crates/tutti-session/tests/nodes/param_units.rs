@@ -11,7 +11,7 @@ use std::any::TypeId;
 use tutti_session::HasParam;
 use tutti_units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CompressionRatio, Db, Depth, Drive, Elevation,
-    Feedback, HoldFactor, Hz, Mix, Q, Resonance, Seconds, Semitones, Spread, StereoWidth,
+    Feedback, HoldFactor, Hz, Metres, Mix, Q, Resonance, Seconds, Semitones, Spread, StereoWidth,
     UnitParam,
 };
 
@@ -82,6 +82,7 @@ units! {
             Cutoff => Hz, Q => Q, Attack => Seconds, Release => Seconds, Semitones => Semitones
         }
         tutti_nodes::PitchShifterNode<f32> { Pitch => Cents }
+        tutti_nodes::DistanceNode<f32> { Distance => Metres }
         tutti_nodes::TransientShaperNode<f32> { GainDb => Db }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
         tutti_nodes::CrossoverNode<f32> { Cutoff => Hz }
