@@ -183,9 +183,7 @@ impl Error {
             description,
         }
     }
-}
 
-impl Error {
     /// The `OSStatus` of the failure when it carries one: a call's status, the
     /// refusal `kMIDINotPermitted`, or an `NSError` code that fits one.
     pub(crate) fn os_status(&self) -> Option<OsStatus> {

@@ -12,7 +12,7 @@ use tutti_platform::Instant;
 /// It covers the MIDI server's restart of about five seconds with room to spare.
 pub(crate) const CLIENT_BOUND: Duration = Duration::from_secs(10);
 
-/// How long an endpoint enable keeps retrying, measured from the first attempt.
+/// How long an endpoint's enable or registration keeps retrying, measured from the first attempt.
 const ENABLE_BOUND: Duration = Duration::from_secs(2);
 
 /// What to do after a failed attempt.
@@ -64,9 +64,9 @@ impl Backoff {
         )
     }
 
-    /// The rule for an endpoint enable: it retries [`OsStatus::NOT_PERMITTED`]
+    /// The rule for an endpoint's enable and registration: it retries [`OsStatus::NOT_PERMITTED`]
     /// with waits of 10 ms doubling to 200 ms, for two seconds.
-    pub(crate) fn enable(start: Instant) -> Self {
+    pub(crate) fn endpoint(start: Instant) -> Self {
         Self::new(
             OsStatus::NOT_PERMITTED,
             Duration::from_millis(10),
@@ -162,7 +162,7 @@ mod tests {
     fn a_refused_enable_is_retried_with_doubling_waits_capped_at_200_ms() {
         let start = Instant::now();
         assert_eq!(
-            waits(Backoff::enable(start), REFUSED, 7, start),
+            waits(Backoff::endpoint(start), REFUSED, 7, start),
             [ms(10), ms(20), ms(40), ms(80), ms(160), ms(200), ms(200)]
         );
     }
@@ -172,7 +172,7 @@ mod tests {
         let start = Instant::now();
         for (mut rule, status, bound) in [
             (Backoff::client(start), SERVER_GONE, Duration::from_secs(10)),
-            (Backoff::enable(start), REFUSED, Duration::from_secs(2)),
+            (Backoff::endpoint(start), REFUSED, Duration::from_secs(2)),
         ] {
             assert_eq!(
                 rule.after(status, start + bound - ms(5)),
@@ -207,7 +207,7 @@ mod tests {
                 "client, status {status}"
             );
             assert_eq!(
-                Backoff::enable(start).after(status, start),
+                Backoff::endpoint(start).after(status, start),
                 Retry::GiveUp,
                 "enable, status {status}"
             );
@@ -218,7 +218,7 @@ mod tests {
             "the client does not retry a refusal"
         );
         assert_eq!(
-            Backoff::enable(start).after(SERVER_GONE, start),
+            Backoff::endpoint(start).after(SERVER_GONE, start),
             Retry::GiveUp,
             "the enable does not retry a gone server"
         );
@@ -235,7 +235,7 @@ mod tests {
     fn retry_runs_an_enable_until_the_refusal_passes() {
         let mut calls = 0;
         let result = retry(
-            Backoff::enable(Instant::now()),
+            Backoff::endpoint(Instant::now()),
             || {
                 calls += 1;
                 if calls < 3 { Err(REFUSED) } else { Ok(7) }
@@ -250,7 +250,7 @@ mod tests {
     fn retry_returns_a_status_the_rule_does_not_retry_at_once() {
         let mut calls = 0;
         let result: Result<(), OsStatus> = retry(
-            Backoff::enable(Instant::now()),
+            Backoff::endpoint(Instant::now()),
             || {
                 calls += 1;
                 Err(OsStatus::new(-10843))
@@ -265,7 +265,7 @@ mod tests {
     fn retry_returns_an_error_without_a_status_at_once_and_unchanged() {
         let mut calls = 0;
         let result: Result<(), &str> = retry(
-            Backoff::enable(Instant::now()),
+            Backoff::endpoint(Instant::now()),
             || {
                 calls += 1;
                 Err("an NSError whose code is no OSStatus")

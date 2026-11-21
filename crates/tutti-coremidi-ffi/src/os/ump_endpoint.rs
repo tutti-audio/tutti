@@ -177,11 +177,14 @@ impl UmpEndpoint {
     /// other processes create endpoints, and accept the same call a few
     /// milliseconds later. This call retries the enable, waiting 10 ms and then
     /// longer, for two seconds from its first attempt, and returns
-    /// [`Error::NotPermitted`] only if the refusal lasts that long. The same
-    /// holds for registering the blocks. On macOS 15 that registration reports
-    /// failure without an error after registering the blocks; it is accepted when
-    /// the endpoint holds as many blocks as were registered. The wait
-    /// happens on the calling thread, which is the main thread.
+    /// [`Error::NotPermitted`] only if the refusal lasts that long. The registration
+    /// of the blocks is retried the same way.
+    ///
+    /// On macOS 15.8.2 the registration has been seen to report failure without an
+    /// error after registering the blocks; that is accepted when the endpoint holds
+    /// as many blocks as were registered.
+    ///
+    /// The wait happens on the calling thread, which is the main thread.
     pub fn new<F>(
         main: MainThreadMarker,
         _client: SharedClient,
@@ -263,7 +266,7 @@ impl UmpEndpoint {
 
 /// The endpoint, registered and enabled, its source and its blocks' numbers.
 ///
-/// On macOS 15 `registerFunctionBlocks:markAsStatic:error:` registers the blocks and
+/// Seen on macOS 15.8.2: `registerFunctionBlocks:markAsStatic:error:` registers the blocks and
 /// then reports failure without an `NSError` ([`RegisterFailure::Unreported`]);
 /// [`register`] accepts that only when the endpoint holds the registered count, and
 /// the read-back after the enable still checks the blocks by name.
@@ -369,7 +372,10 @@ impl RegisterFailure {
 /// Whether the error is the one objc2 makes when a method returns `NO` and leaves
 /// its error out. objc2 exposes no other signal for it: the object is a plain
 /// `NSError` with code 0 and the domain `__objc2.missingError`, so this is the one
-/// place that names the domain.
+/// place that names the domain. The match is pinned to objc2's
+/// `__macro_helpers/null_error.rs` (0.6.x) and is re-checked when objc2 is bumped;
+/// if it stops matching, a register without an error fails closed as
+/// `Objc { code: 0 }`.
 fn is_missing_error(code: isize, domain: &str) -> bool {
     code == 0 && domain == "__objc2.missingError"
 }
@@ -385,7 +391,7 @@ fn register(
 ) -> Result<(), Error> {
     let operation = Operation::RegisterFunctionBlocks;
     let result = retry(
-        Backoff::enable(Instant::now()),
+        Backoff::endpoint(Instant::now()),
         || {
             // SAFETY: plain messages to the live endpoint with an array of live blocks.
             unsafe { endpoint.registerFunctionBlocks_markAsStatic_error(function_blocks, true) }
@@ -416,14 +422,14 @@ fn register(
 }
 
 /// Enables `endpoint`, trying again while CoreMIDI refuses with `kMIDINotPermitted`
-/// (see [`Backoff::enable`]). Called inside [`catch`].
+/// (see [`Backoff::endpoint`]). Called inside [`catch`].
 ///
 /// An attempt fails with the whole [`Error`], so the last refusal keeps its
 /// `NSError` domain and description; [`Error::os_status`] is the status the rule
 /// filters on.
 fn enable(endpoint: &MIDIUMPMutableEndpoint) -> Result<(), Error> {
     retry(
-        Backoff::enable(Instant::now()),
+        Backoff::endpoint(Instant::now()),
         || {
             // SAFETY: a plain message to the live endpoint.
             unsafe { endpoint.setEnabled_error(true) }
