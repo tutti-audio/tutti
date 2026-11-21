@@ -63,6 +63,9 @@
 //!   level (`Volume`) and frame position (`Position`) are read per frame.
 //! - **Noise** — [`NoiseNode`], a mono source of white, pink or brown noise
 //!   (`tutti_dsp::Noise`) from a seed; its level (`Volume`) is read per frame.
+//! - **Granular** — [`GranularNode`], a cloud of Hann-windowed grains of a shared source
+//!   (`tutti_dsp::Granular`): its density (`Rate`), pitch (`Pitch`), grain length (`GrainLength`)
+//!   and two jitters (`Jitter[0]`, `Jitter[1]`) are read per block.
 //! - **Spring reverb** — `SpringReverbNode`, a spring's chirp (stretched all-pass cascades) in a
 //!   loop with a delay and a low-pass, any width, from a `SpringReverbConfig`.
 //! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser, spring and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
@@ -311,6 +314,8 @@ pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 mod oscillator;
 pub use oscillator::{OscillatorConfig, OscillatorNode};
 
+mod granular;
+pub use granular::{GranularConfig, GranularError, GranularNode};
 mod noise;
 pub use noise::{NoiseConfig, NoiseNode};
 

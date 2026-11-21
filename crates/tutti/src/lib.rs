@@ -305,6 +305,9 @@ pub mod nodes {
         Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
         EnvelopeStages, EnvelopeStep,
     };
+    pub use tutti_dsp::{
+        GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
+    };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
@@ -396,6 +399,7 @@ pub mod nodes {
         DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
+    pub use tutti_nodes::{GranularConfig, GranularError, GranularNode};
     pub use tutti_nodes::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
 }
 
