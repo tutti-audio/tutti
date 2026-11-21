@@ -1,5 +1,5 @@
-//! A stream the app reads (`open_stream(..).run()`) is applied to the session:
-//! two opens are two streams, a missing file fails its run with the typed error,
+//! A stream the app reads (`open_stream(..).await`) is applied to the session:
+//! two opens are two streams, a missing file fails its open with the typed error,
 //! another session's read is refused as stale, and a clip over a `load_audio`
 //! handle plays the file's own samples from either tier.
 
@@ -11,7 +11,9 @@ use tutti_platform::Instant;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, StreamPhase, StreamStart};
-use tutti_session::{AudioData, OpenStreamError, OutPort, Root, SamplerError, Session, Tier};
+use tutti_session::{
+    AudioData, LoadError, OpenStreamError, OutPort, Root, SamplerError, Session, Tier,
+};
 use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -46,7 +48,10 @@ fn two_opens_apply_to_two_streams() {
     let mut s = session();
     let first = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
     let second = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
-    let (first, second) = (first.run().expect("reads"), second.run().expect("reads"));
+    let (first, second) = (
+        tutti_fixtures::block_on(first).expect("reads"),
+        tutti_fixtures::block_on(second).expect("reads"),
+    );
     let (stream_a, reader_a) = s.apply(first).expect("applies");
     let (stream_b, reader_b) = s.apply(second).expect("applies");
     assert_eq!(stream_a.id(), reader_a.id(), "the two halves of one stream");
@@ -57,18 +62,45 @@ fn two_opens_apply_to_two_streams() {
 /// **A missing file fails its run with the typed error**
 /// (`OpenError::Io(NotFound)`), not a stream that never starts.
 #[test]
-fn a_missing_file_fails_its_run_with_the_typed_error() {
+fn a_missing_file_fails_its_open_with_the_typed_error() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let s = session();
-    let opened = s
-        .open_stream(dir.path().join("absent.wav"), StreamStart::HEAD)
-        .expect("a streamer")
-        .run();
-    assert_eq!(
-        opened.err(),
-        Some(OpenError::Io(std::io::ErrorKind::NotFound))
+    let opened = tutti_fixtures::block_on(
+        s.open_stream(dir.path().join("absent.wav"), StreamStart::HEAD)
+            .expect("a streamer"),
+    );
+    assert!(
+        matches!(
+            &opened,
+            Err(LoadError::Stream(error))
+                if **error == OpenError::Io(std::io::ErrorKind::NotFound)
+        ),
+        "the typed error names the missing file"
     );
 }
+
+/// **An open of a dropped session is `ShutDown`**: the file did not fail.
+#[test]
+fn an_open_of_a_dropped_session_is_shut_down() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let open = {
+        let s = session();
+        s.open_stream(&path, StreamStart::HEAD).expect("a streamer")
+    };
+    assert!(matches!(
+        tutti_fixtures::block_on(open),
+        Err(LoadError::ShutDown)
+    ));
+}
+
+/// **An open and its future are `Send`.**
+const fn send<T: Send>() {}
+const _: () = {
+    send::<tutti_session::OpenStream<f32>>();
+    send::<tutti_session::OpeningStream<f32>>();
+};
 
 /// **A file read for one session is refused by another** as `Stale`, and the
 /// refusal serves nothing there.
@@ -78,11 +110,9 @@ fn a_file_read_for_another_session_is_stale() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let (a, mut b) = (session(), session());
-    let opened = a
-        .open_stream(&path, StreamStart::HEAD)
-        .expect("a streamer")
-        .run()
-        .expect("reads");
+    let opened =
+        tutti_fixtures::block_on(a.open_stream(&path, StreamStart::HEAD).expect("a streamer"))
+            .expect("reads");
     assert!(matches!(
         b.apply(opened).err(),
         Some(OpenStreamError::Stale)
@@ -108,25 +138,22 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
 /// streamed clip's ring, which ends with it.
 fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
     let mut s = session();
-    let audio = s
-        .load_audio(path)
-        .tier(if streamed {
-            Tier::Streamed
-        } else {
-            Tier::Resident
-        })
-        .run()
-        .expect("loads");
+    let audio = tutti_fixtures::block_on(s.load_audio(path).tier(if streamed {
+        Tier::Streamed
+    } else {
+        Tier::Resident
+    }))
+    .expect("loads");
     let clip = match audio.data() {
         AudioData::Resident(wave) => {
             tutti_sampler::Clip::new(Arc::clone(wave)).expect("a placeable wave")
         }
         AudioData::Streamed(_) => {
-            let opened = s
-                .open_stream(audio.asset().clone(), StreamStart::HEAD)
-                .expect("a streamer")
-                .run()
-                .expect("the file reads");
+            let opened = tutti_fixtures::block_on(
+                s.open_stream(audio.asset().clone(), StreamStart::HEAD)
+                    .expect("a streamer"),
+            )
+            .expect("the file reads");
             let (stream, reader) = s.apply(opened).expect("the session serves it");
             tutti_sampler::Clip::streaming(reader, stream)
         }
@@ -247,8 +274,8 @@ fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
     w.finalize().expect("finalizes");
 
     let s = session();
-    let short = s.load_audio(&short).run().expect("loads");
-    let long = s.load_audio(&long).run().expect("loads");
+    let short = tutti_fixtures::block_on(s.load_audio(&short)).expect("loads");
+    let long = tutti_fixtures::block_on(s.load_audio(&long)).expect("loads");
     let AudioData::Resident(wave) = short.data() else {
         panic!("a short file is resident");
     };
@@ -271,7 +298,7 @@ fn the_threshold_is_the_files_decoded_size() {
     write_ramp(&path);
     let s = session();
     let decoded = (LEN as u64) * 4;
-    let load = |above| s.load_audio(&path).tier(Tier::Auto { above }).run();
+    let load = |above| tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Auto { above }));
     assert!(matches!(
         load(decoded).expect("loads").data(),
         AudioData::Resident(_)

@@ -162,6 +162,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             nodes: self.midi.nodes.as_ref(),
             settings: self.transport.settings(),
             meter: self.transport.settings().project_meter().clone(),
+            executor: self.background.executor().downgrade(),
             #[cfg(feature = "midi-hardware")]
             io: self.midi.hardware.io.as_mut(),
         };
