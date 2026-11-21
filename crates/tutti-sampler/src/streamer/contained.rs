@@ -62,7 +62,7 @@ fn cut_flac(dir: &Path) -> PathBuf {
     path
 }
 
-/// A streamer future with what keeps it going: its bells, whose tick thread wakes the
+/// A streamer future with what keeps it going: its bells, whose tick task wakes the
 /// task, and the executor whose thread runs it (a dropped executor ends the future).
 struct Threaded {
     streamer: DiskStreamer<Running, f32>,
@@ -82,8 +82,8 @@ impl Driver {
         let rate = tutti_units::SampleRate::of(rate);
         let config = DiskStreamerConfig::default();
         if threaded {
-            let bells = tutti_rt::Bells::new().expect("a tick thread");
             let executor = tutti_platform::Executor::new();
+            let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
             let streamer = DiskStreamer::build(rate, config, seams, &executor, &bells)
                 .expect("the future starts");
             Self::Threaded(Box::new(Threaded {
@@ -254,7 +254,7 @@ fn a_dropped_streamer_publishes_streamer_gone() {
 }
 
 /// Polls `done` until it holds, for at most a count of polls that only guards a hang: the
-/// streamer's task is woken by the bells' tick thread and runs on its own thread, which no
+/// streamer's task is woken by the bells' tick task and runs on its own thread, which no
 /// count of polls orders against.
 fn polled_until(mut done: impl FnMut() -> bool) -> bool {
     for _ in 0..1_000_000 {
@@ -273,8 +273,8 @@ fn polled_until(mut done: impl FnMut() -> bool) -> bool {
 fn a_dropped_streamer_future_publishes_streamer_gone() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = constant_file(dir.path(), "a.wav", 8_000, 1, 0.25);
-    let bells = tutti_rt::Bells::new().expect("a tick thread");
     let executor = tutti_platform::Executor::new();
+    let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
     let streamer = DiskStreamer::<Running, f32>::build(
         tutti_units::SampleRate::SR_8K,
         DiskStreamerConfig::default(),

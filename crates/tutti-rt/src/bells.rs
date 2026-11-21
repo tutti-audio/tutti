@@ -10,8 +10,9 @@
 //!
 //! # The tick
 //!
-//! Where a thread can start, [`Bells::new`] starts one **tick thread**
-//! (`tutti_platform::spawn_named`) that parks on the shared parker and, on each
+//! Where a thread can start, [`Bells::new`] spawns one **tick task** on a
+//! dedicated thread of the executor it is given
+//! (`Executor::spawn_dedicated`); it parks on the shared parker and, on each
 //! wake, runs one pass over every bell. Where none can (wasm), there is no
 //! thread and [`Bells::tick`] runs the same pass when its caller does, once per
 //! `Session::update`. On a native target `tick` does nothing, so a caller calls
@@ -25,7 +26,7 @@
 //!   fences (the parker's publish-then-unpark protocol, `parker.rs`).
 //! - **tick pass**: for each bell, if `rung` is set **and** a waker is stored,
 //!   take the waker and wake it. A pass never clears `rung`: only the wait side
-//!   does. The tick thread parks with a pending check, "some bell is rung and
+//!   does. The tick task parks with a pending check, "some bell is rung and
 //!   has a stored waker", so a rung bell with nobody waiting does not make it
 //!   spin, and a pass that took a waker leaves nothing pending.
 //! - **wait poll** (control side):
@@ -50,7 +51,7 @@
 //! # Shutdown
 //!
 //! Dropping the [`Bells`] sets `shut` and runs one **last pass** over every
-//! live bell (`Shared::last_pass`): on the tick thread's way out, or, with the
+//! live bell (`Shared::last_pass`): on the tick task's way out, or, with the
 //! inline tick, in the drop itself. The last pass takes every stored waker.
 //! A rung bell's waker is woken, as in a pass; an unrung bell's is dropped
 //! unwoken, which breaks the cycle a parked future makes (executor task,
@@ -77,6 +78,7 @@
 //! frees it: it is dropped on the control side, never on the audio thread (a
 //! debug build panics otherwise, as [`ControlDrop`] does for any such handle).
 
+#[cfg(not(loom))]
 use std::io;
 use std::sync::PoisonError;
 use std::task::{Context, Poll, Waker};
@@ -85,9 +87,15 @@ use sync::{Arc, AtomicBool, Mutex, MutexGuard, Ordering, fence};
 
 use crate::{ControlDrop, Parker, Unparker, parker};
 
-#[cfg_attr(target_arch = "wasm32", path = "bells/tick_inline.rs")]
-#[cfg_attr(not(target_arch = "wasm32"), path = "bells/tick_thread.rs")]
+#[cfg_attr(loom, path = "bells/tick_stepped.rs")]
+#[cfg_attr(all(not(loom), target_arch = "wasm32"), path = "bells/tick_inline.rs")]
+#[cfg_attr(
+    all(not(loom), not(target_arch = "wasm32")),
+    path = "bells/tick_thread.rs"
+)]
 mod tick;
+#[cfg(any(loom, not(target_arch = "wasm32")))]
+mod tick_body;
 
 mod sync {
     #[cfg(loom)]
@@ -107,7 +115,7 @@ struct State {
     /// The waker of the future waiting on the bell. Control-side threads only.
     waker: Mutex<Option<Waker>>,
     /// `waker` is `Some`: set and cleared inside `waker`'s lock, and read
-    /// without it, so the tick thread's park check is two atomic loads that
+    /// without it, so the tick task's park check is two atomic loads that
     /// the fences order (a mutex is not ordered by a fence).
     waiting: AtomicBool,
     /// The set's `shut` flag, which the wait poll reads.
@@ -188,7 +196,7 @@ impl Shared {
 /// The control-side set of bells: one per session, and the tick that wakes
 /// their futures. See the module docs (`src/bells.rs`).
 ///
-/// Dropping it stops the tick thread, if there is one, and joins it. A bell
+/// Dropping it ends the tick task, if there is one, and waits for it. A bell
 /// rung before the drop wakes its waiting future; a future still waiting on an
 /// unrung bell is never woken again, and its waker is released. After the drop
 /// a wait poll stores no waker. Only a ring that happens-before the drop is
@@ -200,14 +208,20 @@ pub struct Bells {
 }
 
 impl Bells {
-    /// An empty set, with its tick thread where a thread can start.
+    /// An empty set, with its tick task on a dedicated thread of `executor`
+    /// where a thread can start.
+    ///
+    /// Drop the set before the executor's last clone: the tick then ends through
+    /// its own shutdown and runs its last pass. An executor that drops first stops
+    /// the tick, which ends without waiting out the executor's stop bound.
     ///
     /// # Errors
     ///
-    /// The OS's refusal to start the tick thread.
-    pub fn new() -> io::Result<Self> {
+    /// The OS's refusal to start the tick's thread.
+    #[cfg(not(loom))]
+    pub fn new(executor: &tutti_platform::Executor) -> io::Result<Self> {
         let (shared, parker) = Self::shared();
-        let tick = tick::Tick::start(&shared, parker)?;
+        let tick = tick::Tick::start(&shared, parker, executor)?;
         Ok(Self { shared, tick })
     }
 
@@ -241,7 +255,7 @@ impl Bells {
         )
     }
 
-    /// Runs one pass where the set has no tick thread (wasm), and does nothing
+    /// Runs one pass where the set has no tick task (wasm), and does nothing
     /// where it has one: call it unconditionally, once per `Session::update`.
     /// It wakes the waker of every rung bell that has one.
     pub fn tick(&self) {
@@ -253,8 +267,8 @@ impl Drop for Bells {
     fn drop(&mut self) {
         self.shared.shut.store(true, Ordering::Release);
         self.shared.unparker.unpark();
-        // With a tick thread, it runs the last pass on its way out and the
-        // handle, a field, joins it when it drops after this.
+        // With a tick task, it runs the last pass on its way out and the
+        // `Tick`, a field, waits for it when it drops after this.
         self.tick.shut(&self.shared);
     }
 }
@@ -326,7 +340,8 @@ impl Listener {
     /// use std::task::{Context, Poll, Waker};
     /// use tutti_rt::Bells;
     ///
-    /// let bells = Bells::new().unwrap();
+    /// let executor = tutti_platform::Executor::new();
+    /// let bells = Bells::new(&executor).unwrap();
     /// let (bell, mut listener) = bells.bell();
     /// bell.ring();
     /// let mut cx = Context::from_waker(Waker::noop());
@@ -383,11 +398,11 @@ impl std::fmt::Debug for Listener {
     }
 }
 
-/// The loom model's way in: a set with no tick thread, and the tick's body one
+/// The loom model's way in: a set with no tick task, and the tick's body one
 /// step at a time.
 #[cfg(loom)]
 impl Bells {
-    /// A set with no tick thread, and the [`Ticker`] that steps it.
+    /// A set with no tick task, and the [`Ticker`] that steps it.
     pub fn stepped() -> (Self, Ticker) {
         let (shared, parker) = Self::shared();
         let ticker = Ticker {
@@ -410,7 +425,7 @@ impl Bells {
     }
 }
 
-/// The tick thread's body, stepped by a loom model.
+/// The tick task's body, stepped by a loom model.
 #[cfg(loom)]
 pub struct Ticker {
     shared: Arc<Shared>,

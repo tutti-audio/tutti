@@ -3384,6 +3384,7 @@ dependencies = [
  "libc",
  "loom",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-buffers",
  "tutti-fixtures",
  "tutti-platform",

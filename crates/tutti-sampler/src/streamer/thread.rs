@@ -289,10 +289,10 @@ mod tests {
     /// else would wake it (the future awaits its bell and has no timer).
     #[test]
     fn a_send_wakes_an_idle_streamer() {
-        let bells = Bells::new().expect("a tick thread");
+        let executor = Executor::new();
+        let bells = Bells::new(&executor).expect("the bells' tick task");
         let built = built(8, &bells);
         let tx = built.command_sender();
-        let executor = Executor::new();
         let streamer = built.start(&executor).expect("the future starts");
 
         for stream in [StreamId::of(90), StreamId::of(91)] {
@@ -310,10 +310,10 @@ mod tests {
     /// sender is told the streamer is gone, and the drop itself never waits.
     #[test]
     fn a_dropped_streamer_is_gone_to_its_senders() {
-        let bells = Bells::new().expect("a tick thread");
+        let executor = Executor::new();
+        let bells = Bells::new(&executor).expect("the bells' tick task");
         let built = built(8, &bells);
         let tx = built.command_sender();
-        let executor = Executor::new();
         let streamer = built.start(&executor).expect("the future starts");
         drop(streamer);
         // Probed without waiting, so a queue that never disconnects fails
@@ -338,7 +338,8 @@ mod tests {
     /// A streamer dropped before it started is gone to every sender.
     #[test]
     fn a_streamer_dropped_before_it_started_is_gone() {
-        let bells = Bells::new().expect("a tick thread");
+        let executor = Executor::new();
+        let bells = Bells::new(&executor).expect("the bells' tick task");
         let unstarted = built(8, &bells);
         let port = StreamerPort::new(unstarted.command_sender());
         drop(unstarted);
@@ -354,7 +355,8 @@ mod tests {
     /// reporting it gone, rather than waiting for good.
     #[test]
     fn a_waiting_send_is_released_when_the_streamer_is_gone() {
-        let bells = Bells::new().expect("a tick thread");
+        let executor = Executor::new();
+        let bells = Bells::new(&executor).expect("the bells' tick task");
         let streamer = built(1, &bells);
         let port = StreamerPort::new(streamer.command_sender());
         assert_eq!(
