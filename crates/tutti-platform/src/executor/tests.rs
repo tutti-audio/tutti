@@ -897,5 +897,57 @@ fn join_within_returns_the_outcome_of_a_task_that_ends() {
     assert_eq!(join_within(queued, HANG_GUARD).ok(), Some(None));
 }
 
+/// Counts its wakes.
+struct CountWakes(AtomicUsize);
+
+impl Wake for CountWakes {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// **`yield_now` is pending once, having woken its task, then ready**: the first poll
+/// returns to the executor and asks to run again, the second completes.
+#[test]
+fn yield_now_is_pending_once_after_waking_itself_then_ready() {
+    let wakes = Arc::new(CountWakes(AtomicUsize::new(0)));
+    let waker = Waker::from(wakes.clone());
+    let mut cx = Context::from_waker(&waker);
+    let mut yielding = Box::pin(yield_now());
+    assert!(yielding.as_mut().poll(&mut cx).is_pending());
+    assert_eq!(
+        wakes.0.load(Ordering::SeqCst),
+        1,
+        "the yield wakes its task once"
+    );
+    assert!(yielding.as_mut().poll(&mut cx).is_ready());
+    assert_eq!(wakes.0.load(Ordering::SeqCst), 1);
+}
+
+/// **A task cancelled while it yields ends at the yield**: a dedicated loop of yields with
+/// no stop of its own ends when its `Task` drops, which the executor sees between slices.
+#[test]
+fn a_loop_of_yields_ends_when_its_task_is_dropped() {
+    let executor = Executor::new();
+    let (ended, done) = mpsc::channel::<()>();
+    let (entered, looping) = mpsc::channel();
+    let task = executor
+        .spawn_dedicated("yields", None, async move {
+            let _ended = DropSignal(ended);
+            entered.send(()).unwrap();
+            loop {
+                yield_now().await;
+            }
+        })
+        .unwrap();
+    looping.recv_timeout(HANG_GUARD).unwrap();
+    drop(task);
+    assert!(
+        done.recv_timeout(HANG_GUARD).is_ok(),
+        "the cancelled loop drops its future"
+    );
+    drop(executor);
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
