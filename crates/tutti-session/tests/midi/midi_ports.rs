@@ -898,9 +898,9 @@ fn a_ports_id_names_it_in_the_events() {
 
 const SYNTH: u32 = 10;
 
-/// The wait of a check that nothing is sent: about four of the thread's 270 ms
-/// Active Sensing intervals.
-const SECOND: std::time::Duration = std::time::Duration::from_secs(1);
+/// A second output, always opened with Active Sensing after the output under
+/// test: once it has sent twice, the output under test has had two chances to.
+const WITNESS: u32 = 11;
 
 fn is_active_sensing(u: &tutti_ump::Ump) -> bool {
     matches!(
@@ -909,15 +909,19 @@ fn is_active_sensing(u: &tutti_ump::Ump) -> bool {
     )
 }
 
-/// The `Synth` output of a MIDI 1.0 port that declares no block: the Protocol in
-/// use is MIDI 1.0 and there is no UMP Stream to ask.
-fn midi1_synth() -> tutti_midi_hardware::OsEndpoint {
-    let mut synth = persistent_endpoint(SYNTH, "Synth");
+/// The output of a MIDI 1.0 port that declares no block: the Protocol in use is
+/// MIDI 1.0 and there is no UMP Stream to ask.
+fn midi1_output(raw: u32, name: &str) -> tutti_midi_hardware::OsEndpoint {
+    let mut synth = persistent_endpoint(raw, name);
     synth.capability = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
     }));
     synth
+}
+
+fn midi1_synth() -> tutti_midi_hardware::OsEndpoint {
+    midi1_output(SYNTH, "Synth")
 }
 
 /// A session with a MIDI 1.0 Protocol `Synth` output opened with Active Sensing
@@ -935,14 +939,30 @@ fn sensing_session(active_sensing: bool) -> (Session, FakeCounters, MidiOutput) 
     (s, fake, out)
 }
 
-fn sent_by_the_port(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
-    fake.take_sent(EndpointId::from_raw(u64::from(SYNTH)))
+/// Plugs the witness output into `s` and opens it with Active Sensing.
+fn open_witness(s: &mut Session, fake: &FakeCounters) -> MidiOutput {
+    fake.plug(midi1_output(WITNESS, "Witness"), PortDirection::Output);
+    let _ = s.update();
+    let device = device(s, "Witness");
+    s.open_midi_output(device)
+        .active_sensing(true)
+        .run()
+        .expect("opens")
 }
 
-/// What the port sent, collected until `done` accepts it. A port that sends
-/// nothing fails after a hang guard of half a minute.
+fn sent_by(fake: &FakeCounters, raw: u32) -> Vec<tutti_ump::Ump> {
+    fake.take_sent(EndpointId::from_raw(u64::from(raw)))
+}
+
+fn sent_by_the_port(fake: &FakeCounters) -> Vec<tutti_ump::Ump> {
+    sent_by(fake, SYNTH)
+}
+
+/// What output `raw` sent, collected until `done` accepts it. An output that
+/// sends nothing fails after a hang guard of half a minute.
 fn sent_until(
     fake: &FakeCounters,
+    raw: u32,
     what: &str,
     done: impl Fn(&[tutti_ump::Ump]) -> bool,
 ) -> Vec<tutti_ump::Ump> {
@@ -953,10 +973,15 @@ fn sent_until(
             tutti_platform::Instant::now() < deadline,
             "{what}: {sent:?}"
         );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        sent.extend(sent_by_the_port(fake));
+        std::thread::yield_now();
+        sent.extend(sent_by(fake, raw));
     }
     sent
+}
+
+/// Waits until the witness has sent two Active Sensing.
+fn witness_sends_twice(fake: &FakeCounters) {
+    let _ = sent_until(fake, WITNESS, "the witness sends", |sent| sent.len() >= 2);
 }
 
 /// **An idle output port with Active Sensing sends it before a receiver gives
@@ -965,7 +990,9 @@ fn sent_until(
 #[test]
 fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
     let (mut s, fake, out) = sensing_session(true);
-    let first = sent_until(&fake, "no Active Sensing was sent", |sent| !sent.is_empty());
+    let first = sent_until(&fake, SYNTH, "no Active Sensing was sent", |sent| {
+        !sent.is_empty()
+    });
     assert!(first.iter().all(is_active_sensing), "{first:?}");
     // The node's sources are replaced, and no update runs while it goes on.
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
@@ -980,31 +1007,37 @@ fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
     s.graph()
         .set_sources(EventInPort::new(out.node(), 0), [])
         .expect("and drops them");
-    let later = sent_until(&fake, "it did not go on", |sent| sent.len() >= 2);
+    let later = sent_until(&fake, SYNTH, "it did not go on", |sent| sent.len() >= 2);
     assert!(
         later.iter().all(is_active_sensing),
         "and it goes on: {later:?}"
     );
 }
 
-/// **An output port declared without the option never sends Active Sensing.**
+/// **An output port declared without the option never sends Active Sensing**:
+/// it sends nothing while the witness sends twice.
 #[test]
 fn an_output_port_without_the_option_never_sends_active_sensing() {
-    let (_s, fake, _out) = sensing_session(false);
-    std::thread::sleep(SECOND);
+    let (mut s, fake, _out) = sensing_session(false);
+    let _witness = open_witness(&mut s, &fake);
+    witness_sends_twice(&fake);
     assert!(sent_by_the_port(&fake).is_empty());
 }
 
 /// **Closing the port stops Active Sensing**: the last handle dropped, nothing
-/// more reaches the device.
+/// more reaches the device while the witness sends twice.
 #[test]
 fn closing_an_output_port_stops_its_active_sensing() {
     let (mut s, fake, out) = sensing_session(true);
-    let _ = sent_until(&fake, "precondition: it runs", |sent| !sent.is_empty());
+    let _witness = open_witness(&mut s, &fake);
+    let _ = sent_until(&fake, SYNTH, "precondition: it runs", |sent| {
+        !sent.is_empty()
+    });
     drop(out);
     let _ = s.update();
     let _ = sent_by_the_port(&fake);
-    std::thread::sleep(SECOND);
+    let _ = sent_by(&fake, WITNESS);
+    witness_sends_twice(&fake);
     assert!(sent_by_the_port(&fake).is_empty());
 }
 
@@ -1013,20 +1046,22 @@ fn closing_an_output_port_stops_its_active_sensing() {
 #[test]
 fn a_reopened_output_port_sends_active_sensing_again() {
     let (mut s, fake, _out) = sensing_session(true);
-    let _ = sent_until(&fake, "precondition: it runs", |sent| !sent.is_empty());
+    let _ = sent_until(&fake, SYNTH, "precondition: it runs", |sent| {
+        !sent.is_empty()
+    });
     unplug(&fake, SYNTH);
     let _ = s.update();
     let _ = sent_by_the_port(&fake);
     fake.plug(midi1_synth(), PortDirection::Output);
     let _ = s.update();
-    let sent = sent_until(&fake, "the reopened port sends", |sent| {
+    let sent = sent_until(&fake, SYNTH, "the reopened port sends", |sent| {
         sent.iter().any(is_active_sensing)
     });
     assert!(sent.iter().all(is_active_sensing), "{sent:?}");
 }
 
 /// **A port whose device is in the MIDI 2.0 Protocol sends no Active Sensing**,
-/// the option set or not.
+/// the option set or not: it sends nothing while the witness sends twice.
 #[test]
 fn a_midi2_protocol_output_port_sends_no_active_sensing() {
     let (mut s, fake) = session();
@@ -1038,7 +1073,8 @@ fn a_midi2_protocol_output_port_sends_no_active_sensing() {
         .active_sensing(true)
         .run()
         .expect("opens");
-    std::thread::sleep(SECOND);
+    let _witness = open_witness(&mut s, &fake);
+    witness_sends_twice(&fake);
     assert!(sent_by_the_port(&fake).is_empty());
 }
 
