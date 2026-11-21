@@ -45,7 +45,8 @@ fn block_on(listener: &mut Listener) {
 
 #[test]
 fn a_ring_from_another_thread_wakes_a_waiting_future() {
-    let bells = Bells::new().unwrap();
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
     let (bell, mut listener) = bells.bell();
     let ringer = std::thread::spawn(move || {
         bell.ring();
@@ -57,7 +58,8 @@ fn a_ring_from_another_thread_wakes_a_waiting_future() {
 
 #[test]
 fn a_future_resolves_once_for_two_rings_and_waits_for_the_next() {
-    let bells = Bells::new().unwrap();
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
     let (bell, mut listener) = bells.bell();
     let (tx, _rx) = mpsc::channel();
     let waker = Waker::from(std::sync::Arc::new(Notify(tx)));
@@ -71,28 +73,30 @@ fn a_future_resolves_once_for_two_rings_and_waits_for_the_next() {
 
 #[test]
 fn tick_does_nothing_on_a_native_target() {
-    let bells = Bells::new().unwrap();
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
     let (bell, mut listener) = bells.bell();
     let count = std::sync::Arc::new(Count::default());
     let waker = Waker::from(std::sync::Arc::clone(&count));
     assert!(poll_once(&mut listener, &waker).is_pending());
-    // Nothing rang, so nothing is woken by the tick thread or by this call.
+    // Nothing rang, so nothing is woken by the tick task or by this call.
     bells.tick();
     assert_eq!(count.0.load(Ordering::SeqCst), 0);
     drop(bell);
 }
 
 #[test]
-fn dropping_the_bells_joins_the_tick_thread() {
-    let bells = Bells::new().unwrap();
+fn dropping_the_bells_ends_the_tick_task() {
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
     assert!(bells.tick.is_running());
-    // The thread holds a clone of the shared state until its body returns.
+    // The task holds a clone of the shared state until its body returns.
     let shared = std::sync::Arc::clone(&bells.shared);
     drop(bells);
     assert_eq!(
         std::sync::Arc::strong_count(&shared),
         1,
-        "the drop joined the thread, which released its clone"
+        "the drop waited for the task, which released its clone"
     );
 }
 
@@ -129,13 +133,14 @@ fn a_pass_wakes_a_rung_bell_and_not_an_unrung_one() {
 
 #[test]
 fn a_ring_then_the_drop_wakes_the_stored_waker_exactly_once() {
-    let bells = Bells::new().unwrap();
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
     let (bell, mut listener) = bells.bell();
     let count = std::sync::Arc::new(Count::default());
     let waker = Waker::from(std::sync::Arc::clone(&count));
     assert!(poll_once(&mut listener, &waker).is_pending());
     bell.ring();
-    // The drop joins the tick thread, whose last pass has run by then.
+    // The drop waits for the tick task, whose last pass has run by then.
     drop(bells);
     assert_eq!(count.0.load(Ordering::SeqCst), 1);
     drop(bell);
@@ -143,7 +148,8 @@ fn a_ring_then_the_drop_wakes_the_stored_waker_exactly_once() {
 
 #[test]
 fn the_drop_releases_an_unrung_listeners_waker() {
-    let bells = Bells::new().unwrap();
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
     let (bell, mut listener) = bells.bell();
     let count = std::sync::Arc::new(Count::default());
     let waker = Waker::from(std::sync::Arc::clone(&count));
@@ -166,7 +172,8 @@ fn the_drop_releases_an_unrung_listeners_waker() {
 
 #[test]
 fn a_poll_after_the_drop_stores_no_waker() {
-    let bells = Bells::new().unwrap();
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
     let (bell, mut listener) = bells.bell();
     drop(bells);
     let count = std::sync::Arc::new(Count::default());
@@ -177,4 +184,52 @@ fn a_poll_after_the_drop_stores_no_waker() {
     // A ring seen before the drop still resolves a later poll.
     bell.ring();
     assert!(poll_once(&mut listener, Waker::noop()).is_ready());
+}
+
+#[test]
+fn dropping_the_executor_while_the_bells_live_returns_and_ends_the_tick() {
+    let executor = tutti_platform::Executor::new();
+    let bells = Bells::new(&executor).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    // The executor's drop stops and unparks the tick's thread; the guard only
+    // catches a drop that never returns.
+    let dropper = std::thread::spawn(move || {
+        drop(executor);
+        let _ = done_tx.send(());
+    });
+    done_rx
+        .recv_timeout(HANG)
+        .expect("the executor's drop returned with the bells alive");
+    dropper.join().unwrap();
+    assert!(
+        !bells.tick.is_running(),
+        "the stopped executor ended the tick task"
+    );
+}
+
+/// **Bells dropped on a thread that drives an executor detach their tick instead of
+/// panicking**: a dedicated future builds and drops a set, and its task ends with no
+/// panic.
+#[test]
+fn bells_dropped_on_a_driving_thread_detach_their_tick() {
+    let executor = tutti_platform::Executor::new();
+    let other = tutti_platform::Executor::new();
+    let task = executor
+        .spawn_dedicated("drops-bells", None, async move {
+            let bells = Bells::new(&other).expect("the bells' tick task");
+            drop(bells);
+            true
+        })
+        .unwrap();
+    let (out, joined) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = out.send(tutti_platform::join(task));
+    });
+    assert_eq!(
+        joined
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .unwrap(),
+        Some(true),
+        "the drop returns without a panic"
+    );
 }

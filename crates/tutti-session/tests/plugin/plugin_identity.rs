@@ -3,7 +3,7 @@
 //! the hosted plugin. The reference CLAP bundle exports two plugins, in a real
 //! `plugin-server`.
 
-use crate::loading::{LoadPlugin, Spec, catalog_of};
+use crate::loading::{Hosted, LoadPlugin, Spec, catalog_of};
 use crate::support::clap_probe;
 use tutti_buffers::MaxBlock;
 use tutti_plugin_db::PluginEntry;
@@ -127,7 +127,7 @@ fn a_state_is_refused_by_another_plugin() {
     let (catalog, _id, _dir) = catalog_of(&PluginRef::file(&path));
     let id_of = |id: &str| PluginId::Clap(id.into());
     let refused = s
-        .load_plugin(&id_of(second_id()), &catalog)
+        .load_out_of_process(&id_of(second_id()), &catalog)
         .initial_state(from_first.clone())
         .expect_err("the first plugin's state is not the second's");
     let SavedPeer::Plugin(expected) = refused.expected() else {
@@ -140,7 +140,7 @@ fn a_state_is_refused_by_another_plugin() {
         "the text names both: {refused}"
     );
     assert!(
-        s.load_plugin(&id_of(first_id()), &catalog)
+        s.load_out_of_process(&id_of(first_id()), &catalog)
             .initial_state(from_first.clone())
             .is_ok(),
         "its own state is accepted"

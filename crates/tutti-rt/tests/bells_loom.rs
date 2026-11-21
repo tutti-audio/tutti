@@ -6,7 +6,7 @@
 //! cargo xtask loom bells_loom   # sets the loom cfg flag and the preemption bound
 //! ```
 //!
-//! The tick thread's body is `Ticker::tick_once` in a loop, run here as a
+//! The tick task's body is `Ticker::tick_once` in a loop, run here as a
 //! loom thread. The waiting side polls a `Listener` future and parks between
 //! polls; its `Waker` unparks it. Loom reports a lost wake as a deadlock (the
 //! waiter parked with the flag set and its waker never woken):
@@ -88,7 +88,7 @@ fn two_rings_resolve_once_and_the_tick_parks() {
             assert!(poll_once(&mut listener, &waker).is_pending());
         });
         waiter.join().unwrap();
-        // `shut` ends the tick thread only if it parked rather than spun.
+        // `shut` ends the tick task only if it parked rather than spun.
         bells.shut();
         tick.join().unwrap();
         drop(bell);

@@ -224,8 +224,10 @@ pub(crate) struct Jobs {
     /// Declared first: the thread that drives the queue stops and joins before the rest
     /// drops.
     _background: Running,
-    executor: Executor,
+    /// Declared before the executor: the bells drop first, so their tick task ends
+    /// through its own shutdown and runs its last pass, not stopped by the executor.
     bells: Bells,
+    executor: Executor,
     /// The long-lived pumps (a take's) and the bell each one awaits: the drop rings them
     /// and joins them, so what a pump owes at its end (a take's commit) is done first.
     pumps: Vec<(Task<()>, Bell)>,

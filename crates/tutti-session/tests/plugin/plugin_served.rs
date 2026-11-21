@@ -31,6 +31,7 @@ use tutti_units::{SampleRate, Samples, Tail};
 
 const BLOCK: usize = 512;
 
+use crate::loading::{Block as _, Hosted as _};
 use crate::support::clap_probe;
 
 fn first_id() -> PluginId {
@@ -310,12 +311,9 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
         .run(tutti_fixtures::main_thread())
         .expect("a state");
 
-    let second = s
-        .load_plugin(&first_id(), &catalog)
-        .initial_state(state)
-        .expect("its own plugin's state")
-        .run(tutti_fixtures::main_thread())
-        .expect("the plugin loads");
+    let mut load = s.load_out_of_process(&first_id(), &catalog);
+    load.initial_state(state).expect("its own plugin's state");
+    let second = load.block().expect("the plugin loads");
     let second_handle = second.handle();
     let b = s.add_plugin(second).unwrap();
     let read = s
@@ -410,12 +408,9 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
         "the use reaches the plugin: a duplicate save is FOR_DUPLICATE"
     );
 
-    let b = s
-        .load_plugin(&first_id(), &catalog)
-        .initial_state(state)
-        .expect("its own plugin's state")
-        .run(main)
-        .expect("the plugin loads");
+    let mut load = s.load_out_of_process(&first_id(), &catalog);
+    load.initial_state(state).expect("its own plugin's state");
+    let b = load.block().expect("the plugin loads");
     let b = s.add_plugin(b).unwrap();
     let read = s
         .plugin_view(b)
@@ -617,8 +612,8 @@ fn load<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     catalog: &Catalog,
     id: &PluginId,
 ) -> PluginNode {
-    s.load_plugin(id, catalog)
-        .run(tutti_fixtures::main_thread())
+    s.load_out_of_process(id, catalog)
+        .block()
         .expect("the plugin loads")
 }
 

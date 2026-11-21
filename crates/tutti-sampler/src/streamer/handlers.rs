@@ -55,7 +55,8 @@ impl<F: RingFloat> Handles<F> {
     /// Handles for a test that drives a cycle itself: a bell nobody awaits and an
     /// executor that is never polled.
     pub(super) fn detached(config: &BufferConfig, rate: SampleRate) -> Self {
-        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let executor = tutti_platform::Executor::new();
+        let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         Self {
             cache: Arc::new(LruCache::new(
                 config.cache_max_entries,

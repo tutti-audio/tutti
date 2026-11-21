@@ -1304,7 +1304,8 @@ mod tests {
                 *into.lock().unwrap() = Some(end);
             }
         });
-        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let executor = tutti_platform::Executor::new();
+        let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         let (_bell, mut listener) = bells.bell();
         // Every frame is in the tap and the punch-out is inside them: the pump runs to
         // its end in one poll, with nothing to await.

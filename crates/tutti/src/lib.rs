@@ -174,6 +174,8 @@ pub use tutti_codec::{Format, Pcm};
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
 #[cfg(feature = "plugin")]
+pub use tutti_plugin::catalog::ResolvedHosting;
+#[cfg(feature = "plugin")]
 pub use tutti_plugin_db::{Catalog, Hosting};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, StateUse};
@@ -185,10 +187,11 @@ pub use tutti_session::PluginParams;
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPlugin, LoadPreset, LoadedPlugin,
-    LoadedPreset, Opened, Plugin, PluginApplyError, PluginBuses, PluginChange, PluginEvent,
-    PluginHealth, PluginInfo, PluginNode, PluginPresets, PortCounts, PresetStartError,
-    RestoreState, RestoredState, SaveState, StateStartError, SwapPluginError,
+    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadInProcess, LoadOutOfProcess,
+    LoadPlugin, LoadPreset, LoadedPlugin, LoadedPreset, LoadingOutOfProcess, Opened, Plugin,
+    PluginApplyError, PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginPresets, PortCounts, PresetStartError, RestoreState, RestoredState, SaveState,
+    StateStartError, SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -383,9 +386,9 @@ pub mod types {
         StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
-        AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
-        GaugeWriter, LevelSpan, Listener, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally,
-        TallyWriter, Words,
+        AtomicCell, AtomicWord, Bell, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
+        LevelSpan, Listener, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter,
+        Words,
     };
     pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{

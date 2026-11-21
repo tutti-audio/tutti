@@ -8,12 +8,14 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{Locator, PluginId, PluginRef};
 use tutti_rt::LockExt;
-use tutti_session::{AnyPlugin, Key, LoadError, LoadedPlugin, PeerState, Session};
+use tutti_session::{AnyPlugin, Key, LoadError, LoadInProcess, LoadOutOfProcess};
+use tutti_session::{LoadPlugin as Load, LoadedPlugin, PeerState, Session};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
 #[derive(Clone, Debug)]
@@ -214,15 +216,82 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         hosting: Hosting,
         state: Option<PeerState>,
     ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError> {
-        let mut load = self.load_plugin(id, catalog).hosting(hosting);
-        if let Some(state) = state {
-            load = load.initial_state(state).expect("a state of the plugin");
-        }
-        let opened = load.run(main)?;
+        let load = match hosting {
+            Hosting::Auto => self.load_plugin(id, catalog),
+            Hosting::InProcess => self.load_plugin_as(id, catalog, ResolvedHosting::InProcess),
+            Hosting::OutOfProcess => {
+                self.load_plugin_as(id, catalog, ResolvedHosting::OutOfProcess)
+            }
+        };
+        let opened = match load? {
+            Load::InProcess(mut load) => {
+                if let Some(state) = state {
+                    load.initial_state(state).expect("a state of the plugin");
+                }
+                load.run(main)?
+            }
+            Load::OutOfProcess(mut load) => {
+                if let Some(state) = state {
+                    load.initial_state(state).expect("a state of the plugin");
+                }
+                load.block()?
+            }
+        };
         let handle = opened.handle();
         let node = self
             .add_plugin(opened)
             .expect("a plugin just loaded enters");
         Ok((handle, node))
+    }
+}
+
+/// A load of a known hosting, for a test that pins it: the load is built and
+/// its variant taken.
+pub trait Hosted {
+    /// `id` loaded out of process.
+    ///
+    /// # Panics
+    ///
+    /// When the load fails to build or resolves in process.
+    fn load_out_of_process(&self, id: &PluginId, catalog: &Catalog) -> LoadOutOfProcess;
+
+    /// `id` loaded in process.
+    ///
+    /// # Panics
+    ///
+    /// When the load fails to build or does not resolve in process.
+    fn load_in_process(&self, id: &PluginId, catalog: &Catalog) -> LoadInProcess;
+}
+
+impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> Hosted for Session<K, C> {
+    fn load_out_of_process(&self, id: &PluginId, catalog: &Catalog) -> LoadOutOfProcess {
+        match self.load_plugin_as(id, catalog, ResolvedHosting::OutOfProcess) {
+            Ok(Load::OutOfProcess(load)) => load,
+            other => panic!("an out-of-process load: {other:?}"),
+        }
+    }
+
+    fn load_in_process(&self, id: &PluginId, catalog: &Catalog) -> LoadInProcess {
+        match self.load_plugin_as(id, catalog, ResolvedHosting::InProcess) {
+            Ok(Load::InProcess(load)) => load,
+            other => panic!("an in-process load: {other:?}"),
+        }
+    }
+}
+
+/// An out-of-process load run to its node on the calling thread: the test's
+/// wait on the future.
+pub trait Block {
+    /// Awaits the load.
+    ///
+    /// # Errors
+    ///
+    /// Why the load failed.
+    fn block(self) -> Result<tutti_session::PluginNode, LoadError>;
+}
+
+impl Block for LoadOutOfProcess {
+    fn block(self) -> Result<tutti_session::PluginNode, LoadError> {
+        tutti_fixtures::block_on(self)
     }
 }

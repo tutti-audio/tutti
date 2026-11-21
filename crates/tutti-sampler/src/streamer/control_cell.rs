@@ -104,7 +104,9 @@ mod tests {
         use std::pin::pin;
         use std::task::{Context, Poll, Waker};
 
-        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let executor = tutti_platform::Executor::new();
+
+        let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         let (bell, mut listener) = bells.bell();
         let streamed = ControlCell::ringing(0u8, Arc::new(bell));
         let resident = ControlCell::new(0u8);

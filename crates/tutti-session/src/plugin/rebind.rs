@@ -37,7 +37,7 @@
 //! there, so the rebuild runs in an update that runs on it: `plugins_phase` does
 //! not tick an in-process plugin (only the editors' service does, for an open
 //! one), so this phase does, for each hosted plugin that keeps a rebinder
-//! (loaded, or inserted or replaced through `Graph`). A served plugin is
+//! (loaded, or inserted or replaced through `Graph`). An out-of-process plugin is
 //! ticked the same way: it restarts into a new slab, pipeline and node for its
 //! new buses.
 
