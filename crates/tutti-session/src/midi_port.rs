@@ -746,14 +746,10 @@ struct OutputPort {
     parked: Option<JrStream>,
 }
 
-/// What an input port leaves while its node goes: its device's notes are being
-/// released by the node, and nothing else is kept.
-struct Released;
-
-impl From<InputPort> for Released {
-    fn from(_: InputPort) -> Self {
-        Self
-    }
+/// An input port leaves nothing while its node goes: its device's notes are being
+/// released by the node.
+impl From<InputPort> for () {
+    fn from(_: InputPort) -> Self {}
 }
 
 impl Sweepable for InputPort {
@@ -780,7 +776,7 @@ pub(crate) struct Ports {
     inputs: Vec<InputPort>,
     outputs: Vec<OutputPort>,
     /// The input nodes going.
-    retiring: Vec<Retiring<Released>>,
+    retiring: Vec<Retiring<()>>,
     /// The output ports going: their device stays open until the graph has
     /// rendered past the drop and the tap was drained.
     retiring_outputs: Vec<Retiring<OutputPort>>,

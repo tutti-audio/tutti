@@ -56,6 +56,49 @@ const HELD_WORDS: usize = 1 << 9;
 /// The bit of a MIDI 2.0 key ([`Class`] reads every note as one) that says so.
 const MIDI2_KEY: u16 = 1 << 15;
 
+/// Notes `raw` as started or ended in `held`.
+fn track(held: &mut [u64; HELD_WORDS], raw: tutti_ump::Ump) {
+    match Class::of(raw) {
+        Class::On(key) => {
+            let at = bit(key);
+            held[at >> 6] |= 1 << (at & 63);
+        }
+        Class::Off(key) => {
+            let at = bit(key);
+            held[at >> 6] &= !(1 << (at & 63));
+        }
+        Class::Other => {}
+    }
+}
+
+/// Writes a Note Off for each key `held` has, at `at`, clearing a key only when
+/// the port took its off; the first refusal (the port is full) leaves the rest
+/// for the next block. `retry`: the offs were refused in an earlier block, each
+/// attempt gives its count back, so a delayed off nets zero.
+fn end_notes(
+    held: &mut [u64; HELD_WORDS],
+    out: &mut tutti_graph::EventWriter<'_>,
+    at: Offset,
+    retry: bool,
+) {
+    for (word, bits) in held.iter_mut().enumerate() {
+        let mut rest = *bits;
+        while rest != 0 {
+            let low = rest.trailing_zeros() as u16;
+            let key = NoteKey::from_index(MIDI2_KEY | (word as u16) << 6 | low);
+            let taken = out.push(owed_off(key, at)).is_ok();
+            if retry {
+                out.recovered();
+            }
+            if !taken {
+                return;
+            }
+            rest &= rest - 1;
+            *bits &= !(1 << low);
+        }
+    }
+}
+
 /// The key's place in the table.
 fn bit(key: NoteKey) -> usize {
     usize::from(key.index() & !MIDI2_KEY)
@@ -101,10 +144,12 @@ impl Follow {
     /// The phase is by what the blocks before read: N+1 is the one that
     /// [`Closing`](Phase::Closing) ends the notes in, and N+2 on are
     /// [`Closed`](Phase::Closed).
-    fn step(&mut self) -> Phase {
+    fn step(&mut self, owing: impl FnOnce() -> bool) -> Phase {
         let [last, before] = self.seen;
         let now = self.cell.generation();
-        if before != self.acknowledged {
+        // A retired generation is handled only when no note is left to end: the
+        // control side waits for the offs the port had no room for.
+        if before != self.acknowledged && (!departed(before) || !owing()) {
             self.cell.mark_handled(before);
             self.acknowledged = before;
         }
@@ -171,6 +216,10 @@ impl MidiOutNode {
     /// Its copies (the forks) follow nothing.
     #[must_use]
     pub fn following(mut self, generation: &DeviceGeneration) -> Self {
+        debug_assert!(
+            !departed(generation.generation()),
+            "a node that follows a departed generation passes nothing"
+        );
         self.follow = Some(Follow {
             cell: generation.clone(),
             seen: [generation.generation(); 2],
@@ -202,22 +251,22 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
-        let phase = self.follow.as_mut().map_or(Phase::Live, Follow::step);
-        if phase == Phase::Closed {
-            // Retired: the node passes nothing, and says what it dropped.
-            let dropped = io.events(0).len() as u64;
-            if dropped > 0 {
-                io.count_lost(dropped);
-            }
-            return Status::Modified;
-        }
+        let held = &self.held;
+        let phase = self.follow.as_mut().map_or(Phase::Live, |follow| {
+            follow.step(|| {
+                held.as_deref()
+                    .is_some_and(|keys| keys.iter().any(|w| *w != 0))
+            })
+        });
         let mut kept = 0;
         let mut lost = 0;
         for event in io.events(0) {
             let EventKind::Midi(raw) = event.kind else {
                 continue;
             };
-            if let Some(slot) = self.staged.get_mut(kept) {
+            if phase == Phase::Closed {
+                lost += 1;
+            } else if let Some(slot) = self.staged.get_mut(kept) {
                 *slot = (event.offset, raw);
                 kept += 1;
             } else {
@@ -225,41 +274,25 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
             }
         }
         if lost > 0 {
-            // Past the node's room: counted by the executor, as a refused push is.
+            // Past the node's room, or retired: counted by the executor, as a
+            // refused push is.
             io.count_lost(lost);
         }
+        let mut at = Offset::ZERO;
         for (offset, raw) in &self.staged[..kept] {
-            // Refused past the capacity: counted by the executor.
-            let _ = io.event_out(0).push(Event::midi(*offset, *raw));
+            // Refused past the capacity: counted by the executor, and a note
+            // the port refused is not one to end.
+            if io.event_out(0).push(Event::midi(*offset, *raw)).is_ok() {
+                at = *offset;
+                if let Some(held) = self.held.as_deref_mut() {
+                    track(held, *raw);
+                }
+            }
         }
-        if let Some(held) = self.held.as_deref_mut() {
-            for (_, raw) in &self.staged[..kept] {
-                match Class::of(*raw) {
-                    Class::On(key) => {
-                        let at = bit(key);
-                        held[at >> 6] |= 1 << (at & 63);
-                    }
-                    Class::Off(key) => {
-                        let at = bit(key);
-                        held[at >> 6] &= !(1 << (at & 63));
-                    }
-                    Class::Other => {}
-                }
-            }
-            if phase == Phase::Closing {
-                let at = self.staged[..kept]
-                    .last()
-                    .map_or(Offset::ZERO, |last| last.0);
-                for (word, bits) in held.iter_mut().enumerate() {
-                    while *bits != 0 {
-                        let bit = bits.trailing_zeros() as u16;
-                        *bits &= *bits - 1;
-                        let key = NoteKey::from_index(MIDI2_KEY | (word as u16) << 6 | bit);
-                        // Refused past the capacity: counted by the executor.
-                        let _ = io.event_out(0).push(owed_off(key, at));
-                    }
-                }
-            }
+        if let Some(held) = self.held.as_deref_mut()
+            && phase != Phase::Live
+        {
+            end_notes(held, io.event_out(0), at, phase == Phase::Closed);
         }
         Status::Modified
     }

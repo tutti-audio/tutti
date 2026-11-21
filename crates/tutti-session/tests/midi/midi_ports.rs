@@ -1247,6 +1247,41 @@ fn closing_an_output_port_stops_its_active_sensing() {
     assert!(sent_by_the_port(&fake).is_empty());
 }
 
+/// **A retiring output on a MIDI 1.0 device ends a held note with a MIDI 1.0
+/// Note Off**: the node's MIDI 2.0 off is translated for the device, so the wire
+/// carries a 0x8n (or a velocity 0 0x9n) for the key (UMP message type 2).
+#[test]
+fn a_retiring_output_ends_a_held_note_on_a_midi1_device_with_a_midi1_off() {
+    let (mut s, fake, out) = sensing_session(false);
+    let mut keys = s.midi().input(out.node()).expect("the node takes events");
+    let _ = s.update();
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(66),
+        tutti_ump::NoteVelocity::new(MF),
+    )
+    .expect("queued");
+    blocks(&s, 1);
+    drop(out);
+    let _ = s.update();
+    blocks(&s, 3);
+    let _ = s.update();
+    let sent = sent_by_the_port(&fake);
+    let off = sent
+        .iter()
+        .find(|u| is_off(u, 66))
+        .unwrap_or_else(|| panic!("the note off: {sent:?}"));
+    let word = off.0[0];
+    assert_eq!(word >> 28, 2, "a MIDI 1.0 channel voice message: {word:#x}");
+    let status = (word >> 20) & 0xF;
+    let velocity = word & 0x7F;
+    assert!(
+        status == 0x8 || (status == 0x9 && velocity == 0),
+        "a Note Off, or a Note On at velocity 0: {word:#x}"
+    );
+}
+
 /// **A reopened output keeps its Active Sensing**: the device unplugged and
 /// back, the port sends Active Sensing again on the new connection.
 #[test]
