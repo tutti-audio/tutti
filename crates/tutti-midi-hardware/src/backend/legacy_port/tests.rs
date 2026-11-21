@@ -722,22 +722,24 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     )
     .unwrap();
     assert_eq!(devices.list().len(), 1, "seeded before open returns");
-    let events = devices.subscribe();
+    let mut events = devices.subscribe();
 
     LISTED.lock().unwrap().push(device(2, "B"));
-    let Ok(DeviceEvent::Added(added)) =
-        tutti_fixtures::block_on_within(events.recv(), Duration::from_secs(30))
-            .expect("an event before the guard")
-    else {
+    let Some(DeviceEvent::Added(added)) = tutti_fixtures::block_on_within(
+        futures_lite::StreamExt::next(&mut events),
+        Duration::from_secs(30),
+    )
+    .expect("an event before the guard") else {
         panic!("B was not reported");
     };
     assert_eq!(added.name, "B");
 
     LISTED.lock().unwrap().remove(0);
-    let Ok(DeviceEvent::Removed(removed)) =
-        tutti_fixtures::block_on_within(events.recv(), Duration::from_secs(30))
-            .expect("an event before the guard")
-    else {
+    let Some(DeviceEvent::Removed(removed)) = tutti_fixtures::block_on_within(
+        futures_lite::StreamExt::next(&mut events),
+        Duration::from_secs(30),
+    )
+    .expect("an event before the guard") else {
         panic!("A was not reported gone");
     };
     assert_eq!(removed.name, "A");

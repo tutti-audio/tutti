@@ -6,6 +6,10 @@
 //! one place the TXT keys are written and read.
 
 use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use futures_core::Stream;
 
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tutti_ump::{InstanceIdError, NameError};
@@ -308,9 +312,15 @@ pub enum HostEvent {
 }
 
 /// A search for Hosts, until dropped.
+///
+/// A [`Stream`] of [`HostEvent`]s, fed by the mDNS daemon's thread, which wakes
+/// it when a Host appears, changes or goes. It ends, with `None` and then `None`
+/// again, when the daemon stops.
 pub struct Browser {
     daemon: ServiceDaemon,
+    /// The same channel the stream reads, for [`pending`](Self::pending).
     events: mdns_sd::Receiver<ServiceEvent>,
+    stream: Pin<Box<dyn Stream<Item = ServiceEvent> + Send>>,
 }
 
 impl Browser {
@@ -322,17 +332,64 @@ impl Browser {
     pub fn start() -> Result<Self, DiscoveryError> {
         let daemon = ServiceDaemon::new()?;
         let events = daemon.browse(SERVICE_TYPE)?;
-        Ok(Self { daemon, events })
+        let stream = Box::pin(events.clone().into_stream());
+        Ok(Self {
+            daemon,
+            events,
+            stream,
+        })
     }
 
-    /// The next Host event, fed by the mDNS daemon's thread, which wakes it when
-    /// a Host appears, changes or goes. It resolves to `None` once the daemon has
-    /// stopped and nothing more will arrive.
-    pub async fn next_event(&self) -> Option<HostEvent> {
-        loop {
-            if let Some(event) = host_event(self.events.recv_async().await.ok()?) {
-                return Some(event);
+    /// The Host events that have arrived and not been taken, oldest first,
+    /// taking each as it is iterated. Never waits.
+    pub fn pending(&self) -> Pending<'_> {
+        Pending { browser: self }
+    }
+}
+
+impl Stream for Browser {
+    type Item = HostEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<HostEvent>> {
+        poll_hosts(&mut self.get_mut().stream, cx)
+    }
+}
+
+/// The Host events of a [`Browser`] that have arrived and not been taken:
+/// [`Browser::pending`].
+#[derive(Debug)]
+pub struct Pending<'a> {
+    browser: &'a Browser,
+}
+
+impl Iterator for Pending<'_> {
+    type Item = HostEvent;
+
+    fn next(&mut self) -> Option<HostEvent> {
+        while let Ok(event) = self.browser.events.try_recv() {
+            if let Some(host) = host_event(event) {
+                return Some(host);
             }
+        }
+        None
+    }
+}
+
+/// The next Host event of the daemon's `events`, skipping the ones that name no
+/// Host; `None` once they have ended.
+fn poll_hosts<S: Stream<Item = ServiceEvent> + Unpin + ?Sized>(
+    events: &mut S,
+    cx: &mut Context<'_>,
+) -> Poll<Option<HostEvent>> {
+    loop {
+        match Pin::new(&mut *events).poll_next(cx) {
+            Poll::Ready(Some(event)) => {
+                if let Some(host) = host_event(event) {
+                    return Poll::Ready(Some(host));
+                }
+            }
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => return Poll::Pending,
         }
     }
 }
@@ -368,6 +425,33 @@ impl Drop for Browser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_lite::StreamExt;
+
+    fn browsing(events: Vec<ServiceEvent>) -> impl Stream<Item = HostEvent> {
+        futures_lite::stream::poll_fn({
+            let mut events = futures_lite::stream::iter(events);
+            move |cx| poll_hosts(&mut events, cx)
+        })
+    }
+
+    /// Events that name no Host are skipped, and once the daemon's events have
+    /// ended the stream answers `None` every time after.
+    #[test]
+    fn a_browse_skips_events_naming_no_host_and_ends_with_none_for_good() {
+        let mut hosts = Box::pin(browsing(vec![
+            ServiceEvent::SearchStarted(SERVICE_TYPE.to_owned()),
+            ServiceEvent::ServiceRemoved(
+                SERVICE_TYPE.to_owned(),
+                "Keys._midi2._udp.local.".to_owned(),
+            ),
+        ]));
+        let first = futures_lite::future::block_on(hosts.next());
+        assert!(
+            matches!(first, Some(HostEvent::Removed { fullname }) if fullname == "Keys._midi2._udp.local.")
+        );
+        assert!(futures_lite::future::block_on(hosts.next()).is_none());
+        assert!(futures_lite::future::block_on(hosts.next()).is_none());
+    }
 
     /// A removal is the Host's full name; a search that starts says nothing of any Host.
     #[test]
