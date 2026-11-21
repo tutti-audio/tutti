@@ -26,6 +26,8 @@ tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
 # `spawn_named`, `PriorityRequest`: the client's audio and control threads.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+# The audio and guard tasks yield to their drive between slices.
+futures-lite.workspace = true
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["serde", "probe-wire"] }

@@ -968,7 +968,7 @@ impl AudioBridge {
     ///
     /// `None` and `Some(vec![])` are different answers: the first means the
     /// question could not be asked, the second that the plugin listed nothing.
-    pub(crate) fn presets(&self) -> Option<Vec<Preset>> {
+    pub fn presets(&self) -> Option<Vec<Preset>> {
         if self.lifecycle.is_crashed() {
             return None;
         }

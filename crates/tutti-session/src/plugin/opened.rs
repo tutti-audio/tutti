@@ -15,11 +15,11 @@ use std::sync::{Arc, Mutex};
 
 use tutti_buffers::ChannelLayout;
 use tutti_plugin::catalog::ResolvedHosting;
-use tutti_plugin_db::{Hosting, Loadable};
+use tutti_plugin_db::Loadable;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
-use tutti_plugin_types::{Features, IpcError, MainThreadMarker, MainWorkHandle, PluginFailure};
-use tutti_plugin_types::{PluginDescriptor, PluginRef};
+use tutti_plugin_types::{Features, IpcError, MainWorkHandle, PluginFailure, Preset, PresetError};
+use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
 
@@ -35,7 +35,7 @@ use crate::{GiveUp, LoadError, ResourceId};
 pub(super) struct Context {
     pub(super) rate: SampleRate,
     pub(super) work: MainWorkHandle,
-    /// The session's executor, which a served plugin's exit watch runs on.
+    /// The session's executor, which an out-of-process plugin's exit watch runs on.
     pub(super) executor: tutti_platform::WeakExecutor,
     pub(super) ids: ResourceIds,
     /// The session that built the load: the one the plugin may be added to.
@@ -118,14 +118,22 @@ impl Standing {
 /// What a plugin says of itself: one snapshot, taken at the load.
 #[derive(Clone, Debug)]
 pub struct PluginInfo {
+    id: PluginId,
     plugin: PluginRef,
     descriptor: PluginDescriptor,
-    hosting: Hosting,
+    hosting: ResolvedHosting,
     server_pid: Option<u32>,
     presets: PluginPresets,
 }
 
 impl PluginInfo {
+    /// The catalog id the load resolved: what a reload of this plugin passes to
+    /// [`Session::load_plugin_as`](crate::Session::load_plugin_as).
+    #[must_use]
+    pub const fn id(&self) -> &PluginId {
+        &self.id
+    }
+
     /// The plugin the load opened: its file, its format and its id there.
     #[must_use]
     pub const fn plugin(&self) -> &PluginRef {
@@ -145,10 +153,9 @@ impl PluginInfo {
         self.server_pid
     }
 
-    /// Where the plugin runs: [`Hosting::InProcess`] or
-    /// [`Hosting::OutOfProcess`].
+    /// Where the plugin runs, as the load placed it.
     #[must_use]
-    pub const fn hosting(&self) -> Hosting {
+    pub const fn hosting(&self) -> ResolvedHosting {
         self.hosting
     }
 
@@ -194,15 +201,15 @@ impl fmt::Debug for Shared {
 }
 
 impl Shared {
-    /// `main` is the proof of the main thread the load runs on: the plugin's
-    /// preset list is read with it.
+    /// `read` reads the plugin's preset list, as the load's hosting allows.
     pub(super) fn new(
         cx: &Context,
         stamp: Stamp,
+        plugin_id: PluginId,
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
-        main: MainThreadMarker,
+        read: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
     ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,
@@ -210,21 +217,18 @@ impl Shared {
             mirror,
         } = open;
         let plugin = plugin.map_err(plugin_failed)?;
-        let hosting = match plugin.hosting() {
-            ResolvedHosting::OutOfProcess => Hosting::OutOfProcess,
-            ResolvedHosting::InProcess => Hosting::InProcess,
-        };
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
         let id = cx.ids.mint();
         let presets = PluginPresets::new(handle.preset_support(), handle.instance());
         if presets.support().can_list() {
-            presets.fill(handle.presets(main));
+            presets.fill(read(&plugin));
         }
         let info = PluginInfo {
+            id: plugin_id,
             plugin: plugin.plugin().clone(),
             descriptor: handle.descriptor().clone(),
-            hosting,
+            hosting: plugin.hosting(),
             server_pid: handle.server_pid(),
             presets,
         };

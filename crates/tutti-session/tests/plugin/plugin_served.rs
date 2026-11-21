@@ -31,6 +31,7 @@ use tutti_units::{SampleRate, Samples, Tail};
 
 const BLOCK: usize = 512;
 
+use crate::loading::{Block as _, Hosted as _};
 use crate::support::clap_probe;
 
 fn first_id() -> PluginId {
@@ -310,12 +311,9 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
         .run(tutti_fixtures::main_thread())
         .expect("a state");
 
-    let second = s
-        .load_plugin(&first_id(), &catalog)
-        .initial_state(state)
-        .expect("its own plugin's state")
-        .run(tutti_fixtures::main_thread())
-        .expect("the plugin loads");
+    let mut load = s.load_out_of_process(&first_id(), &catalog);
+    load.initial_state(state).expect("its own plugin's state");
+    let second = load.block().expect("the plugin loads");
     let second_handle = second.handle();
     let b = s.add_plugin(second).unwrap();
     let read = s
@@ -332,6 +330,65 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     let pid = |node| s.plugin_view(node).unwrap().diagnostics().server_pid();
     assert_ne!(pid(a), pid(b), "two plugins, two servers");
     assert_ne!(first.id(), second_handle.id());
+}
+
+/// **A reload composed from a node's info and state is awaited off the main
+/// thread and swapped in on it.** The load of the handle's id and hosting, from
+/// the state saved of the node, is `Send`: a spawned thread awaits it, and the
+/// plugin swapped in at the node's key reads the saved value, not the default.
+#[test]
+fn a_reload_awaited_on_a_spawned_thread_is_swapped_in_with_its_state() {
+    const CUTOFF: ParamId = ParamId::new(101);
+    let main = tutti_fixtures::main_thread();
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (handle, node) = in_a_node(&mut s, &catalog, &first_id());
+    let set = Normalized::of(0.9);
+    let target = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(CUTOFF)
+        .expect("the plugin declares the parameter")
+        .target();
+    s.set(target.to(set)).unwrap();
+    let state = s
+        .save_state(&node, StateUse::Project)
+        .unwrap()
+        .run(main)
+        .expect("a state");
+
+    let info = handle.info();
+    let mut load = match s
+        .load_plugin_as(info.id(), &catalog, info.hosting())
+        .unwrap()
+    {
+        tutti_session::LoadPlugin::OutOfProcess(load) => load,
+        other => panic!("{other:?}"),
+    };
+    load.initial_state(state).expect("its own plugin's state");
+    let revived = std::thread::spawn(move || load.block())
+        .join()
+        .expect("the load's thread ends")
+        .expect("the plugin loads");
+    let old_pid = pid_of(&s, node);
+    s.swap_plugin(node, revived, main).expect("it swaps in");
+    pump_until(&mut s, "the node's new plugin", |s| {
+        pid_of(s, node) != old_pid
+            && s.plugin_view(node)
+                .is_ok_and(|view| view.params().get(CUTOFF).is_ok())
+    });
+    let read = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(CUTOFF)
+        .unwrap()
+        .normalized();
+    assert!(
+        (read.get() - set.get()).abs() < 1e-6,
+        "the state's value, not the default: {read:?}"
+    );
 }
 
 /// **A state saved is the state of the plugin at the run, and the refusals are
@@ -410,12 +467,9 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
         "the use reaches the plugin: a duplicate save is FOR_DUPLICATE"
     );
 
-    let b = s
-        .load_plugin(&first_id(), &catalog)
-        .initial_state(state)
-        .expect("its own plugin's state")
-        .run(main)
-        .expect("the plugin loads");
+    let mut load = s.load_out_of_process(&first_id(), &catalog);
+    load.initial_state(state).expect("its own plugin's state");
+    let b = load.block().expect("the plugin loads");
     let b = s.add_plugin(b).unwrap();
     let read = s
         .plugin_view(b)
@@ -617,8 +671,8 @@ fn load<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     catalog: &Catalog,
     id: &PluginId,
 ) -> PluginNode {
-    s.load_plugin(id, catalog)
-        .run(tutti_fixtures::main_thread())
+    s.load_out_of_process(id, catalog)
+        .block()
         .expect("the plugin loads")
 }
 

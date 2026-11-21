@@ -2,7 +2,7 @@
 //! [`Session::load_preset_file`] hand back a [`LoadPreset`], run on the main
 //! thread with its proof (`run(main)`), as [`Session::restore_state`] does.
 //!
-//! The value is `!Send`, whether the plugin is served or in process. A plugin
+//! The value is `!Send`, whether the plugin is out of process or in process. A plugin
 //! that declines ends the run as [`PresetError::Refused`] and one that is gone
 //! as [`PresetError::Lost`]. A preset the plugin took is a [`LoadedPreset`],
 //! which [`Session::apply`] takes back.

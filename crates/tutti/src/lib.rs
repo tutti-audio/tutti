@@ -174,6 +174,8 @@ pub use tutti_codec::{Format, Pcm};
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
 #[cfg(feature = "plugin")]
+pub use tutti_plugin::catalog::ResolvedHosting;
+#[cfg(feature = "plugin")]
 pub use tutti_plugin_db::{Catalog, Hosting};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, StateUse};
@@ -185,10 +187,11 @@ pub use tutti_session::PluginParams;
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPlugin, LoadPreset, LoadedPlugin,
-    LoadedPreset, Opened, Plugin, PluginApplyError, PluginBuses, PluginChange, PluginEvent,
-    PluginHealth, PluginInfo, PluginNode, PluginPresets, PortCounts, PresetStartError,
-    RestoreState, RestoredState, SaveState, StateStartError, SwapPluginError,
+    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadInProcess, LoadOutOfProcess,
+    LoadPlugin, LoadPreset, LoadedPlugin, LoadedPreset, LoadingOutOfProcess, Opened, Plugin,
+    PluginApplyError, PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginPresets, PortCounts, PresetStartError, RestoreState, RestoredState, SaveState,
+    StateStartError, SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -205,9 +208,9 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, CrossfadeControls, Edge, EventInPort, EventOutPort,
-    InPort, Job, JobId, JobKind, JobOutput, JobStatus, Key, NoSuchNode, Offline, OfflineSession,
-    OutPort, Playhead, RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat,
-    SystemClock, SystemSession, TransportHandle, WaitError, Workers,
+    InPort, Key, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
+    SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, TransportHandle,
+    Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -868,9 +871,9 @@ pub mod midi {
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
-        ChannelProfile, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError,
-        MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer, RequestReport,
-        SwitchProfile, WholeProfile,
+        ChannelProfile, ListedPeer, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy,
+        MidiPolicyError, MidiPortError, NoHardware, PortCause, ProfilePeer, ReportPeer,
+        RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};

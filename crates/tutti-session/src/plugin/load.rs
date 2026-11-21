@@ -1,118 +1,106 @@
-//! The plugin as a value: [`Session::load_plugin`] returns a [`LoadPlugin`]
-//! that, when the app runs it on the main thread, opens the plugin and returns
-//! the [`PluginNode`] that owns it; [`Session::add_plugin`] puts the node in the
+//! The plugin as a value: [`Session::load_plugin`] returns a [`LoadPlugin`], a
+//! [`LoadInProcess`] the app runs on the main thread or a [`LoadOutOfProcess`] it
+//! awaits on any thread, which opens the plugin and returns the [`PluginNode`]
+//! that owns it; [`Session::add_plugin`] puts the node in the
 //! graph, and [`Session::swap_plugin`] replaces the plugin at a node with one.
 //!
-//! The id is resolved and bound against the catalog when the load is built; the
-//! load then opens the plugin, the state going in before it is activated. A load
-//! holds the session's identity and rate, its collector of main-thread work and
-//! a weak handle to its executor, which it upgrades only for the launch of a
-//! served plugin.
+//! The id is resolved and bound against the catalog, and the hosting resolved
+//! for the format, when the load is built; the load then opens the plugin, the
+//! state going in before it is activated. A load holds the session's identity
+//! and rate, its collector of main-thread work and a weak handle to its
+//! executor, which it upgrades only for the launch of an out-of-process plugin.
 //!
 //! One opened plugin is one [`PluginNode`], which a session takes once. Its
 //! [`LoadedPlugin`] is the cloneable observer: what the load read of the plugin
 //! and whether it is live, or [`Closed`](Presence::Closed) once no plugin is
 //! behind it. An unadded plugin closes when its node is dropped, and an added
 //! one with its node in the graph (an in-process plugin on the main thread,
-//! whichever thread drops it; a served one reaps its server). The session keeps
+//! whichever thread drops it; an out-of-process one reaps its server). The session keeps
 //! no cache: two loads of one id are two plugins.
 
 use std::fmt;
+use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::task::{Context as TaskContext, Poll};
 
+use futures_channel::oneshot;
 use tutti_graph::NodeKey;
 use tutti_platform::Asset;
-use tutti_plugin_db::{BindError, Catalog, Hosting, Loadable};
+use tutti_plugin::PluginClient;
+use tutti_plugin::catalog::ResolvedHosting;
+use tutti_plugin_db::{Catalog, Hosting, Loadable};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
+use tutti_plugin_types::{IpcError, Preset, PresetError};
 use tutti_plugin_types::{MainThreadMarker, PluginFailure, PluginFormat, PluginId, PluginRef};
 use tutti_rt::LockExt;
 
-use super::opened::ports_of;
 use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shared, Standing};
-use super::{AnyPlugin, HostPlugin, Origin, PluginLoad};
+use super::opened::{plugin_failed, ports_of};
+use super::{AnyPlugin, HostPlugin, Open, Origin, PluginLoad};
 use crate::apply::SessionId;
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
 use crate::{CrossfadeRefused, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
 use crate::{OtherPeer, PeerState, ReplaceRefused, Resource, ResourceId, SavedPeer, Session};
 
-/// A plugin to open, built by [`Session::load_plugin`] and not yet run:
-/// [`run`](Self::run) returns the [`PluginNode`].
-///
-/// Its identity is the [`PluginId`] and the [`Hosting`]; its initial state is
-/// applied by the load. It is not `Send`: every plugin value runs on the main
-/// thread, served or in process; dropping it unrun cancels it.
+/// A plugin to open, built by [`Session::load_plugin`] and not yet run. Where it
+/// runs is decided when it is built, from the catalog's row and the format: a
+/// plugin that runs in the app's process is a [`LoadInProcess`], which only the
+/// main thread runs, and one that runs in a `plugin-server` process is a
+/// [`LoadOutOfProcess`], which any thread awaits. This enum has no `run`.
 ///
 /// ```compile_fail
 /// fn send<T: Send>() {}
-/// send::<tutti_session::LoadPlugin>();
+/// send::<tutti_session::LoadInProcess>();
+/// ```
+///
+/// ```
+/// fn send<T: Send>() {}
+/// send::<tutti_session::LoadOutOfProcess>();
 /// ```
 #[must_use = "work does nothing until it runs"]
 #[derive(Debug)]
-pub struct LoadPlugin {
-    resolved: Result<Loadable, BindError>,
-    hosting: Hosting,
-    state: Option<Arc<PeerState>>,
-    cx: Context,
-    main: PhantomData<*const ()>,
+pub enum LoadPlugin {
+    /// The plugin runs in this process ([`Hosting::InProcess`]).
+    InProcess(LoadInProcess),
+    /// The plugin runs in a `plugin-server` process ([`Hosting::OutOfProcess`]).
+    OutOfProcess(LoadOutOfProcess),
 }
 
-impl LoadPlugin {
-    /// The plugin hosted as `hosting` ([`Hosting::Auto`] until this says
-    /// otherwise).
-    pub const fn hosting(mut self, hosting: Hosting) -> Self {
-        self.hosting = hosting;
-        self
-    }
+/// What both loads hold: the plugin the catalog resolved, the state it starts
+/// from, and what the session lends the load.
+#[derive(Debug)]
+struct Request {
+    id: PluginId,
+    loadable: Loadable,
+    state: Option<Arc<PeerState>>,
+    cx: Context,
+}
 
-    /// With `state` restored at the load, before the plugin is activated. A
-    /// refusal by the plugin is logged, and it loads at its defaults.
-    ///
-    /// # Errors
-    ///
-    /// [`OtherPeer`] when `state` was saved from another peer than the one the
-    /// id resolved to. An id that resolved to none is not checked: the load
-    /// fails.
-    pub fn initial_state(mut self, state: PeerState) -> Result<Self, OtherPeer> {
-        if let Ok(loadable) = &self.resolved {
-            state.check_for(&SavedPeer::Plugin(loadable.plugin().clone()))?;
-        }
+impl Request {
+    fn initial_state(&mut self, state: PeerState) -> Result<(), OtherPeer> {
+        state.check_for(&SavedPeer::Plugin(self.loadable.plugin().clone()))?;
         self.state = Some(Arc::new(state));
-        Ok(self)
+        Ok(())
     }
 
-    /// Opens the plugin on the calling thread and restores the initial state.
-    /// A served plugin's server is launched here, which blocks for up to the
-    /// load deadline (half a second to fifteen).
-    ///
-    /// The plugin module's [`Identity`](tutti_platform::Identity) is taken
-    /// before the open, so a rewrite during it shows in
-    /// [`LoadedPlugin::changed`].
-    ///
-    /// # Errors
-    ///
-    /// [`LoadError::Unresolved`] when the id names no plugin of the catalog, or
-    /// several; [`LoadError::Module`] when its bundle holds no module for this
-    /// target; [`LoadError::Plugin`] when the catalog or the format refuses the
-    /// hosting or the plugin does not open; [`LoadError::Panicked`] when a
-    /// plugin or the host panicked in the open.
-    pub fn run(self, main: MainThreadMarker) -> Result<PluginNode, LoadError> {
-        caught(|| self.open(main))
-    }
-
-    fn open(self, main: MainThreadMarker) -> Result<PluginNode, LoadError> {
-        let loadable = match &self.resolved {
-            Ok(loadable) => loadable.clone().hosting(self.hosting),
-            Err(unresolved) => return Err(LoadError::Unresolved(unresolved.clone())),
-        };
-        let stamp = Stamp::take(Asset::from(module_of(loadable.plugin())?));
+    /// Takes the module's stamp, opens with `open`, and wraps the result as a
+    /// node of the session that built the load. `presets` reads the plugin's
+    /// preset list the way its hosting allows.
+    fn open(
+        self,
+        open: impl FnOnce(PluginLoad) -> Open,
+        presets: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
+    ) -> Result<PluginNode, LoadError> {
+        let stamp = Stamp::take(Asset::from(module_of(self.loadable.plugin())?));
         let cx = self.cx;
         let request = PluginLoad {
-            loadable: loadable.clone(),
+            loadable: self.loadable.clone(),
             rate: cx.rate,
             config: AudioConfig::default(),
             state: self.state,
@@ -120,8 +108,9 @@ impl LoadPlugin {
             executor: cx.executor.clone(),
         };
         let config = request.config.clone();
-        let open = request.run_on(main);
-        let (shared, install) = Shared::new(&cx, stamp, open, loadable, config, main)?;
+        let opened = open(request);
+        let (shared, install) =
+            Shared::new(&cx, stamp, self.id, opened, self.loadable, config, presets)?;
         Ok(PluginNode {
             handle: LoadedPlugin {
                 shared: Arc::new(shared),
@@ -129,6 +118,204 @@ impl LoadPlugin {
             install: Some(Box::new(install)),
             session: cx.session,
         })
+    }
+}
+
+/// A plugin that runs in this process, not yet opened. Its library loads and
+/// its instance is made on the main thread: it is not `Send`, and dropping it
+/// unrun cancels it.
+#[must_use = "work does nothing until it runs"]
+#[derive(Debug)]
+pub struct LoadInProcess {
+    request: Request,
+    main: PhantomData<*const ()>,
+}
+
+impl LoadInProcess {
+    /// With `state` restored at the load, before the plugin is activated. A
+    /// refusal by the plugin is logged, and it loads at its defaults.
+    ///
+    /// # Errors
+    ///
+    /// [`OtherPeer`] when `state` was saved from another peer than the one the
+    /// id resolved to.
+    pub fn initial_state(&mut self, state: PeerState) -> Result<(), OtherPeer> {
+        self.request.initial_state(state)
+    }
+
+    /// Opens the plugin on the main thread `main` proves and restores the
+    /// initial state.
+    ///
+    /// The plugin module's [`Identity`](tutti_platform::Identity) is taken
+    /// before the open, so a rewrite during it shows in
+    /// [`LoadedPlugin::changed`].
+    ///
+    /// # Errors
+    ///
+    /// [`LoadError::Module`] when its bundle holds no module for this target;
+    /// [`LoadError::Plugin`] when the catalog blacklisted the plugin since the
+    /// load was built or the plugin does not open; [`LoadError::Panicked`] when
+    /// a plugin or the host panicked in the open.
+    pub fn run(self, main: MainThreadMarker) -> Result<PluginNode, LoadError> {
+        caught(|| {
+            self.request.open(
+                |load| load.run_in_process(main),
+                |plugin| plugin.handle().presets(main),
+            )
+        })
+    }
+}
+
+/// A plugin that runs in a `plugin-server` process, not yet started. It is
+/// `Send`, and it is a [`Future`] through [`IntoFuture`]: awaiting it launches
+/// the server and loads the plugin as a task on the session's executor, and
+/// yields the [`PluginNode`]. Nothing of it needs the main thread, so any
+/// thread awaits it and the session adds the node on its own. There is no
+/// blocking form: the task wakes the awaiting future when the reply lands.
+///
+/// It holds no strong handle to the session's executor. Dropping it unawaited
+/// starts nothing.
+#[must_use = "work does nothing until it is awaited"]
+#[derive(Debug)]
+pub struct LoadOutOfProcess {
+    request: Request,
+}
+
+impl LoadOutOfProcess {
+    /// With `state` restored at the load, before the plugin is activated. A
+    /// refusal by the plugin is logged, and it loads at its defaults.
+    ///
+    /// # Errors
+    ///
+    /// [`OtherPeer`] when `state` was saved from another peer than the one the
+    /// id resolved to.
+    pub fn initial_state(&mut self, state: PeerState) -> Result<(), OtherPeer> {
+        self.request.initial_state(state)
+    }
+}
+
+impl IntoFuture for LoadOutOfProcess {
+    type Output = Result<PluginNode, LoadError>;
+    type IntoFuture = LoadingOutOfProcess;
+
+    fn into_future(self) -> LoadingOutOfProcess {
+        LoadingOutOfProcess {
+            stage: Stage::Unstarted(self.request),
+        }
+    }
+}
+
+/// An out-of-process load being awaited ([`LoadOutOfProcess`]): resolves to
+/// the [`PluginNode`] once the plugin's server has launched and loaded it.
+///
+/// The first poll starts the launch as a task on the session's executor (the
+/// session's weak handle, upgraded for the spawn only) and awaits the receiver
+/// of a oneshot. **The launch task fills the sender**: it takes the plugin
+/// module's [`Identity`](tutti_platform::Identity), opens the plugin, and sends
+/// the node or the error when the open ends, which wakes the future. Nothing
+/// else drives it and no caller waits on code the app does not run: a poll
+/// never blocks, and `Session::update` is not needed.
+///
+/// Dropped before it resolves, the future drops the receiver. A launch that has
+/// not begun then sees the receiver gone and opens nothing; one in flight
+/// finishes, finds `send` refused, and drops the node it gets back, which closes
+/// the plugin and reaps its server: no server outlives the drop.
+///
+/// # Errors
+///
+/// The output is [`LoadError::Module`] when the bundle holds no module for this
+/// target; [`LoadError::Plugin`] when the catalog blacklisted the plugin since
+/// the load was built, the session is gone
+/// ([`IpcError::ShutDown`]), or the plugin does not open;
+/// [`IpcError::ShutDown`] too when the launch task ended without an answer
+/// (the executor dropped it before it ran: the host is shutting down, and the
+/// plugin did not fail), and [`IpcError::Io`] when the executor could not
+/// start it; [`LoadError::Panicked`] when a plugin or the host panicked in
+/// the open.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+///
+/// [`IpcError::ShutDown`]: tutti_plugin_types::IpcError::ShutDown
+/// [`IpcError::Io`]: tutti_plugin_types::IpcError::Io
+#[must_use = "a load does nothing unless it is awaited"]
+pub struct LoadingOutOfProcess {
+    stage: Stage,
+}
+
+type Reply = oneshot::Receiver<Result<PluginNode, LoadError>>;
+
+enum Stage {
+    Unstarted(Request),
+    Running(Reply),
+    Finished,
+}
+
+impl fmt::Debug for LoadingOutOfProcess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadingOutOfProcess")
+            .finish_non_exhaustive()
+    }
+}
+
+impl LoadingOutOfProcess {
+    /// Starts the launch of `request` on the session's executor: the task owns
+    /// the sender of the reply this returns the receiver of.
+    fn launch(request: Request) -> Result<Reply, LoadError> {
+        // Upgraded for the spawn only: the task holds no strong handle.
+        let Some(executor) = request.cx.executor.upgrade() else {
+            return Err(plugin_failed(IpcError::ShutDown));
+        };
+        let (reply, receiver) = oneshot::channel();
+        let task = executor
+            .unblock(move || {
+                // A future dropped before the launch began has nobody to answer.
+                if reply.is_canceled() {
+                    return;
+                }
+                let node = caught(|| {
+                    request.open(PluginLoad::run_out_of_process, |plugin| {
+                        plugin
+                            .client()
+                            .and_then(PluginClient::presets)
+                            .ok_or(PresetError::Lost)
+                    })
+                });
+                // Refused when the future was dropped meanwhile: the node comes
+                // back and closes here, which reaps its server.
+                drop(reply.send(node));
+            })
+            .map_err(|refused| plugin_failed(IpcError::Io(std::io::Error::from(refused.kind()))))?;
+        // The task runs on without the future: its end is the reply.
+        task.detach();
+        Ok(receiver)
+    }
+}
+
+impl Future for LoadingOutOfProcess {
+    type Output = Result<PluginNode, LoadError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        if matches!(this.stage, Stage::Unstarted(_)) {
+            let Stage::Unstarted(request) = std::mem::replace(&mut this.stage, Stage::Finished)
+            else {
+                unreachable!("matched above");
+            };
+            match Self::launch(request) {
+                Ok(receiver) => this.stage = Stage::Running(receiver),
+                Err(refused) => return Poll::Ready(Err(refused)),
+            }
+        }
+        let Stage::Running(receiver) = &mut this.stage else {
+            panic!("a load future is polled after it resolved");
+        };
+        let answered = std::task::ready!(Pin::new(receiver).poll(cx));
+        this.stage = Stage::Finished;
+        // A sender dropped unanswered: the executor dropped the launch task
+        // before it ran (the open is `caught`, so a panic answers).
+        Poll::Ready(answered.unwrap_or_else(|_| Err(plugin_failed(IpcError::ShutDown))))
     }
 }
 
@@ -180,8 +367,8 @@ impl LoadedPlugin {
     /// modification time) now differs from the one taken before the load. This
     /// reads the file's metadata, and nothing else.
     ///
-    /// To reload, run [`Session::load_plugin`] again and swap the new plugin in
-    /// ([`Session::swap_plugin`]).
+    /// To reload, compose the load as [`Session::swap_plugin`]'s reload
+    /// recipe does.
     #[must_use]
     pub fn changed(&self) -> bool {
         self.shared.stamp.changed()
@@ -222,11 +409,11 @@ impl Peer for LoadedPlugin {
     }
 }
 
-/// An opened plugin, owned: [`LoadPlugin::run`]'s output, which
+/// An opened plugin, owned: a load's `run` output, which
 /// [`Session::add_plugin`] and [`Session::swap_plugin`] consume. A plugin is in
 /// one node, so the node is not `Clone`.
 ///
-/// It is `Send`: the main thread opened it, and a session on any thread takes it.
+/// It is `Send`: a session on any thread takes it, whichever thread opened it.
 /// Dropped before it is added, it closes its plugin (an in-process plugin on the
 /// main thread, whichever thread drops it).
 ///
@@ -330,21 +517,77 @@ pub enum SwapPluginError {
 
 /// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
-    /// A plugin to open, as a value the app runs on the main thread
-    /// ([`LoadPlugin::run`]).
+    /// A plugin to open, as a value the app runs: a [`LoadInProcess`] on the
+    /// main thread or a [`LoadOutOfProcess`] on any thread, by where the
+    /// plugin's format runs by default in this build.
     ///
     /// `id` is resolved and bound against `catalog` now ([`Catalog::resolve`]),
-    /// and the load keeps the answer: a plugin that is missing or in two files
-    /// fails the load ([`LoadError::Unresolved`]). The load runs at the
-    /// session's rate and under the catalog's blacklist. The app keeps its
-    /// catalog. Two loads of one id are two plugins.
+    /// and the load keeps the answer. The load runs at the session's rate and
+    /// under the catalog's blacklist, which it asks again when it runs. The app
+    /// keeps its catalog. Two loads of one id are two plugins.
     ///
     /// The opened plugin has no node in the graph yet:
     /// [`add_plugin`](Self::add_plugin) puts it there, in this session only.
-    pub fn load_plugin(&self, id: &PluginId, catalog: &Catalog) -> LoadPlugin {
-        LoadPlugin {
-            resolved: catalog.resolve(id).bind(),
-            hosting: Hosting::Auto,
+    ///
+    /// # Errors
+    ///
+    /// [`LoadError::Unresolved`] when `id` names no plugin of the catalog, or
+    /// several; [`LoadError::Plugin`] when the plugin is blacklisted now or
+    /// this build holds no host for its format
+    /// ([`IpcError::NotInProcess`]).
+    ///
+    /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
+    pub fn load_plugin(&self, id: &PluginId, catalog: &Catalog) -> Result<LoadPlugin, LoadError> {
+        self.load_hosted(id, catalog, Hosting::Auto)
+    }
+
+    /// [`load_plugin`](Self::load_plugin), run where `hosting` says rather than
+    /// where the format runs by default.
+    ///
+    /// # Errors
+    ///
+    /// As [`load_plugin`](Self::load_plugin), and [`LoadError::Plugin`] when
+    /// the format cannot be hosted as `hosting` ([`IpcError::NotOutOfProcess`]
+    /// for VST2, [`IpcError::NotInProcess`] for a format this build holds no
+    /// in-process host for).
+    ///
+    /// [`IpcError::NotOutOfProcess`]: tutti_plugin_types::IpcError::NotOutOfProcess
+    /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
+    pub fn load_plugin_as(
+        &self,
+        id: &PluginId,
+        catalog: &Catalog,
+        hosting: ResolvedHosting,
+    ) -> Result<LoadPlugin, LoadError> {
+        self.load_hosted(
+            id,
+            catalog,
+            match hosting {
+                ResolvedHosting::InProcess => Hosting::InProcess,
+                ResolvedHosting::OutOfProcess => Hosting::OutOfProcess,
+            },
+        )
+    }
+
+    /// The load of `id` as `hosting` asks.
+    fn load_hosted(
+        &self,
+        id: &PluginId,
+        catalog: &Catalog,
+        hosting: Hosting,
+    ) -> Result<LoadPlugin, LoadError> {
+        let loadable = catalog
+            .resolve(id)
+            .bind()
+            .map_err(LoadError::Unresolved)?
+            .hosting(hosting);
+        let placed = loadable
+            .check()
+            .and_then(|()| tutti_plugin::catalog::placement(&loadable))
+            .map_err(plugin_failed)?;
+        let request = Request {
+            id: id.clone(),
+            loadable,
             state: None,
             cx: Context {
                 rate: self.graph.prepared().sample_rate(),
@@ -354,8 +597,14 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 session: self.id,
                 recovery: self.plugins.recovery.is_some(),
             },
-            main: PhantomData,
-        }
+        };
+        Ok(match placed {
+            ResolvedHosting::InProcess => LoadPlugin::InProcess(LoadInProcess {
+                request,
+                main: PhantomData,
+            }),
+            ResolvedHosting::OutOfProcess => LoadPlugin::OutOfProcess(LoadOutOfProcess { request }),
+        })
     }
 
     /// Puts the plugin of `node` in the graph, unwired. The node's record holds
@@ -400,6 +649,50 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// update on the main thread; its handle reads [`Closed`](Presence::Closed).
     /// `main` proves this call is on the main thread, for the inline close of a
     /// refused in-process incoming plugin.
+    ///
+    /// # Reloading
+    ///
+    /// A reload is the app's own composition: the load of the plugin's id as it
+    /// was hosted, started from the state worth keeping, swapped in at its key.
+    /// The inputs are read: [`PluginInfo::id`] and [`PluginInfo::hosting`] from
+    /// the node's handle, and [`StateView::withheld`](crate::StateView::withheld)
+    /// or [`last_good`](crate::StateView::last_good) from the session's view of
+    /// it. A node that gave up is revived the same way.
+    ///
+    /// ```no_run
+    /// # use tutti_plugin_db::Catalog;
+    /// # use tutti_plugin_types::MainThreadMarker;
+    /// # use tutti_session::{AnyPlugin, Key, LoadPlugin, LoadedPlugin, Peer, Session};
+    /// # async fn go(
+    /// #     session: &mut Session,
+    /// #     catalog: &Catalog,
+    /// #     node: Key<AnyPlugin>,
+    /// #     handle: &LoadedPlugin,
+    /// #     main: MainThreadMarker,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// let info = handle.info();
+    /// let state = {
+    ///     let view = session.plugin_view(node)?;
+    ///     view.state().withheld().or(view.state().last_good()).cloned()
+    /// };
+    /// let loaded = match session.load_plugin_as(info.id(), catalog, info.hosting())? {
+    ///     LoadPlugin::InProcess(mut load) => {
+    ///         if let Some(state) = state {
+    ///             load.initial_state(state)?;
+    ///         }
+    ///         load.run(main)?
+    ///     }
+    ///     LoadPlugin::OutOfProcess(mut load) => {
+    ///         if let Some(state) = state {
+    ///             load.initial_state(state)?;
+    ///         }
+    ///         load.await?
+    ///     }
+    /// };
+    /// session.swap_plugin(node, loaded, main)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// # Errors
     ///
@@ -569,6 +862,22 @@ mod tests {
         std::fs::create_dir_all(bundle.join("Contents")).unwrap();
         let error = module_of(&PluginRef::file(&bundle)).expect_err("no module inside");
         assert!(matches!(error, LoadError::Module(_)), "{error:?}");
+    }
+
+    /// **A launch task dropped before it answers resolves as a shut-down
+    /// host**, never a wait without end: the reply's sender is gone.
+    #[test]
+    fn a_dropped_sender_resolves_as_a_shut_down_host() {
+        let (reply, receiver) = oneshot::channel();
+        drop(reply);
+        let load = LoadingOutOfProcess {
+            stage: Stage::Running(receiver),
+        };
+        let error = tutti_fixtures::block_on(load).expect_err("nobody answered");
+        assert!(
+            matches!(error, LoadError::Plugin(ref failed) if matches!(**failed, IpcError::ShutDown)),
+            "{error:?}"
+        );
     }
 
     /// **A plain file is its own module.**

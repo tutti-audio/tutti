@@ -93,6 +93,10 @@ impl fmt::Display for StateRev {
 }
 
 impl StateId {
+    /// `fullState`: the state that holds the whole of a device's settings
+    /// (M2-111 Appendix A).
+    pub const FULL_STATE: Self = Self(Text::of("fullState"));
+
     /// The `resId` an inquiry for the State names.
     #[must_use]
     pub fn resource_id(&self) -> ResourceId {

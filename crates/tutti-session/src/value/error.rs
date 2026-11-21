@@ -91,8 +91,8 @@ pub enum SetRefusal {
 #[non_exhaustive]
 pub enum PluginParamRefusal {
     /// The plugin's parameters have not been read yet (the read at load was
-    /// not answered and its job has not landed). The session submits the read
-    /// again and lands it in a later update.
+    /// not answered yet). The session asks for the read
+    /// again and applies its answer in a later update.
     #[error("the plugin's parameters have not been read yet")]
     NotRead,
     /// The plugin declares no parameter with this id, or stopped declaring it
