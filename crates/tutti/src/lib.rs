@@ -310,6 +310,9 @@ pub mod nodes {
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
     };
+    pub use tutti_dsp::{
+        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+    };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_dsp::{
         TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
@@ -393,6 +396,7 @@ pub mod nodes {
         DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
+    pub use tutti_nodes::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
 }
 
 /// The shared vocabulary (units, music types, buffers and the param cells: `tutti-units`,

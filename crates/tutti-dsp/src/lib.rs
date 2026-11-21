@@ -192,6 +192,7 @@ mod interp;
 mod level;
 mod lfo;
 mod loudness;
+mod modal;
 mod modulation;
 mod noise;
 mod novelty;
@@ -289,6 +290,7 @@ pub use mel::{
     MelBandCount, MelBandCountError, MelConfig, MelError, MelFilterbank, MelNorm, MelScale,
 };
 pub use mfcc::Mfcc;
+pub use modal::{MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes};
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{

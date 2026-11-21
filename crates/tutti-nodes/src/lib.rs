@@ -410,6 +410,12 @@ pub use tutti_dsp::{
     AutoPanControls, NoiseColour, OscillatorWave, PanLaw, RingModControls, TremoloControls,
 };
 
+// A modal bank: damped resonators excited by the input.
+mod modal_bank;
+pub use modal_bank::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
+// The modes of a bank and the controls it starts at.
+pub use tutti_dsp::{MAX_MODES, ModalControls, Mode, ModeCount, ModeCountError, Modes};
+
 // Comb filter and frequency shifter.
 mod comb;
 mod frequency_shifter;
