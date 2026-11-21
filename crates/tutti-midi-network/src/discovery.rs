@@ -78,8 +78,8 @@ pub fn txt_properties(identity: &EndpointIdentity) -> [(&'static str, String); 2
 /// A DNS-SD service instance name: one DNS label of 1 to 63 octets of UTF-8
 /// (RFC 6763 section 4.1.1, RFC 1035 section 2.3.4).
 ///
-/// It has the range-checked shape of `tutti_types::ranged!` by hand: that macro
-/// and `check_range_contract` take a `Copy` raw, and a `String` is not one.
+/// It has the workspace's range-checked shape written by hand: the range macro
+/// and its contract test take a `Copy` raw, and a `String` is not one.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InstanceName(String);
 
