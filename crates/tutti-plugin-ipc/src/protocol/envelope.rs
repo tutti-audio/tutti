@@ -16,12 +16,12 @@ use super::shm::SlabLayout;
 use crate::{BlobWire, SlabWire};
 use dpi::Size;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_types::MidiEventVec;
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{BlockStatus, ContentScale, PluginId, StateUse};
 use tutti_plugin_types::{
     LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
 };
+use tutti_plugin_types::{MidiEventVec, RateRefusalCause, ServerError};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -497,8 +497,8 @@ pub enum ControlReply {
     /// Fire-and-forget: nothing awaits this, so a request that a caller blocks
     /// on needs its own reply variant rather than relying on this.
     Error {
-        /// Human-readable reason, already formatted subprocess-side.
-        message: String,
+        /// What failed.
+        error: ServerError,
     },
     /// The subprocess is exiting.
     Shutdown,
@@ -540,9 +540,8 @@ pub enum ControlReply {
         /// The rate that was asked for, echoed so a reply read late is never
         /// attributed to a later request.
         rate: SampleRate,
-        /// The plugin's reason, formatted subprocess-side, or `None` when it
-        /// now runs at `rate`.
-        error: Option<String>,
+        /// Why the plugin refused `rate`, or `None` when it now runs at it.
+        refusal: Option<RateRefusalCause>,
     },
     /// The plain value the format converted a normalized one to. `None` means
     /// the format has none (a parameter it does not declare, or VST2 without an

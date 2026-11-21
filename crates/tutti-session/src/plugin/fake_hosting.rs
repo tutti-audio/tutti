@@ -140,7 +140,7 @@ impl tutti_plugin_types::Health for Inert {
     fn crash_cause(&self) -> Option<PluginFailure> {
         None
     }
-    fn rate_refusal(&self) -> Option<(SampleRate, String)> {
+    fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
         None
     }
     fn block_counts(&self) -> tutti_plugin_types::BlockCounts {

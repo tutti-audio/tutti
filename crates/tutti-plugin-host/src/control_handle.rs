@@ -134,12 +134,7 @@ pub enum PluginStatus {
     ///
     /// Not [`Dead`](Self::Dead): the declared latency stands, so the graph's
     /// plan does not change, and nothing needs reloading.
-    RateRefused {
-        /// The rate the plugin refused.
-        rate: tutti_units::SampleRate,
-        /// The plugin's reason, formatted subprocess-side.
-        reason: String,
-    },
+    RateRefused(tutti_plugin_types::RateRefusal),
 }
 
 impl PluginStatus {
@@ -159,7 +154,7 @@ impl PluginStatus {
     pub fn cause(&self) -> Option<&PluginFailure> {
         match self {
             Self::Dead { cause } => Some(cause),
-            Self::Alive | Self::RateRefused { .. } => None,
+            Self::Alive | Self::RateRefused(_) => None,
         }
     }
 }
@@ -473,7 +468,7 @@ impl PluginHandle {
                 cause: PluginFailure::Unreported,
             },
             None => match self.health.rate_refusal() {
-                Some((rate, reason)) => PluginStatus::RateRefused { rate, reason },
+                Some(refusal) => PluginStatus::RateRefused(refusal),
                 None => PluginStatus::Alive,
             },
         }
@@ -1157,7 +1152,7 @@ mod tests {
             fn crash_cause(&self) -> Option<PluginFailure> {
                 None
             }
-            fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
+            fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
                 None
             }
             fn block_counts(&self) -> BlockCounts {
