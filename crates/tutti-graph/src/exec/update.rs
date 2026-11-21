@@ -190,8 +190,15 @@ impl<F: Float> Executor<F> {
                         .find(|i| i.idx == new.idx)
                         .and_then(|i| i.fade.as_mut());
                     if let Some(fade) = fade {
-                        fade.chase.extend_from_slice(&departed.chase_events[from..]);
-                        departed.held_refused.push((new.key, refused));
+                        // The editor sized the buffer for this predecessor
+                        // (`prepare_incoming`); a push never grows it, and
+                        // what does not fit is refused like the rest.
+                        let wrote = &departed.chase_events[from..];
+                        let kept = fade.chase.extend(wrote.iter().copied());
+                        let unfit = u32::try_from(wrote.len() - kept).unwrap_or(u32::MAX);
+                        departed
+                            .held_refused
+                            .push((new.key, refused.saturating_add(unfit)));
                     }
                     departed.chase_events.truncate(from);
                 } else {

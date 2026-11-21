@@ -146,8 +146,8 @@ impl From<Voice1> for Voice2 {
 /// The Default Translation: `voice` at MIDI 1.0 resolution (M2-115 section
 /// 3.4), or the [`NoMidi1Form`] that says why MIDI 1.0 has no single message
 /// for it: per-note controllers and bend, RPN and NRPN, per-note management.
-/// For a [`Voice2`] you already hold; [`Message::try_to_midi1`] does the same
-/// to a whole [`Message`] and [`Voice1::try_from_with`] runs the alternate
+/// For a [`Voice2`] you already hold; [`Message::to_midi1`] does the same
+/// to a whole [`Message`] and [`Voice1::from_voice2`] runs the alternate
 /// extreme values.
 ///
 /// A Note On whose velocity translates to 0 becomes velocity 1, because a MIDI
@@ -158,7 +158,7 @@ impl TryFrom<Voice2> for Voice1 {
     type Error = NoMidi1Form;
 
     fn try_from(voice: Voice2) -> Result<Self, NoMidi1Form> {
-        Self::try_from_with(ExtremeValues::Scaled, voice)
+        Self::from_voice2(voice, ExtremeValues::Scaled)
     }
 }
 
@@ -172,7 +172,7 @@ impl Voice1 {
     ///
     /// [`NoMidi1Form`] for a per-note message, a registered or assignable
     /// controller, or per-note management, as for `Voice1::try_from`.
-    pub fn try_from_with(extremes: ExtremeValues, voice: Voice2) -> Result<Self, NoMidi1Form> {
+    pub fn from_voice2(voice: Voice2, extremes: ExtremeValues) -> Result<Self, NoMidi1Form> {
         Ok(match voice {
             Voice2::NoteOn { note, velocity, .. } => Self::NoteOn {
                 note,
@@ -243,7 +243,7 @@ impl Message {
     /// let to = Address::new(MidiGroup::of(2), MidiChannel::of(5));
     /// let velocity = NoteVelocity::from(U7::of(100));
     /// let on2 = Message::Midi2(to, Voice2::note_on(NoteNumber::of(60), velocity));
-    /// let on1 = on2.try_to_midi1().unwrap();
+    /// let on1 = on2.to_midi1().unwrap();
     /// assert_eq!(on1, Message::midi1(to, Voice1::note_on(NoteNumber::of(60), U7::of(100))));
     /// ```
     ///
@@ -251,7 +251,7 @@ impl Message {
     ///
     /// [`NoMidi1Form`] for a per-note message, a registered or assignable
     /// controller, or per-note management.
-    pub fn try_to_midi1(self) -> Result<Self, NoMidi1Form> {
+    pub fn to_midi1(self) -> Result<Self, NoMidi1Form> {
         match self {
             Self::Midi2(address, voice) => Ok(Self::Midi1(address, Voice1::try_from(voice)?)),
             other => Ok(other),
