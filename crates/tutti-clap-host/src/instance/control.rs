@@ -248,13 +248,7 @@ impl ClapLoaded {
                     wake.raise();
                 }
             } else {
-                let flushed = self.flush_params(main, Vec::new());
-                if flushed.lost() > 0 {
-                    tracing::warn!(
-                        lost = flushed.lost(),
-                        "a CLAP flush output more than its room holds"
-                    );
-                }
+                let _ = self.flush_params(main, Vec::new());
             }
         }
         out.extend(tutti_plugin_types::taken(&self.host_state.requests));
@@ -532,10 +526,11 @@ impl Control for ClapLoaded {
     /// block's `ProcessOutput`.
     fn take_reported_edits(&mut self, _main: MainThreadMarker, _out: &mut Vec<ParamEdit>) {}
 
-    /// `0`: CLAP reports the edits a plugin's own editor makes in the block's
+    /// The events [`flush_params`](ClapLoaded::flush_params) output past its
+    /// room. CLAP reports the edits a plugin's own editor makes in the block's
     /// `ProcessOutput`, not through a queue that can drop them.
     fn dropped_reported_edits(&self) -> u64 {
-        0
+        self.flush_lost
     }
 
     /// What the plugin's `request_process` raises: CLAP's `SLEEP` status is

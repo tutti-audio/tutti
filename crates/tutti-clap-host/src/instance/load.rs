@@ -193,6 +193,7 @@ impl ClapLoaded {
             thread_pool: None,
             origin,
             work: work.clone(),
+            flush_lost: 0,
         };
         Ok(loaded)
     }

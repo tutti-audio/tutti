@@ -805,6 +805,25 @@ fn host_preserves_gesture_and_modulation_events_from_the_plugin() {
     );
 }
 
+/// An output past the flush's room is counted where an app reads the lost
+/// reports, beside the events the flush returned.
+/// Spec: clap.events.output.try_push
+#[test]
+fn a_flush_output_past_its_room_is_counted_as_dropped_reports() {
+    let probe = Probe::acquire();
+    let p = param(0);
+    let mut inst = probe.activate();
+    assert_eq!(inst.loaded().dropped_reported_edits(), 0);
+    // More gesture events than any flush has room for.
+    for _ in 0..1000 {
+        probe.queue_output(OUT_GESTURE_BEGIN, p.id, 0.0);
+    }
+
+    let flushed = inst.loaded_mut().flush_params(main_thread(), Vec::new());
+    assert!(flushed.lost() > 0, "the flush's room is finite");
+    assert_eq!(inst.loaded().dropped_reported_edits(), flushed.lost());
+}
+
 // ---------------------------------------------------------------------------
 // `clap_host_params` callbacks
 // ---------------------------------------------------------------------------
