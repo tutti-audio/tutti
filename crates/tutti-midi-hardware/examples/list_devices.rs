@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // macOS makes CoreMIDI's client on a thread of its own; the list is seeded once it
     // has. Every other backend is ready at once.
     tutti_fixtures::block_on(devices.start())?;
-    let events = devices.subscribe();
+    let mut events = devices.subscribe();
 
     println!("=== MIDI devices ===");
     let list = events.initial();
@@ -55,6 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\nwatching; plug or unplug a device (Ctrl-C to stop)");
     loop {
-        println!("  {:?}", tutti_fixtures::block_on(events.recv())?);
+        match tutti_fixtures::block_on(futures_lite::StreamExt::next(&mut events)) {
+            Some(event) => println!("  {event:?}"),
+            None => return Err(format!("the watch ended: {:?}", events.failure()).into()),
+        }
     }
 }

@@ -87,7 +87,7 @@ pub(crate) struct Closed {
 
 impl Closed {
     /// Puts the file in place. A file that could not be put in place is kept
-    /// where it was written, and the error ([`tutti_codec::Error::Commit`])
+    /// where it was written, and the error ([`tutti_codec::EncodeError::Commit`])
     /// names it.
     pub(crate) fn commit(self) -> tutti_codec::Result<Landed> {
         self.file.commit()?;

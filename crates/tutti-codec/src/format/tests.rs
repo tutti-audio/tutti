@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn extensions_name_formats_and_refuse_the_rest() {
     let name = |r: Result<Format>| match r {
-        Err(Error::UnknownExtension { extension }) => extension,
+        Err(EncodeError::UnknownExtension { extension }) => extension,
         other => panic!("expected UnknownExtension, got {other:?}"),
     };
     assert_eq!(name(Format::from_path("x.XYZ")), "xyz");

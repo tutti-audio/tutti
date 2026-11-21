@@ -270,7 +270,7 @@ impl<F: SynthFloat> VoiceBank<F> {
                 let c = SvfDesign::new(ty, Hz::new(1000.0), q, Db::new(0.0), sample_rate);
                 Filter::Svf {
                     ty,
-                    q,
+                    q: q.into(),
                     m: [c.m0, c.m1, c.m2].map(F::from_design),
                 }
             }

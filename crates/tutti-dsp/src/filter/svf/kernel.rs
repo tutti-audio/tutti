@@ -89,7 +89,7 @@ impl SvfDesign {
     ///
     /// The solve of a control value, which every caller reads at control rate with no one to
     /// refuse it to: the cutoff is held in `1 Hz` to just under Nyquist (`tan` diverges at it),
-    /// `q` at `0.01` or above, a gain within `+-`[`MAX_GAIN`](Self::MAX_GAIN), and a NaN
+    /// `q` at [`SvfControls::MIN_Q`](crate::SvfControls::MIN_Q) or above, a gain within `+-`[`MAX_GAIN`](Self::MAX_GAIN), and a NaN
     /// gain is 0 dB.
     ///
     /// The three tuning parameters are three different units, and taking them as
@@ -112,7 +112,7 @@ impl SvfDesign {
             sample_rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         );
         let g0 = prewarp(fc, sample_rate);
-        let q = q.max(0.01);
+        let q = q.max(crate::SvfControls::MIN_Q);
         // A gain past `MAX_GAIN` either way is that gain: `10^(dB / 40)`
         // underflows to 0 far out (`k = 1 / (Q * A)` is then infinite and the
         // set NaN), and overflows to infinity the other way. A NaN gain is

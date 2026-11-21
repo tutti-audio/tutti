@@ -262,7 +262,8 @@ fn a_failed_rename_leaves_the_target_and_keeps_the_file() {
         std::fs::write(target.join("keep"), b"x").unwrap();
         let err = render_to_file(graph(), &config(format), &FrozenClock, &target)
             .expect_err("a directory cannot be replaced by a file");
-        let tutti_export::RenderError::Encode(tutti_codec::Error::Commit(commit)) = &err else {
+        let tutti_export::RenderError::Encode(tutti_codec::EncodeError::Commit(commit)) = &err
+        else {
             panic!("{ext}: a failed rename is a commit error, got {err}");
         };
         assert!(target.join("keep").exists(), "{ext}");

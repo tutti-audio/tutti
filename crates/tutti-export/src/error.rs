@@ -30,7 +30,7 @@ pub enum RenderError {
     /// written for, a WAV file past its size limit, or a codec failure. The
     /// file is removed. (The sink failing is [`Io`](Self::Io).)
     #[error(transparent)]
-    Encode(tutti_codec::Error),
+    Encode(tutti_codec::EncodeError),
 
     /// A buffer that is not whole frames of its width.
     #[error(transparent)]
@@ -182,7 +182,7 @@ pub enum RenderError {
         /// The files that landed, in the order they were given.
         landed: Vec<std::path::PathBuf>,
         /// The rename's failure.
-        cause: tutti_codec::Error,
+        cause: tutti_codec::EncodeError,
     },
 
     /// A forked unit failed while the render ran: a hosted plugin's
@@ -271,10 +271,10 @@ pub enum ConfigError {
     Root(tutti_graph::RootError),
 }
 
-impl From<tutti_codec::Error> for RenderError {
-    fn from(error: tutti_codec::Error) -> Self {
+impl From<tutti_codec::EncodeError> for RenderError {
+    fn from(error: tutti_codec::EncodeError) -> Self {
         match error {
-            tutti_codec::Error::Io(e) => Self::Io(e),
+            tutti_codec::EncodeError::Io(e) => Self::Io(e),
             other => Self::Encode(other),
         }
     }

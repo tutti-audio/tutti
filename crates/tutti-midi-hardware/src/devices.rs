@@ -9,8 +9,8 @@
 //! A subscriber's queue is unbounded, and exists only while its
 //! [`DeviceEvents`] does: an app that wants no events subscribes to none.
 
+use futures_core::Stream;
 use std::collections::VecDeque;
-use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::task::{Context, Poll, Waker};
@@ -96,26 +96,17 @@ struct Queue {
 struct Inbox {
     events: VecDeque<DeviceEvent>,
     ended: Option<WatchFailure>,
-    /// The futures waiting on this inbox, each woken by the next push or end,
-    /// under the id its [`Recv`] holds.
-    wakers: Vec<(u64, Waker)>,
-    next_id: u64,
+    /// The waker of the stream waiting on this inbox, woken by the next push
+    /// or end.
+    waker: Option<Waker>,
 }
 
 impl Inbox {
-    fn take_wakers(&mut self) -> Vec<Waker> {
-        std::mem::take(&mut self.wakers)
-            .into_iter()
-            .map(|(_, waker)| waker)
-            .collect()
-    }
-
-    /// Removes the waker registered under `id`; the caller drops it once it
-    /// holds no lock, since a waker's drop can run its executor's code.
-    #[must_use = "drop it after releasing the inbox lock"]
-    fn forget(&mut self, id: u64) -> Option<Waker> {
-        let at = self.wakers.iter().position(|(held, _)| *held == id)?;
-        Some(self.wakers.swap_remove(at).1)
+    /// The waker to wake; the caller wakes it, or drops it, once it holds no
+    /// lock, since a waker's wake and drop can run its executor's code.
+    #[must_use = "wake or drop it after releasing the inbox lock"]
+    fn take_waker(&mut self) -> Option<Waker> {
+        self.waker.take()
     }
 }
 
@@ -124,21 +115,21 @@ impl Queue {
         self.inbox.lock_recover()
     }
 
-    /// Queues `event`; the wakers it returns are woken by the caller once it
+    /// Queues `event`; the waker it returns is woken by the caller once it
     /// holds no lock.
-    #[must_use = "wake them after releasing every lock"]
-    fn push(&self, event: DeviceEvent) -> Vec<Waker> {
+    #[must_use = "wake it after releasing every lock"]
+    fn push(&self, event: DeviceEvent) -> Option<Waker> {
         let mut inbox = self.inbox();
         inbox.events.push_back(event);
-        inbox.take_wakers()
+        inbox.take_waker()
     }
 
-    /// Ends the stream; the wakers are woken as for [`push`](Self::push).
-    #[must_use = "wake them after releasing every lock"]
-    fn end(&self, failure: WatchFailure) -> Vec<Waker> {
+    /// Ends the stream; the waker is woken as for [`push`](Self::push).
+    #[must_use = "wake it after releasing every lock"]
+    fn end(&self, failure: WatchFailure) -> Option<Waker> {
         let mut inbox = self.inbox();
         inbox.ended.get_or_insert(failure);
-        inbox.take_wakers()
+        inbox.take_waker()
     }
 }
 
@@ -158,7 +149,7 @@ pub struct ChangeSink {
 impl ChangeSink {
     /// Reports one change. A change that alters nothing is dropped; one that
     /// does reaches every subscriber and wakes a waiting
-    /// [`DeviceEvents::recv`].
+    /// [`DeviceEvents`] stream.
     pub fn send(&self, change: OsChange) {
         self.send_all([change]);
     }
@@ -169,6 +160,10 @@ impl ChangeSink {
     pub fn send_all(&self, changes: impl IntoIterator<Item = OsChange>) {
         let mut state = self.shared.state();
         state.begun = true;
+        // The list is frozen once the watch has ended: nothing queues after the end.
+        if state.failure.is_some() {
+            return;
+        }
         let mut wakers = Vec::new();
         for change in changes {
             if let Some(event) = state.table.apply(change) {
@@ -189,8 +184,8 @@ impl ChangeSink {
 impl ChangeSink {
     /// Records that the watch has ended without being dropped, with the reason.
     /// The list is frozen from here; every subscriber's
-    /// [`recv`](DeviceEvents::recv) says so once it has taken
-    /// what was queued, and so does the session's `Phase::Poll`.
+    /// [`DeviceEvents`] stream ends, and [`failure`](DeviceEvents::failure) says
+    /// why, once it has taken what was queued, and so does the session's `Phase::Poll`.
     pub fn fail(&self, reason: impl Into<WatchFailure>) {
         let reason = reason.into();
         tracing::warn!("MIDI device watch ended: {}", crate::error::chain(&reason));
@@ -239,16 +234,17 @@ impl core::fmt::Debug for ChangeSink {
 ///
 /// ```no_run
 /// # async fn watch() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
+/// use futures_lite::StreamExt;
 /// use tutti_midi_hardware::Devices;
 ///
 /// let executor = tutti_platform::Executor::new();
 /// let devices = Devices::open(&executor)?;
-/// let events = devices.subscribe();
+/// let mut events = devices.subscribe();
 /// for device in events.initial() {
 ///     println!("{}: {}", device.id, device.name);
 /// }
-/// // `recv()` is a future the watch wakes; it errs once the watch has ended.
-/// while let Ok(event) = events.recv().await {
+/// // The stream is woken by the watch; it ends once the watch has ended.
+/// while let Some(event) = events.next().await {
 ///     println!("{event:?}");
 /// }
 /// # Ok(()) }
@@ -511,6 +507,8 @@ pub struct DeviceEvents {
 
 impl Drop for DeviceEvents {
     fn drop(&mut self) {
+        let old = self.queue.inbox().take_waker();
+        drop(old);
         let mine = Arc::as_ptr(&self.queue);
         self._devices
             .state()
@@ -539,88 +537,46 @@ impl DeviceEvents {
         Pending { events: self }
     }
 
-    /// The oldest change, once there is one: a future the watch's thread wakes.
-    ///
-    /// It resolves to the change, or to the [`WatchFailure`] once the watch has
-    /// ended and every change it reported has been taken. Several futures
-    /// awaiting one `DeviceEvents` are all woken and the first to poll takes the
-    /// change; each change goes to one.
-    pub fn recv(&self) -> Recv<'_> {
-        Recv {
-            events: self,
-            id: None,
-        }
-    }
-
-    /// Why the watch ended on its own, if it did: the list is then the last it
-    /// saw and nothing more arrives. `None` while the watch runs.
+    /// Why the stream ended, if the watch ended on its own: the list is then the
+    /// last it saw and nothing more arrives. `None` while the watch runs.
     #[must_use]
     pub fn failure(&self) -> Option<WatchFailure> {
         self.queue.inbox().ended.clone()
     }
 }
 
-/// The wait for the next change of a [`DeviceEvents`]: [`DeviceEvents::recv`].
-/// Fed by the backend's device-watch thread, which wakes it when a change lands.
-#[must_use = "a recv does nothing until it is awaited"]
-pub struct Recv<'a> {
-    events: &'a DeviceEvents,
-    /// The id of the waker this registered in the inbox, until it is woken,
-    /// resolved or dropped.
-    id: Option<u64>,
-}
+/// The changes arrive as they happen: the watch's thread wakes the task that
+/// awaits the next one.
+///
+/// The stream ends, with `None` and then `None` again, once the watch has ended
+/// and every change it reported has been taken; [`DeviceEvents::failure`] says
+/// why it ended.
+impl Stream for DeviceEvents {
+    type Item = DeviceEvent;
 
-impl core::fmt::Debug for Recv<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Recv").finish_non_exhaustive()
-    }
-}
-
-impl Future for Recv<'_> {
-    type Output = std::result::Result<DeviceEvent, WatchFailure>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<DeviceEvent>> {
         let this = self.get_mut();
-        let mut inbox = this.events.queue.inbox();
-        if let Some(event) = inbox.events.pop_front() {
-            let old = this.id.take().and_then(|id| inbox.forget(id));
+        let mut inbox = this.queue.inbox();
+        let ready = match inbox.events.pop_front() {
+            Some(event) => Some(Some(event)),
+            None if inbox.ended.is_some() => Some(None),
+            None => None,
+        };
+        if let Some(item) = ready {
+            let old = inbox.take_waker();
             drop(inbox);
             drop(old);
-            return Poll::Ready(Ok(event));
+            return Poll::Ready(item);
         }
-        if let Some(failure) = inbox.ended.clone() {
-            let old = this.id.take().and_then(|id| inbox.forget(id));
-            drop(inbox);
-            drop(old);
-            return Poll::Ready(Err(failure));
-        }
-        // A re-poll replaces this future's own waker; a waker already taken by a
-        // wake is registered again under the same id.
-        let id = *this.id.get_or_insert_with(|| {
-            inbox.next_id += 1;
-            inbox.next_id
-        });
-        // The replaced waker is dropped once the inbox lock is released.
-        let old = match inbox.wakers.iter_mut().find(|(held, _)| *held == id) {
-            Some((_, waker)) if waker.will_wake(cx.waker()) => None,
-            Some((_, waker)) => Some(std::mem::replace(waker, cx.waker().clone())),
-            None => {
-                inbox.wakers.push((id, cx.waker().clone()));
-                None
-            }
+        // A re-poll replaces the waker only when it would not wake the same task;
+        // the replaced one is dropped once the inbox lock is released.
+        let old = match &inbox.waker {
+            Some(waker) if waker.will_wake(cx.waker()) => None,
+            _ => inbox.waker.replace(cx.waker().clone()),
         };
         drop(inbox);
         drop(old);
         Poll::Pending
-    }
-}
-
-impl Drop for Recv<'_> {
-    fn drop(&mut self) {
-        if let Some(id) = self.id {
-            let old = self.events.queue.inbox().forget(id);
-            drop(old);
-        }
     }
 }
 
