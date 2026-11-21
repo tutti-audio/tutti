@@ -15,7 +15,7 @@
 //! wave that is not exact).
 //!
 //! The end gains are equal and their product is the round trip's gain `rho = exp(-ln(1000) P
-//! / (fs T60))` (held under [`Feedback::MAX_STABLE`]): the signal falls 60 dB in the decay
+//! / (fs T60))`, below 1 for any finite decay: the signal falls 60 dB in the decay
 //! time, the average's loss apart. A frequency is held between the string's lowest and `fs / 8`.
 
 use tutti_buffers::{Float, Planes, PlanesMut};

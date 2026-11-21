@@ -10,8 +10,14 @@ const F0: f64 = 500.0;
 const PERIOD: f64 = 98.0;
 const RAIL: usize = 48;
 const T60: f64 = 0.5;
+/// A decay whose round-trip gain is above the comb's 0.99 bound: `exp(-ln(1000) 98 / (49000 5))`.
+const LONG_T60: f64 = 5.0;
 
 fn string(excitation: f64, pickup: f64) -> WaveguideString<f64> {
+    string_at(excitation, pickup, T60)
+}
+
+fn string_at(excitation: f64, pickup: f64, t60: f64) -> WaveguideString<f64> {
     let mut s = WaveguideString::new(
         WaveguidePositions {
             excitation: Normalized::of(excitation),
@@ -22,7 +28,7 @@ fn string(excitation: f64, pickup: f64) -> WaveguideString<f64> {
     );
     s.retarget(&WaveguideControls {
         frequency: Hz::new(F0),
-        decay: Seconds::new(T60),
+        decay: Seconds::new(t60),
     });
     s
 }
@@ -35,7 +41,11 @@ fn impulse(s: &mut WaveguideString<f64>, len: usize) -> Vec<f64> {
 
 /// The round trip's gain: `exp(-ln(1000) P / (fs T60))`.
 fn rho() -> f64 {
-    (-LN_1000 * PERIOD / (RATE * T60)).exp()
+    rho_at(T60)
+}
+
+fn rho_at(t60: f64) -> f64 {
+    (-LN_1000 * PERIOD / (RATE * t60)).exp()
 }
 
 /// The DTFT of `h` at `w`.
@@ -82,13 +92,23 @@ fn transfer(w: f64, a_q: usize, a_p: usize) -> Complex64 {
 /// trip, so the pickup's does.
 #[test]
 fn the_pickup_repeats_at_the_round_trip_with_the_decay_and_the_ends_taps() {
-    let mut s = string(0.2, 0.33);
+    for t60 in [T60, LONG_T60] {
+        check_round_trip(t60);
+    }
+}
+
+fn check_round_trip(t60: f64) {
+    let mut s = string_at(0.2, 0.33, t60);
     assert_eq!(s.tuning().0.get(), RAIL);
+    assert!(
+        t60 < 1.0 || rho_at(t60) > 0.99,
+        "the long decay is above the comb's bound"
+    );
     let h = impulse(&mut s, 3000);
     let m = 2 * RAIL;
     let worst = (m + 3..h.len())
         .map(|n| {
-            let want = rho() * (h[n - m - 1] + 2.0 * h[n - m - 2] + h[n - m - 3]) / 4.0;
+            let want = rho_at(t60) * (h[n - m - 1] + 2.0 * h[n - m - 2] + h[n - m - 3]) / 4.0;
             (h[n] - want).abs()
         })
         .fold(0.0, f64::max);

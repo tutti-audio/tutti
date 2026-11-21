@@ -128,7 +128,20 @@ fn the_fundamental_is_the_rate_over_the_loop_of_n_plus_a_half_plus_the_all_pass_
 /// `|ln(rho cos(w0/2))| * 0.02` (the group delay of the loop is within 2% of its period).
 #[test]
 fn the_fundamental_falls_per_period_by_the_decay_times_the_averages_gain() {
-    let (f0, rate, t60) = (1000.0, 48_000.0, 0.5);
+    check_fall(0.5);
+}
+
+/// The decay is not capped: a 5 s decay at 1 kHz is `rho = exp(-ln(1000) 0.001 / 5) = 0.99862`
+/// per period, above the comb's 0.99 bound, and the fundamental falls by the same closed form as
+/// at 0.5 s. A cap at 0.99 reads the string's loop gain as 0.99 and the fall as 1.2% lower.
+#[test]
+fn a_five_second_decay_at_a_kilohertz_falls_per_period_by_the_closed_form() {
+    assert!(rho(48.0, 48_000.0, 5.0) > 0.99);
+    check_fall(5.0);
+}
+
+fn check_fall(t60: f64) {
+    let (f0, rate) = (1000.0, 48_000.0);
     let mut s = string(f0, t60, rate);
     let h = impulse(&mut s, 48 * 60);
     let (n, _) = s.tuning();
@@ -170,7 +183,13 @@ fn the_fundamental_falls_per_period_by_the_decay_times_the_averages_gain() {
 /// nothing between. `rho = exp(-ln(1000) P / (fs T60))` with `P = fs / f0`.
 #[test]
 fn the_first_echo_is_the_decay_times_the_averages_taps_through_the_all_pass() {
-    let (f0, rate, t60) = (1000.0, 48_000.0, 0.5);
+    for t60 in [0.5, 5.0] {
+        check_echo(t60);
+    }
+}
+
+fn check_echo(t60: f64) {
+    let (f0, rate) = (1000.0, 48_000.0);
     let mut s = string(f0, t60, rate);
     let h = impulse(&mut s, 200);
     let (n, _) = s.tuning();

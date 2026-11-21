@@ -8,8 +8,8 @@
 //! The loop is `P = N + 1/2 + d` frames long, `d` the phase delay of `A` at the fundamental
 //! (see the module of the shared tuning), so the string sounds `fs / P` exactly. Per period the
 //! fundamental falls by the decay factor `rho` and by the average's `cos(w0 / 2)`; `rho` is the
-//! gain that falls 60 dB in the decay time, `rho = exp(-ln(1000) P / (fs T60))`, held under
-//! [`Feedback::MAX_STABLE`](tutti_units::Feedback::MAX_STABLE). The loss filter shortens the
+//! gain that falls 60 dB in the decay time, `rho = exp(-ln(1000) P / (fs T60))`, below 1 for any
+//! finite decay. The loss filter shortens the
 //! decay of the upper partials more than the fundamental's, so the tone darkens as it rings.
 //!
 //! A frequency is held between the string's lowest (which sizes the ring) and `fs / 6`.

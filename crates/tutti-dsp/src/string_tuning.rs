@@ -63,12 +63,18 @@ pub(crate) fn tune(period: SampleSpan, fixed: SampleSpan, step: usize) -> Tuned 
 }
 
 /// The gain a loop of `trip` seconds holds so that the signal falls 60 dB in `t60`:
-/// `exp(-ln(1000) trip / t60)`, held under [`Feedback::MAX_STABLE`]. A `t60` that is not
-/// above zero or is NaN is a gain of 0.
+/// `exp(-ln(1000) trip / t60)`, below 1 for every finite `t60` above zero. The loop's average
+/// and all-pass have `|H| <= 1`, so any gain below 1 is stable: [`Feedback::MAX_STABLE`], a
+/// comb's feedback bound, does not apply, and a string rings as long as it is asked to. The gain
+/// is held at the largest `f64` below 1 (an infinite `t60`, or a `t60` so long that the
+/// exponential rounds to 1). A `t60` that is not above zero or is NaN is a gain of 0.
 pub(crate) fn per_trip_decay(trip: Seconds, t60: Seconds) -> Feedback {
     if t60.get() > 0.0 && trip.get() >= 0.0 {
-        Feedback::new_clamped(libm::exp(-LN_1000 * (trip / t60)))
+        Feedback::new(libm::exp(-LN_1000 * (trip / t60)).min(LARGEST_BELOW_ONE))
     } else {
         Feedback::NONE
     }
 }
+
+/// The largest `f64` below 1, `1 - 2^-53`.
+const LARGEST_BELOW_ONE: f64 = 1.0 - f64::EPSILON / 2.0;

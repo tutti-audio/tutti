@@ -61,8 +61,8 @@ impl KarplusStrongConfig {
 /// are live cells that land whole on the stream grid (16 frames). A pitch above a sixth of the
 /// rate or below the lowest is held there.
 ///
-/// No latency. Its tail is the loop's ring-out to [`TAIL_FLOOR`](tutti_dsp::TAIL_FLOOR) at the
-/// controls in force. A [`KernelNode`]. Made from a [`KarplusStrongConfig`]
+/// No latency. Its tail is unbounded as a ceiling and the loop's ring-out to
+/// [`TAIL_FLOOR`](tutti_dsp::TAIL_FLOOR) at the controls in force. A [`KernelNode`]. Made from a [`KarplusStrongConfig`]
 /// (`KarplusStrongNode::from`).
 ///
 /// # Panics
@@ -165,14 +165,10 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
         }
     }
 
-    /// The ring-out of the longest decay the loop holds, at the lowest pitch.
+    /// A decay is any time, so the ceiling is unbounded; [`tail_of`](Kernel::tail_of) narrows it
+    /// to the ring-out at the controls in force.
     fn tail(&self) -> Tail {
-        self.bank.as_ref().map_or(Tail::Unknown, |bank| {
-            bank.tail(&KarplusStrongControls {
-                frequency: self.lowest,
-                decay: Seconds::new(f64::INFINITY),
-            })
-        })
+        Tail::Unbounded
     }
 
     fn tail_of(&mut self, controls: &KarplusStrongControls) -> Tail {
@@ -221,7 +217,7 @@ mod tests {
             &[UnitParam::Frequency, UnitParam::Decay][..]
         );
         assert_eq!((n.param_base(0), n.param_base(1)), (Some(440.0), Some(1.5)));
-        assert!(matches!(shape.tail, Tail::Finite(_)));
+        assert_eq!(shape.tail, Tail::Unbounded);
     }
 
     /// The declared tail covers the ring-out.
