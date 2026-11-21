@@ -51,8 +51,8 @@
 //! which takes voices while it plays, cannot. The same holds for any voice started
 //! with no timeline position to read ahead of. A stretching voice's seat primes the
 //! vocoder over several blocks, silent meanwhile: a seek, a loop wrap, a stop and a
-//! start, and the first block of a window not placed ahead are silent for about 590
-//! frames (12 ms at 48 kHz) and then sound on the timeline, and a clip placed ahead primes before its start and is on
+//! start, and the first block of a window not placed ahead are silent for 4 097
+//! frames (85 ms at 48 kHz) and then sound on the timeline, and a clip placed ahead primes before its start and is on
 //! time. Nothing ties the stretch to the tempo.
 //! All three are `tutti-units` types.
 //!

@@ -73,8 +73,8 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
 /// plays the sine at its own level.
 ///
 /// The seat owes `prime` = latency + window = 2049 + 2048 output frames, each frame
-/// that goes by adds one and the priming runs 8 a frame, so the voice sounds `ceil(prime
-/// / 7)` frames after the seek: the frames before are exactly zero. From there the
+/// that goes by adds one and the priming runs 2 a frame, so the voice sounds `prime`
+/// frames after the seek: the frames before are exactly zero. From there the
 /// vocoder is full (the priming ran a window ahead), so the next 2 048 frames have the
 /// sine's RMS, `amplitude / sqrt(2)`, to within 1 dB (two overlapped frames' phase
 /// mismatch of `acos(10^(-1/20)) = 0.48` rad) with no ramp: a voice left to fill from
@@ -84,7 +84,7 @@ fn a_stretched_voice_sounds_the_sine_after_exactly_its_priming() {
     const PRIME: usize = 2049 + 2048;
     let seek_at = 375 * BLOCK; // 24 000
     let out = render(32_000, seek_at);
-    let silent = PRIME.div_ceil(7);
+    let silent = PRIME;
     assert!(
         out[seek_at..seek_at + silent].iter().all(|&x| x == 0.0),
         "silent for the {silent} frames of priming"

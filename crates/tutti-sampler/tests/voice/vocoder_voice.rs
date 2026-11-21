@@ -215,7 +215,8 @@ fn a_non_integer_ratio_plays_n_frames_over_n_times_the_ratio() {
     };
     let source = wave(60_000, &[&tone_burst, &tone_burst]);
     for ratio in [1.5, 0.8] {
-        let out = render(&source, ratio, 0.0, 40_000, |_, _, _| {});
+        // Placed at beat 1, so the voice primes before its window opens and loses none.
+        let out = render_from(&source, 1.0, ratio, 0.0, 70_000, |_, _, _| {});
         let half = 0.5 / 2.0f64.sqrt() / 2.0;
         let loud: Vec<usize> = out[0]
             .as_chunks::<RES>()
@@ -346,7 +347,8 @@ fn a_stretching_memory_voice_declares_no_latency() {
     );
 }
 
-/// An impulse scheduled at timeline frame 4000 comes out at frame 4000 through a pool,
+/// An impulse 4000 frames into a clip placed at beat 1 (frame 24 000) comes out at frame
+/// 28 000 through a pool,
 /// within the transforms' rounding: a vocoder at unity (a voice whose stretch was turned
 /// back to 1.0, which keeps it) delays its input by exactly `latency()`, and the voice
 /// reads that far ahead. The bound is the kernel's: four overlapped frames, each in error
@@ -356,7 +358,8 @@ fn an_onset_lands_at_its_timeline_frame_through_a_pool() {
     const AT: usize = 4000;
     let impulse = |i: usize| if i == AT { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&impulse, &impulse]);
-    let out = render(&source, 1.5, 0.0, 12_000, |index, handle, _| {
+    let due = 24_000 + AT;
+    let out = render_from(&source, 1.0, 1.5, 0.0, 32_000, |index, handle, _| {
         if index == 0 {
             handle
                 .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
@@ -365,10 +368,10 @@ fn an_onset_lands_at_its_timeline_frame_through_a_pool() {
     });
     let bound = 4.0 * f32_transform_error();
     for (n, &y) in out[0].iter().enumerate() {
-        let want = if n == AT { 1.0 } else { 0.0 };
+        let want = if n == due { 1.0 } else { 0.0 };
         assert!(
             (f64::from(y) - want).abs() < bound,
-            "frame {n}: {y}, the impulse is due at {AT}"
+            "frame {n}: {y}, the impulse is due at {due}"
         );
     }
 }
@@ -488,7 +491,7 @@ fn prime() -> usize {
 
 /// A seek reseats the voice, which primes over blocks and is silent until it is done,
 /// then sounds the timeline: the seat owes `prime` frames, each frame that goes by adds
-/// one and the priming runs 8 a frame, so the voice sounds exactly `ceil(prime / 7)`
+/// one and the priming runs 2 a frame, so the voice sounds exactly `prime` (4 097)
 /// frames after the seek. The block of the seek, and everything up to then, is exactly
 /// zero; after it the voice plays the source at its place on the timeline (a vocoder at
 /// unity, which a voice turned back to 1.0 keeps, reproduces it to the transforms'
@@ -508,7 +511,7 @@ fn a_reseat_sounds_after_the_priming_closed_form() {
             transport.seek(Beat::new(5.0));
         }
     });
-    let silent = prime().div_ceil(7);
+    let silent = prime();
     assert!(
         out[0][seek..seek + silent].iter().all(|&x| x == 0.0),
         "silent for the {silent} frames the priming takes"

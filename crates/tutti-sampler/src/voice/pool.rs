@@ -261,6 +261,11 @@ pub struct PoolTooWide {
 /// time. A stretched disk voice cannot read before its seat, so it sounds that
 /// latency late and the pool does not compensate it, nor any voice started with
 /// no timeline position to read ahead of.
+///
+/// A stretching voice's seat (its first block, a seek, a loop wrap, a stop and a
+/// start) primes the vocoder over blocks and is silent for 4 097 frames (85 ms at
+/// 48 kHz) before it sounds on the timeline; a clip placed ahead primes before its
+/// start and is not silent.
 pub struct VoicePool<F: SamplerFloat> {
     /// The resident slots, one per voice, summed in order. Reserved to
     /// `MAX_RESIDENT_VOICES` at construction, and the audio-thread

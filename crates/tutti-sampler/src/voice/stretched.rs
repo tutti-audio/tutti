@@ -33,20 +33,22 @@
 //! voices that reseat together (a seek, a loop wrap) would do it in one block each.
 //! A seat does at most [`PRIME_SPEED`] frames of it per frame of the block (the
 //! rest is carried in `Cursor::owed`), and the voice is silent until it is done.
-//! The speed is 8: a 64-frame block does 512 frames of priming, one hop, the
-//! vocoder's own quantum, which is one analysis frame of work (an FFT pair per
-//! channel) in a block of 64 frames, and a block of `L` frames never more than
-//! `8 L`, in proportion to what it renders anyway. Each frame that goes by adds a
-//! frame to what is owed (the voice must discard up to the frame it sounds at),
-//! and the speed takes eight off, so the voice sounds `ceil(owed / 7)` frames after
-//! it was seated: `ceil(prime / 7)`, 586 frames at the vocoder's `prime` of 4 097,
-//! from its first frame. The speed is per frame, not per block, so when the voice
-//! sounds does not depend on how the output is split into blocks. When it does, it is
-//! on the timeline: it skips the frames it was too late for. A voice seated at the
-//! start of its window, and a seek or a loop wrap, sound that much later; a voice
-//! whose window opens ahead (a clip placed on the timeline) starts priming `prime / 8`
-//! frames, and a block, before its start, from a transport that rolls, so its first
-//! frame lands on its frame (`preroll`).
+//! The speed is 2: a block of `L` frames does at most `2 L` frames of priming. A
+//! vocoder analysis frame (an FFT pair per channel, a phase solution and the
+//! overlap-add) costs about 50 us for a stereo voice, and a hop of output is one, so
+//! a block of 256 frames does one frame of priming per voice and 64 voices reseating
+//! together take 4.3 ms, under the 5.33 ms a 256-frame block lasts at 48 kHz; one voice
+//! takes 63 us in a 64-frame block (the bench `stretch/reseat_*`). Speeds 3, 4 and 8
+//! take 6.5, 6.5 and 9.5 ms for the 64 voices. Each frame that goes by adds a frame to
+//! what is owed (the voice must discard up to the frame it sounds at), and the
+//! speed takes two off, so the voice sounds `ceil(owed / 1)` frames after it was
+//! seated: `prime`, 4 097 frames (85 ms at 48 kHz) from its first frame. The speed is
+//! per frame, not per block, so when the voice sounds does not depend on how the output
+//! is split into blocks. When it does, it is on the timeline: it skips the frames it
+//! was too late for. A voice seated at the start of its window, and a seek or a loop
+//! wrap, sound that much later; a voice whose window opens ahead (a clip placed on
+//! the timeline) starts priming `prime / 2` frames, and a block, before its start,
+//! from a transport that rolls, so its first frame lands on its frame (`preroll`).
 //!
 //! The cursor is an origin and the frames taken since: a position is the origin
 //! plus the step times all of them, one product, so the frames a source is read at
@@ -79,7 +81,7 @@ const HOP: Samples = Samples::new(512);
 
 /// The frames of priming a seat does per frame of the block it is in (see the module
 /// docs).
-pub(crate) const PRIME_SPEED: usize = 8;
+pub(crate) const PRIME_SPEED: usize = 2;
 
 /// The length of the scratch the discarded output of priming goes to: one hop, what a
 /// vocoder call writes at most.

@@ -76,15 +76,13 @@ fn stretch(c: &mut Criterion) {
     group.finish();
 }
 
-/// The worst block while 64 stretching voices reseat together, in 64-frame blocks.
+/// The worst block while `voices` stretching voices (all seated alike, so their analysis
+/// frames fall on the same blocks) reseat together, in blocks of `block` frames.
 ///
-/// Each iteration seeks the transport (every voice unseats and primes, 8 frames a
-/// frame, for 586 frames: about 10 blocks) and runs 16 blocks, timing each; the
-/// figure is the slowest of them. A bench, not a test: it is the cost a block bears,
-/// not a limit.
-fn reseat(c: &mut Criterion) {
-    const VOICES: u128 = 64;
-    const BLOCK: usize = 64;
+/// Each iteration seeks the transport (every voice unseats and primes) and runs 24
+/// blocks, timing each; the figure is the slowest of them. A bench, not a test: it is
+/// the cost a block bears, not a limit.
+fn reseat_case(c: &mut Criterion, name: &str, voices: u128, block: usize) {
     let mut wave = Wave::zero(2, RATE, Seconds::new(4.0));
     for i in 0..wave.len().get() {
         let s = ((TAU * 440.0 * i as f64 / RATE.get()).sin() * 0.5) as f32;
@@ -93,8 +91,8 @@ fn reseat(c: &mut Criterion) {
     }
     let wave = Arc::new(wave);
     let (pool, handle) = VoicePool::<f32>::new().with_handle();
-    let mut direct = Direct::new(pool, RATE, BLOCK);
-    for id in 0..VOICES {
+    let mut direct = Direct::new(pool, RATE, block);
+    for id in 0..voices {
         let source = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
         let play = Playback {
@@ -108,21 +106,21 @@ fn reseat(c: &mut Criterion) {
     }
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let seeker = Arc::clone(&transport);
-    let mut block = move || {
-        let env = transport.env(BLOCK, RATE);
+    let mut run = move || {
+        let env = transport.env(block, RATE);
         direct.block_in(&env);
-        transport.advance(BLOCK as i64, RATE);
+        transport.advance(block as i64, RATE);
     };
     let mut group = c.benchmark_group("stretch");
-    group.bench_function("reseat_64_voices/worst_block", |b| {
+    group.bench_function(name, |b| {
         b.iter_custom(|iterations| {
             let mut total = std::time::Duration::ZERO;
             for _ in 0..iterations {
                 seeker.seek(Beat::new(0.0));
                 let mut worst = std::time::Duration::ZERO;
-                for _ in 0..16 {
+                for _ in 0..24 {
                     let start = tutti_platform::Instant::now();
-                    block();
+                    run();
                     worst = worst.max(start.elapsed());
                 }
                 total += worst;
@@ -133,5 +131,44 @@ fn reseat(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, stretch, reseat);
+/// One stereo voice reseating in 64-frame blocks (the bar: under 1.33 ms), and 64
+/// voices reseating together in 256-frame blocks (under 5.33 ms).
+fn reseat(c: &mut Criterion) {
+    reseat_case(c, "reseat_1_voice/64", 1, 64);
+    reseat_case(c, "reseat_64_voices/256", 64, 256);
+    reseat_case(c, "reseat_64_voices/64", 64, 64);
+}
+
+/// What `PhaseVocoder::reset` costs for 64 stereo vocoders on the voice's geometry: the
+/// share of a reseating block that is only the reset.
+fn reset(c: &mut Criterion) {
+    use tutti_buffers::ChannelLayout;
+    use tutti_dsp::{ColaGeometry, HopSize, PhaseVocoder, StftGeometry, WindowLength};
+    use tutti_units::Samples;
+    let geometry = StftGeometry::new(
+        RATE,
+        WindowLength::new(Samples::new(2048)).unwrap(),
+        HopSize::new(Samples::new(512)).unwrap(),
+    );
+    let mut vocoders: Vec<PhaseVocoder<f32>> = (0..64)
+        .map(|_| {
+            PhaseVocoder::new(
+                ChannelLayout::STEREO,
+                ColaGeometry::try_from(geometry).unwrap(),
+            )
+        })
+        .collect();
+    let mut group = c.benchmark_group("stretch");
+    group.bench_function("reset_64_vocoders", |b| {
+        b.iter(|| {
+            for v in &mut vocoders {
+                v.reset();
+            }
+            black_box(&vocoders);
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(benches, stretch, reseat, reset);
 criterion_main!(benches);
