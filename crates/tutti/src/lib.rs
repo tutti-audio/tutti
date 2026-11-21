@@ -291,7 +291,10 @@ pub mod nodes {
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
-    pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
+    pub use tutti_dsp::{
+        Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
+        SpringLengthError,
+    };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
@@ -340,10 +343,11 @@ pub mod nodes {
         NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
         PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
         SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
-        Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode,
-        SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
-        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
-        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        SpringControls, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
+        SpringStagesError, Stages, StagesError, Stagger, StaggerError, SvfControls,
+        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
+        SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
+        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -357,8 +361,8 @@ pub mod nodes {
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
         FreeverbSet, GateSet, GraphicEqSet, HasControl, LadderSet, LevellerSet, LimiterSet,
-        ModDelaySet, PhaserSet, PlateKernel, PlateSet, ShimmerSet, SvfSet, TiltFilterSet,
-        TransientShaperKernel, TransientShaperSet,
+        ModDelaySet, PhaserSet, PlateKernel, PlateSet, ShimmerSet, SpringReverbKernel,
+        SpringReverbSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
     };
     pub use tutti_nodes::{
         CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
