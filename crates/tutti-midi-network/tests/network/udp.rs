@@ -1,5 +1,6 @@
 //! Links over real UDP sockets on the loopback interface.
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use futures_lite::StreamExt;
@@ -58,7 +59,7 @@ fn client(
         Instant::now(),
     );
     let link = NetworkLink::spawn(executor, socket, client).unwrap();
-    link.with(|c, now| c.connect(now)).unwrap();
+    link.with(|c, now| c.connect(now));
     link
 }
 
@@ -85,17 +86,14 @@ fn a_session_runs_over_two_links_from_invitation_to_bye() {
     });
     assert_eq!(peer, client_addr);
     assert_eq!(remote, identity("Laptop", "CLIENT-1"));
-    host.with(|h, now| h.accept(now, peer)).unwrap();
+    host.with(|h, now| h.accept(now, peer));
     assert_eq!(established(&host), identity("Laptop", "CLIENT-1"));
     assert_eq!(established(&client), identity("Studio", "HOST-1"));
-    assert_eq!(
-        client.with(|c, _| c.state()).unwrap(),
-        SessionState::Established
-    );
+    assert_eq!(client.with(|c, _| c.state()), SessionState::Established);
 
     // Client to host and back.
     let notes = [note_on(60), note_on(64), note_on(67)];
-    client.with(|c, now| c.send(now, &notes)).unwrap().unwrap();
+    client.with(|c, now| c.send(now, &notes)).unwrap();
     let heard: Vec<_> = (0..notes.len())
         .map(|_| {
             next_event(&host, |e| match e {
@@ -106,7 +104,6 @@ fn a_session_runs_over_two_links_from_invitation_to_bye() {
         .collect();
     assert_eq!(heard, notes, "UMPs arrive once and in order");
     host.with(|h, now| h.send(now, client_addr, &[note_on(72)]))
-        .unwrap()
         .unwrap();
     let back = next_event(&client, |e| match e {
         Event::Ump { packet, .. } => Some(*packet),
@@ -114,9 +111,7 @@ fn a_session_runs_over_two_links_from_invitation_to_bye() {
     });
     assert_eq!(back, note_on(72));
 
-    client
-        .with(|c, now| c.close(now, ByeReason::UserTerminated))
-        .unwrap();
+    client.with(|c, now| c.close(now, ByeReason::UserTerminated));
     let (ended_by, reason) = next_event(&host, |e| match e {
         Event::Closed {
             ended_by, reason, ..
@@ -134,7 +129,7 @@ fn a_session_runs_over_two_links_from_invitation_to_bye() {
         _ => None,
     });
     assert_eq!(ended_by, EndedBy::Local);
-    assert_eq!(client.with(|c, _| c.state()).unwrap(), SessionState::Idle);
+    assert_eq!(client.with(|c, _| c.state()), SessionState::Idle);
 }
 
 /// A device that serves a Client and is a Client of another Host at once,
@@ -159,11 +154,11 @@ fn a_device_serves_a_client_and_is_a_client_of_another_host_on_two_ports() {
     established(&device_client);
     established(&visitor);
     assert_eq!(
-        device_client.with(|c, _| c.state()).unwrap(),
+        device_client.with(|c, _| c.state()),
         SessionState::Established
     );
-    assert_eq!(device_host.with(|h, _| h.session_count()).unwrap(), 1);
-    assert_eq!(other_host.with(|h, _| h.session_count()).unwrap(), 1);
+    assert_eq!(device_host.with(|h, _| h.session_count()), 1);
+    assert_eq!(other_host.with(|h, _| h.session_count()), 1);
 }
 
 /// A device with two UMP Endpoints runs a Host for each, each with its own
@@ -188,10 +183,10 @@ fn a_device_with_two_endpoints_runs_a_host_for_each_on_its_own_port_and_name() {
         established(c);
     }
     // Each Client learned the name of the Endpoint behind the port it chose.
-    assert_eq!(clients[0].with(|c, _| c.remote()).unwrap(), Some(keys));
-    assert_eq!(clients[1].with(|c, _| c.remote()).unwrap(), Some(synth));
-    assert_eq!(hosts[0].with(|h, _| h.session_count()).unwrap(), 1);
-    assert_eq!(hosts[1].with(|h, _| h.session_count()).unwrap(), 1);
+    assert_eq!(clients[0].with(|c, _| c.remote()), Some(keys));
+    assert_eq!(clients[1].with(|c, _| c.remote()), Some(synth));
+    assert_eq!(hosts[0].with(|h, _| h.session_count()), 1);
+    assert_eq!(hosts[1].with(|h, _| h.session_count()), 1);
 }
 
 /// A [`NetworkEndpoint`] whose `on_message` panics: its socket task ends.
@@ -251,10 +246,7 @@ fn pending_takes_only_what_is_queued_and_does_not_wait() {
     // of the UMP that follows.
     established(&host);
     established(&client);
-    client
-        .with(|c, now| c.send(now, &[note_on(60)]))
-        .unwrap()
-        .unwrap();
+    client.with(|c, now| c.send(now, &[note_on(60)])).unwrap();
     let mut got = Vec::new();
     let hang_guard = Instant::now() + HANG_GUARD;
     while got.is_empty() {
@@ -300,8 +292,7 @@ fn events_past_the_queue_bound_are_counted_lost_exactly() {
     let executor = Executor::new();
     let link = NetworkLink::bind(&executor, "127.0.0.1:0", Flood::default()).unwrap();
     let excess = 7;
-    link.with(|flood, _| flood.owed = MAX_QUEUED_EVENTS + excess)
-        .unwrap();
+    link.with(|flood, _| flood.owed = MAX_QUEUED_EVENTS + excess);
     assert_eq!(link.events_lost(), excess as u64);
     assert_eq!(link.pending().count(), MAX_QUEUED_EVENTS);
 }
@@ -328,4 +319,87 @@ fn dropping_a_client_link_ends_its_session_at_the_host() {
         _ => None,
     });
     assert_eq!((ended_by, reason), (EndedBy::Remote, ByeReason::PowerDown));
+}
+
+/// Dropping a Host's link sends a Bye to each Client it serves.
+/// Spec: m2-124/6#1
+#[test]
+fn dropping_a_host_link_ends_every_session_at_its_clients() {
+    let executor = Executor::new();
+    let host = host(&executor, HostConfig::new(identity("Studio", "HOST-1")));
+    let clients = ["CLIENT-1", "CLIENT-2"].map(|id| {
+        client(
+            &executor,
+            identity("Laptop", id),
+            host.local_addr().unwrap(),
+        )
+    });
+    for c in &clients {
+        established(c);
+    }
+    drop(host);
+    for c in &clients {
+        let closed = next_event(c, |e| match e {
+            Event::Closed {
+                ended_by, reason, ..
+            } => Some((*ended_by, *reason)),
+            _ => None,
+        });
+        assert_eq!(closed, (EndedBy::Remote, ByeReason::PowerDown));
+    }
+}
+
+/// A [`NetworkEndpoint`] that reports each datagram it is given as a `Reset`
+/// from the sender, and wants the clock at once when told to.
+#[derive(Debug, Default)]
+struct Echo {
+    due: Option<Instant>,
+    heard: VecDeque<Event>,
+}
+
+impl NetworkEndpoint for Echo {
+    fn on_message(&mut self, from: std::net::SocketAddr, _: &[u8], _: Instant) {
+        self.heard.push_back(Event::Reset { peer: from });
+    }
+    fn on_timeout(&mut self, _: Instant) {
+        self.due = None;
+    }
+    fn poll_transmit(&mut self) -> Option<tutti_midi_network::Transmit> {
+        None
+    }
+    fn poll_event(&mut self) -> Option<Event> {
+        self.heard.pop_front()
+    }
+    fn events_lost(&self) -> u64 {
+        0
+    }
+    fn deadline(&self) -> Option<Instant> {
+        self.due
+    }
+    fn close_all(&mut self, _: Instant) {}
+}
+
+/// A zero-length datagram from another port reaches the endpoint; the link's
+/// own poke, which a deadline set through `with` sends, does not.
+#[test]
+fn a_zero_length_datagram_from_another_port_reaches_the_endpoint_but_the_pokes_do_not() {
+    let executor = Executor::new();
+    let link = NetworkLink::bind(&executor, "127.0.0.1:0", Echo::default()).unwrap();
+    let to = link.local_addr().unwrap();
+    let other = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let other_addr = other.local_addr().unwrap();
+    let from_other = |event: &Event| match event {
+        Event::Reset { peer } => Some(*peer),
+        _ => None,
+    };
+
+    other.send_to(&[], to).unwrap();
+    assert_eq!(next_event(&link, from_other), other_addr);
+
+    // The poke goes out inside `with`, before the next datagram is sent, and
+    // loopback keeps their order: were the poke fed to the endpoint, its
+    // event would come first.
+    link.with(|echo, now| echo.due = Some(now));
+    other.send_to(b"x", to).unwrap();
+    assert_eq!(next_event(&link, from_other), other_addr);
 }

@@ -55,6 +55,8 @@ struct State<E> {
     events: VecDeque<Event>,
     /// Events that found `events` full.
     lost: u64,
+    /// Datagrams dropped because the OS refused them for their destination.
+    sends_failed: u64,
     /// The futures waiting for an event, each woken by the next one or the
     /// end, under the id its [`NetworkEvents`] holds.
     wakers: Vec<(u64, Waker)>,
@@ -66,16 +68,33 @@ struct State<E> {
 }
 
 impl<E: NetworkEndpoint> State<E> {
-    /// Sends what the endpoint queued.
+    /// Sends what the endpoint queued. A datagram the OS refuses for its own
+    /// destination is dropped and counted ([`is_per_destination`]); the rest
+    /// still go.
+    ///
+    /// # Errors
+    ///
+    /// The first error that is the socket's, not a destination's; what the
+    /// endpoint still holds stays queued.
     fn flush(&mut self, socket: &UdpSocket) -> io::Result<()> {
         while let Some(transmit) = self.endpoint.poll_transmit() {
             match socket.send_to(&transmit.payload, transmit.to) {
                 Ok(_) => {}
-                Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {}
+                Err(e) if is_per_destination(e.kind()) => self.sends_failed += 1,
                 Err(e) => return Err(e),
             }
         }
         Ok(())
+    }
+
+    /// Ends the link for good after `error` came from the socket: the stream
+    /// ends and the task stops at its next turn. The wakers are woken by the
+    /// caller once it holds no lock.
+    #[must_use = "wake them after releasing the lock"]
+    fn fail(&mut self, error: &io::Error) -> Vec<Waker> {
+        self.ended.get_or_insert_with(|| LinkEnded::new(error));
+        self.stop = true;
+        self.take_wakers()
     }
 
     /// Moves the endpoint's events into the queue; the wakers returned are
@@ -112,6 +131,22 @@ impl<E> State<E> {
     }
 }
 
+/// Whether a send error is its destination's rather than the socket's: the
+/// peer's host or network cannot be reached, its port refuses, or its address
+/// cannot be used. UDP drops such a datagram and the link carries on; any
+/// other kind (a permission, a closed descriptor, a buffer) is the socket's
+/// and ends the link.
+const fn is_per_destination(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::HostUnreachable
+            | io::ErrorKind::NetworkUnreachable
+            | io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::AddrNotAvailable
+    )
+}
+
 struct Shared<E> {
     state: Mutex<State<E>>,
 }
@@ -135,6 +170,9 @@ impl<E> Shared<E> {
 /// endpoint UMP, or ends a Session, through [`with`](Self::with), which sends
 /// what the call queued before it returns.
 ///
+/// Drop a link before the executor it runs on: the executor's own stop waits
+/// out its bound for a thread that is still reading.
+///
 /// The link's queue holds at most [`MAX_QUEUED_EVENTS`] events: one that finds
 /// it full is counted in [`events_lost`](Self::events_lost) and dropped, never
 /// waited on.
@@ -149,7 +187,8 @@ pub struct NetworkLink<E: NetworkEndpoint + Send + 'static> {
     /// pokes the task. The task reads through its own clone.
     socket: UdpSocket,
     /// Held for its drop, which cancels the task.
-    task: Option<Task<()>>,
+    #[expect(dead_code, reason = "held for its drop, which cancels the task")]
+    task: Task<()>,
 }
 
 impl<E: NetworkEndpoint + Send + 'static> core::fmt::Debug for NetworkLink<E> {
@@ -176,6 +215,7 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
                 endpoint,
                 events: VecDeque::new(),
                 lost: 0,
+                sends_failed: 0,
                 wakers: Vec::new(),
                 next_id: 0,
                 ended: None,
@@ -183,11 +223,17 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
                 armed: Instant::now(),
             }),
         });
-        let task = executor.spawn_dedicated(THREAD_NAME, None, run(shared.clone(), task_socket))?;
+        // The guard is in the future from the start: a future dropped before
+        // its first poll still ends the stream.
+        let ending = Ending {
+            shared: shared.clone(),
+            cause: None,
+        };
+        let task = executor.spawn_dedicated(THREAD_NAME, None, run(ending, task_socket))?;
         Ok(Self {
             shared,
             socket,
-            task: Some(task),
+            task,
         })
     }
 
@@ -213,23 +259,29 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
     /// then sends what it queued. The socket task is told of an earlier
     /// deadline the call set.
     ///
-    /// # Errors
+    /// `f` runs under the link's lock: calling one of the link's own methods
+    /// from inside it deadlocks.
     ///
-    /// The error from sending. A datagram that cannot be sent to an
-    /// unreachable peer is dropped, as UDP does.
-    pub fn with<R>(&self, f: impl FnOnce(&mut E, Instant) -> R) -> io::Result<R> {
+    /// A datagram the OS refuses for its destination is dropped and counted in
+    /// [`sends_failed`](Self::sends_failed), as UDP does. An error that is the
+    /// socket's ends the link: the stream ends and
+    /// [`failure`](Self::failure) says why.
+    pub fn with<R>(&self, f: impl FnOnce(&mut E, Instant) -> R) -> R {
         let mut state = self.shared.state();
         let now = Instant::now();
         let result = f(&mut state.endpoint, now);
-        let flushed = state.flush(&self.socket);
-        let wakers = state.collect();
+        let mut wakers = match state.flush(&self.socket) {
+            Ok(()) => Vec::new(),
+            Err(error) => state.fail(&error),
+        };
+        wakers.extend(state.collect());
         let earlier = state.endpoint.deadline().is_some_and(|at| at < state.armed);
         drop(state);
         wakers.into_iter().for_each(Waker::wake);
         if earlier {
             self.poke();
         }
-        flushed.map(|()| result)
+        result
     }
 
     /// The link's events as a [`Stream`], the oldest first.
@@ -263,6 +315,14 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
         state.lost + state.endpoint.events_lost()
     }
 
+    /// How many datagrams were dropped because the OS refused them for their
+    /// destination (the peer's host or network is unreachable, its port
+    /// refuses, its address is unusable).
+    #[must_use]
+    pub fn sends_failed(&self) -> u64 {
+        self.shared.state().sends_failed
+    }
+
     /// Wakes the socket task from its read with a zero-length datagram from
     /// the socket to itself. A poke that cannot be sent is not an error: the
     /// task looks at the clock within 100 ms anyway.
@@ -285,24 +345,23 @@ impl<E: NetworkEndpoint + Send + 'static> Drop for NetworkLink<E> {
         };
         wakers.into_iter().for_each(Waker::wake);
         self.poke();
-        drop(self.task.take());
     }
 }
 
 /// Where a socket bound to `local` receives a datagram from itself: an
 /// unspecified bound address is reached through loopback.
-fn poke_addr(local: SocketAddr) -> SocketAddr {
-    let ip = match local.ip() {
-        IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
-        IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
-        ip => ip,
-    };
-    SocketAddr::new(ip, local.port())
+fn poke_addr(mut local: SocketAddr) -> SocketAddr {
+    match local.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => local.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        IpAddr::V6(ip) if ip.is_unspecified() => local.set_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+        _ => {}
+    }
+    local
 }
 
 /// Ends the link's stream when the socket task is over, however it ends: the
 /// socket's error, a stop, a panic in the endpoint, or the executor dropping
-/// the task.
+/// the task, even before its first poll.
 struct Ending<E> {
     shared: Arc<Shared<E>>,
     cause: Option<LinkEnded>,
@@ -325,12 +384,8 @@ impl<E> Drop for Ending<E> {
 
 /// The socket task: reads datagrams for the endpoint, keeps its clock and
 /// sends what it queues, until the link stops it or the socket fails.
-async fn run<E: NetworkEndpoint + Send + 'static>(shared: Arc<Shared<E>>, socket: UdpSocket) {
-    let mut ending = Ending {
-        shared: shared.clone(),
-        cause: None,
-    };
-    if let Err(error) = serve(&shared, &socket) {
+async fn run<E: NetworkEndpoint + Send + 'static>(mut ending: Ending<E>, socket: UdpSocket) {
+    if let Err(error) = serve(&ending.shared, &socket) {
         ending.cause = Some(LinkEnded::new(&error));
     }
 }
@@ -372,6 +427,11 @@ fn serve<E: NetworkEndpoint>(shared: &Shared<E>, socket: &UdpSocket) -> io::Resu
             Err(e) => return Err(e),
         };
         let mut state = shared.state();
+        // The link was dropped while the task read: its Bye is sent, and
+        // nothing is handled after it.
+        if state.stop {
+            return Ok(());
+        }
         // A zero-length datagram from the socket's own port is the link's
         // poke: it wakes the read and is not the endpoint's to see.
         if let Some((len, from)) = received
