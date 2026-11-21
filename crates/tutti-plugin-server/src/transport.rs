@@ -742,19 +742,21 @@ mod state_object_tests {
         use tutti_plugin_ipc::Working;
         for restoring in [true, false] {
             let (mut host, transport) = pair();
-            let seen = crate::server::working(&transport, ReqId::new(9), restoring, || {
-                (0..2)
-                    .map(
-                        |_| match read_frame::<_, ControlFrame>(&mut host).expect("a beat") {
-                            ControlFrame::Working { id, stage } => {
-                                assert_eq!(id, ReqId::new(9));
-                                stage
-                            }
-                            other => panic!("a beat sends only `Working`, sent {other:?}"),
-                        },
-                    )
-                    .collect::<Vec<_>>()
-            });
+            let executor = tutti_platform::Executor::new();
+            let seen =
+                crate::server::working(&executor, &transport, ReqId::new(9), restoring, || {
+                    (0..2)
+                        .map(
+                            |_| match read_frame::<_, ControlFrame>(&mut host).expect("a beat") {
+                                ControlFrame::Working { id, stage } => {
+                                    assert_eq!(id, ReqId::new(9));
+                                    stage
+                                }
+                                other => panic!("a beat sends only `Working`, sent {other:?}"),
+                            },
+                        )
+                        .collect::<Vec<_>>()
+                });
             let want = if restoring {
                 Working::Restoring
             } else {

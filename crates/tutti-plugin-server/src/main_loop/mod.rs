@@ -36,7 +36,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant};
 
 use tutti_plugin_ipc::{ControlFrame, ControlRequest, Request};
 use tutti_plugin_ipc_ffi::Ready;
@@ -126,7 +126,8 @@ impl Native {
 
 /// Serves `transport`, the host's control connection, until the host
 /// disconnects or asks for shutdown. `render` is the thread serving its audio
-/// connection: the loop ends if that peer breaks the protocol.
+/// connection: the loop ends if that peer breaks the protocol. `executor` runs
+/// the beat that tells the host a state call is at work.
 ///
 /// # Errors
 ///
@@ -138,6 +139,7 @@ pub(crate) fn serve(
     transport: &mut ControlTransport,
     main: MainThreadMarker,
     render: &RenderThread,
+    executor: &Executor,
 ) -> IpcResult<()> {
     serve_every(
         session,
@@ -145,6 +147,7 @@ pub(crate) fn serve(
         &mut Native::default(),
         main,
         render,
+        executor,
         TICK_PERIOD,
     )
 }
@@ -192,10 +195,11 @@ pub(crate) fn serve_every(
     backend: &mut Native,
     main: MainThreadMarker,
     render: &RenderThread,
+    executor: &Executor,
     period: Duration,
 ) -> IpcResult<()> {
     let bell = session.ties().bell.clone();
-    let host_gone = session.ties().host_gone.clone();
+    let host_gone = Arc::clone(&session.ties().host_gone);
     let mut ticker = Ticker::new(Instant::now(), period);
     // What the plugin wants waited on, and what the wait found ready: reused,
     // so a steady watch set allocates nothing.
@@ -235,7 +239,7 @@ pub(crate) fn serve_every(
         let readable = backend.wait(transport, timeout, &wakeups, &bell, &mut ready)?;
         // The host process ended (the watch rang the bell to end the wait): the
         // session is over, as when the control connection ends.
-        if host_gone.is_stopped() {
+        if host_gone.is_raised() {
             return Ok(());
         }
         // A plugin called the host from a thread of its own (its `request_process`,
@@ -258,7 +262,9 @@ pub(crate) fn serve_every(
             Incoming::Request(Request { id, body }) => {
                 let saving = matches!(body, ControlRequest::SaveState { .. });
                 let reaction = if saving {
-                    crate::server::working(transport, id, false, || session.handle(main, body))?
+                    crate::server::working(executor, transport, id, false, || {
+                        session.handle(main, body)
+                    })?
                 } else {
                     session.handle(main, body)?
                 };
@@ -271,7 +277,7 @@ pub(crate) fn serve_every(
                 state,
             } => (
                 id,
-                crate::server::working(transport, id, true, || {
+                crate::server::working(executor, transport, id, true, || {
                     session.load_state(main, &state, state_use)
                 }),
             ),

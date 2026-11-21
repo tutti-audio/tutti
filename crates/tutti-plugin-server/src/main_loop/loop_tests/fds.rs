@@ -68,7 +68,9 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
     });
 
     let main = main_thread();
+    let executor = Executor::new();
     let render = RenderThread::spawn(
+        &executor,
         fixture.side.take().expect("run once"),
         Some(Box::new(fixture.audio.take().expect("run once"))),
     )
@@ -79,6 +81,7 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
         &mut Native::default(),
         main,
         &render,
+        &executor,
         SLOW_TICK,
     );
     fixture.session.drop_plugin(main);

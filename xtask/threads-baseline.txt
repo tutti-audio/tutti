@@ -26,5 +26,3 @@ tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  cor
 # plugin
 tutti-plugin-db  spawn  crates/tutti-plugin-db/src/catalog.rs::Catalog::save_in_background  plugin
 tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin
-tutti-plugin-server  spawn_dedicated  crates/tutti-plugin-server/src/render.rs::RenderThread::spawn  plugin
-tutti-plugin-server  spawn  crates/tutti-plugin-server/src/server.rs::beat_while  plugin

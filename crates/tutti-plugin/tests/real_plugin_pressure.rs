@@ -36,7 +36,7 @@
 //! step costs is the `pressure` bench's figure, not an assertion.
 //!
 //! How many blocks carry audio depends on the plugin subprocess running at
-//! the highest priority the OS grants (`plugin-server`'s `request_audio_priority`). Without it the
+//! the highest priority the OS grants (the render lane's `spawn_dedicated(Highest)` on the server's executor). Without it the
 //! host's callback thread is realtime — the OS audio backend makes it so — but
 //! the subprocess it is waiting on is not, and the blocks that arrive in time
 //! swung between 29 and 492 of 500 across identical runs. With it: 491-498 of
@@ -748,7 +748,7 @@ fn answering_plugins_carry_audio_beside_stalled_ones() {
 
 /// **`plugin-server` raises its audio thread, where the OS lets it.**
 ///
-/// How many blocks carry audio under load depends on `request_audio_priority`
+/// How many blocks carry audio under load depends on the render lane's `spawn_dedicated(Highest)`
 /// (see the module docs), but no audio floor loose enough to hold under load
 /// can tell a raised server from an unraised one. So this reads the server's
 /// audio thread directly: its scheduling policy, realtime priority and nice
@@ -757,7 +757,7 @@ fn answering_plugins_carry_audio_beside_stalled_ones() {
 /// is the pid.
 ///
 /// What "raised" means is derived, not restated: a scratch thread of this
-/// process makes the same call `request_audio_priority` makes
+/// process makes the same call `spawn_dedicated(Highest)` makes
 /// (`tutti_platform::request_priority(PriorityRequest::Highest)`), under the same
 /// limits the server inherits from it, and the server must match what it
 /// got. Where the OS refuses (an unprivileged CI runner: `RLIMIT_NICE` 0 and
@@ -818,8 +818,8 @@ fn plugin_server_audio_thread_is_raised_where_the_os_allows() {
     assert_eq!(
         server, expected,
         "plugin-server's audio thread is not scheduled as a thread that \
-         called `request_audio_priority`'s own call is (policy, rt_priority, nice). \
-         Is `request_audio_priority` still called on entry to the audio phase?"
+         called `request_priority(Highest)` is (policy, rt_priority, nice). \
+         Does the render lane still start with `spawn_dedicated(Highest)` on the server's executor?"
     );
 }
 

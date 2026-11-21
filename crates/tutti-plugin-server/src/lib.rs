@@ -110,6 +110,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod audio_pipeline;
+mod latch;
 mod leak;
 mod main_loop;
 mod render;
