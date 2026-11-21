@@ -226,7 +226,10 @@ impl<T> Drop for ThreadHandle<T> {
     }
 }
 
-fn message(payload: &(dyn Any + Send)) -> String {
+/// A panic's message: the payload's text when it is a `&str` or a `String`, or
+/// `(not a string)` for a payload of another type.
+#[must_use]
+pub fn panic_message(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_owned())
@@ -272,7 +275,7 @@ where
             }))
             .map_err(|payload| Panicked {
                 name: name_owned,
-                message: message(payload.as_ref()),
+                message: panic_message(payload.as_ref()),
             })
         })?
     };
