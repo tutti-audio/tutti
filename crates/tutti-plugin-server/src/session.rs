@@ -19,8 +19,8 @@ use tutti_plugin_ipc::{
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
-    ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, SampleRate,
-    StateUse, Wakeups, WindowHandle,
+    ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, RateRefusalCause,
+    SampleRate, ServerError, StateUse, Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -97,7 +97,7 @@ pub(crate) struct Session {
     /// Why the plugin is not running at the rate the host asked for, while it
     /// is not. A refused plugin renders silence (no block reaches it) and the
     /// next `SetSampleRate` retries it.
-    pub(crate) rate_refused: Option<PluginError>,
+    pub(crate) rate_refused: Option<RateRefusalCause>,
     /// The longest block the loaded plugin was activated for (`LoadPlugin`'s
     /// `block_size`), 0 with none loaded. A block past it, or past the slab's
     /// per-channel room, is refused before anything is sized for it.
@@ -234,11 +234,15 @@ impl Session {
             Ok(opened) => match self.render.attach_slab(opened) {
                 Ok(()) => ControlReply::SharedMemoryReady,
                 Err(e) => ControlReply::Error {
-                    message: format!("the render thread did not take the slab: {e}"),
+                    error: ServerError::SlabNotTaken {
+                        reason: e.to_string(),
+                    },
                 },
             },
             Err(e) => ControlReply::Error {
-                message: e.to_string(),
+                error: ServerError::SlabNotOpened {
+                    reason: e.to_string(),
+                },
             },
         };
         reply.into()
@@ -382,15 +386,13 @@ impl Session {
                         Ok(()) => None,
                         Err(e) => {
                             tracing::warn!(requested = %rate, "sample rate not applied: {e}");
-                            Some(e)
+                            Some(RateRefusalCause::from(&e))
                         }
                     },
                     None => None,
                 };
-                // The wire carries the reason as text; the session keeps it typed.
-                let error = refusal.as_ref().map(ToString::to_string);
-                self.rate_refused = refusal;
-                Ok(ControlReply::SampleRateSet { rate, error }.into())
+                self.rate_refused = refusal.clone();
+                Ok(ControlReply::SampleRateSet { rate, refusal }.into())
             }
             M::SetRenderMode { mode } => {
                 // The plugin's answer is deliberately not returned to the host:
@@ -428,14 +430,14 @@ impl Session {
             // `Incoming::LoadState` and `Incoming::StageState`; a frame that
             // reaches here has none.
             M::LoadState { .. } | M::StageState { .. } => Ok(ControlReply::Error {
-                message: "a state arrived without its object".into(),
+                error: ServerError::StateWithoutObject,
             }
             .into()),
 
             // The transport delivers a setup with its slab as `Incoming::SetupSlab`
             // (`setup_slab`); a frame that reaches here has no slab.
             M::SetupSharedMemory { .. } => Ok(ControlReply::Error {
-                message: "a slab setup arrived without its slab".into(),
+                error: ServerError::SlabSetupWithoutSlab,
             }
             .into()),
             M::Shutdown => Ok(Reaction::Shutdown),
@@ -721,11 +723,10 @@ impl Session {
             (Some(d), Some(bytes)) if d.len == bytes.len() as u64 => {}
             (declared, staged) => {
                 return Ok(ControlReply::Error {
-                    message: format!(
-                        "the load declares a state of {:?} bytes and the server holds {:?}",
-                        declared.map(|d| d.len),
-                        staged.as_ref().map(Vec::len),
-                    ),
+                    error: ServerError::StateLengthMismatch {
+                        declared: declared.map(|d| d.len),
+                        staged: staged.as_ref().map(|s| s.len() as u64),
+                    },
                 }
                 .into());
             }
@@ -748,7 +749,7 @@ impl Session {
         };
         let Some(id) = plugin.plugin().origin().id().cloned() else {
             return Ok(ControlReply::Error {
-                message: "the loaded plugin names no id of its own".into(),
+                error: ServerError::NoPluginId,
             }
             .into());
         };
@@ -774,7 +775,9 @@ impl Session {
             // The load is not answered as done: the render thread has no
             // plugin to run, and every block would be refused.
             return Ok(ControlReply::Error {
-                message: format!("the loaded plugin cannot be seated: {e}"),
+                error: ServerError::NotSeated {
+                    reason: e.to_string(),
+                },
             }
             .into());
         }
@@ -824,7 +827,9 @@ impl Session {
                 // one `Error` frame, and the host reports it as a rejection.
                 Err(e) => {
                     return ControlReply::Error {
-                        message: format!("failed to save state: {e}"),
+                        error: ServerError::SaveFailed {
+                            reason: e.to_string(),
+                        },
                     }
                     .into();
                 }
@@ -835,10 +840,10 @@ impl Session {
         // host is only going to reject.
         if data.len() > MAX_STATE_BYTES {
             return ControlReply::Error {
-                message: format!(
-                    "plugin state is {} bytes, over the {MAX_STATE_BYTES}-byte limit",
-                    data.len()
-                ),
+                error: ServerError::StateTooLarge {
+                    bytes: data.len() as u64,
+                    limit: MAX_STATE_BYTES as u64,
+                },
             }
             .into();
         }
@@ -897,14 +902,16 @@ fn editor_wire_text(e: &PluginError) -> String {
     }
 }
 
-/// The reply to a load that failed. The wire carries a message and no stage, so
-/// a loader failure keeps its stage in the text.
+/// The reply to a load that failed, with the stage the loader reached.
 fn load_failure(e: &PluginError) -> ControlReply {
-    let message = match e {
-        PluginError::Load { stage, reason } => format!("{stage}: {reason}"),
-        other => other.to_string(),
+    let error = match e {
+        PluginError::Load { stage, reason } => ServerError::Load {
+            stage: *stage,
+            reason: reason.clone(),
+        },
+        other => ServerError::Plugin(other.to_string()),
     };
-    ControlReply::Error { message }
+    ControlReply::Error { error }
 }
 
 // Tests — pure dispatch, no tokio, no sockets.
@@ -1307,7 +1314,7 @@ mod tests {
             .into_reply();
         assert!(matches!(
             r,
-            ControlReply::SampleRateSet { rate, error: None } if rate.get() == 96000.0
+            ControlReply::SampleRateSet { rate, refusal: None } if rate.get() == 96000.0
         ));
     }
 
@@ -1552,9 +1559,11 @@ mod tests {
             .expect("a failed load is a reply, not a server error")
             .into_reply();
         match reply {
-            ControlReply::Error { message } => {
-                assert!(message.starts_with(&format!("{}:", LoadStage::Scanning)));
-                assert!(message.contains("does not exist"));
+            ControlReply::Error {
+                error: ServerError::Load { stage, reason },
+            } => {
+                assert_eq!(stage, LoadStage::Scanning);
+                assert!(reason.contains("does not exist"), "{reason}");
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -1655,8 +1664,10 @@ mod tests {
             "the second plugin of the factory"
         );
         match load_clap_choosing(Some(clap("tutti.no-such-plugin"))) {
-            ControlReply::Error { message } => {
-                assert!(message.contains("tutti.no-such-plugin"), "{message}");
+            ControlReply::Error {
+                error: ServerError::Load { reason, .. },
+            } => {
+                assert!(reason.contains("tutti.no-such-plugin"), "{reason}");
             }
             other => panic!("a plugin the file does not hold must be refused, got {other:?}"),
         }
@@ -1718,7 +1729,7 @@ mod tests {
 
         let accepted = set(&mut s, 48000.0);
         assert!(
-            matches!(accepted, ControlReply::SampleRateSet { error: None, .. }),
+            matches!(accepted, ControlReply::SampleRateSet { refusal: None, .. }),
             "{accepted:?}"
         );
         assert!(
@@ -1734,8 +1745,8 @@ mod tests {
         assert!(
             matches!(
                 &refused,
-                ControlReply::SampleRateSet { rate, error: Some(e) }
-                    if rate.get() == 96000.0 && !e.is_empty()
+                ControlReply::SampleRateSet { rate, refusal: Some(e) }
+                    if rate.get() == 96000.0 && matches!(e, RateRefusalCause::Deactivated { .. } | RateRefusalCause::RolledBack { .. })
             ),
             "the host is told, with a reason: {refused:?}"
         );
@@ -1752,7 +1763,10 @@ mod tests {
         // Refused again at the same rate: still silent.
         assert!(matches!(
             set(&mut s, 96000.0),
-            ControlReply::SampleRateSet { error: Some(_), .. }
+            ControlReply::SampleRateSet {
+                refusal: Some(_),
+                ..
+            }
         ));
         process_block(&mut s, &mut shm, 3, 0.5);
         assert!(!shm.has_output(3), "still silent");
@@ -1762,7 +1776,7 @@ mod tests {
         let _flagged = crate::test_utils::clap_probe_ports_64bit(both);
         let revived = set(&mut s, 88200.0);
         assert!(
-            matches!(revived, ControlReply::SampleRateSet { error: None, .. }),
+            matches!(revived, ControlReply::SampleRateSet { refusal: None, .. }),
             "{revived:?}"
         );
         assert!(s.rate_refused.is_none());
@@ -2367,9 +2381,9 @@ mod tests {
 
     fn assert_mismatch(reply: ControlReply) {
         match reply {
-            ControlReply::Error { message } => {
-                assert!(message.contains("declares a state"), "{message}");
-            }
+            ControlReply::Error {
+                error: ServerError::StateLengthMismatch { .. },
+            } => {}
             other => panic!("expected the mismatch refused, got {other:?}"),
         }
     }
@@ -2408,8 +2422,10 @@ mod tests {
 
         let mut s = Rig::new();
         match load_declaring(&mut s, None) {
-            ControlReply::Error { message } => {
-                assert!(message.contains("does not exist"), "{message}");
+            ControlReply::Error {
+                error: ServerError::Load { reason, .. },
+            } => {
+                assert!(reason.contains("does not exist"), "{reason}");
             }
             other => panic!("{other:?}"),
         }
@@ -2580,7 +2596,10 @@ mod tests {
             )
             .unwrap()
             .into_reply();
-        assert!(matches!(r, ControlReply::SampleRateSet { error: None, .. }));
+        assert!(matches!(
+            r,
+            ControlReply::SampleRateSet { refusal: None, .. }
+        ));
     }
 
     #[test]
