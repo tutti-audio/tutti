@@ -2,7 +2,7 @@ use tutti_buffers::{AmbisonicOrder, Planes, PlanesMut};
 use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation};
 
 use super::*;
-use crate::COEFF_INTERVAL;
+use crate::{COEFF_INTERVAL, SpeakerLayout};
 
 const DIRECTIONS: [(f64, f64); 8] = [
     (0.0, 0.0),
@@ -377,6 +377,182 @@ fn a_moved_encoder_glides_each_gain_to_the_new_directions_harmonics() {
         for (f, o) in channel.iter().enumerate() {
             let t = ((f + 1) as f64 / COEFF_INTERVAL as f64).min(1.0);
             assert!((o - ((1.0 - t) * g0[c] + t * g1[c])).abs() < 1e-12);
+        }
+    }
+}
+
+const fn cube_vertex(i: usize) -> (f64, f64) {
+    // The eight vertices of a cube: bearings 45, 135, 225, 315 at +-asin(1/sqrt 3).
+    (
+        45.0 + 90.0 * (i % 4) as f64,
+        if i < 4 {
+            35.264_389_682_754_654
+        } else {
+            -35.264_389_682_754_654
+        },
+    )
+}
+
+/// The vertices of an icosahedron: the two poles and two rings of five at
+/// `+-atan(1/2)`, the second rotated half a step.
+fn icosahedron() -> Vec<Direction> {
+    let ring = libm::atan(0.5).to_degrees();
+    let mut v = vec![direction((0.0, 90.0)), direction((0.0, -90.0))];
+    for k in 0..5 {
+        v.push(direction((72.0 * k as f64, ring)));
+        v.push(direction((72.0 * k as f64 + 36.0, -ring)));
+    }
+    v
+}
+
+fn decode_plane_wave(
+    decoder: &AmbisonicDecoder,
+    normalization: HarmonicNormalization,
+    d: Direction,
+) -> Vec<f64> {
+    let h = Harmonics::new(decoder.order(), normalization, d);
+    (0..decoder.speakers())
+        .map(|s| {
+            h.iter()
+                .enumerate()
+                .map(|(c, a)| decoder.gain(s, c) * a)
+                .sum()
+        })
+        .collect()
+}
+
+/// A cube's eight vertices are a spherical 3-design, so at order 1 the sampling decoder's
+/// gains for a plane wave sum to one and their squares to `(1 + 1)^2 / 8` in any direction
+/// (the harmonics' orthogonality over the design), in SN3D and in N3D alike.
+#[test]
+fn the_sampling_decoder_on_a_cube_keeps_the_sum_one_and_the_energy_four_eighths() {
+    let cube: Vec<Direction> = (0..8).map(|i| direction(cube_vertex(i))).collect();
+    let cube = SpeakerLayout::try_from(cube.as_slice()).unwrap();
+    for normalization in [HarmonicNormalization::Sn3d, HarmonicNormalization::N3d] {
+        let decoder = AmbisonicDecoder::sampling(AmbisonicOrder::of(1), normalization, &cube);
+        for &d in &DIRECTIONS {
+            let g = decode_plane_wave(&decoder, normalization, direction(d));
+            let sum: f64 = g.iter().sum();
+            let energy: f64 = g.iter().map(|g| g * g).sum();
+            assert!((sum - 1.0).abs() < 1e-12, "sum {sum}");
+            assert!((energy - 4.0 / 8.0).abs() < 1e-12, "energy {energy}");
+        }
+    }
+}
+
+/// An icosahedron is a 5-design: at order 2 the same two identities hold with
+/// `(2 + 1)^2 / 12`.
+#[test]
+fn the_sampling_decoder_on_an_icosahedron_keeps_the_sum_one_and_the_energy_nine_twelfths() {
+    let layout = SpeakerLayout::try_from(icosahedron().as_slice()).unwrap();
+    let decoder =
+        AmbisonicDecoder::sampling(AmbisonicOrder::of(2), HarmonicNormalization::Sn3d, &layout);
+    for &d in &DIRECTIONS {
+        let g = decode_plane_wave(&decoder, HarmonicNormalization::Sn3d, direction(d));
+        let sum: f64 = g.iter().sum();
+        let energy: f64 = g.iter().map(|g| g * g).sum();
+        assert!((sum - 1.0).abs() < 1e-12);
+        assert!((energy - 9.0 / 12.0).abs() < 1e-12);
+    }
+}
+
+fn ring(count: usize) -> Vec<Direction> {
+    (0..count)
+        .map(|k| direction((360.0 / count as f64 * k as f64, 0.0)))
+        .collect()
+}
+
+fn allrad_ring(count: usize, order: AmbisonicOrder) -> AmbisonicDecoder {
+    let layout = SpeakerLayout::try_from(ring(count).as_slice()).unwrap();
+    AmbisonicDecoder::allrad(order, HarmonicNormalization::Sn3d, &layout)
+}
+
+/// A ring of eight speakers maps onto itself under 45 degrees, and so do the virtual
+/// speakers (sixteen bearings): a source turned by 45 degrees decodes to the same gains
+/// moved by one speaker, to rounding.
+#[test]
+fn allrad_on_a_ring_moves_by_one_speaker_when_the_source_turns_by_one_spacing() {
+    let decoder = allrad_ring(8, THIRD);
+    for az in [3.0, 17.0, 100.0, -80.0] {
+        let a = decode_plane_wave(&decoder, HarmonicNormalization::Sn3d, direction((az, 0.0)));
+        let b = decode_plane_wave(
+            &decoder,
+            HarmonicNormalization::Sn3d,
+            direction((az + 45.0, 0.0)),
+        );
+        for s in 0..8 {
+            assert!(
+                (b[(s + 1) % 8] - a[s]).abs() < 1e-12,
+                "bearing {az} speaker {s}"
+            );
+        }
+    }
+}
+
+/// The energy vector of the feeds, the speaker directions weighted by their squared gains.
+fn energy_vector(layout: &[Direction], gains: &[f64]) -> [f64; 3] {
+    let mut r = [0.0; 3];
+    for (d, g) in layout.iter().zip(gains) {
+        let u = unit_vector(*d);
+        for k in 0..3 {
+            r[k] += g * g * u[k];
+        }
+    }
+    r
+}
+
+/// The feed of speaker `s` is a trigonometric polynomial of degree at most the order in
+/// the source bearing (the decoded field is band limited and the panning only weighs it),
+/// so the squares of the feeds have degree at most `2 order = 6`. On a ring of eight the
+/// first harmonic of the squares aliases from degree `8 - 1 = 7` and above only, so it is
+/// the source's alone: the energy vector points at the source at every bearing, to
+/// rounding.
+#[test]
+fn allrad_on_a_ring_has_its_energy_vector_exactly_on_the_source_at_every_bearing() {
+    let decoder = allrad_ring(8, THIRD);
+    let layout = ring(8);
+    for az in [
+        0.0, 3.0, 11.0, 22.5, 29.9, 67.5, 100.0, -112.5, 179.0, -45.5,
+    ] {
+        let g = decode_plane_wave(&decoder, HarmonicNormalization::Sn3d, direction((az, 0.0)));
+        let r = energy_vector(&layout, &g);
+        let found = libm::atan2(r[1], r[0]).to_degrees();
+        let off = Azimuth::new(az).shortest_arc_to(Azimuth::new(found)).get();
+        assert!(off.abs() < 1e-9, "bearing {az}: energy vector at {found}");
+    }
+}
+
+/// A source at a speaker takes most of the energy there.
+#[test]
+fn allrad_on_a_ring_puts_a_source_at_a_speaker_mostly_on_that_speaker() {
+    let decoder = allrad_ring(8, THIRD);
+    let g = decode_plane_wave(&decoder, HarmonicNormalization::Sn3d, direction((0.0, 0.0)));
+    let total: f64 = g.iter().map(|g| g * g).sum();
+    assert!(g[0] * g[0] > 0.5 * total);
+}
+
+/// A decoder renders each speaker as the matrix applied to the channels of every frame.
+#[test]
+fn a_decoder_renders_a_speaker_as_the_matrix_over_the_channels() {
+    let decoder = allrad_ring(8, AmbisonicOrder::of(2));
+    let frames = 12;
+    let input: Vec<Vec<f64>> = (0..9)
+        .map(|c| {
+            (0..frames)
+                .map(|f| ((c * 5 + f) % 7) as f64 - 3.0)
+                .collect()
+        })
+        .collect();
+    for speaker in [0, 3, 7] {
+        let mut out = vec![0.0; frames];
+        decoder.process(
+            speaker,
+            Planes::new(&planes_of(&input)).unwrap(),
+            tutti_buffers::MonoMut::new(&mut out),
+        );
+        for f in 0..frames {
+            let expected: f64 = (0..9).map(|c| decoder.gain(speaker, c) * input[c][f]).sum();
+            assert!((out[f] - expected).abs() < 1e-12);
         }
     }
 }

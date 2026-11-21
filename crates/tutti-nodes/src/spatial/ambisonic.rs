@@ -1,20 +1,23 @@
 //! Ambisonic nodes in the AmbiX convention (ACN order, SN3D or N3D): [`AmbisonicEncoderNode`]
-//! places a mono source and [`AmbisonicRotatorNode`] turns a sound field. The algorithms are
-//! `tutti_dsp`'s ([`tutti_dsp::Harmonics`], [`Rotation`]).
+//! places a mono source, [`AmbisonicRotatorNode`] turns a sound field and
+//! [`AmbisonicDecoderNode`] feeds the speakers of a bed. The algorithms are
+//! `tutti_dsp`'s ([`tutti_dsp::Harmonics`], [`Rotation`], [`AmbisonicDecoder`]).
 
 use core::marker::PhantomData;
 
 use thiserror::Error;
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, BusTopology, Float,
-    MaxBlock, Mono, Planes, PlanesMut,
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, Bed, BusTopology,
+    ChannelTopology, Float, MaxBlock, Mono, Planes, PlanesMut,
 };
 use tutti_dsp::{
-    AmbisonicEncoder, AmbisonicRotator, COEFF_INTERVAL, HarmonicNormalization, Rotation,
+    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, COEFF_INTERVAL, HarmonicNormalization,
+    Rotation, SpeakerGeometryError, SpeakerLayout,
 };
 use tutti_graph::{Buses, Cost, Shape};
 use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, SampleRate, Tail};
 
+use super::vbap::speaker_of_channel;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The bus of the channels of `order` in AmbiX's ordering and the scaling `normalization`.
@@ -282,6 +285,18 @@ impl<F: Float> Kernel for AmbisonicRotatorKernel<F> {
     }
 }
 
+/// How an [`AmbisonicDecoderNode`] turns the sound field into speaker feeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum Decoding {
+    /// The harmonics sampled at the speakers: for a regular array
+    /// ([`AmbisonicDecoder::sampling`]).
+    Sampling,
+    /// All-round ambisonic decoding over the array's VBAP, for any array
+    /// ([`AmbisonicDecoder::allrad`]).
+    #[default]
+    AllRad,
+}
+
 /// The error returned when an ambisonic node cannot be built.
 #[derive(Debug, Clone, Error)]
 #[non_exhaustive]
@@ -293,6 +308,12 @@ pub enum AmbisonicError {
     /// run in; `Fold` converts the others.
     #[error("the ambisonic format {0:?} is not ACN in SN3D or N3D")]
     Unsupported(AmbisonicFormat),
+    /// The bus places no bed: a decoder feeds a bed's speakers.
+    #[error("the bus is not a bed, so it has no speakers to decode to")]
+    NotABed,
+    /// The bed's speakers cannot be decoded to: `Bed::Mono` has one and VBAP needs two.
+    #[error("the bed's speakers cannot be decoded to: {0}")]
+    Geometry(#[from] SpeakerGeometryError),
 }
 
 /// The order and the scaling of an ambisonic bus the nodes run in.
@@ -304,6 +325,149 @@ fn format_of(bus: BusTopology) -> Result<(AmbisonicOrder, HarmonicNormalization)
         _ => return Err(AmbisonicError::Unsupported(format)),
     };
     Ok((format.order(), normalization))
+}
+
+/// What an [`AmbisonicDecoderNode`] is made from: the bus of speakers, the ambisonic bus it
+/// reads and the decoding rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AmbisonicDecoderConfig {
+    input: BusTopology,
+    decoding: Decoding,
+    output: BusTopology,
+}
+
+impl AmbisonicDecoderConfig {
+    /// A decoder to the speakers of `output`, reading first order in AmbiX and decoding by
+    /// [`Decoding::AllRad`].
+    #[must_use]
+    pub fn new(output: impl Into<BusTopology>) -> Self {
+        Self {
+            input: bus(AmbisonicOrder::of(1), HarmonicNormalization::Sn3d),
+            decoding: Decoding::default(),
+            output: output.into(),
+        }
+    }
+
+    /// The ambisonic bus it reads.
+    #[must_use]
+    pub fn input(self, input: impl Into<BusTopology>) -> Self {
+        Self {
+            input: input.into(),
+            ..self
+        }
+    }
+
+    /// The decoding rule.
+    #[must_use]
+    pub const fn decoding(self, decoding: Decoding) -> Self {
+        Self { decoding, ..self }
+    }
+}
+
+/// An ambisonic signal decoded to the speakers of a [`Bed`]: ambisonic channels in, the
+/// bed's channels out, in the bed's order, each placed speaker at its `Bed::direction` and
+/// the LFE silent.
+///
+/// A decoder has no live control. No latency and no tail. A [`KernelNode`], made from an
+/// [`AmbisonicDecoderConfig`] (`AmbisonicDecoderNode::try_from`).
+pub type AmbisonicDecoderNode<F> = KernelNode<AmbisonicDecoderKernel<F>>;
+
+impl<F: Float> TryFrom<AmbisonicDecoderConfig> for AmbisonicDecoderNode<F> {
+    type Error = AmbisonicError;
+
+    /// # Errors
+    ///
+    /// [`AmbisonicError::NotAmbisonic`] and [`AmbisonicError::Unsupported`] for an input that
+    /// is not ACN in SN3D or N3D, [`AmbisonicError::NotABed`] for a bus that places no bed, and
+    /// [`AmbisonicError::Geometry`] for a bed whose speakers cannot be decoded to
+    /// ([`Bed::Mono`]: the speakers are the layout VBAP pans over).
+    fn try_from(config: AmbisonicDecoderConfig) -> Result<Self, AmbisonicError> {
+        let (order, normalization) = format_of(config.input)?;
+        let bed = Bed::from_topology(&ChannelTopology::from(config.output))
+            .ok_or(AmbisonicError::NotABed)?;
+        let layout = SpeakerLayout::try_from(bed)?;
+        let decoder = match config.decoding {
+            Decoding::Sampling => AmbisonicDecoder::sampling(order, normalization, &layout),
+            Decoding::AllRad => AmbisonicDecoder::allrad(order, normalization, &layout),
+        };
+        Ok(Self::with_kernel(
+            AmbisonicDecoderKernel {
+                decoder,
+                input: config.input,
+                output: config.output,
+                speaker_of_channel: speaker_of_channel(bed),
+                float: PhantomData,
+            },
+            AmbisonicDecoderSet,
+            (),
+        ))
+    }
+}
+
+/// A node with no control.
+#[derive(Clone, Copy, Debug)]
+pub struct AmbisonicDecoderSet;
+
+impl crate::ControlSet for AmbisonicDecoderSet {
+    type Controls = ();
+
+    fn addrs(&self) -> &'static [tutti_units::UnitAddr] {
+        &[]
+    }
+
+    fn defaults(&self) {}
+
+    fn flatten(&self, _: &(), _: &mut [f64]) {}
+
+    fn assemble(&self, _: &[f64]) {}
+}
+
+/// The decoder as a [`Kernel`].
+#[derive(Clone, Debug)]
+pub struct AmbisonicDecoderKernel<F: Float> {
+    decoder: AmbisonicDecoder,
+    input: BusTopology,
+    output: BusTopology,
+    /// Which speaker feeds each output channel; `None` for the LFE.
+    speaker_of_channel: Vec<Option<usize>>,
+    float: PhantomData<fn() -> F>,
+}
+
+impl<F: Float> Kernel for AmbisonicDecoderKernel<F> {
+    type Float = F;
+    type Set = AmbisonicDecoderSet;
+
+    const GRID: usize = COEFF_INTERVAL;
+
+    /// The order's channels in, the bed's out, `Moderate`: a gain per channel and speaker.
+    fn shape(&self) -> Shape {
+        Shape::buses(Buses::main(self.input), Buses::main(self.output)).with_cost(Cost::Moderate)
+    }
+
+    fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
+
+    fn reset(&mut self) {}
+
+    fn retarget(&mut self, _: &()) {}
+
+    fn render(
+        &mut self,
+        input: Planes<'_, F>,
+        _: ControlSignals<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
+    ) {
+        for (channel, speaker) in self.speaker_of_channel.iter().enumerate() {
+            let mut out = output.plane_mut(channel);
+            match speaker {
+                Some(s) => self.decoder.process(*s, input, out),
+                None => out.samples_mut().fill(F::ZERO),
+            }
+        }
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
+    }
 }
 
 #[cfg(test)]

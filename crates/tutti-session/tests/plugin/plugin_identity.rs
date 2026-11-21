@@ -3,6 +3,7 @@
 //! the hosted plugin. The reference CLAP bundle exports two plugins, in a real
 //! `plugin-server`.
 
+use crate::loading::Perform as _;
 use crate::loading::{Hosted, LoadPlugin, Spec, catalog_of};
 use crate::support::clap_probe;
 use tutti_buffers::MaxBlock;
@@ -103,7 +104,7 @@ fn a_state_is_refused_by_another_plugin() {
     let from_first = s
         .save_state(&first, StateUse::Project)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("saves");
     // The catalog names a plugin by its file's canonical path.
     assert_eq!(
@@ -119,7 +120,7 @@ fn a_state_is_refused_by_another_plugin() {
     let from_second = s
         .save_state(&second, StateUse::Project)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("saves");
 
     // The load's initial state: the load is built and its state checked, and
@@ -157,7 +158,7 @@ fn a_state_is_refused_by_another_plugin() {
     let restored = s
         .restore_state(&second, from_second)
         .expect("and takes its own")
-        .run(main)
+        .perform(main)
         .expect("the plugin takes it");
     s.apply(restored).expect("the node hosts the plugin");
     assert_eq!(

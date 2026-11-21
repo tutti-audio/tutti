@@ -14,4 +14,5 @@ mod error;
 mod node;
 
 pub use error::VbapError;
+pub(super) use node::speaker_of_channel;
 pub use node::{VbapPannerConfig, VbapPannerNode};

@@ -1887,6 +1887,132 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
     assert_healthy_after_stall(&mock, "load_state");
 }
 
+// ── Requests answered into a future ──────────────────────────────────────────
+
+/// Awaits `answer` on a thread of its own, as an app's executor would: it is
+/// polled when the reader or the lane fills it, and nothing else polls it. The
+/// budget only guards a hang.
+fn await_answer<T: Send + 'static>(
+    answer: futures_channel::oneshot::Receiver<T>,
+) -> std::result::Result<T, futures_channel::oneshot::Canceled> {
+    call_within(move || futures_lite::future::block_on(answer))
+        .unwrap_or_else(|w| panic!("an answer was never filled; waited {w:?}"))
+}
+
+/// **An awaited save is filled with the state the server sends**, by the
+/// bridge's lane thread: the caller queued it and returned.
+#[test]
+fn an_awaited_save_state_is_filled_with_the_servers_state() {
+    let bytes = vec![7u8, 8, 9];
+    let sent = bytes.clone();
+    let mock = MockServer::start("awaited-save", move |msg| match msg {
+        ControlRequest::SaveState { .. } => Action::State {
+            len: sent.len() as u64,
+            bytes: sent.clone(),
+        },
+        _ => Action::Silent,
+    });
+    let answer = mock
+        .bridge
+        .audio()
+        .save_state_answer(tutti_plugin_types::StateUse::Project);
+    assert_eq!(await_answer(answer), Ok(Ok(bytes)));
+}
+
+/// **A server that never answers a save is cut off by the control lane's
+/// deadline**, which sends `Stalled` into the answer: no one calls anything
+/// after the request was queued, and the bridge stays healthy.
+#[test]
+fn an_awaited_save_state_the_server_never_answers_stalls_at_the_lanes_deadline() {
+    let mock =
+        MockServer::start_with_state_timeout(
+            "awaited-stalled-save",
+            STATE_TIMEOUT,
+            |msg| match msg {
+                ControlRequest::GetParameterList => {
+                    Action::Reply(Box::new(ControlReply::ParameterList {
+                        parameters: Vec::new(),
+                    }))
+                }
+                _ => Action::Silent,
+            },
+        );
+    let answer = mock
+        .bridge
+        .audio()
+        .save_state_answer(tutti_plugin_types::StateUse::Project);
+    let stalled = await_answer(answer).expect("the lane answered");
+    assert!(
+        matches!(stalled, Err(StateError::Stalled { after }) if after == STATE_TIMEOUT),
+        "{stalled:?}"
+    );
+    assert_healthy_after_stall(&mock, "awaited save_state");
+}
+
+/// **The same for a restore**: the object goes out and the acknowledgement
+/// never comes, so the lane sends `Stalled` into the answer.
+#[test]
+fn an_awaited_load_state_the_server_never_acknowledges_stalls_at_the_lanes_deadline() {
+    let mock =
+        MockServer::start_with_state_timeout(
+            "awaited-stalled-load",
+            STATE_TIMEOUT,
+            |msg| match msg {
+                ControlRequest::GetParameterList => {
+                    Action::Reply(Box::new(ControlReply::ParameterList {
+                        parameters: Vec::new(),
+                    }))
+                }
+                _ => Action::Silent,
+            },
+        );
+    let answer = mock
+        .bridge
+        .audio()
+        .load_state_answer(&[3u8; 128], tutti_plugin_types::StateUse::Project);
+    let stalled = await_answer(answer).expect("the lane answered");
+    assert!(
+        matches!(stalled, Err(StateError::Stalled { after }) if after == STATE_TIMEOUT),
+        "{stalled:?}"
+    );
+    assert_healthy_after_stall(&mock, "awaited load_state");
+}
+
+/// **A preset load the server never answers ends `Stalled` at the parameter
+/// deadline**, not as a refusal: the plugin was asked and may have loaded it.
+#[test]
+fn an_awaited_preset_load_the_server_never_answers_stalls_at_the_lanes_deadline() {
+    let param = Duration::from_millis(300);
+    let mut timeouts = Timeouts::default();
+    timeouts.param = param;
+    let mock =
+        MockServer::start_with_timeouts("awaited-stalled-preset", timeouts, |_| Action::Silent);
+    let answer = mock
+        .bridge
+        .audio()
+        .load_preset_answer(tutti_plugin_types::PresetId::Location("/x.preset".into()));
+    let stalled = await_answer(answer).expect("the lane answered");
+    assert_eq!(
+        stalled,
+        Err(tutti_plugin_types::PresetError::Stalled { after: param })
+    );
+}
+
+/// **A server that dies mid-request drops the sender**, which resolves the
+/// answer as canceled: it never hangs.
+#[test]
+fn an_awaited_save_state_the_server_dies_in_is_canceled() {
+    let mock = MockServer::start("awaited-death", |msg| match msg {
+        ControlRequest::SaveState { .. } => Action::Die,
+        _ => Action::Silent,
+    });
+    let answer = mock
+        .bridge
+        .audio()
+        .save_state_answer(tutti_plugin_types::StateUse::Project);
+    assert!(await_answer(answer).is_err(), "no reply was sent");
+}
+
 /// Assert that a stall left the session genuinely usable, not merely unflagged.
 ///
 /// Shared by both stall tests so they cannot drift into proving different

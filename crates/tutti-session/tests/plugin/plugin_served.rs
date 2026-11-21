@@ -12,6 +12,7 @@ use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 
+use crate::loading::Perform as _;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -21,9 +22,9 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    CrossfadeRefused, DetachedSession, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
-    PluginHealth, PluginNode, Presence, RecoveryPolicy, Resource, Session, SessionEvent,
-    StateStartError, SwapPluginError,
+    CrossfadeRefused, DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState,
+    PluginCause, PluginHealth, PluginNode, Presence, RecoveryPolicy, Resource, RestoreState,
+    SaveState, Session, SessionEvent, StateStartError, SwapPluginError,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -308,7 +309,7 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     let state = s
         .save_state(&a, tutti_plugin_types::StateUse::Project)
         .unwrap()
-        .run(tutti_fixtures::main_thread())
+        .perform(tutti_fixtures::main_thread())
         .expect("a state");
 
     let mut load = s.load_out_of_process(&first_id(), &catalog);
@@ -355,7 +356,7 @@ fn a_reload_awaited_on_a_spawned_thread_is_swapped_in_with_its_state() {
     let state = s
         .save_state(&node, StateUse::Project)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("a state");
 
     let info = handle.info();
@@ -440,7 +441,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let state = s
         .save_state(&a, StateUse::Project)
         .expect("a node holds the plugin")
-        .run(main)
+        .perform(main)
         .expect("a state");
     assert_eq!(
         state.media_type().as_str(),
@@ -459,7 +460,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let duplicate = s
         .save_state(&a, StateUse::Duplicate)
         .expect("a node holds the plugin")
-        .run(main)
+        .perform(main)
         .expect("a duplicate state");
     assert_eq!(
         duplicate.bytes()[CONTEXT_BYTE],
@@ -496,12 +497,12 @@ fn a_restore_applied_after_a_recovery_replaced_the_plugin_is_stale() {
     let state = s
         .save_state(&node, StateUse::Project)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("a state");
     let restored = s
         .restore_state(&node, state)
         .unwrap()
-        .run(main)
+        .perform(main)
         .expect("the plugin takes it");
     let before = pid_of(&s, node);
     s.plugin_view(node)
@@ -538,7 +539,7 @@ fn a_save_of_a_dead_plugin_is_the_plugins_refusal() {
     let saved = s
         .save_state(&node, StateUse::Project)
         .expect("the node is still there")
-        .run(tutti_fixtures::main_thread());
+        .perform(tutti_fixtures::main_thread());
     assert!(
         matches!(saved, Err(StateError::PluginCrashed)),
         "the plugin's refusal: {saved:?}"
@@ -1000,4 +1001,182 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
         "the reloaded plugin's node is cut the same: the reports add"
     );
     assert_eq!(losses(&s), Losses::NONE);
+}
+
+/// **The arm is the node's hosting**: a plugin in a plugin server hands out the
+/// out-of-process value for a save, a restore and a preset load.
+#[test]
+fn state_and_preset_work_for_a_served_plugin_is_out_of_process() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let save = s.save_state(&node, StateUse::Project).unwrap();
+    assert!(matches!(save, SaveState::OutOfProcess(_)), "{save:?}");
+    let state = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let restore = s.restore_state(&node, state).unwrap();
+    assert!(
+        matches!(restore, RestoreState::OutOfProcess(_)),
+        "{restore:?}"
+    );
+    let load = s.load_preset_file(&node, "/x.tutti-preset").unwrap();
+    assert!(matches!(load, LoadPreset::OutOfProcess(_)), "{load:?}");
+}
+
+fn block_on_save(save: SaveState) -> PeerState {
+    let SaveState::OutOfProcess(save) = save else {
+        panic!("a served plugin's save is awaited");
+    };
+    tutti_fixtures::block_on(save).expect("a state")
+}
+
+/// **A save awaited on a spawned thread returns the plugin's state**, which a
+/// new plugin loaded from it holds: no main thread ran the round trip.
+#[test]
+fn a_save_awaited_on_a_spawned_thread_returns_the_plugins_state() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, a) = in_a_node(&mut s, &catalog, &first_id());
+    let set = Normalized::of(0.9);
+    let target = s
+        .plugin_view(a)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .expect("the plugin declares Cutoff")
+        .target();
+    s.set(target.to(set)).unwrap();
+
+    let SaveState::OutOfProcess(save) = s.save_state(&a, StateUse::Project).unwrap() else {
+        panic!("a served plugin's save is awaited");
+    };
+    let state = std::thread::spawn(move || tutti_fixtures::block_on(save))
+        .join()
+        .expect("the awaiting thread ends")
+        .expect("a state");
+
+    let mut load = s.load_out_of_process(&first_id(), &catalog);
+    load.initial_state(state).expect("its own plugin's state");
+    let b = s
+        .add_plugin(load.block().expect("the plugin loads"))
+        .unwrap();
+    let read = s
+        .plugin_view(b)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .normalized();
+    assert!(
+        (read.get() - set.get()).abs() < 1e-6,
+        "the saved value, not the default: {read:?}"
+    );
+}
+
+/// **A restore awaited off the main thread has its effect once the main thread
+/// applies it**: the plugin holds 0.3 when its state is saved, is moved to 0.9,
+/// and the saved state goes back from a spawned thread: the mirror reads 0.3
+/// again after `apply`.
+#[test]
+fn a_restore_awaited_off_main_takes_effect_when_applied() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    // Rendered, so a host write reaches the plugin with a block.
+    s.graph().connect(node, tutti_session::Root).unwrap();
+    let cutoff = |s: &Session| {
+        s.plugin_view(node)
+            .unwrap()
+            .params()
+            .get(ParamId::new(101))
+            .unwrap()
+            .normalized()
+            .get()
+    };
+    let target = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .target();
+    s.set(target.to(Normalized::of(0.3))).unwrap();
+    let saved = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    s.set(target.to(Normalized::of(0.9))).unwrap();
+    // The write reaches the plugin with a block: a state saved now holds it.
+    for _ in 0..4 {
+        let _ = pump(&mut s);
+    }
+    let held = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    assert_ne!(held.bytes(), saved.bytes(), "the plugin holds 0.9, not 0.3");
+
+    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, saved).unwrap() else {
+        panic!("a served plugin's restore is awaited");
+    };
+    let restored = std::thread::spawn(move || tutti_fixtures::block_on(restore))
+        .join()
+        .expect("the awaiting thread ends")
+        .expect("the plugin takes the state");
+    s.apply(restored).expect("the node hosts the plugin");
+    pump_until(&mut s, "the mirror reads the restored value", |s| {
+        (cutoff(s) - 0.3).abs() < 1e-6
+    });
+}
+
+/// **A restore or a save dropped before its first poll asks the plugin
+/// nothing**, and no `RestoredState` exists for it: the plugin keeps its value.
+#[test]
+fn a_restore_dropped_before_it_is_awaited_sends_nothing() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let default = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let target = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .target();
+    s.set(target.to(Normalized::of(0.9))).unwrap();
+    drop(s.restore_state(&node, default).unwrap());
+    let after = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let mut loaded = s.load_out_of_process(&first_id(), &catalog);
+    loaded.initial_state(after).unwrap();
+    let c = s.add_plugin(loaded.block().unwrap()).unwrap();
+    let held = s
+        .plugin_view(c)
+        .unwrap()
+        .params()
+        .get(ParamId::new(101))
+        .unwrap()
+        .normalized();
+    assert!(
+        (held.get() - 0.9).abs() < 1e-6,
+        "a dropped restore never reached the plugin: {held:?}"
+    );
+}
+
+/// **A server that dies in a restore drops the sender, and the awaited restore
+/// ends as the dead plugin**, never a hang: the lane ends with the request
+/// unanswered.
+#[test]
+fn a_restore_the_server_dies_in_ends_as_the_dead_plugin() {
+    let (catalog, _dir) = catalog();
+    // SAFETY: nextest runs each test in its own process, and this is set before
+    // the first server is spawned, from the test's own thread.
+    unsafe { std::env::set_var("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD", "1") };
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let state = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
+    let RestoreState::OutOfProcess(restore) = s.restore_state(&node, state).unwrap() else {
+        panic!("a served plugin's restore is awaited");
+    };
+    let ended = std::thread::spawn(move || tutti_fixtures::block_on(restore))
+        .join()
+        .expect("the awaiting thread ends");
+    assert!(
+        matches!(ended, Err(StateError::PluginCrashed)),
+        "the plugin died in the restore: {:?}",
+        ended.map(|_| ())
+    );
 }
