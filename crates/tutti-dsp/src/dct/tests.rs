@@ -5,7 +5,7 @@ fn nz(n: usize) -> NonZeroUsize {
 }
 
 fn full(n: usize) -> Dct2 {
-    Dct2::new(nz(n), nz(n))
+    Dct2::new(nz(n), nz(n)).unwrap()
 }
 
 /// The columns of the matrix, `D e_n`.
@@ -77,14 +77,27 @@ fn a_cosine_at_index_k_maps_to_one_coefficient() {
 /// Keeping `K < N` coefficients keeps the first `K` of the full transform, and more outputs
 /// than inputs keeps `N`.
 #[test]
-fn keeping_fewer_outputs_is_a_prefix_and_outputs_cap_at_inputs() {
+fn keeping_fewer_outputs_is_a_prefix() {
     let x: Vec<f64> = (0..12).map(|i| ((i * i) % 7) as f64 - 3.0).collect();
     let mut all = vec![0.0; 12];
     full(12).process(&x, &mut all);
-    let few = Dct2::new(nz(12), nz(5));
+    let few = Dct2::new(nz(12), nz(5)).unwrap();
     let mut head = vec![0.0; 5];
     few.process(&x, &mut head);
     assert_eq!(few.outputs(), 5);
     assert_eq!(head, all[..5]);
-    assert_eq!(Dct2::new(nz(12), nz(40)).outputs(), 12);
+}
+
+/// More coefficients than points cannot be kept: `new` returns the counts, where it used to
+/// give back a transform of fewer.
+#[test]
+fn more_outputs_than_inputs_is_refused() {
+    assert_eq!(
+        Dct2::new(nz(12), nz(40)),
+        Err(TooManyOutputs {
+            outputs: 40,
+            inputs: 12
+        })
+    );
+    assert!(Dct2::new(nz(12), nz(12)).is_ok());
 }

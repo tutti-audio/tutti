@@ -56,7 +56,7 @@ fn session_with_open_editor(command: u32) -> (Session, Editor) {
     let mut editor = s
         .editor(node, &tutti_fixtures::main_thread())
         .expect("it is hosted");
-    editor
+    let _ = editor
         .open(&StandInWindow, ContentScale::IDENTITY)
         .expect("the editor opens");
     (s, editor)

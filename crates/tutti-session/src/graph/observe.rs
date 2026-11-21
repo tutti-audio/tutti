@@ -218,7 +218,7 @@ impl<F: Float> Taps<'_, F> {
     pub fn open_root(&mut self, capacity: Samples) -> Result<TapReader<F>, MissingSource> {
         let id = TapId::mint(&self.graph.ids);
         let width = self.graph.outputs();
-        let reader = self.graph.editor.open_output_tap(id, width, capacity)?;
+        let reader = self.graph.editor.open_heard_tap(id, width, capacity)?;
         self.graph.output_taps.insert(id, (capacity, width));
         self.graph.edited = true;
         Ok(reader)
@@ -458,7 +458,7 @@ impl<F: Float> Graph<F> {
     /// The new reader takes the old one's id, so the commit that carries the
     /// change swaps the executor's writer for the new one at that block, and
     /// the old reader ends once that commit is applied
-    /// (`Editor::reopen_output_tap`). The master meter held by the graph is
+    /// (`Editor::reopen_heard_tap`). The master meter held by the graph is
     /// replaced in place; one a host took is held under its id to be claimed.
     pub(super) fn reopen_root_readers(&mut self, resized: bool) {
         let width = self.outputs();
@@ -470,7 +470,7 @@ impl<F: Float> Graph<F> {
             .map(|(&id, &(capacity, _))| (id, capacity))
             .collect();
         for (id, capacity) in stale {
-            match self.editor.reopen_output_tap(id, width, capacity) {
+            match self.editor.reopen_heard_tap(id, width, capacity) {
                 Ok(reader) => {
                     self.output_taps.insert(id, (capacity, width));
                     self.hold(RootReader::Tap(id), Reopened::Tap(reader), &topology);

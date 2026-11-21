@@ -234,8 +234,14 @@ where
     }
 
     /// [`StreamHost::sync_to_graph`] on this driver's stream.
-    pub fn sync_to_graph(&mut self, prepared: &tutti_graph::Prepare) {
-        self.host.sync_to_graph(prepared);
+    ///
+    /// # Errors
+    /// As [`StreamHost::sync_to_graph`].
+    pub fn sync_to_graph(
+        &mut self,
+        prepared: &tutti_graph::Prepare,
+    ) -> core::result::Result<(), tutti_engine::QuantumOutOfRange> {
+        self.host.sync_to_graph(prepared)
     }
 
     /// The stream host, taken out of the driver: the device is no longer this
@@ -264,11 +270,16 @@ where
     }
 
     /// Selects a device for the next [`restart`](Self::restart).
-    pub fn select_device(&mut self, sel: DeviceSelector) -> &mut Self {
-        if let Some((_, current, _)) = &mut self.target {
-            current.select(sel);
-        }
-        self
+    ///
+    /// # Errors
+    /// [`DeviceError::InvalidDevice`](crate::DeviceError::InvalidDevice) on a
+    /// driver built from a bare spec, which has no device to select.
+    pub fn select_device(&mut self, sel: DeviceSelector) -> Result<&mut Self> {
+        let Some((_, current, _)) = &mut self.target else {
+            return Err(crate::output::no_device());
+        };
+        current.select(sel);
+        Ok(self)
     }
 
     /// Stops any running stream and starts a new one on a driver of the

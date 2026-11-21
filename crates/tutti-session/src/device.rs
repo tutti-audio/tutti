@@ -44,7 +44,7 @@ use std::time::Duration;
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector, SnapshotSource, TuttiDriver};
-use tutti_engine::{OutputSpec, Stopped, StreamDriver, StreamFaults, StreamLatency};
+use tutti_engine::{OutputQuantum, OutputSpec, Stopped, StreamDriver, StreamFaults, StreamLatency};
 use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::{
@@ -249,7 +249,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
 
     /// Starts watching `host`'s devices: [`watch_devices`](Self::watch_devices)
     /// over a [`DevicePoller`](tutti_cpal::DevicePoller) of `host` that looks every
-    /// `interval` (at least [`MIN_POLL_INTERVAL`](tutti_cpal::MIN_POLL_INTERVAL)). The
+    /// `interval`. The
     /// loop is a task on the session's executor, each look a step on its blocking pool;
     /// a look that fails is tried again at the next tick, and dropping or replacing the
     /// watch cancels the loop without waiting on a look in progress.
@@ -263,7 +263,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
     pub fn watch_host(
         &mut self,
         host: tutti_cpal::AudioHost,
-        interval: Duration,
+        interval: tutti_cpal::PollInterval,
         policy: DevicePolicy,
     ) -> Result<()> {
         tutti_cpal::DeviceHost::open(host)?;
@@ -958,7 +958,8 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         self.check_device(spec.channels, topology.as_ref())?;
         // The new device's callback size too: a hosted plugin's pipeline
         // follows it, and its declared latency with it.
-        self.graph.reprepare(rate, max_block, spec.quantum)?;
+        self.graph
+            .reprepare(rate, max_block, spec.quantum.map(OutputQuantum::max_block))?;
         // The transport's rate first: it marks every frame-timed command sent
         // from here on as already in the new rate's frames, and the engine's
         // settle below rescales only the ones before the mark.
@@ -1012,7 +1013,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // from the engine's own readings.
         self.midi.set_block(
             spec.quantum
-                .unwrap_or(self.graph.prepared().max_block())
+                .map_or(self.graph.prepared().max_block(), OutputQuantum::max_block)
                 .samples(),
             rate,
         );

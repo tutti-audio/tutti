@@ -1,10 +1,11 @@
 use super::*;
 use core::f64::consts::TAU;
+use core::num::NonZeroUsize;
 
 fn lattice(delay: usize, gain: f64, len: usize) -> Vec<f64> {
     let mut ap = AllPassFilter::<f64>::new(
         AllPassForm::Lattice,
-        Samples::new(delay),
+        NonZeroUsize::new(delay).unwrap(),
         Feedback::new(gain),
     );
     let mut h = vec![0.0; len];
@@ -73,4 +74,18 @@ fn the_lattice_group_delay_at_dc_is_d_times_one_plus_g_over_one_minus_g() {
     let want = d as f64 * (1.0 + g) / (1.0 - g);
     // The central difference errs by `tau'' eps^2 / 6`, 3e-6 here.
     assert!((delay - want).abs() < 1e-5, "{delay} vs {want}");
+}
+
+/// The delay is the frames asked for: one frame is one frame, and there is no zero to
+/// refuse because the argument is a `NonZeroUsize`.
+#[test]
+fn a_one_frame_delay_is_one_frame_and_the_response_has_its_closed_form() {
+    let ap = AllPassFilter::<f64>::new(AllPassForm::Lattice, NonZeroUsize::MIN, Feedback::new(0.5));
+    assert_eq!(ap.delay(), Samples::new(1));
+    // Lattice `(z^-1 - g) / (1 - g z^-1)` at `g = 1/2`: `h[0] = -g`, `h[n] = (1 - g^2) g^(n-1)`.
+    let h = lattice(1, 0.5, 4);
+    let want = [-0.5, 0.75, 0.375, 0.1875];
+    for (n, (got, want)) in h.iter().zip(want).enumerate() {
+        assert!((got - want).abs() < 1e-15, "h[{n}] = {got}, want {want}");
+    }
 }

@@ -27,7 +27,7 @@ fn node(width: u16, taps: &[Tap]) -> EarlyReflectionsNode<f32> {
 }
 
 /// The shape is the input's width in and a channel for each one a tap feeds out, with no
-/// latency; an empty layout is mono; the tail is the last tap, and the output holds to it.
+/// latency; an empty layout is no channels; the tail is the last tap, and the output holds to it.
 #[test]
 fn the_shape_is_the_input_width_to_the_taps_channels_with_no_latency() {
     let taps = [tap(3.0, 0.5, 0), tap(40.0, -0.25, 1)];
@@ -40,7 +40,7 @@ fn the_shape_is_the_input_width_to_the_taps_channels_with_no_latency() {
     assert_eq!(shape.latency, tutti_units::Latency::new(Samples::ZERO));
     assert_eq!(shape.tail, Tail::Finite(Samples::new(40)));
     assert_declared_tail(&mut n, RATE);
-    assert_eq!(node(0, &taps).shape().audio_in().count(), 1);
+    assert_eq!(node(0, &taps).shape().audio_in().count(), 0);
 }
 
 /// An impulse through the node is the taps' gains at their delays on their channels, whatever

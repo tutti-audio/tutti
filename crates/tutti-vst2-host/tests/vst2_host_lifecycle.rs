@@ -588,7 +588,7 @@ fn editor_idle_reaches_an_open_editor() {
         .open_editor(main_thread(), parent, ContentScale::IDENTITY)
         .expect("the probe opens");
     // `effEditGetRect` is the probe's 320 by 240, read before `effEditOpen`.
-    let size = size.to_physical::<u32>(1.0);
+    let size = size.window.to_physical::<u32>(1.0);
     assert_eq!((size.width, size.height), (320, 240));
     instance.loaded_mut().editor_idle(main_thread());
     instance.loaded_mut().editor_idle(main_thread());
@@ -680,7 +680,7 @@ fn editor_keys_reach_an_open_editor_and_its_answer_is_reported() {
     assert_eq!(read_capture().key_events, 0, "and the plugin heard nothing");
 
     let parent = tutti_fixtures::StandInWindow.handle();
-    instance
+    let _opened = instance
         .loaded_mut()
         .open_editor(main_thread(), parent, ContentScale::IDENTITY)
         .expect("the probe opens");

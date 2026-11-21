@@ -13,7 +13,7 @@ fn mfcc(norm: MelNorm, coefficients: u16) -> Mfcc {
             .norm(norm),
     )
     .unwrap();
-    Mfcc::new(bank, NonZeroUsize::new(coefficients.into()).unwrap())
+    Mfcc::new(bank, NonZeroUsize::new(coefficients.into()).unwrap()).unwrap()
 }
 
 fn spectrum(seed: u64) -> Vec<f64> {
@@ -94,4 +94,22 @@ fn a_silent_or_non_finite_spectrum_reads_zero() {
         m.process(&x, &mut c);
         assert!(c.iter().all(|&v| v == 0.0), "{c:?}");
     }
+}
+
+/// More coefficients than the bank has bands is refused with both counts.
+#[test]
+fn more_coefficients_than_bands_is_refused() {
+    let bank = MelFilterbank::try_from(MelConfig::new(
+        MelBandCount::of(BANDS),
+        BinCount(BINS),
+        Hz::new(15.625),
+    ))
+    .unwrap();
+    assert_eq!(
+        Mfcc::new(bank, NonZeroUsize::new(usize::from(BANDS) + 1).unwrap()),
+        Err(TooManyOutputs {
+            outputs: usize::from(BANDS) + 1,
+            inputs: usize::from(BANDS)
+        })
+    );
 }

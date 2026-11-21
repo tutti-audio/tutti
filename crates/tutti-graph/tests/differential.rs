@@ -609,7 +609,7 @@ proptest! {
             pair.editor.spec_mut().topology.nodes = spec.topology.nodes.clone();
             pair.editor.spec_mut().topology.inputs = spec.topology.inputs;
             let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapOptions::new(Samples::new(1 << 16))).expect("the sources exist");
-            let mut heard = pair.editor.open_output_tap(TapId::of(2), channels, Samples::new(1 << 16)).expect("the sources exist");
+            let mut heard = pair.editor.open_heard_tap(TapId::of(2), channels, Samples::new(1 << 16)).expect("the sources exist");
             pair.switch(&valid, &desc.kinds);
             let width = tap.width();
             prop_assert_eq!(heard.width(), channels);

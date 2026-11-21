@@ -17,11 +17,11 @@ pub struct EarlyReflectionsConfig {
 }
 
 impl EarlyReflectionsConfig {
-    /// A stage of `taps` (a rectangular room's come from [`ShoeboxRoom::taps`](tutti_dsp::ShoeboxRoom::taps)) over an input of `width` channels (an empty layout is taken as mono).
+    /// A stage of `taps` (a rectangular room's come from [`ShoeboxRoom::taps`](tutti_dsp::ShoeboxRoom::taps)) over an input of `width` channels.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>, taps: TapSet) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             taps,
         }
     }

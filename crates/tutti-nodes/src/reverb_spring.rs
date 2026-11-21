@@ -22,13 +22,13 @@ pub struct SpringReverbConfig {
 }
 
 impl SpringReverbConfig {
-    /// A spring of `width` channels (an empty layout is taken as mono) at
+    /// A spring of `width` channels at
     /// [`SpringLayout::DEFAULT`] and [`SpringControls::DEFAULT`]: forty stages, a 40 ms loop,
     /// a decay of 2 s, a 4 kHz tone and full dispersion.
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             layout: SpringLayout::DEFAULT,
             controls: SpringControls::DEFAULT,
         }
@@ -248,11 +248,11 @@ mod tests {
         );
     }
 
-    /// An empty layout is taken as mono.
+    /// An empty layout is no channels, not one.
     #[test]
-    fn an_empty_layout_is_mono() {
+    fn an_empty_layout_has_no_channels() {
         let n = SpringReverbNode::<f32>::from(SpringReverbConfig::new(ChannelLayout::EMPTY));
-        assert_eq!(n.shape().audio_in().count(), 1);
+        assert_eq!(n.shape().audio_in().count(), 0);
     }
 
     /// Started at no dispersion the node delays an impulse by the cascades' `M K = 40 * 4 =

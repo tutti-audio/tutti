@@ -159,8 +159,8 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
     let beat = |n| Tick::quarters(n, DIVISION).expect("eight quarters fit");
     let mut track = Track::new()
-        .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
-        .meta(beat(4), Meta::tempo(Bpm::of(60.0))); // 60 BPM from beat 4
+        .meta(Tick(0), Meta::tempo(Bpm::of(120.0)).unwrap())
+        .meta(beat(4), Meta::tempo(Bpm::of(60.0)).unwrap()); // 60 BPM from beat 4
     for n in 0..8u8 {
         let key = NoteNumber::of(60 + n);
         track = track.note(
