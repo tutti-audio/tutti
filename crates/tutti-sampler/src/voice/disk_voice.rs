@@ -32,7 +32,7 @@ use super::interp::{Gate, Place, past_window, place};
 use super::live_read::{LiveRead, Out};
 use super::memory_source::VoiceWindow;
 use super::offline_read::OfflineRead;
-use super::types::Direction;
+use super::types::PlayDirection;
 use crate::lanes::{Gather, Lanes, UNPREPARED_FRAMES, audible_gain};
 use crate::streamer::{Cells, SharedReader, StatusCell, StreamFile, StreamId, StreamReader};
 use tutti_timeline::TempoReader;
@@ -288,7 +288,7 @@ struct Origin<F: SamplerFloat> {
 #[derive(Clone, Debug, Default)]
 struct Offline<F: SamplerFloat> {
     /// The direction the stream played in when the fork was taken.
-    direction: Direction,
+    direction: PlayDirection,
     /// The file, from the streamer's record when the fork was taken. `None`
     /// when the stream was gone by then: silence.
     read: Option<OfflineRead<F>>,
@@ -1017,7 +1017,7 @@ impl<F: SamplerFloat> Node<F> for DiskVoice<F> {
 /// The handle a host keeps on a [`DiskVoice`] inserted as a node of its
 /// own: the stream's playback controls (its cells, which the voice reads once
 /// per block). Control thread. The stream's direction and loop are not here:
-/// they are the streamer's, set through [`Stream`](crate::Stream).
+/// they are the streamer's, set through [`StreamHandle`](crate::StreamHandle).
 #[derive(Clone)]
 pub struct DiskVoiceControls {
     state: Arc<Cells>,

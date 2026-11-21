@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tutti_modulation::{Clock, Curve, Law, LfoRate, Polarity, Source, TargetKey};
+use tutti_modulation::{Curve, Law, LayerClock, LfoRate, Polarity, Source, TargetKey};
 use tutti_nodes::automation::Trajectory;
 use tutti_rt::LockExt;
 use tutti_units::Bipolar;
@@ -91,11 +91,11 @@ impl Held for RateField {
     fn current(&self) -> LfoRate {
         match self.0.get() {
             Source::Lfo {
-                clock: Clock::Beats { per_cycle, .. },
+                clock: LayerClock::Beats { per_cycle, .. },
                 ..
             } => LfoRate::Beats(per_cycle),
             Source::Lfo {
-                clock: Clock::Seconds { rate, .. },
+                clock: LayerClock::Seconds { rate, .. },
                 ..
             } => LfoRate::Hz(rate),
             _ => unreachable!("the slot is unregistered before the source stops being an LFO"),
@@ -115,10 +115,10 @@ impl Held for RateField {
                 return false;
             };
             // The phase offset stays; the compile dates the rate change.
-            let (Clock::Beats { phase, .. } | Clock::Seconds { phase, .. }) = *clock;
+            let (LayerClock::Beats { phase, .. } | LayerClock::Seconds { phase, .. }) = *clock;
             let next = match *value {
-                LfoRate::Beats(per_cycle) => Clock::Beats { per_cycle, phase },
-                LfoRate::Hz(rate) => Clock::Seconds {
+                LfoRate::Beats(per_cycle) => LayerClock::Beats { per_cycle, phase },
+                LfoRate::Hz(rate) => LayerClock::Seconds {
                     rate,
                     phase,
                     anchor: None,

@@ -73,4 +73,4 @@ pub use node::{VoiceNode, VoiceNodeError};
 pub use pool::{PoolDrops, VoicePool};
 /// The voice vocabulary: what a voice is, which tier it reads from, and the
 /// control intent recorded for it. Documented on `types`.
-pub use types::{Direction, Playback, SlotId, Voice, VoiceSource};
+pub use types::{PlayDirection, Playback, SlotId, Voice, VoiceSource};

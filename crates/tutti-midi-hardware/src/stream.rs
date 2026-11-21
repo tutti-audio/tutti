@@ -95,12 +95,12 @@ use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
-use crate::peer::PeerError;
+use crate::peer::PeerRequestError;
 use crate::process::{self, ProcessChange, ReportAsk};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
 use crate::properties::{self, PropertyAsk, PropertyChange};
 use crate::session::Presented;
-use tutti_midi_device::DeviceId;
+use tutti_midi_device::MidiDeviceId;
 
 /// Where an input's event times come from: what a device is asked to send, and
 /// what the input edge reads.
@@ -422,7 +422,7 @@ impl Negotiation {
     /// has an output. It asks only a UMP Endpoint that has an output; any
     /// other is [`Basis::Described`] at once.
     pub(crate) fn new(
-        device: DeviceId,
+        device: MidiDeviceId,
         os: Endpoint,
         out: Option<OpenOutput>,
         timing: InputTiming,
@@ -504,12 +504,12 @@ impl Negotiation {
     }
 
     /// Asks that a peer be made a Property Exchange call at the next poll.
-    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerError> {
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerRequestError> {
         self.ci.ask_property(ask)
     }
 
     /// Asks that a peer be sent a MIDI Message Report request at the next poll.
-    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerError> {
+    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerRequestError> {
         self.ci.report(ask)
     }
 

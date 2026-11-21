@@ -8,7 +8,7 @@
 //! comb and all-pass order). The banks' tests hold a render's RT60, pre-delay, freeze and line
 //! lengths to analytic figures, and the node tests hold the reported tail to the network's tail.
 //! Algorithms not built here fit the model too: a Schroeder all-pass is a one-line network, early reflections are a
-//! [`Taps`](network::Taps) stage, and a convolution is the [`Fir`](network::Stage::Fir)
+//! [`TapSet`](network::TapSet) stage, and a convolution is the [`Fir`](network::NetworkStage::Fir)
 //! stage's summary.
 
 pub(crate) mod fdn;

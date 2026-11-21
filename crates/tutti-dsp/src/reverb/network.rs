@@ -50,7 +50,7 @@ pub const MAX_STAGES: usize = 8;
 /// The most channels an [`Fdn`] outputs or an all-pass stage runs on. A size of the
 /// storage, not a property of the network.
 pub const MAX_CHANNELS: usize = 8;
-/// The most taps in one [`Taps`] stage.
+/// The most taps in one [`TapSet`] stage.
 pub const MAX_TAPS: usize = 64;
 /// The most entries of a [`Matrix::Dense`]: a 16 by 16 matrix.
 pub const MAX_DENSE: usize = 256;
@@ -104,7 +104,7 @@ pub struct Network {
     /// The pre-delay in whole frames: `round(seconds * rate)`.
     pub pre_delay: Samples,
     /// The stages, in series.
-    pub stages: Inline<Stage, MAX_STAGES>,
+    pub stages: Inline<NetworkStage, MAX_STAGES>,
     /// The stereo width of the wet signal.
     pub width: StereoWidth,
     /// The wet gain.
@@ -144,14 +144,14 @@ pub(crate) fn pre_delay_frames(pre_delay: Seconds, rate: SampleRate) -> Samples 
 
 /// One stage of a [`Network`].
 // Boxing the large variant would allocate: the size is the price of a network
-// built without the heap. Every `Stage` is about 8 KB whatever its variant (an
-// `Inline` array of `Stage` is as large as its largest member), so a short
+// built without the heap. Every `NetworkStage` is about 8 KB whatever its variant (an
+// `Inline` array of `NetworkStage` is as large as its largest member), so a short
 // all-pass stage costs as much as an `Fdn`.
 #[expect(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
-pub enum Stage {
+pub enum NetworkStage {
     /// Sparse taps: early reflections. No feedback.
-    Taps(Taps),
+    Taps(TapSet),
     /// A series Schroeder all-pass on each output channel.
     AllPass(Inline<AllPass, MAX_CHANNELS>),
     /// Delay lines with feedback.
@@ -160,20 +160,20 @@ pub enum Stage {
     Fir(FirSummary),
 }
 
-impl Default for Stage {
+impl Default for NetworkStage {
     fn default() -> Self {
-        Stage::Taps(Taps::default())
+        NetworkStage::Taps(TapSet::default())
     }
 }
 
 /// A sparse tap set: early reflections.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Taps {
+pub struct TapSet {
     /// The taps.
     pub taps: Inline<Tap, MAX_TAPS>,
 }
 
-/// One tap of [`Taps`].
+/// One tap of [`TapSet`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Tap {
     /// The delay in frames. A tap at less than one frame is a direct path.

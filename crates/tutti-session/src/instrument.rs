@@ -284,8 +284,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         handle: InstrumentHandle<N>,
     ) -> Result<(), RemoveError> {
         // The feed into the instrument goes with the queue (`Graph::remove`).
-        let queue = self.remove(handle.queue.erase());
-        let strip = self.remove(handle.strip.erase());
+        let queue = self.remove(handle.queue.erase()).map(|_| ());
+        let strip = self.remove(handle.strip.erase()).map(|_| ());
         queue.and(strip)
     }
 

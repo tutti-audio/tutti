@@ -498,7 +498,7 @@ node_slot_target!(
 #[cfg(feature = "sampler")]
 node_slot_target!(
     /// Which way a sampler voice plays, as `sampler.direction()` names it:
-    /// [`Direction::Reverse`](tutti_sampler::Direction) reads the source from
+    /// [`Direction::Reverse`](tutti_sampler::PlayDirection) reads the source from
     /// its end and ignores the loop.
     ///
     /// A write is staged and published by the next
@@ -509,7 +509,7 @@ node_slot_target!(
     /// mirrored, frame `len - 1 - p`, and goes on backwards from there. A read
     /// answers the staged direction, else the one in force. A write to a node removed before the update is dropped.
     DirectionTarget,
-    tutti_sampler::Direction,
+    tutti_sampler::PlayDirection,
     Direction
 );
 

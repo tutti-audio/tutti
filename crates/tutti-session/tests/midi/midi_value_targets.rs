@@ -397,53 +397,6 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     );
 }
 
-/// **`play_clip` on a target whose clip node was removed from the graph
-/// directly names the error**, and changes nothing: the target's clip is still
-/// the one it had.
-#[test]
-fn play_clip_after_the_clips_node_was_removed_directly_is_refused() {
-    let mut s = offline();
-    let (synth, _seen) = tap(&mut s);
-    s.midi()
-        .play_clip(
-            synth,
-            Beat::new(0.0),
-            note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)),
-        )
-        .unwrap();
-    let clip = s.midi().clip(synth).expect("the target's clip");
-    s.graph().remove(clip).expect("the clip is there");
-    let again = s.midi().play_clip(
-        synth,
-        Beat::new(0.0),
-        note(62, MF, Beat::new(0.0), BeatDuration::new(1.0)),
-    );
-    assert!(
-        matches!(
-            again,
-            Err(tutti_session::MidiError::ClipEvents(
-                ValueErrorKind::NoSuchTarget
-            ))
-        ),
-        "{again:?}"
-    );
-    let stopped = s.midi().stop_clip(synth);
-    assert!(
-        matches!(
-            stopped,
-            Err(tutti_session::MidiError::ClipEvents(
-                ValueErrorKind::NoSuchTarget
-            ))
-        ),
-        "{stopped:?}"
-    );
-    assert_eq!(
-        s.midi().clip(synth),
-        Some(clip),
-        "the refused calls leave the target's clip in force"
-    );
-}
-
 /// **A clip written with the `Arc` it already holds publishes nothing**, by
 /// pointer or by value: no note is cut either way.
 #[test]

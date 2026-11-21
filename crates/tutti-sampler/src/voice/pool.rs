@@ -198,7 +198,7 @@ pub(crate) enum LoopRoute {
     /// On the voice's in-memory source, by the drain.
     Memory,
     /// On its streamer stream (the stream it reads, which a loop is set on
-    /// through the handle's [`Stream`](crate::Stream), from the control
+    /// through the handle's [`StreamHandle`](crate::StreamHandle), from the control
     /// thread).
     Stream(StreamId),
 }
@@ -401,7 +401,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// one at a non-stereo width, [`with_channels`](Self::with_channels). Its
     /// controls come with it into the graph ([`IntoNode`]).
     ///
-    /// A streaming voice's loop and direction are its [`Stream`](crate::Stream)'s,
+    /// A streaming voice's loop and direction are its [`StreamHandle`](crate::StreamHandle)'s,
     /// set from the control thread, never from here: a streaming voice is
     /// added with its stream through the handle
     /// ([`add_streaming`](VoicePoolHandle::add_streaming)), and the pool
@@ -433,7 +433,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     /// the node by hand. A handle taken before goes dead
     /// ([`SendError::Disconnected`](super::command::SendError::Disconnected)).
     ///
-    /// The handle holds the [`Stream`](crate::Stream) of every streaming voice
+    /// The handle holds the [`StreamHandle`](crate::StreamHandle) of every streaming voice
     /// added through it ([`add_streaming`](VoicePoolHandle::add_streaming)): a
     /// loop or a direction set for one is set on its stream.
     #[must_use]
@@ -608,7 +608,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     fn apply_queued_direction(
         &mut self,
         id: SlotId,
-        direction: super::types::Direction,
+        direction: super::types::PlayDirection,
         forwarded: Option<StreamId>,
     ) {
         let Some(slot) = self.voices.iter_mut().find(|s| s.id == id) else {

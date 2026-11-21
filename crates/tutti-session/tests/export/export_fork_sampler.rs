@@ -22,8 +22,8 @@ use tutti_export::Produced;
 use tutti_graph::NodeKey;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, Stream, StreamReader, StreamStart,
-    Voice, VoiceNode, VoiceSource, VoiceWindow,
+    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, StreamHandle, StreamReader,
+    StreamStart, Voice, VoiceNode, VoiceSource, VoiceWindow,
 };
 use tutti_session::BufferMaster;
 use tutti_session::{
@@ -212,7 +212,7 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 fn streamer_on(
     path: &Path,
 ) -> (
-    (DiskStreamer<Manual<f32>, f32>, Stream<f32>),
+    (DiskStreamer<Manual<f32>, f32>, StreamHandle<f32>),
     StreamReader<f32>,
 ) {
     let mut streamer =

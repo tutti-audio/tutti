@@ -24,9 +24,16 @@ use tutti_midi_hardware::{MidiHardwareConfig, MidiSession, OpenOutput};
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{MidiChannel, NoteKeyEvent, Ump};
 
-/// The loopback endpoint.
-fn pick(list: &[DeviceInfo]) -> Option<&DeviceInfo> {
-    list.iter().find(|e| e.name.contains("Midi Through"))
+/// `Midi Through`'s input (`input`) or output, once `io` lists it.
+fn through(io: &MidiSession, input: bool) -> DeviceInfo {
+    super::listing::listed(io, "`Midi Through` (`sudo modprobe snd-seq-dummy`)", |d| {
+        let way = if input {
+            d.direction.is_input()
+        } else {
+            d.direction.is_output()
+        };
+        way && d.name.contains("Midi Through")
+    })
 }
 
 /// A session with `Midi Through` connected both ways, and the graph that
@@ -45,11 +52,7 @@ fn open() -> Loopback {
     let executor = tutti_platform::Executor::new();
     let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
         .expect("open MIDI");
-    let inputs = io.inputs();
-    let outputs = io.outputs();
-    let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
-        panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
-    };
+    let (inp, out) = (through(&io, true), through(&io, false));
     let tutti_midi_hardware::Connected::Opened(inlet) = io
         .connect_input(super::opening::started(&io), &inp.id)
         .expect("connect input")
@@ -182,11 +185,7 @@ fn an_input_reopened_at_once_hears_a_note() {
     let executor = tutti_platform::Executor::new();
     let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
         .expect("open MIDI");
-    let (inputs, outputs) = (io.inputs(), io.outputs());
-    let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
-        panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
-    };
-    let (input_id, output_id) = (inp.id.clone(), out.id.clone());
+    let (input_id, output_id) = (through(&io, true).id, through(&io, false).id);
     let mut sink = io
         .connect_output(super::opening::started(&io), &output_id)
         .expect("connect output");

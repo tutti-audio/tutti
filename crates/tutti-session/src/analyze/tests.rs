@@ -8,7 +8,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, Mono, Wave};
 use tutti_fixtures::signal;
 use tutti_measure::{
-    ChromaConfig, FiniteLevel, FrequencyBand, Meter, PeakBlocks, PeakConfig, SilenceConfig,
+    ChromaConfig, FiniteLevel, FrequencyBand, PeakBlocks, PeakConfig, SilenceConfig, StreamMeter,
     VectorscopeConfig,
 };
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
@@ -213,7 +213,7 @@ impl tutti_measure::Measure<f32> for Counting {
     }
 }
 
-impl Meter for CountingMeter {
+impl StreamMeter for CountingMeter {
     type Input<'a> = tutti_buffers::Mono<'a>;
     type Item = ();
     type Output = usize;
@@ -251,7 +251,7 @@ impl tutti_measure::Measure<f32> for ChannelPeaks {
     }
 }
 
-impl Meter for ChannelPeaksMeter {
+impl StreamMeter for ChannelPeaksMeter {
     type Input<'a> = tutti_buffers::StereoPlanes<'a>;
     type Item = ();
     type Output = [f32; 2];
@@ -319,7 +319,7 @@ impl<S: Float> tutti_measure::Measure<S> for MaxAbs {
     }
 }
 
-impl<S: Float> Meter for MaxAbsMeter<S> {
+impl<S: Float> StreamMeter for MaxAbsMeter<S> {
     type Input<'a> = Mono<'a, S>;
     type Item = ();
     type Output = f64;

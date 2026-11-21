@@ -32,7 +32,7 @@ use tutti_graph::{
     Prepare, Renderer, declick_frames,
 };
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, ControlProgramBuilder, Layer, LayerId, Polarity, Waveform,
+    Amount, ControlProgram, ControlProgramBuilder, Layer, LayerClock, LayerId, Polarity, Waveform,
 };
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
@@ -95,7 +95,7 @@ const LANE: NodeKey = NodeKey(9_000);
 fn konst(depth: f64) -> Layer {
     Layer {
         id: LayerId(1),
-        clock: Clock::Beats {
+        clock: LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
             phase: PhaseIncrement::new(0.0),
         },

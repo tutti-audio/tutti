@@ -29,7 +29,7 @@ use crate::background::Background;
 use crate::clock::sealed::Streaming;
 use crate::graph::Graph;
 use crate::value::{SlotCell, ValueState, ValueTable};
-use crate::{Clock, Offline, OutputPolicy, RealTime, RemoveError, SessionFloat};
+use crate::{Clock, Offline, OutputPolicy, RealTime, Removal, RemoveError, SessionFloat};
 use parts::{
     BouncePart, DevicePart, EarlyWork, Inputs, MidiPart, OutputPart, PluginPart, Reports,
     SamplerPart, TransportPart,
@@ -391,8 +391,16 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         pinned
     }
 
-    /// Takes `node` out of the graph ([`Graph::remove`]). Any thread that
-    /// owns the session: the removal frees nothing itself. The unit is freed
+    /// Takes `node` out of the graph, whatever it is (a plugin, an inlet, a
+    /// clip): every edge to and from it reads silence afterwards, so a sink
+    /// still naming it is left silent rather than dangling, and the feeds into
+    /// and from it go. The edges fade out first (a declicked removal): the node
+    /// stays in the editor, rendering, until they have. [`Removal::unfaded`] cuts
+    /// it at the next block boundary instead. A replacement waiting on it is
+    /// dropped and reported
+    /// ([`SessionEvent::ReplaceDropped`]).
+    ///
+    /// Any thread that owns the session: the removal frees nothing itself. The unit is freed
     /// when the executor hands it back, at a collect, which is where the
     /// main-thread guard is (see the type docs).
     ///
@@ -408,16 +416,19 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`RemoveError::NoSuchNode`] when `node` is not in the graph (removed
     /// already, or never added); nothing changes, the session's declarations
     /// on it included.
-    pub fn remove(&mut self, node: impl Into<NodeKey>) -> Result<(), RemoveError> {
+    pub fn remove(
+        &mut self,
+        node: impl Into<NodeKey>,
+    ) -> Result<Removal<'_, C::Float>, RemoveError> {
         let node = node.into();
         self.graph.remove(node)?;
         self.forget_removed();
-        Ok(())
+        Ok(Removal::new(&mut self.graph, node))
     }
 
     /// Forgets what the session declared on every node removed since the
-    /// last call, through this session's [`remove`](Self::remove) or the
-    /// graph's own: modulation, MIDI routes, the capture of an input.
+    /// last call, through this session's [`remove`](Self::remove) or a removal of
+    /// the session's own: modulation, MIDI routes, the capture of an input.
     fn forget_removed(&mut self) {
         // Until nothing more goes: a clip's transform removed with its clip
         // is a removal too.

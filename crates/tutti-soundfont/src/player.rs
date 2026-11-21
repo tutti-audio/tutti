@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
@@ -153,6 +155,22 @@ fn voice_config(polyphony: NonZeroUsize) -> VoiceConfig {
         .with_percussion(PERCUSSION_CHANNEL)
 }
 
+/// How many program changes named a bank and program the SoundFont does not have, so that the
+/// channel sounds the fallback preset ([`SoundFontUnit::missing_presets`](crate::SoundFontUnit::missing_presets)).
+///
+/// A handle on one count that the unit, its forks and its re-rated copies all add to: read it
+/// on the control side after the unit is in a graph.
+#[derive(Clone, Debug, Default)]
+pub struct MissingPresets(Arc<AtomicU64>);
+
+impl MissingPresets {
+    /// The program changes counted so far.
+    #[must_use]
+    pub fn get(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
 /// The player. Its voices are built against a rate and cannot be re-rated in
 /// place: [`rerated`](Self::rerated) builds another.
 #[derive(Debug, Clone)]
@@ -164,6 +182,8 @@ pub(crate) struct Player<F: Float + SimdLanes> {
     default_preset: usize,
 
     channels: Vec<Channel>,
+    /// The program changes that named a preset the font lacks.
+    missing: MissingPresets,
     allocator: VoiceAllocator,
     voices: Voices<F>,
     /// The Group's Universal System Exclusive, reassembled and filtered by
@@ -246,6 +266,7 @@ impl<F: Float + SimdLanes> Player<F> {
             presets,
             default_preset,
             channels,
+            missing: MissingPresets::default(),
             allocator: VoiceAllocator::new(voice_config(polyphony.voices())),
             voices: Voices::new(&render, polyphony.get()),
             universal,
@@ -359,8 +380,22 @@ impl<F: Float + SimdLanes> Player<F> {
 
     /// Selects the program `channel` plays, in the bank held by Bank Select
     /// (M1 p.13).
+    ///
+    /// A bank and program the font has no preset for sound the fallback
+    /// ([`preset_of`](Self::preset_of)), and the change is counted in
+    /// [`missing_presets`](Self::missing_presets).
     pub(crate) fn program_change(&mut self, channel: MidiChannel, program: U7) {
-        self.channels[channel.index()].program_change(program);
+        let info = &mut self.channels[channel.index()];
+        info.program_change(program);
+        let id = (info.bank_number() << 16) | info.patch_number();
+        if !self.presets.contains_key(&id) {
+            self.missing.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// The handle on the count of program changes to a preset the font lacks.
+    pub(crate) fn missing_presets(&self) -> MissingPresets {
+        self.missing.clone()
     }
 
     /// Selects `preset` on `channel`: its bank and its program. `None` when the
@@ -579,6 +614,7 @@ impl<F: Float + SimdLanes> Player<F> {
         // The font has a playable preset, or `self` was not built.
         let mut player = Self::at(self.config.clone(), render).ok()?;
         player.channels = self.channels.clone();
+        player.missing = self.missing.clone();
         // The core's channel state (wheel, sensitivity); its notes are not
         // the new player's, which has no voice.
         player.allocator = self.allocator.clone();

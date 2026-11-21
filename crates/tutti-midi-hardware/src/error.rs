@@ -13,7 +13,7 @@ use thiserror::Error;
 pub enum NotFound {
     /// No device is present under this id: what a stale id resolves to.
     #[error("no MIDI device {0}")]
-    Device(tutti_midi_device::DeviceId),
+    Device(tutti_midi_device::MidiDeviceId),
 
     /// No endpoint answers to this id: a handle the OS has since retired, or
     /// one this platform's backend never minted.
@@ -89,14 +89,14 @@ pub enum MidiHardwareError {
     #[error("MIDI device {id} is {direction:?}")]
     WrongDirection {
         /// The device.
-        id: tutti_midi_device::DeviceId,
+        id: tutti_midi_device::MidiDeviceId,
         /// Which way it does go.
         direction: tutti_midi_device::PortDirection,
     },
 
     /// The device has no open input: it was never connected, or was closed.
     #[error("MIDI device {0} has no open input")]
-    NotConnected(tutti_midi_device::DeviceId),
+    NotConnected(tutti_midi_device::MidiDeviceId),
 
     /// Another connection or application holds the endpoint, and the OS lets
     /// only one.

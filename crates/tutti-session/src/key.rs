@@ -723,7 +723,7 @@ impl Inlet<Event> for EventInPort {
 }
 
 /// A port with a set of sources: what [`Graph::sources`],
-/// [`Graph::set_sources`] and [`Graph::disconnect_all`] take, so one
+/// [`Graph::set_sources`] takes, so one
 /// vocabulary covers an audio [`InPort`] (its sources sum) and an
 /// [`EventInPort`] (its sources merge). Sealed.
 pub trait Fanin: Sealed + Copy {
@@ -738,8 +738,6 @@ pub trait Fanin: Sealed + Copy {
         from: Vec<Self::Source>,
         hard: bool,
     ) -> Result<Vec<EdgeId>, ConnectError>;
-    #[doc(hidden)]
-    fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError>;
 }
 
 impl Fanin for InPort {
@@ -755,10 +753,6 @@ impl Fanin for InPort {
         hard: bool,
     ) -> Result<Vec<EdgeId>, ConnectError> {
         graph.set_channel_sources(self, from, hard)
-    }
-    fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError> {
-        graph.check_in(self)?;
-        Ok(graph.disconnect_all_channels(self))
     }
 }
 
@@ -776,10 +770,6 @@ impl Fanin for EventInPort {
     ) -> Result<Vec<EdgeId>, ConnectError> {
         graph.set_event_sources_of(self, &from)?;
         Ok(Vec::new())
-    }
-    fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError> {
-        graph.check_event_in(self)?;
-        Ok(graph.disconnect_all_events(self))
     }
 }
 
@@ -909,7 +899,7 @@ impl<'g, W: Wire, F: Float> Disconnection<'g, W, F> {
     }
 }
 
-/// What a [`Graph::remove`] did, and the step that makes the cut land at the
+/// What a [`Session::remove`](crate::Session::remove) did, and the step that makes the cut land at the
 /// next block boundary instead of fading the node out.
 ///
 /// Dropping it keeps the removal as the call left it: the node's output edges

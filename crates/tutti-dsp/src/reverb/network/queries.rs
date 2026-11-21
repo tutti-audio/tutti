@@ -5,7 +5,7 @@ use tutti_units::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 use crate::{DecayTime, System};
 
 use super::gain::decay_seconds;
-use super::{AllPass, AllPassForm, Band, Fdn, Matrix, Network, Stage, energy};
+use super::{AllPass, AllPassForm, Band, Fdn, Matrix, Network, NetworkStage, energy};
 
 /// How far from 1 a gain may be and still be lossless.
 const LOSSLESS_TOLERANCE: f64 = 1e-6;
@@ -312,13 +312,13 @@ fn all_pass_ring(a: &AllPass, amplitude: f64) -> f64 {
 impl Network {
     fn fdns(&self) -> impl Iterator<Item = &Fdn> {
         self.stages.iter().filter_map(|s| match s {
-            Stage::Fdn(f) => Some(f),
+            NetworkStage::Fdn(f) => Some(f),
             _ => None,
         })
     }
 
     /// The RT60 in `band`: the slowest decay of any recirculating stage (a
-    /// [`Stage::Fir`] reports its summary; taps and series all-passes add
+    /// [`NetworkStage::Fir`] reports its summary; taps and series all-passes add
     /// none). Zero for a network that does not recirculate; infinity for a
     /// loop that never settles.
     ///
@@ -331,8 +331,8 @@ impl Network {
         let mut slowest = Seconds::ZERO;
         for stage in self.stages.iter() {
             let r = match stage {
-                Stage::Fdn(f) => f.rt60(band, rate),
-                Stage::Fir(s) => s.rt60[band.index()],
+                NetworkStage::Fdn(f) => f.rt60(band, rate),
+                NetworkStage::Fir(s) => s.rt60[band.index()],
                 _ => Seconds::ZERO,
             };
             slowest = slowest.max(r);
@@ -362,10 +362,10 @@ impl Network {
             .stages
             .iter()
             .map(|s| match s {
-                Stage::Fdn(f) => f.lines.iter().map(|l| l.effective_frames()).sum(),
-                Stage::AllPass(a) => a.iter().map(|a| a.delay.get()).sum(),
-                Stage::Fir(s) => s.length.get() as f64,
-                Stage::Taps(_) => 0.0,
+                NetworkStage::Fdn(f) => f.lines.iter().map(|l| l.effective_frames()).sum(),
+                NetworkStage::AllPass(a) => a.iter().map(|a| a.delay.get()).sum(),
+                NetworkStage::Fir(s) => s.length.get() as f64,
+                NetworkStage::Taps(_) => 0.0,
             })
             .sum();
         Seconds::new(frames / self.rate.get())
@@ -386,10 +386,10 @@ impl Network {
         let mut total = 0.0f64;
         for stage in self.stages.iter() {
             match stage {
-                Stage::Fdn(f) if !f.lines.is_empty() => {
+                NetworkStage::Fdn(f) if !f.lines.is_empty() => {
                     total += fdn_density(f, self.rate, t);
                 }
-                Stage::Fir(s) if t.get() * rate < s.length.get() as f64 => total += rate,
+                NetworkStage::Fir(s) if t.get() * rate < s.length.get() as f64 => total += rate,
                 _ => {}
             }
         }
@@ -405,10 +405,10 @@ impl Network {
         let mut frames = SampleSpan::from_samples(self.pre_delay);
         for stage in self.stages.iter() {
             frames += match stage {
-                Stage::Taps(t) => t.taps.iter().map(|t| t.delay).reduce(SampleSpan::min),
+                NetworkStage::Taps(t) => t.taps.iter().map(|t| t.delay).reduce(SampleSpan::min),
                 // A form with a direct term (`-g`, or `-1`) is a path of no
                 // delay; a lattice at `g = 0` is a plain delay.
-                Stage::AllPass(a) => a
+                NetworkStage::AllPass(a) => a
                     .iter()
                     .map(|a| {
                         if a.has_direct_term() {
@@ -418,8 +418,8 @@ impl Network {
                         }
                     })
                     .reduce(SampleSpan::min),
-                Stage::Fdn(f) => f.lines.iter().map(|l| l.length).reduce(SampleSpan::min),
-                Stage::Fir(s) => Some(SampleSpan::from_samples(s.onset)),
+                NetworkStage::Fdn(f) => f.lines.iter().map(|l| l.length).reduce(SampleSpan::min),
+                NetworkStage::Fir(s) => Some(SampleSpan::from_samples(s.onset)),
             }?;
         }
         Some(frames)
@@ -440,7 +440,7 @@ impl System for Network {
         self.stages
             .iter()
             .filter_map(|s| match s {
-                Stage::Fir(s) => Some(s.latency),
+                NetworkStage::Fir(s) => Some(s.latency),
                 _ => None,
             })
             .max()
@@ -469,16 +469,16 @@ impl System for Network {
         let mut frames = self.pre_delay.get() as f64;
         for stage in self.stages.iter() {
             match stage {
-                Stage::Taps(t) => {
+                NetworkStage::Taps(t) => {
                     frames += t.taps.iter().map(|t| t.delay.get()).fold(0.0, f64::max);
                 }
-                Stage::AllPass(a) => {
+                NetworkStage::AllPass(a) => {
                     frames += a
                         .iter()
                         .map(|a| all_pass_ring(a, amplitude))
                         .fold(0.0, f64::max);
                 }
-                Stage::Fdn(f) => {
+                NetworkStage::Fdn(f) => {
                     frames += f.transit();
                     if f.is_lossless() {
                         return DecayTime::Unbounded;
@@ -489,7 +489,7 @@ impl System for Network {
                         decay = decay.max(seconds);
                     }
                 }
-                Stage::Fir(s) => frames += s.length.get() as f64,
+                NetworkStage::Fir(s) => frames += s.length.get() as f64,
             }
         }
         if !frames.is_finite() || !decay.is_finite() {

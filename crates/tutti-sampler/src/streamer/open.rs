@@ -1,6 +1,6 @@
 //! Opening a stream: the request ([`StreamStart`]), its refusals ([`OpenError`],
 //! [`AdoptError`]) and what an adopted stream is made of: the control side's
-//! [`Stream`] and the audio side's one [`StreamReader`].
+//! [`StreamHandle`] and the audio side's one [`StreamReader`].
 //!
 //! The ring's width comes from the file's header, so the ring is built after the
 //! file is read ([`OpenStream::run`](crate::OpenStream::run)), on the control thread
@@ -24,8 +24,8 @@ use super::decode::OpenedStream;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
-use super::stream::{Stream, StreamerPort};
-use crate::voice::Direction;
+use super::stream::{StreamHandle, StreamerPort};
+use crate::voice::PlayDirection;
 use crate::voice::interp::Place;
 use crate::{Loop, PlaceError};
 use tutti_rt::RingFloat;
@@ -130,7 +130,7 @@ pub(crate) struct Opened<F: RingFloat> {
     pub(crate) ring: SharedReader<F>,
     pub(crate) pos: PosReader<F>,
     pub(crate) cells: Arc<Cells>,
-    /// What the stream's handle reads of it ([`Stream::status`]).
+    /// What the stream's handle reads of it ([`StreamHandle::status`]).
     pub(crate) status: Arc<StatusCell>,
     /// What the stream plays, immutable.
     pub(crate) file: Arc<StreamFile<F>>,
@@ -139,7 +139,7 @@ pub(crate) struct Opened<F: RingFloat> {
     /// The loop and direction the control side asks for, which the streamer
     /// reads: the handle holds the publishing ends.
     pub(crate) looping: ControlCell<Option<Loop>>,
-    pub(crate) direction: ControlCell<Direction>,
+    pub(crate) direction: ControlCell<PlayDirection>,
     pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
@@ -161,9 +161,9 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 pub(super) fn serve<F: RingFloat>(
     opened: Opened<F>,
     port: StreamerPort<F>,
-) -> (Stream<F>, StreamReader<F>) {
+) -> (StreamHandle<F>, StreamReader<F>) {
     (
-        Stream::new(
+        StreamHandle::new(
             opened.id,
             port,
             Arc::clone(&opened.status),

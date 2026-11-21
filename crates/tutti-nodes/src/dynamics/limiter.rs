@@ -8,7 +8,6 @@ use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterSignals, Lookahead, PeakDetection,
-    TruePeakError,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Samples, Seconds, Tail};
@@ -108,7 +107,8 @@ impl LimiterConfig {
     /// The audio is delayed by `lookahead` (at least one frame) so the gain decision can run
     /// ahead of it.
     ///
-    /// **The lookahead is the node's latency.** Longer catches peaks more transparently and
+    /// **The lookahead is the node's latency**, except that true-peak
+    /// [`detection`](Self::detection) raises it to the detector's floor. Longer catches peaks more transparently and
     /// delays more; [`Lookahead::DEFAULT`], 5 ms, is a typical compromise. It is fixed here,
     /// because it sizes the delay: the frame count is derived from these seconds at the rate
     /// [`Node::prepare`](tutti_graph::Node::prepare) hands it, and again at every other rate.
@@ -121,12 +121,11 @@ impl LimiterConfig {
     ///
     /// [`TruePeak`](PeakDetection::TruePeak) limits the signal between the samples too, to
     /// within [`LimiterBank::TRUE_PEAK_MARGIN`] (0.56 dB) of the ceiling for content in the
-    /// oversampler's passband, and its detection must line up with the lookahead: one under
-    /// the up-sampler's delay (about 20 frames) is lengthened to the shortest that does at
-    /// the rate the node is prepared at, and the latency the node declares is that length;
-    /// [`LimiterBank::detecting`] is the one that refuses. The up-sampler designs at every
-    /// rate a device runs at; a rate whose transition width does not fit `f32` panics at
-    /// prepare.
+    /// oversampler's passband. The [lookahead](Self::lookahead) is then a floor: the detection
+    /// needs the up-sampler's delay (about 20 frames) of lookahead, and a shorter lookahead is
+    /// raised to that at the rate the node is prepared at, computed once there. The latency the
+    /// node declares is the frames used ([`LimiterBank::detecting`] does the raise). The up-sampler designs at every rate a device runs at; a rate whose
+    /// transition width does not fit `f32` panics at prepare.
     #[must_use]
     pub fn detection(self, detection: PeakDetection) -> Self {
         Self { detection, ..self }
@@ -210,16 +209,9 @@ impl<F: Float> Kernel for LimiterKernel<F> {
     /// Sizes the delay from the lookahead at `rate`: a re-prepare empties it.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let (layout, detection) = (self.input.layout(), self.detection);
+        // `prepare` has no refusal path: the up-sampler fails to design only at a rate whose
+        // transition width does not fit `f32` (a rate no device has).
         let bank = LimiterBank::detecting(layout, self.lookahead, rate, detection)
-            .or_else(|e| match e {
-                TruePeakError::Lookahead { shortest, .. } => {
-                    LimiterBank::detecting(layout, shortest, rate, detection)
-                }
-                design @ TruePeakError::Design(_) => Err(design),
-            })
-            // The up-sampler fails to design only at a rate whose transition width does not fit
-            // `f32` (a rate no device has), and the shortest lookahead lines up by
-            // construction.
             .expect("the true-peak up-sampler designs at every rate a device runs at");
         self.bank = Some(bank);
     }
@@ -910,17 +902,16 @@ mod tests {
         );
         let frames = tp.shape().latency.samples().get();
         assert!(frames > 10, "{frames}");
-        let bank = LimiterBank::<f32>::detecting(
+        let needed = LimiterBank::<f32>::detecting(
             ChannelLayout::MONO,
             short,
             SampleRate::SR_48K,
             PeakDetection::TruePeak,
-        );
-        let tutti_dsp::TruePeakError::Lookahead { needed, .. } = bank.expect_err("too short")
-        else {
-            panic!("not a lookahead refusal");
-        };
-        assert!(frames >= needed.get());
+        )
+        .unwrap()
+        .latency()
+        .get();
+        assert_eq!(frames, needed, "the node declares the floor itself");
     }
 
     /// An `f64` kernel keeps its gain and its delay in `f64`: under a threshold at the ceiling

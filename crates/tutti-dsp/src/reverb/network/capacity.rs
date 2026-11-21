@@ -3,7 +3,7 @@
 
 use tutti_units::{Db, SampleSpan, Samples};
 
-use super::{Network, Stage};
+use super::{Network, NetworkStage};
 use crate::{DecayTime, System};
 
 /// The size of a [`Network`], or the worst case over a layout's controls: every
@@ -51,7 +51,7 @@ impl NetworkCapacity {
         };
         for stage in network.stages.iter() {
             match stage {
-                Stage::Taps(t) => {
+                NetworkStage::Taps(t) => {
                     b.taps += t.taps.len();
                     b.delay += t
                         .taps
@@ -59,12 +59,12 @@ impl NetworkCapacity {
                         .map(|t| t.delay)
                         .fold(SampleSpan::ZERO, SampleSpan::max);
                 }
-                Stage::AllPass(a) => {
+                NetworkStage::AllPass(a) => {
                     b.delay = a
                         .iter()
                         .fold(b.delay, |sum, a| sum + a.delay + a.modulation.depth);
                 }
-                Stage::Fdn(f) => {
+                NetworkStage::Fdn(f) => {
                     b.lines += f.lines.len();
                     b.outputs = b.outputs.max(f.output.rows.len());
                     for l in f.lines.iter() {
@@ -77,7 +77,7 @@ impl NetworkCapacity {
                         b.delay += len;
                     }
                 }
-                Stage::Fir(s) => b.ir = b.ir.max(s.length),
+                NetworkStage::Fir(s) => b.ir = b.ir.max(s.length),
             }
         }
         b

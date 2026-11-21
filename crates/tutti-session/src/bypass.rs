@@ -255,16 +255,28 @@ pub(crate) mod tests {
     }
 
     impl AnyThread for Plugin {
-        fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-            Some(vec![
-                ParameterInfo::new(ID, "bypass").with_flags(ParamFlags::BYPASS, ParamFlags::BYPASS),
-            ])
+        fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+            let read = || {
+                Some(vec![
+                    ParameterInfo::new(ID, "bypass")
+                        .with_flags(ParamFlags::BYPASS, ParamFlags::BYPASS),
+                ])
+            };
+            tutti_plugin_types::answered(read())
         }
         fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
             self.readable
                 .load(SeqCst)
                 .then(|| bypass_value(self.held.load(SeqCst)))
         }
+
+        fn parameter_value_answer(
+            &self,
+            id: ParamId,
+        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::answered(self.parameter_value(id))
+        }
+
         fn set_parameter_value(
             &self,
             _id: ParamId,
@@ -293,8 +305,13 @@ pub(crate) mod tests {
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
             None
         }
-        fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
-            None
+        fn parameter_normalized(
+            &self,
+            _id: ParamId,
+            _plain: f64,
+        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            let read = || None;
+            tutti_plugin_types::answered(read())
         }
         fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
             None
@@ -354,7 +371,10 @@ pub(crate) mod tests {
         )
         .with_server_pid(served.then_some(1234));
         let (mut mirror, read) = PluginParamValues::start(&handle);
-        mirror.land(read.run().expect("the fake answers"));
+        mirror.land(
+            futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+                .expect("the fake answers"),
+        );
         (handle, plugin, mirror)
     }
 

@@ -1,4 +1,4 @@
-use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, PortDirection, SavedDevice};
+use tutti_midi_device::{DeviceInfo, Learned, Match, MidiDeviceId, PortDirection, SavedDevice};
 use tutti_ump::ProductInstanceId;
 use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
@@ -52,7 +52,7 @@ fn a_saved_device_round_trips_and_a_bare_info_reads_as_knowing_nothing() {
     let info: DeviceInfo = serde_json::from_value(table_info.clone()).unwrap();
     assert_eq!(
         info.id,
-        serde_json::from_value::<DeviceId>(table_info["id"].clone()).unwrap()
+        serde_json::from_value::<MidiDeviceId>(table_info["id"].clone()).unwrap()
     );
     assert_eq!(info.direction, PortDirection::Input);
 

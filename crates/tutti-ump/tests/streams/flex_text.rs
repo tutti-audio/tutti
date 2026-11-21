@@ -3,9 +3,9 @@
 //! entry point holds a message to.
 
 use tutti_ump::{
-    Entry, EntryError, FLEX_TEXT_MAX_LEN, Flex, FlexAddress, FlexTextAssembler, FlexTextKind,
-    FlexTextStep, Form, Iso8601Date, LyricKind, Message, MidiChannel, MidiGroup, PlainTextKind,
-    Syllable, SyllableBody, SyllableEnd, Text, TextError, Ump, flex_clip_name_packets,
+    Entry, EntryError, FLEX_TEXT_MAX_LEN, Flex, FlexAddress, FlexTextAssembler, FlexTextError,
+    FlexTextKind, FlexTextStep, Form, Iso8601Date, LyricKind, Message, MidiChannel, MidiGroup,
+    PlainTextKind, Syllable, SyllableBody, SyllableEnd, Text, Ump, flex_clip_name_packets,
     flex_lyric_packets, flex_project_name_packets, flex_recording_date_packets, flex_text_packets,
 };
 
@@ -91,7 +91,7 @@ fn the_length_is_exact() {
 /// Zero is the padding, so a text holding one is refused.
 #[test]
 fn a_nul_is_refused() {
-    assert_eq!(Text::try_from("a\0b").err(), Some(TextError::Nul));
+    assert_eq!(Text::try_from("a\0b").err(), Some(FlexTextError::Nul));
 }
 
 /// A Flex Data message has at most 32 packets: a Start, 30 Continue and an
@@ -105,7 +105,7 @@ fn a_message_has_at_most_32_packets() {
     assert_eq!(umps.len(), 32);
     assert_eq!(
         Text::try_from(&*format!("{longest}x")).err(),
-        Some(TextError::TooLong)
+        Some(FlexTextError::TooLong)
     );
 }
 
@@ -255,7 +255,7 @@ fn several_entities_in_one_text_are_separated_by_commas() {
     assert_eq!(Entry::try_from("").err(), Some(EntryError::Empty));
     // A list past the longest text is refused.
     let long = "x".repeat(200);
-    assert_eq!(list(&[&long, &long]).err(), Some(TextError::TooLong));
+    assert_eq!(list(&[&long, &long]).err(), Some(FlexTextError::TooLong));
 }
 
 /// M2-104 section 7.5.9.2: the date text is ISO 8601, a date with an optional

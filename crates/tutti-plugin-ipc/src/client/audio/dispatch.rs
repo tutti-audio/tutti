@@ -1051,7 +1051,14 @@ pub(super) fn handle_control(
             };
             reply.send(value);
         }
-        ControlCommand::GetParameter { param_id, reply } => {
+        ControlCommand::GetParameter {
+            param_id,
+            flush,
+            reply,
+        } => {
+            if let Some(applied) = flush {
+                let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
+            }
             let value = match query(
                 lane,
                 inbox,
@@ -1350,7 +1357,7 @@ pub(super) fn apply_rate_reply(
             inbox.rate_refusal(Some(refusal));
         }
         None => {
-            if lifecycle.rate_refusal().is_some() {
+            if lifecycle.is_rate_refused() {
                 lifecycle.set_rate_refusal(None);
                 inbox.rate_refusal(None);
             }

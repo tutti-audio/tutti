@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tutti_midi_file::{Normalized, TimelineDrop};
+use tutti_midi_file::{ReadRepair, TimelineDrop};
 use tutti_music::TimeSignature;
 use tutti_session::{DetachedSession, LoadedMidi, NoCommonTimelineError, Session, TrackError};
 use tutti_units::{Beat, SampleRate, Seconds};
@@ -165,10 +165,10 @@ fn a_repaired_file_reports_what_the_read_added() {
     let loaded = load(&mut session(), write(dir.path(), "bare.mid", &bytes)).expect("loads");
     let report = loaded.report();
     assert_eq!(
-        report.normalized,
+        report.repairs,
         vec![
-            Normalized::DefaultTempo { track: 0 },
-            Normalized::DefaultTimeSignature { track: 0 },
+            ReadRepair::DefaultTempo { track: 0 },
+            ReadRepair::DefaultTimeSignature { track: 0 },
         ]
     );
     assert!(report.dropped.is_empty());

@@ -1,7 +1,7 @@
 use tutti_units::{Amplitude, Db, Gain, SampleSpan, Seconds, StereoWidth};
 
 use super::*;
-use crate::reverb::network::{Gains, Inline, LineModulation, NetworkOutputMap, Tap, Taps};
+use crate::reverb::network::{Gains, Inline, LineModulation, NetworkOutputMap, Tap, TapSet};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -44,7 +44,7 @@ fn fdn(lines: &[Line], matrix: Matrix, input: &[f64], output: &[f64]) -> Fdn {
     }
 }
 
-fn network(stages: Vec<Stage>) -> Network {
+fn network(stages: Vec<NetworkStage>) -> Network {
     let mut n = Network::new(RATE);
     for s in stages {
         n.stages.push(s).unwrap();
@@ -79,7 +79,7 @@ fn the_two_all_pass_forms_have_their_documented_gains() {
         };
         let mut channels = Inline::new();
         channels.push(a).unwrap();
-        network(vec![Stage::AllPass(channels)])
+        network(vec![NetworkStage::AllPass(channels)])
     };
     let (lattice, freeverb) = (ap(AllPassForm::Lattice), ap(AllPassForm::Freeverb));
     let pi_over_d = std::f64::consts::PI / 8.0;
@@ -115,7 +115,7 @@ fn an_all_pass_has_the_l1_norm_of_its_impulse_response() {
         };
         let mut channels = Inline::new();
         channels.push(a).unwrap();
-        let n = network(vec![Stage::AllPass(channels)]);
+        let n = network(vec![NetworkStage::AllPass(channels)]);
         // The impulse response from the difference equation.
         let d = 4usize;
         let len = 80 * d;
@@ -157,7 +157,7 @@ fn a_circulant_feeds_the_next_line_round_the_cycle() {
         &[1.0, 0.0, 0.0],
         &[0.0, 0.0, 1.0],
     );
-    let n = network(vec![Stage::Fdn(f)]);
+    let n = network(vec![NetworkStage::Fdn(f)]);
     for w in [0.0, 0.1, 0.77, 2.0, 3.1] {
         let z = |d: f64| delay(w, d);
         let want = z(m[0] + m[2]) * g / (ONE - z(m[0] + m[1] + m[2]) * g.powi(3));
@@ -177,7 +177,12 @@ fn a_hadamard_is_the_sylvester_matrix() {
     let m = [31.0f64, 37.0, 43.0, 47.0];
     let lines = m.map(|m| line(m, gain(0.7)));
     let (b, c) = ([1.0, 0.5, 0.25, 0.125], [0.3, 0.1, 0.2, 0.4]);
-    let hadamard = network(vec![Stage::Fdn(fdn(&lines, Matrix::Hadamard, &b, &c))]);
+    let hadamard = network(vec![NetworkStage::Fdn(fdn(
+        &lines,
+        Matrix::Hadamard,
+        &b,
+        &c,
+    ))]);
     let h = [
         [1.0f64, 1.0, 1.0, 1.0],
         [1.0, -1.0, 1.0, -1.0],
@@ -185,7 +190,7 @@ fn a_hadamard_is_the_sylvester_matrix() {
         [1.0, -1.0, -1.0, 1.0],
     ];
     let flat: Vec<f64> = h.iter().flatten().map(|x| x / 2.0).collect();
-    let dense = network(vec![Stage::Fdn(fdn(&lines, dense(&flat), &b, &c))]);
+    let dense = network(vec![NetworkStage::Fdn(fdn(&lines, dense(&flat), &b, &c))]);
     for w in [0.0, 0.2, 1.1, 3.0] {
         assert!(close(at(&hadamard, w), at(&dense, w)), "w {w}");
     }
@@ -221,8 +226,8 @@ fn the_rank_one_solve_equals_elimination() {
         (Matrix::Householder, householder),
         (Matrix::Reflection(gains(&v)), reflection),
     ] {
-        let a = network(vec![Stage::Fdn(fdn(&lines, fast, &b, &c))]);
-        let d = network(vec![Stage::Fdn(fdn(&lines, slow, &b, &c))]);
+        let a = network(vec![NetworkStage::Fdn(fdn(&lines, fast, &b, &c))]);
+        let d = network(vec![NetworkStage::Fdn(fdn(&lines, slow, &b, &c))]);
         for w in [0.0, 0.05, 0.9, 2.5, std::f64::consts::PI] {
             assert!(
                 close(at(&a, w), at(&d, w)),
@@ -245,7 +250,7 @@ fn elimination_is_cramers_rule_on_two_lines() {
     let lines = m.map(|m| line(m, gain(3.0)));
     let a = [[0.0f64, 1.0], [1.0, 0.0]];
     let flat: Vec<f64> = a.iter().flatten().copied().collect();
-    let n = network(vec![Stage::Fdn(fdn(
+    let n = network(vec![NetworkStage::Fdn(fdn(
         &lines,
         dense(&flat),
         &[1.0, 0.0],
@@ -276,7 +281,7 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
     let want = (0..2)
         .map(|i| libm::pow(g[i], 1.0 / m[i]))
         .fold(0.0, f64::max);
-    let n = network(vec![Stage::Fdn(f)]);
+    let n = network(vec![NetworkStage::Fdn(f)]);
     assert!(
         (n.spectral_radius() - want).abs() < 1e-6,
         "{}",
@@ -284,7 +289,7 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
     );
     assert!(n.spectral_radius() < 1.0);
 
-    let frozen = network(vec![Stage::Fdn(fdn(
+    let frozen = network(vec![NetworkStage::Fdn(fdn(
         &[line(500.0, gain(1.0)), line(700.0, gain(1.0))],
         Matrix::Householder,
         &[1.0, 1.0],
@@ -293,7 +298,7 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
     assert_eq!(frozen.spectral_radius(), 1.0);
     // A reflection of a vector a rounding off unit length is still lossless
     // (to the tolerance), and its radius is 1, not the rounding's `1 + 2e-7`.
-    let nearly = network(vec![Stage::Fdn(fdn(
+    let nearly = network(vec![NetworkStage::Fdn(fdn(
         &[
             line(500.0, gain(1.0)),
             line(700.0, gain(1.0)),
@@ -308,7 +313,7 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
         nearly
             .stages
             .iter()
-            .any(|s| matches!(s, Stage::Fdn(f) if f.is_lossless()))
+            .any(|s| matches!(s, NetworkStage::Fdn(f) if f.is_lossless()))
     );
     assert_eq!(nearly.spectral_radius(), 1.0);
     // Stable, though the default `radius < 1` would refuse it.
@@ -322,10 +327,10 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
             ..AllPass::default()
         })
         .unwrap();
-    let ap = network(vec![Stage::AllPass(channels)]);
+    let ap = network(vec![NetworkStage::AllPass(channels)]);
     assert!((ap.spectral_radius() - libm::pow(0.5, 0.01)).abs() < 1e-12);
 
-    let taps = Taps {
+    let taps = TapSet {
         taps: Inline::from_slice(&[Tap {
             delay: SampleSpan::of(10.0),
             gain: Gain::new(0.5),
@@ -333,9 +338,12 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
         }])
         .unwrap(),
     };
-    assert_eq!(network(vec![Stage::Taps(taps)]).spectral_radius(), 0.0);
+    assert_eq!(
+        network(vec![NetworkStage::Taps(taps)]).spectral_radius(),
+        0.0
+    );
 
-    let hostile = network(vec![Stage::Fdn(fdn(
+    let hostile = network(vec![NetworkStage::Fdn(fdn(
         &[line(0.0, gain(0.5))],
         Matrix::Diagonal,
         &[1.0],
@@ -351,7 +359,7 @@ fn the_spectral_radius_is_the_slowest_decay_per_frame() {
 /// response, which is run here from the difference equations.
 #[test]
 fn the_l1_norm_is_exact_for_a_comb_and_a_bound_for_a_mixing_loop() {
-    let comb = network(vec![Stage::Fdn(fdn(
+    let comb = network(vec![NetworkStage::Fdn(fdn(
         &[line(7.0, gain(0.8))],
         Matrix::Diagonal,
         &[0.5],
@@ -365,7 +373,7 @@ fn the_l1_norm_is_exact_for_a_comb_and_a_bound_for_a_mixing_loop() {
 
     // Three Householder-mixed lines of gain 0.6, run in `f64`.
     let (m, g) = ([5usize, 7, 11], 0.6f64);
-    let n = network(vec![Stage::Fdn(fdn(
+    let n = network(vec![NetworkStage::Fdn(fdn(
         &m.map(|m| line(m as f64, gain(g))),
         Matrix::Householder,
         &[1.0, 0.5, 0.25],
@@ -404,27 +412,29 @@ fn the_l1_norm_is_exact_for_a_comb_and_a_bound_for_a_mixing_loop() {
 }
 
 /// A loop the analysis cannot bound has an infinite l1 norm and a
-/// [`Stage::Fir`] has no response: NaN where asked, and radius 0.
+/// [`NetworkStage::Fir`] has no response: NaN where asked, and radius 0.
 #[test]
 fn a_fir_has_no_response_and_no_l1_bound() {
-    let n = network(vec![Stage::Fir(crate::reverb::network::FirSummary {
-        length: tutti_units::Samples::new(100),
-        onset: tutti_units::Samples::new(0),
-        latency: tutti_units::Samples::new(0),
-        rt60: [Seconds::new(1.0); 3],
-        energy: 1.0,
-    })]);
+    let n = network(vec![NetworkStage::Fir(
+        crate::reverb::network::FirSummary {
+            length: tutti_units::Samples::new(100),
+            onset: tutti_units::Samples::new(0),
+            latency: tutti_units::Samples::new(0),
+            rt60: [Seconds::new(1.0); 3],
+            energy: 1.0,
+        },
+    )]);
     assert!(n.l1_norm().is_infinite() && n.hinf_norm().is_infinite());
     assert!(at(&n, 0.3).re.is_nan());
     assert_eq!(n.spectral_radius(), 0.0);
 }
 
-/// Taps sum their gains at their delays: `H = sum g e^(-j w d)`, `l1 = sum |g|`;
+/// TapSet sum their gains at their delays: `H = sum g e^(-j w d)`, `l1 = sum |g|`;
 /// the channels are the taps' channels, and width and wet follow the kernel's
 /// mid and side: `(M + w S, M - w S) * wet`.
 #[test]
 fn taps_width_and_wet_follow_the_kernels_fold() {
-    let taps = Taps {
+    let taps = TapSet {
         taps: Inline::from_slice(&[
             Tap {
                 delay: SampleSpan::of(3.0),
@@ -439,7 +449,7 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
         ])
         .unwrap(),
     };
-    let mut n = network(vec![Stage::Taps(taps)]);
+    let mut n = network(vec![NetworkStage::Taps(taps)]);
     assert_eq!(n.outputs(), 2);
     assert!((n.l1_norm() - 0.5).abs() < 1e-12);
     let w = 0.7;
@@ -467,7 +477,7 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
 /// Pre-delay is a delay of `P` frames in front of the stages: `e^(-j w P)`.
 #[test]
 fn the_pre_delay_is_a_delay() {
-    let mut n = network(vec![Stage::Taps(Taps {
+    let mut n = network(vec![NetworkStage::Taps(TapSet {
         taps: Inline::from_slice(&[Tap {
             delay: SampleSpan::of(0.0),
             gain: Gain::new(1.0),

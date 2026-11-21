@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use tutti_midi_device::{EndpointId, Identity, OsChange, OsDevice, PortDirection};
+use tutti_midi_device::{EndpointId, OsChange, OsDevice, OsEndpointIdentity, PortDirection};
 
 use super::{ChangeSink, SeedError};
 
@@ -21,7 +21,7 @@ use super::{ChangeSink, SeedError};
 #[derive(Debug)]
 pub(crate) struct Reporter {
     sink: ChangeSink,
-    known: BTreeMap<EndpointId, Identity>,
+    known: BTreeMap<EndpointId, OsEndpointIdentity>,
 }
 
 impl Reporter {
@@ -61,7 +61,7 @@ impl Reporter {
     /// departure of each known one that is not, that has another identity now,
     /// or that `departed` names. The table drops what repeats.
     pub(crate) fn report(&mut self, present: Vec<OsDevice>, departed: impl Fn(EndpointId) -> bool) {
-        let now: BTreeMap<EndpointId, Identity> = present
+        let now: BTreeMap<EndpointId, OsEndpointIdentity> = present
             .iter()
             .map(|d| (d.handle, d.identity.clone()))
             .collect();

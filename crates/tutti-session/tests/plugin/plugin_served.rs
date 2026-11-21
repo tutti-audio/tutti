@@ -333,6 +333,21 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     assert_ne!(first.id(), second_handle.id());
 }
 
+/// **A served plugin arrives with its parameters read.** The load future awaits the
+/// read the server's replies feed, so the node's mirror is ready the moment the session
+/// adds it, with no `update` between: an app never sees a loaded plugin whose
+/// parameters are not read.
+#[test]
+fn a_served_plugin_arrives_with_its_parameters_read() {
+    const CUTOFF: ParamId = ParamId::new(101);
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let view = s.plugin_view(node).unwrap();
+    assert!(view.params().is_ready(), "read before the first update");
+    assert!(view.params().get(CUTOFF).is_ok(), "and declared");
+}
+
 /// **A reload composed from a node's info and state is awaited off the main
 /// thread and swapped in on it.** The load of the handle's id and hosting, from
 /// the state saved of the node, is `Send`: a spawned thread awaits it, and the
@@ -404,7 +419,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let mut s = session(true);
     let (_, a) = in_a_node(&mut s, &catalog, &first_id());
     let (_, gone) = in_a_node(&mut s, &catalog, &first_id());
-    s.graph().remove(gone).unwrap();
+    s.remove(gone).unwrap();
 
     assert_eq!(
         s.save_state(&gone, StateUse::Project)

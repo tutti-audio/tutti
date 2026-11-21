@@ -197,6 +197,7 @@ mod volume_envelope;
 
 pub use config::{Polyphony, PolyphonyError, SoundFontConfig};
 pub use error::{Error, Result};
+pub use player::MissingPresets;
 
 // `SoundFontUnit::fork_instance`: the unit in a fork of the graph
 // (an export), with its clip.
@@ -395,6 +396,19 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
             attribute: Attribute::None,
         };
         self.player.apply(channel, off);
+    }
+
+    /// The count of program changes, from the event input or [`program_change`](Self::program_change),
+    /// that named a bank and program the SoundFont has no preset for.
+    ///
+    /// Such a channel sounds General MIDI's program in bank 0 (the standard drum set for a drum
+    /// bank), else the font's first preset, as the wire has no caller to refuse to. The handle
+    /// shares the count with this unit's forks and re-rated copies, so an app takes it before
+    /// inserting the unit and reads it while the graph plays. A channel left on its initial
+    /// bank 0, program 0 with no change is not counted.
+    #[must_use]
+    pub fn missing_presets(&self) -> MissingPresets {
+        self.player.missing_presets()
     }
 
     /// Selects the preset a channel plays, bypassing MIDI.

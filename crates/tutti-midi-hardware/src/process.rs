@@ -7,7 +7,7 @@
 //! reply says they support MIDI Message Report. A request is made only from such
 //! a handle, so an app cannot ask a peer that never declared the category or
 //! answered that it lacks the feature. The handle is a snapshot: the peer may be
-//! lost before the request is sent, and that is refused ([`PeerError::NoSuchPeer`]).
+//! lost before the request is sent, and that is refused ([`PeerRequestError::NoSuchPeer`]).
 //!
 //! A report is a Reply, the MIDI messages themselves, and an End. The End is an
 //! [`Answer::Report`](crate::Answer::Report); the messages between the Reply and
@@ -18,10 +18,10 @@ use std::sync::Arc;
 
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{ProcessFeatures, ReportRequest};
-use tutti_midi_device::DeviceId;
+use tutti_midi_device::MidiDeviceId;
 use tutti_ump::MidiGroup;
 
-use crate::peer::{PeerError, PeerRef};
+use crate::peer::{PeerRef, PeerRequestError};
 
 /// A peer that declared Process Inquiry and answered that it supports MIDI
 /// Message Report: the handle a [`ReportAsk`] is made from.
@@ -33,7 +33,7 @@ pub struct Reporter {
 impl Reporter {
     /// The input device the peer was found on.
     #[must_use]
-    pub const fn device(&self) -> &DeviceId {
+    pub const fn device(&self) -> &MidiDeviceId {
         self.at.device()
     }
 
@@ -78,7 +78,7 @@ pub struct ReportAsk {
 impl ReportAsk {
     /// The input device the request was made from.
     #[must_use]
-    pub const fn device(&self) -> &DeviceId {
+    pub const fn device(&self) -> &MidiDeviceId {
         self.peer.at.device()
     }
 
@@ -93,12 +93,12 @@ impl ReportAsk {
     ///
     /// # Errors
     ///
-    /// [`PeerError::NoSuchPeer`] when the peer is gone or no longer supports
+    /// [`PeerRequestError::NoSuchPeer`] when the peer is gone or no longer supports
     /// MIDI Message Report.
     pub fn check<'a>(
         &self,
         peers: impl IntoIterator<Item = &'a Reporter>,
-    ) -> Result<(), PeerError> {
+    ) -> Result<(), PeerRequestError> {
         self.peer.at.find(peers, |peer| &peer.at).map(|_| ())
     }
 }
