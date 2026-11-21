@@ -58,7 +58,7 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// The phase vocoder, present once the voice has been asked to stretch or
     /// transpose: `None` reads the source dry, the common case. From then on it
     /// always runs, at unity too, so the voice's latency
-    /// ([`PhaseVocoder::latency`]) is constant. It owns no copy of the
+    /// ([`PhaseVocoder::latency`](tutti_dsp::PhaseVocoder::latency)) is constant. It owns no copy of the
     /// audio source: the read feeds it the source frames it asks for (see
     /// `stretched`).
     ///
@@ -172,7 +172,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
     /// are not, and nothing else clears them. The voice is unseated, and the
     /// next sounding frame seats it where the playhead now is.
     ///
-    /// RT-safe: [`PhaseVocoder::reset`] is buffer fills and cursor resets, no allocation.
+    /// RT-safe: [`PhaseVocoder::reset`](tutti_dsp::PhaseVocoder::reset) is buffer fills and cursor resets, no allocation.
     pub(crate) fn flush_playhead_state(&mut self) {
         self.voice.source.flush();
         if let Some(vocoders) = &mut self.stretch {

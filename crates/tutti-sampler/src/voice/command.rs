@@ -99,7 +99,7 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
     ///
     /// The drain does not drop the slot in the callback — it hands it to the
     /// control thread through the retirement ring, because freeing a
-    /// [`PhaseVocoder`] frees its rings. See
+    /// [`PhaseVocoder`](tutti_dsp::PhaseVocoder) frees its rings. See
     /// [`VoicePoolHandle::collect_retired`].
     Remove(SlotId),
     /// Point an in-memory slot at a different wave, keeping its placement,

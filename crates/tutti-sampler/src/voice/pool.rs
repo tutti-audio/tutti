@@ -39,7 +39,7 @@ use tutti_units::{SampleRate, Tail};
 /// Something the drain took ownership of and must not free in the callback.
 ///
 /// Every variant exists for the same reason: dropping it can free a large
-/// allocation — a [`PhaseVocoder`]'s rings (about 60 KB per channel), or a
+/// allocation — a vocoder pair's rings (about 120 KB per channel), or a
 /// decoded [`Wave`] whose last reference it is. Rather than teach each call
 /// site its own evasion, everything the drain needs to shed goes down one
 /// ring and is freed by [`VoicePoolHandle::collect_retired`] on the
