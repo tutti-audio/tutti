@@ -2,7 +2,7 @@
 //!
 //! [`process_audio`] is the *inner* seam: the engine render, callable without a
 //! driver. Everything around it in an output callback lives here: the
-//! [`MAX_FRAMES`] clamp, the zero-fill and the write to the driver's buffer.
+//! [`MAX_FRAMES`] ceiling, the zero-fill and the write to the driver's buffer.
 //! Keeping it outside the closure a backend runs is what lets a test run it
 //! without a sound card.
 //!
@@ -19,7 +19,7 @@
 //! The `debug_assert!` on the callback size deliberately does **not** live
 //! here: an over-sized buffer is a claim about a *backend's* contract, not about
 //! this block, so it belongs at the driver boundary. Keeping it out is also
-//! what lets a debug-build test observe the clamp instead of panicking before
+//! what lets a debug-build test observe the count instead of panicking before
 //! it.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -37,8 +37,11 @@ use crate::latency::StreamLatency;
 /// Maximum frames per driver callback buffer.
 ///
 /// The stream's mix buffer is sized to this once and never resized, so it is
-/// also the largest block [`process_audio`] can be handed: a longer callback is
-/// clamped and its tail silenced rather than reallocating on the audio thread.
+/// also the largest block [`process_audio`] can be handed: the tail of a longer
+/// callback is written silent, and counted in
+/// [`BlockCounts::truncated`](crate::BlockCounts::truncated), rather than
+/// reallocating on the audio thread. A stream is opened at an
+/// [`OutputQuantum`](crate::OutputQuantum), which is never longer.
 pub const MAX_FRAMES: usize = 8192;
 
 /// Everything the output callback reads: the [`Engine`].
@@ -71,7 +74,9 @@ impl<F: Float> AudioCallbackState<F> {
 ///
 /// **Runs on the audio thread. Must not allocate, lock, or block.** Every
 /// buffer it touches is sized once at stream build to [`MAX_FRAMES`]; a longer
-/// callback is clamped and its tail silenced rather than reallocating here.
+/// callback's tail is silenced and counted
+/// ([`BlockCounts::truncated`](crate::BlockCounts::truncated)) rather than
+/// reallocating here.
 /// `tests/no_alloc/block_no_alloc.rs` gates this against a disabled allocator.
 ///
 /// # Panics
@@ -100,9 +105,10 @@ fn process_audio_at<F: Float>(
 /// The working set one output stream's callback reads, sized once.
 ///
 /// Every buffer here is allocated in [`OutputBlock::new`], on the control
-/// thread, and never resized: a callback larger than [`MAX_FRAMES`] is
-/// clamped in [`render_with`](OutputBlock::render_with) and its tail silenced
-/// rather than reallocating on the audio thread.
+/// thread, and never resized: the tail of a callback larger than [`MAX_FRAMES`]
+/// is silenced in [`render_with`](OutputBlock::render_with) and counted in
+/// [`BlockCounts::truncated`](crate::BlockCounts::truncated) rather than
+/// reallocating on the audio thread.
 pub struct OutputBlock<F: Float = f32> {
     state: Arc<AudioCallbackState<F>>,
     /// The device's true channel layout. The engine folds the graph root to
@@ -192,11 +198,8 @@ impl<F: Float> OutputBlock<F> {
         self.channels
     }
 
-    /// Frames the last render actually produced, after the [`MAX_FRAMES`]
-    /// clamp.
-    ///
-    /// Exists so a test can assert the clamp happened rather than infer it
-    /// from a silent tail.
+    /// Frames the last render actually produced: the callback's, at most
+    /// [`MAX_FRAMES`].
     pub fn last_rendered_frames(&self) -> usize {
         self.last_rendered_frames
     }
@@ -327,13 +330,14 @@ impl<F: Float> OutputBlock<F> {
         stamp: Option<i64>,
         write: impl FnOnce(Interleaved<'_, F>, &mut [T]),
     ) {
-        // Clamp so we never allocate. If a backend hands us a larger buffer we
-        // process the head and write silence to the tail. The assertion that
-        // this should not happen lives at the driver boundary, not here.
-        let frames = self
-            .layout
-            .from_interleaved_len(data.len())
-            .min(Samples::new(MAX_FRAMES));
+        // The mix buffer never grows. A backend that hands a larger buffer than
+        // the stream opened with gets its head rendered and its tail silence,
+        // and the engine counts the callback (`BlockCounts::truncated`).
+        let offered = self.layout.from_interleaved_len(data.len());
+        let frames = offered.min(Samples::new(MAX_FRAMES));
+        if frames < offered {
+            self.state.engine.count_truncated();
+        }
         self.last_rendered_frames = frames.get();
 
         let mix = &mut self.buffer[..self.layout.interleaved_len(frames)];

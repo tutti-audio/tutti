@@ -221,7 +221,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.output.report_silenced(out);
             }
             Phase::Commit => {
-                self.apply_output_policy();
+                self.apply_output_policy(out);
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
                 self.graph.report_commit(out);
                 self.graph.report_rewired(out);

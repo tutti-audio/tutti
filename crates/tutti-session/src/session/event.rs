@@ -132,6 +132,12 @@ pub enum SessionEvent {
     /// budget are not silenced and have no event: that is the polled
     /// [`BlockCounts::over_budget`](tutti_engine::BlockCounts::over_budget).
     BlocksSilenced(u64),
+    /// A staged [`OutputPolicy`](crate::OutputPolicy)'s routing was checked
+    /// when it was set, and the engine refused it when it came to apply: it has
+    /// no place for a root on the device the stream renders into. The routing
+    /// in force is unchanged and the policy's levels are applied; set a routing
+    /// that places the root.
+    OutputRoutingRefused(tutti_engine::RoutingError),
     /// The session's rate changed with its clock: a switch onto a sound card
     /// that runs at another rate, or the card's rate carried to the timer. A
     /// capture a host holds itself (not one the session added) is at the old

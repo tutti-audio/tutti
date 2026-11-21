@@ -54,6 +54,21 @@ fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>
     let _ = s.update();
 }
 
+/// **A timer asked for a block past the callback ceiling is refused, never
+/// opened at a shorter one.** One frame past `MAX_FRAMES` names the quantum.
+#[test]
+fn a_system_clock_block_past_the_callback_ceiling_is_refused() {
+    let past = tutti_engine::MAX_FRAMES + 1;
+    let refused = system_builder()
+        .max_block(MaxBlock::of(Samples::new(past)))
+        .build();
+    assert!(
+        matches!(&refused, Err(Error::Quantum(q)) if q.0 == past),
+        "{:?}",
+        refused.err()
+    );
+}
+
 fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     let limit = Instant::now() + Duration::from_secs(10);
     while !done() {
@@ -232,7 +247,7 @@ fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
     assert_eq!(s.stream_spec().sample_rate, SampleRate::SR_48K);
     assert_eq!(
         s.stream_spec().quantum,
-        Some(MaxBlock::of(Samples::new(BLOCK)))
+        Some(tutti_engine::OutputQuantum::of(BLOCK))
     );
     wait_past(&mut s, before);
 }
@@ -502,7 +517,7 @@ fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_t
     assert_eq!(stream.channels, ChannelLayout::STEREO);
     assert_eq!(
         stream.quantum,
-        Some(MaxBlock::of(Samples::new(BLOCK))),
+        Some(tutti_engine::OutputQuantum::of(BLOCK)),
         "the old block"
     );
     wait_past(&mut s, before);

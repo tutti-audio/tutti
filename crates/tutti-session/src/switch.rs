@@ -36,7 +36,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, OutputConfig, TuttiDriver};
-use tutti_engine::{OutputSpec, StreamDriver, TimerDriver};
+use tutti_engine::{OutputQuantum, OutputSpec, StreamDriver, TimerDriver};
 use tutti_units::SampleRate;
 
 use crate::clock::SystemEngine;
@@ -260,7 +260,8 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
             |spec, stopped| self.rerate(spec, stopped, None, None),
         );
         if restored.is_err() {
-            host.sync_to_graph(&self.graph.prepared());
+            let synced = host.sync_to_graph(&self.graph.prepared());
+            debug_assert!(synced.is_ok(), "the graph's quantum came from the spec's");
         }
         self.reports
             .faults_restarted(host.stream().faults().count());
@@ -365,7 +366,11 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
     {
         let rate = self.device().graph_rate();
         let old = self.device().spec().clone();
-        let mut spec = old.clone().with_quantum(self.graph.prepared().max_block());
+        let quantum = match OutputQuantum::try_from(self.graph.prepared().max_block()) {
+            Ok(quantum) => quantum,
+            Err(e) => return Err(ClockError::new(self, e.into())),
+        };
+        let mut spec = old.clone().with_quantum(quantum);
         spec.sample_rate = rate;
         if let Err(e) = self.check_switch(spec.channels) {
             return Err(ClockError::new(self, e));
@@ -384,7 +389,8 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
             let undone = self.with_device(|session, device| undo(session, device, old));
             if undone.is_err() {
                 let prepared = self.graph.prepared();
-                self.device_mut().driver.sync_to_graph(&prepared);
+                let synced = self.device_mut().driver.sync_to_graph(&prepared);
+                debug_assert!(synced.is_ok(), "the graph's quantum came from the spec's");
             }
             self.reports
                 .faults_restarted(self.device().faults().count());
@@ -496,7 +502,7 @@ mod tests {
             ChannelLayout::STEREO,
             tutti_buffers::SampleFormat::F32,
         )
-        .with_quantum(MaxBlock::of(Samples::new(quantum)))
+        .with_quantum(OutputQuantum::of(quantum))
     }
 
     /// **A card that cannot be started again after a timer that would not
@@ -522,7 +528,10 @@ mod tests {
         assert!(!live.device().is_running(), "stopped");
         let prepared = live.graph.prepared();
         assert_eq!(live.device().spec().sample_rate, prepared.sample_rate());
-        assert_eq!(live.device().spec().quantum, prepared.quantum());
+        assert_eq!(
+            live.device().spec().quantum.map(OutputQuantum::max_block),
+            prepared.quantum()
+        );
         assert_eq!(live.device().graph_rate(), prepared.sample_rate());
     }
 
@@ -550,6 +559,9 @@ mod tests {
         let s = err.into_session();
         let prepared = s.graph.prepared();
         assert_eq!(s.stream_spec().sample_rate, prepared.sample_rate());
-        assert_eq!(s.stream_spec().quantum, prepared.quantum());
+        assert_eq!(
+            s.stream_spec().quantum.map(OutputQuantum::max_block),
+            prepared.quantum()
+        );
     }
 }

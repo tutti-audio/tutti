@@ -14,11 +14,43 @@ use std::sync::Arc;
 
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, SampleFormat};
-use tutti_units::SampleRate;
+use tutti_units::{SampleRate, Samples};
 
-use crate::callback::{AudioCallbackState, OutputBlock};
+use crate::callback::{AudioCallbackState, MAX_FRAMES, OutputBlock};
 use crate::faults::StreamFaults;
 use crate::latency::StreamLatency;
+
+tutti_units::ranged! {
+    /// The frames of one device callback, from one to [`MAX_FRAMES`]: the
+    /// largest buffer an output stream's callback renders whole.
+    OutputQuantum(usize), QuantumOutOfRange, "from one frame to MAX_FRAMES",
+    |raw| raw >= 1 && raw <= MAX_FRAMES
+}
+
+impl OutputQuantum {
+    /// This quantum as the longest block a graph is prepared for.
+    #[must_use]
+    pub const fn max_block(self) -> MaxBlock {
+        MaxBlock::of(Samples::new(self.get()))
+    }
+
+    /// This quantum as a frame count.
+    #[must_use]
+    pub const fn samples(self) -> Samples {
+        Samples::new(self.get())
+    }
+}
+
+impl Eq for OutputQuantum {}
+
+impl TryFrom<MaxBlock> for OutputQuantum {
+    type Error = QuantumOutOfRange;
+
+    /// The block as a quantum, refused when it is longer than [`MAX_FRAMES`].
+    fn try_from(block: MaxBlock) -> Result<Self, QuantumOutOfRange> {
+        Self::try_from(block.get())
+    }
+}
 
 /// The configuration an output stream is opened with: rate, width, sample
 /// format and callback size.
@@ -42,7 +74,7 @@ pub struct OutputSpec {
     /// (`tutti_graph::Prepare::with_quantum`), so a node that keeps work in
     /// step with the device (a hosted out-of-process plugin, which ships one
     /// callback's worth to its server per callback) can.
-    pub quantum: Option<MaxBlock>,
+    pub quantum: Option<OutputQuantum>,
 }
 
 impl OutputSpec {
@@ -63,11 +95,10 @@ impl OutputSpec {
 
     /// Returns this spec with a fixed `quantum`-frame callback buffer.
     ///
-    /// Keep `quantum` at or below [`MAX_FRAMES`](crate::MAX_FRAMES); a larger
-    /// callback is clamped and its tail silenced. A quantum is a [`MaxBlock`],
-    /// so a zero one cannot be written.
+    /// An [`OutputQuantum`] is from one frame to [`MAX_FRAMES`](crate::MAX_FRAMES),
+    /// so a quantum the callback could not render whole cannot be written.
     #[must_use]
-    pub fn with_quantum(mut self, quantum: MaxBlock) -> Self {
+    pub fn with_quantum(mut self, quantum: OutputQuantum) -> Self {
         self.quantum = Some(quantum);
         self
     }

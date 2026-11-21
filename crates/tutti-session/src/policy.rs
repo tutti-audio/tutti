@@ -163,12 +163,14 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
     }
 
     /// Applies a staged policy to the engine, in [`Phase::Commit`](crate::Phase::Commit).
-    pub(crate) fn apply_output_policy(&mut self) {
+    pub(crate) fn apply_output_policy(&mut self, out: &mut Vec<crate::SessionEvent>) {
         let Some(policy) = self.output.policy.take_staged() else {
             return;
         };
         if let Some(control) = self.graph.output_control() {
-            control.set_routing(policy.routing());
+            if let Err(refused) = control.set_routing(policy.routing()) {
+                out.push(crate::SessionEvent::OutputRoutingRefused(refused));
+            }
             control.set_levels(&policy.outputs);
         }
     }
