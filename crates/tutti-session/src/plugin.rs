@@ -154,7 +154,7 @@ use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::StateError;
 use tutti_plugin_types::{
-    IpcError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail,
+    IpcError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail, RenderMode,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -623,6 +623,13 @@ pub enum PluginChange {
         /// Why the state was not restored.
         reason: String,
     },
+    /// The plugin was prepared off the main thread, where a render mode change
+    /// cannot run: it keeps the mode it runs in, and the next prepare on the
+    /// main thread applies it. Not a refusal by the plugin.
+    RenderModeNotApplied {
+        /// The mode the prepare carried.
+        mode: RenderMode,
+    },
     /// The plugin's new ports were not made a node, and the node stays as it
     /// is: they are wider than a block serves, or the graph refused the swap
     /// ([`PortsRefusal`]). Reported once for the ports: they count as handled.
@@ -699,8 +706,10 @@ fn hear(handle: &PluginHandle) -> (Signals, Subscription) {
 
 /// What `notice` is as an event, if it is one: a latency the plugin reports
 /// is reported once, by the update that hands it to the graph; a rate refusal,
-/// a crash and a reload are the plugin's health, and a reload that left the
-/// plugin at its defaults is [`PluginChange::StateNotRestored`].
+/// a crash and a reload are the plugin's health, read as a status. A reload
+/// that left the plugin at its defaults is [`PluginChange::StateNotRestored`],
+/// and a render mode a prepare off the main thread could not apply has no
+/// status to read: both are events.
 fn change_of(notice: PluginSignal) -> Option<PluginChange> {
     Some(match notice {
         PluginSignal::Param(ParamEdit::Begin(id)) => PluginChange::GestureBegan { id },
@@ -720,6 +729,9 @@ fn change_of(notice: PluginSignal) -> Option<PluginChange> {
         PluginSignal::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
         PluginSignal::Invalidate(PluginInvalidation::StateNotRestored { reason }) => {
             PluginChange::StateNotRestored { reason }
+        }
+        PluginSignal::Invalidate(PluginInvalidation::RenderModeNotApplied { mode }) => {
+            PluginChange::RenderModeNotApplied { mode }
         }
         PluginSignal::Invalidate(_) | _ => return None,
     })
@@ -2109,7 +2121,12 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let latency_before = hosted.reload.latency_before;
         let withheld = hosted.reload.withheld_age;
         let attempts = recovery.as_ref().map_or(1, Recovery::failures);
-        match self.graph.replace_plugin_with_rebinder(node, client, None) {
+        match self.graph.replace_plugin_with_rebinder(
+            node,
+            client,
+            None,
+            crate::graph::OnShape::Cut,
+        ) {
             Ok(rebinder) => {
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                     hosted.set_rebinder(rebinder);
@@ -3644,7 +3661,7 @@ mod tests {
             let node = NodeKey::fresh();
             let mut editor = yard.editors.make(node, record.handle.clone(), main);
             if open {
-                editor
+                let _ = editor
                     .open(
                         &tutti_fixtures::StandInWindow,
                         tutti_plugin_types::ContentScale::IDENTITY,

@@ -3,7 +3,7 @@
 use tutti_buffers::{Bed, MAX_CHANNELS};
 use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, Gain, Radians, Spread};
 
-use super::error::SpeakerGeometryError;
+use super::error::{GainsLengthMismatch, SpeakerGeometryError};
 use super::math::{Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3};
 use super::select;
 
@@ -273,25 +273,35 @@ impl SpeakerLayout {
     ///
     /// A direction that is not finite (a NaN bearing or height) gives silence:
     /// every gain zero, spread included.
+    ///
+    /// # Errors
+    ///
+    /// [`GainsLengthMismatch`] when `out` is not `speaker_count`
+    /// long; `out` is left as it was.
     pub fn gains_into(
         &self,
         azimuth: Azimuth,
         elevation: Elevation,
         spread: Spread,
         out: &mut [Gain],
-    ) {
-        debug_assert_eq!(out.len(), self.count);
+    ) -> Result<(), GainsLengthMismatch> {
+        if out.len() != self.count {
+            return Err(GainsLengthMismatch {
+                len: out.len(),
+                speakers: self.count,
+            });
+        }
         let mut scratch = [0.0f64; MAX_CHANNELS];
         self.unit_power_gains(azimuth, elevation, &mut scratch[..self.count]);
-        let written = out.len().min(self.count);
-        for (out, &g) in out.iter_mut().zip(&scratch[..written]) {
+        for (out, &g) in out.iter_mut().zip(&scratch[..self.count]) {
             *out = Gain::new(g);
         }
         // Silence stays silent: spread would blend in an equal gain.
-        if scratch[..written].iter().all(|&g| g == 0.0) {
-            return;
+        if scratch[..self.count].iter().all(|&g| g == 0.0) {
+            return Ok(());
         }
-        apply_spread(spread, &mut out[..written]);
+        apply_spread(spread, out);
+        Ok(())
     }
 
     /// Steps 1 to 3 of [`gains_into`](Self::gains_into), in `f64`, into `scratch`

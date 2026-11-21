@@ -154,9 +154,14 @@ fn serve_audio(
 }
 
 /// The control connection: the queries a node makes at load and a rate change.
-fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
+fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record, lists: bool) {
     while let Some(Request { id, body }) = read_frame::<Request>(stream) {
         let reply = match body {
+            // A server that cannot list answers with another reply, which is
+            // no list to the bridge.
+            ControlRequest::GetParameterList if !lists => Some(ControlReply::PresetList {
+                presets: Vec::new(),
+            }),
             ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
                 parameters: PARAMS
                     .iter()
@@ -198,6 +203,11 @@ pub(super) fn rig() -> Rig {
     rig_gated(None)
 }
 
+/// [`rig`] whose server cannot list the plugin's parameters.
+pub(super) fn rig_unlisted() -> Rig {
+    build(None, false)
+}
+
 /// What holds a mock server's replies: the server signals `published` once a
 /// block's audio is in the slab, then sends the reply only when `release`
 /// gets a message. The test owns the other ends.
@@ -208,6 +218,10 @@ pub(super) struct ReplyGate {
 
 /// [`rig`] whose server holds each block's reply behind `gate`, if given.
 pub(super) fn rig_gated(gate: Option<ReplyGate>) -> Rig {
+    build(gate, true)
+}
+
+fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
@@ -253,7 +267,7 @@ pub(super) fn rig_gated(gate: Option<ReplyGate>) -> Rig {
         .name("mock-differential-control".into())
         .spawn({
             let log = Arc::clone(&record);
-            move || serve_control(&control, &log)
+            move || serve_control(&control, &log, lists)
         })
         .unwrap();
     let server = std::thread::Builder::new()
@@ -336,6 +350,30 @@ pub(super) fn new_node(
     rig: Rig,
     tempo: TempoReader,
 ) -> (Direct<tutti_plugin_host::PluginNode<Ipc>>, Record, Threads) {
+    let (ipc, record, threads) = served(rig);
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"));
+    let descriptor = ipc.descriptor().clone();
+    let wiring = ipc.loaded().clone();
+    let (processor, controller) = ipc
+        .activate_anywhere(prepare)
+        .unwrap_or_else(|_| panic!("the served plugin activates"));
+    let mut client = client_over::<Ipc, f32>(
+        processor,
+        controller,
+        prepare,
+        descriptor,
+        &wiring,
+        PARAMS.iter().map(|&id| ParamId::new(id)),
+        ParameterChanges::SPARE_QUEUES,
+        None,
+    )
+    .expect("the wiring is within a block's width");
+    client.go_offline();
+    (Direct::new(client.bind(tempo), SR, CHUNK), record, threads)
+}
+
+/// The served plugin over the mock server's bridge, not yet activated.
+pub(super) fn served(rig: Rig) -> (Ipc, Record, Threads) {
     let guard = Arc::new(ProcessGuard::for_test(
         tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
     ));
@@ -356,25 +394,7 @@ pub(super) fn new_node(
         origin: None,
     });
     let _ = ipc.watch(true);
-    let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"));
-    let descriptor = ipc.descriptor().clone();
-    let wiring = ipc.loaded().clone();
-    let (processor, controller) = ipc
-        .activate_anywhere(prepare)
-        .unwrap_or_else(|_| panic!("the served plugin activates"));
-    let mut client = client_over::<Ipc, f32>(
-        processor,
-        controller,
-        prepare,
-        descriptor,
-        &wiring,
-        PARAMS.iter().map(|&id| ParamId::new(id)),
-        ParameterChanges::SPARE_QUEUES,
-        None,
-    )
-    .expect("the wiring is within a block's width");
-    client.go_offline();
-    (Direct::new(client.bind(tempo), SR, CHUNK), record, threads)
+    (ipc, record, threads)
 }
 
 pub(super) fn at(frame: usize, len: usize) -> Offset {

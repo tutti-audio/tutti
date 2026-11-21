@@ -367,8 +367,10 @@ impl EditorWindow for Vst2Loaded {
         main: MainThreadMarker,
         parent: WindowHandle,
         _scale: ContentScale,
-    ) -> PluginResult<dpi::Size> {
-        self.open_editor_in(main, parent).map_err(plugin_error)
+    ) -> PluginResult<tutti_plugin_types::EditorOpened<dpi::Size>> {
+        self.open_editor_in(main, parent)
+            .map(tutti_plugin_types::EditorOpened::new)
+            .map_err(plugin_error)
     }
 
     /// Forwards the key as `effEditKeyDown` or `effEditKeyUp` and reports the plugin's 1 as

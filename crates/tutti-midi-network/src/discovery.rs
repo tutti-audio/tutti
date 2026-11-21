@@ -21,7 +21,8 @@ pub const KEY_ENDPOINT_NAME: &str = "UMPEndpointName";
 /// The TXT key that holds the Product Instance Id.
 pub const KEY_PRODUCT_INSTANCE_ID: &str = "ProductInstanceId";
 
-/// The longest a DNS label (a service instance name) is, in bytes.
+/// The most octets a DNS label, and so a service instance name, holds
+/// (RFC 1035 section 2.3.4; RFC 6763 section 4.1.1).
 const LABEL_MAX: usize = 63;
 
 /// Why discovery fails, or a published Host is refused.
@@ -54,6 +55,9 @@ pub enum DiscoveryError {
     /// A TXT value is empty, which M2-124 section 4.4 does not allow.
     #[error("the TXT value of {0} is empty")]
     Empty(&'static str),
+    /// The service instance name of the Host does not fit a DNS label.
+    #[error("the service instance name is not a DNS label")]
+    InstanceName(#[from] InstanceNameError),
     /// The service resolved with no address.
     #[error("the service has no address")]
     NoAddress,
@@ -71,16 +75,72 @@ pub fn txt_properties(identity: &EndpointIdentity) -> [(&'static str, String); 2
     ]
 }
 
-/// The service instance name for `identity`: its Product Instance Id, a dash
-/// and its name, cut to a DNS label.
-#[must_use]
-pub fn instance_name(identity: &EndpointIdentity) -> String {
-    let full = format!("{}-{}", identity.instance_id(), identity.name());
-    let mut end = full.len().min(LABEL_MAX);
-    while !full.is_char_boundary(end) {
-        end -= 1;
+/// A DNS-SD service instance name: one DNS label of 1 to 63 octets of UTF-8
+/// (RFC 6763 section 4.1.1, RFC 1035 section 2.3.4).
+///
+/// It has the workspace's range-checked shape written by hand: the range macro
+/// and its contract test take a `Copy` raw, and a `String` is not one.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct InstanceName(String);
+
+/// Why a string is not an [`InstanceName`]: its length in octets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a service instance name is 1 to 63 octets, not {octets}")]
+pub struct InstanceNameError {
+    /// The refused length, in octets of UTF-8.
+    pub octets: usize,
+}
+
+impl InstanceName {
+    /// The name `name`, or `None` when it is empty or longer than 63 octets.
+    #[must_use]
+    pub fn new(name: String) -> Option<Self> {
+        (1..=LABEL_MAX).contains(&name.len()).then_some(Self(name))
     }
-    full[..end].to_owned()
+
+    /// The name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The name, as an owned string.
+    #[must_use]
+    pub fn get(self) -> String {
+        self.0
+    }
+}
+
+impl TryFrom<String> for InstanceName {
+    type Error = InstanceNameError;
+
+    fn try_from(name: String) -> Result<Self, InstanceNameError> {
+        let octets = name.len();
+        Self::new(name).ok_or(InstanceNameError { octets })
+    }
+}
+
+impl From<InstanceName> for String {
+    fn from(name: InstanceName) -> Self {
+        name.0
+    }
+}
+
+impl std::fmt::Display for InstanceName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The service instance name for `identity`: its Product Instance Id, a dash
+/// and its name.
+///
+/// # Errors
+///
+/// [`InstanceNameError`] when that is longer than 63 octets: a name is never
+/// cut to fit.
+pub fn instance_name(identity: &EndpointIdentity) -> Result<InstanceName, InstanceNameError> {
+    format!("{}-{}", identity.instance_id(), identity.name()).try_into()
 }
 
 fn local_hostname(hostname: &str) -> Result<String, DiscoveryError> {
@@ -112,7 +172,9 @@ impl Advertisement {
     ///
     /// # Errors
     ///
-    /// [`DiscoveryError::Hostname`] for a hostname that is not ASCII, and
+    /// [`DiscoveryError::Hostname`] for a hostname that is not ASCII,
+    /// [`DiscoveryError::InstanceName`] when the identity's service instance
+    /// name is longer than a DNS label, and
     /// [`DiscoveryError::Mdns`] when the daemon cannot start or publish.
     pub fn start(
         identity: &EndpointIdentity,
@@ -121,10 +183,11 @@ impl Advertisement {
         port: u16,
     ) -> Result<Self, DiscoveryError> {
         let host = local_hostname(hostname)?;
+        let instance = instance_name(identity)?;
         let daemon = ServiceDaemon::new()?;
         let mut info = ServiceInfo::new(
             SERVICE_TYPE,
-            &instance_name(identity),
+            instance.as_str(),
             &host,
             addresses,
             port,

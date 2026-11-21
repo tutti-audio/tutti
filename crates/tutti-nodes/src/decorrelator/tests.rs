@@ -15,7 +15,7 @@ fn node(width: u16, seed: u64) -> DecorrelatorNode<f32> {
 }
 
 /// The shape is the width in and out with no latency, and the tail is the latest impulse,
-/// inside the length; an empty layout is mono.
+/// inside the length; an empty layout is no channels.
 #[test]
 fn the_shape_is_the_width_with_no_latency_and_a_tail_inside_the_length() {
     let mut n = node(2, 1);
@@ -35,7 +35,7 @@ fn the_shape_is_the_width_with_no_latency_and_a_tail_inside_the_length() {
             .shape()
             .audio_in()
             .count(),
-        1
+        0
     );
 }
 

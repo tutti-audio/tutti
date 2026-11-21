@@ -456,6 +456,13 @@ impl<L: Loaded> Instance<L> {
         Arc::clone(&self.lost)
     }
 
+    /// Reports that `mode` was not applied because the node was prepared off
+    /// the main thread ([`PluginInvalidation::RenderModeNotApplied`]).
+    pub(super) fn note_mode_not_applied(&mut self, mode: RenderMode) {
+        self.reports
+            .push(PluginInvalidation::RenderModeNotApplied { mode });
+    }
+
     /// The render mode the plugin runs in, or was last told.
     pub(super) fn render_mode(&self) -> RenderMode {
         self.prepare.mode()

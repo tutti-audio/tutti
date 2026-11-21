@@ -250,7 +250,7 @@ fn the_upsample_delay_is_the_impulse_peak_of_the_4x_signal() {
     let mut state = plan.state::<f32>(tutti_buffers::MaxBlock::of(Samples::new(256)));
     let mut x = vec![0.0f32; 256];
     x[0] = 1.0;
-    state.upsample(Mono::new(&x));
+    state.upsample(Mono::new(&x)).unwrap();
     let (high, _) = state.high_rate();
     let peak = high
         .samples()

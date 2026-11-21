@@ -21,12 +21,12 @@ impl PitchShifterConfig {
     /// The hop a pitch shifter starts at: 512 frames, a window of 2048.
     pub const DEFAULT_HOP: HopSize = HopSize::of(Samples::new(512));
 
-    /// A pitch shifter of `width` channels (an empty layout is taken as mono) at no shift, on a
+    /// A pitch shifter of `width` channels at no shift, on a
     /// hop of [`DEFAULT_HOP`](Self::DEFAULT_HOP).
     #[must_use]
     pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width: ChannelLayout::from_count(width.into().count().max(1)),
+            width: width.into(),
             hop: Self::DEFAULT_HOP,
             controls: PhaseVocoderControls::UNITY,
         }

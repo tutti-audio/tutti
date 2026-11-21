@@ -19,6 +19,7 @@ use tutti_platform::Instant;
 use support::clap_probe;
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
+use tutti_graph::Fade;
 use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
@@ -214,14 +215,14 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
     );
 }
 
-/// **A plugin crossfaded in is the one the latency phase reads.** The outgoing
+/// **A plugin swapped in is the one the latency phase reads.** The outgoing
 /// plugin announces a longer latency than the incoming one's, so the figure says
 /// which plugin the session's record follows: after `replace_plugin` the graph
 /// plans against the incoming plugin's figure plus the chunk, and a later change
 /// of the incoming plugin's latency is the one the phase hands the graph (its
 /// record moved to the incoming plugin). The node keeps its key.
 #[test]
-fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
+fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
     // The probe adds this to its 137 when told to render offline, and announces it
     // through `clap.latency`.
     const OFFLINE_EXTRA: usize = 74;
@@ -277,7 +278,11 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     let incoming_handle = incoming.handle();
     let landed = s
         .graph()
-        .replace_plugin(node, Replacement::new(Box::new(incoming)))
+        .replace_plugin(
+            node,
+            // The incoming plugin's latency differs: a cut, not a fade.
+            Replacement::new(Box::new(incoming)).fade(Fade::new(Samples::ZERO)),
+        )
         .expect("the replace is accepted");
     assert_eq!(landed.erase(), node);
     assert_eq!(
@@ -318,7 +323,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
             ChannelLayout::STEREO,
             tutti_buffers::SampleFormat::F32,
         )
-        .with_quantum(MaxBlock::of(Samples::new(quantum)))
+        .with_quantum(tutti_engine::OutputQuantum::of(quantum))
     }
     set_server();
     let (driver, stream) = ManualStreamDriver::new();
@@ -413,7 +418,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
                 ChannelLayout::STEREO,
                 tutti_buffers::SampleFormat::F32,
             )
-            .with_quantum(MaxBlock::of(Samples::new(256))),
+            .with_quantum(tutti_engine::OutputQuantum::of(256)),
             driver,
         )
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
