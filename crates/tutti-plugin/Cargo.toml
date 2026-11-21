@@ -90,6 +90,8 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 
 [dev-dependencies]
+# Test reads block on a `ParamRead` (a test may block).
+futures-lite.workspace = true
 tutti-midi-runtime = { path = "../tutti-midi-runtime" }
 # The tests' tempo maps and note timing.
 tutti-tempo = { path = "../tutti-tempo" }

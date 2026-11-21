@@ -29,6 +29,15 @@ tutti_units::ranged! {
 }
 
 impl VelvetDensity {
+    /// This density, lowered to `rate` when it is past it: a sequence has at most one impulse
+    /// a frame, so a density in impulses a second above the rate in frames a second is
+    /// [`VelvetNoise::new`]'s refusal. The result is the density to build at, at least 1 Hz
+    /// for a rate of 1 Hz or more; a lower rate keeps the density and is refused there.
+    #[must_use]
+    pub fn clamped_to_rate(self, rate: SampleRate) -> Self {
+        Self::new(self.get().min(Hz::new(rate.get()))).unwrap_or(self)
+    }
+
     /// 2000 impulses a second: Alary et al.'s density for a decorrelator, past the point
     /// where the sequence sounds like noise rather than a train of clicks.
     pub const DEFAULT: Self = Self(Hz::new(2_000.0));
@@ -57,6 +66,24 @@ impl Default for VelvetLength {
     }
 }
 
+/// What [`VelvetNoise::new`] refused.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+pub enum VelvetNoiseError {
+    /// The density is past the rate: a sequence has one impulse in each period of
+    /// `Td = rate / density` frames, and `Td` is at least 1.
+    #[error(
+        "a density of {} impulses a second is past the rate of {} frames a second",
+        density.get().get(),
+        rate.get()
+    )]
+    DensityPastRate {
+        /// The density given.
+        density: VelvetDensity,
+        /// The rate given.
+        rate: SampleRate,
+    },
+}
+
 /// One impulse of a [`VelvetNoise`] sequence.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VelvetPulse {
@@ -77,10 +104,21 @@ pub struct VelvetNoise {
 impl VelvetNoise {
     /// The sequence of `length` at `density` and `rate` that the stream `seed` names: for each
     /// period, one word for the position and one for the sign, in order. Allocates.
-    #[must_use]
-    pub fn new(density: VelvetDensity, length: VelvetLength, rate: SampleRate, seed: u64) -> Self {
-        // A density past the rate is one impulse a frame: `Td >= 1` keeps positions distinct.
-        let density = density.get().min(Hz::new(rate.get()));
+    ///
+    /// # Errors
+    ///
+    /// [`VelvetNoiseError::DensityPastRate`] when `density` is above `rate` (`Td >= 1` keeps
+    /// the positions distinct); [`VelvetDensity::clamped_to_rate`] is the caller's lowering.
+    pub fn new(
+        density: VelvetDensity,
+        length: VelvetLength,
+        rate: SampleRate,
+        seed: u64,
+    ) -> Result<Self, VelvetNoiseError> {
+        if density.get().get() > rate.get() {
+            return Err(VelvetNoiseError::DensityPastRate { density, rate });
+        }
+        let density = density.get();
         let period = density
             .period()
             .and_then(|t| SampleSpan::from_seconds(t, rate))
@@ -102,10 +140,10 @@ impl VelvetNoise {
                 }
             })
             .collect();
-        Self {
+        Ok(Self {
             pulses,
             length: length.get().to_samples_ceil(rate),
-        }
+        })
     }
 
     /// The impulses, in order of position.
@@ -143,18 +181,21 @@ pub struct Decorrelator<F: Float> {
 impl<F: Float> Decorrelator<F> {
     /// A decorrelator of `width` channels (an empty layout has none) at `rate`. Channel `c`'s
     /// sequence is [`VelvetNoise::new`] of the `c`-th word of `seed`'s stream. Allocates.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// [`VelvetNoiseError::DensityPastRate`], as [`VelvetNoise::new`].
     pub fn new(
         width: ChannelLayout,
         density: VelvetDensity,
         length: VelvetLength,
         rate: SampleRate,
         seed: u64,
-    ) -> Self {
+    ) -> Result<Self, VelvetNoiseError> {
         let mut seeds = SplitMix64::new(seed);
-        let sequences: Vec<VelvetNoise> = (0..width.count())
+        let sequences = (0..width.count())
             .map(|_| VelvetNoise::new(density, length, rate, seeds.next_u64()))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         let frames = length.get().get() * rate.get();
         let channels: Vec<Channel<F>> = sequences
             .iter()
@@ -190,11 +231,11 @@ impl<F: Float> Decorrelator<F> {
             .map(|p| p.position)
             .max()
             .unwrap_or(Samples::ZERO);
-        Self {
+        Ok(Self {
             sequences,
             channels,
             tail,
-        }
+        })
     }
 
     /// Channel `c`'s velvet sequence, before its envelope and scale.
