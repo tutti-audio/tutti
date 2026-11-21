@@ -2524,6 +2524,13 @@ impl PluginInstance {
         Some(unsafe { get(effect, index) })
     }
 
+    /// Whether the plugin filled `AEffect::setParameter`: without it no write reaches the plugin.
+    pub fn exposes_set_parameter(&self) -> bool {
+        let effect = self.core.get_effect();
+        // SAFETY: as above.
+        unsafe { (*effect).setParameter }.is_some()
+    }
+
     /// `setParameter`. `false` when the plugin left `AEffect::setParameter` null — the value
     /// went nowhere.
     pub fn set_parameter(&self, index: i32, value: f32) -> bool {

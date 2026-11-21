@@ -107,7 +107,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use atomic_float::AtomicF64;
 use tutti_curve::FadeLaw;
-use tutti_rt::ParamCell;
+use tutti_rt::{CappedVec, ParamCell};
 use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
@@ -735,9 +735,13 @@ impl<F: Float> ModeState<F> {
     /// which fades to the base and then idles. A `lane` the unit has no use
     /// for goes to `spare`, to be freed on the control side. Allocates
     /// nothing.
-    pub(crate) fn drive_with(&mut self, mut lane: ParamState<F>, spare: &mut Vec<ParamState<F>>) {
+    pub(crate) fn drive_with(
+        &mut self,
+        mut lane: ParamState<F>,
+        spare: &mut CappedVec<ParamState<F>>,
+    ) {
         if self.drive.is_some() {
-            spare.push(lane);
+            crate::exec::place(spare, lane);
             return;
         }
         if self.ran {
@@ -1122,7 +1126,7 @@ mod tests {
         assert!(state.is_plain(), "never driven");
 
         let lane = ParamState::lane(64, DECLICK_FRAMES, cell.ranges());
-        state.drive_with(lane, &mut Vec::new());
+        state.drive_with(lane, &mut CappedVec::with_capacity(1));
         state.snapshot();
         assert!(!state.is_plain(), "driven");
         state.drive_step(64, Some((from, &[])));

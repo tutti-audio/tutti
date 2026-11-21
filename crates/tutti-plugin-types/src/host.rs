@@ -29,10 +29,10 @@ use dpi::Size;
 use tutti_buffers::{Float, InputOutput};
 
 use crate::{
-    AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorWindow,
-    KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError,
-    PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
-    SampleRate, Samples, WindowHandle,
+    AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorOpened,
+    EditorWindow, KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor,
+    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
+    ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, ParameterChanges, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -431,10 +431,11 @@ pub trait Loaded: Control + Sized + Send {
     /// # Errors
     ///
     /// [`Refused`], holding the plugin if it survived, when the instance cannot
-    /// be rebuilt.
-    fn rebuild(self, main: MainThreadMarker) -> Result<Self, Refused<Self>> {
+    /// be rebuilt. A rebuilt plugin that refuses the state it was saved with is
+    /// not a refusal: it is [`Rebuilt::restored`] (the field).
+    fn rebuild(self, main: MainThreadMarker) -> Result<Rebuilt<Self>, Refused<Self>> {
         let _ = main;
-        Ok(self)
+        Ok(Rebuilt::whole(self))
     }
 }
 
@@ -913,11 +914,11 @@ impl<W: Wraps> EditorWindow for W {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<Size> {
+    ) -> PluginResult<EditorOpened<Size>> {
         self.plugin_mut().open_editor(main, parent, scale)
     }
 
-    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<()> {
+    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<EditorOpened<()>> {
         self.plugin_mut().open_floating_editor(main)
     }
 
@@ -959,6 +960,31 @@ impl<W: Wraps> EditorWindow for W {
 
     fn poll_editor_resize_request(&mut self, main: MainThreadMarker) -> Option<Size> {
         self.plugin_mut().poll_editor_resize_request(main)
+    }
+}
+
+/// A rebuilt instance ([`Loaded::rebuild`]) and whether it took the state the
+/// old one was saved with.
+#[derive(Debug)]
+pub struct Rebuilt<L> {
+    /// The new instance, loaded. When [`restored`](Self::restored) is an
+    /// error it holds its defaults.
+    pub plugin: L,
+    /// `Ok` when the new instance took the state the old one was saved with
+    /// (an empty state is taken). Otherwise why it did not: the old instance
+    /// would not save its state, or the new one refused it. A format with no
+    /// state to carry over reports `Ok` ([`whole`](Rebuilt::whole)).
+    pub restored: Result<(), PluginError>,
+}
+
+impl<L> Rebuilt<L> {
+    /// `plugin`, rebuilt with nothing to restore.
+    #[must_use]
+    pub fn whole(plugin: L) -> Self {
+        Self {
+            plugin,
+            restored: Ok(()),
+        }
     }
 }
 

@@ -705,3 +705,23 @@ fn the_declared_midi_bound_is_held_beside_a_full_expression_room() {
     assert_eq!(list.dropped(), 0);
     assert_eq!(len(&list), MIDI_STACK_CAPACITY + NOTE_EXPRESSION_ROOM);
 }
+
+/// **A plugin with no event input bus takes no events**: the list stays empty
+/// whatever is offered, and each event offered is counted as dropped, so a
+/// caller sees them go nowhere; the stager of a plugin with a bus sends the
+/// same note.
+#[test]
+fn a_plugin_with_no_event_bus_takes_no_events_and_counts_them() {
+    let list = EventList::input();
+    let note = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0x8000))];
+
+    let mut bare = Stager::without_buses();
+    assert!(bare.stage(&list, &midi_only(&note)));
+    assert_eq!(len(&list), 0);
+    assert_eq!(bare.groups_dropped(), 1);
+
+    let mut bussed = Stager::new(GroupSpan::of(1));
+    assert!(bussed.stage(&list, &midi_only(&note)));
+    assert_eq!(len(&list), 1);
+    assert_eq!(bussed.groups_dropped(), 0);
+}

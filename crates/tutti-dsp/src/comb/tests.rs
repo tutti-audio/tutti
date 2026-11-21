@@ -12,7 +12,8 @@ fn magnitude(h: &[f64], w: f64) -> f64 {
 }
 
 fn impulse_response(form: CombForm, delay: usize, gain: f64, len: usize) -> Vec<f64> {
-    let mut comb = CombFilter::<f64>::new(form, Samples::new(delay), Feedback::new(gain));
+    let mut comb =
+        CombFilter::<f64>::new(form, NonZeroUsize::new(delay).unwrap(), Feedback::new(gain));
     let mut h = vec![0.0; len];
     h[0] = 1.0;
     comb.process(&mut h);
@@ -79,7 +80,12 @@ fn the_impulse_responses_are_the_difference_equations_taps() {
 /// second echo of a feedback comb is the coefficient set last.
 #[test]
 fn a_bank_retargets_every_channel() {
-    let mut bank = CombBank::<f32>::new(CombForm::Feedback, Samples::new(4), Feedback::new(0.5), 2);
+    let mut bank = CombBank::<f32>::new(
+        CombForm::Feedback,
+        NonZeroUsize::new(4).unwrap(),
+        Feedback::new(0.5),
+        ChannelLayout::from_count(2),
+    );
     assert_eq!(bank.delay(), Samples::new(4));
     bank.retarget(&CombControls {
         gain: Feedback::new(0.25),
@@ -103,16 +109,40 @@ fn a_bank_retargets_every_channel() {
 fn the_tail_covers_the_ring_out_to_the_floor() {
     let rate = SampleRate::SR_48K;
     let (d, g) = (100usize, 0.9);
-    let bank = CombBank::<f64>::new(CombForm::Feedback, Samples::new(d), Feedback::new(g), 1);
+    let bank = CombBank::<f64>::new(
+        CombForm::Feedback,
+        NonZeroUsize::new(d).unwrap(),
+        Feedback::new(g),
+        ChannelLayout::MONO,
+    );
     let Tail::Finite(tail) = bank.tail(Feedback::new(g), rate) else {
         panic!("finite");
     };
     let h = impulse_response(CombForm::Feedback, d, g, tail.get() + d);
     let last = h.iter().rposition(|&y| y.abs() >= 1e-3).unwrap();
     assert!(last < tail.get(), "{last} vs {}", tail.get());
-    let ff = CombBank::<f64>::new(CombForm::Feedforward, Samples::new(d), Feedback::new(g), 1);
+    let ff = CombBank::<f64>::new(
+        CombForm::Feedforward,
+        NonZeroUsize::new(d).unwrap(),
+        Feedback::new(g),
+        ChannelLayout::MONO,
+    );
     assert_eq!(
         ff.tail(Feedback::new(g), rate),
         Tail::Finite(Samples::new(d))
     );
+}
+
+/// The delay is the frames asked for: one frame is one frame (a `NonZeroUsize` has no zero
+/// to turn into one), and a one-frame feedback comb is `z^-1 / (1 - g z^-1)`: `h[0] = 0`, `h[n] = g^(n-1)`.
+#[test]
+fn a_one_frame_comb_is_one_frame_and_the_response_has_its_closed_form() {
+    let g = 0.5;
+    let comb = CombFilter::<f64>::new(CombForm::Feedback, NonZeroUsize::MIN, Feedback::new(g));
+    assert_eq!(comb.delay(), Samples::new(1));
+    let h = impulse_response(CombForm::Feedback, 1, g, 5);
+    for (n, got) in h.iter().enumerate() {
+        let want = if n == 0 { 0.0 } else { g.powi(n as i32 - 1) };
+        assert!((got - want).abs() < 1e-15, "h[{n}] = {got}, want {want}");
+    }
 }

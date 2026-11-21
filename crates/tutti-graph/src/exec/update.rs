@@ -2,12 +2,12 @@
 //! every unit out for a re-prepare.
 
 use tutti_buffers::Float;
-use tutti_rt::RtScope;
+use tutti_rt::{CappedVec, RtScope};
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
-use super::{Executor, RootFadeRun, Suspension};
+use super::{Executor, RootFadeRun, Suspension, place, place_all};
 use crate::NodeKey;
 use crate::event::Event;
 use crate::gain::SumLane;
@@ -65,12 +65,12 @@ impl<F: Float> Executor<F> {
                     // The unit a cut displaced still owes its keys: they close
                     // in the first block after the resume.
                     if let Some(stale) = cut_fades(&mut unit, &mut self.inbox.fade_back) {
-                        c.spare_held.push(unit.keys.park(stale));
+                        place(&mut c.spare_held, unit.keys.park(stale));
                     }
-                    c.retired.push((u.key, unit.node));
-                    c.spare_params.push(unit.params);
-                    c.spare_modes.push(unit.mode);
-                    self.parked.push((u.key, unit.keys));
+                    place(&mut c.retired, (u.key, unit.node));
+                    place(&mut c.spare_params, unit.params);
+                    place(&mut c.spare_modes, unit.mode);
+                    place(&mut self.parked, (u.key, unit.keys));
                 }
             }
             let mut reset_time = false;
@@ -148,14 +148,13 @@ impl<F: Float> Executor<F> {
                 .get_mut(p.idx.0 as usize)
                 .and_then(Option::as_mut)
             {
-                departed
-                    .held
-                    .push((p.key, u.keys.depart(&mut departed.spare)));
+                let tables = u.keys.depart(&mut departed.spare);
+                place(&mut departed.held, (p.key, tables));
             }
         }
-        departed
-            .replaced
-            .extend(c.delta.replace.iter().map(|(_, new)| new.key));
+        for (_, new) in &c.delta.replace {
+            place(&mut departed.replaced, new.key);
+        }
         // The state a replaced node hands its successor, written while it is
         // still in the store (see `Node::chase`).
         departed.chase_events = std::mem::take(&mut self.chase);
@@ -190,14 +189,23 @@ impl<F: Float> Executor<F> {
                         .find(|i| i.idx == new.idx)
                         .and_then(|i| i.fade.as_mut());
                     if let Some(fade) = fade {
-                        fade.chase.extend_from_slice(&departed.chase_events[from..]);
-                        departed.held_refused.push((new.key, refused));
+                        // The editor sized the buffer for this predecessor
+                        // (`prepare_incoming`); a push never grows it, and
+                        // what does not fit is refused like the rest.
+                        let wrote = &departed.chase_events[from..];
+                        let kept = fade.chase.extend(wrote.iter().copied());
+                        let unfit = u32::try_from(wrote.len() - kept).unwrap_or(u32::MAX);
+                        place(
+                            &mut departed.held_refused,
+                            (new.key, refused.saturating_add(unfit)),
+                        );
                     }
                     departed.chase_events.truncate(from);
                 } else {
-                    departed
-                        .chased
-                        .push((new.key, from..departed.chase_events.len(), refused));
+                    place(
+                        &mut departed.chased,
+                        (new.key, from..departed.chase_events.len(), refused),
+                    );
                 }
             }
         }
@@ -220,9 +228,9 @@ impl<F: Float> Executor<F> {
                     u.generation, p.generation,
                     "retiring the unit the delta named"
                 );
-                c.retired.push((p.key, u.node));
-                c.spare_params.push(u.params);
-                c.spare_modes.push(u.mode);
+                place(&mut c.retired, (p.key, u.node));
+                place(&mut c.spare_params, u.params);
+                place(&mut c.spare_modes, u.mode);
                 for f in [u.fade, u.queued].into_iter().flatten() {
                     retire_fade(&mut self.inbox.fade_back, f);
                 }
@@ -240,7 +248,7 @@ impl<F: Float> Executor<F> {
                     "cutting the unit the delta named"
                 );
                 if let Some(stale) = cut_fades(u, &mut self.inbox.fade_back) {
-                    departed.held.push((p.key, stale));
+                    place(&mut departed.held, (p.key, stale));
                 }
             }
         }
@@ -274,8 +282,8 @@ impl<F: Float> Executor<F> {
                     // The key's param state and mode run on across the
                     // replace; the ones built for the incoming unit go back
                     // unused.
-                    c.spare_params.push(params);
-                    c.spare_modes.push(mode);
+                    place(&mut c.spare_params, params);
+                    place(&mut c.spare_modes, mode);
                     // A crossfade replaced without one running here has
                     // departed the unit's keys: it gets its tables back.
                     u.keys.refill(keys, &mut c.spare_held);
@@ -290,9 +298,9 @@ impl<F: Float> Executor<F> {
                         }
                         // The tables the waiting unit will write, unless the
                         // unit has them already.
-                        c.spare_held.push(u.keys.wait(staging));
+                        place(&mut c.spare_held, u.keys.wait(staging));
                     } else {
-                        c.spare_held.push(staging);
+                        place(&mut c.spare_held, staging);
                         x.out = Some(std::mem::replace(&mut u.node, node));
                         u.fade = Some(x);
                         u.quiet = 0;
@@ -304,7 +312,7 @@ impl<F: Float> Executor<F> {
                 (fade, _) => {
                     debug_assert!(slot.is_none(), "store index {} is occupied", idx.0);
                     *slot = Some(Unit::new(generation, node, params, mode, keys));
-                    c.spare_held.push(staging);
+                    place(&mut c.spare_held, staging);
                     // Nothing to fade from (reachable only through
                     // `package`): the crossfade goes back unused.
                     if let Some(x) = fade {
@@ -320,7 +328,7 @@ impl<F: Float> Executor<F> {
             if let Some(u) = self.store.get_mut(idx.0 as usize).and_then(Option::as_mut)
                 && let Some(old) = u.mode.relined(latency, line)
             {
-                c.spare_lines.push(old);
+                place(&mut c.spare_lines, old);
             }
         }
         c.relined = relined;
@@ -334,13 +342,15 @@ impl<F: Float> Executor<F> {
         // The chase buffer sized for this plan; the old one goes back.
         departed.chase_events.clear();
         self.chase = std::mem::replace(&mut st.chase, std::mem::take(&mut departed.chase_events));
-        c.spare_held.extend(departed.held.drain(..).map(|(_, k)| k));
-        c.spare_held.append(&mut departed.spare);
+        for (_, tables) in departed.held.drain(..) {
+            place(&mut c.spare_held, tables);
+        }
+        place_all(&mut c.spare_held, &mut departed.spare);
         // Units whose mix this plan drives and that have no lane yet.
         for (store, lane) in st.drives.drain(..) {
             match self.store.get_mut(store as usize).and_then(Option::as_mut) {
                 Some(u) => u.mode.drive_with(lane, &mut st.spare_drives),
-                None => st.spare_drives.push(lane),
+                None => place(&mut st.spare_drives, lane),
             }
         }
         let old_state = std::mem::replace(&mut self.state, new_state);
@@ -551,7 +561,10 @@ impl<F: Float> Executor<F> {
                     keys.settle();
                     u.keys = keys;
                 }
-                None => departed.held.push((key, keys.depart(&mut departed.spare))),
+                None => {
+                    let tables = keys.depart(&mut departed.spare);
+                    place(&mut departed.held, (key, tables));
+                }
             }
         }
         self.parked = parked;
@@ -732,17 +745,17 @@ fn fill(to: &mut Vec<Event>, events: &[Event]) -> u32 {
 fn move_ring<F: Float>(
     target: Option<&mut Ring<F>>,
     carried: Option<Ring<F>>,
-    spare: &mut Vec<Ring<F>>,
+    spare: &mut CappedVec<Ring<F>>,
 ) -> usize {
     match (target, carried) {
         (Some(Ring::Audio(n)), Some(Ring::Audio(o))) => {
             n.transfer_from(&o);
-            spare.push(Ring::Audio(o));
+            place(spare, Ring::Audio(o));
             0
         }
         (Some(Ring::Event(n)), Some(Ring::Event(mut o))) => {
             let lost = n.transfer_from(&mut o);
-            spare.push(Ring::Event(o));
+            place(spare, Ring::Event(o));
             lost
         }
         (_, Some(o)) => {
@@ -751,7 +764,7 @@ fn move_ring<F: Float>(
                 Ring::Event(f) => f.queued(),
                 Ring::Audio(_) => 0,
             };
-            spare.push(o);
+            place(spare, o);
             lost
         }
         (_, None) => 0,

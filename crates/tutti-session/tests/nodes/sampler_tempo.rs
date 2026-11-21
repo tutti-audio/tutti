@@ -57,7 +57,8 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
     let mut pool = VoicePool::new();
-    pool.insert(SlotId(1), source, Playback::default());
+    pool.insert(SlotId(1), source, Playback::default())
+        .expect("a finite gain and a nonempty width");
     let mut s = offline();
     let map =
         TempoMap::new(

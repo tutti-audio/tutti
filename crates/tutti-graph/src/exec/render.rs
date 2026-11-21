@@ -17,6 +17,7 @@ use super::ops::{
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
 use crate::history::TransportHistory;
+use crate::loss::Dropped;
 use crate::meter::meter_op;
 use crate::node::{Env, TransportChanges, TransportPosition};
 use crate::par::Block;
@@ -37,6 +38,7 @@ pub(super) fn end_fades<F: Float>(
     fade_back: &mut RingWriter<Box<Crossfade<F>>>,
     inject: &mut [Inject],
     has_inject: &mut [bool],
+    dropped: &mut Dropped,
 ) {
     for rec in &plan.nodes.recs {
         let Some(u) = store[rec.store as usize].as_mut() else {
@@ -58,8 +60,15 @@ pub(super) fn end_fades<F: Float>(
                     .iter_mut()
                     .find(|i| i.unit == rec.unit && i.port == 0)
             {
-                inj.events.extend_from_slice(&next.chase);
-                inj.events.rotate_right(next.chase.len());
+                // Only as much as the buffer's room takes; the rest is lost
+                // and charged to the unit.
+                let room = (inj.events.capacity() - inj.events.len()).min(next.chase.len());
+                inj.events.extend_from_slice(&next.chase[..room]);
+                inj.events.rotate_right(room);
+                let lost = next.chase.len() - room;
+                if lost > 0 {
+                    dropped.at_node(rec.unit, u32::try_from(lost).unwrap_or(u32::MAX));
+                }
                 inj.live = true;
                 has_inject[rec.unit as usize] = true;
             }
@@ -538,6 +547,9 @@ impl<F: Float> Executor<F> {
                 }
             }
 
+            if fade_ended {
+                end_fades(plan, store, fade_back, inject, has_inject, dropped);
+            }
             dropped.flush(plan, losses, unreported);
             // An edge whose declick fade ended this block tells the editor,
             // which drops it (or its entry) at its next collect. A full
@@ -551,9 +563,6 @@ impl<F: Float> Executor<F> {
             }
             for f in event_fb.iter_mut().flatten() {
                 f.advance(frames);
-            }
-            if fade_ended {
-                end_fades(plan, store, fade_back, inject, has_inject);
             }
             if let (Some(run), Some(bank)) = (root_fade.as_mut(), plan.root_bank()) {
                 let before = run.done;

@@ -70,7 +70,10 @@ const RES_EPS: f64 = 0.0001;
 /// release take their stated times from wherever they start, and an attack takes the share of
 /// its time the level has left to rise.
 fn envelope_design(env: &Adsr, rate: SampleRate) -> EnvelopeDesign {
-    EnvelopeDesign::new(&EnvelopeStages::from(*env).pace(EnvelopePace::Stage), rate)
+    EnvelopeDesign::new(
+        &EnvelopeStages::from_adsr_clamped(*env).pace(EnvelopePace::Stage),
+        rate,
+    )
 }
 
 /// One group's envelope registers: the level, and the leg each lane runs as one affine move

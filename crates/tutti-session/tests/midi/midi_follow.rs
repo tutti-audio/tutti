@@ -48,10 +48,9 @@ fn rig() -> (Keyed, FakeCounters) {
 fn follow(s: &mut Keyed, group: MidiGroup, meter: bool) {
     let input = s.input();
     s.midi()
-        .follow_tempo(FollowTempo {
-            input,
-            group,
-            meter,
+        .follow_tempo({
+            let f = FollowTempo::new(input, group);
+            if meter { f.meter() } else { f }
         })
         .expect("follows");
     // The update that commits the tap.
@@ -450,20 +449,12 @@ fn follow_refusals() {
     let (mut s, _fake) = rig();
     let node = s.input();
     assert!(matches!(
-        s.midi().follow_tempo(FollowTempo {
-            input: node,
-            group: MidiGroup::of(3),
-            meter: false
-        }),
+        s.midi().follow_tempo(FollowTempo::new(node, MidiGroup::of(3))),
         Err(MidiError::GroupNotHeard(g)) if g == MidiGroup::of(3)
     ));
     let (not_a_port, _) = tap(&mut s);
     assert!(matches!(
-        s.midi().follow_tempo(FollowTempo {
-            input: not_a_port,
-            group: MidiGroup::FIRST,
-            meter: false
-        }),
+        s.midi().follow_tempo(FollowTempo::new(not_a_port, MidiGroup::FIRST)),
         Err(MidiError::NotAnInput(n)) if n == not_a_port
     ));
     assert!(
@@ -506,11 +497,7 @@ fn a_tempo_staged_before_following_is_dropped_not_published_over_the_restored_ma
 
     let input = s.input();
     s.midi()
-        .follow_tempo(FollowTempo {
-            input,
-            group: MidiGroup::FIRST,
-            meter: false,
-        })
+        .follow_tempo(FollowTempo::new(input, MidiGroup::FIRST))
         .expect("follows");
     assert!(
         !Arc::ptr_eq(&s.get(tempo).unwrap(), &staged),

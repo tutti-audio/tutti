@@ -28,11 +28,13 @@ macro_rules! peer_future {
         $(#[$meta:meta])*
         $name:ident => $output:ty, $error:ty, $must:literal
     ) => {
+        /// Fed by [`Session::update`](crate::Session::update): keep updating while
+        /// you await it.
+        ///
         $(#[$meta])*
         ///
-        /// It resolves in a later [`Session::update`](crate::Session::update): keep
-        /// updating while you await it. Dropping it drops the answer; a device or
-        /// session that goes away resolves it to [`PeerError::Disconnected`](crate::PeerError::Disconnected).
+        /// Dropping it drops the answer; a device or session that goes away
+        /// resolves it to [`PeerError::Disconnected`](crate::PeerError::Disconnected).
         #[derive(Debug)]
         #[must_use = $must]
         pub struct $name {
@@ -61,12 +63,12 @@ macro_rules! peer_future {
 }
 pub(crate) use peer_future;
 
-/// A peer's reply to a request, as a future: it resolves with what the peer
-/// answered, or with the [`PeerError`] that says why it could not.
+/// Fed by [`Session::update`](crate::Session::update): keep updating while you
+/// await it.
 ///
-/// The session sends the request and reads the reply in its
-/// [`update`](crate::Session::update), so the future resolves in a later update:
-/// keep updating while you await it. Dropping it is harmless: the reply, when it
+/// A peer's reply to a request, as a future: it resolves with what the peer
+/// answered, or with the [`PeerError`] that says why it could not. The session
+/// sends the request and reads the reply in its update. Dropping it is harmless: the reply, when it
 /// comes, is discarded. A request whose session or device goes away unanswered
 /// resolves to [`PeerError::Disconnected`]; it never waits for ever.
 #[must_use = "a reply is read only when the future is awaited"]

@@ -154,7 +154,8 @@ fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool<f32>, Arc<
             gain: Amplitude::new(1.0),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     (pool, clock)
 }
 
@@ -604,7 +605,8 @@ fn a_reversed_voice_with_a_loop_set_stays_bounded() {
             gain: Amplitude::new(1.0),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
 
     let out = render_placed(&mut pool, &clock, 100);
     for (i, &s) in out.iter().enumerate() {

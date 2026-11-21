@@ -15,6 +15,7 @@ use super::memory_source::{MemorySource, VoiceWindow};
 use super::node::*;
 use super::pool::*;
 use super::types::*;
+use crate::PlaceError;
 use std::sync::mpsc::sync_channel;
 use std::sync::{Arc, Mutex};
 use tutti_buffers::ChannelLayout;
@@ -122,7 +123,8 @@ fn resetting_a_fork_leaves_the_live_voice_playing() {
             },
         },
         1u16,
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     assert!(node.slot.stretch.is_some(), "vacuous without a filter");
     let (mut live, source) = live_and_fork(node);
     live.prepare(&Prepare::new(
@@ -195,6 +197,7 @@ fn a_standalone_voices_fork_shares_no_stretch_state() {
             },
             1u16,
         )
+        .expect("a finite gain and a nonempty width")
     };
     let (live, mut twin) = (node(), node());
     assert!(
@@ -463,7 +466,8 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
             },
         },
         1u16,
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     assert!(
         node.slot.stretch.is_some(),
         "test is vacuous unless the stretch path is live"
@@ -528,7 +532,8 @@ fn continuous_playback_does_not_flush_a_standalone_voice_node() {
             },
         },
         1u16,
-    );
+    )
+    .expect("a finite gain and a nonempty width");
 
     let mut out = [0.0f32; 1];
     for _ in 0..16_384 {
@@ -656,7 +661,8 @@ fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
                     },
                 },
                 1u16,
-            );
+            )
+            .expect("a finite gain and a nonempty width");
             node.prepare(&Prepare::new(
                 SampleRate::SR_48K,
                 MaxBlock::of(Samples::new(64)),
@@ -803,6 +809,8 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
 const STREAM_1: crate::streamer::StreamId = crate::streamer::StreamId::of(1);
 #[cfg(test)]
 const STREAM_2: crate::streamer::StreamId = crate::streamer::StreamId::of(2);
+#[cfg(test)]
+const STREAM_3: crate::streamer::StreamId = crate::streamer::StreamId::of(3);
 
 /// Dominant frequency by Hann-windowed DFT scan — a test helper, not
 /// production code. Coarse (2 Hz) because the assertion tolerance is 2%.
@@ -1309,7 +1317,7 @@ fn voice_node_is_a_standalone_graph_node() {
     };
 
     // As a standalone node: 0 in, 2 out, produces audio.
-    let mut node = VoiceNode::new(voice);
+    let mut node = VoiceNode::new(voice).expect("a finite gain and a nonempty width");
     assert_eq!(node.shape().audio_in().count(), 0);
     assert_eq!(node.shape().audio_out().count(), 2);
 
@@ -1344,7 +1352,8 @@ fn voice_node_is_a_standalone_graph_node() {
                 .expect("a placeable wave"),
         ),
         play: Playback::default(),
-    });
+    })
+    .expect("a finite gain and a nonempty width");
     let mut mixer_out = [0.0f32; 2];
     let mut node_out = [0.0f32; 2];
     tick(&mut mixer, &transport, SR, &mut mixer_out);
@@ -1378,7 +1387,8 @@ fn a_voices_fork_keeps_its_window_and_reads_the_renders_transport() {
         VoiceSource::Memory(s) => assert_eq!(s.window().map(|w| w.start), Some(Beat::new(2.0))),
         other => panic!("expected a Memory source, got {other:?}"),
     }
-    let mut node = VoiceNode::with_channels(fork, 1u16);
+    let mut node =
+        VoiceNode::with_channels(fork, 1u16).expect("a finite gain and a nonempty width");
     node.prepare(&Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(64)),
@@ -1542,13 +1552,20 @@ fn add_with_stream(
     voice: Voice<f32>,
     port: &crate::streamer::StreamerPort<f32>,
 ) {
+    add_with_stream_result(handle, id, voice, port).expect("the command queue has room in a test");
+}
+
+fn add_with_stream_result(
+    handle: &VoicePoolHandle<f32>,
+    id: SlotId,
+    voice: Voice<f32>,
+    port: &crate::streamer::StreamerPort<f32>,
+) -> Result<(), Box<StreamingAddError<f32>>> {
     let stream = stream_of(&voice, port);
     let VoiceSource::Disk(disk) = voice.source else {
         unreachable!("a streaming voice")
     };
-    handle
-        .add_streaming(id, disk, stream, voice.play)
-        .expect("the command queue has room in a test");
+    handle.add_streaming(id, disk, stream, voice.play)
 }
 
 fn looped(mut voice: Voice<f32>) -> Voice<f32> {
@@ -1714,10 +1731,10 @@ fn a_direction_set_through_the_handle_reaches_the_stream() {
 }
 
 /// A stream ends with its voice: the handle holds it from the add, and a
-/// `Remove` (or an add at the same id) drops it, which sends the streamer
-/// its close.
+/// `Remove` drops it, which sends the streamer its close. An add at a live id
+/// is refused and hands its stream back, and the resident stream stays open.
 #[test]
-fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
+fn a_stream_ends_when_its_voice_is_removed() {
     use crate::streamer::StreamerCommand as C;
     let (commands, streamer) = test_streamer(8);
     let (_pool, handle) = VoicePool::new().with_handle();
@@ -1728,20 +1745,36 @@ fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
         0,
         "an add with nothing to set sends nothing"
     );
-    handle.send(VoiceCommand::Remove(id)).expect("room");
+    handle.remove(id).expect("room");
     assert!(matches!(
         streamer.try_iter().collect::<Vec<_>>().as_slice(),
         [C::Close { stream: STREAM_1 }]
     ));
 
     add_with_stream(&handle, id, streaming_voice_of(2), &commands);
-    add_with_stream(&handle, id, streaming_voice_of(3), &commands);
+    let refused = add_with_stream_result(&handle, id, streaming_voice_of(3), &commands)
+        .expect_err("the id is live");
+    assert_eq!(refused.error, SendError::SlotInUse(id));
+    assert_eq!(
+        streamer.try_iter().count(),
+        0,
+        "the refused add ended nothing: the resident voice's stream stays open"
+    );
+    drop(refused);
+    assert!(
+        matches!(
+            streamer.try_iter().collect::<Vec<_>>().as_slice(),
+            [C::Close { stream: STREAM_3 }]
+        ),
+        "only the stream handed back ends, when its caller drops it"
+    );
+    handle.remove(id).expect("room");
     assert!(
         matches!(
             streamer.try_iter().collect::<Vec<_>>().as_slice(),
             [C::Close { stream: STREAM_2 }]
         ),
-        "the replaced voice's stream ended, the replacing one's did not"
+        "the resident voice's stream ended, the refused one's did not open"
     );
 }
 
@@ -1942,48 +1975,56 @@ fn a_pool_wider_than_the_sampler_reads_is_refused() {
         ChannelLayout::try_from(ceiling + 1).expect("a test width is small"),
     )
     .expect_err("a pool past the ceiling must be refused");
+    assert!(matches!(
+        err,
+        PlaceError::WidthTooWide { channels, .. } if channels as usize == ceiling + 1
+    ));
     assert_eq!(
-        err.channels,
-        ChannelLayout::try_from(ceiling + 1).expect("a test width is small")
+        VoicePool::<f32>::with_channels(0u16).err(),
+        Some(PlaceError::EmptyWidth),
+        "no channels is refused, not coerced to mono"
     );
 }
 
-/// A voice node wider than the sampler reads writes silence on the
-/// channels past it, not what the buffer held: the node's constructor
-/// cannot refuse (it is infallible, and hosts clamp the width first), so
-/// its `process` clears every output it declares.
+/// A voice node's constructor refuses a width the sampler cannot run, and a
+/// gain that is not finite, by name: past `MAX_CHANNELS` it would declare
+/// outputs its read never writes, and no channels is a node nothing can be
+/// wired to.
 #[test]
-fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
-    let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let sampler = MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
-    let wide = tutti_buffers::MAX_CHANNELS + 2;
-    let node = VoiceNode::with_channels(
-        Voice {
-            source: VoiceSource::Memory(sampler),
-            play: Playback::default(),
+fn a_voice_node_refuses_a_width_or_gain_the_sampler_cannot_run() {
+    let voice = |gain: f64| Voice {
+        source: VoiceSource::Memory(
+            MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
+                .expect("a placeable wave"),
+        ),
+        play: Playback {
+            gain: Amplitude::new(gain),
+            ..Playback::default()
         },
-        ChannelLayout::try_from(wide).expect("a test width is small"),
+    };
+    let max = tutti_buffers::MAX_CHANNELS as u16;
+    assert_eq!(
+        VoiceNode::with_channels(voice(1.0), ChannelLayout::from(max)).err(),
+        None,
+        "the ceiling itself is carried"
     );
-    let mut direct = tutti_graph::contract::Direct::new(node, SampleRate::of(SR), 64);
-    for ch in direct.outputs_mut().iter_mut() {
-        let ch = ch.into_samples_mut();
-        ch.fill(7.0);
-    }
-    direct.block_in(&transport.env(64, SampleRate::of(SR)));
-    for c in tutti_buffers::MAX_CHANNELS..wide {
-        for i in 0..64 {
-            assert_eq!(
-                direct.output().plane(c).samples()[i],
-                0.0,
-                "channel {c} frame {i} kept what the buffer held"
-            );
-        }
-    }
-    assert!(
-        direct.output().plane(0).iter().any(|&s| s != 0.0),
-        "the voice must sound on the channels it reads"
+    assert_eq!(
+        VoiceNode::with_channels(voice(1.0), ChannelLayout::from(max + 2)).err(),
+        Some(VoiceNodeError::Width(PlaceError::WidthTooWide {
+            channels: max + 2,
+            max
+        }))
     );
+    assert_eq!(
+        VoiceNode::with_channels(voice(1.0), ChannelLayout::from(0u16)).err(),
+        Some(VoiceNodeError::Width(PlaceError::EmptyWidth))
+    );
+    for gain in [f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            VoiceNode::new(voice(gain)).err(),
+            Some(VoiceNodeError::Gain(GainError::NotFinite))
+        );
+    }
 }
 
 /// Both nodes declare the width they were built at, as generators: no
@@ -2011,7 +2052,8 @@ fn both_nodes_declare_their_width() {
         let vn = VoiceNode::with_channels(
             voice,
             ChannelLayout::try_from(w).expect("a test width is small"),
-        );
+        )
+        .expect("a finite gain and a nonempty width");
         // A pool takes voices while it plays, so it promises no ceiling; a
         // node over a placed voice is the programme, which has no ring-out.
         for (what, shape, tail) in [
@@ -2188,6 +2230,8 @@ fn send_builds_the_stretch_filter_not_the_drain() {
             counters: Default::default(),
             streams: Default::default(),
             free: Default::default(),
+            live: Default::default(),
+            stamps: Default::default(),
         };
         probe
             .send(VoiceCommand::AddVoice {

@@ -155,8 +155,8 @@ impl<F: SamplerFloat> VoiceSource<F> {
     #[inline]
     pub(crate) fn apply_gain(&mut self, gain: Amplitude) {
         match self {
-            Self::Memory(s) => s.set_gain(gain),
-            Self::Disk(s) => s.set_gain(gain),
+            Self::Memory(s) => s.store_gain(gain),
+            Self::Disk(s) => s.store_gain(gain),
         }
     }
 

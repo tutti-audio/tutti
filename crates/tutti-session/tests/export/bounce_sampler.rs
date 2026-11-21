@@ -116,7 +116,8 @@ fn a_pool_built_with_its_voices_bounces_them() {
         tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
     )
     .expect("a placeable wave");
-    pool.insert(SlotId(1), source, Playback::default());
+    pool.insert(SlotId(1), source, Playback::default())
+        .expect("a finite gain and a nonempty width");
     let pool = session.graph().add(pool);
     session.graph().connect(pool, Root).unwrap().unfaded();
 

@@ -24,14 +24,15 @@ use tutti_units::{
 };
 
 use super::clock::{BlockClock, Clock};
+use super::command::GainError;
 use super::interp::{
     Gate, Place, hermite_lanes, mirrored, place, place_tail, read_looped_frame, split_position, tap,
 };
 use super::loop_span::{Loop, LoopSpan};
 use super::slot::Piece;
 use super::types::Direction;
+use crate::PlaceError;
 use crate::lanes::{Gather, Lane, UNPREPARED_FRAMES, audible_gain, scale};
-use crate::{PlaceError, nonempty};
 use tutti_buffers::MAX_CHANNELS;
 
 /// The span of timeline a voice occupies: where it starts, and how long it
@@ -313,12 +314,14 @@ impl<F: Float> MemorySource<F> {
     /// # Errors
     ///
     /// [`PlaceError`] for a wave with a channel no speaker names (a second
-    /// LFE, a wide or high speaker), or one the frame has no place for.
+    /// LFE, a wide or high speaker), or one the frame has no place for, and
+    /// for a width the sampler cannot run a voice at
+    /// ([`voice_width`](crate::voice_width)).
     pub fn with_channels(
         wave: Arc<Wave<F>>,
         channels: impl Into<ChannelLayout>,
     ) -> Result<Self, PlaceError> {
-        let channels = nonempty(channels.into());
+        let channels = crate::voice_width(channels.into())?;
         let channel_place = Place::for_wave(&wave, channels)?;
         let sample_rate = wave.sample_rate();
         Ok(Self {
@@ -480,12 +483,26 @@ impl<F: Float> MemorySource<F> {
         self.wave.duration()
     }
 
-    /// Publishes a new output gain. A NaN or infinite gain is silence.
+    /// Publishes a new output gain.
     ///
     /// `&self` and stored in a shared cell: a value stored by value here is
     /// written on a frontend clone and rendered from a different one. See the
     /// field's doc.
-    pub fn set_gain(&self, gain: Amplitude) {
+    ///
+    /// # Errors
+    ///
+    /// [`GainError::NotFinite`] for a NaN or infinite gain; the source keeps
+    /// the gain it had.
+    pub fn set_gain(&self, gain: Amplitude) -> Result<(), GainError> {
+        GainError::check(gain)?;
+        self.store_gain(gain);
+        Ok(())
+    }
+
+    /// [`set_gain`](Self::set_gain) for a gain already checked: a store, so
+    /// the audio thread's drain can apply what a control-side entry refused or
+    /// passed.
+    pub(crate) fn store_gain(&self, gain: Amplitude) {
         self.gain.store(gain);
     }
 

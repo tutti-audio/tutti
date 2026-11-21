@@ -337,7 +337,8 @@ fn a_stretching_memory_voice_declares_no_latency() {
                 pitch: Cents::new(cents),
                 ..Default::default()
             },
-        });
+        })
+        .expect("a finite gain and a nonempty width");
         assert_eq!(
             node.shape().latency.samples(),
             Samples::new(0),
@@ -400,7 +401,8 @@ fn an_onset_lands_at_its_timeline_frame_through_a_node() {
             stretch: StretchFactor::new(1.5),
             ..Default::default()
         },
-    });
+    })
+    .expect("a finite gain and a nonempty width");
     let mut node = contract::prepared(node, SampleRate::of(SR), BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut out = Vec::new();

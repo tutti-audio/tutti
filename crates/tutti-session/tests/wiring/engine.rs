@@ -241,7 +241,8 @@ fn voice(cents: f64) -> tutti_sampler::VoicePool<f32> {
             pitch: tutti_units::Cents::new(cents),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     pool
 }
 
@@ -610,7 +611,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
     assert_eq!(
         s.close_heard_tap(),
         Err(tutti_session::SessionHeardTapError::Tap(
-            tutti_engine::OutputTapError::NotOpen
+            tutti_engine::HeardTapError::NotOpen
         )),
         "none was opened"
     );
@@ -623,7 +624,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
     assert_eq!(
         s.close_heard_tap(),
         Err(tutti_session::SessionHeardTapError::Tap(
-            tutti_engine::OutputTapError::NotOpen
+            tutti_engine::HeardTapError::NotOpen
         )),
         "closed already"
     );
@@ -976,7 +977,7 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     assert_eq!(
         s.open_heard_tap(Samples::new(8)).err(),
         Some(tutti_session::SessionHeardTapError::Tap(
-            tutti_engine::OutputTapError::Busy
+            tutti_engine::HeardTapError::Busy
         ))
     );
     let mut block = vec![0.0f32; 64 * 2];

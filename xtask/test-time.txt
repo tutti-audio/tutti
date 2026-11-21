@@ -4,7 +4,7 @@
 0 3 crates/tutti-au-host/tests/au_property_watch.rs
 0 2 crates/tutti-cpal/src/owner/tests.rs
 0 1 crates/tutti-engine/tests/no_alloc/rt_no_alloc_engine.rs
-0 1 crates/tutti-engine/tests/outputs/output_tap.rs
+0 1 crates/tutti-engine/tests/outputs/heard_tap.rs
 0 3 crates/tutti-engine/tests/stream/timer.rs
 0 1 crates/tutti-graph/src/pool.rs
 0 1 crates/tutti-graph/tests/executor/parallel.rs

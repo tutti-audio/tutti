@@ -44,11 +44,7 @@ fn rig() -> (Keyed, FakeCounters) {
 fn follow(s: &mut Keyed) {
     let input = s.input();
     s.midi()
-        .follow_machine_control(FollowMachineControl {
-            input,
-            group: G,
-            device: OURS,
-        })
+        .follow_machine_control(FollowMachineControl::new(input, G, OURS))
         .expect("follows");
     let _ = s.update();
 }
@@ -287,11 +283,7 @@ fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
     let (mut s, fake) = rig();
     let input = s.input();
     s.midi()
-        .follow_clock(FollowClock {
-            input,
-            group: G,
-            kind: ClockKind::BeatClock,
-        })
+        .follow_clock(FollowClock::new(input, G, ClockKind::BeatClock))
         .expect("follows the clock");
     follow(&mut s);
     assert_eq!(
@@ -331,11 +323,7 @@ fn a_group_the_input_does_not_hear_is_refused() {
     let far = MidiGroup::of(9);
     let input = s.input();
     assert!(matches!(
-        s.midi().follow_machine_control(FollowMachineControl {
-            input,
-            group: far,
-            device: OURS
-        }),
+        s.midi().follow_machine_control(FollowMachineControl::new(input, far, OURS)),
         Err(MidiError::GroupNotHeard(g)) if g == far
     ));
 }
@@ -384,7 +372,7 @@ fn sender(wire: &Wire, to: Recipient) -> (Session, tutti_session::MidiSink) {
         .build()
         .expect("builds");
     let _ = s.update();
-    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).open();
     let _ = s.update();
     s.midi_nodes()
         .unwrap()

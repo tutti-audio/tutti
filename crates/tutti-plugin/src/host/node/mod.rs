@@ -244,7 +244,9 @@ impl PluginClient<Unbound> {
     /// host's process: see `Plugin::open`), and a [`IpcError`] if the
     /// plugin-server cannot be found or spawned, the handshake fails or times out, the
     /// plugin fails to load (a ref's id that names no plugin of the file is the
-    /// format's own load failure), or the IPC bridge cannot be set up.
+    /// format's own load failure), the IPC bridge cannot be set up, or the
+    /// server does not list the plugin's parameters
+    /// ([`IpcError::ParametersUnlisted`]).
     pub fn new(
         config: IpcConfig,
         executor: &Executor,
@@ -313,6 +315,11 @@ impl PluginClient<Unbound> {
     /// sinks the bridge's events go to, and the generic node, activated at the
     /// slab's chunk ceiling (a graph's `prepare` then narrows it). Needs no
     /// main thread.
+    ///
+    /// # Errors
+    ///
+    /// [`IpcError::ParametersUnlisted`] when the server does not list the
+    /// plugin's parameters, and the other failures of setting up the node.
     fn over(ipc: Ipc) -> IpcResult<Self> {
         let bridge = Arc::clone(ipc.bridge());
         let descriptor = ipc.descriptor().clone();
@@ -372,6 +379,9 @@ impl PluginClient<Unbound> {
                 ResyncClass::Refresh(r) => listener_refresh_sink.fire(r),
                 ResyncClass::Invalidate(i) => listener_invalidate_sink.fire(i),
             },
+            IpcEvent::StateNotRestored { reason } => {
+                listener_invalidate_sink.fire(PluginInvalidation::StateNotRestored { reason });
+            }
             IpcEvent::RateRefusal(Some(refusal)) => {
                 listener_invalidate_sink.fire(PluginInvalidation::RateRefused(refusal));
             }
@@ -396,16 +406,13 @@ impl PluginClient<Unbound> {
         // The parameter list, once, while loading blocks anyway: the node's
         // per-parameter delivery is sized from it. A `prepare` may not make
         // this round trip; a load already has.
-        let params: Vec<ParamId> = match bridge.audio().parameters() {
-            Some(list) => list.into_iter().map(|p| p.id()).collect(),
-            None => {
-                tracing::warn!(
-                    "plugin-server listed no parameters at load; parameter \
-                     delivery falls back to its spare slots"
-                );
-                Vec::new()
-            }
-        };
+        let params: Vec<ParamId> = bridge
+            .audio()
+            .parameters()
+            .ok_or(IpcError::ParametersUnlisted)?
+            .into_iter()
+            .map(|p| p.id())
+            .collect();
 
         let origin = ipc.origin().cloned().ok_or(IpcError::NoOrigin)?;
         // The ref carries the id the server loaded, so a state it saves and a

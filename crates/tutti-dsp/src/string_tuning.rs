@@ -14,6 +14,19 @@
 
 use tutti_units::{Feedback, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
+tutti_units::ranged! {
+    /// The lowest pitch a string model plays: finite and at least 1 Hz. It sizes the string's
+    /// delay line (`rate / lowest` frames), so zero, a negative or a non-finite pitch cannot
+    /// size one, and a sub-hertz pitch would size a line a second long or more.
+    LowestPitch(Hz), LowestPitchError, "a lowest pitch, finite and at least 1 Hz",
+    |raw| raw.get().is_finite() && raw.get() >= 1.0
+}
+
+impl LowestPitch {
+    /// 20 Hz: the bottom of hearing, and the lowest the string nodes start at.
+    pub const DEFAULT: Self = Self(Hz::new(20.0));
+}
+
 /// `ln 1000`: the natural-log span of 60 dB of amplitude.
 pub(crate) const LN_1000: f64 = 3.0 * core::f64::consts::LN_10;
 
@@ -24,13 +37,18 @@ pub(crate) fn min_period(step: usize) -> SampleSpan {
 
 /// The loop's period in frames at `frequency`, held between `lowest` and the shortest period
 /// the tuning designs. A frequency that is not finite and positive reads as `lowest`.
-pub(crate) fn period(frequency: Hz, lowest: Hz, rate: SampleRate, step: usize) -> SampleSpan {
+pub(crate) fn period(
+    frequency: Hz,
+    lowest: LowestPitch,
+    rate: SampleRate,
+    step: usize,
+) -> SampleSpan {
     let f = if frequency.get().is_finite() && frequency.get() > 0.0 {
         frequency
     } else {
-        lowest
+        lowest.get()
     };
-    let frames = rate.get() / f.get().max(lowest.get());
+    let frames = rate.get() / f.get().max(lowest.get().get());
     SampleSpan::clamped(frames).max(min_period(step))
 }
 
@@ -78,3 +96,6 @@ pub(crate) fn per_trip_decay(trip: Seconds, t60: Seconds) -> Feedback {
 
 /// The largest `f64` below 1, `1 - 2^-53`.
 const LARGEST_BELOW_ONE: f64 = 1.0 - f64::EPSILON / 2.0;
+
+#[cfg(test)]
+mod tests;

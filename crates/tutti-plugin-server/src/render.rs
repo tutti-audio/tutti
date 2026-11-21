@@ -1151,6 +1151,7 @@ impl Drop for RenderThread {
             self.wake.ring();
             if let Err(task) = join_within(lane.task, crate::server::RENDER_STOP_PATIENCE) {
                 tracing::warn!("plugin-server: the render lane did not stop; leaving it");
+                crate::leak::note_detached();
                 task.detach();
             }
         }

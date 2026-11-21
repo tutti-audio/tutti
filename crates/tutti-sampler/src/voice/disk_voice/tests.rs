@@ -445,7 +445,8 @@ fn a_fork_never_touches_the_live_stream() {
         under(&mut copy, &render, SR, 64);
         render.advance(64, SampleRate::of(SR));
     }
-    copy.set_gain(Amplitude::new(0.25));
+    copy.set_gain(Amplitude::new(0.25))
+        .expect("a finite gain and a nonempty width");
 
     assert_eq!(ring.play(), play_before, "a copy moved the live read");
     assert_eq!(ring.window(), window_before, "a copy touched the live ring");
@@ -510,7 +511,9 @@ fn a_non_finite_gain_is_silence_on_a_disk_voice() {
             Beat::new(4.0),
             Some(BeatDuration::new(4.0)),
         );
-        reader.set_gain(Amplitude::new(gain));
+        // The checked setter refuses these; the render's own guard is what
+        // answers one that is stored anyway.
+        reader.store_gain(Amplitude::new(gain));
         for beat in [0.0, 5.0, 9.0] {
             transport.set_beat(Beat::new(beat));
             let out = under(&mut reader, &transport, SR, 8);
@@ -1117,7 +1120,8 @@ fn gain_scales_the_output() {
     let samples: Vec<_> = (0..20).map(|_| (1.0f32, -1.0f32)).collect();
     let (mut full, _) = rolling_voice(&samples);
     let (mut half, _) = rolling_voice(&samples);
-    half.set_gain(Amplitude::new(0.5));
+    half.set_gain(Amplitude::new(0.5))
+        .expect("a finite gain and a nonempty width");
     let (t_full, t_half) = (
         MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0)),
         MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0)),
@@ -1348,7 +1352,8 @@ fn a_gain_change_reaches_a_cloned_voice() {
     // The clone stands in for a copy the host writes through; the
     // original is what the graph renders.
     let mut copy = unit.clone();
-    copy.set_gain(Amplitude::new(0.25));
+    copy.set_gain(Amplitude::new(0.25))
+        .expect("a finite gain and a nonempty width");
 
     let peak = |u: &mut DiskVoice<f32>, t: &MockTransport| {
         let mut peak = 0.0f32;

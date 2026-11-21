@@ -121,7 +121,7 @@ fn set_routes_with_a_held_key() {
         2 => Some(b),
         _ => None,
     };
-    let to = |k: u8| [MidiRouteRule::<u8>::any_channel().to(k)];
+    let to = |k: u8| [MidiRouteRule::<u8>::new().to(k)];
     s.midi().set_routes(src, &to(1), None, resolve).unwrap();
     let _ = s.update();
     mail.lock().unwrap().push([0x2090_3c64, 0, 0, 0]);
@@ -200,9 +200,7 @@ fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
     let src = s.graph().add(GroupSrc(Arc::clone(&mail), ports));
     let (a, a_seen) = tap(&mut s);
     let resolve = |k: u8| (k == 1).then_some(a);
-    let by_group_2 = [MidiRouteRule::<u8>::any_channel()
-        .in_group(MidiGroup::of(1))
-        .to(1)];
+    let by_group_2 = [MidiRouteRule::<u8>::new().in_group(MidiGroup::of(1)).to(1)];
     s.midi()
         .set_routes(src, &by_group_2, None, resolve)
         .unwrap();
