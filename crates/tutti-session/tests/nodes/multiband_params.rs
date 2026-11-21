@@ -218,6 +218,11 @@ fn the_meter_of_band_1_follows_its_threshold() {
         "{:?}",
         s.graph_ref().gain_reduction(&mb, 1).unwrap()
     );
+    assert_eq!(
+        s.graph_ref().gain_reduction(&mb, 2),
+        None,
+        "a band past the last names nothing"
+    );
 }
 
 /// **A route to `GainDb` at index 1 moves band 1's tone and leaves band 0's

@@ -6,7 +6,7 @@
 //! editor-only second instance here through `load_editor`; each
 //! lives in its format's host crate.
 
-use tutti_plugin_types::LoadStage;
+use tutti_plugin_types::NoEditorHost;
 use tutti_plugin_types::{Editor, MainThreadMarker, MainWorkHandle};
 use tutti_plugin_types::{IpcError, IpcResult, PluginFormat, PluginRef};
 
@@ -38,24 +38,19 @@ pub(crate) fn load_gui_instance(
     let path = plugin.path();
     match format {
         #[cfg(feature = "vst3")]
-        PluginFormat::Vst3 => editor::<tutti_vst3_host::Vst3Loaded>(main, work, plugin, "VST3"),
+        PluginFormat::Vst3 => editor::<tutti_vst3_host::Vst3Loaded>(main, work, plugin),
         #[cfg(feature = "clap")]
-        PluginFormat::Clap => editor::<tutti_clap_host::ClapLoaded>(main, work, plugin, "CLAP"),
+        PluginFormat::Clap => editor::<tutti_clap_host::ClapLoaded>(main, work, plugin),
         PluginFormat::AudioUnit => platform::audio_unit(main, work, plugin),
-        PluginFormat::Vst2 => Err(IpcError::LoadFailed {
-            path: Some(path.to_path_buf()),
-            stage: LoadStage::Opening,
-            reason: "VST2 plugins use the in-process backend (enable the \
-                     `vst2` feature) — they don't go through the subprocess \
-                     GUI loader."
-                .into(),
+        PluginFormat::Vst2 => Err(IpcError::NoEditorHost {
+            path: path.to_path_buf(),
+            why: NoEditorHost::Vst2InProcess,
         }),
         // `PluginFormat` is `#[non_exhaustive]` and another crate's, so the
         // arm stays even when every format above is compiled in.
-        _ => Err(IpcError::LoadFailed {
-            path: Some(path.to_path_buf()),
-            stage: LoadStage::Opening,
-            reason: format!("No in-process GUI support for format {format:?}"),
+        _ => Err(IpcError::NoEditorHost {
+            path: path.to_path_buf(),
+            why: NoEditorHost::Format(format),
         }),
     }
 }
@@ -66,16 +61,11 @@ fn editor<L: tutti_plugin_types::OutOfProcess>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
     plugin: &PluginRef,
-    format: &str,
 ) -> IpcResult<Box<dyn Editor>>
 where
     L::Editor: 'static,
 {
-    let editor = L::load_editor(main, work, plugin).map_err(|e| IpcError::LoadFailed {
-        path: Some(plugin.path().to_path_buf()),
-        stage: LoadStage::Opening,
-        reason: format!("{format} GUI-only load failed: {e}"),
-    })?;
+    let editor = L::load_editor(main, work, plugin)?;
     Ok(Box::new(editor))
 }
 
@@ -87,11 +77,8 @@ pub(crate) fn load_gui_instance(
     plugin: &PluginRef,
     _format: PluginFormat,
 ) -> IpcResult<Box<dyn Editor>> {
-    Err(IpcError::LoadFailed {
-        path: Some(plugin.path().to_path_buf()),
-        stage: LoadStage::Opening,
-        reason: "In-process GUI support not built (no format feature enabled: \
-                 vst3, clap or au)"
-            .into(),
+    Err(IpcError::NoEditorHost {
+        path: plugin.path().to_path_buf(),
+        why: NoEditorHost::NoFormatHost,
     })
 }

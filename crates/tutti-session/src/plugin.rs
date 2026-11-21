@@ -3149,7 +3149,7 @@ mod tests {
         fn crash_cause(&self) -> Option<PluginFailure> {
             self.is_crashed().then_some(PluginFailure::StreamClosed)
         }
-        fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
+        fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
             None
         }
         fn block_counts(&self) -> tutti_plugin_types::BlockCounts {

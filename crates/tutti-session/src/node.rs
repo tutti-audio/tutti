@@ -23,9 +23,9 @@ use crate::NodeSlots;
 /// - its own impl with the default `params` (none), for a node with
 ///   controls of another shape.
 ///
-/// The controls are `Clone + Send + 'static`: the graph keeps a clone for the
-/// node's life ([`Graph::add`](crate::Graph::add)), so a clone shares the node's
-/// cells, and the node's removal drops it.
+/// The controls are `Send + 'static`: the graph owns them for the node's life
+/// ([`Graph::add`](crate::Graph::add)) and drops them once the node has left
+/// the render.
 ///
 /// Every impl states what frees what its controls publish
 /// ([`reclaimer`](Self::reclaimer)): [`Reclaims::Cells`] for a node whose
