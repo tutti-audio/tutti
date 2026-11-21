@@ -772,10 +772,9 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             // The node is out of any executor (`Node::prepare`'s contract), so
             // its realtime end is here: the exchange finishes in this call.
             let Some(main) = MainThreadMarker::new() else {
-                // Not recorded, so the next prepare on the main thread tells it.
-                tracing::error!(
-                    "a plugin was prepared off the main thread in {mode:?}; it keeps its render mode until a prepare on the main thread"
-                );
+                // Not recorded, so the next prepare on the main thread tells it;
+                // the handle's subscribers hear it as the rate's refusal is.
+                inner.note_mode_not_applied(mode);
                 return;
             };
             inner.set_render_mode(main, mode, Some(&mut self.rt));

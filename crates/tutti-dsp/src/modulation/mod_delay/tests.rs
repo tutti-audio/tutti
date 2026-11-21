@@ -449,3 +449,22 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
     }
     assert_close_f64(&run_with(g), &delayed(&v), 2.0f64.powi(-45));
 }
+
+/// **A sweep rate is finite and at least `MIN_RATE`**: a slower rate, or one that is not
+/// finite, is refused by the type.
+#[test]
+fn a_modulation_rate_takes_exactly_the_finite_rates_from_the_minimum() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: ModulationRate::new,
+        get: ModulationRate::get,
+        of: Some(ModulationRate::of),
+        valid: &[MIN_RATE, Hz::new(1.0), Hz::new(20_000.0)],
+        invalid: &[
+            Hz::new(0.0),
+            Hz::new(0.0099),
+            Hz::new(-1.0),
+            Hz::new(f64::NAN),
+            Hz::new(f64::INFINITY),
+        ],
+    });
+}

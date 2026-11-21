@@ -75,7 +75,8 @@ mod tests {
                 _: MainThreadMarker,
                 _: tutti_plugin_types::WindowHandle,
                 _: tutti_plugin_types::ContentScale,
-            ) -> tutti_plugin_types::PluginResult<dpi::Size> {
+            ) -> tutti_plugin_types::PluginResult<tutti_plugin_types::EditorOpened<dpi::Size>>
+            {
                 unreachable!("no editor")
             }
             fn close_editor(&mut self, _: MainThreadMarker) {}

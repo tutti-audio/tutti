@@ -46,6 +46,12 @@ use crate::{DelayLine, InterpolationMode, Lerp, MaxDelay, Ramp, delay_step};
 /// (or negative) reads as it.
 pub const MIN_RATE: Hz = Hz::new(0.01);
 
+tutti_units::ranged! {
+    /// An LFO rate a sweep is built at: finite and at least [`MIN_RATE`].
+    ModulationRate(Hz), ModulationRateError, "a finite rate of at least 0.01 Hz",
+    |raw| raw.get().is_finite() && raw.get() >= MIN_RATE.get()
+}
+
 /// The most channels a swept delay has: a bus's.
 pub const MAX_MOD_DELAY_CHANNELS: usize = MAX_CHANNELS;
 
@@ -98,12 +104,11 @@ impl ModDelayControls {
     /// `1 - d'(t) = 1 - 2 pi r D cos(2 pi r t)`, so the pitch swings between the ratios `1 +- 2
     /// pi r D`. The depth is the peak rise, `2^(depth / 1200) = 1 + 2 pi r D`, which gives
     /// `D = (2^(depth / 1200) - 1) / (2 pi r)` seconds; the peak fall is the same ratio
-    /// step down, `1200 log2(2 - 2^(depth / 1200))` cents (a little more). A `rate` below
-    /// [`MIN_RATE`] is read as it, as the sweep does, and a `depth` the sweep's range cannot
-    /// reach is clamped there when it is taken.
+    /// step down, `1200 log2(2 - 2^(depth / 1200))` cents (a little more). A `depth` the sweep's
+    /// range cannot reach is clamped there when it is taken, as every control is.
     #[must_use]
-    pub fn vibrato(depth: Cents, rate: Hz) -> Self {
-        let rate = rate.max(MIN_RATE);
+    pub fn vibrato(depth: Cents, rate: ModulationRate) -> Self {
+        let rate = rate.get();
         let swing = depth.to_pitch_ratio() - 1.0;
         Self {
             rate,
