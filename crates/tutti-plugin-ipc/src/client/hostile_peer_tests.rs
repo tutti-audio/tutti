@@ -194,7 +194,7 @@ fn send_raw_frame(stream: &Stream, len: u32, body: &[u8]) -> std::io::Result<()>
 /// while and then die — which is the whole point of this file. Returning
 /// [`Action::Die`] closes the socket the way a segfaulting server does: no
 /// shutdown message, no goodbye, just EOF at the host's next read.
-enum Action {
+pub(crate) enum Action {
     /// Answer a control request.
     Reply(Box<ControlReply>),
     /// Answer a block or an `ApplyParameters` on the audio connection. Boxed:
@@ -346,8 +346,8 @@ fn serve_lane<Req: Wire>(
 /// How a mock lane answers: a script over the messages of its connection.
 type Responder<Body> = Arc<std::sync::Mutex<Box<dyn Fn(Body) -> Action + Send>>>;
 
-struct MockServer {
-    bridge: Arc<PluginBridge>,
+pub(crate) struct MockServer {
+    pub(crate) bridge: Arc<PluginBridge>,
     /// The ring the bridge's audio lane answers blocks into.
     replies: crate::client::audio::Replies,
     /// `Option` only so `Drop` can take it out and `mem::forget` it; see there.
@@ -357,7 +357,10 @@ struct MockServer {
 }
 
 impl MockServer {
-    fn start(label: &str, respond: impl Fn(ControlRequest) -> Action + Send + 'static) -> Self {
+    pub(crate) fn start(
+        label: &str,
+        respond: impl Fn(ControlRequest) -> Action + Send + 'static,
+    ) -> Self {
         // The production deadline, not the shortened one. Only the two tests
         // *about* the deadline shorten it: a 400 ms progress budget applied to
         // every mock made `a_state_larger_than_one_frame_round_trips` fail, and
@@ -830,6 +833,44 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     });
     assert_eq!(*layouts.lock(), [real], "only the plausible layout is kept");
     assert!(resyncs.load(Ordering::Relaxed) >= 1, "the resync is heard");
+}
+
+/// **A rebuilt plugin's refusal of its saved state is heard by the host, with
+/// its reason**, after the reload it follows: the server's news reaches the
+/// listener as `StateNotRestored`.
+#[test]
+fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
+    use crate::client::audio::IpcEvent;
+    use parking_lot::Mutex as PlMutex;
+
+    let mock = MockServer::start("state-not-restored", |msg| match msg {
+        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
+            News::PluginReloaded,
+            News::PluginStateNotRestored {
+                reason: "setState refused".into(),
+            },
+        ]),
+        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        _ => Action::Silent,
+    });
+    let heard: Arc<PlMutex<Vec<String>>> = Arc::new(PlMutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge
+        .audio()
+        .set_listener(Some(Arc::new(move |ev| match ev {
+            IpcEvent::Resync(kind) => sink.lock().push(format!("{kind:?}")),
+            IpcEvent::StateNotRestored { reason } => sink.lock().push(reason),
+            _ => {}
+        })));
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Realtime)
+    );
+    tutti_fixtures::wait_until("the refusal to be heard", NOTICE_TIMEOUT, || {
+        heard.lock().len() >= 2
+    });
+    assert_eq!(*heard.lock(), ["Reloaded", "setState refused"]);
 }
 
 /// A handle to a real slab of `layout`: what the host sends, to a mock server

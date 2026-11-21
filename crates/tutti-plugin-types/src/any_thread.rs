@@ -11,8 +11,22 @@ use crate::{
     PluginFailure, RenderMode, StateError, StateUse, TerminationReason, UnknownParam, bypass_value,
     is_bypassed,
 };
+use futures_channel::oneshot;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
+
+/// An answer a plugin's hosting fills: the receiver of a oneshot whose sender
+/// the thread that learns the answer holds. A sender dropped unanswered (the
+/// hosting ended) cancels it.
+pub type Answer<T> = oneshot::Receiver<T>;
+
+/// An [`Answer`] that is already filled with `value`.
+pub fn answered<T>(value: T) -> Answer<T> {
+    let (tx, rx) = oneshot::channel();
+    // The receiver is alive: the send cannot fail.
+    drop(tx.send(value));
+    rx
+}
 
 /// What a loaded plugin answers from any thread, without a main-thread token.
 ///
@@ -41,16 +55,26 @@ use tutti_units::ParamId;
 /// Object-safe, `&self`, `Send + Sync`: a handle stores it as `Arc<dyn
 /// AnyThread>`.
 pub trait AnyThread: Send + Sync {
-    /// The static parameter catalog (id, name, range, flags), or `None` when
-    /// it is unavailable: the plugin is lost, or (in-process, off the main
-    /// thread) the main thread did not answer in time.
-    fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>>;
+    /// The static parameter catalog (id, name, range, flags) as an [`Answer`]:
+    /// queued, and the call returns without waiting. **In-process** the main
+    /// thread fills it when it runs the queued work (at once when this is the
+    /// main thread); **served** the bridge's control lane fills it with the
+    /// server's reply, or with `None` at its query deadline. `None` is
+    /// unavailable: the plugin is lost, the backend cannot list, or the deadline
+    /// passed; a dropped sender cancels the answer, which a caller reads as
+    /// unavailable too.
+    fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>>;
 
     /// The plugin's current value for one parameter.
     ///
     /// `None` if unavailable, including when `id` uses the other addressing
     /// model, which addresses no parameter of this plugin. See [`ParamId`].
+    /// Blocks on a round trip (served) or a main-thread tick (in-process).
     fn parameter_value(&self, id: ParamId) -> Option<Normalized>;
+
+    /// [`parameter_value`](Self::parameter_value) as an [`Answer`], filled as
+    /// [`parameter_descriptors`](Self::parameter_descriptors) is.
+    fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>>;
 
     /// Writes one parameter value, for a UI knob or an initial value.
     ///
@@ -83,8 +107,10 @@ pub trait AnyThread: Send + Sync {
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64>;
 
     /// The inverse of [`parameter_plain`](Self::parameter_plain)
-    /// ([`Control::parameter_normalized`](crate::Control::parameter_normalized)).
-    fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized>;
+    /// ([`Control::parameter_normalized`](crate::Control::parameter_normalized)),
+    /// as an [`Answer`] filled as [`parameter_descriptors`](Self::parameter_descriptors)
+    /// is.
+    fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>>;
 
     /// The plugin's own display string for `value`, such as `"800 Hz"`.
     ///
@@ -214,11 +240,14 @@ mod tests {
     }
 
     impl AnyThread for Listed {
-        fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-            Some(self.params.clone())
+        fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+            answered(Some(self.params.clone()))
         }
         fn parameter_value(&self, _: ParamId) -> Option<Normalized> {
             None
+        }
+        fn parameter_value_answer(&self, _: ParamId) -> Answer<Option<Normalized>> {
+            answered(None)
         }
         fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
             self.written.lock().unwrap().push((id, value.get()));
@@ -227,8 +256,8 @@ mod tests {
         fn parameter_plain(&self, _: ParamId, _: Normalized) -> Option<f64> {
             None
         }
-        fn parameter_normalized(&self, _: ParamId, _: f64) -> Option<Normalized> {
-            None
+        fn parameter_normalized(&self, _: ParamId, _: f64) -> Answer<Option<Normalized>> {
+            answered(None)
         }
         fn parameter_text(&self, _: ParamId, _: Normalized) -> Option<String> {
             None

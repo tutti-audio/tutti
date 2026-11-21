@@ -34,12 +34,21 @@ struct FakeBackend {
 }
 
 impl tutti_plugin_types::AnyThread for FakeBackend {
-    fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        None
+    fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+        let read = || None;
+        tutti_plugin_types::answered(read())
     }
     fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
         None
     }
+
+    fn parameter_value_answer(
+        &self,
+        id: ParamId,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        tutti_plugin_types::answered(self.parameter_value(id))
+    }
+
     fn set_parameter_value(
         &self,
         _id: ParamId,
@@ -50,8 +59,13 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
     fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
         None
     }
-    fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
-        None
+    fn parameter_normalized(
+        &self,
+        _id: ParamId,
+        _plain: f64,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        let read = || None;
+        tutti_plugin_types::answered(read())
     }
     fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
         None
@@ -377,6 +391,31 @@ fn a_plugins_own_edit_arrives_as_param_changed() {
         "{changes:?}"
     );
     assert!(plugin_events(&mut s).is_empty(), "each is reported once");
+}
+
+/// **A reload that left the plugin at its defaults reaches the stream** as
+/// `StateNotRestored`, with the reason, and a reload that restored is not an
+/// event.
+#[test]
+fn a_reload_that_restored_nothing_arrives_in_the_stream() {
+    use tutti_plugin_types::PluginInvalidation;
+    let _ = tutti_fixtures::main_thread();
+    let (mut s, _, _, _, invalidate) = session_reporting();
+    invalidate.fire(PluginInvalidation::Reloaded);
+    invalidate.fire(PluginInvalidation::StateNotRestored {
+        reason: "setState refused".into(),
+    });
+    let changes: Vec<_> = plugin_events(&mut s)
+        .into_iter()
+        .map(|e| e.change)
+        .collect();
+    assert!(
+        matches!(
+            changes.as_slice(),
+            [PluginChange::StateNotRestored { reason }] if reason == "setState refused"
+        ),
+        "{changes:?}"
+    );
 }
 
 /// **What a plugin reports besides edits reaches the same stream**: a refresh

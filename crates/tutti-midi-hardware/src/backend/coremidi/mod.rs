@@ -45,7 +45,7 @@ use tutti_coremidi_ffi::{
     Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
     UniqueId, ump_endpoints,
 };
-use tutti_midi_device::{EndpointId, Identity, OsDevice};
+use tutti_midi_device::{EndpointId, OsDevice, OsEndpointIdentity};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_ump::{FunctionBlockInfo, Protocol, read_protocol};
 
@@ -270,7 +270,7 @@ fn os_endpoint(endpoint: &OsObject, ump: Option<&UmpEndpointInfo>) -> OsEndpoint
     let described = endpoint_capability(endpoint, ump);
     OsEndpoint {
         id: endpoint_id(endpoint.id()),
-        identity: Identity::CoreMidi(endpoint.id().get()),
+        identity: OsEndpointIdentity::CoreMidi(endpoint.id().get()),
         name: endpoint_name(endpoint),
         capability: described.endpoint,
         blocks_left_out: described.blocks_left_out,

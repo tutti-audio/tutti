@@ -169,7 +169,7 @@ fn step_is_allocation_free_in_every_mode() {
 #[test]
 fn per_note_state_is_allocation_free() {
     use tutti_ump::{Address, MidiGroup, RegisteredPerNoteController, U7};
-    let mut state = PerNoteState::new(16, Semitones::new(48.0));
+    let mut state = PerNoteState::new(tutti_ump::GroupSpan::of(16), Semitones::new(48.0));
     let mut twin = state.clone();
     assert_no_alloc(|| {
         for round in 0..400u32 {

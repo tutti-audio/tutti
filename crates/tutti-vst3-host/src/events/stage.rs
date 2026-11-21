@@ -6,7 +6,7 @@ use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     NoteExpressionIntValue, NoteExpressionValue, RtMidiEvents, group_of_port, push_sysex,
 };
-use tutti_ump::SysexStep;
+use tutti_ump::{GroupSpan, SysexStep};
 use tutti_vst3_ffi::{EventList, NOTE_EXPRESSION_ROOM, Staging};
 
 use super::{
@@ -50,9 +50,19 @@ impl InputEvents<'_> {
 
 /// Fills a plugin's input [`EventList`] from [`InputEvents`], keeping the
 /// MIDI stream's state across blocks ([`MidiEncoder`]).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Stager {
-    encoder: MidiEncoder,
+    /// `None` for a plugin with no event input bus: nothing is encoded.
+    encoder: Option<MidiEncoder>,
+    /// Events offered to a plugin with no event input bus.
+    unrouted: u64,
+}
+
+impl Default for Stager {
+    /// A stager for a plugin with one event input bus.
+    fn default() -> Self {
+        Self::new(GroupSpan::of(1))
+    }
 }
 
 impl Stager {
@@ -60,30 +70,48 @@ impl Stager {
     /// the bus of its number ([`MidiEncoder::new`]). Allocates: off the audio
     /// thread.
     #[must_use]
-    pub fn new(buses: usize) -> Self {
+    pub fn new(buses: GroupSpan) -> Self {
         Self {
-            encoder: MidiEncoder::new(buses),
+            encoder: Some(MidiEncoder::new(buses)),
+            unrouted: 0,
         }
     }
 
-    /// MIDI messages dropped for a Group the plugin has no event input bus for
-    /// ([`MidiEncoder::groups_dropped`]).
+    /// A stager for a plugin with no event input bus: it takes no events, so
+    /// every event offered is dropped and counted
+    /// ([`groups_dropped`](Self::groups_dropped)), and the list stays empty.
+    #[must_use]
+    pub fn without_buses() -> Self {
+        Self {
+            encoder: None,
+            unrouted: 0,
+        }
+    }
+
+    /// Events dropped because the plugin has no event input bus for them
+    /// ([`MidiEncoder::groups_dropped`]): MIDI messages of a Group past its
+    /// buses, and, for a plugin with no event input bus at all, every event
+    /// offered of any kind.
     #[must_use]
     pub fn groups_dropped(&self) -> u64 {
-        self.encoder.groups_dropped()
+        self.unrouted + self.encoder.as_ref().map_or(0, MidiEncoder::groups_dropped)
     }
 
     /// MIDI messages dropped because VST3 has no event for them
     /// ([`MidiEncoder::unsendable_dropped`]).
     #[must_use]
     pub fn unsendable_dropped(&self) -> u64 {
-        self.encoder.unsendable_dropped()
+        self.encoder
+            .as_ref()
+            .map_or(0, MidiEncoder::unsendable_dropped)
     }
 
     /// The plugin was stopped or reset: it forgot its notes
     /// ([`MidiEncoder::reset`]).
     pub fn reset(&mut self) {
-        self.encoder.reset();
+        if let Some(encoder) = &mut self.encoder {
+            encoder.reset();
+        }
     }
 
     /// Stages every source into `list`, replacing the previous block.
@@ -107,6 +135,16 @@ impl Stager {
         let Some(mut stage) = list.try_begin() else {
             return false;
         };
+        if self.encoder.is_none() {
+            self.unrouted += (src.midi.len()
+                + src.note_expressions.len()
+                + src.expr_ints.len()
+                + src.chords.len()
+                + src.scales.len()
+                + src.expr_texts.len()) as u64;
+            stage.finish();
+            return true;
+        }
         // In frame order, so a per-note bend sensitivity applies to the bends after it.
         for event in src.midi {
             self.stage_midi(&mut stage, event);
@@ -148,7 +186,10 @@ impl Stager {
         let (at, ump) = event;
         match stage.reassemble(ump) {
             SysexStep::NotSysex => {
-                let events = self.encoder.encode(event);
+                let Some(encoder) = &mut self.encoder else {
+                    return;
+                };
+                let events = encoder.encode(event);
                 // One event is the list's own to place or count (a note-off
                 // takes the place of an event staged before it); several are
                 // all or none.

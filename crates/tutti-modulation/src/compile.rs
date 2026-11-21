@@ -17,7 +17,7 @@
 //!   play reading, a seconds-clocked layer whose rate changed gets a
 //!   [`RateAnchor`] [`RATE_ANCHOR_MARGIN`] frames ahead, at the phase the
 //!   previous program reaches there, so its phase is continuous.
-//! - Refusals are by name ([`CompileError`]).
+//! - Refusals are by name ([`ProgramCompileError`]).
 
 use crate::ControlProgramBuilder;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -36,8 +36,8 @@ use tutti_rt::SplitMix64;
 
 use crate::curve::Curve;
 use crate::program::{
-    Amount, Clock, ControlProgram, DepthBy, InputLayer, Layer, LayerId, ProgramError, ProgramTime,
-    RateAnchor, SourceId, Waveform,
+    Amount, ControlProgram, DepthBy, InputLayer, Layer, LayerClock, LayerId, ProgramError,
+    ProgramTime, RateAnchor, SourceId, Waveform,
 };
 use crate::shape::Polarity;
 
@@ -141,12 +141,12 @@ fn adsr_valid(adsr: &Adsr) -> bool {
 pub enum Source {
     /// A wave on a clock: a closed-form layer, no node. The clock's anchor
     /// is the compiler's to set; a declared one is refused
-    /// ([`CompileError::AnchorDeclared`]).
+    /// ([`ProgramCompileError::AnchorDeclared`]).
     Lfo {
         /// One period.
         wave: Waveform,
         /// The clock it runs on.
-        clock: Clock,
+        clock: LayerClock,
     },
     /// A constant the user moves, a raw value (`shape` saturates past ±1).
     /// Moving it recompiles what it reaches: a layer of [`Waveform::Const`].
@@ -185,7 +185,7 @@ pub enum RouteTarget {
 /// A route: a source into a target, shaped by an amount.
 ///
 /// Plain data, built with a struct literal: every field is independent, and
-/// [`compile`] refuses a combination it cannot run ([`CompileError`]).
+/// [`compile`] refuses a combination it cannot run ([`ProgramCompileError`]).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct RouteDecl {
     /// What modulates.
@@ -331,7 +331,7 @@ pub struct Compiled {
     /// not: every layer and depth scaler it drives uses this one clock, so
     /// one LFO stays phase-coherent across its targets, and the next
     /// compile dates its rate edits from it.
-    pub clocks: BTreeMap<SourceKey, Clock>,
+    pub clocks: BTreeMap<SourceKey, LayerClock>,
     /// The id the next new signal source takes: one past every id this
     /// lineage of compiles has given, so no id is ever given twice. It wraps after `2^32`
     /// sources, skipping the ids still held.
@@ -340,7 +340,7 @@ pub struct Compiled {
 
 /// A clock holds no NaN: `compile` refuses a rate, period or phase that is
 /// not finite, and a phase whose magnitude exceeds [`MAX_CLOCK_PHASE`]. An
-/// anchor's phase is a finite `Clock::cycles` plus phase jumps, each a
+/// anchor's phase is a finite `LayerClock::cycles` plus phase jumps, each a
 /// difference of two phases within that bound, so at most `2 * MAX_CLOCK_PHASE`
 /// (2^41): the sum stays finite for fewer than 2^900 edits, never `inf − inf`.
 impl Eq for Compiled {}
@@ -356,7 +356,7 @@ pub const MAX_CLOCK_PHASE: f64 = 1_099_511_627_776.0;
 /// `tutti_graph::CompileError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum CompileError {
+pub enum ProgramCompileError {
     /// Two sources with one key.
     #[error("two sources share key {}", .0.0)]
     DuplicateSource(SourceKey),
@@ -464,7 +464,7 @@ pub enum CompileError {
 
 /// The clock a macro's constant layer carries: it reads none, and a beat
 /// clock has no corners for a constant.
-const MACRO_CLOCK: Clock = Clock::Beats {
+const MACRO_CLOCK: LayerClock = LayerClock::Beats {
     per_cycle: BeatsPerCycle::of(1.0),
     phase: PhaseIncrement::new(0.0),
 };
@@ -490,37 +490,37 @@ pub fn layer_id(route: RouteKey, depth_by: Option<RouteKey>) -> LayerId {
 ///
 /// # Errors
 ///
-/// Each [`CompileError`], by name.
+/// Each [`ProgramCompileError`], by name.
 pub fn compile(
     decl: &Declarations<'_>,
     prev: Option<&Compiled>,
     now: PlayReading,
     rate: SampleRate,
-) -> Result<Compiled, CompileError> {
-    let sources = index(decl.sources, CompileError::DuplicateSource)?;
-    let routes = index(decl.routes, CompileError::DuplicateRoute)?;
-    let targets = index(decl.targets, CompileError::DuplicateTarget)?;
+) -> Result<Compiled, ProgramCompileError> {
+    let sources = index(decl.sources, ProgramCompileError::DuplicateSource)?;
+    let routes = index(decl.routes, ProgramCompileError::DuplicateRoute)?;
+    let targets = index(decl.targets, ProgramCompileError::DuplicateTarget)?;
 
     for (&key, source) in &sources {
         check_source(key, source)?;
     }
     for (&key, route) in &routes {
         if !sources.contains_key(&route.source) {
-            return Err(CompileError::UnknownSource { route: key });
+            return Err(ProgramCompileError::UnknownSource { route: key });
         }
     }
     for (&key, t) in &targets {
         if t.min.is_nan() || t.max.is_nan() {
-            return Err(CompileError::NanRange(key));
+            return Err(ProgramCompileError::NanRange(key));
         }
         if t.min > t.max
             && matches!(key, TargetKey::Param { param, .. }
                 if param.as_unit().is_some_and(|a| a.param.is_circular()))
         {
-            return Err(CompileError::CrossedArc(key));
+            return Err(ProgramCompileError::CrossedArc(key));
         }
         if t.automation.as_ref().is_some_and(|c| c.frozen().is_some()) {
-            return Err(CompileError::LiveCurve(key));
+            return Err(ProgramCompileError::LiveCurve(key));
         }
     }
 
@@ -537,16 +537,16 @@ pub fn compile(
             continue;
         };
         let Some(inner) = routes.get(&scaled) else {
-            return Err(CompileError::UnknownRoute { route: key });
+            return Err(ProgramCompileError::UnknownRoute { route: key });
         };
         if matches!(inner.to, RouteTarget::Depth(_)) {
-            return Err(CompileError::DepthByChain { route: key });
+            return Err(ProgramCompileError::DepthByChain { route: key });
         }
         if is_signal(route.source) || is_signal(inner.source) {
-            return Err(CompileError::DepthBySignal { route: key });
+            return Err(ProgramCompileError::DepthBySignal { route: key });
         }
         if depth_of.insert(scaled, key).is_some() {
-            return Err(CompileError::TwoDepthBy { route: scaled });
+            return Err(ProgramCompileError::TwoDepthBy { route: scaled });
         }
     }
 
@@ -612,7 +612,7 @@ pub fn compile(
             continue;
         };
         if !targets.contains_key(&target) {
-            return Err(CompileError::UndeclaredTarget { route: key });
+            return Err(ProgramCompileError::UndeclaredTarget { route: key });
         }
         let scaler = depth_of.get(&key).copied();
         let id = layer_id(key, scaler);
@@ -661,16 +661,18 @@ pub fn compile(
         }
         let program = builder.build().map_err(|e| match e {
             ProgramError::TooManyLayers { count } | ProgramError::TooManyDepths { count } => {
-                CompileError::TooManyLayers { target, count }
+                ProgramCompileError::TooManyLayers { target, count }
             }
-            ProgramError::TooManyInputs { count } => CompileError::TooManyInputs { target, count },
-            ProgramError::DuplicateLayer(_) => CompileError::LayerIdCollision(target),
+            ProgramError::TooManyInputs { count } => {
+                ProgramCompileError::TooManyInputs { target, count }
+            }
+            ProgramError::DuplicateLayer(_) => ProgramCompileError::LayerIdCollision(target),
             // Sources and routes are checked above, so these do not reach
             // here; named by the layer's source if they do.
             ProgramError::BadDrawnWave(id) | ProgramError::NotANumber(id) => origin
                 .get(&id)
-                .map_or(CompileError::LayerIdCollision(target), |&s| {
-                    CompileError::BadSource(s)
+                .map_or(ProgramCompileError::LayerIdCollision(target), |&s| {
+                    ProgramCompileError::BadSource(s)
                 }),
         })?;
         programs.insert(target, program);
@@ -693,8 +695,8 @@ fn next_id(n: u32) -> SourceId {
 
 fn index<K: Ord + Copy, V>(
     items: &[(K, V)],
-    dup: impl Fn(K) -> CompileError,
-) -> Result<BTreeMap<K, &V>, CompileError> {
+    dup: impl Fn(K) -> ProgramCompileError,
+) -> Result<BTreeMap<K, &V>, ProgramCompileError> {
     let mut out = BTreeMap::new();
     for (k, v) in items {
         if out.insert(*k, v).is_some() {
@@ -705,28 +707,28 @@ fn index<K: Ord + Copy, V>(
 }
 
 /// A source's params in their domain, or the refusal.
-fn check_source(key: SourceKey, source: &Source) -> Result<(), CompileError> {
-    let bad = Err(CompileError::BadSource(key));
+fn check_source(key: SourceKey, source: &Source) -> Result<(), ProgramCompileError> {
+    let bad = Err(ProgramCompileError::BadSource(key));
     match source {
         Source::Lfo { wave, clock } => {
             let ok_clock = match *clock {
-                Clock::Beats { phase, .. } => phase.get().is_finite(),
-                Clock::Seconds {
+                LayerClock::Beats { phase, .. } => phase.get().is_finite(),
+                LayerClock::Seconds {
                     rate,
                     phase,
                     anchor,
                 } => {
                     if anchor.is_some() {
-                        return Err(CompileError::AnchorDeclared(key));
+                        return Err(ProgramCompileError::AnchorDeclared(key));
                     }
                     rate.get().is_finite() && phase.get().is_finite()
                 }
             };
             let phase = match *clock {
-                Clock::Beats { phase, .. } | Clock::Seconds { phase, .. } => phase.get(),
+                LayerClock::Beats { phase, .. } | LayerClock::Seconds { phase, .. } => phase.get(),
             };
             if ok_clock && phase.abs() > MAX_CLOCK_PHASE {
-                return Err(CompileError::PhaseOutOfRange(key));
+                return Err(ProgramCompileError::PhaseOutOfRange(key));
             }
             let ok_wave = match wave {
                 Waveform::Shape { .. } => true,
@@ -774,7 +776,7 @@ fn signal_kind(source: &Source) -> Option<SignalKind> {
 }
 
 /// A time function's clock and wave (an LFO's own; a macro's constant).
-fn time_function(source: &Source) -> (Clock, Waveform) {
+fn time_function(source: &Source) -> (LayerClock, Waveform) {
     match source {
         Source::Lfo { wave, clock } => (*clock, wave.clone()),
         Source::Macro { value } => (MACRO_CLOCK, Waveform::Const(*value)),
@@ -818,14 +820,19 @@ fn time_function(source: &Source) -> (Clock, Waveform) {
 ///
 /// A changed declared phase is a deliberate jump: it moves a carried or new
 /// anchor's phase by the same amount, as it moves an unanchored clock.
-fn anchored(clock: Clock, old: Option<&Clock>, now: PlayReading, rate: SampleRate) -> Clock {
-    let Clock::Seconds {
+fn anchored(
+    clock: LayerClock,
+    old: Option<&LayerClock>,
+    now: PlayReading,
+    rate: SampleRate,
+) -> LayerClock {
+    let LayerClock::Seconds {
         rate: r, phase: p, ..
     } = clock
     else {
         return clock;
     };
-    let Some(&Clock::Seconds {
+    let Some(&LayerClock::Seconds {
         rate: old_rate,
         phase: old_phase,
         anchor: old_anchor,
@@ -867,7 +874,7 @@ fn anchored(clock: Clock, old: Option<&Clock>, now: PlayReading, rate: SampleRat
             }
         }
     };
-    Clock::Seconds {
+    LayerClock::Seconds {
         rate: r,
         phase: p,
         anchor,

@@ -58,7 +58,7 @@ fn rig(wire: &Wire) -> (Session, MidiSink) {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).open();
     let _ = s.update();
     s.play().expect("room");
     (s, sink)
@@ -265,7 +265,7 @@ fn a_sink_is_open_while_a_handle_is_held() {
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
-    let sink = s.open_midi_sink(Arc::clone(&first)).run();
+    let sink = s.open_midi_sink(Arc::clone(&first)).open();
     let _ = s.update();
     assert!(s.graph_ref().contains(sink.node()), "the sink's node");
 
@@ -276,7 +276,7 @@ fn a_sink_is_open_while_a_handle_is_held() {
     let _ = s.update();
     assert!(s.graph_ref().contains(node), "a clone keeps the sink open");
 
-    let other = s.open_midi_sink(first).stamping(Stamping::Jr).run();
+    let other = s.open_midi_sink(first).stamping(Stamping::Jr).open();
     assert_ne!(other.node(), clone.node(), "a sink of its own");
 }
 
@@ -346,7 +346,7 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
     let out = s
         .open_midi_sink(Arc::new(wire.clone()))
         .stamping(Stamping::Jr)
-        .run();
+        .open();
     let _ = s.update();
     s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     let _ = s.update();

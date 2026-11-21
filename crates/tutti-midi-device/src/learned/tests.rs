@@ -89,7 +89,7 @@ fn or_keeps_what_is_known_and_fills_the_rest() {
 #[test]
 fn a_saved_device_confirms_against_what_it_learned() {
     let info = DeviceInfo {
-        id: crate::DeviceId::new(crate::Identity::alsa("K", "P"), 0),
+        id: crate::MidiDeviceId::new(crate::OsEndpointIdentity::alsa("K", "P"), 0),
         name: "K: P".into(),
         direction: crate::PortDirection::Input,
     };

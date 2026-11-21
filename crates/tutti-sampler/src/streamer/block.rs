@@ -14,7 +14,7 @@ use tutti_units::Samples;
 
 use super::io::refill::{Refill, needs_refill};
 use super::loops::RingControl;
-use crate::{Direction, Loop};
+use crate::{Loop, PlayDirection};
 use std::sync::Arc;
 use tutti_rt::Bell;
 use tutti_rt::RingFloat;
@@ -245,7 +245,7 @@ impl<F: RingFloat> Block<'_, F> {
 
     /// The direction the stream plays in, as published.
     #[inline]
-    pub fn direction(&self) -> Direction {
+    pub fn direction(&self) -> PlayDirection {
         self.control.direction
     }
 

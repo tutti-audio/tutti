@@ -3,7 +3,7 @@
 use crate::capability::{OsEndpoint, legacy};
 use std::collections::BTreeMap;
 
-use tutti_midi_device::{EndpointId, Identity, WinMmDevice};
+use tutti_midi_device::{EndpointId, OsEndpointIdentity, WinMmDevice};
 
 /// Which way a port goes. Inputs and outputs are numbered separately by such an
 /// API, so a position alone names neither.
@@ -178,8 +178,8 @@ pub(in crate::backend) fn distinct_names(listed: &[Listed<'_>]) -> Vec<String> {
 /// MIDI 1.0 port with no Function Blocks, named as the driver names it.
 pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) -> OsEndpoint {
     let identity = match side {
-        Side::Input => Identity::winmm_input(info.device.clone()),
-        Side::Output => Identity::winmm_output(info.device.clone()),
+        Side::Input => OsEndpointIdentity::winmm_input(info.device.clone()),
+        Side::Output => OsEndpointIdentity::winmm_output(info.device.clone()),
     };
     OsEndpoint {
         id: endpoint_id(side, occurrence, &info.device),

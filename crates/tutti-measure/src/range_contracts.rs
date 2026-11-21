@@ -9,7 +9,7 @@ use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_units::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
 
 use crate::{
-    Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicDecay, Harmonics, NoteSpan,
+    Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicCount, HarmonicDecay, NoteSpan,
     OnsetGap, OnsetSensitivity, OnsetThreshold, PeakDecay, PeakFloor, PitchHop, PitchSplit,
     PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness, TuningOffset,
     YinThreshold,
@@ -32,7 +32,7 @@ macro_rules! serde_through_try_from {
 }
 
 serde_through_try_from! {
-    Harmonics: usize,
+    HarmonicCount: usize,
     HarmonicDecay: f64,
     PeakFloor: Db,
     TuningOffset: Cents,
@@ -80,9 +80,9 @@ fn seconds(raws: &[f64]) -> Vec<Seconds> {
 #[test]
 fn harmonics_keep_the_range_checked_shape() {
     check_range_contract(&RangeContract {
-        new: Harmonics::new,
-        get: Harmonics::get,
-        of: Some(Harmonics::of),
+        new: HarmonicCount::new,
+        get: HarmonicCount::get,
+        of: Some(HarmonicCount::of),
         valid: &[1, 4, 16],
         invalid: &[0, 17, usize::MAX],
     });

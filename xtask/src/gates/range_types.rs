@@ -36,6 +36,11 @@ use super::{Report, Tree, under_skipped_dir};
 /// `(file, type, what removes the entry)`.
 pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     (
+        "crates/tutti-session/src/midi.rs",
+        "MidiRouteRule",
+        "permanent: each field's type checks itself (`MidiChannel`, `MidiGroup`) and every combination is a valid rule",
+    ),
+    (
         "crates/tutti-midi-protocol/src/sensitivity.rs",
         "PitchBendSensitivity",
         "permanent: every u32 is a valid RPN word",
@@ -62,7 +67,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ),
     (
         "crates/tutti-midi-device/src/id.rs",
-        "DeviceId",
+        "MidiDeviceId",
         "permanent: the OS mints the identity and ordinal, and any pair names a device; new has no check",
     ),
     (

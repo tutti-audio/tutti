@@ -2,6 +2,7 @@
 //! injections, and the state a plan's ops run against.
 
 use tutti_buffers::Float;
+use tutti_rt::CappedVec;
 use tutti_units::Tail;
 
 use super::commit::{Crossfade, NodeBox};
@@ -77,18 +78,18 @@ impl<F: Float> Unit<F> {
 /// keys retired or replaced, and the keys replaced.
 #[derive(Default)]
 pub(super) struct Gone {
-    pub(super) held: Vec<(NodeKey, Tables)>,
+    pub(super) held: CappedVec<(NodeKey, Tables)>,
     /// Emptied tables to free on the control side.
-    pub(super) spare: Vec<Tables>,
-    pub(super) replaced: Vec<NodeKey>,
+    pub(super) spare: CappedVec<Tables>,
+    pub(super) replaced: CappedVec<NodeKey>,
     /// What each replaced node wrote for its successor (`Node::chase`):
     /// the key, its span of `chase_events` and what its buffer refused.
-    pub(super) chased: Vec<(NodeKey, std::ops::Range<usize>, u32)>,
+    pub(super) chased: CappedVec<(NodeKey, std::ops::Range<usize>, u32)>,
     /// The executor's chase buffer, lent for the commit.
     pub(super) chase_events: Vec<Event>,
     /// What a chase held for a successor behind a running fade refused, by
     /// key, counted once the new plan says where the node is.
-    pub(super) held_refused: Vec<(NodeKey, u32)>,
+    pub(super) held_refused: CappedVec<(NodeKey, u32)>,
 }
 
 pub(crate) enum Ring<F: Float = f32> {
@@ -129,7 +130,7 @@ impl Inject {
     pub(super) fn owe(
         &mut self,
         table: crate::held::Held,
-        spare: &mut Vec<crate::held::Held>,
+        spare: &mut CappedVec<crate::held::Held>,
     ) -> u32 {
         // A table placed here always has a slot: staging counted every cut
         // edge into this sink port and every table that moves to it
@@ -148,14 +149,9 @@ impl Inject {
             table.close_each(|_| lost = lost.saturating_add(1));
             table
         };
-        if spare.len() < spare.capacity() {
-            spare.push(left_over);
-        } else {
-            // Room for every table is made with the commit; were it short,
-            // leak the table rather than free it on the audio thread.
-            debug_assert!(false, "room was made for every table merged away");
-            std::mem::forget(left_over);
-        }
+        // Room for every table is made with the commit; were it short, the
+        // table leaks rather than frees on the audio thread.
+        super::place(spare, left_over);
         lost
     }
 
@@ -288,7 +284,7 @@ mod tests {
     #[test]
     fn a_table_with_no_slot_free_merges_into_the_first() {
         let mut i = inject(1);
-        let mut spare = Vec::with_capacity(1);
+        let mut spare = CappedVec::with_capacity(1);
         assert_eq!(i.owe(holding(60), &mut spare), 0);
         let capacity = i.owed.capacity();
         assert_eq!(i.owe(holding(61), &mut spare), 0, "merged, not lost");

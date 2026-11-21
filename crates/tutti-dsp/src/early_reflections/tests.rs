@@ -10,8 +10,8 @@ fn tap(delay: f64, gain: f64, channel: u8) -> Tap {
     }
 }
 
-fn stage(taps: &[Tap]) -> Taps {
-    Taps {
+fn stage(taps: &[Tap]) -> TapSet {
+    TapSet {
         taps: Inline::from_slice(taps).unwrap(),
     }
 }
@@ -102,7 +102,7 @@ fn the_tail_is_the_last_tap_and_the_width_is_the_highest_channel() {
     ]))
     .unwrap();
     assert_eq!((er.tail(), er.channels()), (Samples::new(100), 4));
-    let empty = EarlyReflections::<f32>::try_from(&Taps::default()).unwrap();
+    let empty = EarlyReflections::<f32>::try_from(&TapSet::default()).unwrap();
     assert_eq!((empty.tail(), empty.channels()), (Samples::ZERO, 1));
 }
 

@@ -706,20 +706,28 @@ tutti_rt::id! {
 pub struct MidiRouteRule<T = NodeKey> {
     /// Group filter: `None` matches every Group the input hears, `Some(g)`
     /// only Group `g`.
-    pub group: Option<MidiGroup>,
+    group: Option<MidiGroup>,
     /// Channel filter: `None` matches any channel, `Some(n)` only channel
     /// `n`.
-    pub channel: Option<MidiChannel>,
+    channel: Option<MidiChannel>,
     /// The targets this rule feeds.
-    pub targets: Vec<T>,
+    targets: Vec<T>,
     /// A disabled rule stays declared but routes nothing: a mute that does
     /// not lose the rule.
-    pub enabled: bool,
+    enabled: bool,
+}
+
+impl<T> Default for MidiRouteRule<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T> MidiRouteRule<T> {
-    /// A rule matching every channel. Add targets with [`to`](Self::to).
-    pub fn any_channel() -> Self {
+    /// A rule matching every channel of the first Group, with no targets. Add
+    /// targets with [`to`](Self::to), narrow it with [`channel`](Self::channel).
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             group: Some(MidiGroup::FIRST),
             channel: None,
@@ -728,14 +736,11 @@ impl<T> MidiRouteRule<T> {
         }
     }
 
-    /// A rule matching one channel.
-    pub fn for_channel(channel: MidiChannel) -> Self {
-        Self {
-            group: Some(MidiGroup::FIRST),
-            channel: Some(channel),
-            targets: Vec::new(),
-            enabled: true,
-        }
+    /// Matches only `channel`.
+    #[must_use]
+    pub const fn channel(mut self, channel: MidiChannel) -> Self {
+        self.channel = Some(channel);
+        self
     }
 
     /// Matches `group` instead of the first.
@@ -1895,17 +1900,17 @@ impl<F: Float> Midi<'_, F> {
         {
             return Err(MidiError::TempoSourceTaken);
         }
-        let tap = self.follow_tap(follow.input, follow.group, FOLLOW_TAP_CAPACITY)?;
+        let tap = self.follow_tap(follow.input(), follow.group(), FOLLOW_TAP_CAPACITY)?;
         let core = tutti_midi_runtime::TempoFollower::new(
-            tutti_midi_runtime::TempoSource::Flex(follow.group),
-            follow.meter,
+            tutti_midi_runtime::TempoSource::Flex(follow.group()),
+            follow.follows_meter(),
         );
         self.state.follow = Some(match self.state.follow.take() {
             Some(first) => first.replaced_by(core, tap),
             None => Follow::new(core, tap, self.settings.tempo_map(), self.meter.current()),
         });
         self.state.sync_following();
-        self.discard_staged_maps(follow.meter);
+        self.discard_staged_maps(follow.follows_meter());
         Ok(())
     }
 
@@ -2003,11 +2008,12 @@ impl<F: Float> Midi<'_, F> {
     /// [`MidiError::TempoSourceTaken`] for a Beat Clock follow while
     /// [`follow_tempo`](Self::follow_tempo) is active. Nothing changes.
     pub fn follow_clock(&mut self, follow: FollowClock) -> Result<()> {
-        if follow.kind == tutti_midi_runtime::ClockKind::BeatClock && self.state.follow.is_some() {
+        if follow.kind() == tutti_midi_runtime::ClockKind::BeatClock && self.state.follow.is_some()
+        {
             return Err(MidiError::TempoSourceTaken);
         }
-        let tap = self.follow_tap(follow.input, follow.group, CLOCK_TAP_CAPACITY)?;
-        let core = tutti_midi_runtime::ClockFollower::new(follow.kind);
+        let tap = self.follow_tap(follow.input(), follow.group(), CLOCK_TAP_CAPACITY)?;
+        let core = tutti_midi_runtime::ClockFollower::new(follow.kind());
         // A second follow replaces the first; the maps the first overlaid are
         // the project's again before the second takes them.
         if let Some(first) = self.state.clock.take() {
@@ -2020,7 +2026,7 @@ impl<F: Float> Midi<'_, F> {
             self.meter.current(),
         ));
         self.state.sync_following();
-        if follow.kind == tutti_midi_runtime::ClockKind::BeatClock {
+        if follow.kind() == tutti_midi_runtime::ClockKind::BeatClock {
             self.discard_staged_maps(true);
         }
         Ok(())
@@ -2102,9 +2108,9 @@ impl<F: Float> Midi<'_, F> {
     /// [`MidiError::Tap`] when the tap cannot open because the host removed the node.
     /// Nothing changes.
     pub fn follow_machine_control(&mut self, follow: FollowMachineControl) -> Result<()> {
-        let tap = self.follow_tap(follow.input, follow.group, MACHINE_TAP_CAPACITY)?;
+        let tap = self.follow_tap(follow.input(), follow.group(), MACHINE_TAP_CAPACITY)?;
         self.state.machine = Some(MachineFollow::new(
-            tutti_midi_runtime::MachineControlFollower::new(follow.device),
+            tutti_midi_runtime::MachineControlFollower::new(follow.device()),
             tap,
         ));
         Ok(())

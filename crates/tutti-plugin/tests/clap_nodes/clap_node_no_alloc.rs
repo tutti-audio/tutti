@@ -28,7 +28,7 @@ use tutti_fixtures::midi;
 use tutti_graph::{Offset, ParamRange, TransportChanges, TransportPosition};
 
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, ControlProgramBuilder, Layer, LayerId, LfoShape, Polarity,
+    Amount, ControlProgram, ControlProgramBuilder, Layer, LayerClock, LayerId, LfoShape, Polarity,
     Waveform,
 };
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
@@ -86,7 +86,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     // whole range: a layer of depth 0.5 around a knob at 0.5.
     let lfo = Layer {
         id: LayerId(1),
-        clock: Clock::Beats {
+        clock: LayerClock::Beats {
             per_cycle: BeatsPerCycle::of(0.25),
             phase: PhaseIncrement::new(0.0),
         },

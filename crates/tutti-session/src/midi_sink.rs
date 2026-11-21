@@ -72,7 +72,7 @@ impl MidiSink {
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// A request to open `sink` as an output: wire what it should receive to
     /// its [`node`](MidiSink::node). Nothing opens until
-    /// [`run`](OpenMidiSink::run) is called, and the sink
+    /// [`open`](OpenMidiSink::open) is called, and the sink
     /// ends when every clone of the handle is dropped, once the graph has
     /// rendered past the drop ([`update`](Self::update) ends it).
     pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpenMidiSink<'_, K, C> {
@@ -85,8 +85,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 }
 
 /// A sink to open, built by [`Session::open_midi_sink`]: it borrows the session
-/// until [`run`](Self::run) opens the sink.
-#[must_use = "the sink opens when the request runs"]
+/// until [`open`](Self::open) opens the sink.
+#[must_use = "the sink opens when `open` is called"]
 pub struct OpenMidiSink<'s, K: crate::AppKey, C: crate::Clock> {
     session: &'s mut Session<K, C>,
     sink: Arc<dyn MidiOut>,
@@ -111,7 +111,7 @@ impl<K: crate::AppKey, C: crate::Clock> OpenMidiSink<'_, K, C> {
 
     /// Opens the sink: its output node joins the graph (the next
     /// [`update`](Session::update) commits it).
-    pub fn run(self) -> MidiSink {
+    pub fn open(self) -> MidiSink {
         self.session.midi().open_sink(self.sink, self.stamping)
     }
 }

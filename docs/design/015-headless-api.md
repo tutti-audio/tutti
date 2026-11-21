@@ -571,7 +571,7 @@ let synth = s.add_plugin(done)?;             // main thread: NodeKey; controls a
 ```rust
 let keys = s.midi().input(synth)?;                  // an event inlet fed into synth; returns its MidiKeys
 s.midi().play_clip(synth, events)?;               // one MidiClipNode per target, updated in place
-s.midi().route(MidiRouteRule::any_channel().to(synth)); // `midi-hardware`
+s.midi().route(MidiRouteRule::new().to(synth)); // `midi-hardware`
 ```
 
 **Transport.** `s.transport()` returns today's `Transport` handle, and

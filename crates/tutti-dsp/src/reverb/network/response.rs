@@ -6,7 +6,7 @@
 //! [`FdnBank`](crate::FdnBank)). The bounds are sufficient ones and say so.
 //!
 //! **What the model leaves out, on purpose.** Modulation moves a line around its
-//! centre length, and the model reads the centre. A [`Stage::Fir`] holds a
+//! centre length, and the model reads the centre. A [`NetworkStage::Fir`] holds a
 //! summary and not the response, so it has no frequency response (NaN), no
 //! finite `l1_norm` and radius 0. [`FdnBank`](crate::FdnBank) rescales a set
 //! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
@@ -15,7 +15,8 @@
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate};
 
 use super::{
-    Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
+    Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, NetworkStage,
+    energy,
 };
 use crate::onepole::cutoff_pole;
 use crate::{Complex64, Lti};
@@ -384,16 +385,16 @@ impl Network {
         let mut width = 1;
         for stage in self.stages.iter() {
             width = match stage {
-                Stage::Taps(t) => t
+                NetworkStage::Taps(t) => t
                     .taps
                     .iter()
                     .map(|t| usize::from(t.channel) + 1)
                     .max()
                     .unwrap_or(1),
-                Stage::AllPass(a) if !a.is_empty() => a.len(),
-                Stage::AllPass(_) => width,
-                Stage::Fdn(f) => f.output.rows.len().max(1),
-                Stage::Fir(_) => width,
+                NetworkStage::AllPass(a) if !a.is_empty() => a.len(),
+                NetworkStage::AllPass(_) => width,
+                NetworkStage::Fdn(f) => f.output.rows.len().max(1),
+                NetworkStage::Fir(_) => width,
             };
         }
         width.min(MAX_CHANNELS)
@@ -416,7 +417,7 @@ impl Network {
         for stage in self.stages.iter() {
             let mut out = [ZERO; MAX_CHANNELS];
             match stage {
-                Stage::Taps(t) => {
+                NetworkStage::Taps(t) => {
                     let x = mean(&v, width);
                     let mut next = 1;
                     for tap in t.taps.iter() {
@@ -426,7 +427,7 @@ impl Network {
                     }
                     width = next;
                 }
-                Stage::AllPass(a) => {
+                NetworkStage::AllPass(a) => {
                     for (k, ap) in a.iter().enumerate() {
                         let x = if width == 1 {
                             v[0]
@@ -443,7 +444,7 @@ impl Network {
                         out = v;
                     }
                 }
-                Stage::Fdn(f) => {
+                NetworkStage::Fdn(f) => {
                     let n = f.lines.len();
                     let x = mean(&v, width);
                     let t: Vec<Complex64> = f.lines.iter().map(|l| l.trip(w, rate)).collect();
@@ -468,7 +469,7 @@ impl Network {
                     }
                     width = f.output.rows.len().max(1);
                 }
-                Stage::Fir(_) => out = [nan; MAX_CHANNELS],
+                NetworkStage::Fir(_) => out = [nan; MAX_CHANNELS],
             }
             v = out;
         }
@@ -495,7 +496,7 @@ impl Network {
         let mut gain = 1.0f64;
         for stage in self.stages.iter() {
             gain *= match stage {
-                Stage::Taps(t) => {
+                NetworkStage::Taps(t) => {
                     let mut per = [0.0f64; MAX_CHANNELS];
                     for tap in t.taps.iter() {
                         let (g, d) = (tap.gain.magnitude().get(), tap.delay.get());
@@ -506,18 +507,18 @@ impl Network {
                     }
                     per.iter().copied().fold(0.0, f64::max)
                 }
-                Stage::AllPass(a) => a
+                NetworkStage::AllPass(a) => a
                     .iter()
                     .map(|ap| match norm {
                         Norm::L1 => ap.majorant(1.0),
                         Norm::Hinf => ap.peak(),
                     })
                     .fold(0.0, f64::max),
-                Stage::Fdn(f) => match norm {
+                NetworkStage::Fdn(f) => match norm {
                     Norm::L1 => f.l1_gain(rate),
                     Norm::Hinf => f.resolvent_gain(1.0, rate),
                 },
-                Stage::Fir(_) => f64::INFINITY,
+                NetworkStage::Fir(_) => f64::INFINITY,
             };
         }
         let wet = self.wet.to_amplitude().get();
@@ -693,12 +694,12 @@ impl Lti for Network {
     }
 
     /// `H(e^jw)` from the input to `output`: the pre-delay, the stages in series
-    /// (a [`Taps`](super::Taps) sum of delays, a series all-pass per channel and an
+    /// (a [`TapSet`](super::TapSet) sum of delays, a series all-pass per channel and an
     /// [`Fdn`] solved over its own lines: a diagonal `A` directly, a Householder or
     /// reflection by a rank-one update, any other matrix by Gaussian elimination),
     /// then width and wet. A stage that takes one signal is handed the mean of
     /// its input channels. NaN for an `output` the network does not have, for a
-    /// [`Stage::Fir`] (a summary has no response), and for a network that does not
+    /// [`NetworkStage::Fir`] (a summary has no response), and for a network that does not
     /// fit its matrix. `freqs` are `f32` hertz, so a response read near a pole
     /// is only as sharp as the grid's own rounding.
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
@@ -722,16 +723,16 @@ impl Lti for Network {
         self.stages
             .iter()
             .map(|s| match s {
-                Stage::Fdn(f) => f.radius(),
-                Stage::AllPass(a) => a.iter().map(AllPass::radius).fold(0.0, f64::max),
-                Stage::Taps(t) => {
+                NetworkStage::Fdn(f) => f.radius(),
+                NetworkStage::AllPass(a) => a.iter().map(AllPass::radius).fold(0.0, f64::max),
+                NetworkStage::Taps(t) => {
                     if t.taps.iter().all(|t| t.gain.get().is_finite()) {
                         0.0
                     } else {
                         f64::INFINITY
                     }
                 }
-                Stage::Fir(_) => 0.0,
+                NetworkStage::Fir(_) => 0.0,
             })
             .fold(0.0, f64::max)
     }
@@ -742,7 +743,7 @@ impl Lti for Network {
     /// (their impulse responses summed); an [`Fdn`] as in
     /// [`Fdn::l1_gain`](Fdn) (the exact figure for a diagonal `A`, a resolvent
     /// bound on shrunk circles for any other). Infinity for a
-    /// [`Stage::Fir`], whose response is not in the value, and wherever a loop's
+    /// [`NetworkStage::Fir`], whose response is not in the value, and wherever a loop's
     /// gain is not under 1.
     ///
     /// The width stage `(M + wS, M - wS)` has l1 gain `max(1, w)`.
@@ -768,10 +769,10 @@ impl Lti for Network {
     /// all-pass that is not a lattice) are refused here by name.
     fn is_stable(&self) -> bool {
         self.stages.iter().all(|s| match s {
-            Stage::Fdn(f) => f.is_stable(),
-            Stage::AllPass(a) => a.iter().all(|a| a.gain.magnitude() < Amplitude::UNITY),
-            Stage::Taps(t) => t.taps.iter().all(|t| t.gain.get().is_finite()),
-            Stage::Fir(s) => s.rt60.iter().all(|r| !r.get().is_nan()),
+            NetworkStage::Fdn(f) => f.is_stable(),
+            NetworkStage::AllPass(a) => a.iter().all(|a| a.gain.magnitude() < Amplitude::UNITY),
+            NetworkStage::Taps(t) => t.taps.iter().all(|t| t.gain.get().is_finite()),
+            NetworkStage::Fir(s) => s.rt60.iter().all(|r| !r.get().is_nan()),
         })
     }
 }

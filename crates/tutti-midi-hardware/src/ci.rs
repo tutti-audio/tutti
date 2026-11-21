@@ -169,14 +169,14 @@ use tutti_midi_ci::{
     MaxSysexSize, ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator, ProfileAction,
     ProfileInitiator, ProfileRequestError, ResourceInitiator, ResourceResponder, ResourceStore,
 };
-use tutti_midi_device::DeviceId;
+use tutti_midi_device::MidiDeviceId;
 use tutti_rt::CounterWriter;
 use tutti_rt::SplitMix64;
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
 use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
-use crate::peer::{PeerError, PeerRef};
+use crate::peer::{PeerRef, PeerRequestError};
 use crate::process::{self, ProcessChange, ReportAsk, Reporter};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Snapshot, Switch,
@@ -412,7 +412,7 @@ struct Running {
 /// inquiry has decided them, and the devices while they run.
 pub(crate) struct Ci {
     /// The device the input is, named in every Profile snapshot.
-    device: DeviceId,
+    device: MidiDeviceId,
     groups: Vec<MidiGroup>,
     running: Option<Box<Running>>,
     /// Every peer found, by Group then MUID: rebuilt when a step changes them,
@@ -464,7 +464,7 @@ pub(crate) fn groups_of_a_midi1_port() -> Vec<MidiGroup> {
 
 impl Ci {
     /// MIDI-CI for the input `device`, with nothing decided.
-    pub(crate) fn new(device: DeviceId, refused: CounterWriter<Losses>) -> Self {
+    pub(crate) fn new(device: MidiDeviceId, refused: CounterWriter<Losses>) -> Self {
         Self {
             device,
             groups: Vec::new(),
@@ -584,7 +584,7 @@ impl Ci {
 
     /// Asks that the peer of `ask` be sent its request at the next poll, after
     /// checking it is still one that supports MIDI Message Report.
-    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerError> {
+    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerRequestError> {
         ask.check(self.reporters.iter())?;
         self.reports.push(ask);
         Ok(())
@@ -597,7 +597,7 @@ impl Ci {
 
     /// Asks that the call of `ask` be made of its peer at the next poll, after
     /// checking it is still one that answered its Capabilities.
-    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerError> {
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerRequestError> {
         ask.check(self.property_peers.iter())?;
         self.calls.push(ask);
         Ok(())
@@ -1035,7 +1035,7 @@ impl Member {
         }
     }
 
-    fn peer_ref(&self, device: &DeviceId, muid: Muid) -> PeerRef {
+    fn peer_ref(&self, device: &MidiDeviceId, muid: Muid) -> PeerRef {
         PeerRef::new(device.clone(), self.peer_id(muid))
     }
 
@@ -1651,7 +1651,7 @@ mod tests {
     }
 
     /// The id of a fake device.
-    fn device_id() -> DeviceId {
+    fn device_id() -> MidiDeviceId {
         let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
         let inlets = tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(64),

@@ -14,8 +14,8 @@ use std::time::Duration;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
 use tutti_midi_device::{
-    Capabilities, DeviceId, EndpointId, FunctionBlock, MAX_ATTEMPTS, PortDirection, STEP_TIMEOUT,
-    Supports,
+    Capabilities, EndpointId, FunctionBlock, MAX_ATTEMPTS, MidiDeviceId, PortDirection,
+    STEP_TIMEOUT, Supports,
 };
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
@@ -31,7 +31,7 @@ struct Wire {
     /// The output the caller holds, following what the session polls.
     output: Option<OpenOutput>,
     counters: FakeCounters,
-    id: DeviceId,
+    id: MidiDeviceId,
     raw: EndpointId,
     /// The device's own state, which answers what it is sent.
     device: Endpoint,
@@ -41,7 +41,7 @@ struct Wire {
 }
 
 /// The stream reports among what a poll returned.
-fn streams(polled: impl IntoIterator<Item = Polled>) -> Vec<(DeviceId, DeviceStream)> {
+fn streams(polled: impl IntoIterator<Item = Polled>) -> Vec<(MidiDeviceId, DeviceStream)> {
     polled
         .into_iter()
         .filter_map(|p| match p {
@@ -180,7 +180,7 @@ impl Wire {
     /// One tick of the session at `ms`, then the device reads what the session
     /// sent and answers into the input. Returns what the session sent, and the
     /// devices the tick settled.
-    fn tick(&mut self, ms: u64) -> (Vec<Stream>, Vec<(DeviceId, DeviceStream)>) {
+    fn tick(&mut self, ms: u64) -> (Vec<Stream>, Vec<(MidiDeviceId, DeviceStream)>) {
         let now = self.at(ms);
         let settled = streams(self.poll(ms));
         let sent: Vec<Stream> = self

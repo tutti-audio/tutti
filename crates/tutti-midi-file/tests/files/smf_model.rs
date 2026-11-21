@@ -158,7 +158,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
                 .unwrap()
             )
         );
-        assert_eq!(file.normalized(), []);
+        assert_eq!(file.repairs(), []);
         assert_eq!(at(0).1, FileEvent::Meta(Meta::text(TextKind::Text, "text")));
         assert_eq!(at(2).1, FileEvent::Meta(Meta::text(TextKind::Lyric, "la")));
         assert_eq!(

@@ -69,6 +69,51 @@ impl<T> CappedVec<T> {
         true
     }
 
+    /// Appends one item if there is room, and hands it back when there is
+    /// none: the name and the shape of `Vec::push_within_capacity`.
+    ///
+    /// A refused item is not dropped here, so a caller on the audio thread
+    /// that must not free it can park or leak it. A refusal latches
+    /// [`is_overflowed`](Self::is_overflowed) like [`push`](Self::push).
+    ///
+    /// # Errors
+    ///
+    /// `Err(value)` when the collection is already at the cap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tutti_rt::CappedVec;
+    ///
+    /// let mut owned: CappedVec<String> = CappedVec::with_capacity(1);
+    /// assert!(owned.push_within_capacity("kept".to_owned()).is_ok());
+    /// let refused = owned.push_within_capacity("refused".to_owned());
+    /// assert_eq!(refused, Err("refused".to_owned())); // handed back, not dropped
+    /// assert!(owned.is_overflowed());
+    /// ```
+    #[inline]
+    pub fn push_within_capacity(&mut self, value: T) -> Result<(), T> {
+        if self.buf.len() == self.cap {
+            self.overflowed = true;
+            return Err(value);
+        }
+        // Below the cap: this push writes into reserved room.
+        self.buf.push(value);
+        Ok(())
+    }
+
+    /// Removes the items in `range` and yields them in order; the rest shift
+    /// down. Dropping the iterator removes what was not yielded. Never frees
+    /// the storage and leaves the overflow flag as it is.
+    ///
+    /// # Panics
+    ///
+    /// If the range starts after its end or ends past [`len`](Self::len).
+    #[inline]
+    pub fn drain<R: core::ops::RangeBounds<usize>>(&mut self, range: R) -> std::vec::Drain<'_, T> {
+        self.buf.drain(range)
+    }
+
     /// Removes and returns the last item, or `None` when empty. Leaves the
     /// overflow flag as it is: a pop does not undo a refused push. Never
     /// frees storage.
@@ -160,6 +205,14 @@ impl<T> CappedVec<T> {
     #[inline]
     pub fn iter(&self) -> core::slice::Iter<'_, T> {
         self.buf.iter()
+    }
+}
+
+impl<T> Default for CappedVec<T> {
+    /// A collection with a cap of zero, which allocates nothing and refuses
+    /// every push.
+    fn default() -> Self {
+        Self::with_capacity(0)
     }
 }
 

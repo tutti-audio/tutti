@@ -29,13 +29,13 @@ fn render(bank: &mut LimiterBank<f32>, x: &[f32]) -> Vec<f32> {
     run(bank, &[x]).remove(0)
 }
 
-/// The shortest lookahead a true-peak bank takes at the test rate, as the refusal names it.
+/// The shortest lookahead a true-peak bank takes at the test rate: the floor `1 + U / 4` frames.
 fn shortest() -> Lookahead {
-    let short = Lookahead::of(Seconds::new(0.0002));
-    match LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak) {
-        Err(TruePeakError::Lookahead { shortest, .. }) => shortest,
-        other => panic!("{other:?}"),
-    }
+    let plan = Oversampling::new(OversamplingFactor::X4)
+        .plan(RATE)
+        .unwrap();
+    let needed = 1 + plan.upsample_delay() / 4;
+    Lookahead::of(Seconds::new(needed as f64 / 48_000.0))
 }
 
 fn bessel_i0(x: f64) -> f64 {
@@ -262,45 +262,25 @@ fn the_upsample_delay_is_the_impulse_peak_of_the_4x_signal() {
     assert_eq!(peak, plan.upsample_delay());
 }
 
-/// A lookahead under the up-sampler's delay is refused with its figures; the shortest one the
-/// error names is accepted, and the sample-peak bank takes any.
+/// `detecting` takes the lookahead as a floor: a true-peak lookahead under the
+/// up-sampler's `1 + U / 4` frames is raised to exactly that, a longer one is kept, and sample
+/// detection keeps any.
 #[test]
-fn a_lookahead_shorter_than_the_upsampler_delay_is_refused() {
-    let short = Lookahead::of(Seconds::new(0.0002));
-    let refused =
-        LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak)
-            .expect_err("ten frames");
-    let TruePeakError::Lookahead {
-        lookahead,
-        needed,
-        shortest,
-    } = refused
-    else {
-        panic!("{refused:?}");
-    };
-    assert_eq!(lookahead, Samples::new(10));
-    let plan = Oversampling::new(OversamplingFactor::X4)
+fn the_lookahead_is_a_floor_raised_to_the_upsampler_delay() {
+    let needed = 1 + Oversampling::new(OversamplingFactor::X4)
         .plan(RATE)
-        .unwrap();
-    assert_eq!(needed, Samples::new(1 + plan.upsample_delay() / 4));
-    let ok =
-        LimiterBank::<f32>::detecting(ChannelLayout::MONO, shortest, RATE, PeakDetection::TruePeak)
-            .expect("the shortest lines up");
-    assert!(ok.latency() >= needed);
-    let one_under = Lookahead::of(Seconds::new((needed.get() - 1) as f64 / 48_000.0));
-    assert!(
-        LimiterBank::<f32>::detecting(
-            ChannelLayout::MONO,
-            one_under,
-            RATE,
-            PeakDetection::TruePeak
-        )
-        .is_err()
-    );
-    assert!(
-        LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::Sample)
-            .is_ok()
-    );
+        .unwrap()
+        .upsample_delay()
+        / 4;
+    let at = |lookahead, detection| {
+        LimiterBank::<f32>::detecting(ChannelLayout::MONO, lookahead, RATE, detection)
+            .unwrap()
+            .latency()
+    };
+    let short = Lookahead::of(Seconds::new(0.0002));
+    assert_eq!(at(short, PeakDetection::TruePeak), Samples::new(needed));
+    assert_eq!(at(short, PeakDetection::Sample), Samples::new(10));
+    assert_eq!(at(LOOKAHEAD, PeakDetection::TruePeak), Samples::new(240));
 }
 
 /// A lone sample over the ceiling is limited whatever frame it lands on: the detection lines up

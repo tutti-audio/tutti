@@ -42,8 +42,8 @@ use super::off_main_wait::{OffMainWait, await_answer};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
-    OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
+    Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health,
+    InProcess, OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
 use tutti_units::Normalized;
@@ -157,6 +157,32 @@ where
         )
     }
 
+    /// `work` on the plugin on the main thread, answered into an [`Answer`]
+    /// and never waited for: at once when this is the main thread, else by the
+    /// main-thread job queued here, which the main thread's next tick runs. `None`
+    /// when `work` has no answer, and when the collector has never run (no main
+    /// thread to hop to); a job dropped unrun cancels the answer.
+    fn on_main_answer<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> Option<R> + Send + 'static,
+    ) -> Answer<Option<R>> {
+        let (tx, answer) = futures_channel::oneshot::channel();
+        if let Some(main) = MainThreadMarker::new() {
+            // The receiver is held here: the send cannot fail.
+            drop(tx.send(self.flushed(main, work)));
+        } else if self.work.is_pumped() {
+            let inner = Arc::clone(&self.inner);
+            let post = self.edits.clone();
+            self.work.defer(move |main| {
+                // A dropped receiver has no one to tell.
+                drop(tx.send(flushed(&post, main, &mut inner.lock(), work)));
+            });
+        } else {
+            drop(tx.send(None));
+        }
+        answer
+    }
+
     /// Queues the main-thread job that tells the plugin's edit controller of
     /// the host's writes, unless one is queued: the controller hears each
     /// parameter's newest value when the main thread runs, the way the
@@ -253,15 +279,24 @@ where
     L: InProcess + 'static,
     L::Processor: 'static,
 {
-    /// `None` for a lost plugin, and when the main thread does not answer.
-    fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        self.on_main(|main, instance| Some(instance.control()?.parameters(main)))?
-    }
-
     /// `None` for a lost plugin, for a plugin that exposes no value to read,
     /// for an id it does not have, and when the main thread does not answer.
     fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
         self.on_main(move |main, instance| instance.control()?.parameter(main, id))?
+    }
+
+    fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+        self.on_main_answer(|main, instance| Some(instance.control()?.parameters(main)))
+    }
+
+    fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
+        self.on_main_answer(move |main, instance| instance.control()?.parameter(main, id))
+    }
+
+    fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
+        self.on_main_answer(move |main, instance| {
+            instance.control()?.parameter_normalized(main, id, plain)
+        })
     }
 
     /// Stored in the parameter's slot, from any thread, with no instance lock
@@ -318,13 +353,6 @@ where
     /// The format's own conversion ([`Control::parameter_plain`]).
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         self.on_main(move |main, instance| instance.control()?.parameter_plain(main, id, value))?
-    }
-
-    /// The format's own conversion ([`Control::parameter_normalized`]).
-    fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized> {
-        self.on_main(move |main, instance| {
-            instance.control()?.parameter_normalized(main, id, plain)
-        })?
     }
 
     /// The plugin's display string for `value`, as
@@ -684,7 +712,9 @@ mod off_main_tests {
     fn the_parameter_reads_answer_on_the_main_thread() {
         let (_unit, handle, _pump) = loaded();
         let any = handle.any_thread();
-        let catalog = any.parameter_descriptors().expect("the probe lists");
+        let catalog = futures_lite::future::block_on(any.parameter_descriptors())
+            .expect("answered")
+            .expect("the probe lists");
         assert!(catalog.iter().any(|p| p.id() == ParamId::new(1)));
         assert_eq!(
             any.parameter_value(ParamId::new(1)).map(Normalized::get),
@@ -894,7 +924,9 @@ mod off_main_tests {
         let (_unit, handle) = load(&work);
         let (catalog, text, from_text, mode, automation) = std::thread::spawn(move || {
             (
-                handle.any_thread().parameter_descriptors(),
+                futures_lite::future::block_on(handle.any_thread().parameter_descriptors())
+                    .ok()
+                    .flatten(),
                 handle
                     .any_thread()
                     .parameter_text(ParamId::new(1), Normalized::of(0.5)),

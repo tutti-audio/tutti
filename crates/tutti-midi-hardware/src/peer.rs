@@ -1,5 +1,5 @@
 //! The peer a handle of MIDI-CI names ([`PeerRef`]), and why a request made from
-//! a handle is refused ([`PeerError`]).
+//! a handle is refused ([`PeerRequestError`]).
 //!
 //! The handles of Profile Configuration ([`PeerProfiles`](crate::PeerProfiles),
 //! [`ProfileSwitch`](crate::ProfileSwitch)), Process Inquiry
@@ -7,7 +7,7 @@
 //! ([`PropertyPeer`](crate::PropertyPeer)) are snapshots of one peer of one
 //! open input; each names it with a [`PeerRef`].
 
-use tutti_midi_device::DeviceId;
+use tutti_midi_device::MidiDeviceId;
 
 use crate::ci::PeerId;
 
@@ -15,18 +15,18 @@ use crate::ci::PeerId;
 /// MUID there.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PeerRef {
-    device: DeviceId,
+    device: MidiDeviceId,
     peer: PeerId,
 }
 
 impl PeerRef {
-    pub(crate) const fn new(device: DeviceId, peer: PeerId) -> Self {
+    pub(crate) const fn new(device: MidiDeviceId, peer: PeerId) -> Self {
         Self { device, peer }
     }
 
     /// The input device the peer was found on.
     #[must_use]
-    pub const fn device(&self) -> &DeviceId {
+    pub const fn device(&self) -> &MidiDeviceId {
         &self.device
     }
 
@@ -41,23 +41,23 @@ impl PeerRef {
     ///
     /// # Errors
     ///
-    /// [`PeerError::NoSuchPeer`] when none does.
+    /// [`PeerRequestError::NoSuchPeer`] when none does.
     pub(crate) fn find<'a, H>(
         &self,
         handles: impl IntoIterator<Item = &'a H>,
         at: impl Fn(&H) -> &Self,
-    ) -> Result<&'a H, PeerError> {
+    ) -> Result<&'a H, PeerRequestError> {
         handles
             .into_iter()
             .find(|handle| at(handle) == self)
-            .ok_or(PeerError::NoSuchPeer)
+            .ok_or(PeerRequestError::NoSuchPeer)
     }
 }
 
 /// A request made from the handle of a peer that cannot be made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
-pub enum PeerError {
+pub enum PeerRequestError {
     /// The device the request was made from is no longer an open input.
     #[error("the device is not an open input")]
     NotOpen,
