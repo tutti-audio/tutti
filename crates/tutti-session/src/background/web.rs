@@ -16,3 +16,9 @@ pub(crate) struct Running;
 pub(crate) fn start(_executor: &Executor) -> io::Result<Running> {
     Ok(Running)
 }
+
+/// Runs, on the caller's thread, what the executor has ready: a page starts no thread, so
+/// the session's update is what drives its tasks.
+pub(crate) fn drive(executor: &Executor) {
+    executor.run_until_stalled();
+}

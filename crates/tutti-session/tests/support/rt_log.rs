@@ -86,10 +86,27 @@ impl<S: Subscriber> Layer<S> for Collect {
     }
 }
 
+#[allow(dead_code, reason = "a binary uses one of the two collectors")]
 pub fn rt_events(f: impl FnOnce()) -> Vec<Logged> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(Collect(seen.clone()));
     tracing::subscriber::with_default(subscriber, f);
+    let all = std::mem::take(&mut *seen.lock().expect("collected"));
+    all.into_iter()
+        .filter(|e| e.target.starts_with("tutti::"))
+        .collect()
+}
+
+/// As [`rt_events`], for work that logs on a thread `f` does not run on (a bounce renders as
+/// a task of the session's executor): the collector is the process's default subscriber, so
+/// one test of a process may call it, and a test's own filter picks its records out.
+#[allow(dead_code, reason = "a binary uses one of the two collectors")]
+pub fn rt_events_on_any_thread(f: impl FnOnce()) -> Vec<Logged> {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Collect(seen.clone()));
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("one test of the process installs the default subscriber");
+    f();
     let all = std::mem::take(&mut *seen.lock().expect("collected"));
     all.into_iter()
         .filter(|e| e.target.starts_with("tutti::"))

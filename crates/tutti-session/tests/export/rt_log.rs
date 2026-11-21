@@ -1,7 +1,8 @@
 //! A bounce's graph logs on its own audio thread, and the records reach the
 //! session's `tracing` subscriber as they do for the live graph: drained
-//! between blocks on the thread that renders.
+//! between blocks on the thread that renders (a task of the session's executor).
 
+use crate::bounced::bounced;
 use tracing::Level;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::ForkByClone;
@@ -10,7 +11,7 @@ use tutti_units::{SampleRate, Seconds};
 
 #[path = "../support/rt_log.rs"]
 mod support;
-use support::{Noisy, SITE, rt_events};
+use support::{Noisy, SITE, rt_events_on_any_thread};
 
 #[test]
 fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() {
@@ -28,8 +29,8 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
         .unfaded();
     let _ = session.update();
 
-    let events = rt_events(|| {
-        let bounce = Bounce::project()
+    let events = rt_events_on_any_thread(|| {
+        let bounce = Bounce::new()
             .master_buffers()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.05)))
             .sample_rate(SampleRate::of(48_000.0))
@@ -37,7 +38,7 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
             .clock(ExportClock::frozen())
             .latency(BounceLatency::Keep)
             .tail(tutti_session::BounceTail::None);
-        session.bounce(bounce).expect("the bounce renders");
+        bounced(&mut session, bounce).expect("the bounce renders");
     });
 
     let warn: Vec<_> = events

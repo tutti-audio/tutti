@@ -3,6 +3,7 @@
 //! nothing, a free-running voice rings to the end of its wave, and a pool
 //! forks only while its voices are the ones it was built with.
 
+use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 
@@ -38,12 +39,11 @@ fn constant(frames: usize, level: f32) -> Arc<Wave> {
 /// The master's frame count of a bounce of the first `seconds`, with the
 /// tail the bounce picks without being asked.
 fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(RATE));
-    session
-        .bounce(bounce)
+    bounced(session, bounce)
         .expect("the bounce renders")
         .into_master()
         .into_planes()[0]
@@ -91,13 +91,12 @@ fn a_free_running_voice_rings_out_its_wave() {
     let voice = session.graph().add(source);
     session.graph().connect(voice, Root).unwrap().unfaded();
     let cap = Seconds::new(0.5);
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::Graph { cap });
-    let len = session
-        .bounce(bounce)
+    let len = bounced(&mut session, bounce)
         .expect("renders")
         .into_master()
         .into_planes()[0]
@@ -121,13 +120,12 @@ fn a_pool_built_with_its_voices_bounces_them() {
     let pool = session.graph().add(pool);
     session.graph().connect(pool, Root).unwrap().unfaded();
 
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
-    let planes = session
-        .bounce(bounce)
+    let planes = bounced(&mut session, bounce)
         .expect("renders")
         .into_master()
         .into_planes();
@@ -158,12 +156,12 @@ fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
         .add(SlotId(1), source, Playback::default())
         .expect("queued");
 
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
-    match session.bounce(bounce) {
+    match bounced(&mut session, bounce) {
         Err(BounceError::Fork(ForkError::Source { key, .. })) => assert_eq!(key, pool.erase()),
         other => panic!(
             "expected the pool's refusal by key, got {:?}",

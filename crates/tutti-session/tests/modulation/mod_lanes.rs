@@ -178,6 +178,7 @@ impl Node for Late {
 #[cfg(feature = "export")]
 #[test]
 fn an_export_is_the_live_render_on_a_native_param() {
+    use crate::bounced::bounced;
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
@@ -211,7 +212,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
         sample_rate: SampleRate::of(RATE),
         loop_range: None,
     }));
-    let request = Bounce::project()
+    let request = Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Frames(
@@ -222,8 +223,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
         .clock(ExportClock::timeline(timeline))
         .latency(BounceLatency::Keep)
         .tail(BounceTail::None);
-    let export = s
-        .bounce(request)
+    let export = bounced(&mut s, request)
         .expect("the export runs")
         .into_master()
         .into_planes();

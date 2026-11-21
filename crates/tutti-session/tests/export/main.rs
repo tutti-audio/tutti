@@ -49,3 +49,8 @@ mod export_fork_sampler;
     feature = "soundfont"
 ))]
 mod export_fork_synth;
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(feature = "export")]
+#[path = "../support/bounced.rs"]
+mod bounced;

@@ -13,7 +13,7 @@ use std::time::Duration;
 use tutti_platform::{Executor, Task};
 use tutti_rt::{Bell, Bells};
 
-pub(crate) use os::{Running, THREADS, start};
+pub(crate) use os::{Running, THREADS, drive, start};
 
 #[cfg_attr(not(target_arch = "wasm32"), path = "background/native.rs")]
 #[cfg_attr(target_arch = "wasm32", path = "background/web.rs")]
@@ -69,15 +69,20 @@ impl Background {
         }
     }
 
-    /// Ticks the bells: what a future awaiting one sent lands in the same update.
+    /// Ticks the bells: what a future awaiting one sent lands in the same update. Where no
+    /// thread drives the executor, runs what it has ready first.
     pub(crate) fn poll(&self) {
+        drive(&self.executor);
         self.bells.tick();
     }
 
     /// The session's executor, held for the session's whole life.
     #[cfg_attr(
-        not(feature = "device"),
-        expect(dead_code, reason = "a device switch (feature `device`) is its user")
+        not(any(feature = "device", feature = "export")),
+        expect(
+            dead_code,
+            reason = "a device switch (feature `device`) and a bounce (feature `export`) are its users"
+        )
     )]
     pub(crate) fn executor(&self) -> &Executor {
         &self.executor

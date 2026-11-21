@@ -13,6 +13,7 @@
 //! the hosted plugin are `export_fork_synth.rs`, `export_fork_sampler.rs` and
 //! `export_fork_plugin.rs`.
 
+use crate::bounced::bounced;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 
@@ -22,6 +23,7 @@ use std::thread::ThreadId;
 use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 use tutti_export::Produced;
+use tutti_fixtures::block_on;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, ForkBuild, ForkByClone, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
@@ -60,7 +62,7 @@ fn session_with_outputs(outputs: usize) -> DetachedSession {
 /// frozen clock, trimming nothing and keeping no tail (what the figures it
 /// does not name come to is each test's to ask for).
 fn bounce_at(seconds: f64, rate: f64) -> Bounce<NodeKey, BufferMaster> {
-    Bounce::project()
+    Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
@@ -76,8 +78,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
 
 /// The planes `bounce` renders, run on this thread.
 fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
-    session
-        .bounce(bounce)
+    bounced(session, bounce)
         .expect("the bounce renders")
         .into_master()
         .into_planes()
@@ -89,8 +90,7 @@ fn render_stems(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, BufferMaster>,
 ) -> Vec<Vec<Vec<f32>>> {
-    let (_, stems) = session
-        .bounce(bounce)
+    let (_, stems) = bounced(session, bounce)
         .expect("the bounce renders")
         .into_parts();
     stems
@@ -111,7 +111,7 @@ fn stem_of(session: &mut DetachedSession, node: NodeKey, seconds: f64) -> Vec<Ve
 
 /// What the session refuses `bounce` with, started and run on this thread.
 fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> BounceError {
-    match session.bounce(bounce) {
+    match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!(
             "expected a refusal, the bounce rendered {} stems",
@@ -369,7 +369,10 @@ fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
         BounceError::Config(BounceConfigError::PrepareHookUnpaired) => {}
         other => panic!("expected the unpaired refusal, got {other:?}"),
     }
-    assert!(!session.bounce_in_flight(), "the token is released");
+    assert!(
+        bounced(&mut session, buffers(0.01)).is_ok(),
+        "the token is released"
+    );
 }
 
 /// **An export of a graph with no outputs says so**, for the master and for
@@ -909,7 +912,7 @@ tutti_graph::declare_params!([] Level, n { Volume => Amplitude = &n.0 });
 /// **An export does not wait for a slow fork, and is the graph as it was
 /// when it started.** A node whose fork build blocks until released (the
 /// shape of a hosted plugin's `plugin-server` launch) is exported beside
-/// a `ParamNode`. `Session::bounce_start` returns with the build not yet run (it
+/// a `ParamNode`. `Session::bounce` returns with the build not yet run (it
 /// gathers; the job builds); there the live graph is edited — the slow
 /// node's cell and the param moved, the outputs rewired to another node —
 /// and only then is the build released and the job run on a thread of its
@@ -940,9 +943,7 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
         .unwrap()
         .unfaded();
 
-    let job = session
-        .bounce_start(buffers(0.05))
-        .expect("the export starts");
+    let job = session.bounce(buffers(0.05)).expect("the export starts");
     assert!(
         !built.load(Ordering::SeqCst),
         "the fork's build had run by the time the export started: it does not wait for the build"
@@ -954,11 +955,9 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
     session.graph().connect(other, Root).unwrap().unfaded();
     let _ = release.send(());
 
-    let rendered = std::thread::spawn(move || job.run())
-        .join()
-        .expect("the render thread");
+    let rendered = block_on(job);
     let planes = session
-        .finish_bounce(rendered)
+        .apply(rendered)
         .expect("the export renders")
         .into_master()
         .into_planes();
@@ -1065,9 +1064,8 @@ fn all_main(what: &str, at: &Mutex<Vec<ThreadId>>) {
 /// **A main-thread-only fork source builds on the main thread** though the
 /// job builds the rest of its fork on the thread that runs it: a pinned
 /// source (an in-process VST2 plugin's) is built and prepared in the gather,
-/// in `Session::bounce_start`, and the unit it built is dropped by
-/// `finish_bounce`, on the main thread, after the render on a thread of its
-/// own. A slow deferred source beside it keeps the job busy for a while.
+/// in `Session::bounce`, and the unit it built is dropped by
+/// `apply`, on the main thread, after the render on a thread of its own. A slow deferred source beside it keeps the job busy for a while.
 #[test]
 fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
     let mut session = session();
@@ -1087,14 +1085,10 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
         .unfaded();
     drop(release); // the slow build goes straight through
 
-    let job = session
-        .bounce_start(buffers(0.05))
-        .expect("the export starts");
-    let rendered = std::thread::spawn(move || job.run())
-        .join()
-        .expect("the render thread");
+    let job = session.bounce(buffers(0.05)).expect("the export starts");
+    let rendered = block_on(job);
     let planes = session
-        .finish_bounce(rendered)
+        .apply(rendered)
         .expect("the export renders")
         .into_master()
         .into_planes();
@@ -1111,7 +1105,7 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
 /// dropped: an export whose fork holds a pinned unit (built in the gather)
 /// is handed to a thread that drops it unrun (as a cancelled task is dropped
 /// by a pool); whatever the job held goes back to the session, and
-/// `drop_bounce_leftovers` drops it on the main thread. No render happened.
+/// the next `update` drops it on the main thread. No render happened.
 #[test]
 fn a_dropped_export_job_drops_its_fork_on_the_main_thread() {
     let mut session = session();
@@ -1128,9 +1122,7 @@ fn a_dropped_export_job_drops_its_fork_on_the_main_thread() {
         .unwrap()
         .unfaded();
 
-    let job = session
-        .bounce_start(buffers(0.05))
-        .expect("the export starts");
+    let job = session.bounce(buffers(0.05)).expect("the export starts");
     // Dropped on another thread, never run.
     std::thread::spawn(move || drop(job))
         .join()
@@ -1139,10 +1131,13 @@ fn a_dropped_export_job_drops_its_fork_on_the_main_thread() {
         threads.dropped.lock().unwrap().is_empty(),
         "the pinned unit is held for the main thread, not dropped where the job was"
     );
-    session.drop_bounce_leftovers();
+    let _events = session.update();
     all_main("built", &threads.built);
     all_main("dropped", &threads.dropped);
-    assert!(!session.bounce_in_flight(), "the token went with the job");
+    assert!(
+        session.bounce(buffers(0.05)).is_ok(),
+        "the token went with the job"
+    );
 }
 
 /// Why a [`Broken`] fork's build fails: a type to downcast back out.
@@ -1222,12 +1217,10 @@ fn a_fork_build_that_fails_names_its_node_and_drops_on_the_main_thread() {
         .unfaded();
 
     let job = session
-        .bounce_start(buffers(0.05))
+        .bounce(buffers(0.05))
         .expect("the export starts: the build fails in the job");
-    let rendered = std::thread::spawn(move || job.run())
-        .join()
-        .expect("the render thread");
-    match session.finish_bounce(rendered) {
+    let rendered = block_on(job);
+    match session.apply(rendered) {
         Err(BounceError::Fork(tutti_graph::ForkError::Source { key, cause })) => {
             assert_eq!(key, broken.erase());
             assert_eq!(cause.downcast_ref::<NoServer>(), Some(&NoServer));
@@ -1272,12 +1265,10 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     session.graph().connect(broken, Root).unwrap().unfaded();
     let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();
     let job = session
-        .bounce_start(witnessed(&drops))
+        .bounce(witnessed(&drops))
         .expect("the export starts");
-    let rendered = std::thread::spawn(move || job.run())
-        .join()
-        .expect("the render thread");
-    match session.finish_bounce(rendered) {
+    let rendered = block_on(job);
+    match session.apply(rendered) {
         Err(BounceError::Fork(tutti_graph::ForkError::Source { .. })) => {}
         other => panic!("expected the failing build, got {other:?}"),
     }
@@ -1289,7 +1280,7 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     session.graph().connect(dc, Root).unwrap().unfaded();
     let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();
     let job = session
-        .bounce_start(witnessed(&drops))
+        .bounce(witnessed(&drops))
         .expect("the export starts");
     std::thread::spawn(move || drop(job))
         .join()
@@ -1298,6 +1289,6 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
         drops.lock().unwrap().is_empty(),
         "the edit is held for the main thread, not dropped where the job was"
     );
-    session.drop_bounce_leftovers();
+    let _events = session.update();
     all_main("dropped (job dropped before it ran)", &drops);
 }

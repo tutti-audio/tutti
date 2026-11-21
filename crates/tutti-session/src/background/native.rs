@@ -24,3 +24,6 @@ pub(crate) fn start(executor: &Executor) -> io::Result<Running> {
         _thread: executor.spawn_threads(NonZeroUsize::MIN)?,
     })
 }
+
+/// Nothing to run here: the thread `start` made runs the executor's tasks.
+pub(crate) fn drive(_executor: &Executor) {}

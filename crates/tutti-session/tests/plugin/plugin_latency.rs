@@ -145,7 +145,7 @@ fn a_plugins_tail_ceiling_is_the_plugins_claim() {
 /// A short offline bounce into memory: the render mode a plugin is told
 /// Offline for as long as it is in flight.
 fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
-    Bounce::project()
+    Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
@@ -182,7 +182,7 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
         Samples::new(own + BLOCK)
     );
 
-    let _job = s.bounce_start(request()).expect("the bounce starts");
+    let _job = s.bounce(request()).expect("the bounce starts");
     let deadline = Instant::now() + std::time::Duration::from_secs(10);
     while diagnostics_of(&s, node).reported_latency() != Samples::new(own + 300) {
         assert!(Instant::now() < deadline, "the report never arrived");

@@ -6,6 +6,7 @@
 //! Every tempo here is 90 BPM: a beat is 32 000 frames at 48 kHz (64 000 at
 //! 96 kHz), placed to the frame since clips place on integer frames.
 
+use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_session::Root;
@@ -41,7 +42,7 @@ const PRESET: U7 = U7::of(24);
 /// A bounce of the mix into memory for `seconds` at `rate`: stereo, trimming
 /// nothing and keeping no tail, on `clock`.
 fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMaster> {
-    Bounce::project()
+    Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
@@ -52,8 +53,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
 }
 
 fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
-    session
-        .bounce(bounce)
+    bounced(session, bounce)
         .expect("the bounce renders")
         .into_master()
         .into_planes()
@@ -65,8 +65,7 @@ fn render_stem(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, BufferMaster>,
 ) -> Vec<Vec<f32>> {
-    let (_, mut stems) = session
-        .bounce(bounce)
+    let (_, mut stems) = bounced(session, bounce)
         .expect("the bounce renders")
         .into_parts();
     match stems.pop() {

@@ -36,3 +36,8 @@ mod problems;
 // A route's polarity and curve, an LFO's rate and a macro's value are values:
 // staged at `set`, republished at the update.
 mod program_targets;
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(feature = "export")]
+#[path = "../support/bounced.rs"]
+mod bounced;

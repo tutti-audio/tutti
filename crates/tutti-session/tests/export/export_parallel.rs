@@ -16,6 +16,7 @@
 //! included, is `tutti-engine`'s `rt_no_alloc_engine` (`GatedPool`), over the
 //! same executor.
 
+use crate::bounced::bounced;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
@@ -133,7 +134,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     named.push(sum.erase());
     session.graph().connect(sum, Root).unwrap();
 
-    let mut bounce = Bounce::project()
+    let mut bounce = Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
@@ -143,7 +144,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     for &stem in stems {
         bounce = bounce.stem_with(Stem::buffers(named[stem]));
     }
-    let (master, stems) = session.bounce(bounce).unwrap().into_parts();
+    let (master, stems) = bounced(&mut session, bounce).unwrap().into_parts();
     let targets = std::iter::once(master)
         .chain(stems.into_iter().map(|p| match p {
             Produced::Buffers(rendered) => rendered,

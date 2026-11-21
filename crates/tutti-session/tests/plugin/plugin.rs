@@ -13,9 +13,11 @@
 //! it every test here fails, naming that command. They must fail rather than
 //! skip.
 
+use crate::bounced::bounced;
 use crate::loading::{Block as _, LoadFrom as _, LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
 use crate::support;
+use tutti_fixtures::block_on;
 use tutti_plugin_db::Hosting;
 use tutti_rt::LockExt;
 use tutti_session::InPort;
@@ -150,7 +152,7 @@ fn stays_latency(s: &Session, node: NodeKey, want: Samples, why: &str) {
 /// A render of `seconds` into memory: stereo at `RATE`, trimming nothing and
 /// keeping no tail, on a frozen clock.
 fn request_for(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
-    Bounce::project()
+    Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
@@ -184,30 +186,35 @@ fn wired_probe(s: &mut Session) -> (NodeKey, Samples) {
 /// **An export announces Offline before its first block, and Realtime after
 /// it.** `export` runs `Phase::RenderMode` before it returns: the probe
 /// renders offline (its latency moves by the extra) while the job is still
-/// unrun, so before the fork can render a block. `finish_bounce` releases
-/// the token and runs the phase again: back to realtime, with no update.
+/// unrun, so before the fork can render a block. `apply` releases the token and
+/// announces nothing: the update after it runs the phase again, back to realtime.
 #[test]
 fn an_export_announces_offline_before_its_first_block_and_realtime_after() {
     let mut s = session(&[]);
     let (node, base) = wired_probe(&mut s);
     let offline = base + Samples::new(OFFLINE_EXTRA);
 
-    let job = s.bounce_start(request()).expect("the export starts");
+    let job = s.bounce(request()).expect("the export starts");
     assert_eq!(s.render_mode(), RenderMode::Offline);
     await_latency(&s, node, offline, "told Offline before the job runs");
-    assert!(s.bounce_in_flight());
+    assert!(matches!(s.bounce(request()), Err(BounceError::InFlight)));
 
-    let done = job.run();
-    let output = s.finish_bounce(done).expect("the export renders");
+    let done = block_on(job);
+    let output = s.apply(done).expect("the export renders");
     assert!(!output.master().planes().is_empty(), "the master is planes");
-    assert!(!s.bounce_in_flight());
+    let _ = s.update();
     assert_eq!(s.render_mode(), RenderMode::Realtime);
-    await_latency(&s, node, base, "told Realtime by finish_bounce");
+    await_latency(
+        &s,
+        node,
+        base,
+        "told Realtime by the update after the apply",
+    );
 }
 
 /// **A dropped job, or a dropped return, restores Realtime on the next
 /// update** (§4.3: the render mode is a level). Neither reaches
-/// `finish_bounce`; each drops the export's token, and the update after
+/// `apply`; each drops the export's token, and the update after
 /// finds none alive. Until that update the session still says Offline:
 /// nothing is announced from a drop (it may be a worker's).
 #[test]
@@ -217,7 +224,7 @@ fn a_dropped_export_job_restores_realtime_on_the_next_update() {
     let offline = base + Samples::new(OFFLINE_EXTRA);
 
     // The job, dropped unrun (a cancelled task).
-    let job = s.bounce_start(request()).expect("starts");
+    let job = s.bounce(request()).expect("starts");
     await_latency(&s, node, offline, "the job's export is in flight");
     drop(job);
     assert_eq!(
@@ -226,15 +233,17 @@ fn a_dropped_export_job_restores_realtime_on_the_next_update() {
         "nothing told on a drop"
     );
     let _ = s.update();
-    assert!(!s.bounce_in_flight());
     assert_eq!(s.render_mode(), RenderMode::Realtime);
     await_latency(&s, node, base, "the update after a dropped job");
 
     // Its return, dropped unfinished (a worker that ran it, then went).
-    let job = s.bounce_start(request()).expect("starts again");
+    let job = s.bounce(request()).expect("starts again");
     await_latency(&s, node, offline, "the second export is in flight");
-    let done = std::thread::spawn(move || job.run()).join().unwrap();
-    assert!(s.bounce_in_flight(), "the return holds the token");
+    let done = block_on(job);
+    assert!(
+        matches!(s.bounce(request()), Err(BounceError::InFlight)),
+        "the return holds the token"
+    );
     drop(done);
     let _ = s.update();
     assert_eq!(s.render_mode(), RenderMode::Realtime);
@@ -253,7 +262,7 @@ fn a_plugin_added_mid_export_is_told_offline() {
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
     s.graph().connect(dc, Root).unwrap();
     let _ = s.update();
-    let job = s.bounce_start(request()).expect("starts");
+    let job = s.bounce(request()).expect("starts");
     assert_eq!(s.render_mode(), RenderMode::Offline);
 
     let late = add_probe(&mut s);
@@ -267,8 +276,14 @@ fn a_plugin_added_mid_export_is_told_offline() {
         "a plugin added mid-export, after its first update",
     );
 
-    s.finish_bounce(job.run()).expect("renders, not cancelled");
-    await_latency(&s, late, base, "told Realtime once the export ends");
+    s.apply(block_on(job)).expect("renders, not cancelled");
+    let _ = s.update();
+    await_latency(
+        &s,
+        late,
+        base,
+        "told Realtime by the update after the apply",
+    );
 }
 
 /// **With recovery off, a plugin dead for the window stays silent at its node,
@@ -388,7 +403,7 @@ impl tutti_graph::Node for DropWitness {
 /// **An export's leftovers drop on the main thread.** The live graph holds a
 /// [`DropWitness`] beside the probe, both on the outputs (through a plugin
 /// input: the probe's fork comes too), so the export's fork carries a clone
-/// of the witness. The job runs on a spawned thread and `finish_bounce` on
+/// of the witness. The job renders on the executor's thread and `apply` runs on
 /// this one: every drop of the fork's witness is this thread's.
 #[test]
 fn export_leftovers_drop_on_the_main_thread() {
@@ -412,9 +427,9 @@ fn export_leftovers_drop_on_the_main_thread() {
     let _ = s.update();
     drops.lock().unwrap().clear();
 
-    let job = s.bounce_start(request()).expect("starts");
-    let done = std::thread::spawn(move || job.run()).join().unwrap();
-    s.finish_bounce(done).expect("renders, not cancelled");
+    let job = s.bounce(request()).expect("starts");
+    let done = block_on(job);
+    s.apply(done).expect("renders, not cancelled");
 
     let main = std::thread::current().id();
     let drops = drops.lock().unwrap().clone();
@@ -1595,13 +1610,12 @@ fn an_export_during_the_recovery_window_is_refused() {
         s.plugin_view(node).unwrap().health(),
         PluginHealth::Reloading { .. }
     ));
-    let refused = s.bounce_start(request());
+    let refused = s.bounce(request());
     let refusal = format!("{:?}", refused.as_ref().err());
     assert!(
         refusal.contains("SaveState(PluginCrashed)"),
         "the fork of a dead plugin is refused: {refusal}"
     );
-    assert!(!s.bounce_in_flight());
     assert_eq!(s.render_mode(), RenderMode::Realtime);
 }
 
@@ -1641,7 +1655,7 @@ impl tutti_graph::Node for CancelOnSecondBlock {
 }
 
 /// **A cancelled export over a hosted plugin's fork** stops at its second
-/// block, reports `Cancelled`, releases the token on `finish_bounce`, takes
+/// block, reports `Cancelled`, releases the token on `apply`, takes
 /// its forked `plugin-server` with it (the fork dies with the rendered graph,
 /// on the main thread), and the next export, forking a fresh server, succeeds.
 /// The server count is read from `/proc`, so that part is Linux only.
@@ -1672,22 +1686,24 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
     let _ = s.update();
     let live = servers();
 
-    let job = s.bounce_start(request_for(5.0)).expect("starts");
+    let job = s.bounce(request_for(5.0)).expect("starts");
     handle.set(job.handle()).ok();
-    let rendered = job.run();
+    let rendered = block_on(job);
     assert!(
         blocks.load(std::sync::atomic::Ordering::SeqCst) < 20,
         "the render stopped at the cancel, not at its end of 235 blocks"
     );
-    assert!(s.bounce_in_flight(), "the token lives until the finish");
+    assert!(
+        matches!(s.bounce(request()), Err(BounceError::InFlight)),
+        "the token lives until the apply"
+    );
     if let Some(live) = live {
         assert_eq!(servers(), Some(live + 1), "the export's fork has a server");
     }
     assert!(
-        matches!(s.finish_bounce(rendered), Err(BounceError::Cancelled)),
+        matches!(s.apply(rendered), Err(BounceError::Cancelled)),
         "cancelled"
     );
-    assert!(!s.bounce_in_flight(), "the token is released");
     if let Some(live) = live {
         let deadline = Instant::now() + Duration::from_secs(10);
         while servers() != Some(live) {
@@ -1696,8 +1712,7 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
         }
     }
 
-    s.bounce(request())
-        .expect("the next export is not refused, and renders to its end");
+    bounced(&mut s, request()).expect("the next export is not refused, and renders to its end");
 }
 
 /// **A replacement that refused the snapshot is not blamed for its death.**

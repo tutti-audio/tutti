@@ -3,7 +3,10 @@
 //! `load_midi`). Every input is bytes or samples in memory: the web has no file system.
 #![cfg(target_arch = "wasm32")]
 
+use std::future::IntoFuture as _;
+use std::pin::pin;
 use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
 use tutti::codec::{read_wave, write_wave};
 use tutti::measure::PeakConfig;
 use tutti::sampler::StreamStart;
@@ -51,12 +54,27 @@ fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() {
         .graph()
         .add(Clip::new(Arc::new(wave_of(vec![0.25; 2 * 48_000]))).expect("a placeable wave"));
     session.graph().connect(clip, Root).unwrap().unfaded();
-    let bounce = Bounce::project()
+    let bounce = Bounce::new()
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(RATE);
+    // A page starts no thread: the render is a task of the session's queue, which an
+    // update runs.
+    let mut rendering = pin!(
+        session
+            .bounce(bounce)
+            .expect("the bounce starts")
+            .into_future()
+    );
+    let mut cx = Context::from_waker(Waker::noop());
+    let rendered = loop {
+        if let Poll::Ready(rendered) = rendering.as_mut().poll(&mut cx) {
+            break rendered;
+        }
+        let _ = session.update();
+    };
     let planes = session
-        .bounce(bounce)
+        .apply(rendered)
         .expect("the bounce renders")
         .into_master()
         .into_planes();

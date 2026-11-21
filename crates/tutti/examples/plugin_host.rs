@@ -238,13 +238,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 10. Bounce four beats to a 24-bit WAV. The plugin hears Offline while it
-    //    renders and Realtime after.
-    let bounce = session.bounce_start(
-        Bounce::project()
+    //    renders, and Realtime from the update after the apply.
+    let rendering = session.bounce(
+        Bounce::new()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
             .master(out.as_path(), Format::Wav(Pcm::Int24)),
     )?;
-    let written = session.finish_bounce(bounce.run())?.into_master();
+    let rendered = block_on(rendering.into_future());
+    let written = session.apply(rendered)?.into_master();
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
     Ok(())
 }

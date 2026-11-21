@@ -8,6 +8,7 @@
 //! not a dev-dependency (a cycle through `tutti-plugin`), and without it every
 //! test here fails, naming that command. They must fail rather than skip.
 
+use crate::bounced::bounced;
 use crate::loading::{LoadPlugin, Spec};
 use crate::support;
 use tutti_session::Root;
@@ -47,7 +48,7 @@ const NOTES: u32 = 4;
 /// A bounce of the mix into memory for `seconds` at `rate`: stereo, trimming
 /// nothing and keeping no tail, on `clock`.
 fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMaster> {
-    Bounce::project()
+    Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
@@ -63,7 +64,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
 
 /// The planes `bounce` renders; panics with the refusal otherwise.
 fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
-    match session.bounce(bounce) {
+    match bounced(session, bounce) {
         Ok(out) => out.into_master().into_planes(),
         Err(e) => panic!("the bounce failed: {e:?}"),
     }
@@ -75,7 +76,7 @@ fn stem_planes(
     session: &mut DetachedSession,
     bounce: Bounce<NodeKey, BufferMaster>,
 ) -> Vec<Vec<f32>> {
-    match session.bounce(bounce) {
+    match bounced(session, bounce) {
         Ok(out) => {
             let (_, mut stems) = out.into_parts();
             match stems.pop() {
@@ -220,7 +221,7 @@ fn a_plugin_fork_that_cannot_be_built_is_a_named_failure() {
     let (mut session, probe, _env) =
         session_with_probe_at(TAG_PASSTHROUGH, own.clone(), Hosting::OutOfProcess);
     std::fs::remove_file(&own).expect("remove the plugin's file");
-    match session.bounce(buffers(0.05)) {
+    match bounced(&mut session, buffers(0.05)) {
         Err(BounceError::Fork(tutti_graph::ForkError::Source { key, cause })) => {
             assert_eq!(key, probe, "a plugin file gone since it loaded");
             assert!(
@@ -336,7 +337,7 @@ fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
     let (mut session, probe, mut env) = session_with_probe(TAG_PASSTHROUGH);
     feed_with(&mut session, probe, ForkByClone(Const::mono(0.25)));
     env.set("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
-    match session.bounce(buffers(2.0)) {
+    match bounced(&mut session, buffers(2.0)) {
         Err(BounceError::Export(tutti_export::RenderError::ForkFailed { key, kind, .. })) => {
             assert_eq!(key, probe);
             assert_eq!(kind, tutti_graph::ForkFaultKind::Crashed);

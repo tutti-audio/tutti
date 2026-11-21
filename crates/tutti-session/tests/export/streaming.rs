@@ -1,6 +1,7 @@
 //! A session's streamer runs on the thread of its own that `spawn_dedicated` gives it, so
 //! a stream opens, primes and bounces with no thread but that and the bells' tick.
 
+use crate::bounced::bounced;
 use std::path::Path;
 use std::time::Duration;
 
@@ -93,19 +94,19 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
         .expect("the clip reaches the root");
     let _ = s.update();
 
-    let rendered = s
-        .bounce(
-            Bounce::project()
-                .master_buffers()
-                .channels(ChannelLayout::STEREO)
-                .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
-                .sample_rate(SampleRate::of(RATE))
-                .latency(BounceLatency::Keep)
-                .tail(BounceTail::None),
-        )
-        .expect("the bounce renders")
-        .into_master()
-        .into_planes();
+    let rendered = bounced(
+        &mut s,
+        Bounce::new()
+            .master_buffers()
+            .channels(ChannelLayout::STEREO)
+            .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
+            .sample_rate(SampleRate::of(RATE))
+            .latency(BounceLatency::Keep)
+            .tail(BounceTail::None),
+    )
+    .expect("the bounce renders")
+    .into_master()
+    .into_planes();
     for k in 0..LEN {
         assert_eq!(rendered[0][k], value(k), "left, file frame {k}");
         assert_eq!(rendered[1][k], -value(k), "right, file frame {k}");
