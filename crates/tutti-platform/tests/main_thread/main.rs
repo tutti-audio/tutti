@@ -6,6 +6,10 @@
 //! libtest binary with: `--list` prints one `<case>: test` line per case, and
 //! `<case> --exact` runs that case alone and exits non-zero when it panics. (This
 //! crate names no workspace crate, so it cannot use `tutti_fixtures::main_thread_cases`.)
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 use tutti_platform::MainThreadMarker;
 

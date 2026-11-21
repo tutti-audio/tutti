@@ -18,8 +18,8 @@ use tutti_engine::{
 
 use crate::Result;
 use crate::driver_seam::CpalDriver;
-use crate::host::{DeviceHost, DeviceSelector};
-use crate::output::{AudioEngine, Opened};
+use crate::host::DeviceSelector;
+use crate::output::{AudioEngine, Opened, Target};
 
 /// The output device lifecycle a host holds: start, restart on another device
 /// or rate, stop.
@@ -33,7 +33,7 @@ use crate::output::{AudioEngine, Opened};
 /// See the [crate-level example](crate) for building one.
 pub struct TuttiDriver<F: Float = f32> {
     host: StreamHost<F>,
-    target: Option<(DeviceHost, crate::OutputConfig)>,
+    target: Option<Target>,
     opened: Opened,
 }
 
@@ -132,7 +132,7 @@ where
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<(), E> {
         self.host.stop();
-        if let Some((_, current)) = &mut self.target {
+        if let Some((_, current, _)) = &mut self.target {
             current.select(device.into());
         }
         let mut opened = None;
@@ -195,7 +195,7 @@ where
         spec: OutputSpec,
         driver: D,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
-        target: Option<(DeviceHost, crate::OutputConfig)>,
+        target: Option<Target>,
         opened: Opened,
     ) -> core::result::Result<Self, (StreamHost<F>, E)>
     where
@@ -265,7 +265,7 @@ where
 
     /// Selects a device for the next [`restart`](Self::restart).
     pub fn select_device(&mut self, sel: DeviceSelector) -> &mut Self {
-        if let Some((_, current)) = &mut self.target {
+        if let Some((_, current, _)) = &mut self.target {
             current.select(sel);
         }
         self

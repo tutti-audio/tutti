@@ -9,11 +9,10 @@
     )),
     expect(
         dead_code,
-        reason = "the loads (features `sampler`, `soundfont`, `plugin`) are its users; the job table needs only `panic_message`"
+        reason = "the loads (features `sampler`, `soundfont`, `plugin`) are its users"
     )
 )]
 
-use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
@@ -53,7 +52,7 @@ impl Stamp {
 /// Why a load did not finish.
 ///
 /// Each load adds its own failures (a plugin's, a SoundFont's) to the common
-/// ones here. Clone, so a handle's failed state and its job's error carry the
+/// ones here. Clone, so a handle's failed state and its load's error carry the
 /// same value.
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -101,18 +100,9 @@ pub enum LoadError {
 pub(crate) fn caught<T>(read: impl FnOnce() -> Result<T, LoadError>) -> Result<T, LoadError> {
     catch_unwind(AssertUnwindSafe(read)).unwrap_or_else(|payload| {
         Err(LoadError::Panicked {
-            message: panic_message(payload.as_ref()),
+            message: tutti_platform::panic_message(payload.as_ref()),
         })
     })
-}
-
-/// The message a caught panic carried, or a stand-in when its payload is no string.
-pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
-    payload
-        .downcast_ref::<&str>()
-        .map(|s| (*s).to_owned())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "a payload that is not a string".to_owned())
 }
 
 #[cfg(test)]

@@ -38,7 +38,7 @@
 //! The control thread owns the [`Session`]. Each frame it calls
 //! [`Session::update`], which runs the [`Phase`]s of [`PHASES`] in order and
 //! returns the [`SessionEvent`]s they raised: [`Phase::Collect`] lands what
-//! the session's jobs sent and frees what the audio thread retired,
+//! the session's takes reported and frees what the audio thread retired,
 //! [`Phase::Commit`] compiles and sends an edited graph, and the phases around
 //! them serve plugins, modulation, MIDI and reclamation.
 //!
@@ -47,7 +47,7 @@
 //!
 //! Between the two there are queues and no mutable state. A commit travels
 //! to the audio thread over the editor's queue, retired values travel back
-//! over its return queue, and a job on the session's executor reports over a
+//! over its return queue, and a take's pump on the session's executor reports over a
 //! channel that [`Phase::Collect`] drains. A call on the [`Graph`] only stages
 //! an edit, in the graph value the control thread holds
 //! ([`Graph::is_edited`] says whether one waits); nothing reaches the audio
@@ -58,6 +58,13 @@
 
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 #[cfg(feature = "analyze")]
 mod analyze;
@@ -86,7 +93,6 @@ mod hang;
 mod input;
 #[cfg(feature = "midi")]
 mod instrument;
-mod jobs;
 mod key;
 #[cfg(any(feature = "capture", feature = "midi"))]
 mod latency;
@@ -197,7 +203,6 @@ pub use graph::{
 pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
-pub use jobs::WorkerError;
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
@@ -270,9 +275,7 @@ pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
 #[cfg(feature = "record")]
-pub use recorder::{
-    FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError,
-};
+pub use recorder::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};
 #[cfg(feature = "plugin")]
 pub use recovery::{
     GiveUp, PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy,

@@ -7,6 +7,10 @@
 //! main thread (`tutti_fixtures::main_thread_cases` answers the command line nextest
 //! drives it with). The reference plugins load in process; a missing server is a failure,
 //! never a skip.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[cfg(feature = "clap")]
 #[path = "../support/mod.rs"]

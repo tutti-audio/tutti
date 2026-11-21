@@ -26,7 +26,6 @@ use tutti_plugin_types::StateError;
 
 use super::{ParamValues, PluginLoaded};
 use crate::RecoveryFailure;
-use crate::loaded::panic_message;
 
 /// What a loop's task ended with.
 pub(crate) enum Arrival {
@@ -170,7 +169,7 @@ impl ReloadPost {
                 loaded: Box::new(loaded),
             },
             Err(payload) => self.ended(RecoveryFailure::ReloadPanicked {
-                message: panic_message(payload.as_ref()),
+                message: tutti_platform::panic_message(payload.as_ref()),
             }),
         };
         self.sent = true;
@@ -202,7 +201,7 @@ pub(crate) fn contained<R>(what: &str, node: NodeKey, work: impl FnOnce() -> R) 
         Err(payload) => {
             tracing::warn!(
                 "plugin {node:?}: its {what} panicked: {}",
-                panic_message(payload.as_ref())
+                tutti_platform::panic_message(payload.as_ref())
             );
             None
         }

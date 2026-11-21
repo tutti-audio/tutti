@@ -84,14 +84,18 @@ impl Hub {
     ///
     /// [`MidiHardwareError::Spawn`] when the OS refuses the thread; nothing is kept,
     /// so the next call tries again.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the CoreMIDI hub: it makes the process-static client on a thread of its own that \
+                  no Executor owns, and the client's notification loop outlives every Executor"
+    )]
     fn ensure_thread(&'static self, slot: &mut Option<Unparker>) -> Result<()> {
         if self.client.get().is_some() || slot.is_some() {
             return Ok(());
         }
         let (unparker, parker) = parker();
-        // The hub is a process-static CoreMIDI client whose notification loop never
-        // returns, so its thread outlives every `Executor`, and no owner stops it
-        // (`check-threads` exempts this file).
+        // The thread makes the process-static CoreMIDI client and then runs its
+        // notification loop, which outlives every `Executor`; no owner stops it.
         spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
             let _ended = EndGuard(self);
             self.run(parker);

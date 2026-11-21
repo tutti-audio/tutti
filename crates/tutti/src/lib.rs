@@ -97,7 +97,7 @@
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
 //! - `codec` — `tutti::codec`, `Wave`. Implied by every decode and encode feature.
-//! - `record` — the session's `Recorder` and its pump loop, device-free. Implied by `capture`.
+//! - `record` — the session's pump loop, device-free. Implied by `capture`.
 //! - `capture` — live audio input from the sound card: `Session::add_input`, takes, mic capture
 //!   (implies `device` and `record`).
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
@@ -135,8 +135,9 @@
 pub use tutti_session::Error;
 
 // The graph's vocabulary a session hands out.
+pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
-    DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
+    EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
     InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
     TapOptions, TapReader, TapWriter,
 };
@@ -266,6 +267,7 @@ pub use tutti_session::{
 /// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
 /// ```
 pub mod nodes {
+    pub use tutti_curve::Breakpoint;
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
@@ -276,6 +278,9 @@ pub mod nodes {
     pub use tutti_dsp::{
         AllPassFilter, CombBank, CombControls, CombFilter, CombForm, FrequencyShifterBank,
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
+    };
+    pub use tutti_dsp::{
+        AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics, Rotation,
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
@@ -289,9 +294,13 @@ pub mod nodes {
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
     pub use tutti_nodes::automation::{
-        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, Breakpoint, ControlLaneNode,
+        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
+    };
+    pub use tutti_nodes::{
+        AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
+        AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, DirectionSet,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
@@ -325,11 +334,11 @@ pub mod nodes {
         MultibandControls, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
         NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
         PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder,
-        SweepError, SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls,
-        TiltFilterNode, TransientControls, TransientShaperConfig, TransientShaperNode, VbapError,
-        VbapPannerConfig, VbapPannerNode,
+        SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
+        Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode,
+        SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
+        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -337,13 +346,13 @@ pub mod nodes {
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, GraphicEqKernel, Kernel,
         KernelConfig, KernelNode, LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel,
-        PhaserKernel, ReconcileError, SvfKernel, TiltFilterKernel,
+        PhaserKernel, ReconcileError, ShimmerKernel, SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
         FreeverbSet, GateSet, GraphicEqSet, HasControl, LadderSet, LevellerSet, LimiterSet,
-        ModDelaySet, PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet,
+        ModDelaySet, PhaserSet, PlateKernel, PlateSet, ShimmerSet, SvfSet, TiltFilterSet,
         TransientShaperKernel, TransientShaperSet,
     };
     pub use tutti_nodes::{
@@ -369,9 +378,9 @@ pub mod types {
         PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_buffers::{
-        BufferError, FiniteSource, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel,
-        FoldLevels, FoldSpec, NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed,
-        Source, StereoPlanes, Stop,
+        BufferError, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec,
+        NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes,
+        Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
@@ -395,12 +404,12 @@ pub mod types {
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Mix, Moment, NormalizedOutOfRange,
-        Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate,
-        PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance, RunningPhase,
-        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Spread, SrcRatio,
-        StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
-        UnitParamOutOfRange, Velocity,
+        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
+        Moment, NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep,
+        PlayReading, PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate,
+        Resonance, RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan,
+        SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
+        StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }
@@ -488,7 +497,6 @@ pub mod session {
         )
     ))]
     pub use tutti_session::LoadError;
-    pub use tutti_session::WorkerError;
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
         CrossfadeId, CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin,
@@ -548,8 +556,7 @@ pub mod session {
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{
-        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, NoiseShaping, PumpLoop, PumpPass,
-        Recorder, RecorderError,
+        DitherSink, FinalizeError, NoiseShaping, PumpLoop, PumpLoopError, PumpPass,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{

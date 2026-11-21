@@ -1,4 +1,8 @@
 //! Offline render through the session: bounce, cancel and the forks of every node kind.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 // `Session::new` is a full session: it bounces.
 #[cfg(feature = "export")]

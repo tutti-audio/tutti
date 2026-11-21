@@ -582,6 +582,12 @@ pub(super) const ALLOW: &[Allow] = &[
         WIDTH,
         MONO_IN_STEREO_OUT,
     ),
+    ty(
+        "crates/tutti-nodes/",
+        "ShimmerConfig",
+        WIDTH,
+        MONO_IN_STEREO_OUT,
+    ),
     ty("crates/tutti-nodes/", "DelayConfig", WIDTH, OVER_A_LAYOUT),
     ty(
         "crates/tutti-nodes/",

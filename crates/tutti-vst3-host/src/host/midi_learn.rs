@@ -9,12 +9,12 @@
 //! Those two facts are the entire design here:
 //!
 //! - **Capture (RT thread):** when armed, each incoming CC `(channel, cc)` is
-//!   pushed to a bounded, lock-free channel. Gated by an [`AtomicBool`] so the
-//!   normal (un-armed) case does literally nothing on the hot path. Bounded +
-//!   `try_send` keeps the push allocation-free; on overflow the CC just sent is
+//!   pushed to a preallocated [`ArrayQueue`]: push and pop are lock-free and
+//!   allocation-free. Gated by an [`AtomicBool`] so the normal (un-armed) case
+//!   does literally nothing on the hot path. On overflow the CC just sent is
 //!   dropped, and counted (learning only needs *a* recent CC, not all of them).
 //! - **Forward (main thread):** [`Vst3Loaded::poll_plugin_notifications`](super::loaded::Vst3Loaded::poll_plugin_notifications) drains
-//!   the channel and makes the actual `onLiveMIDIControllerInput` COM call,
+//!   the queue and makes the actual `onLiveMIDIControllerInput` COM call,
 //!   honouring the spec's threading contract.
 //!
 //! Arming is the host/UI's job (e.g. right-click a knob → "MIDI learn" →
@@ -22,24 +22,24 @@
 //! the same "plumbed but idle until a producer wires it" shape note expression
 //! uses.
 
+use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crossbeam_channel::{Receiver, Sender, TrySendError};
 use tutti_rt::{Tally, TallyWriter, tally};
 use tutti_ump::MidiChannel;
 use tutti_vst3_ffi::MidiLearn;
 
-/// Bound on the in-flight CC capture channel. Learning only needs a recent CC,
+/// Bound on the in-flight CC capture queue. Learning only needs a recent CC,
 /// so a small ring is plenty; a CC that finds it full is dropped (the unread ones
 /// stay) and counted.
-const CC_CHANNEL_CAPACITY: usize = 64;
+const CC_QUEUE_CAPACITY: usize = 64;
 
 /// A captured live CC: `(channel, controller_number)`. Value is irrelevant for
 /// learning — the plugin only needs to know *which* controller moved.
 type CapturedCc = (i16, i16);
 
-/// RT-thread half: captures live CCs into the channel when armed. Lives in the
+/// RT-thread half: captures live CCs into the queue when armed. Lives in the
 /// audio scratch ([`super::instance`]'s `AudioIO`) so the process loop can reach
 /// it allocation-free.
 ///
@@ -48,7 +48,7 @@ type CapturedCc = (i16, i16);
 /// it's built at load, the producer only exists while the plugin is active).
 pub(super) struct MidiLearnProducer {
     armed: Arc<AtomicBool>,
-    tx: Sender<CapturedCc>,
+    queue: Arc<ArrayQueue<CapturedCc>>,
     dropped: TallyWriter<u64>,
 }
 
@@ -61,8 +61,8 @@ impl MidiLearnProducer {
     }
 
     /// Captures a single live CC `(channel, controller)` if armed. Allocation-free
-    /// (`try_send` into a pre-sized bounded channel); drops the CC on a full or
-    /// disconnected channel rather than blocking the audio thread, and counts it.
+    /// (a push into the preallocated queue); drops the CC on a full queue rather
+    /// than blocking the audio thread, and counts it.
     ///
     /// `controller` is a VST3 `ControllerNumbers` index (0-127 plus the
     /// synthetic aftertouch/pitch-bend slots) — passed through verbatim; the
@@ -72,12 +72,12 @@ impl MidiLearnProducer {
         if !self.is_armed() {
             return;
         }
-        match self
-            .tx
-            .try_send((i16::from(channel.get()), controller as i16))
+        if self
+            .queue
+            .push((i16::from(channel.get()), controller as i16))
+            .is_err()
         {
-            Ok(()) => {}
-            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => self.dropped.add(1),
+            self.dropped.add(1);
         }
     }
 }
@@ -89,8 +89,7 @@ impl MidiLearnProducer {
 pub(super) struct MidiLearnConsumer {
     controller: Option<MidiLearn>,
     armed: Arc<AtomicBool>,
-    tx: Sender<CapturedCc>,
-    rx: Receiver<CapturedCc>,
+    queue: Arc<ArrayQueue<CapturedCc>>,
     dropped: Tally<u64>,
 }
 
@@ -100,23 +99,21 @@ impl MidiLearnConsumer {
     /// which case [`forward_pending`](Self::forward_pending) is a no-op and
     /// arming has no observable effect.
     pub(super) fn new(controller: Option<MidiLearn>) -> Self {
-        let (tx, rx) = crossbeam_channel::bounded(CC_CHANNEL_CAPACITY);
         Self {
             controller,
             armed: Arc::new(AtomicBool::new(false)),
-            tx,
-            rx,
+            queue: Arc::new(ArrayQueue::new(CC_QUEUE_CAPACITY)),
             dropped: tally(),
         }
     }
 
     /// Spawn an RT-side [`MidiLearnProducer`] sharing this consumer's armed flag
-    /// and CC channel. Called at activation; the producer lives in the audio
+    /// and CC queue. Called at activation; the producer lives in the audio
     /// scratch and is dropped at deactivation, leaving the consumer intact.
     pub(super) fn producer(&self) -> MidiLearnProducer {
         MidiLearnProducer {
             armed: self.armed.clone(),
-            tx: self.tx.clone(),
+            queue: Arc::clone(&self.queue),
             dropped: self.dropped.writer(),
         }
     }
@@ -145,11 +142,11 @@ impl MidiLearnConsumer {
     pub(super) fn forward_pending(&self) -> usize {
         let Some(controller) = self.controller.as_ref() else {
             // No IMidiLearn — still drain so a stale armed flag can't back the
-            // channel up unboundedly.
-            return self.rx.try_iter().count();
+            // queue up unboundedly.
+            return std::iter::from_fn(|| self.queue.pop()).count();
         };
         let mut count = 0;
-        for (channel, cc) in self.rx.try_iter() {
+        while let Some((channel, cc)) = self.queue.pop() {
             // busIndex 0: live CC is reported against the first event bus, the
             // same contract IMidiMapping uses (see midi_mapping.rs).
             controller.live_controller_input(channel, cc);
@@ -170,12 +167,12 @@ mod tests {
         let producer = consumer.producer();
         producer.capture(MidiChannel::of(3), 7);
         producer.capture(MidiChannel::of(0), 1);
-        // Nothing was armed → channel is empty → no forwards.
+        // Nothing was armed → queue is empty → no forwards.
         assert_eq!(consumer.forward_pending(), 0);
     }
 
     /// Armed capture reaches the consumer; without an IMidiLearn the COM call is
-    /// skipped but the channel is still drained.
+    /// skipped but the queue is still drained.
     #[test]
     fn armed_capture_is_drained() {
         let consumer = MidiLearnConsumer::new(None);
@@ -209,27 +206,27 @@ mod tests {
         let consumer = MidiLearnConsumer::new(None);
         let producer = consumer.producer();
         consumer.arm(true);
-        for i in 0..(CC_CHANNEL_CAPACITY * 4) {
+        for i in 0..(CC_QUEUE_CAPACITY * 4) {
             producer.capture(MidiChannel::of(0), i % 128);
         }
-        // At most the channel capacity survived; the rest were dropped.
+        // At most the queue capacity survived; the rest were dropped.
         let forwarded = consumer.forward_pending();
         assert!(
-            forwarded <= CC_CHANNEL_CAPACITY,
+            forwarded <= CC_QUEUE_CAPACITY,
             "forwarded {forwarded} > cap"
         );
         assert!(forwarded > 0);
         assert_eq!(
             consumer.dropped(),
-            (CC_CHANNEL_CAPACITY * 4 - forwarded) as u64,
-            "every CC the channel could not hold is counted"
+            (CC_QUEUE_CAPACITY * 4 - forwarded) as u64,
+            "every CC the queue could not hold is counted"
         );
     }
 
-    /// RT regression: armed capture into a warmed bounded channel is
-    /// allocation-free, including the overflow path (`try_send` returning `Full`
-    /// without allocating). The bounded channel allocates its slab once at
-    /// construction; `capture` only ever writes into it.
+    /// RT regression: armed capture into a warmed bounded queue is
+    /// allocation-free, including the overflow path (a push refused on a full
+    /// queue, without allocating). The queue allocates its slots once at
+    /// construction; `capture` only ever writes into them.
     #[test]
     fn armed_capture_is_allocation_free_after_warmup() {
         let consumer = MidiLearnConsumer::new(None);

@@ -138,10 +138,8 @@ fn graph_tap(capacity: usize) -> (Graph, TapReader) {
 
 /// **The whole chain, driven pass by pass, with every sample checked.**
 ///
-/// A stepped `PumpLoop` rather than a thread: the counts are then exact rather
-/// than whatever the scheduler allowed, which is the same argument
-/// `recorder.rs` makes for its own fixtures. The thread is covered separately
-/// in `recorder_thread.rs`.
+/// A stepped `PumpLoop`: the counts are exact rather than whatever a scheduler
+/// allowed.
 #[test]
 fn tapped_frames_reach_the_wav_in_order_through_the_whole_chain() {
     let dir = tempfile::tempdir().unwrap();
@@ -275,7 +273,7 @@ fn interleaved_pushes_and_pumps_lose_no_frames() {
 
 /// **A recording through a tap that fell behind reports the gap, and the file
 /// closes up over it.** The ring holds 512 frames and 2048 are rendered before
-/// the pump runs, so the first 512 are kept and 1536 are lost. The recorder
+/// the pump runs, so the first 512 are kept and 1536 are lost. The pump
 /// counts them; the file holds the 512 and is shorter than the take by the
 /// lost frames, with nothing in the audio to mark where.
 #[test]

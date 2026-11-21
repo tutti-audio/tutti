@@ -10,6 +10,13 @@
 //! `RUST_LOG` says otherwise. The exit status is 0 for a session that ended with
 //! every plugin destroyed, [`EXIT_PLUGIN_LEAKED`] for one that had to leak a
 //! plugin, and 1 for an error.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 use std::env;
 use std::process::ExitCode;

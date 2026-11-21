@@ -49,6 +49,10 @@
 //! happens then.
 
 #![cfg(all(target_os = "linux", not(loom), not(miri)))]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;

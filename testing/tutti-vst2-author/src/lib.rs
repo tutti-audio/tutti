@@ -14,6 +14,10 @@
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![allow(missing_docs)]
 #![allow(mismatched_lifetime_syntaxes)]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test support: it starts the threads its tests race"
+)]
 
 #[macro_use]
 extern crate tracing;

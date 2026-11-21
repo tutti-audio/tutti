@@ -260,6 +260,13 @@
 //! subscribers, so a send/receive pair on one virmidi port receives nothing),
 //! and `Midi Through` is the kernel's actual loopback.
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 // --- Framework-free hardware I/O core ---
 

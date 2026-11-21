@@ -12,7 +12,7 @@ use super::fs::{canonical_path, discover};
 use super::pedal::Pedal;
 use super::table::{FileRow, PluginDb, RowChange};
 use crate::Stop;
-use crossbeam_channel::{Receiver, Sender, TrySendError};
+use crossbeam_queue::ArrayQueue;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
@@ -28,23 +28,14 @@ const PROGRESS_CAPACITY: usize = 256;
 /// The scan's end of the progress queue: sends the newest update, making room
 /// by dropping the oldest, and counts what it drops.
 struct Progress {
-    tx: Sender<ScanProgress>,
-    oldest: Receiver<ScanProgress>,
+    queue: Arc<ArrayQueue<ScanProgress>>,
     dropped: TallyWriter<u64>,
 }
 
 impl Progress {
-    fn send(&self, mut update: ScanProgress) {
-        loop {
-            match self.tx.try_send(update) {
-                Ok(()) | Err(TrySendError::Disconnected(_)) => return,
-                Err(TrySendError::Full(back)) => {
-                    update = back;
-                    if self.oldest.try_recv().is_ok() {
-                        self.dropped.add(1);
-                    }
-                }
-            }
+    fn send(&self, update: ScanProgress) {
+        if self.queue.force_push(update).is_some() {
+            self.dropped.add(1);
         }
     }
 }
@@ -321,20 +312,16 @@ impl std::fmt::Debug for ScanPlugins {
 
 impl ScanPlugins {
     fn new(job: Job) -> Self {
-        let (progress_tx, progress_rx) = crossbeam_channel::bounded(PROGRESS_CAPACITY);
+        let queue = Arc::new(ArrayQueue::new(PROGRESS_CAPACITY));
         let dropped = tutti_rt::tally::<u64>();
         Self {
             job,
             stop: Stop::new(),
             progress: Progress {
-                tx: progress_tx,
-                oldest: progress_rx.clone(),
+                queue: Arc::clone(&queue),
                 dropped: dropped.writer(),
             },
-            reader: ScanProgressReader {
-                rx: progress_rx,
-                dropped,
-            },
+            reader: ScanProgressReader { queue, dropped },
             origin: None,
         }
     }
@@ -411,14 +398,14 @@ impl ScanCanceller {
 /// run is its return, never an update.
 #[derive(Debug, Clone)]
 pub struct ScanProgressReader {
-    rx: Receiver<ScanProgress>,
+    queue: Arc<ArrayQueue<ScanProgress>>,
     dropped: Tally<u64>,
 }
 
 impl ScanProgressReader {
     /// The updates made since the last call, oldest first. Never blocks.
     pub fn read(&self) -> impl Iterator<Item = ScanProgress> + '_ {
-        self.rx.try_iter()
+        std::iter::from_fn(|| self.queue.pop())
     }
 
     /// How many updates were dropped because the queue was full.
@@ -1635,13 +1622,15 @@ mod tests {
             ));
         }
 
-        let (parked_tx, parked_rx) = crossbeam_channel::bounded::<PathBuf>(1);
-        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
+        let (parked_tx, parked_rx) = std::sync::mpsc::sync_channel::<PathBuf>(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
+        // The probe closure is `Sync`; a `Receiver` is not.
+        let release_rx = Mutex::new(release_rx);
         let probes = AtomicUsize::new(0);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, _| {
             if probes.fetch_add(1, Ordering::SeqCst) == 1 {
                 parked_tx.send(path.to_path_buf()).unwrap();
-                release_rx.recv_timeout(HANG_GUARD).unwrap();
+                release_rx.lock().unwrap().recv_timeout(HANG_GUARD).unwrap();
             }
             Ok(vec![described("new")])
         });
@@ -1716,18 +1705,20 @@ mod tests {
         answer: fn(&Path) -> Result<Vec<Described>, ProbeFailure>,
     ) -> (
         Scanner,
-        crossbeam_channel::Receiver<PathBuf>,
-        crossbeam_channel::Sender<()>,
+        std::sync::mpsc::Receiver<PathBuf>,
+        std::sync::mpsc::SyncSender<()>,
         Arc<AtomicUsize>,
     ) {
-        let (parked_tx, parked_rx) = crossbeam_channel::bounded::<PathBuf>(1);
-        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
+        let (parked_tx, parked_rx) = std::sync::mpsc::sync_channel::<PathBuf>(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
+        // The probe closure is `Sync`; a `Receiver` is not.
+        let release_rx = Mutex::new(release_rx);
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&calls);
         let scanner = Scanner::new(dir.join(".scanning"), move |path, _, _| {
             if seen.fetch_add(1, Ordering::SeqCst) == 0 {
                 parked_tx.send(path.to_path_buf()).unwrap();
-                release_rx.recv_timeout(HANG_GUARD).unwrap();
+                release_rx.lock().unwrap().recv_timeout(HANG_GUARD).unwrap();
             }
             answer(path)
         });
@@ -1822,7 +1813,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let file = create_fake_plugin(&plugins_dir, "a.clap");
-        let (probing_tx, probing_rx) = crossbeam_channel::bounded::<()>(1);
+        let (probing_tx, probing_rx) = std::sync::mpsc::sync_channel::<()>(1);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, stop| {
             let _ = probing_tx.try_send(());
             let _ = stop.wait(Duration::from_secs(600));
@@ -1936,7 +1927,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let file = create_fake_plugin(&plugins_dir, "a.clap");
-        let (probing_tx, probing_rx) = crossbeam_channel::bounded::<()>(1);
+        let (probing_tx, probing_rx) = std::sync::mpsc::sync_channel::<()>(1);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |_, _, stop| {
             let _ = probing_tx.try_send(());
             let _ = stop.wait(Duration::from_secs(600));

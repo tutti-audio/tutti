@@ -415,7 +415,7 @@ mod tests {
 
     /// `Debug` names the common widths.
     ///
-    /// Load-bearing, not cosmetic: width-mismatch errors (`Recorder::start`)
+    /// Load-bearing, not cosmetic: width-mismatch errors (`PumpLoop::new`)
     /// `Debug`-format both layouts, and a derived newtype `Debug` would print
     /// `ChannelLayout(2)`.
     #[test]

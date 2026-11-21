@@ -27,15 +27,15 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", featur
 # `Reaped`, the guard on the probe's child process, and `HOST_PID_ENV`, how the
 # host states its pid to it.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
-# `spawn_named`: the scanner's probe threads.
+# `Instant`: the probe's deadline.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # `LockExt`, `Tally`: the catalog's lock and the scan's loss count.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }
 thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
-# The scan's progress and change channels.
-crossbeam-channel = "0.5"
+# The scan's progress queue.
+crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 # The probe's private result directory (pure Rust; removed on drop, panic included).
 tempfile = "3"
 

@@ -24,7 +24,7 @@ testing = []
 dpi = { workspace = true, features = ["serde"] }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-# `spawn_named`, `PriorityRequest`: the client's audio and control threads.
+# `Executor`, `PriorityRequest`: the client's audio and control lanes.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # The audio and guard tasks yield to their drive between slices.
 futures-lite.workspace = true
@@ -45,8 +45,7 @@ bytemuck = "1"
 # Unpredictable slab and socket names (pure Rust; the OS's random source).
 getrandom = { workspace = true }
 
-crossbeam = "0.8"
-crossbeam-channel = "0.5"
+crossbeam-queue = "0.3"
 parking_lot = "0.13"
 
 # Cross-platform local IPC (Unix sockets on Unix, named pipes on Windows).
