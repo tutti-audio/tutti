@@ -16,6 +16,7 @@ use tutti_buffers::{Float, Sample, SampleFormat};
 use tutti_engine::{
     MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
 };
+use tutti_platform::Executor;
 use tutti_units::{SampleRate, Samples};
 
 use crate::edge::{self, OffsetBinary};
@@ -169,6 +170,8 @@ pub struct CpalDriver {
     /// The device's exact sample type, which `spec.sample_format` cannot say
     /// for the offset-binary formats; one [`spec_format`] accepts.
     format: cpal::SampleFormat,
+    /// The executor whose dedicated thread owns the stream.
+    executor: Executor,
 }
 
 impl std::fmt::Debug for CpalDriver {
@@ -182,9 +185,17 @@ impl CpalDriver {
     ///
     /// # Errors
     /// [`DeviceError::InvalidConfig`] for a sample type the driver does not build.
-    pub(crate) fn new(device: cpal::Device, format: cpal::SampleFormat) -> Result<Self> {
+    pub(crate) fn new(
+        device: cpal::Device,
+        format: cpal::SampleFormat,
+        executor: Executor,
+    ) -> Result<Self> {
         spec_format(format)?;
-        Ok(Self { device, format })
+        Ok(Self {
+            device,
+            format,
+            executor,
+        })
     }
 }
 
@@ -221,7 +232,8 @@ impl<F: Float> StreamDriver<F> for CpalDriver {
     ) -> Result<CpalStream> {
         let config = stream_config(spec);
         let format = self.format;
-        Owned::spawn("tutti-output-stream", move || {
+        let executor = self.executor.clone();
+        Owned::spawn(&executor, "tutti-output-stream", move || {
             let stream = match format {
                 cpal::SampleFormat::I8 => self.build(&config, block, faults, native::<F, i8>)?,
                 cpal::SampleFormat::I16 => self.build(&config, block, faults, native::<F, i16>)?,

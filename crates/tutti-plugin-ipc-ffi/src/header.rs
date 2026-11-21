@@ -36,8 +36,28 @@
 //! published here".
 
 use crate::SlabError;
-use crossbeam_utils::CachePadded;
 use std::mem::{align_of, offset_of, size_of};
+use std::ops::{Deref, DerefMut};
+
+/// A value on its own cache line: aligned to 128 bytes, the larger of the line
+/// sizes the targets use (64 on x86-64, whose adjacent-line prefetcher pulls
+/// pairs, and 128 on aarch64). The alignment pads the size to a multiple of it.
+#[derive(Debug)]
+#[repr(C, align(128))]
+struct CachePadded<T>(T);
+
+impl<T> Deref for CachePadded<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for CachePadded<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
 
 /// The header's atomics: `std`'s, and `loom`'s under `--cfg loom`, so the model
 /// in `loom_model` runs this code. The mapped layout is the `std` one.
@@ -118,18 +138,13 @@ pub struct SlabHeader {
 // critical path, paying the full price of contention over data that is not
 // actually shared.
 //
-// `CachePadded` rather than a hand-rolled `align(64)`: the line size is not 64
-// everywhere. It is 64 on x86-64 — but its L2 prefetcher pulls line *pairs*, so
-// the effective granularity is 128 — and 128 on aarch64. Both are targets here,
-// so a hardcoded 64 would be mistuned on both. `crossbeam` already carries the
-// per-architecture constant and we already depend on it.
+// `CachePadded` aligns to 128, not 64: the line size is 64 on x86-64 — but its
+// L2 prefetcher pulls line *pairs*, so the effective granularity is 128 — and
+// 128 on aarch64. A hardcoded 64 would be mistuned on both.
 //
 // The assertions check *properties* (each region is line-aligned) rather than an
-// absolute `size_of`, because `CachePadded`'s size is target-dependent by
-// design. That is the better guard anyway: it states the invariant instead of a
-// number that happens to satisfy it today. Target-dependent size is safe for
-// shared memory here because both processes are the same binary on the same
-// machine — the header version check catches it if that ever stops being true.
+// absolute `size_of`: they state the invariant instead of a number that happens
+// to satisfy it today.
 const _: () = assert!(align_of::<CachePadded<[AtomicU64; RING_SLOTS]>>() >= 64);
 const _: () = assert!(
     offset_of!(SlabHeader, input_seq) % align_of::<CachePadded<[AtomicU64; RING_SLOTS]>>() == 0
@@ -165,13 +180,13 @@ impl SlabHeader {
     #[cfg(loom)]
     pub fn zeroed() -> Self {
         Self {
-            control: CachePadded::new(Control {
+            control: CachePadded(Control {
                 magic: AtomicU64::new(0),
                 header_version: AtomicU32::new(0),
                 slots: AtomicU32::new(0),
             }),
-            input_seq: CachePadded::new(std::array::from_fn(|_| AtomicU64::new(0))),
-            output_seq: CachePadded::new(std::array::from_fn(|_| AtomicU64::new(0))),
+            input_seq: CachePadded(std::array::from_fn(|_| AtomicU64::new(0))),
+            output_seq: CachePadded(std::array::from_fn(|_| AtomicU64::new(0))),
         }
     }
 

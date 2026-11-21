@@ -18,25 +18,25 @@
 //! `reclaim()` on the control side's own tick.
 
 use std::sync::Arc;
+use std::sync::mpsc::{SendError, SyncSender, TrySendError};
 
-use crossbeam_channel::{SendError, Sender};
 use tutti_rt::{Bell, RingFloat};
 
 use super::command::StreamerCommand;
 
 /// The sending end of the streamer's command queue: a bounded
-/// `crossbeam_channel` and the [`Bell`] each send rings. Sent on by control
+/// `std::sync::mpsc::sync_channel` and the [`Bell`] each send rings. Sent on by control
 /// threads. A send waits while the queue is full and
 /// fails once the streamer has gone (every receiver dropped: its future ended, a
 /// built streamer's on its drop).
 #[derive(Clone)]
 pub(crate) struct StreamerSender<F: RingFloat> {
-    tx: Sender<StreamerCommand<F>>,
+    tx: SyncSender<StreamerCommand<F>>,
     bell: Arc<Bell>,
 }
 
 impl<F: RingFloat> StreamerSender<F> {
-    pub(crate) fn new(tx: Sender<StreamerCommand<F>>, bell: Bell) -> Self {
+    pub(crate) fn new(tx: SyncSender<StreamerCommand<F>>, bell: Bell) -> Self {
         Self {
             tx,
             bell: Arc::new(bell),
@@ -58,24 +58,18 @@ impl<F: RingFloat> StreamerSender<F> {
     pub(crate) fn try_send(
         &self,
         cmd: StreamerCommand<F>,
-    ) -> Result<(), crossbeam_channel::TrySendError<StreamerCommand<F>>> {
+    ) -> Result<(), TrySendError<StreamerCommand<F>>> {
         self.tx.try_send(cmd)?;
         self.bell.ring();
         Ok(())
-    }
-
-    /// Whether the queue holds no command (tests).
-    #[cfg(test)]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.tx.is_empty()
     }
 }
 
 /// A sender whose bell nobody awaits: for a test that holds the receiving end
 /// itself.
 #[cfg(test)]
-impl<F: RingFloat> From<Sender<StreamerCommand<F>>> for StreamerSender<F> {
-    fn from(tx: Sender<StreamerCommand<F>>) -> Self {
+impl<F: RingFloat> From<SyncSender<StreamerCommand<F>>> for StreamerSender<F> {
+    fn from(tx: SyncSender<StreamerCommand<F>>) -> Self {
         let executor = tutti_platform::Executor::new();
         let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         Self::new(tx, bells.bell().0)

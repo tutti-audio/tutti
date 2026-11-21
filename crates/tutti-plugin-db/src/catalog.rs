@@ -1400,7 +1400,7 @@ mod tests {
             std::fs::write(scanned_dir.join(name), b"x").unwrap();
         }
         let mut catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
-        let (parked_tx, parked_rx) = crossbeam_channel::bounded::<()>(1);
+        let (parked_tx, parked_rx) = std::sync::mpsc::sync_channel::<()>(1);
         let probes = std::sync::atomic::AtomicUsize::new(0);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |path, _, stop| {
             if probes.fetch_add(1, Ordering::SeqCst) == 1 {

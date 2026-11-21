@@ -97,7 +97,7 @@
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
 //! - `codec` — `tutti::codec`, `Wave`. Implied by every decode and encode feature.
-//! - `record` — the session's `Recorder` and its pump loop, device-free. Implied by `capture`.
+//! - `record` — the session's pump loop, device-free. Implied by `capture`.
 //! - `capture` — live audio input from the sound card: `Session::add_input`, takes, mic capture
 //!   (implies `device` and `record`).
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
@@ -135,8 +135,9 @@
 pub use tutti_session::Error;
 
 // The graph's vocabulary a session hands out.
+pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
-    DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
+    EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
     InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
     TapOptions, TapReader, TapWriter,
 };
@@ -266,6 +267,7 @@ pub use tutti_session::{
 /// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
 /// ```
 pub mod nodes {
+    pub use tutti_curve::Breakpoint;
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
@@ -293,7 +295,7 @@ pub mod nodes {
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
     pub use tutti_nodes::automation::{
-        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, Breakpoint, ControlLaneNode,
+        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
     };
@@ -379,9 +381,9 @@ pub mod types {
         PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_buffers::{
-        BufferError, FiniteSource, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel,
-        FoldLevels, FoldSpec, NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed,
-        Source, StereoPlanes, Stop,
+        BufferError, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec,
+        NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes,
+        Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
@@ -558,8 +560,7 @@ pub mod session {
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{
-        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, NoiseShaping, PumpLoop, PumpPass,
-        Recorder, RecorderError,
+        DitherSink, FinalizeError, NoiseShaping, PumpLoop, PumpLoopError, PumpPass,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{

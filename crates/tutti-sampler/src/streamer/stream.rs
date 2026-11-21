@@ -278,7 +278,7 @@ mod tests {
     /// on one queue each send their own id in the close their drop sends.
     #[test]
     fn a_stream_names_itself_in_the_close_it_sends() {
-        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand<f32>>(16);
+        let (tx, queue) = std::sync::mpsc::sync_channel::<StreamerCommand<f32>>(16);
         let port = StreamerPort::new(tx);
         let (a, b) = (
             Stream::detached(StreamId::of(1), port.clone()),

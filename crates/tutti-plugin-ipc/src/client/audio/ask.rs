@@ -7,7 +7,7 @@
 //! one-shot semantics are enforced by the type system, not by hoping
 //! responses come back in the order requests went out.
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 use tutti_rt::LockExt;
@@ -44,7 +44,7 @@ impl Drop for Owing {
 /// delivered, and forgetting to send is a compile error in any branch
 /// that should have consumed `self`.
 pub(super) struct Reply<T> {
-    tx: Sender<T>,
+    tx: SyncSender<T>,
     /// The slot this reply holds, for a request that owes one.
     owing: Option<Owing>,
 }
@@ -84,7 +84,7 @@ impl<T> Ask<T> {
 
 /// Make a paired one-shot channel.
 pub(super) fn ask<T>() -> (Ask<T>, Reply<T>) {
-    let (tx, rx) = bounded(1);
+    let (tx, rx) = sync_channel(1);
     (Ask(rx), Reply { tx, owing: None })
 }
 
