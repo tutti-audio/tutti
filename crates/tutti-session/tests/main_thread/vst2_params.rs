@@ -4,7 +4,7 @@
 //! (`tutti-vst2-host`'s `IntegerRange`), so `Hz::new(31.75)` is position `0.25`
 //! (the figures are the range's, written here, not read from the host).
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_plugin_types::ParamUnit;

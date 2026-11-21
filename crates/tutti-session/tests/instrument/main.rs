@@ -16,8 +16,8 @@ mod f64_session;
 mod main_pair;
 mod plugin;
 mod polysynth;
-// Loading a plugin file through the pool.
-#[path = "../support/pooled.rs"]
-mod pooled;
+// Loading a plugin file, as a test does where an app runs the load.
+#[path = "../support/loading.rs"]
+mod loading;
 mod refusal;
 mod soundfont;

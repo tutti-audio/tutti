@@ -9,8 +9,8 @@
 //! without it every test here fails, naming that command. They must fail
 //! rather than skip.
 
+use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
-use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
@@ -64,19 +64,14 @@ fn detached() -> DetachedSession {
 
 /// Loads the probe into `s` and puts it on the outputs.
 fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::AnyPlugin> {
-    add_probe_keyed(s).1
-}
-
-/// As [`add_probe`], with the pool key of the plugin's entry.
-fn add_probe_keyed(s: &mut DetachedSession) -> (u64, tutti_session::Key<tutti_session::AnyPlugin>) {
-    let (key, node) = s
-        .load_plugin_keyed(
+    let node = s
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
             Spec::new(PluginRef::file(clap_probe())),
         )
         .expect("the reference CLAP plugin loads");
     s.graph().connect(node, Root).unwrap();
-    (key, node)
+    node
 }
 
 /// A virtual clock for the session's phases, and the plugin changes they
@@ -195,7 +190,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
         .join(format!("session-recovery-lane.once.{}", std::process::id()));
     let _ = std::fs::remove_file(&once);
     // The probe of the plugin's file runs before the fault variable is set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()));
+    crate::loading::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
     set_env("TUTTI_CLAP_PROBE_ONCE_FILE", &once);
     set_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
@@ -490,11 +485,11 @@ fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
 fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     // The plugin's file is probed before its variables are set; the reference
     // plugin answers `clap.preset-load` only when asked.
-    crate::pooled::prime(&PluginRef::file(clap_probe()));
+    crate::loading::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
     let mut s = detached();
     let mut drive = Drive::new();
-    let (_entry, node) = add_probe_keyed(&mut s);
+    let node = add_probe(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
     let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
@@ -573,7 +568,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     const BLOCKS: usize = 24;
 
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()));
+    crate::loading::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
     let mut s = detached();

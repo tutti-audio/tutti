@@ -8,7 +8,7 @@
 //! embeddable editor open: an X11 window id is what its editor embeds into, so
 //! the module is one `cfg` on its declaration.
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use std::sync::OnceLock;
 use std::time::Duration;
 

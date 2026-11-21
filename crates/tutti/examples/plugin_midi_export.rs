@@ -1,6 +1,6 @@
 //! Load a plugin, play a MIDI file, export to WAV.
 //!
-//! The plugin is loaded as a job and added to an offline session; the file's
+//! The plugin is loaded as a value the app runs and added to an offline session; the file's
 //! events become a clip on the plugin's event input; the project adopts the
 //! file's tempo map, and the bounce renders the file's beats (so their length
 //! is the map's, steps included), trims the latency the plan compensated, and
@@ -35,7 +35,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Timebase, Track};
-use tutti::session::{Master, PoolEvent};
+use tutti::session::Master;
 use tutti::{
     Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PeerState, Range, Root, SampleRate, Samples,
     Session, SessionEvent, Written,
@@ -51,9 +51,9 @@ fn report(events: Vec<SessionEvent>) {
     }
 }
 
-/// Probes `plugin` into a catalog, declares it as a pool entry (its state
-/// given to the entry, restored before the plugin is activated), updates until
-/// it lands, and adds its node.
+/// Probes `plugin` into a catalog, loads it on the main thread (its state
+/// given to the load, restored before the plugin is activated), and adds its
+/// node.
 fn load(
     s: &mut Session,
     main: tutti::plugin::MainThreadMarker,
@@ -82,27 +82,12 @@ fn load(
         .cloned()
         .ok_or("the scan could not read the plugin's id")?;
     let plugin = entry.plugin_ref();
-    let mut declared = s.plugin_entry("synth", &id, &catalog);
+    let mut load = s.load_plugin(&id, &catalog);
     if let Some(bytes) = state {
-        declared = declared.initial_state(PeerState::of_plugin(plugin, bytes))?;
+        load = load.initial_state(PeerState::of_plugin(plugin, bytes))?;
     }
-    s.pool(declared)?;
-    loop {
-        for event in s.update_on(main) {
-            match event {
-                SessionEvent::Pool {
-                    event: PoolEvent::Loaded,
-                    ..
-                } => return Ok(s.add_pooled_plugin(&"synth")?),
-                SessionEvent::Pool {
-                    event: PoolEvent::Failed(error),
-                    ..
-                } => return Err(error.into()),
-                _ => {}
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    let loaded = load.run(main)?;
+    Ok(s.add_plugin(loaded.node())?)
 }
 
 /// Plays `plugin` (restored from `state`, if any)
