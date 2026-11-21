@@ -82,7 +82,7 @@
 //!   stretched all-pass cascades in a loop with a delay and a low-pass), their parameters [`Ramp`]s in [`FreeverbRamps`],
 //!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
 //!   given gain; [`EarlyReflections`] (the model's [`Taps`] stage: a sparse multi-tap delay
-//!   per output channel); and the velvet-noise [`Decorrelator`] over a [`VelvetNoise`] sequence.
+//!   per output channel), whose taps a [`ShoeboxRoom`] makes by the image-source method; and the velvet-noise [`Decorrelator`] over a [`VelvetNoise`] sequence.
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
@@ -195,6 +195,7 @@ mod position;
 mod ramp;
 mod ring_mod;
 mod sample_convert;
+mod shoebox;
 mod stereo;
 mod tremolo;
 mod waveshape;
@@ -317,6 +318,7 @@ pub use reverb::spring::{
 };
 pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
+pub use shoebox::{ReflectionOrder, ShoeboxConfig, ShoeboxError, ShoeboxRoom, Wall};
 pub use smoother::smooth_toward;
 pub use sos::{
     Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, Cookbook,
