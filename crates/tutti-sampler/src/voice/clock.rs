@@ -68,7 +68,7 @@ use std::ops::Range;
 use tutti_graph::{Env, TransportPosition, declick_frames};
 use tutti_music::{FrameClock, LoopRange, first_frame_at_or_after};
 use tutti_tempo::TempoMap;
-use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
 
 /// How far from where the playhead would have been, in frames, a run may
 /// start and still continue it. Far below anything audible (a thousandth of
@@ -419,6 +419,21 @@ impl<'e> BlockClock<'e> {
             }
             _ => (to - from).get().max(0.0) * 60.0 / tempo.get(),
         }
+    }
+
+    /// The frames the playhead takes to go from beat `from` to beat `to` (none when `to`
+    /// is not after `from`), at `rate`: [`seconds`](Self::seconds) through the project's
+    /// tempo map, so the tempo changes between the two count, and the whole frames of it.
+    /// Without a map the playhead's `tempo` is taken to go on unchanged.
+    #[inline]
+    pub(crate) fn frames_between(
+        &self,
+        from: Beat,
+        to: Beat,
+        tempo: Bpm,
+        rate: SampleRate,
+    ) -> Samples {
+        Seconds::new(self.seconds(from, to, tempo)).to_samples_floor(rate)
     }
 
     /// The block's runs, in order, covering it.

@@ -473,13 +473,19 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
 }
 
 /// The frames from block frame `from` until the playhead reaches `start`, while the
-/// transport rolls (`None` when it does not, or `start` is not ahead): the first run's
-/// tempo carried on, a few blocks' extrapolation.
+/// transport rolls (`None` when it does not, or `start` is not ahead), counted through the
+/// project's tempo map ([`BlockClock::frames_between`]).
 fn frames_until(clock: &BlockClock<'_>, from: usize, start: Beat) -> Option<usize> {
     let run = clock.runs_in(from..from + 1).next()?;
-    let per_beat = run.frames_per_beat()?;
-    let beats = (start - run.beat_at(from.max(run.start))).get();
-    (beats > 0.0).then_some((beats * per_beat) as usize)
+    if !run.rolling() {
+        return None;
+    }
+    let beat = run.beat_at(from.max(run.start));
+    (start > beat).then(|| {
+        clock
+            .frames_between(beat, start, run.tempo(), run.sample_rate())
+            .get()
+    })
 }
 
 /// The beat and tempo of a stopped transport at block frame `from`, when it stands
