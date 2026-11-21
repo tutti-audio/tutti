@@ -6,7 +6,7 @@ use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     NoteExpressionIntValue, NoteExpressionValue, RtMidiEvents, group_of_port, push_sysex,
 };
-use tutti_ump::SysexStep;
+use tutti_ump::{GroupSpan, SysexStep};
 use tutti_vst3_ffi::{EventList, NOTE_EXPRESSION_ROOM, Staging};
 
 use super::{
@@ -60,7 +60,7 @@ impl Stager {
     /// the bus of its number ([`MidiEncoder::new`]). Allocates: off the audio
     /// thread.
     #[must_use]
-    pub fn new(buses: usize) -> Self {
+    pub fn new(buses: GroupSpan) -> Self {
         Self {
             encoder: MidiEncoder::new(buses),
         }

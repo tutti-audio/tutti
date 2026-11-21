@@ -194,9 +194,12 @@ impl ClapLoaded {
         // (`ClapProcessor::output_param_points_dropped`).
         reserve_output_queues(&mut scratch, &table, max_frames);
         // A UMP Group is an input note port: each port's own dialect.
-        scratch
+        if let Err(e) = scratch
             .input_events
-            .set_note_ports(&self.midi_note_ports(main));
+            .set_note_ports(&self.midi_note_ports(main))
+        {
+            return Err(refuse(self, ClapError::NotSupported(e.to_string())));
+        }
         // `clap_event_midi` only to a port that declares the MIDI dialect.
         scratch
             .input_events

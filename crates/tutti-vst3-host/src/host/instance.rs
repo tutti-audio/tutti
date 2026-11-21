@@ -18,6 +18,7 @@ use vst3::Steinberg::Vst::{SpeakerArr, SpeakerArrangement};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_plugin_types::{PointPool, RtMidiEvents};
+use tutti_ump::GroupSpan;
 use tutti_units::SampleRate;
 
 use crate::error::{LoadStage, Result, Vst3Error};
@@ -36,6 +37,16 @@ use super::processor::{AudioIO, InputStaging, OutputStaging, ProcessConfig};
 /// parameter count when that is larger. Growing past it allocates once and
 /// then sticks.
 const OUTPUT_PARAM_QUEUE_RESERVE: usize = 32;
+
+/// The UMP Groups a plugin with `buses` event input buses is addressed by:
+/// one for none (it is sent Group 0's events), and at most 16 (a bus past the
+/// 16th has no Group to name it).
+fn group_span(buses: i32) -> GroupSpan {
+    u8::try_from(buses.clamp(1, 16))
+        .ok()
+        .and_then(GroupSpan::new)
+        .unwrap_or(GroupSpan::of(1))
+}
 
 /// The arrangement to propose for a bus of `layout` channels, when the host has
 /// no topology for it.
@@ -206,15 +217,14 @@ impl<T: Vst3Sample> Staged<T> {
             input: InputStaging {
                 buses: in_scratch,
                 events: EventList::input(),
-                // A UMP Group is an event input bus: its number.
-                stager: Stager::new(
-                    usize::try_from(loaded.plugin.bus_count(
-                        main,
-                        MediaType::Event,
-                        BusDirection::Input,
-                    ))
-                    .unwrap_or(0),
-                ),
+                // A UMP Group is an event input bus: its number. A plugin
+                // with no event bus is sent Group 0's events, and buses past
+                // the 16th have no Group to name them.
+                stager: Stager::new(group_span(loaded.plugin.bus_count(
+                    main,
+                    MediaType::Event,
+                    BusDirection::Input,
+                ))),
                 param_changes: ParameterChangesImpl::with_queues(chunk_queues, floor, input_pool),
             },
             output: OutputStaging {
@@ -679,5 +689,22 @@ mod scratch_resolution_tests {
             staged.audio.config.num_output_channels,
             ChannelLayout::from(1u16)
         );
+    }
+}
+
+#[cfg(test)]
+mod group_span_tests {
+    use super::*;
+
+    /// **A plugin's event bus count is the Groups it is addressed by**: none is
+    /// the one Group 0's events go to, a count is itself, and a bus past the
+    /// 16th has no Group (M2-104 section 2.1.2).
+    #[test]
+    fn an_event_bus_count_is_the_groups_it_is_addressed_by() {
+        let spans: Vec<u8> = [-1, 0, 1, 2, 16, 17, i32::MAX]
+            .into_iter()
+            .map(|buses| group_span(buses).get())
+            .collect();
+        assert_eq!(spans, [1, 1, 1, 2, 16, 16, 16]);
     }
 }

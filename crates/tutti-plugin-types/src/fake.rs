@@ -27,8 +27,8 @@ use crate::{
     ChannelLayout, ContentScale, Control, Controller, EditReader, EditWriter, EditorError,
     EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, ParamEdit, ParamFlags,
     ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail,
-    Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
-    SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
+    Prepare, Processor, Rebuilt, Refused, RenderMode, RenderModeSupport, Request, RescanScope,
+    RestartRules, SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
 };
 use tutti_buffers::{Float, FloatWidth};
 use tutti_units::Normalized;
@@ -940,7 +940,7 @@ impl Loaded for FakeLoaded {
         })
     }
 
-    fn rebuild(self, _main: MainThreadMarker) -> Result<Self, Refused<Self>> {
+    fn rebuild(self, _main: MainThreadMarker) -> Result<Rebuilt<Self>, Refused<Self>> {
         self.shared.log.push(Call::Rebuild);
         assert!(
             !self.shared.panic_in_rebuild.load(Ordering::Relaxed),
@@ -952,7 +952,7 @@ impl Loaded for FakeLoaded {
                 reason: PluginError::Other("the fake cannot rebuild".into()),
             });
         }
-        Ok(self)
+        Ok(Rebuilt::restored(self))
     }
 }
 

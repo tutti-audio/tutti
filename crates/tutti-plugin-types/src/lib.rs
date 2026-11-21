@@ -293,7 +293,7 @@ pub use failure::{PluginFailure, TerminationReason};
 pub use format::{FourCc, PluginFormat, PluginId, PluginIdError, Uid, UnknownExtension};
 pub use guard::{contained_panics, ffi_guard};
 pub use host::{
-    Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps, process_block,
+    Control, Controller, Loaded, PluginIo, Processor, Rebuilt, Refused, Stuck, Wraps, process_block,
 };
 pub use hosting::{Describe, Editor, EditorWindow, InProcess, OutOfProcess, Reopen};
 pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKind};

@@ -889,6 +889,12 @@ impl InputRooms {
     }
 }
 
+/// A list of more input note ports than the 16 UMP Groups that name them
+/// ([`InputEventList::set_note_ports`]); the count listed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0} input note ports listed, at most 16 (one for each UMP Group)")]
+pub struct TooManyNotePorts(pub usize);
+
 /// Owned list of input events passed into `clap_plugin.process()`.
 ///
 /// The plugin reads it through the FFI crate's `clap_input_events`, built over
@@ -975,7 +981,7 @@ impl InputEventList {
             param_points_dropped: tally::<u64>().writer(),
             midi_dropped: 0,
             refused: 0,
-            notes: Self::per_note_state(1),
+            notes: Self::per_note_state(tutti_ump::GroupSpan::of(1)),
             midi1_translator: Midi1Translator::new(),
             ports: 1,
             midi_ports: 0,
@@ -988,12 +994,13 @@ impl InputEventList {
     /// The per-note state of `ports` note ports, each channel's bend
     /// sensitivity at the MPE default, ±48 (RP-053), until the stream sets
     /// another.
-    fn per_note_state(ports: usize) -> PerNoteState {
+    fn per_note_state(ports: tutti_ump::GroupSpan) -> PerNoteState {
         PerNoteState::new(ports, PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones())
     }
 
     /// Sets the plugin's input note ports, one entry each (at most 16, the
-    /// Groups of MIDI 2.0), `true` for a port that takes the MIDI dialect
+    /// Groups of MIDI 2.0; a longer list is refused with
+    /// [`TooManyNotePorts`] and nothing changes), `true` for a port that takes the MIDI dialect
     /// only: notes go out as `clap_event_midi`, a MIDI event's per-note
     /// expression is sent as its MIDI 1.0 bytes where it has them (poly
     /// pressure), and `add_note_expressions`
@@ -1010,18 +1017,23 @@ impl InputEventList {
     /// changes its note ports raises an I/O change
     /// ([`Request::IoChanged`](tutti_plugin_types::Request::IoChanged)), and
     /// is not heard differently until the lifecycle re-activates it.
-    pub fn set_note_ports(&mut self, midi: &[bool]) {
-        let ports = midi
-            .len()
-            .clamp(1, usize::from(tutti_ump::MidiGroup::COUNT));
-        self.ports = ports;
+    ///
+    /// # Errors
+    ///
+    /// [`TooManyNotePorts`] when `midi` lists more than 16 ports.
+    pub fn set_note_ports(&mut self, midi: &[bool]) -> Result<(), TooManyNotePorts> {
+        let span = u8::try_from(midi.len().max(1))
+            .ok()
+            .and_then(tutti_ump::GroupSpan::new)
+            .ok_or(TooManyNotePorts(midi.len()))?;
+        self.ports = usize::from(span.get());
         self.midi_ports = midi
             .iter()
-            .take(ports)
             .enumerate()
             .fold(0, |mask, (port, &midi)| mask | (u16::from(midi) << port));
-        self.notes = Self::per_note_state(ports);
+        self.notes = Self::per_note_state(span);
         self.midi1_translator.reset();
+        Ok(())
     }
 
     /// Sets which input note ports declare the MIDI dialect, one entry each
@@ -2705,7 +2717,7 @@ mod tests {
     fn an_unknown_packet_yields_no_clap_event() {
         for midi_notes in [false, true] {
             let mut list = InputEventList::new(InputRooms::new(8));
-            list.set_note_ports(&[midi_notes]);
+            list.set_note_ports(&[midi_notes]).unwrap();
             for words in [
                 [0x6000_0000u32, 0, 0, 0],
                 [0x7000_0000, 0, 0, 0],
@@ -2806,7 +2818,7 @@ mod tests {
         let packets: Vec<UmpAt> = table.iter().map(|(_, words)| packet(2, words)).collect();
         for midi_notes in [false, true] {
             let mut list = InputEventList::new(InputRooms::new(128));
-            list.set_note_ports(&[midi_notes]);
+            list.set_note_ports(&[midi_notes]).unwrap();
             list.add_midi_events(&packets);
             assert!(
                 list.len() >= 10,
@@ -2933,7 +2945,7 @@ mod tests {
     /// `(time, bytes)`.
     fn staged_midi(words: &[u32], midi_notes: bool) -> Vec<(u32, [u8; 3])> {
         let mut list = InputEventList::new(InputRooms::new(8));
-        list.set_note_ports(&[midi_notes]);
+        list.set_note_ports(&[midi_notes]).unwrap();
         list.add_midi(&packet(11, words));
         list.events()
             .iter()
@@ -3185,7 +3197,7 @@ mod tests {
     /// transport changes.
     fn reserved_list() -> InputEventList {
         let mut list = InputEventList::new(InputRooms::new(8).param_points(4).sources(3, 3, 2));
-        list.set_note_ports(&[false]);
+        list.set_note_ports(&[false]).unwrap();
         list
     }
 
@@ -3298,7 +3310,7 @@ mod tests {
     #[test]
     fn sysex_cannot_take_the_edit_room() {
         let mut list = InputEventList::new(InputRooms::new(3).sources(3, 0, 0));
-        list.set_note_ports(&[true]);
+        list.set_note_ports(&[true]).unwrap();
         for k in 0..5 {
             list.add_midi_events(&sysex_packets(&[1, 2, 3], k));
         }
@@ -3556,7 +3568,7 @@ mod tests {
     #[test]
     fn a_controller_is_not_sent_to_a_port_without_the_midi_dialect() {
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[false, false]);
+        list.set_note_ports(&[false, false]).unwrap();
         list.set_midi_capable_ports(&[false, true]);
 
         list.add_midi(&cc_message(0));
@@ -3584,7 +3596,7 @@ mod tests {
             (Offset::of(Samples::new(0), Samples::new(64)), ump)
         };
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[false, false]);
+        list.set_note_ports(&[false, false]).unwrap();
         list.set_midi_capable_ports(&[false, true]);
 
         list.add_midi(&sysex(1));
@@ -4354,7 +4366,7 @@ mod tests {
         let off = (at(0), midi::note_off(ch, 60, 0));
 
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]);
+        list.set_note_ports(&[true]).unwrap();
         list.add_midi(&on)
             .add_midi(&mid)
             .add_midi(&quiet)
@@ -4392,7 +4404,7 @@ mod tests {
             value: 0.5,
         }];
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]);
+        list.set_note_ports(&[true]).unwrap();
         list.add_note_expressions(&expr);
         assert!(list.events().is_empty());
     }
@@ -4405,7 +4417,7 @@ mod tests {
     fn midi_dialect_velocity_is_the_m2_115_shift() {
         let ch = MidiChannel::of(0);
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]);
+        list.set_note_ports(&[true]).unwrap();
         list.add_midi(&(at(0), midi::note_on(ch, 60, 0xE665)));
         list.add_midi(&(at(0), midi::note_off(ch, 60, 0xE665)));
         let sent: Vec<[u8; 3]> = list
@@ -4602,7 +4614,7 @@ mod tests {
         let event = midi1_event(&[0xA3, 60, 90]);
 
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.set_note_ports(&[true]);
+        list.set_note_ports(&[true]).unwrap();
         list.add_midi(&event);
         assert_eq!(list.events().len(), 1);
         let ClapEvent::Midi(m) = &list.events()[0] else {

@@ -431,10 +431,11 @@ pub trait Loaded: Control + Sized + Send {
     /// # Errors
     ///
     /// [`Refused`], holding the plugin if it survived, when the instance cannot
-    /// be rebuilt.
-    fn rebuild(self, main: MainThreadMarker) -> Result<Self, Refused<Self>> {
+    /// be rebuilt. A rebuilt plugin that refuses the state it was saved with is
+    /// not a refusal: it is [`Rebuilt::restored`].
+    fn rebuild(self, main: MainThreadMarker) -> Result<Rebuilt<Self>, Refused<Self>> {
         let _ = main;
-        Ok(self)
+        Ok(Rebuilt::restored(self))
     }
 }
 
@@ -959,6 +960,30 @@ impl<W: Wraps> EditorWindow for W {
 
     fn poll_editor_resize_request(&mut self, main: MainThreadMarker) -> Option<Size> {
         self.plugin_mut().poll_editor_resize_request(main)
+    }
+}
+
+/// A rebuilt instance ([`Loaded::rebuild`]) and whether it took the state the
+/// old one was saved with.
+#[derive(Debug)]
+pub struct Rebuilt<L> {
+    /// The new instance, loaded. When [`restored`](Self::restored) is an
+    /// error it holds its defaults.
+    pub plugin: L,
+    /// `Ok` when the new instance took the saved state, or the old one had
+    /// none to give; otherwise why the state was not restored: the old
+    /// instance would not save it, or the new one refused it.
+    pub restored: Result<(), PluginError>,
+}
+
+impl<L> Rebuilt<L> {
+    /// `plugin`, which needed no state restored.
+    #[must_use]
+    pub fn restored(plugin: L) -> Self {
+        Self {
+            plugin,
+            restored: Ok(()),
+        }
     }
 }
 

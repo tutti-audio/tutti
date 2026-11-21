@@ -617,6 +617,13 @@ pub enum PluginChange {
     /// answers the recall once per block, so the change completes while the
     /// bypass lasts.
     IoChanged,
+    /// The plugin was rebuilt in place and did not take the state it was saved
+    /// with: it is at its defaults. Reported for an in-process plugin; a
+    /// served plugin's server logs it.
+    StateNotRestored {
+        /// Why the state was not restored.
+        reason: String,
+    },
     /// The plugin's new ports were not made a node, and the node stays as it
     /// is: they are wider than a block serves, or the graph refused the swap
     /// ([`PortsRefusal`]). Reported once for the ports: they count as handled.
@@ -693,7 +700,8 @@ fn hear(handle: &PluginHandle) -> (Signals, Subscription) {
 
 /// What `notice` is as an event, if it is one: a latency the plugin reports
 /// is reported once, by the update that hands it to the graph; a rate refusal,
-/// a crash and a reload are the plugin's health.
+/// a crash and a reload are the plugin's health, and a reload that left the
+/// plugin at its defaults is [`PluginChange::StateNotRestored`].
 fn change_of(notice: PluginSignal) -> Option<PluginChange> {
     Some(match notice {
         PluginSignal::Param(ParamEdit::Begin(id)) => PluginChange::GestureBegan { id },
@@ -711,6 +719,9 @@ fn change_of(notice: PluginSignal) -> Option<PluginChange> {
             PluginChange::TailChanged { tail }
         }
         PluginSignal::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
+        PluginSignal::Invalidate(PluginInvalidation::StateNotRestored { reason }) => {
+            PluginChange::StateNotRestored { reason }
+        }
         PluginSignal::Invalidate(_) | _ => return None,
     })
 }

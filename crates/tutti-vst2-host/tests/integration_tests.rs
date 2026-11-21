@@ -18,7 +18,7 @@ use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
-use tutti_plugin_types::{ContentScale, Control, EditorWindow};
+use tutti_plugin_types::{ContentScale, Control, EditorWindow, ParamWriteError};
 use tutti_ump::MidiChannel;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -53,6 +53,7 @@ const PROBE_ENV_KEYS: &[&str] = &[
     "TUTTI_VST2_PROBE_EDITOR",
     "TUTTI_VST2_PROBE_IS_SYNTH",
     "TUTTI_VST2_PROBE_NO_CHUNKS",
+    "TUTTI_VST2_PROBE_NO_SET_PARAMETER",
     "TUTTI_VST2_PROBE_PARAMS",
     "TUTTI_VST2_PROBE_SERVICED_PARAMS",
     "TUTTI_VST2_PROBE_MIDI_INPUTS",
@@ -1201,6 +1202,38 @@ fn parameter_count_and_names() {
             param.id()
         );
     }
+}
+
+/// A plugin that leaves `AEffect::setParameter` null (VST 2.4 permits it) takes
+/// no host write, so each declared parameter is read-only to the host: both
+/// `parameter_writable` and `set_parameter` refuse it, and a plugin with a
+/// setter is unchanged.
+#[test]
+fn a_plugin_with_no_set_parameter_refuses_the_write() {
+    let _guard = lock_probe();
+    let mut bare = load_probe_with(&[("TUTTI_VST2_PROBE_NO_SET_PARAMETER", "1")]);
+    let id = pid(0);
+    assert_eq!(
+        Control::parameter_writable(bare.loaded(), main_thread(), id),
+        Err(ParamWriteError::ReadOnly(id))
+    );
+    assert_eq!(
+        Control::set_parameter(bare.loaded_mut(), main_thread(), id, Normalized::of(0.5)),
+        Err(ParamWriteError::ReadOnly(id))
+    );
+    // An id the plugin does not declare is still undeclared.
+    let past = pid(1_000);
+    assert_eq!(
+        Control::set_parameter(bare.loaded_mut(), main_thread(), past, Normalized::of(0.5)),
+        Err(ParamWriteError::Undeclared(past))
+    );
+    drop(bare);
+
+    let mut whole = load_probe();
+    assert_eq!(
+        Control::set_parameter(whole.loaded_mut(), main_thread(), id, Normalized::of(0.5)),
+        Ok(())
+    );
 }
 
 /// Spec: vst2.field.setParameter, vst2.field.getParameter

@@ -533,6 +533,11 @@ impl<L: ServerSide> Server<L> {
             Notice::Stuck { reason } => {
                 tracing::warn!("plugin would not stop: {reason}");
             }
+            Notice::StateNotRestored { reason } => {
+                // The wire has no "state not restored" message: the host was
+                // told the reload, and finds the plugin at its defaults.
+                tracing::warn!("plugin did not restore its state after a reload: {reason}");
+            }
             Notice::Lost { reason } => {
                 // The wire has no "lost" message, and the buses are not what
                 // changed: nothing is sent here. The loop ends the server on
