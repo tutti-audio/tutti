@@ -1,11 +1,9 @@
 //! [`watch_host`]: a task that runs a function when a named process ends, and
 //! [`watch_spawner`]: the same for the process that spawned this one.
 
-use std::future::poll_fn;
-use std::task::Poll;
 use std::time::Duration;
 
-use tutti_platform::{Executor, Task, Timer};
+use tutti_platform::{Executor, Task, Timer, yield_now};
 
 use super::Waited;
 use super::platform::Imp;
@@ -79,22 +77,6 @@ fn watch<W: FnMut(Duration) -> Waited + Send>(
         }
         on_gone();
     })
-}
-
-/// Returns to the executor once, so that a cancelled [`Task`] is seen between
-/// two waits.
-async fn yield_now() {
-    let mut yielded = false;
-    poll_fn(|cx| {
-        if yielded {
-            Poll::Ready(())
-        } else {
-            yielded = true;
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    })
-    .await;
 }
 
 /// The environment variable through which a host states its own PID to the
