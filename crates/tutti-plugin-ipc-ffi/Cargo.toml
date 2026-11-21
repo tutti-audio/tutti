@@ -24,6 +24,8 @@ serde = { version = "1", features = ["derive"] }
 getrandom = { workspace = true }
 # `Executor`: the host-watch task; `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+# The host watch yields to its drive between looks.
+futures-lite.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 # `poll`, `kill(pid, 0)`, the slab's memfd and seals, and the descriptor's

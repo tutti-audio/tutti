@@ -40,6 +40,8 @@ bytemuck = { version = "1.16", features = ["derive"] }
 thiserror = { workspace = true, features = ["std"] }
 # `Instant`, the clock the waits and `BlockWaits` read (the web's `performance.now()` there).
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+# The bells' tick yields to its drive between passes.
+futures-lite.workspace = true
 # `tracing::warn!` when the bells' tick task does not end at the drop.
 tracing.workspace = true
 # `Sample`, the formats `PosRing` is generic over, and `ChannelLayout`, the width it is written in.

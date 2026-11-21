@@ -150,8 +150,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             graph: &mut self.graph,
             state: &mut self.midi.state,
             nodes: self.midi.nodes.as_ref(),
-            #[cfg(feature = "midi-hardware")]
-            jobs: &mut self.jobs,
             settings: self.transport.settings(),
             meter: self.transport.settings().project_meter().clone(),
             #[cfg(feature = "midi-hardware")]

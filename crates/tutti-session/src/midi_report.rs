@@ -37,7 +37,7 @@ pub enum MidiReport {
     /// session is the Initiator with every peer that declares Profile
     /// Configuration, and reports each change once, from `Phase::Poll`. The
     /// Profiles now are the input's
-    /// [`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles), and a change
+    /// [`ListedPeer::profiles`](crate::ListedPeer::profiles), and a change
     /// is also a [`ResourceChanged`](crate::SessionEvent::ResourceChanged) of its
     /// input.
     #[cfg(feature = "midi-hardware")]
@@ -54,7 +54,7 @@ pub enum MidiReport {
     /// peer that declares Process Inquiry, and reports each change once, from
     /// `Phase::Poll`. The peers that can be asked for a MIDI Message Report are the
     /// input's
-    /// [`MidiInputInfo::report_peers`](crate::MidiInputInfo::report_peers).
+    /// [`ListedPeer::report`](crate::ListedPeer::report).
     #[cfg(feature = "midi-hardware")]
     CiProcess {
         /// The device.

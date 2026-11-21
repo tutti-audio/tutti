@@ -1214,8 +1214,6 @@ pub struct Midi<'a, F: Float = f32> {
     pub(crate) graph: &'a mut Graph<F>,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) jobs: &'a mut crate::jobs::Jobs,
     /// The transport's settings (the tempo map a follower overlays).
     pub(crate) settings: &'a tutti_timeline::TransportSettings,
     /// The project meter a follower overlays.

@@ -12,7 +12,6 @@ use std::future::Future;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
-use std::task::Poll;
 use std::time::Duration;
 
 use crate::Instant;
@@ -79,25 +78,6 @@ pub fn is_driving() -> bool {
 /// As [`join`]: on a thread that drives an executor.
 pub fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>, Task<T>> {
     os::join_within(task, bound)
-}
-
-/// Returns to the executor once, waking itself first so it is polled again.
-///
-/// A future that runs slices of blocking work awaits it between them: its executor can
-/// drive other tasks and see a cancelled [`Task`] there, and a caller-driven executor
-/// gets its thread back instead of being held by a loop still busy.
-pub async fn yield_now() {
-    let mut yielded = false;
-    std::future::poll_fn(|cx| {
-        if yielded {
-            Poll::Ready(())
-        } else {
-            yielded = true;
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    })
-    .await;
 }
 
 /// Threads that drive an [`Executor`]'s queue, started by `Executor::spawn_threads` on a
