@@ -485,6 +485,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let runtime = Self::session_executor()?;
+        let timer = tutti_engine::TimerDriver::new(&runtime.0);
         let mut parts = self.parts(runtime, rate, max_block, Some(max_block), root)?;
         let engine = parts.graph.engine(
             &parts.transport,
@@ -503,7 +504,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             Arc::new(tutti_engine::AudioCallbackState::new(engine)),
         );
         let latency = host.stream().latency();
-        host.start_with(tutti_engine::TimerDriver::new())?;
+        host.start_with(timer)?;
         let mut session = self.session(
             parts,
             crate::clock::SystemEngine {

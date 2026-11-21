@@ -18,9 +18,11 @@ thiserror = { workspace = true, features = ["std"] }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-# `monotonic_ns`, `sleep_until_ns`, `spawn_named` (the deviceless clock's thread), `request_priority`, `with_no_denormals`: the clock, the pacing threads and their priority.
+# `monotonic_ns`, `sleep_until_ns`, `Executor` (the deviceless clock's dedicated task), `request_priority`, `with_no_denormals`: the clock, the pacing threads and their priority.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+# The control-side warning when a stopped timer loop is left to end on its own.
+tracing = { workspace = true }
 bytemuck = { version = "1.16", features = ["derive", "min_const_generics"] }
 # `Engine` renders a `tutti_graph::Executor`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }

@@ -1,8 +1,9 @@
-//! [`TimerDriver`]: a [`StreamDriver`] whose clock is a thread of its own that
-//! sleeps to absolute deadlines, for an app with MIDI and no sound card.
+//! [`TimerDriver`]: a [`StreamDriver`] whose clock is a dedicated task of the
+//! session's executor that sleeps to absolute deadlines, for an app with MIDI and
+//! no sound card.
 //!
 //! `Pacer` is the schedule as a pure function of the time it is told, and
-//! `run` is the thread's loop: the pacer over a `Timebase`, the OS clock in the
+//! `run` is the task's loop: the pacer over a `Timebase`, the OS clock in the
 //! driver and a scripted one under test.
 
 mod pacer;
@@ -13,7 +14,8 @@ use std::time::Duration;
 use tutti_buffers::Float;
 use tutti_buffers::MaxBlock;
 use tutti_platform::{
-    PriorityRequest, StopToken, ThreadHandle, monotonic_ns, sleep_until_ns, spawn_named,
+    Executor, PriorityRequest, StopToken, Task, is_driving, join_within, monotonic_ns,
+    sleep_until_ns,
 };
 use tutti_units::Samples;
 
@@ -28,7 +30,8 @@ use pacer::{Due, Pacer};
 /// [`quantum`](OutputSpec::quantum): 256 frames, 5.3 ms at 48 kHz.
 pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples::new(256));
 
-/// Runs an output stream on a thread that sleeps to each block's deadline,
+/// Runs an output stream on a dedicated thread of an [`Executor`] that sleeps to
+/// each block's deadline,
 /// with no device: the graph renders through the same [`OutputBlock`] a sound
 /// card's callback does, into a scratch buffer nobody plays, and
 /// [`StreamLatency`](crate::StreamLatency) reads `Some(0)`.
@@ -51,42 +54,71 @@ pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples::new(256));
 ///
 /// The block is the stream's [`quantum`](OutputSpec::quantum), or
 /// [`DEFAULT_BLOCK`] when the spec has none. The thread asks the OS for its
-/// highest ordinary priority ([`tutti_platform::spawn_named`]); a refusal leaves
+/// highest ordinary priority ([`Executor::spawn_dedicated_local`]); a refusal leaves
 /// it at the default.
 ///
 /// Pass it to [`OutputStream::start_with`](crate::OutputStream::start_with) or
 /// [`StreamHost::start_with`](crate::StreamHost::start_with); dropping the
-/// stream (or [`stop`](crate::OutputStream::stop)) joins the thread, so no block
-/// renders after the stop returns.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TimerDriver;
+/// stream (or [`stop`](crate::OutputStream::stop)) waits for the loop to end, so
+/// no block renders after the stop returns.
+#[derive(Debug, Clone)]
+pub struct TimerDriver {
+    executor: Executor,
+}
 
 impl TimerDriver {
-    /// A driver that renders [`DEFAULT_BLOCK`] frames per block when the spec
-    /// fixes none.
+    /// A driver whose clock runs on a dedicated thread of `executor`, rendering
+    /// [`DEFAULT_BLOCK`] frames per block when the spec fixes none.
     #[must_use]
-    pub fn new() -> Self {
-        Self
+    pub fn new(executor: &Executor) -> Self {
+        Self {
+            executor: executor.clone(),
+        }
     }
 }
+
+/// The longest a stop waits for the loop to end. The loop reads its stop once per
+/// block, so it ends within one block's sleep and render; this bound guards only a
+/// render that hangs.
+const STOP_PATIENCE: Duration = Duration::from_secs(10);
 
 /// Why a [`TimerDriver`] did not start.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TimerError {
-    /// The OS refused the timer thread.
+    /// The OS refused the timer thread, or the target has no threads (the web).
     #[error("the timer thread could not start: {0}")]
     Thread(#[from] std::io::Error),
 }
 
-/// The handle of a started [`TimerDriver`] stream. Dropping it stops the
-/// thread and waits for it.
+/// The handle of a started [`TimerDriver`] stream. Dropping it stops the loop
+/// and waits for it to end.
 ///
-/// A panic of the loop itself (the render's are caught in the block) is caught
-/// on the thread and ends the stream silently: the drop's join discards it.
+/// A panic of the loop itself (the render's are caught in the block) ends the
+/// stream silently: the drop's join discards it. A drop on a thread that drives
+/// an executor does not wait: it stops the loop and detaches, with a warning.
 #[derive(Debug)]
 pub struct TimerRunning {
-    _thread: ThreadHandle<()>,
+    stop: StopToken,
+    task: Option<Task<()>>,
+}
+
+impl Drop for TimerRunning {
+    fn drop(&mut self) {
+        self.stop.stop();
+        let Some(task) = self.task.take() else {
+            return;
+        };
+        if is_driving() {
+            tracing::warn!(
+                "a timer stream is dropped on an executor's thread; leaving it to stop there"
+            );
+            task.detach();
+        } else if let Err(task) = join_within(task, STOP_PATIENCE) {
+            tracing::warn!("the timer loop did not stop in time; leaving it");
+            task.detach();
+        }
+    }
 }
 
 impl RunningStream for TimerRunning {
@@ -109,28 +141,35 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
         let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples::new(frames))];
-        // A refusal of the priority leaves the thread at the default.
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "the deviceless audio clock: it paces and renders blocks against OS \
-                      deadlines, so it is no executor's task"
-        )]
-        let thread = spawn_named("tutti-timer", Some(PriorityRequest::Highest), move |stop| {
-            let time = OsTime;
-            // The first block is due now and plays one block from now.
-            let mut pacer = Pacer::new(time.now_ns(), frames, rate);
-            run(
-                &time,
-                &mut pacer,
-                stop,
-                |os_ns| {
-                    block.render_at(&mut scratch, os_ns, Some(Duration::ZERO));
-                    faults.delivered();
-                },
-                || faults.record_overrun("the timer fell behind and began its schedule again"),
-            );
-        })?;
-        Ok(TimerRunning { _thread: thread })
+        let stop = StopToken::new();
+        let token = stop.clone();
+        // The loop owns its dedicated thread and sleeps on the OS clock's absolute
+        // deadlines, never on the executor's timers, so it needs a thread of its own:
+        // the web, which has none, refuses it here. A refusal of the priority leaves
+        // the thread at the default.
+        let task = self.executor.spawn_dedicated_local(
+            "tutti-timer",
+            Some(PriorityRequest::Highest),
+            move || async move {
+                let time = OsTime;
+                // The first block is due now and plays one block from now.
+                let mut pacer = Pacer::new(time.now_ns(), frames, rate);
+                run(
+                    &time,
+                    &mut pacer,
+                    &token,
+                    |os_ns| {
+                        block.render_at(&mut scratch, os_ns, Some(Duration::ZERO));
+                        faults.delivered();
+                    },
+                    || faults.record_overrun("the timer fell behind and began its schedule again"),
+                );
+            },
+        )?;
+        Ok(TimerRunning {
+            stop,
+            task: Some(task),
+        })
     }
 }
 
@@ -147,7 +186,7 @@ impl Timebase for OsTime {
     }
 }
 
-/// The timer thread's loop: `pacer` over `time`, until `stop`.
+/// The timer task's loop: `pacer` over `time`, until `stop`.
 ///
 /// `render` is called once per block with the block's deadline, in order and
 /// with none skipped between two calls of `overran`; `overran` is called once
