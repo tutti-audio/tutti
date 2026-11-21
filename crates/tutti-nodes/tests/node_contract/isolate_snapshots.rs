@@ -38,7 +38,8 @@ use tutti_nodes::{
 };
 use tutti_nodes::{
     GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
-    StereoWidthConfig, StereoWidthNode, TiltFilterConfig, TiltFilterNode,
+    SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
+    TiltFilterNode,
 };
 use tutti_units::{
     Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples,
@@ -597,6 +598,25 @@ fn plate_reverb() {
         assert!(p.param_set().set(UnitParam::Depth, 1.0))
     })
     .control("diffusion", |p| {
+        assert!(p.param_set().set(UnitParam::Diffusion, 0.2))
+    })
+    .check();
+}
+
+#[test]
+fn spring_reverb() {
+    IsolateRow::new("SpringReverbNode", || {
+        SpringReverbNode::<f32>::from(
+            SpringReverbConfig::new(ChannelLayout::STEREO).decay(Seconds::new(1.0)),
+        )
+    })
+    .control("decay", |p| {
+        assert!(p.param_set().set(UnitParam::Decay, 4.0))
+    })
+    .control("tone", |p| {
+        assert!(p.param_set().set(UnitParam::Cutoff, 500.0))
+    })
+    .control("dispersion", |p| {
         assert!(p.param_set().set(UnitParam::Diffusion, 0.2))
     })
     .check();

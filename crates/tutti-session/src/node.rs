@@ -273,6 +273,7 @@ param_session_node!(
     FreeverbNode,
     FdnNode,
     PlateReverbNode,
+    SpringReverbNode,
     ConvolverNode,
     NoiseNode,
 );

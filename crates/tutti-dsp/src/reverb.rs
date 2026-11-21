@@ -15,6 +15,7 @@ pub(crate) mod fdn;
 pub(crate) mod freeverb;
 pub(crate) mod network;
 pub(crate) mod plate;
+pub(crate) mod spring;
 
 use tutti_units::{SampleRate, Seconds, Tail};
 

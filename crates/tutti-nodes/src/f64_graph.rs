@@ -15,8 +15,9 @@ use crate::{
     GateConfig, GateControls, GateNode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
     LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig,
     PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
-    StereoWidthConfig, StereoWidthNode, SvfFilterConfig, SvfFilterNode, TiltFilterConfig,
-    TiltFilterNode, TransientShaperConfig, TransientShaperNode, TremoloConfig, TremoloNode,
+    SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, SvfFilterConfig,
+    SvfFilterNode, TiltFilterConfig, TiltFilterNode, TransientShaperConfig, TransientShaperNode,
+    TremoloConfig, TremoloNode,
 };
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{
@@ -367,6 +368,12 @@ fn the_linear_nodes_satisfy_superposition() {
     );
     assert_linear(
         || PlateReverbNode::<f64>::from(PlateReverbConfig::new()),
+        SampleRate::SR_44K1,
+        1,
+        6_000,
+    );
+    assert_linear(
+        || SpringReverbNode::<f64>::from(SpringReverbConfig::new(1u16)),
         SampleRate::SR_44K1,
         1,
         6_000,
