@@ -8,17 +8,11 @@
 
 use crate::{
     AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass, ParameterInfo,
-    PluginFailure, PresetError, PresetId, RenderMode, SampleRate, StateError, StateUse,
-    TerminationReason, UnknownParam, bypass_value, is_bypassed,
+    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, UnknownParam,
+    bypass_value, is_bypassed,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-
-/// The answer to a request sent to a plugin server, which the IPC reader thread
-/// of the bridge fills when the server's reply lands. A sender dropped
-/// unanswered (the bridge ended or the server died) resolves as
-/// [`Canceled`](futures_channel::oneshot::Canceled).
-pub type Answer<T> = futures_channel::oneshot::Receiver<T>;
 
 /// What a loaded plugin answers from any thread, without a main-thread token.
 ///
@@ -119,39 +113,6 @@ pub trait AnyThread: Send + Sync {
     /// or ([`StateError::Unavailable`]) the plugin was not asked because the
     /// main thread did not answer in time.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError>;
-
-    /// [`save_state`](Self::save_state) as an [`Answer`] a served plugin's
-    /// bridge fills when the server replies, with no wait on the calling thread:
-    /// the request is queued and the call returns. `None` for a plugin with no
-    /// served route (an in-process plugin, whose state is read on the main
-    /// thread).
-    ///
-    /// The request is a state save of the plugin: it is asked once and the
-    /// plugin's own deadline ([`StateError::Stalled`]) ends it; a dropped
-    /// `Answer` discards the state.
-    fn save_state_answer(
-        &self,
-        state_use: StateUse,
-    ) -> Option<Answer<Result<Vec<u8>, StateError>>> {
-        let _ = state_use;
-        None
-    }
-
-    /// Restores `data` (a [`StateUse::Project`] state) as an [`Answer`], as
-    /// [`save_state_answer`](Self::save_state_answer) does for a save. A
-    /// dropped `Answer` does not undo the request: the server may still apply
-    /// the state.
-    fn load_state_answer(&self, data: &[u8]) -> Option<Answer<Result<(), StateError>>> {
-        let _ = data;
-        None
-    }
-
-    /// Loads the preset `id` as an [`Answer`], as
-    /// [`load_state_answer`](Self::load_state_answer) does for a state.
-    fn load_preset_answer(&self, id: &PresetId) -> Option<Answer<Result<(), PresetError>>> {
-        let _ = id;
-        None
-    }
 
     /// Tells the plugin whether it is rendering offline, and returns whether it
     /// *accepted* the mode (`false` is a refusal or an unavailable plugin, not

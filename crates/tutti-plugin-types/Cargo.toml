@@ -36,8 +36,6 @@ contract = []
 testing = []
 
 [dependencies]
-# `Answer`: the receiver of a oneshot an out-of-process plugin's reply is sent into.
-futures-channel = { workspace = true }
 # The capped per-block containers (`MidiEventVec`, the harmony changes): a
 # fixed run of slots that cannot grow, so the cap is the type's.
 arrayvec = "0.7"

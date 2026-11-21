@@ -7,7 +7,7 @@
 //! one-shot semantics are enforced by the type system, not by hoping
 //! responses come back in the order requests went out.
 //!
-//! A reply is answered into a blocking [`Ask`] or into an [`Answer`] (a
+//! A reply is answered into a blocking [`Ask`] or into an [`oneshot::Receiver`] (a
 //! `futures_channel` oneshot) a caller awaits: the lane's thread that sends the
 //! reply wakes the awaiting task, and a reply dropped unanswered resolves it as
 //! canceled.
@@ -16,7 +16,6 @@ use futures_channel::oneshot;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
-use tutti_plugin_types::Answer;
 use tutti_rt::LockExt;
 
 /// Whether a control request is owed a reply: at most one is, and a caller who
@@ -112,11 +111,11 @@ pub(super) fn ask<T>() -> (Ask<T>, Reply<T>) {
     )
 }
 
-/// Make a paired reply and the [`Answer`] a future awaits: the thread that
+/// Make a paired reply and the [`oneshot::Receiver`] a future awaits: the thread that
 /// sends the reply fills it. It holds no slot ([`ControlSlot`]): the request
 /// queues behind an owed one and the lane's deadline bounds each in turn, with
 /// no caller waiting for either.
-pub(super) fn awaited<T>() -> (Answer<T>, Reply<T>) {
+pub(super) fn awaited<T>() -> (oneshot::Receiver<T>, Reply<T>) {
     let (tx, rx) = oneshot::channel();
     (
         rx,

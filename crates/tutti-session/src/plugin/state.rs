@@ -14,22 +14,24 @@
 //! A save is pure data ([`PeerState`]). A restore ends as a [`RestoredState`],
 //! which [`Session::apply`] takes back: it queues the read of the plugin's
 //! parameters, and refuses by name when the node it was cut from is gone or
-//! now hosts another plugin instance. An editor-only in-process instance of an
-//! out-of-process plugin (an Audio Unit's) is not told the restored state by the
-//! awaited restore.
+//! now hosts another plugin instance. For an out-of-process plugin it also has
+//! the plugin's editor-only in-process instance (an Audio Unit's) load the state,
+//! on the main thread at the session's next update.
 
 use core::marker::PhantomData;
 use std::fmt;
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 
 use tutti_graph::NodeKey;
+use tutti_plugin::PluginAnswers;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRef, StateError, StateUse};
 
 use super::awaiting::Stage;
-use super::{AnyPlugin, Gate, Placement};
+use super::{AnyPlugin, Gate};
 use crate::SessionFloat;
 use crate::apply::{Cut, Sealed};
 use crate::{AppKey, Clock, Key, NoSuchNode, OtherPeer, PeerState, SavedPeer, Session};
@@ -132,7 +134,7 @@ impl SaveStateInProcess {
 #[must_use = "work does nothing until it is awaited"]
 pub struct SaveStateOutOfProcess {
     gate: Gate,
-    handle: PluginHandle,
+    answers: PluginAnswers,
     plugin: PluginRef,
     state_use: StateUse,
 }
@@ -153,12 +155,12 @@ impl IntoFuture for SaveStateOutOfProcess {
     fn into_future(self) -> SavingStateOutOfProcess {
         let Self {
             gate,
-            handle,
+            answers,
             plugin,
             state_use,
         } = self;
         SavingStateOutOfProcess {
-            stage: Stage::Unstarted((gate, handle, state_use)),
+            stage: Stage::Unstarted((gate, answers, state_use)),
             plugin,
         }
     }
@@ -191,7 +193,7 @@ impl IntoFuture for SaveStateOutOfProcess {
 /// When polled after it resolved.
 #[must_use = "a save does nothing unless it is awaited"]
 pub struct SavingStateOutOfProcess {
-    stage: Stage<(Gate, PluginHandle, StateUse), Vec<u8>, StateError>,
+    stage: Stage<(Gate, PluginAnswers, StateUse), Vec<u8>, StateError>,
     plugin: PluginRef,
 }
 
@@ -211,13 +213,11 @@ impl Future for SavingStateOutOfProcess {
         this.stage
             .poll(
                 cx,
-                |(gate, handle, state_use)| {
+                |(gate, answers, state_use)| {
                     if gate.is_ended() {
                         return Err(StateError::Lost);
                     }
-                    handle
-                        .save_state_answer(state_use)
-                        .ok_or(StateError::NoStateRoute)
+                    Ok(answers.save_state(state_use))
                 },
                 StateError::PluginCrashed,
             )
@@ -299,7 +299,7 @@ impl RestoreStateInProcess {
 #[must_use = "work does nothing until it is awaited"]
 pub struct RestoreStateOutOfProcess {
     landed: Landed,
-    handle: PluginHandle,
+    answers: PluginAnswers,
     state: PeerState,
 }
 
@@ -317,12 +317,19 @@ impl IntoFuture for RestoreStateOutOfProcess {
 
     fn into_future(self) -> RestoringStateOutOfProcess {
         let Self {
-            landed,
-            handle,
+            mut landed,
+            answers,
             state,
         } = self;
+        // What `Session::apply` has the editor-only instance load, once the
+        // server took the state.
+        let state = Arc::new(state);
+        landed.mirror = Some(Mirror {
+            answers: answers.clone(),
+            state: Arc::clone(&state),
+        });
         RestoringStateOutOfProcess {
-            stage: Stage::Unstarted((handle, state)),
+            stage: Stage::Unstarted((answers, state)),
             landed: Some(landed),
         }
     }
@@ -357,7 +364,7 @@ impl IntoFuture for RestoreStateOutOfProcess {
 /// When polled after it resolved.
 #[must_use = "a restore does nothing unless it is awaited"]
 pub struct RestoringStateOutOfProcess {
-    stage: Stage<(PluginHandle, PeerState), (), StateError>,
+    stage: Stage<(PluginAnswers, Arc<PeerState>), (), StateError>,
     landed: Option<Landed>,
 }
 
@@ -377,15 +384,13 @@ impl Future for RestoringStateOutOfProcess {
         this.stage
             .poll(
                 cx,
-                |(handle, state)| {
+                |(answers, state)| {
                     // Checked when the request is made, so a plugin the node left
                     // is never asked.
                     if landed.as_ref().is_some_and(|l| l.gate.is_ended()) {
                         return Err(StateError::Lost);
                     }
-                    handle
-                        .load_state_answer(state.bytes())
-                        .ok_or(StateError::NoStateRoute)
+                    Ok(answers.load_state(state.bytes()))
                 },
                 StateError::PluginCrashed,
             )
@@ -400,6 +405,17 @@ pub(super) struct Landed {
     pub(super) cut: Cut,
     node: Key<AnyPlugin>,
     pub(super) gate: Gate,
+    /// The state an awaited restore sent, for the plugin's in-process editor
+    /// instance ([`Mirror`]).
+    mirror: Option<Mirror>,
+}
+
+/// A restored state the plugin's editor-only in-process instance (an Audio
+/// Unit's) has yet to load: it shows what the server took.
+#[derive(Debug)]
+struct Mirror {
+    answers: PluginAnswers,
+    state: Arc<PeerState>,
 }
 
 impl Landed {
@@ -412,6 +428,7 @@ impl Landed {
             cut: Cut::of(session),
             node,
             gate,
+            mirror: None,
         }
     }
 
@@ -430,6 +447,13 @@ impl Landed {
             return Err(PluginApplyError::Stale);
         }
         hosted.refresh_values();
+        // Loaded on the main thread, where the instance is called from: the
+        // session's own collector runs it at its next update.
+        if let Some(Mirror { answers, state }) = self.mirror {
+            session.plugins.work.defer(move |main| {
+                answers.mirror_state(main, state.bytes());
+            });
+        }
         Ok(())
     }
 }
@@ -479,22 +503,18 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         state_use: StateUse,
     ) -> Result<SaveState, NoSuchNode> {
         let hosted = self.hosted_at(node)?;
-        let (gate, handle, plugin) = (
-            hosted.gate.clone(),
-            hosted.handle.clone(),
-            hosted.plugin.clone(),
-        );
-        Ok(match hosted.placement {
-            Placement::InProcess => SaveState::InProcess(SaveStateInProcess {
+        let (gate, plugin) = (hosted.gate.clone(), hosted.plugin.clone());
+        Ok(match &hosted.answers {
+            None => SaveState::InProcess(SaveStateInProcess {
                 gate,
-                handle,
+                handle: hosted.handle.clone(),
                 plugin,
                 state_use,
                 main_thread: PhantomData,
             }),
-            Placement::Served => SaveState::OutOfProcess(SaveStateOutOfProcess {
+            Some(answers) => SaveState::OutOfProcess(SaveStateOutOfProcess {
                 gate,
-                handle,
+                answers: answers.clone(),
                 plugin,
                 state_use,
             }),
@@ -521,17 +541,16 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
             .check_for(&SavedPeer::Plugin(hosted.plugin.clone()))
             .map_err(StateStartError::OtherPeer)?;
         let landed = Landed::of(self, *node, hosted.gate.clone());
-        let handle = hosted.handle.clone();
-        Ok(match hosted.placement {
-            Placement::InProcess => RestoreState::InProcess(RestoreStateInProcess {
+        Ok(match &hosted.answers {
+            None => RestoreState::InProcess(RestoreStateInProcess {
                 landed,
-                handle,
+                handle: hosted.handle.clone(),
                 state,
                 main_thread: PhantomData,
             }),
-            Placement::Served => RestoreState::OutOfProcess(RestoreStateOutOfProcess {
+            Some(answers) => RestoreState::OutOfProcess(RestoreStateOutOfProcess {
                 landed,
-                handle,
+                answers: answers.clone(),
                 state,
             }),
         })

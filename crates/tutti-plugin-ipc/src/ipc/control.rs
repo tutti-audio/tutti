@@ -8,12 +8,12 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    Answer, AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
+    AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
     Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
     LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor, PluginError,
-    PluginFailure, PluginResult, Preset, PresetError, PresetId, ProcessWake, RenderMode,
-    RenderModeSupport, Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo,
-    UnknownParam, WindowHandle, bypass_value,
+    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
+    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, UnknownParam,
+    WindowHandle, bypass_value,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
@@ -106,30 +106,6 @@ macro_rules! served_control {
 
             fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
                 self.link.bridge.audio().save_state(state_use)
-            }
-
-            /// Filled by the bridge's control lane thread, which also owns the
-            /// deadline ([`AudioBridge::save_state_answer`]).
-            ///
-            /// [`AudioBridge::save_state_answer`]: crate::AudioBridge
-            fn save_state_answer(
-                &self,
-                state_use: StateUse,
-            ) -> Option<Answer<Result<Vec<u8>, StateError>>> {
-                Some(self.link.bridge.audio().save_state_answer(state_use))
-            }
-
-            fn load_state_answer(&self, data: &[u8]) -> Option<Answer<Result<(), StateError>>> {
-                Some(
-                    self.link
-                        .bridge
-                        .audio()
-                        .load_state_answer(data, StateUse::Project),
-                )
-            }
-
-            fn load_preset_answer(&self, id: &PresetId) -> Option<Answer<Result<(), PresetError>>> {
-                Some(self.link.bridge.audio().load_preset_answer(id.clone()))
             }
 
             /// Queued on the command bus as the blocks around it are, so the

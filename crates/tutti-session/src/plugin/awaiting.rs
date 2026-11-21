@@ -5,7 +5,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use tutti_plugin_types::Answer;
+use tutti_plugin::Answer;
 
 /// Where an awaited request is: not queued yet (`P` is what queues it), queued
 /// (the answer's receiver), or resolved.

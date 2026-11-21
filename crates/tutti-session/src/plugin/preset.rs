@@ -15,12 +15,13 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context as TaskContext, Poll};
 
+use tutti_plugin::PluginAnswers;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetError, PresetId, PresetSupport};
 
 use super::awaiting::Stage;
 use super::state::{Landed, PluginApplyError};
-use super::{AnyPlugin, HostedPlugin, Placement};
+use super::{AnyPlugin, HostedPlugin};
 use crate::SessionFloat;
 use crate::apply::{Cut, Sealed};
 use crate::{AppKey, Clock, Key, ListedPreset, NoSuchNode, Session};
@@ -119,6 +120,7 @@ impl LoadPresetInProcess {
 #[must_use = "work does nothing until it is awaited"]
 pub struct LoadPresetOutOfProcess {
     landed: Landed,
+    answers: PluginAnswers,
     handle: PluginHandle,
     id: PresetId,
     needs: Option<PresetSupport>,
@@ -139,12 +141,13 @@ impl IntoFuture for LoadPresetOutOfProcess {
     fn into_future(self) -> LoadingPresetOutOfProcess {
         let Self {
             landed,
+            answers,
             handle,
             id,
             needs,
         } = self;
         LoadingPresetOutOfProcess {
-            stage: Stage::Unstarted((handle, id, needs)),
+            stage: Stage::Unstarted((answers, handle, id, needs)),
             landed: Some(landed),
         }
     }
@@ -181,7 +184,7 @@ impl IntoFuture for LoadPresetOutOfProcess {
 /// When polled after it resolved.
 #[must_use = "a load does nothing unless it is awaited"]
 pub struct LoadingPresetOutOfProcess {
-    stage: Stage<(PluginHandle, PresetId, Option<PresetSupport>), (), PresetError>,
+    stage: Stage<(PluginAnswers, PluginHandle, PresetId, Option<PresetSupport>), (), PresetError>,
     landed: Option<Landed>,
 }
 
@@ -201,16 +204,14 @@ impl Future for LoadingPresetOutOfProcess {
         this.stage
             .poll(
                 cx,
-                |(handle, id, needs)| {
+                |(answers, handle, id, needs)| {
                     if landed.as_ref().is_some_and(|l| l.gate.is_ended()) {
                         return Err(PresetError::Lost);
                     }
                     if needs.is_some_and(|needs| needs != handle.preset_support()) {
                         return Err(PresetError::Unsupported);
                     }
-                    handle
-                        .load_preset_answer(&id)
-                        .ok_or(PresetError::Unsupported)
+                    Ok(answers.load_preset(&id))
                 },
                 PresetError::Lost,
             )
@@ -321,16 +322,17 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     ) -> LoadPreset {
         let landed = Landed::of(self, *node, hosted.gate.clone());
         let handle = hosted.handle.clone();
-        match hosted.placement {
-            Placement::InProcess => LoadPreset::InProcess(LoadPresetInProcess {
+        match &hosted.answers {
+            None => LoadPreset::InProcess(LoadPresetInProcess {
                 landed,
                 handle,
                 id,
                 needs,
                 main_thread: PhantomData,
             }),
-            Placement::Served => LoadPreset::OutOfProcess(LoadPresetOutOfProcess {
+            Some(answers) => LoadPreset::OutOfProcess(LoadPresetOutOfProcess {
                 landed,
+                answers: answers.clone(),
                 handle,
                 id,
                 needs,

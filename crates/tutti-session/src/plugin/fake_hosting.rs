@@ -53,10 +53,10 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     let node = node.into();
     let (controls, _) =
         PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
-    let previous = session
-        .graph
-        .plugins
-        .insert(node, HostedPlugin::served(handle, plugin, controls));
+    let mut record = HostedPlugin::new(handle, plugin, (*controls).clone());
+    record.placement = crate::plugin::Placement::Served;
+    record.controls = Some(controls);
+    let previous = session.graph.plugins.insert(node, record);
     assert!(previous.is_none(), "{node:?} hosts one plugin");
     session.graph.provide_plugin(node);
     session.graph.write_own_bypass(node);

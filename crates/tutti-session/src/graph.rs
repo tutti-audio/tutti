@@ -937,6 +937,7 @@ impl Graph {
             client.handle(),
             client.plugin().clone(),
             client.controls(),
+            client.answers(),
         );
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
@@ -1013,6 +1014,7 @@ impl Graph {
         let handle = client.handle();
         let controls = client.controls();
         let plugin = client.plugin().clone();
+        let answers = client.answers();
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
@@ -1025,13 +1027,14 @@ impl Graph {
                 // plugin's state survives (`HostedPlugin::replace`).
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
-                        let outgoing = hosted.replace(handle, controls, plugin);
+                        let outgoing =
+                            hosted.replace(handle, controls, plugin, Some(answers.clone()));
                         outgoing.retire().settle(node, &mut self.graveyard);
                     }
                     None => {
                         self.plugins.insert(
                             node,
-                            crate::plugin::HostedPlugin::served(handle, plugin, controls),
+                            crate::plugin::HostedPlugin::served(handle, plugin, controls, answers),
                         );
                     }
                 }

@@ -835,6 +835,9 @@ pub(crate) struct HostedPlugin {
     plugin: PluginRef,
     pub(crate) handle: PluginHandle,
     pub(crate) controls: Option<PluginControls>,
+    /// The state and preset requests of a plugin served from a plugin server:
+    /// what makes its work values awaited.
+    answers: Option<tutti_plugin::PluginAnswers>,
     /// What the node counts and holds (its meter cell and delivery counters).
     /// The project meter is installed only for a plugin the session added.
     pub(crate) node: NodeControls,
@@ -1078,9 +1081,11 @@ impl HostedPlugin {
         handle: PluginHandle,
         plugin: PluginRef,
         controls: PluginControls,
+        answers: tutti_plugin::PluginAnswers,
     ) -> Self {
         let mut record = Self::placed(Placement::Served, handle, plugin, (*controls).clone());
         record.controls = Some(controls);
+        record.answers = Some(answers);
         record
     }
 
@@ -1097,6 +1102,7 @@ impl HostedPlugin {
             plugin,
             handle,
             controls: None,
+            answers: None,
             node,
             banked: tutti_graph::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
@@ -1160,9 +1166,11 @@ impl HostedPlugin {
         handle: PluginHandle,
         controls: PluginControls,
         plugin: PluginRef,
+        answers: Option<tutti_plugin::PluginAnswers>,
     ) -> Outgoing {
         self.carry_declaration(&plugin);
         self.plugin = plugin;
+        self.answers = answers;
         let outgoing = self.adopt(handle, Placement::Served);
         self.set_node((*controls).clone());
         self.controls = Some(controls);
@@ -1180,6 +1188,7 @@ impl HostedPlugin {
     ) -> Outgoing {
         self.carry_declaration(&plugin);
         self.plugin = plugin;
+        self.answers = None;
         let outgoing = self.adopt(handle, Placement::InProcess);
         self.set_node(node);
         self.controls = None;

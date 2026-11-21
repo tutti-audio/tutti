@@ -1893,7 +1893,7 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
 /// polled when the reader or the lane fills it, and nothing else polls it. The
 /// budget only guards a hang.
 fn await_answer<T: Send + 'static>(
-    answer: tutti_plugin_types::Answer<T>,
+    answer: futures_channel::oneshot::Receiver<T>,
 ) -> std::result::Result<T, futures_channel::oneshot::Canceled> {
     call_within(move || futures_lite::future::block_on(answer))
         .unwrap_or_else(|w| panic!("an answer was never filled; waited {w:?}"))

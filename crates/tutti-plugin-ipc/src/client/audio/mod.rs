@@ -32,8 +32,8 @@ use crate::SlabLayout;
 use dpi::Size;
 use tutti_platform::Executor;
 use tutti_plugin_types::{
-    Answer, BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult,
-    PluginFailure, PresetError, StateError, StateUse, UnknownParam, edit_slots,
+    BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
+    PresetError, StateError, StateUse, UnknownParam, edit_slots,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
@@ -1012,7 +1012,7 @@ impl AudioBridge {
 
     // --- Requests answered into a future ---
 
-    /// [`save_state`](Self::save_state) as an [`Answer`]: queues the request and
+    /// [`save_state`](Self::save_state) as a oneshot receiver: queues the request and
     /// returns, and **the control lane's thread fills the answer** when the
     /// server's reply lands. That lane owns the deadline: with no reply within
     /// [`Timeouts::state`] (renewed by the server's `Working`, up to the
@@ -1023,7 +1023,7 @@ impl AudioBridge {
     pub fn save_state_answer(
         &self,
         state_use: StateUse,
-    ) -> Answer<std::result::Result<Vec<u8>, StateError>> {
+    ) -> futures_channel::oneshot::Receiver<std::result::Result<Vec<u8>, StateError>> {
         let (answer, reply) = ask::awaited();
         if self.lifecycle.is_crashed() {
             reply.send(Err(StateError::PluginCrashed));
@@ -1039,15 +1039,15 @@ impl AudioBridge {
         answer
     }
 
-    /// [`load_state`](Self::load_state) as an [`Answer`], filled and bounded as
+    /// [`load_state`](Self::load_state) as a oneshot receiver, filled and bounded as
     /// [`save_state_answer`](Self::save_state_answer) is: [`StateError::Stalled`]
     /// at [`Timeouts::state`]. The server may apply a state whose answer is no
     /// longer awaited.
-    pub(crate) fn load_state_answer(
+    pub fn load_state_answer(
         &self,
         data: &[u8],
         state_use: StateUse,
-    ) -> Answer<std::result::Result<(), StateError>> {
+    ) -> futures_channel::oneshot::Receiver<std::result::Result<(), StateError>> {
         let (answer, reply) = ask::awaited();
         match self.state_object(data) {
             Ok(blob) => self.queue(ControlCommand::LoadState {
@@ -1061,13 +1061,13 @@ impl AudioBridge {
         answer
     }
 
-    /// [`load_preset`](Self::load_preset) as an [`Answer`], filled and bounded as
+    /// [`load_preset`](Self::load_preset) as a oneshot receiver, filled and bounded as
     /// [`save_state_answer`](Self::save_state_answer) is:
     /// [`PresetError::Stalled`] at [`Timeouts::param`].
-    pub(crate) fn load_preset_answer(
+    pub fn load_preset_answer(
         &self,
         id: PresetId,
-    ) -> Answer<std::result::Result<(), PresetError>> {
+    ) -> futures_channel::oneshot::Receiver<std::result::Result<(), PresetError>> {
         let (answer, reply) = ask::awaited();
         if self.lifecycle.is_crashed() {
             reply.send(Err(PresetError::Lost));
