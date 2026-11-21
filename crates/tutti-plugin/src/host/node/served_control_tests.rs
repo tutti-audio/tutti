@@ -63,7 +63,9 @@ fn the_served_control_and_any_thread_answer_alike() {
         "the catalog"
     );
 
-    let value = AnyThread::parameter_value(&any, GAIN).expect("the probe answers a value");
+    let value = futures_lite::future::block_on(AnyThread::parameter_value(&any, GAIN))
+        .flatten()
+        .expect("the probe answers a value");
     assert_eq!(
         Control::parameter(&control, main, GAIN),
         Some(value),
@@ -189,7 +191,7 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
     // The server's answer was an answer, not a crash: the plugin is still served.
     assert!(
         futures_lite::future::block_on(AnyThread::parameter_descriptors(&ipc.controller()))
-            .is_ok_and(|listed| listed.is_some()),
+            .is_some_and(|listed| listed.is_some()),
         "the refused open left the server serving"
     );
     let resize = ipc

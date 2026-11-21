@@ -45,7 +45,7 @@ use thiserror::Error;
 use tutti_plugin_host::{RebindError, Settlement};
 use tutti_plugin_types::MainThreadMarker;
 
-use super::{PluginChange, PluginEvent, RebindState};
+use super::{PluginChange, PluginEvent, RebindState, Silence};
 use crate::graph::SwapRefused;
 use crate::{Clock, ReplaceRefused, Session, SessionEvent};
 use tutti_graph::NodeKey;
@@ -82,7 +82,7 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
             .graph
             .plugins
             .iter()
-            .filter(|(_, hosted)| hosted.rebind.is_some() && !hosted.silenced)
+            .filter(|(_, hosted)| hosted.rebind.is_some() && hosted.silence == Silence::Pending)
             .map(|(node, _)| *node)
             .collect();
         for node in nodes {

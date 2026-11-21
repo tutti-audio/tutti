@@ -10,7 +10,7 @@
 //! that interval the glide has travelled.
 
 use tutti_curve::Law;
-use tutti_units::{Hz, Normalized, SampleRate, Seconds, Semitones};
+use tutti_units::{FrequencyRatio, Hz, Normalized, SampleRate, Seconds, Semitones};
 
 /// When a new note glides from the previous pitch rather than jumping to its
 /// own.
@@ -192,10 +192,11 @@ impl Portamento {
             let glide_time = if self.config.constant_time {
                 self.config.time.get().get()
             } else {
-                // The interval in octaves; `Semitones::from_pitch_ratio`
-                // guards the non-positive ratio a bare `log2` would turn into
-                // a NaN glide time.
-                let interval = (Semitones::from_pitch_ratio(freq / from).get() / 12.0).abs();
+                // The interval in octaves; a pitch with no ratio (not above
+                // zero) is no interval, not a NaN glide time.
+                let interval = FrequencyRatio::new(freq / from).map_or(0.0, |ratio| {
+                    (Semitones::from_pitch_ratio(ratio).get() / 12.0).abs()
+                });
                 self.config.time.get().get() * interval.max(MIN_INTERVAL_OCTAVES)
             };
 
@@ -369,7 +370,9 @@ impl Portamento {
 fn glide_at(curve: Law, from: Hz, to: Hz, progress: f64) -> Hz {
     let t = curve.eval(Normalized::clamped(progress));
     // Equal steps in pitch: `from` moved `t` of the way along its interval to `to`.
-    let interval = Semitones::from_pitch_ratio(to / from);
+    // A pitch with no ratio (not above zero) stays at `from`.
+    let interval =
+        FrequencyRatio::new(to / from).map_or(Semitones::UNISON, Semitones::from_pitch_ratio);
     from * (interval * t.get()).to_pitch_ratio()
 }
 
