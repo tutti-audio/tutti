@@ -4,6 +4,7 @@ use crate::framing::Framing;
 use crate::meters::chroma::FrequencyBand;
 use crate::test_rng::uniform;
 use tutti_rt::SplitMix64;
+use tutti_ump::NoteNumber;
 use tutti_units::{Confidence, Hz};
 
 const RATE: f64 = 44100.0;
@@ -240,7 +241,7 @@ fn a_melody_gives_its_notes_at_every_geometry() {
         let notes = transcribe(&c, &render(rate, &tones, 1.5)).unwrap();
         assert_eq!(notes.len(), 3, "{notes:?} at {rate} {min_freq} {hop_div}");
         for (n, &(a, b, hz, midi)) in notes.iter().zip(&melody) {
-            assert_eq!(u8::try_from(n.note), Ok(midi));
+            assert_eq!(NoteNumber::try_from(n.note).map(u8::from), Ok(midi));
             assert!(n.cents.get().abs() < 1.0, "{}", n.cents);
             let tol = timing_tolerance(&c);
             let period = Samples::new((rate / hz) as usize);
@@ -279,7 +280,11 @@ fn a_detuned_tone_reports_its_bend() {
         let x = render(RATE, &[tone(0.1, 0.5, cents_up(440.0, cents), 0.5)], 0.7);
         let notes = run(&cfg(), &x);
         assert_eq!(notes.len(), 1, "{cents}: {notes:?}");
-        assert_eq!(u8::try_from(notes[0].note), Ok(midi), "{cents}");
+        assert_eq!(
+            NoteNumber::try_from(notes[0].note).map(u8::from),
+            Ok(midi),
+            "{cents}"
+        );
         assert!(
             (notes[0].cents.get() - bend).abs() < 1.5,
             "{cents}: {}",
@@ -306,7 +311,11 @@ fn a_re_articulated_note_is_two_notes() {
     );
     let notes = run(&c, &x);
     assert_eq!(notes.len(), 2, "{notes:?}");
-    assert!(notes.iter().all(|n| u8::try_from(n.note) == Ok(69)));
+    assert!(
+        notes
+            .iter()
+            .all(|n| NoteNumber::try_from(n.note).map(u8::from) == Ok(69))
+    );
     assert!(notes[0].span.end() <= notes[1].span.start());
     let dip_start = 0.2 + 0.2; // the dip starts 0.2 s into the tone
     assert!(near(
@@ -358,8 +367,8 @@ fn pitch_changes_split_only_beyond_the_threshold() {
     };
     let notes = run(&c, &render(RATE, &[step], 0.9));
     assert_eq!(notes.len(), 2, "{notes:?}");
-    assert_eq!(u8::try_from(notes[0].note), Ok(69));
-    assert_eq!(u8::try_from(notes[1].note), Ok(70));
+    assert_eq!(NoteNumber::try_from(notes[0].note).map(u8::from), Ok(69));
+    assert_eq!(NoteNumber::try_from(notes[1].note).map(u8::from), Ok(70));
     // The onset the change makes cuts first, so the notes meet within a hop.
     assert!(notes[0].span.end() <= notes[1].span.start());
     assert!(notes[1].span.start().get() - notes[0].span.end().get() <= c.hop.get());
@@ -451,10 +460,10 @@ fn a_note_shorter_than_the_minimum_is_dropped() {
     let c = cfg().min_length(NoteSpan::of(Seconds::new(0.1)));
     let notes = run(&c, &x);
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert_eq!(u8::try_from(notes[0].note), Ok(72));
+    assert_eq!(NoteNumber::try_from(notes[0].note).map(u8::from), Ok(72));
     let kept = run(&cfg().min_length(NoteSpan::of(Seconds::new(0.02))), &x);
     assert_eq!(kept.len(), 2, "{kept:?}");
-    assert_eq!(u8::try_from(kept[0].note), Ok(69));
+    assert_eq!(NoteNumber::try_from(kept[0].note).map(u8::from), Ok(69));
 }
 
 /// Silence is `NoSignal`, noise gives no notes, a NaN or infinity and a
@@ -689,7 +698,7 @@ fn a_pitch_step_splits_at_the_frame_midpoint_and_blips_do_not() {
         (notes[0].span.end().get(), notes[1].span.start().get()),
         (boundary, boundary)
     );
-    assert_eq!(u8::try_from(notes[1].note), Ok(72));
+    assert_eq!(NoteNumber::try_from(notes[1].note).map(u8::from), Ok(72));
 
     let mut octave = vec![Some(440.0); 40];
     octave[20] = Some(880.0);
@@ -697,7 +706,7 @@ fn a_pitch_step_splits_at_the_frame_midpoint_and_blips_do_not() {
         octave[20..20 + blip].fill(Some(880.0));
         let notes = notes_from_track(&c, &track(&octave), &loud(40), &[]).unwrap();
         assert_eq!(notes.len(), 1, "{blip}: {notes:?}");
-        assert_eq!(u8::try_from(notes[0].note), Ok(69));
+        assert_eq!(NoteNumber::try_from(notes[0].note).map(u8::from), Ok(69));
     }
 }
 

@@ -6,6 +6,7 @@
 //! through `masked`; a bounded value out of range it reads as a `Field::Reserved`.
 
 use crate::ControlValue;
+use tutti_music::Note;
 
 tutti_units::ranged! {
     /// A 4-bit value: an MDS id, a chord degree.
@@ -48,6 +49,35 @@ tutti_units::ranged! {
     #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     NoteNumber(u8), NoteNumberOutOfRange, bits 7
 }
+
+/// The error converting a [`Note`] outside MIDI's `0..=127` note numbers to a
+/// [`NoteNumber`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{0} has no MIDI note number")]
+pub struct NotOnMidiScale(pub Note);
+
+/// MIDI's note-number encoding of a pitch: number 0 is C-1 and 69 is A4.
+impl From<NoteNumber> for Note {
+    /// Every note number names a note, so this cannot fail.
+    fn from(number: NoteNumber) -> Self {
+        Note::from_semitones_from_c0(i32::from(number.get()) - MIDI_C0_OFFSET)
+    }
+}
+
+impl TryFrom<Note> for NoteNumber {
+    type Error = NotOnMidiScale;
+
+    /// A note above G9 or below C-1 has no number and is refused.
+    fn try_from(note: Note) -> Result<Self, Self::Error> {
+        u8::try_from(note.semitones_from_c0() + MIDI_C0_OFFSET)
+            .ok()
+            .and_then(NoteNumber::new)
+            .ok_or(NotOnMidiScale(note))
+    }
+}
+
+/// MIDI note 0 is C-1, twelve semitones below C0.
+const MIDI_C0_OFFSET: i32 = 12;
 tutti_units::ranged! {
     /// A Delta Clockstamp: ticks since the previous event (20 bits).
     #[repr(transparent)]

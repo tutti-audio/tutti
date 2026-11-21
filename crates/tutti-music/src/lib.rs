@@ -6,9 +6,10 @@
 //! you need only the vocabulary; otherwise reach it through the `tutti`
 //! umbrella. What is in it:
 //!
-//! - **Notes**: `Note` and `PitchClass`, twelve-tone equal temperament with a
-//!   fallible conversion to and from a MIDI number, and `Adsr`, the four stages
-//!   of an envelope.
+//! - **Notes**: `Note` and `PitchClass`, twelve-tone equal temperament in
+//!   scientific pitch notation, and `Adsr`, the four stages of an envelope.
+//!   The MIDI note number encoding of a `Note` is `tutti_ump::NoteNumber`'s
+//!   conversions, not this crate's.
 //! - **Durations**: `NoteDuration`, a note value with a plain, dotted or triplet
 //!   `NoteModifier`, converted to beats.
 //! - **Meter**: `TimeSignature`, the `MeterMap` timeline of changes, and the
@@ -67,7 +68,7 @@ mod timeline;
 
 pub use adsr::Adsr;
 pub use duration::{NoteDuration, NoteModifier};
-pub use note::{NotOnMidiScale, Note, NoteNumberOutOfRange, PitchClass};
+pub use note::{Note, PitchClass};
 
 // The frame is the source of truth for time: the one frame↔beat conversion,
 // and the one rule for which frame a beat lands on.

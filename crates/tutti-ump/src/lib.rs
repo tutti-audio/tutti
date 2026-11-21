@@ -134,10 +134,10 @@ pub use field::{
     ChordType, ChordTypeOutOfRange, DeltaTicks, DeltaTicksOutOfRange, FirstGroup,
     FirstGroupOutOfRange, FunctionBlockCount, FunctionBlockCountOutOfRange, FunctionBlockId,
     FunctionBlockIdOutOfRange, GroupSpan, GroupSpanOutOfRange, MonoChannels,
-    MonoChannelsOutOfRange, MpeChannels, MpeChannelsOutOfRange, NoteNumber, NoteNumberOutOfRange,
-    Pitch, SharpsFlats, SharpsFlatsOutOfRange, TicksPerQuarterNote, TicksPerQuarterNoteOutOfRange,
-    U4, U4OutOfRange, U7, U7OutOfRange, U14, U14OutOfRange, U28, U28OutOfRange,
-    first_non_seven_bit,
+    MonoChannelsOutOfRange, MpeChannels, MpeChannelsOutOfRange, NotOnMidiScale, NoteNumber,
+    NoteNumberOutOfRange, Pitch, SharpsFlats, SharpsFlatsOutOfRange, TicksPerQuarterNote,
+    TicksPerQuarterNoteOutOfRange, U4, U4OutOfRange, U7, U7OutOfRange, U14, U14OutOfRange, U28,
+    U28OutOfRange, first_non_seven_bit,
 };
 pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
 pub use flex_write::{
