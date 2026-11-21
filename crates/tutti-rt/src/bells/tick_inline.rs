@@ -27,7 +27,7 @@ impl Tick {
         shared.last_pass();
     }
 
-    #[cfg(any(test, loom))]
+    #[cfg(test)]
     pub(super) fn none() -> Self {
         Self
     }

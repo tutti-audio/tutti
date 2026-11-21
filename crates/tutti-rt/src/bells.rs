@@ -87,9 +87,15 @@ use sync::{Arc, AtomicBool, Mutex, MutexGuard, Ordering, fence};
 
 use crate::{ControlDrop, Parker, Unparker, parker};
 
-#[cfg_attr(target_arch = "wasm32", path = "bells/tick_inline.rs")]
-#[cfg_attr(not(target_arch = "wasm32"), path = "bells/tick_thread.rs")]
+#[cfg_attr(loom, path = "bells/tick_stepped.rs")]
+#[cfg_attr(all(not(loom), target_arch = "wasm32"), path = "bells/tick_inline.rs")]
+#[cfg_attr(
+    all(not(loom), not(target_arch = "wasm32")),
+    path = "bells/tick_thread.rs"
+)]
 mod tick;
+#[cfg(any(loom, not(target_arch = "wasm32")))]
+mod tick_body;
 
 mod sync {
     #[cfg(loom)]

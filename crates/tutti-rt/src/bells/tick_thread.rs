@@ -1,32 +1,21 @@
 //! The tick where a thread can start: one task on an executor's dedicated thread
 //! running [`Shared::tick_once`](super::Shared::tick_once) until the set is shut.
 
-#[cfg(not(loom))]
 use std::io;
-#[cfg(not(loom))]
 use std::time::Duration;
 
-#[cfg(not(loom))]
 use tutti_platform::{Executor, Task, join_within};
 
-#[cfg(not(loom))]
-use super::Arc;
-use super::{Ordering, Parker, Shared, State};
+use super::{Arc, Parker, Shared};
 
 /// How long the drop waits for the task to run its last pass and end.
-#[cfg(not(loom))]
 const JOIN_BOUND: Duration = Duration::from_secs(1);
 
 /// The task, held for its drop, which waits for it to end.
-///
-/// A loom build has no executor (`tutti-platform` leaves it out): its models step the
-/// tick by hand and hold no task.
 pub(super) struct Tick {
-    #[cfg(not(loom))]
     task: Option<Task<()>>,
 }
 
-#[cfg(not(loom))]
 impl Tick {
     /// Spawns the tick on a dedicated thread of `executor`.
     ///
@@ -60,21 +49,17 @@ impl Tick {
     /// The task runs the last pass on its way out: nothing to do here.
     pub(super) fn shut(&self, _shared: &Shared) {}
 
-    #[cfg(any(test, loom))]
+    #[cfg(test)]
     pub(super) fn none() -> Self {
-        Self {
-            #[cfg(not(loom))]
-            task: None,
-        }
+        Self { task: None }
     }
 
-    #[cfg(all(test, not(loom)))]
+    #[cfg(test)]
     pub(super) fn is_running(&self) -> bool {
         self.task.as_ref().is_some_and(|t| !t.is_finished())
     }
 }
 
-#[cfg(not(loom))]
 impl Drop for Tick {
     /// Runs after `Bells`' drop has shut the set and unparked: the task runs the last
     /// pass and ends, and the drop waits for it.
@@ -88,31 +73,5 @@ impl Drop for Tick {
             );
             task.detach();
         }
-    }
-}
-
-impl State {
-    /// Whether the tick has a waker to wake: rung, and someone waiting.
-    fn wakeable(&self) -> bool {
-        self.rung.load(Ordering::Acquire) && self.waiting.load(Ordering::Acquire)
-    }
-}
-
-impl Shared {
-    /// Some bell is rung and has a waiter: the tick task's pending check.
-    pub(super) fn pending(&self) -> bool {
-        self.bells().iter().any(|state| state.wakeable())
-    }
-
-    /// Park until a bell has a waiter to wake or the set is shut, then run
-    /// one pass; `false` once shut, after the last pass. The tick task loops on it.
-    pub(super) fn tick_once(&self, parker: &mut Parker) -> bool {
-        parker.park(|| self.shut.load(Ordering::Acquire) || self.pending());
-        if self.shut.load(Ordering::Acquire) {
-            self.last_pass();
-            return false;
-        }
-        self.pass();
-        true
     }
 }
