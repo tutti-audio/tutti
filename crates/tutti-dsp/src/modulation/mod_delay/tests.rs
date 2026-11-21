@@ -6,6 +6,7 @@ use tutti_units::{
 
 use super::*;
 use crate::{DELAY_SLEW, Steps};
+use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -73,9 +74,10 @@ fn run(
         bank.process(
             delays,
             feedback,
-            Planes::new(&a).unwrap(),
-            PlanesMut::new(&mut outs).unwrap(),
-        );
+            &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     out
@@ -430,9 +432,13 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
         bank.process(
             &mut delays,
             &mut feedback,
-            Planes::new(&[&x[..]]).unwrap(),
-            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[&x[..]]).unwrap(),
+                PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         y
     };
     let delayed = |v: &[f64]| -> Vec<f64> {

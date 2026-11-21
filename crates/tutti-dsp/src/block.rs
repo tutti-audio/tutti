@@ -78,6 +78,23 @@ pub(crate) fn expect_widths<S: Sample>(
     Ok(())
 }
 
+/// `block` has `output` channels out, whatever its input: the width of a processor that mixes
+/// any input down.
+pub(crate) fn expect_output_width<S: Sample>(
+    block: &mut InputOutput<'_, S>,
+    output: usize,
+) -> Result<(), BlockMismatch> {
+    let found = block.output().channels();
+    if found != output {
+        return Err(BlockMismatch::Width {
+            side: BlockSide::Output,
+            expected: output,
+            found,
+        });
+    }
+    Ok(())
+}
+
 /// `block` has as many channels out as in, the width of a processor that takes any: that width.
 pub(crate) fn expect_same_width<S: Sample>(
     block: &mut InputOutput<'_, S>,

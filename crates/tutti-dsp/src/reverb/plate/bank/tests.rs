@@ -3,6 +3,7 @@ use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
 use crate::reverb::network::NetworkStage;
+use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -47,9 +48,13 @@ fn run(
         let end = at + piece.len();
         bank.process(
             ramps,
-            Planes::new(&[piece]).unwrap(),
-            PlanesMut::new(&mut [&mut l[at..end], &mut r[at..end]]).unwrap(),
-        );
+            &mut InputOutput::paired(
+                Planes::new(&[piece]).unwrap(),
+                PlanesMut::new(&mut [&mut l[at..end], &mut r[at..end]]).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         at = end;
     }
     [l, r]
@@ -334,9 +339,13 @@ fn run_wide(bank: &mut PlateBank<f64>, ramps: &mut PlateRamps<f64>, x: &[f64]) -
     let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
     bank.process(
         ramps,
-        Planes::new(&[x]).unwrap(),
-        PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[x]).unwrap(),
+            PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     [l, r]
 }
 

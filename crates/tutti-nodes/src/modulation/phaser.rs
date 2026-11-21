@@ -335,14 +335,14 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        let frames = input.frames().get().min(output.frames().get());
-        self.chain
-            .process(&mut self.complements, &mut self.feedback, input, output);
+        let frames = block.frames().get();
+        let rendered = self
+            .chain
+            .process(&mut self.complements, &mut self.feedback, block);
         self.depth
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
         self.clock.advance(frames);
-        Ok(())
+        rendered
     }
 
     /// The closed loop's ring-out has no bound a tail could be cut at: unknown, so the

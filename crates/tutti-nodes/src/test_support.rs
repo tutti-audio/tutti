@@ -253,7 +253,8 @@ pub(crate) fn mean<S: Sample>(x: &[S]) -> f64 {
 /// Renders `input` (one `Vec` per channel) through `k` in one call.
 pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<K::Float>]) -> Vec<Vec<K::Float>> {
     let ins: Vec<&[K::Float]> = input.iter().map(Vec::as_slice).collect();
-    let mut out = vec![vec![K::Float::ZERO; input[0].len()]; input.len()];
+    let width = usize::from(k.shape().audio_out().count());
+    let mut out = vec![vec![K::Float::ZERO; input[0].len()]; width];
     let mut outs: Vec<&mut [K::Float]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     let frames = Samples::new(input[0].len());
     k.render(

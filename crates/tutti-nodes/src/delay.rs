@@ -250,17 +250,17 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         block: &mut InputOutput<'_, F>,
         signals: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
         let signals = DelaySignals {
             time: signals.get(DelaySet::TIME_SIGNAL),
             feedback: signals.get(DelaySet::FEEDBACK_SIGNAL),
         };
-        if let Some(bank) = &mut self.bank {
-            bank.process(&mut self.ramps, signals, input, output);
-        }
+        let rendered = match &mut self.bank {
+            Some(bank) => bank.process(&mut self.ramps, signals, block),
+            None => Ok(()),
+        };
         // A design after a render is a move, which ramps.
         self.applied = true;
-        Ok(())
+        rendered
     }
 
     /// A recirculating line rings for as long as its feedback says: unknown, so the graph

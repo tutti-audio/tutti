@@ -32,8 +32,10 @@
 //! delay line's sample, so the product rounds by about `u` a trip whatever the form: it is not
 //! stored as a complement.
 
+use crate::BlockMismatch;
+use crate::block::expect_output_width;
 use tutti_buffers::MAX_CHANNELS;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, InputOutput};
 use tutti_units::{Hz, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
@@ -422,16 +424,21 @@ impl<F: Float + Lerp> PlateBank<F> {
 
     /// Runs `input` into `output`, the same number of frames: the input channels averaged to
     /// one, the wet signal on the first two output channels. `ramps` steps at each chunk's
-    /// start, so a call that ends inside a chunk goes on in the next. A channel of `output`
-    /// past the second is not touched; before the first [`retarget`](Self::retarget) the output is
-    /// silent. No allocation.
+    /// start, so a call that ends inside a chunk goes on in the next. Before the first
+    /// [`retarget`](Self::retarget) the output is silent. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's output is not two channels wide.
     pub fn process(
         &mut self,
         ramps: &mut PlateRamps<F>,
-        input: Planes<'_, F>,
-        mut output: PlanesMut<'_, '_, F>,
-    ) {
-        let frames = input.frames().get().min(output.frames().get());
+        block: &mut InputOutput<'_, F>,
+    ) -> Result<(), BlockMismatch> {
+        // Any input is mixed down to the one wet signal, which is a stereo pair.
+        expect_output_width(block, 2)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let width = input.channels();
         let xs: [&[F]; MAX_CHANNELS] = core::array::from_fn(|c| {
             if c < width {
@@ -448,7 +455,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             for y in left.iter_mut().chain(right.iter_mut()) {
                 y.fill(F::ZERO);
             }
-            return;
+            return Ok(());
         }
         let scale = F::from_design(1.0 / width.max(1) as f64);
         for i in 0..frames {
@@ -467,6 +474,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             }
             self.into = (self.into + Samples::new(1)) % Samples::new(Self::CHUNK);
         }
+        Ok(())
     }
 
     /// One frame: `x` through the pre-delay, the bandwidth, the input diffusers and the tank;

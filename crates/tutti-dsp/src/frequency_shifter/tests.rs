@@ -2,6 +2,7 @@ use super::*;
 use crate::Complex64;
 use crate::testing::amplitude_at;
 use core::f64::consts::{FRAC_PI_2, PI, TAU};
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -54,9 +55,13 @@ fn shifted(input: f64, shift: f64) -> (Vec<f64>, usize) {
         .collect();
     let mut y = vec![0.0; frames];
     bank.process(
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     (y, frames / 2)
 }
 
@@ -117,9 +122,13 @@ fn any_block_size_gives_the_same_bits() {
         for chunk in x.chunks(block) {
             let mut y = vec![0.0; chunk.len()];
             bank.process(
-                Planes::new(&[chunk]).unwrap(),
-                PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-            );
+                &mut InputOutput::paired(
+                    Planes::new(&[chunk]).unwrap(),
+                    PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
             out.extend(y);
         }
         out
@@ -142,9 +151,13 @@ fn the_tail_covers_the_impulse_response_down_to_the_floor() {
     x[0] = 1.0;
     let mut y = vec![0.0; frames];
     bank.process(
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let peak = y.iter().fold(0.0f64, |m, v| m.max(v.abs()));
     let last = y.iter().rposition(|v| v.abs() > peak * 1e-3).unwrap();
     assert!(
@@ -170,9 +183,13 @@ fn every_channel_of_a_three_wide_bank_shifts() {
         unreachable!()
     };
     bank.process(
-        Planes::new(&[&x[..], &x[..], &x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y0[..], &mut y1[..], &mut y2[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..], &x[..], &x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y0[..], &mut y1[..], &mut y2[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     for (c, ch) in y.iter().enumerate() {
         let peak = ch[2_400..].iter().fold(0.0f64, |m, v| m.max(v.abs()));
         assert!(peak > 0.9, "channel {c} peaks at {peak}");
