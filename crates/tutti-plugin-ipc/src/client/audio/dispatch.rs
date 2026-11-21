@@ -19,7 +19,9 @@ use crate::{
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_types::{IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError};
+use tutti_plugin_types::{
+    EditorError, IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError,
+};
 use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
@@ -994,12 +996,8 @@ pub(super) fn handle_control(
             // reasonable") against a session that had just been torn down.
             // The answer is late when it comes, and recognised by its id.
             let value = match wait_for(stream, inbox, state, id, None)? {
-                Waited::Reply(ControlReply::StateLoaded { error }) => {
-                    error.map(StateError::Rejected).map_or(Ok(()), Err)
-                }
-                Waited::Reply(other) => Err(StateError::Rejected(format!(
-                    "unexpected reply to LoadState: {other:?}"
-                ))),
+                Waited::Reply(ControlReply::StateLoaded { error }) => error.map_or(Ok(()), Err),
+                Waited::Reply(_) => Err(StateError::UnexpectedReply),
                 Waited::Pending | Waited::GaveUp => Err(StateError::Stalled { after: window }),
             };
             reply.send(value);
@@ -1130,11 +1128,9 @@ pub(super) fn handle_control(
             )?;
             let value = match wait_for(stream, inbox, state, id, None)? {
                 Waited::Reply(ControlReply::EditorOpened { result }) => result,
-                Waited::Reply(ControlReply::Error { error }) => Err(error.to_string()),
-                Waited::Reply(other) => Err(format!("unexpected reply to OpenEditor: {other:?}")),
-                Waited::Pending | Waited::GaveUp => Err(format!(
-                    "the server did not open the editor within {window:?}"
-                )),
+                Waited::Reply(ControlReply::Error { error }) => Err(EditorError::Server(error)),
+                Waited::Reply(_) => Err(EditorError::UnexpectedReply),
+                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { within: window }),
             };
             reply.send(value);
         }
@@ -1158,13 +1154,9 @@ pub(super) fn handle_control(
             )?;
             let value = match wait_for(stream, inbox, state, id, None)? {
                 Waited::Reply(ControlReply::EditorSized { result }) => result,
-                Waited::Reply(ControlReply::Error { error }) => Err(error.to_string()),
-                Waited::Reply(other) => {
-                    Err(format!("unexpected reply to SetEditorSize: {other:?}"))
-                }
-                Waited::Pending | Waited::GaveUp => Err(format!(
-                    "the server did not resize the editor within {window:?}"
-                )),
+                Waited::Reply(ControlReply::Error { error }) => Err(EditorError::Server(error)),
+                Waited::Reply(_) => Err(EditorError::UnexpectedReply),
+                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { within: window }),
             };
             reply.send(value);
         }

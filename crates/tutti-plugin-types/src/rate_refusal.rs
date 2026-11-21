@@ -3,8 +3,6 @@
 use thiserror::Error;
 use tutti_units::SampleRate;
 
-use crate::{IpcError, PluginError};
-
 /// What a refused rate left the plugin as, and the plugin's own words for why.
 ///
 /// A refusal is not "keep the old rate": the plugin renders silence until a
@@ -39,23 +37,6 @@ pub enum RateRefusalCause {
         /// How long the host waited.
         within: std::time::Duration,
     },
-    /// A failure that fits no other arm, in the loader's own words.
-    #[error("{0}")]
-    Other(String),
-}
-
-/// A loader's failure to change the rate, as the cause it refused for: the
-/// typed cause a [`RateRefusal`] carries, or the loader's words otherwise.
-impl From<&PluginError> for RateRefusalCause {
-    fn from(e: &PluginError) -> Self {
-        match e {
-            PluginError::Bridge(b) => match &**b {
-                IpcError::RateRefused(refusal) => refusal.cause.clone(),
-                other => Self::Other(other.to_string()),
-            },
-            other => Self::Other(other.to_string()),
-        }
-    }
 }
 
 /// A plugin refused the sample rate it was asked to run at.
@@ -80,26 +61,6 @@ impl RateRefusal {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// **A typed refusal survives the loader-facing error**: a cause carried
-    /// through [`PluginError::Bridge`] comes out as the same arm, and any other
-    /// loader failure is [`RateRefusalCause::Other`].
-    #[test]
-    fn a_typed_cause_survives_the_loader_error() {
-        let cause = RateRefusalCause::RolledBack {
-            running: SampleRate::SR_44K1,
-            reason: "no".into(),
-        };
-        let carried = PluginError::Bridge(Box::new(IpcError::RateRefused(RateRefusal::new(
-            SampleRate::SR_96K,
-            cause.clone(),
-        ))));
-        assert_eq!(RateRefusalCause::from(&carried), cause);
-        assert!(matches!(
-            RateRefusalCause::from(&PluginError::Other("x".into())),
-            RateRefusalCause::Other(_)
-        ));
-    }
 
     /// **A cause from a newer peer this build does not know is a decode
     /// failure**, never a different cause: the wire's variant index is the

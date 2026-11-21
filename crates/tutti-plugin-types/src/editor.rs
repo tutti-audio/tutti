@@ -385,7 +385,8 @@ impl WindowHandle {
 ///
 /// Each variant names a distinct cause, so a UI can say what went wrong and
 /// whether retrying makes sense.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum EditorError {
     /// The plugin-server subprocess died, so there is nothing left to embed.
@@ -451,6 +452,20 @@ pub enum EditorError {
     /// Another `open_editor` holds the GUI lock. Retryable once it completes.
     #[error("could not acquire GUI lock (another open_editor in progress?)")]
     Busy,
+    /// The plugin-server failed the editor request outright.
+    #[error("the plugin-server failed the editor request: {0}")]
+    Server(#[from] crate::ServerError),
+
+    /// The plugin-server did not answer the editor request within `within`.
+    #[error("the plugin-server did not answer the editor request within {within:?}")]
+    NoAnswer {
+        /// How long the host waited.
+        within: std::time::Duration,
+    },
+
+    /// The plugin-server answered an editor request with another request's reply.
+    #[error("the plugin-server answered an editor request with another request's reply")]
+    UnexpectedReply,
 }
 
 #[cfg(test)]

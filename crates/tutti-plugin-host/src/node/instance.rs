@@ -16,8 +16,8 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use parking_lot::Mutex;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Event, Hand, HostOp, InProcess, Layout, Lifecycle, Loaded, MaxBlock, Notice, PluginError,
-    PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RateRefusal,
+    Event, Hand, HostOp, InProcess, IpcError, Layout, Lifecycle, Loaded, MaxBlock, Notice,
+    PluginError, PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RateRefusal,
     RateRefusalCause, RenderMode, RenderModeSupport, SampleRate, Samples, State, Successor, Widths,
     standing,
 };
@@ -611,7 +611,7 @@ impl<L: Loaded> Instance<L> {
                 self.reports
                     .push(PluginInvalidation::RateRefused(RateRefusal::new(
                         rate,
-                        RateRefusalCause::from(&*reason),
+                        self.refusal_cause(&reason),
                     )));
             }
             Trouble::Stuck { reason } => {
@@ -620,6 +620,27 @@ impl<L: Loaded> Instance<L> {
                 });
             }
             Trouble::Lost { .. } => {}
+        }
+    }
+
+    /// What a refused rate left the plugin as: a refusal a served plugin
+    /// already typed keeps its cause, and a loader's own failure is the plugin
+    /// running at the rate it had when it renders still, deactivated when it
+    /// does not.
+    fn refusal_cause(&self, reason: &PluginError) -> RateRefusalCause {
+        if let PluginError::Bridge(bridge) = reason
+            && let IpcError::RateRefused(refusal) = &**bridge
+        {
+            return refusal.cause.clone();
+        }
+        let reason = reason.to_string();
+        if self.state.renders() {
+            RateRefusalCause::RolledBack {
+                running: self.prepare.rate(),
+                reason,
+            }
+        } else {
+            RateRefusalCause::Deactivated { reason }
         }
     }
 

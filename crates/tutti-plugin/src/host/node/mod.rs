@@ -272,7 +272,10 @@ impl PluginClient<Unbound> {
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)> {
+    ) -> IpcResult<(
+        Self,
+        Option<std::result::Result<(), tutti_plugin_types::StateError>>,
+    )> {
         plugin.check()?;
         let format = crate::host::placement::format_of(plugin)?;
         let plugin = plugin.plugin();
