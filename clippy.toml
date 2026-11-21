@@ -1,0 +1,13 @@
+# Background work is a std `Future` on `tutti_platform::Executor`, and a blocking OS edge
+# goes through `Executor::spawn_dedicated`: nothing else starts an OS thread. The thread
+# starts that stay (`tutti-platform`'s own, the graph's render workers, the engine's
+# deviceless clock and the CoreMIDI hub) each carry an `#[expect]` with their reason, and a
+# test binary or a crate's `cfg(test)` code allows the lint at its root. `spawn_named` is
+# `allow-invalid`: inside `tutti-platform`, which defines it, the path names no crate.
+disallowed-methods = [
+    { path = "std::thread::spawn", reason = "spawn a future on tutti_platform::Executor (spawn, spawn_dedicated)" },
+    { path = "std::thread::scope", reason = "spawn a future on tutti_platform::Executor (spawn, spawn_dedicated)" },
+    { path = "std::thread::Builder::spawn", reason = "spawn a future on tutti_platform::Executor (spawn, spawn_dedicated)" },
+    { path = "std::thread::Builder::spawn_scoped", reason = "spawn a future on tutti_platform::Executor (spawn, spawn_dedicated)" },
+    { path = "tutti_platform::spawn_named", allow-invalid = true, reason = "spawn a future on tutti_platform::Executor (spawn, spawn_dedicated)" },
+]

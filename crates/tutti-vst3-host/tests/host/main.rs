@@ -1,6 +1,10 @@
 //! The VST3 host against real and reference plugins: loading, event lists, MIDI groups and the FFI plugin.
 //!
 //! The binary's global allocator is armed (`AllocDisabler`), so its no-alloc gates bite.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[path = "../support/active.rs"]
 mod active;

@@ -64,6 +64,13 @@
 //!
 //! [`PluginLoader::load`]: PluginLoader::load
 //!
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod primitive_enum;
 

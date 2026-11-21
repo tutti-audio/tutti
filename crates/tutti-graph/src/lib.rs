@@ -635,6 +635,13 @@
 // by `split_at_mut`, not by a comment. See `arena.rs`.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 mod arena;
 mod builder;

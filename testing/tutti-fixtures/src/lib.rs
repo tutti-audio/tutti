@@ -45,6 +45,10 @@
 // its entry point into every suite.
 #![deny(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test support: it starts the threads its tests race"
+)]
 
 mod alloc_count;
 #[cfg(feature = "au")]

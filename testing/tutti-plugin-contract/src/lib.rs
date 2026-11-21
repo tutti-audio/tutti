@@ -10,6 +10,10 @@
 //! the markers the format's loaded type implements: each one
 //! listed is checked at compile time, and `cargo xtask check-hosting` fails an
 //! impl the list leaves out.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test support: it starts the threads its tests race"
+)]
 
 mod active;
 mod cases;
