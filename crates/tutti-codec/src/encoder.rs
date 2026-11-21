@@ -1,6 +1,6 @@
 //! The [`Encoder`]: one type over every format.
 
-use crate::error::{Error, Result};
+use crate::error::{EncodeError, Result};
 #[cfg(encode)]
 use crate::format::Format;
 use crate::spec::Spec;
@@ -42,13 +42,13 @@ use tutti_units::Samples;
 /// assert_eq!(&wav[..4], b"RIFF");
 /// assert_eq!(wav.len(), 44 + 2 * 2 * 2); // a header, two stereo frames of 16 bits
 /// # }
-/// # Ok::<(), tutti_codec::Error>(())
+/// # Ok::<(), tutti_codec::EncodeError>(())
 /// ```
 pub struct Encoder<W: Write + Seek> {
     inner: Inner<W>,
     layout: ChannelLayout,
     /// The first failure of a `write`, kept for `finish` to report.
-    first_error: Option<Error>,
+    first_error: Option<EncodeError>,
 }
 
 impl<W: Write + Seek> std::fmt::Debug for Encoder<W> {
@@ -89,11 +89,11 @@ impl<W: Write + Seek> Inner<W> {
     }
 }
 
-/// [`Error::WavTooLarge`] when `frames` is past the spec's format's limit.
+/// [`EncodeError::WavTooLarge`] when `frames` is past the spec's format's limit.
 pub(crate) fn check_planned(spec: &Spec, frames: Samples) -> Result<()> {
     match spec.format().max_frames(spec.layout()) {
         Some(limit_frames) if frames.get() as u64 > limit_frames => {
-            Err(Error::WavTooLarge { limit_frames })
+            Err(EncodeError::WavTooLarge { limit_frames })
         }
         _ => Ok(()),
     }
@@ -104,9 +104,9 @@ impl<W: Write + Seek> Encoder<W> {
     ///
     /// # Errors
     ///
-    /// [`Error::Spec`] when the format cannot be written for `spec` (a zero
+    /// [`EncodeError::Spec`] when the format cannot be written for `spec` (a zero
     /// rate or width, a width past the format's limit, a topology of another
-    /// width); [`Error::Encoding`] when the codec rejects it; [`Error::Io`]
+    /// width); [`EncodeError::Encoding`] when the codec rejects it; [`EncodeError::Io`]
     /// when the sink fails on the header.
     pub fn create(spec: &Spec, sink: W) -> Result<Self> {
         spec.channels()?;
@@ -147,10 +147,10 @@ impl<W: Write + Seek> Encoder<W> {
     ///
     /// # Errors
     ///
-    /// [`Error::BlockWidth`] for a block of another width than the spec's;
-    /// [`Error::Io`] when the sink fails (a full disk); [`Error::WavTooLarge`]
+    /// [`EncodeError::BlockWidth`] for a block of another width than the spec's;
+    /// [`EncodeError::Io`] when the sink fails (a full disk); [`EncodeError::WavTooLarge`]
     /// when a WAV file reaches its size limit, after the frames that fit were
-    /// written; [`Error::Encoding`] when the codec rejects the block. After an
+    /// written; [`EncodeError::Encoding`] when the codec rejects the block. After an
     /// error the file is not a complete take: [`finish`](Self::finish) still
     /// closes what was written for a caller that keeps it, and
     /// [`abort`](Self::abort) discards it.
@@ -164,7 +164,7 @@ impl<W: Write + Seek> Encoder<W> {
 
     fn write_block<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         if block.layout() != self.layout {
-            return Err(Error::BlockWidth {
+            return Err(EncodeError::BlockWidth {
                 expected: self.layout,
                 got: block.layout(),
             });
@@ -191,7 +191,7 @@ impl<W: Write + Seek> Encoder<W> {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] or [`Error::Encoding`] when closing fails.
+    /// [`EncodeError::Io`] or [`EncodeError::Encoding`] when closing fails.
     pub fn finish(self) -> Result<W> {
         Ok(self.finalize()?.commit())
     }
@@ -268,12 +268,12 @@ impl std::fmt::Debug for FileEncoder {
 impl FileEncoder {
     /// Starts a file for `target`: a path (which an existing file there is
     /// replaced by) or a [`Staged`], whose [`create_new`](Staged::create_new)
-    /// refuses an existing file at the commit with [`Error::Commit`] of kind
+    /// refuses an existing file at the commit with [`EncodeError::Commit`] of kind
     /// `AlreadyExists`, keeping the finished file.
     ///
     /// # Errors
     ///
-    /// As [`Encoder::create`], and [`Error::Io`] when the temporary cannot be
+    /// As [`Encoder::create`], and [`EncodeError::Io`] when the temporary cannot be
     /// created.
     pub fn create(spec: &Spec, target: impl Into<Staged>) -> Result<Self> {
         // Created before the header is written: a failure from here on drops
@@ -300,7 +300,7 @@ impl FileEncoder {
     ///
     /// # Errors
     ///
-    /// [`Error::WavTooLarge`] when `frames` is past [`crate::Format::max_frames`] for
+    /// [`EncodeError::WavTooLarge`] when `frames` is past [`crate::Format::max_frames`] for
     /// the spec's width; otherwise as [`create`](Self::create).
     pub fn create_planned(spec: &Spec, target: impl Into<Staged>, frames: Samples) -> Result<Self> {
         check_planned(spec, frames)?;
@@ -329,7 +329,7 @@ impl FileEncoder {
     ///
     /// # Errors
     ///
-    /// As [`finalize`](Self::finalize), and [`Error::Commit`] when the sync or
+    /// As [`finalize`](Self::finalize), and [`EncodeError::Commit`] when the sync or
     /// the move fails: the path is left alone and the complete file is kept.
     pub fn finish(self) -> Result<()> {
         self.finalize()?.commit()
@@ -345,7 +345,7 @@ impl FileEncoder {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] or [`Error::Encoding`] when closing fails, or the first
+    /// [`EncodeError::Io`] or [`EncodeError::Encoding`] when closing fails, or the first
     /// failed `write`: a take must be whole, so the file is removed.
     pub fn finalize(self) -> Result<FinalizedFile> {
         close(self.encoder)
@@ -440,7 +440,7 @@ pub enum Kept {
     Unfinished {
         /// What failed.
         #[source]
-        source: Error,
+        source: EncodeError,
         /// The file kept.
         unfinished: Unfinished,
     },
@@ -496,7 +496,7 @@ impl FinalizedFile {
     ///
     /// # Errors
     ///
-    /// [`Error::Commit`] when the sync or the move fails (or the path exists
+    /// [`EncodeError::Commit`] when the sync or the move fails (or the path exists
     /// under `create_new`): what was at the path is left alone and the complete
     /// file is kept at the error's `kept` path, the caller's to move or delete.
     pub fn commit(self) -> Result<()> {

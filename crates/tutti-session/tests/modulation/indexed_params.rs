@@ -12,9 +12,9 @@ use tutti_graph::Params;
 use tutti_modulation::Lfo;
 use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session, ValueErrorKind};
 use tutti_units::SampleRate;
-use tutti_units::{BeatsPerCycle, Db, Depth, ParamAddr, UnitAddr, UnitParam};
+use tutti_units::{BeatsPerCycle, Db, Depth, ParamAddr, UnitParam};
 
-use common::bands::{BAND0, BAND1, Bands};
+use common::bands::{BAND1, Bands};
 
 const RATE: f64 = 48_000.0;
 /// A lane's control step (`tutti_modulation::CONTROL_GRID`).
@@ -84,27 +84,6 @@ fn a_write_reaches_the_index_it_names() {
     );
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == -12.0) && b.iter().all(|&x| x == -6.0));
-}
-
-/// The graph declares each index modulatable on its own.
-#[test]
-fn the_graph_declares_each_index() {
-    let mut s = offline();
-    let node = s.graph().add(Params(Bands::new(0.0, 0.0)));
-    let _ = s.update();
-    assert!(s.graph().declares_param(node, BAND0).unwrap());
-    assert!(s.graph().declares_param(node, BAND1).unwrap());
-    assert!(
-        s.graph()
-            .declares_param(node, UnitParam::Threshold)
-            .unwrap()
-    );
-    assert!(
-        !s.graph()
-            .declares_param(node, UnitAddr::new(UnitParam::Threshold, 2))
-            .unwrap()
-    );
-    assert!(!s.graph().declares_param(node, UnitParam::Ratio).unwrap());
 }
 
 /// **A route to `Threshold` at index 1 modulates index 1 and leaves index 0

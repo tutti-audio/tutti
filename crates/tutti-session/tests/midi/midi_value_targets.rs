@@ -3,8 +3,8 @@
 //! their node at the next block, an equal value publishes nothing, and a
 //! removed node's target is gone.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 use tutti_buffers::ChannelLayout;
@@ -165,7 +165,7 @@ fn a_removed_clips_target_is_gone() {
 
 /// A harmony node fed to a stand-in that logs the chords and scales it takes,
 /// with their absolute frames.
-struct HarmonyTap(Arc<Mutex<Vec<(u64, Harmony)>>>);
+struct HarmonyTap(tutti_fixtures::Record<(u64, Harmony)>);
 
 impl Node for HarmonyTap {
     fn shape(&self) -> Shape {
@@ -209,14 +209,15 @@ fn at(beat: f64, harmony: Harmony) -> TimedHarmony {
 fn harmony_session() -> (
     Session,
     tutti_session::Key<HarmonyNode>,
-    Arc<Mutex<Vec<(u64, Harmony)>>>,
+    tutti_fixtures::Record<(u64, Harmony)>,
 ) {
     let mut s = offline();
-    let seen = Arc::default();
-    let tap = s.graph().add(HarmonyTap(Arc::clone(&seen)));
+    let seen = tutti_fixtures::Record::new();
+    let tap = s.graph().add(HarmonyTap(seen.clone()));
     let harmony = s.graph().add(HarmonyNode::new([]));
     s.graph()
-        .set_feed(tap, Feeder::Declared, vec![harmony.events_out()]);
+        .set_feed(tap, Feeder::Declared, vec![harmony.events_out()])
+        .unwrap();
     let _ = s.update();
     play(&s);
     (s, harmony, seen)
@@ -230,7 +231,7 @@ fn harmony_session() -> (
 fn harmony_changes_written_through_the_target_reach_the_node() {
     let (mut s, harmony, seen) = harmony_session();
     blocks(&s, 1);
-    assert_eq!(*seen.lock().unwrap(), vec![]);
+    assert_eq!(seen.lock().unwrap().to_vec(), vec![]);
     s.set(
         harmony
             .changes()
@@ -241,9 +242,12 @@ fn harmony_changes_written_through_the_target_reach_the_node() {
     .unwrap();
     let _ = s.update();
     blocks(&s, 1);
-    assert_eq!(*seen.lock().unwrap(), vec![(512, C), (512, C_MAJOR)]);
+    assert_eq!(
+        seen.lock().unwrap().to_vec(),
+        vec![(512, C), (512, C_MAJOR)]
+    );
     blocks(&s, (BEAT / 512) as usize);
-    let heard = seen.lock().unwrap().clone();
+    let heard = seen.lock().unwrap().to_vec();
     assert_eq!(heard[2], (BEAT, G), "the change on its beat");
     assert_eq!(heard.len(), 3);
 }
@@ -324,7 +328,8 @@ fn blocks_adopting_written_values_do_not_allocate() {
     let clip = s.midi().clip(note_sink).expect("the clip");
     let harmony = s.graph().add(HarmonyNode::new([]));
     s.graph()
-        .set_feed(chord_sink, Feeder::Declared, vec![harmony.events_out()]);
+        .set_feed(chord_sink, Feeder::Declared, vec![harmony.events_out()])
+        .unwrap();
     let _ = s.update();
     play(&s);
     blocks(&s, 2);
@@ -375,7 +380,8 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
+        .set_feed(synth, Feeder::Declared, vec![clip.events_out()])
+        .unwrap();
     let _ = s.update();
     s.graph()
         .replace(
@@ -394,53 +400,6 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
         note_ons(&seen),
         vec![(8_000, 64)],
         "the new node plays the written clip, the replaced node's note 60 never"
-    );
-}
-
-/// **`play_clip` on a target whose clip node was removed from the graph
-/// directly names the error**, and changes nothing: the target's clip is still
-/// the one it had.
-#[test]
-fn play_clip_after_the_clips_node_was_removed_directly_is_refused() {
-    let mut s = offline();
-    let (synth, _seen) = tap(&mut s);
-    s.midi()
-        .play_clip(
-            synth,
-            Beat::new(0.0),
-            note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)),
-        )
-        .unwrap();
-    let clip = s.midi().clip(synth).expect("the target's clip");
-    s.graph().remove(clip).expect("the clip is there");
-    let again = s.midi().play_clip(
-        synth,
-        Beat::new(0.0),
-        note(62, MF, Beat::new(0.0), BeatDuration::new(1.0)),
-    );
-    assert!(
-        matches!(
-            again,
-            Err(tutti_session::MidiError::ClipEvents(
-                ValueErrorKind::NoSuchTarget
-            ))
-        ),
-        "{again:?}"
-    );
-    let stopped = s.midi().stop_clip(synth);
-    assert!(
-        matches!(
-            stopped,
-            Err(tutti_session::MidiError::ClipEvents(
-                ValueErrorKind::NoSuchTarget
-            ))
-        ),
-        "{stopped:?}"
-    );
-    assert_eq!(
-        s.midi().clip(synth),
-        Some(clip),
-        "the refused calls leave the target's clip in force"
     );
 }
 

@@ -109,45 +109,42 @@ fn a_pending_task_is_polled_again_only_after_its_wake() {
 }
 
 #[test]
-fn try_tick_runs_one_task_per_call_in_spawn_order_and_is_false_when_idle() {
+fn tick_runs_one_task_per_call_in_spawn_order_and_is_false_when_idle() {
     let executor = Executor::new();
-    assert!(!executor.try_tick(), "nothing is ready on a new executor");
+    assert!(!executor.tick(), "nothing is ready on a new executor");
     let order = Arc::new(Mutex::new(Vec::new()));
     for i in 0..3 {
         let order = Arc::clone(&order);
         executor.spawn(async move { lock(&order).push(i) }).detach();
     }
-    assert!(executor.try_tick());
+    assert!(executor.tick());
     assert_eq!(*lock(&order), [0]);
-    assert!(executor.try_tick());
+    assert!(executor.tick());
     assert_eq!(*lock(&order), [0, 1]);
-    assert!(executor.try_tick());
+    assert!(executor.tick());
     assert_eq!(*lock(&order), [0, 1, 2]);
-    assert!(!executor.try_tick(), "all three ran");
+    assert!(!executor.tick(), "all three ran");
 }
 
 #[test]
-fn try_tick_fires_a_due_sleep_before_it_runs_a_task() {
+fn tick_fires_a_due_sleep_before_it_runs_a_task() {
     let executor = Executor::new();
     let deadline = Instant::now() + Duration::from_millis(2);
     let sleep = executor.sleep_until(deadline);
     let task = executor.spawn(sleep);
-    assert!(executor.try_tick(), "the task polls and arms its sleep");
+    assert!(executor.tick(), "the task polls and arms its sleep");
     assert!(!task.is_finished());
     // The clock passing the deadline is the event: no thread stands in for it.
     while Instant::now() < deadline {
         thread::yield_now();
     }
-    assert!(
-        executor.try_tick(),
-        "the due sleep woke its task, which ran"
-    );
+    assert!(executor.tick(), "the due sleep woke its task, which ran");
     assert!(task.is_finished());
-    assert!(!executor.try_tick());
+    assert!(!executor.tick());
 }
 
 #[test]
-fn a_self_waking_task_runs_once_per_try_tick() {
+fn a_self_waking_task_runs_once_per_tick() {
     let executor = Executor::new();
     let polls = Arc::new(AtomicUsize::new(0));
     let p = Arc::clone(&polls);
@@ -159,7 +156,7 @@ fn a_self_waking_task_runs_once_per_try_tick() {
         }))
         .detach();
     for expected in 1..=3 {
-        assert!(executor.try_tick());
+        assert!(executor.tick());
         assert_eq!(polls.load(Ordering::SeqCst), expected);
     }
 }

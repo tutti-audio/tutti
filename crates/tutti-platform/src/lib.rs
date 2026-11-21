@@ -6,7 +6,7 @@
 //! bottom of tutti, so that every crate above it builds on every target. It names no
 //! tutti crate; its dependencies are `std`, `async-executor`, `async-task`, `web-time` and the OS
 //! bindings (`libc` on Unix, `windows` on Windows, `thread-priority` everywhere but the
-//! web).
+//! web, `wasm-bindgen-futures` and `gloo-timers` on it).
 //!
 //! - [`Instant`] and [`SystemTime`] — std's types on a native target (the same
 //!   type, so an app's own `Instant` keeps working), `performance.now()` and
@@ -24,8 +24,9 @@
 //!   refuses it (`disallowed-methods`), bar a real-time thread whose `#[expect]` says why.
 //! - [`Executor`] — where tutti's background work runs: a run queue and a deadline queue
 //!   that the caller's [`run_until_stalled`](Executor::run_until_stalled) and
-//!   [`try_tick`](Executor::try_tick), or the [`Threads`] of
-//!   [`spawn_threads`](Executor::spawn_threads) (native), drive.
+//!   [`tick`](Executor::tick), or the [`Threads`] of
+//!   [`spawn_threads`](Executor::spawn_threads) (native) or the [`PageDriver`] of
+//!   `Executor::drive_on_page` (the web, on the browser's own queue), drive.
 //!   [`spawn`](Executor::spawn) returns a [`Task`] that cancels on drop;
 //!   [`unblock`](Executor::unblock) runs a blocking closure off the drive;
 //!   [`spawn_dedicated`](Executor::spawn_dedicated) gives a long-lived future a thread
@@ -40,7 +41,7 @@
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
 //!   (`impl Into<Asset>`): a path or shared bytes, or an app's own [`Open`]
 //!   source that opens again and again, with an [`Identity`] to cache by (a
-//!   path's carries its [`Stamp`]). [`Destination`] is where one write goes: a
+//!   path's carries its [`FileStamp`]). [`Destination`] is where one write goes: a
 //!   path, written staged and replacing by default (or refusing an existing file
 //!   with [`create_new`](Destination::create_new)), or a borrowed writer;
 //!   [`Staged`] opens the temporary beside a path that a destination writes
@@ -95,8 +96,8 @@ mod sleep;
 mod thread;
 
 pub use asset::{
-    Asset, Destination, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
-    StagedKeep, Stamp,
+    Asset, Destination, FileStamp, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
+    StagedKeep,
 };
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;

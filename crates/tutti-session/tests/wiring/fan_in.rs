@@ -230,7 +230,7 @@ fn an_unchanged_set_marks_nothing_edited() {
     assert!(r.s.graph_ref().has_uncommitted_edits(), "a new source");
 }
 
-/// Silence is the empty set: an empty `set_sources` and `disconnect_all` clear
+/// Silence is the empty set: an empty `set_sources` clears
 /// the port, and nothing stores a `PortSource::Zero`.
 #[test]
 fn silence_is_the_empty_set() {
@@ -253,11 +253,10 @@ fn silence_is_the_empty_set() {
         .set_sources(InPort::new(r.sink, 0), [node(r.a)])
         .unwrap()
         .unfaded();
-    assert!(r.s.graph().disconnect_all(InPort::new(r.sink, 0)).unwrap());
-    assert!(
-        !r.s.graph().disconnect_all(InPort::new(r.sink, 0)).unwrap(),
-        "already empty"
-    );
+    r.s.graph()
+        .set_sources(InPort::new(r.sink, 0), [])
+        .unwrap()
+        .unfaded();
     assert!(
         r.s.graph_ref()
             .sources(InPort::new(r.sink, 0))

@@ -186,7 +186,7 @@ pub use device::{
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
     BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
-    Result, SessionHeardTapError, TempoError,
+    Result, SessionHeardTapError, SetRateError, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -298,7 +298,7 @@ pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
     Armed, InFlight, Punch, PunchError, Recorded, Rolling, Take, TakeEnd, TakeError, TakeEvent,
-    TakeId, TakePlacement, TakeTarget, Window,
+    TakeFile, TakeId, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};

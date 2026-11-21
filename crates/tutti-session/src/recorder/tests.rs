@@ -10,13 +10,13 @@ use tutti_units::SampleRate;
 
 /// A WAV sink `channels` wide at 48 kHz.
 fn sink(path: &std::path::Path, channels: u16, pcm: Pcm) -> FileOut {
-    FileOut::create(
+    FileOut::new(
         &Spec::of_width(
             Format::Wav(pcm),
             ChannelLayout::from(channels),
             SampleRate::SR_48K,
         ),
-        path,
+        std::fs::File::create(path).expect("file opens"),
     )
     .expect("sink opens")
 }
@@ -496,8 +496,8 @@ fn a_failed_sink_fails_the_take() {
             &err,
             FinalizeError::Sink(io)
                 if matches!(
-                    io.get_ref().and_then(|e| e.downcast_ref::<tutti_codec::Error>()),
-                    Some(tutti_codec::Error::WavTooLarge { limit_frames: 4 })
+                    io.get_ref().and_then(|e| e.downcast_ref::<tutti_codec::EncodeError>()),
+                    Some(tutti_codec::EncodeError::WavTooLarge { limit_frames: 4 })
                 )
         ),
         "{err:?}"

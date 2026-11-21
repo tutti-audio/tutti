@@ -9,7 +9,7 @@
 //! widths, so there is no conversion policy here beyond the rule in
 //! [`Sample`] every format shares.
 
-use crate::error::{Codec, Error, Result, SpecError};
+use crate::error::{Codec, EncodeError, Result, SpecError};
 use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -40,7 +40,7 @@ impl<W: Write + Seek> AiffWriter<W> {
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
     pub(crate) fn create(spec: &Spec, pcm: Pcm, sink: W) -> Result<Self> {
-        spec.header_rate()?;
+        let sample_rate = spec.header_hz()?;
         let channels = spec.channels()?;
         let info = AifcWriteInfo {
             // Float samples are an AIFF-C extension; plain AIFF is integer-only,
@@ -54,9 +54,8 @@ impl<W: Write + Seek> AiffWriter<W> {
                 channels,
                 max: i16::MAX.unsigned_abs(),
             })?,
-            // The extended float the header states; the one rate that is not
-            // narrowed to whole Hz.
-            sample_rate: spec.rate().get(),
+            // The extended float the header states, written exactly.
+            sample_rate,
             sample_format: match pcm {
                 Pcm::Int16 => SampleFormat::I16,
                 Pcm::Int24 => SampleFormat::I24,
@@ -65,7 +64,7 @@ impl<W: Write + Seek> AiffWriter<W> {
             },
         };
         let writer = AifcWriter::new(sink, &info)
-            .map_err(|e| Error::encoding(Codec::Aiff, format!("{e:?}")))?;
+            .map_err(|e| EncodeError::encoding(Codec::Aiff, format!("{e:?}")))?;
         Ok(Self {
             writer,
             pcm,
@@ -110,13 +109,13 @@ impl<W: Write + Seek> FormatWriter for AiffWriter<W> {
                 self.writer.write_samples_f64(&self.doubles)
             }
         }
-        .map_err(|e| Error::encoding(Codec::Aiff, format!("write failed: {e:?}")))
+        .map_err(|e| EncodeError::encoding(Codec::Aiff, format!("write failed: {e:?}")))
     }
 
     fn finish(mut self) -> Result<Self::Sink> {
-        self.writer
-            .finalize()
-            .map_err(|e| Error::encoding(Codec::Aiff, format!("finalization failed: {e:?}")))?;
+        self.writer.finalize().map_err(|e| {
+            EncodeError::encoding(Codec::Aiff, format!("finalization failed: {e:?}"))
+        })?;
         Ok(self.writer.into_inner())
     }
 }

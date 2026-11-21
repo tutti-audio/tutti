@@ -14,7 +14,7 @@ use tutti_graph::{
 };
 
 use crate::SoundFontUnit;
-use crate::player::{CHASE_MESSAGES, Plane};
+use crate::player::{CHASE_MESSAGES, Plane, RATES};
 
 impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {
     /// No audio in, five out (dry left and right, chorus send left and right,
@@ -33,6 +33,10 @@ impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {
             // ends at the last note-off extends by this, and keeps the
             // release. The effects after the unit declare their own.
             .with_tail(self.shape_tail())
+            // The rates the voices are built for: a graph refuses another
+            // (`Graph::set_sample_rate`, a fork) instead of playing at the
+            // wrong pitch.
+            .with_rates(RATES)
             // The state it hands the unit that replaces it (`chase`).
             .with_chase(CHASE_MESSAGES as u32)
     }
@@ -40,8 +44,11 @@ impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {
     /// Re-rate to the prepared rate (keeping the preset), and size the
     /// render scratch to the largest block. Control thread.
     ///
-    /// A rate outside 16 to 192 kHz is accepted and the unit keeps its own rate, so it plays at
-    /// the wrong pitch: the graph has no supported-rate range on a `Shape` to refuse it with yet.
+    /// A rate within [`shape`](Node::shape)'s rates (16 to 192 kHz) is the unit's rate, rounded to
+    /// whole hertz. A graph never hands another through a re-rate or a fork: both refuse it. A
+    /// node added at a rate outside them still reaches `prepare` until the graph refuses the
+    /// insertion too; the unit then keeps the rate it has (44.1 kHz until prepared) and so plays
+    /// at the wrong pitch.
     fn prepare(&mut self, p: &Prepare) {
         let rate = p.sample_rate();
         if rate.get().round() != self.sample_rate.get().round()

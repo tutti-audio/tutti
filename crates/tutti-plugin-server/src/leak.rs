@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static LEAKED: AtomicBool = AtomicBool::new(false);
 static DETACHED: AtomicU64 = AtomicU64::new(0);
+static LANES_LOST: AtomicU64 = AtomicU64::new(0);
 
 /// Notes that a plugin was leaked.
 pub(crate) fn note() {
@@ -25,6 +26,17 @@ pub(crate) fn happened() -> bool {
 /// Notes that a task did not stop within its patience and was left running.
 pub(crate) fn note_detached() {
     DETACHED.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Notes that a render lane ended without handing its state back (it panicked,
+/// or was dropped under the executor's shutdown).
+pub(crate) fn note_lane_lost() {
+    LANES_LOST.fetch_add(1, Ordering::Relaxed);
+}
+
+/// How many render lanes in this process ended without handing their state back.
+pub(crate) fn lanes_lost() -> u64 {
+    LANES_LOST.load(Ordering::Relaxed)
 }
 
 /// How many tasks were left running in this process.

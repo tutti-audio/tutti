@@ -31,6 +31,10 @@ pub struct SvfControls {
 }
 
 impl SvfControls {
+    /// The smallest `Q` a design asks the coefficients for: `Q` divides into the damping,
+    /// so one at or below zero has none.
+    pub const MIN_Q: f64 = 0.01;
+
     /// The largest `Q` a design asks the coefficients for. Past it the poles are
     /// indistinguishable from the unit circle in `f64` at a low cutoff, and a model
     /// whose radius rounds to 1 could not be called stable.
@@ -65,14 +69,14 @@ impl SvfControls {
     }
 
     /// These controls with every non-finite figure replaced by the default's and
-    /// `q` held in `0.01..=MAX_Q`. A cutoff and a gain out of range are
+    /// `q` held in `MIN_Q..=MAX_Q`. A cutoff and a gain out of range are
     /// [`SvfDesign::new`]'s to clamp.
     fn sanitized(self) -> Self {
         let finite = |v: f64, d: f64| if v.is_finite() { v } else { d };
         Self {
             ty: self.ty,
             freq: Hz::new(finite(self.freq.get(), Self::DEFAULT.freq.get())),
-            q: Q::new(finite(self.q.get(), Self::DEFAULT.q.get()).clamp(0.01, Self::MAX_Q)),
+            q: Q::new(finite(self.q.get(), Self::DEFAULT.q.get()).clamp(Self::MIN_Q, Self::MAX_Q)),
             gain: if self.gain.get().is_nan() {
                 Db::UNITY
             } else {

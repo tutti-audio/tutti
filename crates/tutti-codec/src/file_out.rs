@@ -2,7 +2,6 @@
 
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::Path;
 
 use std::marker::PhantomData;
 use tutti_buffers::ChannelLayout;
@@ -41,7 +40,7 @@ use crate::spec::Spec;
 /// [`Sink::write`] returns only the marker [`SinkFailed`], so the detail of a
 /// failure has nowhere to go mid-stream: the **first** write error (a full
 /// disk, or a WAV reaching its 4 GiB limit with
-/// [`Error::WavTooLarge`](crate::Error::WavTooLarge)) is kept, that write and
+/// [`EncodeError::WavTooLarge`](crate::EncodeError::WavTooLarge)) is kept, that write and
 /// every later one returns [`SinkFailed`], and later writes are skipped.
 /// [`finalize`](Sink::finalize) must run for the file to be
 /// readable: it closes what was written even after a failure (a recording
@@ -70,7 +69,8 @@ use crate::spec::Spec;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = tempfile::tempdir()?;
 /// let spec = Spec::of_width(Format::Wav(Pcm::Int24), ChannelLayout::STEREO, SampleRate::SR_48K);
-/// let mut out = FileOut::<f32>::create(&spec, dir.path().join("tone.wav"))?;
+/// let file = std::fs::File::create(dir.path().join("tone.wav"))?;
+/// let mut out = FileOut::<f32>::new(&spec, file)?;
 /// let frames = [0.5, -0.5, 0.25, -0.25]; // two stereo frames
 /// out.write(Interleaved::new(&frames, ChannelLayout::STEREO)?).expect("the write lands");
 /// out.finalize()?;
@@ -101,16 +101,19 @@ impl<S: Sample> std::fmt::Debug for FileOut<S> {
 }
 
 impl<S: Sample> FileOut<S> {
-    /// Creates (or truncates) the file at `path` and writes the header of
-    /// `spec`.
+    /// Writes the header of `spec` into `file` and returns the sink over it.
+    /// The caller opens the file, and so chooses what happens to one already
+    /// at its path: [`File::create`] replaces it, and
+    /// [`OpenOptions::create_new`](std::fs::OpenOptions::create_new) refuses
+    /// it. The file is written in place, so a recording cut short keeps what
+    /// was written.
     ///
     /// # Errors
     ///
-    /// [`Error::Io`](crate::Error::Io) from creating the file (a missing directory, a permission
-    /// denial) or the header (a full disk), and the codec's other errors when
-    /// the [`Spec`] cannot be written.
-    pub fn create(spec: &Spec, path: impl AsRef<Path>) -> Result<Self> {
-        let sink = BufWriter::new(File::create(path.as_ref())?);
+    /// [`EncodeError::Io`](crate::EncodeError::Io) from writing the header (a full disk),
+    /// and the codec's other errors when the [`Spec`] cannot be written.
+    pub fn new(spec: &Spec, file: File) -> Result<Self> {
+        let sink = BufWriter::new(file);
         Ok(Self {
             encoder: Encoder::create(spec, sink)?,
             spec: spec.clone(),
@@ -172,7 +175,7 @@ impl<S: Sample> Sink for FileOut<S> {
         let written = if frames.layout() == self.spec.layout() {
             self.encoder.write(frames)
         } else {
-            Err(crate::Error::Io(std::io::Error::new(
+            Err(crate::EncodeError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!(
                     "a {:?} view written to a {:?} file",

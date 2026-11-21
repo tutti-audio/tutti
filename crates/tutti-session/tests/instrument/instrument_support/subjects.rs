@@ -4,7 +4,7 @@ use crate::loading::{LoadPlugin, Spec};
 use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_units::{Amplitude, Seconds};
 
 use super::cases::{Chunks, Gap, Subject};
@@ -57,11 +57,10 @@ impl Subject for Soundfont {
     const CUT: usize = 8;
 
     fn rig() -> Rig {
-        let settings = Settings::new();
         let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
         let font =
             std::sync::Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
-        let unit = settings.build(font).expect("builds");
+        let unit = SoundFontUnit::try_from(SoundFontConfig::new(font)).expect("builds");
         let mut session = offline_session();
         let handle = session
             .add_instrument(unit)

@@ -53,7 +53,9 @@
 //!   piece 0 after it.
 
 use tutti_graph::{Offset, TransportPosition, UmpAt};
-use tutti_music::{Meter, MeterMap, Pass, PassEnd, TimeSignature, first_frame_at_or_after};
+use tutti_music::{
+    ClockPass, ClockPassEnd, Meter, MeterMap, TimeSignature, first_frame_at_or_after,
+};
 use tutti_ump::{Flex, Message, MidiGroup, System, Ump};
 use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
 
@@ -426,7 +428,7 @@ impl ClockMaster {
         let mut clock = transport.clock(sample_rate);
         let mut ends_on_wrap = false;
         for pass in clock.passes(Samples::new(block_size), region) {
-            ends_on_wrap = pass.end == PassEnd::Wrap;
+            ends_on_wrap = pass.end == ClockPassEnd::Wrap;
             if !pass.start.is_zero() {
                 if messages.clock {
                     emit((
@@ -515,7 +517,7 @@ impl ClockMaster {
     /// the next boundary's.
     fn tick_clock(
         &self,
-        pass: &Pass,
+        pass: &ClockPass,
         block_size: usize,
         beats_per_sample: BeatDuration,
         emit: &mut impl FnMut(UmpAt),
@@ -541,7 +543,7 @@ impl ClockMaster {
         &mut self,
         messages: SyncMessages,
         meter: &MeterMap,
-        pass: &Pass,
+        pass: &ClockPass,
         block_size: usize,
         beats_per_sample: BeatDuration,
         tempo: Bpm,
@@ -612,7 +614,7 @@ impl ClockMaster {
     /// time (M2-104 §7.6, MTC quarter-frame 0xF1).
     fn tick_mtc(
         &mut self,
-        pass: &Pass,
+        pass: &ClockPass,
         block_size: usize,
         sample_rate: SampleRate,
         beats_per_sample: BeatDuration,
@@ -690,7 +692,7 @@ impl ClockMaster {
 /// frame at or after beat `k / 24` (`first_frame_at_or_after`) for each tick
 /// `k` the pass reaches, compared as integer frames so a tick on a block
 /// boundary is reached on the next block's first frame, not both.
-fn tick_frames(pass: &Pass, beats_per_sample: BeatDuration) -> impl Iterator<Item = usize> {
+fn tick_frames(pass: &ClockPass, beats_per_sample: BeatDuration) -> impl Iterator<Item = usize> {
     let tick_beats = BeatDuration::new(1.0 / f64::from(System::TIMING_CLOCKS_PER_QUARTER));
     let (beat, len) = (pass.beat, pass.len.get());
     // The tick at or before the pass's first beat: its frame is 0 (on the

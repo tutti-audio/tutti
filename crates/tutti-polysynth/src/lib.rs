@@ -152,10 +152,13 @@ pub use portamento::{GlideTime, GlideTimeError, PortamentoConfig, PortamentoMode
 
 mod tuning;
 // Public: `Tuning` appears in `SynthConfig`.
-pub use tuning::Tuning;
+pub use tuning::{ReferencePitch, ReferencePitchOutOfRange, Tuning, TuningError};
 
 mod synth;
-pub use synth::{FilterModConfig, FilterType, OscillatorType, SvfMode, SynthConfig};
+pub use synth::{
+    FilterModConfig, FilterType, MasterVolume, MasterVolumeOutOfRange, OscillatorType, SvfMode,
+    SvfQ, SvfQOutOfRange, SynthConfig,
+};
 // The amplitude envelope `SynthConfig::envelope` takes; one type with the
 // modulation sources' note envelope.
 pub use tutti_music::Adsr;

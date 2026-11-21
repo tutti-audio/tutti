@@ -12,9 +12,9 @@ use tutti_ump::{Bank, CCNumber, MidiChannel, U7, Voice2};
 
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
-use tutti_graph::{Node, Prepare};
+use tutti_graph::{Node, Prepare, SampleRates};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Error, Polyphony, Settings, SoundFontUnit};
+use tutti_soundfont::{Error, Polyphony, SoundFontConfig, SoundFontUnit};
 use tutti_units::{SampleRate, Samples};
 
 /// A unit at the default settings, whose dry pair is true silence once a voice
@@ -25,15 +25,26 @@ fn dry() -> Rig {
 
 /// A unit prepared by a graph at `rate`, the way `Node::prepare` re-rates it.
 fn prepared_at(rate: SampleRate) -> SoundFontUnit<f32> {
-    let mut unit = Settings::new().build(timgm6mb()).unwrap();
+    let mut unit = SoundFontUnit::try_from(SoundFontConfig::new(timgm6mb())).unwrap();
     unit.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(64))));
     unit
 }
 
+/// The unit's declared rates are the range `prepare` re-rates within.
 #[test]
-fn a_graph_re_rates_the_unit_within_16_to_192_khz_and_leaves_it_outside() {
-    let initial = Settings::new()
-        .build::<f32>(timgm6mb())
+fn the_shape_declares_the_rates_the_unit_runs_at() {
+    let unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(timgm6mb())).unwrap();
+    assert_eq!(
+        Node::<f32>::shape(&unit).rates(),
+        SampleRates::of(SampleRate::of(16_000.0), SampleRate::of(192_000.0))
+    );
+}
+
+/// A rate within the declared rates is the unit's rate; `prepare` leaves a rate
+/// outside them at the rate the unit has (a graph refuses to hand one in).
+#[test]
+fn a_graph_re_rates_the_unit_within_its_rates_and_leaves_it_outside() {
+    let initial = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(timgm6mb()))
         .unwrap()
         .sample_rate();
     for hz in [16_000_u32, 48_000, 192_000] {
@@ -46,6 +57,25 @@ fn a_graph_re_rates_the_unit_within_16_to_192_khz_and_leaves_it_outside() {
     }
 }
 
+/// A key 69 sounds the font's 441 Hz at every rate the unit runs at: the
+/// rising zero crossings in one second are the frequency. Spec: SF2 2.04
+/// section 8.1.3 (root key and playback pitch).
+#[test]
+fn a_note_sounds_its_pitch_at_every_rate_in_range() {
+    let font = octave_font();
+    for rate in [SampleRate::SR_44K1, SampleRate::SR_96K] {
+        let mut rig = Rig::dry_at(&font, rate);
+        rig.note_on(0, 69, 100);
+        let (left, _) = rig.render(rate.get() as usize);
+        assert!(left.iter().any(|s| s.abs() > 1e-3), "{rate}: silent");
+        let hz = left
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        assert!((hz as i64 - 441).abs() <= 2, "{rate}: {hz} Hz");
+    }
+}
+
 // The polyphony is a count of voices that cannot be zero (`Polyphony`), and
 // one voice is enough: a second note takes the first's place, so two notes
 // sound at the power of one, where a pool of two sounds both (two sines an
@@ -54,8 +84,8 @@ fn a_graph_re_rates_the_unit_within_16_to_192_khz_and_leaves_it_outside() {
 fn a_pool_of_one_voice_gives_way_to_the_next_note() {
     let font = support::font::one_preset(vec![vec![]]);
     let level = |voices: usize| {
-        let settings = Settings::new().polyphony(Polyphony::of(voices));
-        let mut rig = Rig::with(&font, settings);
+        let config = SoundFontConfig::new(Arc::clone(&font)).polyphony(Polyphony::of(voices));
+        let mut rig = Rig::with(config);
         rig.note_on(0, 60, 100);
         rig.energy(4096);
         rig.note_on(0, 72, 100);
@@ -76,9 +106,12 @@ fn a_pool_of_one_voice_gives_way_to_the_next_note() {
 // overflow the pool's allocation); the maximum itself and one voice build.
 #[test]
 fn a_polyphony_past_the_maximum_is_refused_and_the_maximum_builds() {
-    let at = |voices: usize| Settings::new().polyphony(Polyphony::of(voices));
-    assert!(at(1).build::<f32>(timgm6mb()).is_ok());
-    assert!(at(Polyphony::MAX).build::<f32>(timgm6mb()).is_ok());
+    let at = |voices: usize| {
+        let config = SoundFontConfig::new(timgm6mb()).polyphony(Polyphony::of(voices));
+        SoundFontUnit::<f32>::try_from(config)
+    };
+    assert!(at(1).is_ok());
+    assert!(at(Polyphony::MAX).is_ok());
     for too_many in [Polyphony::MAX + 1, usize::MAX] {
         assert_eq!(Polyphony::new(too_many), None, "{too_many}");
         assert_eq!(
@@ -865,7 +898,7 @@ fn a_font_with_nothing_playable_is_refused() {
             zones: vec![vec![]],
         }],
     );
-    let error = Settings::new().build::<f32>(font).unwrap_err();
+    let error = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(font)).unwrap_err();
     assert!(matches!(error, Error::NoPlayablePreset), "{error:?}");
 }
 
@@ -1065,7 +1098,7 @@ fn a_sample_stating_rate_zero_plays_at_the_nearest_practical_rate() {
 fn a_program_change_to_a_missing_preset_is_counted() {
     use support::Hand;
     let font = support::font::one_preset(vec![vec![]]);
-    let unit = Settings::new().build(font).unwrap();
+    let unit = SoundFontUnit::try_from(SoundFontConfig::new(font)).unwrap();
     let missing = unit.missing_presets();
     let mut rig = Rig {
         hand: Hand::new(unit),

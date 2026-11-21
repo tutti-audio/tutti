@@ -112,6 +112,7 @@ pub struct FileTarget {
     pub(crate) width: Width,
     pub(crate) resample: Option<Resample>,
     pub(crate) dither: Option<DitherShape>,
+    pub(crate) noise_shaping: bool,
     pub(crate) normalize: Option<NormalizeSpec>,
     create_new: bool,
 }
@@ -128,6 +129,7 @@ impl FileTarget {
             width: Width::Count(channels),
             resample: None,
             dither: Some(DitherShape::Triangular),
+            noise_shaping: false,
             normalize: None,
             create_new: false,
         }
@@ -168,6 +170,21 @@ impl FileTarget {
         self
     }
 
+    /// Shapes the quantization error of an integer width
+    /// ([`tutti_dsp::NoiseShaping`], designed for the file's rate): the error
+    /// moves to where hearing is least sensitive, and a normalizing output keeps
+    /// more headroom for it. Off unless this says so; a format with no integer
+    /// width ignores it.
+    ///
+    /// It is independent of the dither: with [`no_dither`](Self::no_dither) the
+    /// rounding error alone is fed back and shaped, and the shaping of the
+    /// triangular default shapes the dithered error.
+    #[must_use]
+    pub fn noise_shaping(mut self) -> Self {
+        self.noise_shaping = true;
+        self
+    }
+
     /// Normalizes this output ([`NormalizeSpec`]); without it the output is
     /// written as rendered.
     ///
@@ -187,7 +204,7 @@ impl FileTarget {
 
     /// Refuses a path that already exists instead of replacing it. The file is
     /// still written beside the path; the refusal is the commit's, which fails
-    /// with a [`tutti_codec::Error::Commit`] of kind `AlreadyExists`, leaves
+    /// with a [`tutti_codec::EncodeError::Commit`] of kind `AlreadyExists`, leaves
     /// what is at the path alone and keeps the complete file at the error's
     /// `kept` path for the caller.
     #[must_use]

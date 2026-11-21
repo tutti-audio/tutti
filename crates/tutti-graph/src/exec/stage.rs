@@ -144,6 +144,14 @@ pub(super) struct Staged<F: Float = f32> {
 }
 
 impl<F: Float> Staged<F> {
+    /// Items its spare lists refused: the ones the apply leaked.
+    pub(super) fn refused(&self) -> usize {
+        self.spare_rings
+            .refused()
+            .saturating_add(self.spare_tables.refused())
+            .saturating_add(self.spare_drives.refused())
+    }
+
     /// The parallel state for `participants` (the pool the executor has now),
     /// built for the plan this was staged for: the pool was set after the
     /// commit was sent. Control side: allocates.

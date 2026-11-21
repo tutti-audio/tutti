@@ -437,7 +437,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-platform/",
-        "Stamp::of",
+        "FileStamp::of",
         CTOR,
         "stamping a file: the failure is the file's metadata, not a value's",
     ),

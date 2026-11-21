@@ -285,6 +285,10 @@ pub struct Written {
     /// [`Default`](tutti_buffers::Placement::Default)). A `Lufs` normalize
     /// weighted the file's loudness by that placement.
     pub placement: tutti_buffers::Placement,
+    /// The spill file a normalizing output kept its rendered audio in, when
+    /// removing it failed: it is left beside [`path`](Self::path) for the
+    /// caller to delete. `None` when there was none or it is gone.
+    pub spill_left: Option<PathBuf>,
 }
 
 /// The frame width an export config asks for, as the interleave stride.
@@ -331,7 +335,7 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// the one step that is not undone: if one fails after others succeeded the
 /// error is [`RenderError::NotCommitted`] and the files already in place are kept.
 /// The finished file whose rename failed is kept beside its path, named by
-/// the error ([`tutti_codec::Error::Commit`]): moving or deleting it is the
+/// the error ([`tutti_codec::EncodeError::Commit`]): moving or deleting it is the
 /// caller's.
 ///
 /// `control` is how a host watches and stops the render: it is told the

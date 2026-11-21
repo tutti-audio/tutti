@@ -38,7 +38,7 @@
 //!
 //! ## Why a violation aborts rather than fails
 //!
-//! `AllocDisabler` aborts the process on violation; it is not a catchable
+//! `RtAllocCheck` aborts the process on violation; it is not a catchable
 //! panic. A regression therefore shows up as the test binary dying with
 //! `memory allocation of N bytes failed` on stderr, not as a tidy assertion
 //! diff. That abort was observed deliberately (a `Vec::with_capacity` under the

@@ -952,7 +952,7 @@ fn a_bend_lands_on_the_same_pitch_whether_the_note_was_already_sounding() {
     struck.tick(&[], &mut out);
     let struck_freq = struck.voices[0].sounding_freq();
 
-    let delta = tutti_units::Cents::from_pitch_ratio(held_freq.get() / struck_freq.get());
+    let delta = tutti_units::Cents::from_pitch_ratio(ratio(held_freq.get() / struck_freq.get()));
     assert!(
         delta.get().abs() < 0.5,
         "same wheel position, two pitches: held {held_freq:?} vs struck {struck_freq:?} \
@@ -1977,7 +1977,7 @@ fn a_long_block_renders_every_frame_like_short_blocks() {
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
             cutoff: Hz::new(3_000.0),
-            q: tutti_units::Q::new(1.0),
+            q: crate::SvfQ::of(tutti_units::Q::new(1.0)),
             mode: crate::SvfMode::Lowpass,
         },
         portamento: Some(PortamentoConfig {
@@ -2225,7 +2225,7 @@ fn reset_all_controllers_leaves_the_cutoff_alone() {
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
             cutoff: Hz::new(600.0),
-            q: tutti_units::Q::new(0.707),
+            q: crate::SvfQ::BUTTERWORTH,
             mode: crate::SvfMode::Lowpass,
         },
         ..Default::default()
@@ -2294,7 +2294,7 @@ fn a_fork_renders_the_volume_and_unison_it_was_taken_with() {
                 stereo_spread: Spread::new(0.5),
                 phase_randomize: false,
             }),
-            volume: tutti_units::Amplitude::new(0.5),
+            volume: crate::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
             ..Default::default()
         });
         synth.synth
@@ -3372,7 +3372,8 @@ fn master_fine_tuning_is_a_hundred_over_8192_cents_a_step() {
             .collect::<Vec<_>>(),
     );
     s.tick(&[], &mut out);
-    let cents = tutti_units::Cents::from_pitch_ratio(s.voices[0].sounding_freq().get() / 440.0);
+    let cents =
+        tutti_units::Cents::from_pitch_ratio(ratio(s.voices[0].sounding_freq().get() / 440.0));
     assert!((cents.get() + 100.0).abs() < 0.5, "{cents:?}");
 }
 
@@ -3440,7 +3441,11 @@ fn ev_tuning_program(channel: u8, program: u8) -> Ump {
 }
 
 fn cents_above(freq: Hz, reference: f64) -> f64 {
-    tutti_units::Cents::from_pitch_ratio(freq.get() / reference).get()
+    tutti_units::Cents::from_pitch_ratio(ratio(freq.get() / reference)).get()
+}
+
+fn ratio(raw: f64) -> tutti_units::FrequencyRatio {
+    tutti_units::FrequencyRatio::new(raw).expect("a positive finite ratio")
 }
 
 /// The synth's construction-time scale is its tuning program 0 of bank 0: with

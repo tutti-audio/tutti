@@ -19,7 +19,10 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    session.graph().set_sample_rate(SampleRate::of(48_000.0));
+    session
+        .graph()
+        .set_sample_rate(SampleRate::of(48_000.0))
+        .unwrap();
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()

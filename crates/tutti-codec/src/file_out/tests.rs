@@ -1,6 +1,7 @@
 use super::*;
-use crate::{Error as CodecError, Format, Pcm};
+use crate::{EncodeError, Format, Pcm};
 use hound::SampleFormat;
+use std::path::Path;
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Interleaved, Sink};
 
@@ -18,9 +19,9 @@ fn wav(
     channels: impl Into<ChannelLayout>,
     pcm: Pcm,
 ) -> std::io::Result<FileOut> {
-    Ok(FileOut::create(
+    Ok(FileOut::new(
         &Spec::of_width(Format::Wav(pcm), channels.into(), SampleRate::of(rate)),
-        path,
+        std::fs::File::create(path)?,
     )?)
 }
 
@@ -32,28 +33,10 @@ fn wav_with_topology(
     topology: ChannelTopology,
     pcm: Pcm,
 ) -> std::io::Result<FileOut> {
-    Ok(FileOut::create(
+    Ok(FileOut::new(
         &Spec::new(Format::Wav(pcm), topology, SampleRate::of(rate)),
-        path,
+        std::fs::File::create(path)?,
     )?)
-}
-
-/// A failed open reports *why*, and takes a path without ceremony.
-///
-/// The kind matters: a caller distinguishing "make the directory and
-/// retry" from "give up" can only do so from the error.
-#[test]
-fn a_failed_open_reports_the_cause() {
-    let dir = tempfile::tempdir().unwrap();
-    let missing = dir.path().join("no-such-dir").join("take.wav");
-
-    let err = wav(&missing, 48_000.0, 2u16, Pcm::Float32)
-        .expect_err("a file under a missing directory cannot be created");
-    assert_eq!(
-        err.kind(),
-        std::io::ErrorKind::NotFound,
-        "the cause must survive to the caller, not flatten to a sentinel"
-    );
 }
 
 /// The sink writes INCREMENTALLY: feeding frames across many `write` calls
@@ -178,8 +161,8 @@ fn a_failed_sink_stops_writing_and_leaves_a_readable_prefix() {
     let err = sink.finalize().expect_err("the failure must be reported");
     assert!(
         err.get_ref()
-            .and_then(|e| e.downcast_ref::<CodecError>())
-            .is_some_and(|e| matches!(e, CodecError::WavTooLarge { limit_frames: 2 })),
+            .and_then(|e| e.downcast_ref::<EncodeError>())
+            .is_some_and(|e| matches!(e, EncodeError::WavTooLarge { limit_frames: 2 })),
         "carrying the typed error, got: {err}"
     );
 
@@ -309,7 +292,7 @@ fn a_plain_header_is_left_alone() {
 }
 
 /// The write that would pass the frame limit stops the sink; `finalize`
-/// reports a typed [`CodecError::WavTooLarge`] and the file holds exactly the
+/// reports a typed [`EncodeError::WavTooLarge`] and the file holds exactly the
 /// frames under the limit, with correct header sizes and mask. Later writes
 /// are ignored.
 ///
@@ -330,9 +313,12 @@ fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
     let err = sink.finalize().expect_err("the limit must be reported");
     let limit = err
         .get_ref()
-        .and_then(|e| e.downcast_ref::<CodecError>())
+        .and_then(|e| e.downcast_ref::<EncodeError>())
         .expect("the typed error rides out of finalize");
-    assert!(matches!(limit, CodecError::WavTooLarge { limit_frames: 3 }));
+    assert!(matches!(
+        limit,
+        EncodeError::WavTooLarge { limit_frames: 3 }
+    ));
 
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(
@@ -419,7 +405,7 @@ fn a_flac_take_round_trips_through_the_decoder() {
         })
         .collect();
 
-    let mut sink = FileOut::create(&spec, &path).unwrap();
+    let mut sink = FileOut::new(&spec, std::fs::File::create(&path).unwrap()).unwrap();
     assert_eq!(sink.sample_rate(), SampleRate::SR_44K1);
     // In blocks of 300 frames, the last one short: the sink is incremental.
     for block in signal.chunks(300 * 2) {

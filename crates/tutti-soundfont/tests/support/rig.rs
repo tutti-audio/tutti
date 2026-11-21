@@ -10,7 +10,7 @@ use super::{BLOCK, Hand};
 
 use tutti_fixtures::midi;
 use tutti_sf2::SoundFont;
-use tutti_soundfont::Settings;
+use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::{CCNumber, Message, MidiChannel, U7, U14, Ump, Voice1, Voice2};
 use tutti_units::SampleRate;
 
@@ -28,13 +28,20 @@ pub struct Rig {
 impl Rig {
     /// A unit at the default settings. Its dry pair is true silence once a voice stops: the effects are not in it.
     pub fn dry(font: &Arc<SoundFont>) -> Self {
-        let settings = Settings::new();
-        Self::with(font, settings)
+        Self::with(SoundFontConfig::new(Arc::clone(font)))
     }
 
-    pub fn with(font: &Arc<SoundFont>, settings: Settings) -> Self {
+    /// A unit at the default settings, prepared by a graph at `rate`.
+    pub fn dry_at(font: &Arc<SoundFont>, rate: SampleRate) -> Self {
+        let unit = SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).unwrap();
         Self {
-            hand: Hand::new(settings.build(Arc::clone(font)).unwrap()),
+            hand: Hand::at(unit, rate),
+        }
+    }
+
+    pub fn with(config: SoundFontConfig) -> Self {
+        Self {
+            hand: Hand::new(SoundFontUnit::try_from(config).unwrap()),
         }
     }
 

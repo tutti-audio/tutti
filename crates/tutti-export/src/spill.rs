@@ -158,19 +158,35 @@ impl<F: Float> Spill<F> {
     }
 }
 
+impl<F: Float> Spill<F> {
+    /// Removes the spill's file, if it has one, and returns its path and the
+    /// cause when the removal failed: the file is left beside the target, for
+    /// the caller to report.
+    pub(crate) fn remove(&mut self) -> Option<(PathBuf, io::Error)> {
+        let Store::File { path, writer } =
+            std::mem::replace(&mut self.store, Store::Memory(Vec::new()))
+        else {
+            return None;
+        };
+        // Closed before it is removed (Windows will not remove an open file).
+        drop(writer);
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Some((path, e)),
+            _ => None,
+        }
+    }
+}
+
 impl<F: Float> Drop for Spill<F> {
+    /// A spill dropped before [`remove`](Spill::remove) (the export failed or
+    /// was cancelled) removes its file; the failure is logged, as no result is
+    /// left to carry it (teardown).
     fn drop(&mut self) {
-        if let Store::File { path, writer } = &mut self.store {
-            // Closed before it is removed (Windows will not remove an open file).
-            drop(writer.take());
-            if let Err(e) = std::fs::remove_file(&*path)
-                && e.kind() != io::ErrorKind::NotFound
-            {
-                tracing::warn!(
-                    "export: could not remove the spill file {}: {e}",
-                    path.display()
-                );
-            }
+        if let Some((path, e)) = self.remove() {
+            tracing::warn!(
+                "export: could not remove the spill file {}: {e}",
+                path.display()
+            );
         }
     }
 }
