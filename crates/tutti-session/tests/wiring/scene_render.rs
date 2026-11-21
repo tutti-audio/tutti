@@ -96,23 +96,28 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     let g = session.graph();
     let osc = g.add(saw());
     let filter = g.add(low_pass(1_200.0));
-    g.set_sources_unfaded(InPort::new(filter, 0), [OutPort::new(osc, 0)])
-        .unwrap();
+    g.set_sources(InPort::new(filter, 0), [OutPort::new(osc, 0)])
+        .unwrap()
+        .unfaded();
     let drive = g.add(shaper(drive));
-    g.set_sources_unfaded(InPort::new(drive, 0), [OutPort::new(filter, 0)])
-        .unwrap();
+    g.set_sources(InPort::new(drive, 0), [OutPort::new(filter, 0)])
+        .unwrap()
+        .unfaded();
     let right = if with_limiter {
         let lim = g.add(limiter());
-        g.set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(osc, 0)])
-            .unwrap();
+        g.set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
+            .unwrap()
+            .unfaded();
         lim.erase()
     } else {
         osc.erase()
     };
-    g.set_sources_unfaded(Root::output(0), [OutPort::new(drive, 0)])
-        .unwrap();
-    g.set_sources_unfaded(Root::output(1), [OutPort::new(right, 0)])
-        .unwrap();
+    g.set_sources(Root::output(0), [OutPort::new(drive, 0)])
+        .unwrap()
+        .unfaded();
+    g.set_sources(Root::output(1), [OutPort::new(right, 0)])
+        .unwrap()
+        .unfaded();
     let _ = session.update();
     Scene {
         session,

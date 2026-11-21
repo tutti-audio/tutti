@@ -43,8 +43,9 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     let mut tap = session
         .graph()
         .taps()
@@ -115,14 +116,17 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         }),
     ));
     s.graph()
-        .set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(osc, 0)])
-        .unwrap();
+        .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(osc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(osc, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(lim, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(lim, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     old.render_block(Samples::new(480)).expect("open");
     let _ = s.update();
@@ -1021,8 +1025,9 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     let _ = session.update();
     session.declare_root_topology(Some(stereo.clone())).unwrap();
     let _ = session.update();
@@ -1104,8 +1109,9 @@ fn a_panic_in_the_render_is_a_device_fault_event() {
     let node = session.graph().add(ForkByClone(AlwaysPanics));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap()
+        .unfaded();
     let _ = session.update();
 
     let block = stream

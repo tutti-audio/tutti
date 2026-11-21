@@ -23,8 +23,9 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(noisy, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(noisy, 0)])
+        .unwrap()
+        .unfaded();
     let _ = session.update();
 
     let events = rt_events(|| {

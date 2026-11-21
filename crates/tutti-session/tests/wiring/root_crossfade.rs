@@ -26,8 +26,9 @@ fn session() -> Session {
     let node = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
-            .unwrap();
+            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .unwrap()
+            .unfaded();
     }
     let _ = block(&mut s);
     s
