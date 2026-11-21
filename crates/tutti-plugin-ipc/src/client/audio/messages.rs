@@ -12,6 +12,7 @@ use tutti_plugin_types::{
     NoteExpressionTextChanges, ParamEdit, ParameterChanges, ParameterInfo, PluginTail, Preset,
     PresetId, Samples, ScaleChanges, TransportChanges, TransportInfo,
 };
+use tutti_plugin_types::{RateRefusal, RateRefusalCause};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -280,7 +281,7 @@ pub enum IpcEvent {
     },
     /// The plugin refused the rate it was asked to run at (`Some`: the rate in
     /// Hz and the plugin's reason), or took a rate after refusing one (`None`).
-    RateRefusal(Option<(SampleRate, String)>),
+    RateRefusal(Option<RateRefusal>),
     /// The bridge died: the subprocess never connected, failed the handshake,
     /// or its stream dropped mid-session.
     ///
@@ -356,7 +357,7 @@ pub(super) struct Unsolicited {
     params: std::collections::VecDeque<ParamEdit>,
     latency: Option<Samples>,
     tail: Option<PluginTail>,
-    rate: Option<Option<(SampleRate, String)>>,
+    rate: Option<Option<RateRefusal>>,
     /// What a late answer is applied to, when it is read.
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
@@ -424,9 +425,9 @@ impl Unsolicited {
     /// Apply the answer to a rate change the bridge stopped waiting for,
     /// **now**: it is read in stream order, ahead of whatever is read after it,
     /// so a later answer (the request being waited on) lands after it and wins.
-    pub(super) fn late_rate_answer(&mut self, rate: SampleRate, error: Option<String>) {
+    pub(super) fn late_rate_answer(&mut self, rate: SampleRate, refusal: Option<RateRefusalCause>) {
         if let Some(lifecycle) = self.lifecycle.clone() {
-            super::dispatch::apply_rate_reply(&lifecycle, self, rate, error);
+            super::dispatch::apply_rate_reply(&lifecycle, self, rate, refusal);
         }
     }
 
@@ -458,7 +459,7 @@ impl Unsolicited {
     }
 
     /// A rate refusal, or its clearing, replacing one already held.
-    pub(super) fn rate_refusal(&mut self, refusal: Option<(SampleRate, String)>) {
+    pub(super) fn rate_refusal(&mut self, refusal: Option<RateRefusal>) {
         self.rate = Some(refusal);
     }
 

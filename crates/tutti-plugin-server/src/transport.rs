@@ -16,7 +16,9 @@ use tutti_plugin_ipc::{
     SlabLayout, read_frame, write_frame,
 };
 use tutti_plugin_ipc_ffi::{Blob, Lease};
-use tutti_plugin_types::{Deadline, IpcError, IpcResult, MAX_STATE_BYTES, SlabError, StateUse};
+use tutti_plugin_types::{
+    Deadline, IpcError, IpcResult, MAX_STATE_BYTES, ServerError, SlabError, StateUse,
+};
 
 use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
@@ -186,7 +188,9 @@ pub(crate) fn send_state(
         Err(e) => transport.send(&ControlFrame::Reply {
             id,
             reply: ControlReply::Error {
-                message: format!("the state could not be made into an object: {e}"),
+                error: ServerError::StateNotShared {
+                    reason: e.to_string(),
+                },
             },
         }),
     }

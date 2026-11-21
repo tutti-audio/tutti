@@ -317,21 +317,13 @@ impl PluginClient<Unbound> {
         let rate = ipc.rate();
         // The plugin's file, when the ipc knows it: the path of a failure here.
         let origin_path = ipc.origin().map(|o| o.origin.path().to_path_buf());
-        let failed = |reason: String| IpcError::LoadFailed {
-            path: origin_path.clone(),
-            stage: LoadStage::Activation,
-            reason,
-        };
         // The pipeline's chunk ceiling, matching the slab (`Ipc` clamps it to
         // `MAX_CHUNK` for the same reason): the raw `max_buffer_size` would
         // stage 8192 samples per channel to ship 64.
         let prepare = MaxBlock::new(Samples::new(ipc.ceiling()))
             .map(|block| Prepare::new(rate, block))
-            .ok_or_else(|| {
-                failed(format!(
-                    "the plugin cannot run in blocks of {} frames",
-                    ipc.ceiling()
-                ))
+            .ok_or(IpcError::BlockUnsupported {
+                frames: ipc.ceiling(),
             })?;
 
         let (controls, reports) = PluginControls::with_chunks(
@@ -378,8 +370,8 @@ impl PluginClient<Unbound> {
                 ResyncClass::Refresh(r) => listener_refresh_sink.fire(r),
                 ResyncClass::Invalidate(i) => listener_invalidate_sink.fire(i),
             },
-            IpcEvent::RateRefusal(Some((rate, reason))) => {
-                listener_invalidate_sink.fire(PluginInvalidation::RateRefused { rate, reason });
+            IpcEvent::RateRefusal(Some(refusal)) => {
+                listener_invalidate_sink.fire(PluginInvalidation::RateRefused(refusal));
             }
             IpcEvent::RateRefusal(None) => {
                 listener_invalidate_sink.fire(PluginInvalidation::RateRestored);
@@ -413,10 +405,7 @@ impl PluginClient<Unbound> {
             }
         };
 
-        let origin = ipc
-            .origin()
-            .cloned()
-            .ok_or_else(|| failed("the served plugin has no origin".into()))?;
+        let origin = ipc.origin().cloned().ok_or(IpcError::NoOrigin)?;
         // The ref carries the id the server loaded, so a state it saves and a
         // hand-inserted node name it as a scan would.
         let plugin = origin.origin.clone();
@@ -427,7 +416,7 @@ impl PluginClient<Unbound> {
         let (inputs, outputs) = (loaded.total_inputs(), loaded.total_outputs());
         let (processor, controller) = ipc
             .activate_anywhere(prepare)
-            .map_err(|refused| failed(refused.reason.to_string()))?;
+            .map_err(|refused| IpcError::from(refused.reason))?;
         let client = client_over::<Ipc, f32>(
             processor,
             controller,
@@ -438,7 +427,11 @@ impl PluginClient<Unbound> {
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
         )
-        .map_err(|e| failed(e.to_string()))?;
+        .map_err(|e| IpcError::LoadFailed {
+            path: origin_path.clone(),
+            stage: LoadStage::Activation,
+            reason: e.to_string(),
+        })?;
         Ok(Self {
             bridge,
             descriptor,

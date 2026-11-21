@@ -23,7 +23,7 @@ use tutti_platform::Instant;
 
 use tutti_graph::Prepare;
 use tutti_plugin_host::{PluginHandle, PluginStatus};
-use tutti_plugin_types::PluginInvalidation;
+use tutti_plugin_types::{PluginInvalidation, RateRefusalCause};
 use tutti_units::{SampleRate, Samples};
 
 /// The rate the plugin is loaded at, and accepts.
@@ -82,7 +82,7 @@ fn wait_for(
 }
 
 fn refused_at(status: &PluginStatus, rate: f64) -> bool {
-    matches!(status, PluginStatus::RateRefused { rate: r, reason } if r.get() == rate && !reason.is_empty())
+    matches!(status, PluginStatus::RateRefused(refusal) if refusal.rate.get() == rate && matches!(refusal.cause, RateRefusalCause::Deactivated { .. } | RateRefusalCause::RolledBack { .. }))
 }
 
 /// Drive until two consecutive blocks are live. Blocks are submitted faster
@@ -163,7 +163,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     );
     assert!(
         events.lock().unwrap().iter().any(
-            |e| matches!(e, PluginInvalidation::RateRefused { rate, .. } if rate.get() == REFUSED_RATE)
+            |e| matches!(e, PluginInvalidation::RateRefused(refusal) if refusal.rate.get() == REFUSED_RATE)
         ),
         "{:?}",
         events.lock().unwrap()
@@ -175,7 +175,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
             .lock()
             .unwrap()
             .iter()
-            .filter(|e| matches!(e, PluginInvalidation::RateRefused { rate, .. } if rate.get() == REFUSED_RATE))
+            .filter(|e| matches!(e, PluginInvalidation::RateRefused(refusal) if refusal.rate.get() == REFUSED_RATE))
             .count()
     };
     reprepare(&mut unit, REFUSED_RATE);

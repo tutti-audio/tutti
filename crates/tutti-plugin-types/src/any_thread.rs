@@ -8,8 +8,8 @@
 
 use crate::{
     AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass, ParameterInfo,
-    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, UnknownParam,
-    bypass_value, is_bypassed,
+    PluginFailure, RenderMode, StateError, StateUse, TerminationReason, UnknownParam, bypass_value,
+    is_bypassed,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -183,9 +183,9 @@ pub trait Health: Send + Sync {
     /// site, so it answers even for a crash before the host listened.
     fn crash_cause(&self) -> Option<PluginFailure>;
 
-    /// The sample rate the plugin refused and its reason, while it is refused.
+    /// The refusal of the sample rate, while the plugin refuses it.
     /// An in-process plugin cannot refuse.
-    fn rate_refusal(&self) -> Option<(SampleRate, String)>;
+    fn rate_refusal(&self) -> Option<crate::RateRefusal>;
 
     /// Blocks the audio path gave up waiting for, and replies it took (on time
     /// or late), over the plugin's life: a plugin that stays alive but never
