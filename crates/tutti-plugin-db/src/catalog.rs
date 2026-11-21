@@ -1129,7 +1129,10 @@ mod tests {
                 FileRow::probed(PluginFormat::Vst3, &FileFacts::read(path))
                     .plugins(vec![Described {
                         id: None,
-                        descriptor: PluginDescriptor::default(),
+                        descriptor: PluginDescriptor::new(
+                            "",
+                            tutti_plugin_types::PluginClass::Unknown,
+                        ),
                     }])
                     .build()
                     .expect("ids of the row's format"),

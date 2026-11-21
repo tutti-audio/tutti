@@ -226,7 +226,6 @@ tutti-plugin-types  setter  crates/tutti-plugin-types/src/process.rs::ProcessOut
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/metadata.rs::PluginBus::placed
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_role
-tutti-plugin-types  default-enum-arg  crates/tutti-plugin-types/src/descriptor.rs::PluginDescriptor::new
 
 # tutti-polysynth
 

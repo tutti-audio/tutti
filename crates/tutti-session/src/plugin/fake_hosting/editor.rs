@@ -41,7 +41,7 @@ fn hosting_as(backend: Inert, served: bool) -> (DetachedSession, NodeKey, FakePl
     let handle = PluginHandle::from_backend(
         Arc::new(backend),
         Some(control),
-        Default::default(),
+        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         Default::default(),
     );

@@ -955,7 +955,9 @@ impl PluginHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_plugin_types::{EditorWindow, ParameterInfo, Preset, PresetId, RenderMode};
+    use tutti_plugin_types::{
+        EditorWindow, ParameterInfo, PluginClass, Preset, PresetId, RenderMode,
+    };
     use tutti_units::Normalized;
     use tutti_units::ParamId;
 
@@ -1167,7 +1169,7 @@ mod tests {
         PluginHandle::from_backend(
             Arc::new(Inert),
             control,
-            PluginDescriptor::default(),
+            PluginDescriptor::new("", PluginClass::Unknown),
             loaded,
             ParameterChangeSink::default(),
         )

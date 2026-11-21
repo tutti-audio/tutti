@@ -21,6 +21,7 @@ use dpi::{PhysicalSize, Size};
 use tutti_plugin_ipc_ffi::FdId;
 use tutti_rt::AtomicRequestFlags;
 
+use crate::PluginClass;
 use crate::StateError;
 use crate::{
     ChannelLayout, ContentScale, Control, Controller, EditReader, EditWriter, EditorError,
@@ -314,10 +315,7 @@ impl Shared {
     }
 
     fn descriptor() -> PluginDescriptor {
-        PluginDescriptor {
-            name: "Fake".into(),
-            ..PluginDescriptor::default()
-        }
+        PluginDescriptor::new("Fake", PluginClass::Unknown)
     }
 }
 

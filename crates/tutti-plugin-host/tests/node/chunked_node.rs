@@ -27,9 +27,9 @@ use tutti_plugin_host::{InProcessClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
     EditorWindow, Features, InProcess, Loaded, LoadedPlugin, MainThreadMarker, MainWorkHandle,
-    ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult,
-    PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused, RenderModeSupport,
-    RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
+    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef,
+    PluginResult, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused,
+    RenderModeSupport, RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::TempoReader;
@@ -328,10 +328,7 @@ impl InProcess for Rec {
         let rig = ROUTE.with(|r| r.borrow_mut().take()).expect("a rig routed");
         Ok(Rec {
             rig,
-            descriptor: PluginDescriptor {
-                name: "Rec".into(),
-                ..PluginDescriptor::default()
-            },
+            descriptor: PluginDescriptor::new("Rec", PluginClass::Unknown),
             origin: plugin.clone(),
             work: work.clone(),
         })

@@ -3180,7 +3180,7 @@ mod tests {
                 main,
             }),
             None,
-            Default::default(),
+            tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
             Default::default(),
             Default::default(),
         );
@@ -3229,7 +3229,7 @@ mod tests {
                 main: None,
             }),
             None,
-            Default::default(),
+            tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
             Default::default(),
             sink.clone(),
         );
@@ -3251,7 +3251,7 @@ mod tests {
                 main: None,
             }),
             None,
-            Default::default(),
+            tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
             Default::default(),
             Default::default(),
         );
@@ -3583,7 +3583,10 @@ mod tests {
                     main: None,
                 }),
                 Some(control),
-                Default::default(),
+                tutti_plugin_types::PluginDescriptor::new(
+                    "",
+                    tutti_plugin_types::PluginClass::Unknown,
+                ),
                 Default::default(),
                 Default::default(),
             );
@@ -3829,7 +3832,7 @@ mod tests {
                 main: None,
             }),
             None,
-            Default::default(),
+            tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
             Default::default(),
             Default::default(),
         );

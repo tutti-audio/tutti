@@ -168,15 +168,14 @@ pub fn read_result(result: &Path) -> Result<Option<ProbeOutcome>, ResultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MeasureFailure, PluginDescriptor, PluginId, Widths};
+    use crate::{MeasureFailure, PluginClass, PluginDescriptor, PluginId, Widths};
 
     fn described() -> ProbeOutcome {
         let plugin = |id: &str, widths| Described {
             id: Some(PluginId::Clap(id.into())),
             descriptor: PluginDescriptor {
-                name: id.into(),
                 widths,
-                ..PluginDescriptor::default()
+                ..PluginDescriptor::new(id, PluginClass::Unknown)
             },
         };
         ProbeOutcome::Described {
@@ -335,7 +334,7 @@ mod tests {
                 id: Some(PluginId::Vst2(k as u32)),
                 descriptor: PluginDescriptor {
                     measured: Some(measured(tail, latency)),
-                    ..PluginDescriptor::default()
+                    ..PluginDescriptor::new("", PluginClass::Unknown)
                 },
             })
             .collect();
@@ -408,7 +407,7 @@ mod tests {
         let outcome = ProbeOutcome::Described {
             plugins: vec![Described {
                 id: None,
-                descriptor: PluginDescriptor::default(),
+                descriptor: PluginDescriptor::new("", PluginClass::Unknown),
             }],
             unmeasured: failures
                 .into_iter()
