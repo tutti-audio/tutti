@@ -5,8 +5,8 @@
 //! nowhere lower. Everything the mic feeds is device-free and lives lower: the
 //! inlet node that copies the monitor ring into the graph (`tutti-graph`'s
 //! `InletNode`, opened by `tutti-session`'s `Graph::add_inlet`), the
-//! `tutti_codec::FileOut` a take records into, and the `Recorder` that pumps
-//! between them (`tutti-session`). What this crate contributes is the one live
+//! `tutti_codec::FileOut` a take records into, and the pump that moves
+//! frames between them (`tutti-session`'s take). What this crate contributes is the one live
 //! [`Source`] that touches hardware.
 //!
 //! # Threading
@@ -61,6 +61,7 @@ use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
 use crate::owner::Owned;
 use crate::roster::DeviceDirection;
 use tutti_engine::{StreamFaults, StreamLatency};
+use tutti_platform::Executor;
 
 /// Capture-ring capacity: one second, held whole at the stream's rate. Large
 /// enough that a briefly descheduled pump thread doesn't overrun, small enough
@@ -95,7 +96,7 @@ struct StreamHandle(
 /// The CPAL input callback selects the inputs the mic was opened with from each
 /// device frame and pushes them into a lock-free ring of about one second; this
 /// value is the consumer end. Pull from it with [`pull`](Source::pull),
-/// or hand it to a `tutti_session::Recorder` with a sink from
+/// or hand it to a `tutti_session::PumpLoop` with a sink from
 /// [`matching_sink`](Self::matching_sink) to record. If the consumer falls
 /// behind, the callback drops the newest frames rather than block. Capture
 /// stops when this value is dropped.
@@ -208,7 +209,8 @@ impl MicConfig {
 
 impl<F: Float> MicIn<F> {
     /// Opens the input device `config` names at the graph's sample rate and
-    /// starts capturing its inputs. Returns once the stream is live.
+    /// starts capturing its inputs on a dedicated thread of `executor`. Returns once the
+    /// stream is live.
     ///
     /// The rate is a parameter rather than read off the device because nothing
     /// downstream resamples: an inlet renders the mic into the graph
@@ -230,8 +232,8 @@ impl<F: Float> MicIn<F> {
     /// sample format; [`DeviceError::BuildStream`] / [`DeviceError::PlayStream`] from
     /// CPAL; [`DeviceError::Inputs`] for an empty list of inputs or one the device
     /// does not have.
-    pub fn open(config: &MicConfig, graph_rate: SampleRate) -> Result<Self> {
-        Self::open_inner(config, graph_rate, false).map(|(mic, _)| mic)
+    pub fn open(executor: &Executor, config: &MicConfig, graph_rate: SampleRate) -> Result<Self> {
+        Self::open_inner(executor, config, graph_rate, false).map(|(mic, _)| mic)
     }
 
     /// Opens the mic like [`open`](Self::open), and also returns the reader of
@@ -249,10 +251,11 @@ impl<F: Float> MicIn<F> {
     /// # Errors
     /// As [`open`](Self::open).
     pub fn open_with_monitor(
+        executor: &Executor,
         config: &MicConfig,
         graph_rate: SampleRate,
     ) -> Result<(Self, InletRing<F>)> {
-        Self::open_inner(config, graph_rate, true).map(Self::with_ring)
+        Self::open_inner(executor, config, graph_rate, true).map(Self::with_ring)
     }
 
     fn with_ring((source, ring): (Self, Option<InletRing<F>>)) -> (Self, InletRing<F>) {
@@ -260,6 +263,7 @@ impl<F: Float> MicIn<F> {
     }
 
     fn open_inner(
+        executor: &Executor,
         mic: &MicConfig,
         graph_rate: SampleRate,
         monitor: bool,
@@ -329,7 +333,7 @@ impl<F: Float> MicIn<F> {
         }
         let cb_faults = Arc::clone(&faults);
         let cb_latency = Arc::clone(&latency);
-        let owned = Owned::spawn("tutti-input-stream", move || {
+        let owned = Owned::spawn(executor, "tutti-input-stream", move || {
             let (d, c) = (&device, &cfg);
             let stream = match sample_format {
                 cpal::SampleFormat::I8 => build_input(
@@ -416,8 +420,8 @@ impl<F: Float> MicIn<F> {
 
     /// The faults the input stream has reported, shared with its error callback.
     ///
-    /// Take it before handing the mic to a `tutti_session::Recorder`, which owns the
-    /// `MicIn`. A disconnect also ends the take: the recorder's
+    /// Take it before handing the mic to a `tutti_session::PumpLoop`, which owns the
+    /// `MicIn`. A disconnect also ends the take: the pump's
     /// `failed()` turns `true` once the buffered frames are written. Nothing
     /// else observes the mic; a host that wants to report it polls this handle,
     /// as it does the output's.
@@ -477,7 +481,7 @@ impl<F: Float> MicIn<F> {
         // Read off `Source::layout` rather than hard-coded, so this pairing
         // cannot drift from what `pull` actually hands back; a sink built
         // from a *different* width than the source reports is exactly what
-        // `Recorder::start` refuses, and this helper exists to be the pairing
+        // `PumpLoop::new` refuses, and this helper exists to be the pairing
         // that always passes.
         FileOut::create(
             &Spec::of_width(format, Source::layout(self), self.sample_rate),

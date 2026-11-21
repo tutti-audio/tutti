@@ -44,8 +44,10 @@
 //! use tutti_cpal::{AudioEngine, TuttiDriver};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // The stream runs on a dedicated thread of this executor.
+//! let streams = tutti_platform::Executor::new();
 //! // Open a device first: it reports the rate the graph must be built at.
-//! let mut audio_engine = AudioEngine::new(None)?;
+//! let mut audio_engine = AudioEngine::new(&streams, None)?;
 //! let sample_rate = audio_engine.sample_rate();
 //!
 //! // The graph: an editor on the control thread, its executor for the audio
@@ -94,8 +96,8 @@
 //! other method runs on the control thread.
 //!
 //! This crate does not own the graph (rendering a block is `tutti-engine`'s) or
-//! recording (the pump that drives a mic into a file is `tutti-session`'s
-//! `Recorder`, which is device-free).
+//! recording (the pump that drives a mic into a file is `tutti-session`'s:
+//! its takes and `PumpLoop`, which are device-free).
 //!
 //! ## Features
 //!

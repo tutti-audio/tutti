@@ -1,9 +1,9 @@
 //! The pump loop, stepped by hand: counts are exact because the passes are the
-//! test's, never a sleep. What only a thread runs (the stop handshake, the
-//! park, the join) is `tests/io/recorder_thread.rs`.
+//! test's, never a sleep.
 
 use super::*;
-use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::Interleaved;
 use tutti_codec::{FileOut, Format, Pcm, Spec};
 use tutti_units::SampleRate;
@@ -87,7 +87,8 @@ fn pump_into_wav_sink_round_trips_frame_count() {
         pos: 0,
         layout: ChannelLayout::STEREO,
     };
-    let mut pump_loop = PumpLoop::new(src, sink(&path, 2, Pcm::Float32), SCRATCH_FRAMES).unwrap();
+    let mut pump_loop =
+        PumpLoop::new(src, sink(&path, 2, Pcm::Float32), Samples::new(1024)).unwrap();
     assert_eq!(pump_until_dry(&mut pump_loop, 16), Samples::new(FRAMES));
     pump_loop
         .finalize()
@@ -102,15 +103,14 @@ fn pump_into_wav_sink_round_trips_frame_count() {
 
 /// **The replacement for the lost compile error, outer half.**
 ///
-/// A width mismatch is a returned error, checked BEFORE any frame moves (and,
-/// for a recorder, before the thread spawns), so no frame is ever written to a
+/// A width mismatch is a returned error, checked BEFORE any frame moves, so no frame is ever written to a
 /// file whose channels would rotate. This is the guarantee the runtime
 /// `ChannelLayout` gave up at the type level.
 ///
 /// The matching pair must still be accepted, which is the half that stops
 /// this from passing vacuously.
 #[test]
-fn start_rejects_a_source_sink_width_mismatch() {
+fn new_rejects_a_source_sink_width_mismatch() {
     let dir = tempfile::tempdir().unwrap();
 
     let stereo_src = || SliceSource {
@@ -121,14 +121,14 @@ fn start_rejects_a_source_sink_width_mismatch() {
 
     // Stereo source, 6-channel sink: refused.
     let wide = sink(&dir.path().join("mismatch.wav"), 6, Pcm::Float32);
-    let err = Recorder::start(stereo_src(), wide)
+    let err = PumpLoop::new(stereo_src(), wide, Samples::new(1024))
         .expect_err("a width mismatch must be refused, not recorded");
     // The typed variant carries both layouts as values, so a caller can
     // branch on the widths without parsing the message.
     assert!(
         matches!(
             err,
-            RecorderError::ChannelWidthMismatch { src, sink }
+            PumpLoopError::ChannelWidthMismatch { src, sink }
                 if src == ChannelLayout::STEREO && sink == ChannelLayout::from(6u16)
         ),
         "expected ChannelWidthMismatch carrying both layouts, got: {err:?}"
@@ -142,12 +142,13 @@ fn start_rejects_a_source_sink_width_mismatch() {
     // wrong as a widening one, and it is the direction a caller is most likely
     // to think "it'll just downmix". Through the loop as well as the recorder.
     let mono = sink(&dir.path().join("mismatch_mono.wav"), 1, Pcm::Float32);
-    assert!(PumpLoop::new(stereo_src(), mono, SCRATCH_FRAMES).is_err());
+    assert!(PumpLoop::new(stereo_src(), mono, Samples::new(1024)).is_err());
 
     // And the matching pair is accepted.
     let ok = sink(&dir.path().join("match.wav"), 2, Pcm::Float32);
-    let rec = Recorder::start(stereo_src(), ok).expect("matching widths must be accepted");
-    rec.finish().expect("finalize");
+    let pump = PumpLoop::new(stereo_src(), ok, Samples::new(1024))
+        .expect("matching widths must be accepted");
+    pump.finalize().expect("finalize");
 }
 
 /// A non-stereo pairing records end to end, and every count on the way
@@ -168,7 +169,7 @@ fn a_six_channel_source_records_at_its_own_width() {
         pos: 0,
         layout: ChannelLayout::from(6u16),
     };
-    let mut pump_loop = PumpLoop::new(src, sink(&path, 6, Pcm::Float32), SCRATCH_FRAMES)
+    let mut pump_loop = PumpLoop::new(src, sink(&path, 6, Pcm::Float32), Samples::new(1024))
         .expect("matching 6ch widths");
 
     let written = pump_until_dry(&mut pump_loop, 16);
@@ -226,7 +227,7 @@ fn a_non_mic_live_source_records_until_stopped() {
     let mut pump_loop = PumpLoop::new(
         Starving { polls: 0 },
         sink(&path, 2, Pcm::Float32),
-        SCRATCH_FRAMES,
+        Samples::new(1024),
     )
     .expect("matching stereo widths");
 
@@ -422,7 +423,7 @@ fn a_dead_mic_fails_the_take_and_keeps_its_frames() {
             dead: Arc::clone(&dead),
         },
         sink(&path, 2, Pcm::Float32),
-        SCRATCH_FRAMES,
+        Samples::new(1024),
     )
     .unwrap();
 
@@ -461,7 +462,7 @@ fn frames_buffered_at_the_fault_are_written_first() {
             dead: Arc::new(AtomicBool::new(true)),
         },
         sink(&path, 2, Pcm::Float32),
-        SCRATCH_FRAMES,
+        Samples::new(1024),
     )
     .unwrap();
     assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples::new(5)));
@@ -484,7 +485,7 @@ fn a_failed_sink_fails_the_take() {
             dead: Arc::new(AtomicBool::new(false)),
         },
         wav,
-        SCRATCH_FRAMES,
+        Samples::new(1024),
     )
     .unwrap();
     assert_eq!(pump_loop.pump_once(), PumpPass::Failed);
@@ -543,7 +544,7 @@ fn a_frame_delivered_before_the_failure_is_recorded() {
             answers: vec![Pull::Starved, Pull::Frames(Samples::new(1)), Pull::Failed].into_iter(),
         },
         sink(&path, 2, Pcm::Float32),
-        SCRATCH_FRAMES,
+        Samples::new(1024),
     )
     .unwrap();
     assert_eq!(pump_loop.pump_once(), PumpPass::Starved);
@@ -569,7 +570,7 @@ fn a_failed_finite_source_is_failed_not_ended() {
     }
     let dir = tempfile::tempdir().unwrap();
     let wav = sink(&dir.path().join("f.wav"), 2, Pcm::Float32);
-    let mut pump_loop = PumpLoop::new(DeadFile, wav, SCRATCH_FRAMES).unwrap();
+    let mut pump_loop = PumpLoop::new(DeadFile, wav, Samples::new(1024)).unwrap();
     assert_eq!(pump_loop.pump_once(), PumpPass::Failed);
 }
 
@@ -605,7 +606,7 @@ fn the_loop_sums_what_the_source_lost() {
             Ok(())
         }
     }
-    let mut pump_loop = PumpLoop::new(Dropping, F32Collect, SCRATCH_FRAMES).unwrap();
+    let mut pump_loop = PumpLoop::new(Dropping, F32Collect, Samples::new(1024)).unwrap();
     assert_eq!(pump_loop.pump_once(), PumpPass::Starved);
     assert_eq!(pump_loop.pump_once(), PumpPass::Starved);
     assert_eq!(pump_loop.lost(), Samples::new(14));
@@ -769,4 +770,44 @@ fn pump_rejects_a_width_mismatch() {
     };
     let mut buf = vec![0.0f32; 16];
     let _ = pump(&mut src, &mut dst, &mut buf);
+}
+
+/// A sink that cannot close: the pump's `finalize` hands back the sink's own
+/// error, which is also its `source`.
+#[test]
+fn a_sink_that_fails_to_close_reports_its_own_error() {
+    struct DiskFull;
+
+    impl Sink for DiskFull {
+        type Sample = f32;
+        type Error = std::io::Error;
+
+        fn layout(&self) -> ChannelLayout {
+            ChannelLayout::STEREO
+        }
+
+        fn write(&mut self, _: Interleaved<'_>) -> Result<(), SinkFailed> {
+            Ok(())
+        }
+
+        fn finalize(self) -> Result<(), Self::Error> {
+            Err(std::io::Error::other("disk full"))
+        }
+    }
+
+    let pump = PumpLoop::new(
+        SliceSource {
+            samples: Vec::new(),
+            pos: 0,
+            layout: ChannelLayout::STEREO,
+        },
+        DiskFull,
+        Samples::new(8),
+    )
+    .expect("stereo into stereo");
+    let err = pump.finalize().expect_err("the sink failed to close");
+    let FinalizeError::Sink(cause) = err else {
+        panic!("a close failure is the sink's: {err:?}");
+    };
+    assert_eq!(cause.to_string(), "disk full");
 }

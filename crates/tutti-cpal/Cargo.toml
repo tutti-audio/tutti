@@ -54,9 +54,14 @@ tutti-codec = { version = "0.0.1", path = "../tutti-codec", optional = true }
 
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-# `spawn_named`: the device-listing and poller threads.
+# The `Executor` whose dedicated threads own the streams, and `spawn_named` for the
+# device-listing and poller threads.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+# The owner thread's warnings when a drop cannot wait for it.
+tracing.workspace = true
+# The owner's stop: a oneshot whose sender dropping resolves the owner's future.
+futures-channel = { workspace = true }
 
 [dev-dependencies]
 # `contract::prepared`, to drive the inlet node by hand in the capture tests.
