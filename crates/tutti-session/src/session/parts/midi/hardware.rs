@@ -13,7 +13,6 @@ use tutti_buffers::Float;
 use tutti_midi_device::MidiIdentity;
 use tutti_midi_hardware::Presented;
 
-use crate::midi_port::Io;
 use tutti_midi_runtime::MidiInputPorts;
 use tutti_rt::Reclaim;
 use tutti_units::{SampleRate, Samples};
@@ -28,7 +27,7 @@ use crate::{MidiPolicy, SessionEvent};
 /// The OS MIDI layer and the identity the session presents on it.
 #[derive(Debug)]
 pub(crate) struct Hardware {
-    pub(crate) io: Option<Io>,
+    pub(crate) io: Option<tutti_midi_hardware::MidiSession>,
     /// Who the session is on the wire, as set ([`Session::policy`](crate::Session::policy)).
     policy: Arc<Cell<MidiPolicy>>,
 }

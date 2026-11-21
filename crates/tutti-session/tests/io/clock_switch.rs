@@ -770,7 +770,15 @@ mod midi_ports {
             .expect("builds");
         let _ = s.update();
         let keys = s.midi().devices().remove(0);
-        let port = s.open_midi_input(keys).expect("opens");
+        let opened = {
+            use std::task::{Context, Poll, Waker};
+            let wait = s.open_midi_input(keys).expect("begins");
+            match std::pin::pin!(wait).poll(&mut Context::from_waker(Waker::noop())) {
+                Poll::Ready(outcome) => outcome.expect("a fake backend starts at once"),
+                Poll::Pending => panic!("a fake backend's start is ready on the first poll"),
+            }
+        };
+        let port = s.apply(opened).expect("opens");
         (s, fake, port)
     }
 

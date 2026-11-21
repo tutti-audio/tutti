@@ -161,7 +161,8 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // when several present devices could be it. The port closes when its last
     // handle is dropped.
     //
-    //     let keys = s.open_midi_input(saved)?;
+    //     let opened = s.open_midi_input(saved)?.await?;
+    //     let keys = s.apply(opened)?;
     //     keys.presence();                     // Live, Lost(PortCause::Unplugged), ...
     let devices = list_devices(&mut s);
     let first = s
@@ -169,7 +170,13 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
         .devices()
         .into_iter()
         .find(|device| device.direction.is_input());
-    let keys = first.map(|device| s.open_midi_input(device)).transpose()?;
+    let keys = match first {
+        Some(device) => {
+            let opened = tutti_fixtures::block_on(s.open_midi_input(device)?)?;
+            Some(s.apply(opened)?)
+        }
+        None => None,
+    };
     let opened = keys.is_some();
     s.midi().unroute(route)?;
 

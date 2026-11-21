@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
+use crate::common::OpenPorts as _;
 use crate::common::{MF, blocks, note, play};
 use tutti_graph::Losses;
 use tutti_midi_ci::Muid;
@@ -74,8 +75,8 @@ fn wired_with(last_group: u8, config: MidiHardwareConfig) -> (Session, FakeCount
         .find(|d| d.name == "Wire")
         .expect("Wire is listed");
     let ports = Ports {
-        input: s.open_midi_input(wire.clone()).expect("opens"),
-        output: s.open_midi_output(wire).run().expect("opens"),
+        input: s.open_input(wire.clone()).expect("opens"),
+        output: s.open_output(wire).expect("opens"),
     };
     (s, fake, ports)
 }

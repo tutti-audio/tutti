@@ -814,7 +814,7 @@ pub mod midi {
         InputTiming, NotAChannelCount, ProcessChange, ReportAsk, Reporter, WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
+    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
         MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
@@ -875,7 +875,10 @@ pub mod midi {
         Stamping, TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
-    pub use tutti_session::{MidiInput, MidiOutput, OpenMidiOutput};
+    pub use tutti_session::{
+        MidiInput, MidiOpenError, MidiOutput, OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput,
+        OpeningMidiOutput,
+    };
 
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;

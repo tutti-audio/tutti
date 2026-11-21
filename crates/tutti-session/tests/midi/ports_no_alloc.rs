@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_platform::Instant;
 
+use crate::common::OpenPorts as _;
 use crate::common::{MF, play};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
@@ -52,8 +53,8 @@ fn an_input_and_an_output_port_render_without_allocating() {
         .route(MidiRouteRule::any_channel().to(synth))
         .expect("routes");
     let list = s.midi().devices();
-    let input = s.open_midi_input(list[0].clone()).expect("opens");
-    let output = s.open_midi_output(list[1].clone()).run().expect("opens");
+    let input = s.open_input(list[0].clone()).expect("opens");
+    let output = s.open_output(list[1].clone()).expect("opens");
     let _ = s.update();
     s.midi_nodes()
         .unwrap()

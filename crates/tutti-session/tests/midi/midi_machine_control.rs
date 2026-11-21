@@ -6,6 +6,7 @@
 //! `00:00:02:00` is 2 s, beat 4 at 120 bpm; drop-frame labels skip two a minute)
 //! and the time code a locate states.
 
+use crate::common::OpenPorts as _;
 use crate::common::{Keyed, blocks};
 use std::sync::{Arc, Mutex};
 use tutti_platform::Instant;
@@ -36,7 +37,7 @@ fn rig() -> (Keyed, FakeCounters) {
         .expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    let keys = s.open_midi_input(keys).expect("opens");
+    let keys = s.open_input(keys).expect("opens");
     (Keyed::new(s, keys), fake)
 }
 
