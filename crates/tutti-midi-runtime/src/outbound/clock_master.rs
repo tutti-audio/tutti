@@ -97,7 +97,8 @@ pub(crate) struct ClockMaster {
     flex: FlexOut,
     /// The Song Position Pointers and MTC timecodes not sent since the host
     /// last took the count ([`take_refused`](Self::take_refused)): a position
-    /// the 14-bit pointer or a timecode cannot name.
+    /// the 14-bit pointer or a timecode cannot name. MTC with no time (before
+    /// beat 0) counts once from each grid restart, not per quarter-frame.
     refused: u64,
 }
 
@@ -184,10 +185,10 @@ struct MtcGrid {
     /// The grid was just restarted: its first piece 0 is still to be placed
     /// on an even frame ([`ClockMaster::tick_mtc`]).
     align: bool,
-    /// The cycle in progress had no timecode to state (its piece 0 was refused),
-    /// or the passes since the grid restarted have no MIDI time (before beat
-    /// 0): nothing of it is sent, so no receiver reads half of a position or
-    /// the previous cycle's, and the refusal is counted once.
+    /// Nothing of the current cycle is sent, and its refusal is counted
+    /// already: its piece 0 had no timecode to state, or every pass since the
+    /// grid restarted has no MIDI time (before beat 0). No receiver reads half
+    /// of a position or the previous cycle's.
     skipped: bool,
 }
 
@@ -226,8 +227,9 @@ impl ClockMaster {
 
     /// The messages refused since the last call, then zero: a Song Position
     /// Pointer for a beat past its 14-bit field (4096 beats) or before the
-    /// start, and an MTC position for a time before zero or NaN. Each is
-    /// skipped, never sent clamped to a position the transport is not at.
+    /// start, and an MTC position for a time before zero or NaN (once from each
+    /// grid restart while the quarter-frames have none). Each is skipped, never
+    /// sent clamped to a position the transport is not at.
     pub(crate) fn take_refused(&mut self) -> u64 {
         std::mem::take(&mut self.refused)
     }
@@ -776,8 +778,11 @@ fn frame_offset(frames: usize, block_size: usize) -> Offset {
 /// (or not a number), or a tempo that does not advance, has none: MTC states
 /// no time there.
 fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> Option<f64> {
+    if beats_per_sample <= BeatDuration::new(0.0) {
+        return None;
+    }
     let samples = beat.get() / beats_per_sample.get();
-    (beats_per_sample > BeatDuration::new(0.0) && samples >= 0.0).then_some(samples)
+    (samples >= 0.0).then_some(samples)
 }
 
 /// The eight Quarter Frames of the cycle that starts at `position` from
