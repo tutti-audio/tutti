@@ -3930,7 +3930,7 @@ mod tests {
     /// **A reload of a plugin whose load resolves in process is refused as
     /// `ReplacementInProcess`, with no main thread and nothing opened.** The
     /// decision is `Loadable::placement` (a pure resolve, no module
-    /// read): `PluginLoad::run` returns such a load unopened (`Opened::OnMain`),
+    /// read): `PluginLoad::run` returns such a load unopened (`Opened::InProcess`),
     /// and the landing does not open it. No thread of this process claimed the
     /// main thread, so an open (which takes the token) could not have happened.
     #[cfg(feature = "clap")]
