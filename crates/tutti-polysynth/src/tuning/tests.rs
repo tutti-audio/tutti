@@ -21,7 +21,10 @@ fn test_equal_temperament() {
 
 #[test]
 fn test_custom_reference() {
-    let tuning = Tuning::equal_temperament_with_reference(Hz::new(432.0), NoteNumber::of(69));
+    let tuning = Tuning::equal_temperament_with_reference(
+        ReferencePitch::of(Hz::new(432.0)),
+        NoteNumber::of(69),
+    );
 
     // A4 should be 432 Hz
     assert!((tuning.note_to_freq(NoteNumber::of(69)).get() - 432.0).abs() < 0.01);
@@ -73,7 +76,7 @@ fn the_table_is_frequency_data() {
 fn test_from_cents() {
     // Create quarter-tone scale (24 notes per octave)
     let cents: Vec<Cents> = (0..24).map(|i| Cents::new(f64::from(i) * 50.0)).collect();
-    let tuning = Tuning::from_cents(&cents);
+    let tuning = Tuning::try_from(cents.as_slice()).unwrap();
 
     assert_eq!(tuning.scale_size(), 24);
 
@@ -87,8 +90,8 @@ fn test_from_cents() {
 #[test]
 fn test_from_ratios() {
     // Simple Pythagorean pentatonic
-    let ratios = [1.0, 9.0 / 8.0, 81.0 / 64.0, 3.0 / 2.0, 27.0 / 16.0];
-    let tuning = Tuning::from_ratios(&ratios);
+    let ratios = [1.0, 9.0 / 8.0, 81.0 / 64.0, 3.0 / 2.0, 27.0 / 16.0].map(FrequencyRatio::of);
+    let tuning = Tuning::try_from(ratios.as_slice()).unwrap();
 
     assert_eq!(tuning.scale_size(), 5);
     // A4 (note 69) is degree 4, 27/16; note 71 is degree 1, 9/8, an octave on: a
@@ -164,7 +167,10 @@ fn test_set_reference_dynamically() {
 #[test]
 fn test_different_reference_note() {
     // Use C4 (note 60) as reference at 256 Hz
-    let tuning = Tuning::equal_temperament_with_reference(Hz::new(256.0), NoteNumber::of(60));
+    let tuning = Tuning::equal_temperament_with_reference(
+        ReferencePitch::of(Hz::new(256.0)),
+        NoteNumber::of(60),
+    );
 
     assert!((tuning.note_to_freq(NoteNumber::of(60)).get() - 256.0).abs() < 0.01);
 
@@ -246,4 +252,67 @@ fn test_very_low_and_high_frequencies() {
         "Note 127 should be ~12543.85 Hz, got {}",
         highest
     );
+}
+
+/// **A scale has at least one degree**: no degrees is refused, not read as 12-tone equal
+/// temperament.
+#[test]
+fn an_empty_scale_is_refused() {
+    let cents: &[Cents] = &[];
+    let ratios: &[FrequencyRatio] = &[];
+    assert_eq!(Tuning::try_from(cents), Err(TuningError::EmptyScale));
+    assert_eq!(Tuning::try_from(ratios), Err(TuningError::EmptyScale));
+}
+
+/// **A degree that no frequency follows is refused at its key**: a NaN or
+/// infinite degree, or one so far out `2^(cents/1200)` overflows or vanishes, never reaches the
+/// table.
+#[test]
+fn a_degree_without_a_frequency_is_refused() {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1.0e9] {
+        // Note 69 is degree 1 of 2, the reference's, at 0 cents; key 0 is degree 0, the bad one.
+        let got = Tuning::try_from([Cents::new(bad), Cents::new(0.0)].as_slice());
+        assert_eq!(
+            got,
+            Err(TuningError::Unplayable {
+                note: NoteNumber::of(0)
+            }),
+            "{bad} cents"
+        );
+    }
+}
+
+/// **A reference pitch runs from 1 Hz to 1 MHz**: zero, below 1 Hz, past 1 MHz, NaN and the
+/// infinities are refused, so every key of the table has a frequency.
+#[test]
+fn a_reference_pitch_takes_exactly_one_hertz_to_one_megahertz() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: ReferencePitch::new,
+        get: ReferencePitch::get,
+        of: Some(ReferencePitch::of),
+        valid: &[Hz::new(1.0), Hz::new(432.0), Hz::new(1.0e6)],
+        invalid: &[
+            Hz::new(0.0),
+            Hz::new(0.999),
+            Hz::new(-440.0),
+            Hz::new(1.0e6 + 1.0),
+            Hz::new(f64::NAN),
+            Hz::new(f64::INFINITY),
+        ],
+    });
+}
+
+/// **The table of every reference the type accepts has a frequency for each key**: the ends
+/// of its range, at the lowest and highest reference notes, stay finite and above zero.
+#[test]
+fn the_ends_of_the_reference_range_keep_every_key_audible_to_the_table() {
+    for hz in [1.0, 1.0e6] {
+        for note in [0, 127] {
+            let tuning = Tuning::equal_temperament_with_reference(
+                ReferencePitch::of(Hz::new(hz)),
+                NoteNumber::of(note),
+            );
+            assert!(tuning.checked().is_ok(), "{hz} Hz at note {note}");
+        }
+    }
 }

@@ -149,7 +149,7 @@ impl<F: SynthFloat> PolySynth<F> {
             .collect();
         let bank = Self::build_bank(&config, sample_rate, unison_count);
 
-        let volume = Self::clamp_volume(config.volume);
+        let volume = config.volume.get();
         let master_volume = Param::new(volume);
         let universal = UniversalReader::new(config.group, config.device);
         let bends = [Semitones::UNISON; 16];
@@ -196,8 +196,8 @@ impl<F: SynthFloat> PolySynth<F> {
         self.process_midi_event(ump.into());
     }
 
-    /// A master volume as the synth reads it: floored at 0. Shared by the config's
-    /// [`volume`](SynthConfig::volume) and a driven port's value.
+    /// A driven port's master volume as the synth reads it: floored at 0, the
+    /// range of [`MasterVolume`](crate::MasterVolume) a param stream has no caller to refuse to.
     #[inline]
     pub(crate) fn clamp_volume(volume: Amplitude) -> Amplitude {
         volume.max(Amplitude::SILENT)

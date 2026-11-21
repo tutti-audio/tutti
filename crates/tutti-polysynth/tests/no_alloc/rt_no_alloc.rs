@@ -30,7 +30,7 @@ use tutti_ump::{
     PerNoteManagement, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
-use tutti_units::{Hz, Q, SampleRate};
+use tutti_units::{Hz, SampleRate};
 
 fn note_on(channel: u8, note: u8, vel: u8) -> Ump {
     midi::note_on(
@@ -72,7 +72,7 @@ fn polysynth_process_with_active_voices_is_allocation_free() {
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
             cutoff: Hz::new(2_000.0),
-            q: Q::new(0.707),
+            q: tutti_polysynth::SvfQ::BUTTERWORTH,
             mode: tutti_polysynth::SvfMode::Lowpass,
         },
         ..Default::default()
