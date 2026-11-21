@@ -74,6 +74,10 @@
 //!   the mean of the input through signed, delayed taps onto output channels, no latency, the tail
 //!   the last tap) and `DecorrelatorNode` (a sparse velvet-noise FIR per channel, each from its own
 //!   seeded sequence, of unit energy), from an `EarlyReflectionsConfig` and a `DecorrelatorConfig`.
+//! - **FM and additive synthesis** — `FmNode` (operators that modulate one another's phase as an
+//!   algorithm says, oversampled, with two-sample-average feedback) and `AdditiveNode` (a bank of
+//!   sine partials as ratios of a frequency, a partial at or above the Nyquist dropped), from an
+//!   `FmConfig` and an `AdditiveConfig`.
 //! - **Distance** — `DistanceNode` (a source at a distance in metres: the delay `r / c`, the level
 //!   `r_ref / r` and optional air absorption; a moving distance is the Doppler shift, and the
 //!   delay is musical, so it reports no latency), from a `DistanceConfig`.
@@ -307,6 +311,12 @@ pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 
 mod oscillator;
 pub use oscillator::{OscillatorConfig, OscillatorNode};
+
+// Phase-modulation and additive synthesis: operators and partials as sources.
+mod additive;
+mod fm;
+pub use additive::{AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet};
+pub use fm::{FmConfig, FmKernel, FmNode, FmSet};
 
 mod noise;
 pub use noise::{NoiseConfig, NoiseNode};

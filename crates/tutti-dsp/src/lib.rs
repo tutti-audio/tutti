@@ -114,6 +114,10 @@
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
+//! - **Phase modulation** (`fm.rs`): [`FmVoice`], operators that modulate one another's phase
+//!   as an [`Algorithm`] says, run oversampled, with two-sample-average feedback.
+//! - **Additive** (`additive.rs`): [`AdditiveBank`], sine [`Partials`] as ratios of a frequency,
+//!   a partial at or above the Nyquist dropped.
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
 //!   channels a block inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a ramped
 //!   [`StereoWidth`](tutti_units::StereoWidth)); [`PanLaw`] and [`pan_gains`].
@@ -158,6 +162,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod additive;
 mod all_pass;
 mod bands;
 mod beat;
@@ -178,6 +183,7 @@ mod early_reflections;
 mod fft;
 mod filter;
 mod fir;
+mod fm;
 mod follower;
 mod frequency_shifter;
 mod interp;
@@ -215,6 +221,10 @@ mod stft;
 mod testing;
 mod viterbi;
 
+pub use additive::{
+    AdditiveBank, AdditiveControls, MAX_PARTIALS, Partial, PartialCount, PartialCountError,
+    Partials,
+};
 pub use all_pass::AllPassFilter;
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
@@ -263,6 +273,11 @@ pub use filter::{
 pub use fir::{
     Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,
     kaiser_beta,
+};
+pub use fm::{
+    Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice, MAX_OPERATORS, Operator,
+    OperatorCount, OperatorCountError, OperatorError, OperatorFrequency, OperatorSpec, PatchError,
+    Route,
 };
 pub use frequency_shifter::{
     FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,

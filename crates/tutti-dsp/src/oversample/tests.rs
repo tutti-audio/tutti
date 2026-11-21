@@ -314,3 +314,56 @@ fn a_passband_keeps_the_range_checked_shape() {
     };
     tutti_fixtures::check_range_contract(&c);
 }
+
+/// A generator's block is `factor` times the frames at the higher rate, and a constant written
+/// there is the constant at the base rate once the half-band's response has passed: the
+/// down-sampler's DC gain is 1 within its ripple.
+#[test]
+fn a_source_block_is_written_at_the_higher_rate_and_down_sampled() {
+    for factor in FACTORS {
+        let mut os = plan(factor).state::<f64>(MaxBlock::of(Samples::new(256)));
+        let mut out = vec![0.0f64; 256];
+        for _ in 0..2 {
+            let mut high = os.source(Samples::new(256));
+            assert_eq!(high.frames().get(), 256 * factor.get());
+            high.samples_mut().fill(1.0);
+            os.downsample(MonoMut::new(&mut out));
+        }
+        assert!(
+            out[128..].iter().all(|&y| (y - 1.0).abs() <= DELTA),
+            "{factor:?}"
+        );
+    }
+}
+
+/// A sine written at the higher rate comes out at the base rate as `sin(w (n - d))` for `d =
+/// down_delay()`, within the ripple of the `stages` half-bands (`2 * DELTA` each by Kaiser's
+/// estimate): the delay is the exact linear-phase one, a fraction of a base frame for the
+/// factors where the round trip is not a multiple of the factor.
+#[test]
+fn the_down_delay_is_the_delay_of_a_sine_written_at_the_higher_rate() {
+    for factor in FACTORS {
+        let stages = factor.get().trailing_zeros() as f64;
+        let plan = plan(factor);
+        let delay = plan.down_delay().get();
+        let high = BASE * factor.get() as f64;
+        let f = TONE_BIN as f64 / WINDOW as f64 * BASE;
+        let mut os = plan.state::<f64>(MaxBlock::of(Samples::new(WINDOW)));
+        let mut out = vec![0.0f64; WINDOW];
+        for pass in 0..2 {
+            let mut written = os.source(Samples::new(WINDOW));
+            for (m, y) in written.samples_mut().iter_mut().enumerate() {
+                let n = (pass * WINDOW * factor.get() + m) as f64;
+                *y = (TAU * f * n / high).sin();
+            }
+            os.downsample(MonoMut::new(&mut out));
+        }
+        let worst = (SETTLE..WINDOW)
+            .map(|n| {
+                let want = (TAU * f * (n as f64 + WINDOW as f64 - delay) / BASE).sin();
+                (out[n] - want).abs()
+            })
+            .fold(0.0, f64::max);
+        assert!(worst < 2.0 * stages * DELTA, "{factor:?}: {worst}");
+    }
+}
