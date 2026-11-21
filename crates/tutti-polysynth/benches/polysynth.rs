@@ -49,7 +49,7 @@ use tutti_ump::{
     Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
-use tutti_units::{Amplitude, Hz, Normalized, Q, Resonance, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Hz, Normalized, Resonance, SampleRate, Samples, Seconds};
 
 const SR: f64 = 48_000.0;
 /// The block every case renders: a constant here, not an axis (see the
@@ -165,7 +165,7 @@ fn bench_filter(c: &mut Criterion) {
             "svf-lowpass",
             FilterType::Svf {
                 cutoff: Hz::new(2_000.0),
-                q: Q::new(0.707),
+                q: tutti_polysynth::SvfQ::BUTTERWORTH,
                 mode: SvfMode::Lowpass,
             },
         ),

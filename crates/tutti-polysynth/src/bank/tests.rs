@@ -331,7 +331,7 @@ fn svf_gain_matches_the_closed_form<F: SynthFloat>() {
     ] {
         let filter = FilterType::Svf {
             cutoff: Hz::new(fc),
-            q: Q::new(q),
+            q: crate::SvfQ::of(Q::new(q)),
             mode,
         };
         for hz in [90.0, 450.0, 900.0, 3_000.0, 9_000.0] {
