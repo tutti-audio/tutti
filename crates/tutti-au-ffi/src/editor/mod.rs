@@ -199,7 +199,6 @@ impl Drop for AuEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::ComponentRef;
 
     /// **AUDelay advertises a Cocoa view**: `has_editor` reads the property's
     /// size, and the host's lifecycle suite opens that view.
