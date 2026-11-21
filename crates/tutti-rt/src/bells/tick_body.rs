@@ -1,5 +1,5 @@
 //! The tick's body where something parks for it: the task on a native target, the
-//! loom model's stepped [`Ticker`](super::Ticker).
+//! loom model's stepped `Ticker`.
 
 use super::{Ordering, Parker, Shared, State};
 

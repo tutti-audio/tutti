@@ -1,5 +1,5 @@
 //! The tick under loom: no task, since `tutti-platform` has no executor there. The
-//! model steps the body by hand through [`Ticker`](super::Ticker).
+//! model steps the body by hand through its `Ticker`.
 
 use super::Shared;
 
