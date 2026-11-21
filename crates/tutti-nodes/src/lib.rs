@@ -68,6 +68,9 @@
 //!   `CombForm` of one delay, its coefficient live) and `FrequencyShifterNode` (single-sideband
 //!   modulation by a signed shift in hertz through a Hilbert all-pass network, with no latency),
 //!   from a `CombFilterConfig` and a `FrequencyShifterConfig`.
+//! - **Pitch shifter** — `PitchShifterNode` (a shift in cents at the input's duration over a phase
+//!   vocoder shared by every channel, so a stereo image survives; its latency is reported), from a
+//!   `PitchShifterConfig`.
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
@@ -399,6 +402,12 @@ pub use frequency_shifter::{
 };
 // The controls those start at and the form of a comb.
 pub use tutti_dsp::{CombControls, CombForm, FrequencyShifterControls};
+
+// Pitch shifter.
+mod pitch_shifter;
+pub use pitch_shifter::{
+    PitchShifterConfig, PitchShifterKernel, PitchShifterNode, PitchShifterSet,
+};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.

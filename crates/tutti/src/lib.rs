@@ -345,7 +345,8 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
-        FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet,
+        FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig,
+        PitchShifterKernel, PitchShifterNode, PitchShifterSet,
     };
 }
 
