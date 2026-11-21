@@ -119,7 +119,7 @@ impl EditorSite {
     /// The result says whether the editor instance was given the audio
     /// instance's state ([`EditorOpened::mirrored`]); an editor whose mirror
     /// failed still opens, at the plugin's defaults, and the failure is
-    /// counted in [`mirror_refused_cell`](Self::mirror_refused_cell). A served
+    /// counted in [`mirror_transfers_refused_cell`](Self::mirror_transfers_refused_cell). A served
     /// editor is the audio instance's own: nothing to mirror.
     ///
     /// # Errors
@@ -252,7 +252,7 @@ impl EditorSite {
     /// current), user edits the audio instance did not take, and states that
     /// could not be read or loaded either way, each counted once. `None` for a
     /// served editor, which has no mirror.
-    pub fn mirror_refused_cell(&self) -> Option<Tally<u64>> {
+    pub fn mirror_transfers_refused_cell(&self) -> Option<Tally<u64>> {
         match &self.site {
             Site::InProcess(site) => Some(site.mirror.refused.clone()),
             Site::Server(_) => None,
@@ -288,7 +288,7 @@ impl EditorSite {
 
     /// Loads `data` into the in-process editor so its display stays in step
     /// with the audio instance. A refusal is counted in
-    /// [`mirror_refused_cell`](Self::mirror_refused_cell): the audio instance
+    /// [`mirror_transfers_refused_cell`](Self::mirror_transfers_refused_cell): the audio instance
     /// has the state either way.
     pub(crate) fn mirror_state(&self, main: MainThreadMarker, data: &[u8]) {
         if let Site::InProcess(site) = &self.site
@@ -694,9 +694,19 @@ impl InProcessEditor {
     /// The editor's state as it stands now, as the baseline for the next
     /// [`pull_editor_state`]: called once the open has synced it from the
     /// audio instance. Read back rather than taken from the sync's bytes,
-    /// because a plugin may normalise a state it is given.
+    /// because a plugin may normalise a state it is given. A state the editor
+    /// instance cannot read leaves no baseline, so the editor's own changes are
+    /// not carried to the audio instance: counted as a refused transfer.
     fn take_baseline(&self, main: MainThreadMarker, gui: &mut dyn Editor) {
-        *self.baseline.lock_recover() = gui.save_state(main).ok();
+        let baseline = match gui.save_state(main) {
+            Ok(state) => Some(state),
+            Err(e) => {
+                tracing::warn!("[bridge] the editor's baseline state could not be read: {e}");
+                self.mirror.refuse();
+                None
+            }
+        };
+        *self.baseline.lock_recover() = baseline;
     }
 
     /// [`pull_editor_state`] against this bridge's audio instance.
@@ -787,7 +797,7 @@ struct GuiMirror {
     params: ArrayQueue<(ParamId, Normalized)>,
     /// Transfers between the audio and editor instances that were refused,
     /// ever: writes the full queue refused, and the failed ones of the editor's
-    /// edits and state (see [`EditorSite::mirror_refused_cell`]).
+    /// edits and state (see [`EditorSite::mirror_transfers_refused_cell`]).
     refused: Tally<u64>,
     /// The writer of `refused`.
     refused_writer: TallyWriter<u64>,

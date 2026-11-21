@@ -376,8 +376,8 @@ impl PluginControls {
     /// the editor that the plugin did not take, and a state that could not be
     /// read or loaded either way (an editor opened at the plugin's defaults
     /// among them). RT-safe: one relaxed load.
-    pub fn mirror_writes_refused(&self) -> u64 {
-        self.chunks.mirror_refused()
+    pub fn mirror_transfers_refused(&self) -> u64 {
+        self.chunks.mirror_transfers_refused()
     }
 
     /// Requests the plugin's editor instance made that were dropped: every

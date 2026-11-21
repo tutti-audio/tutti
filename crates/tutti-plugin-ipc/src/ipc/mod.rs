@@ -478,6 +478,20 @@ pub struct Launched {
     pub restored: Option<std::result::Result<(), StateError>>,
 }
 
+/// How many parameters the server lists for the plugin `bridge` serves.
+///
+/// # Errors
+///
+/// [`IpcError::ParametersUnlisted`] when the server gives no list. A plugin with
+/// no parameters lists none, which is an answer.
+fn listed_parameters(bridge: &PluginBridge) -> IpcResult<usize> {
+    bridge
+        .audio()
+        .parameters()
+        .map(|list| list.len())
+        .ok_or(IpcError::ParametersUnlisted)
+}
+
 impl Ipc {
     /// A served plugin over a running server. Installs the bridge's listener
     /// (the figures the plugin re-reports); a host that wants the events too
@@ -508,8 +522,8 @@ impl Ipc {
             counters.attach_commands_refused(bridge.audio().commands_refused_cell());
             counters.attach_responses_lost(bridge.audio().responses_lost_cell());
             counters.attach_leaked_buffers(bridge.audio().leaked_buffers_cell());
-            if let Some(refused) = bridge.editor().mirror_refused_cell() {
-                counters.attach_mirror_refused(refused);
+            if let Some(refused) = bridge.editor().mirror_transfers_refused_cell() {
+                counters.attach_mirror_transfers_refused(refused);
             }
             if let Some(dropped) = bridge.editor().editor_requests_dropped_cell() {
                 counters.attach_editor_requests_dropped(dropped);
@@ -602,13 +616,10 @@ impl Ipc {
             config.timeouts,
         )?;
         guard.attach(thread);
-        // The parameter list, once, while loading blocks anyway: the bridge's
-        // buffers are sized by it at activation, which may not make the trip.
-        let parameters = bridge
-            .audio()
-            .parameters()
-            .ok_or(IpcError::ParametersUnlisted)?
-            .len();
+        // The parameter list, asked here and by `over`, while loading blocks
+        // anyway: the bridge's buffers are sized by it at activation, which
+        // may not make the trip.
+        let parameters = listed_parameters(&bridge)?;
         let ceiling = config.max_buffer_size.min(tutti_plugin_types::MAX_CHUNK);
         let timeout = config.timeouts.call;
         let ipc = Self::new(IpcParts {

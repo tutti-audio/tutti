@@ -81,8 +81,8 @@ pub struct ChunkCounters {
     leaked_buffers: OnceLock<Tally<u64>>,
     /// Transfers between the audio and editor instances that were refused,
     /// counted by the bridge (set by
-    /// [`attach_mirror_refused`](Self::attach_mirror_refused)).
-    mirror_refused: OnceLock<Tally<u64>>,
+    /// [`attach_mirror_transfers_refused`](Self::attach_mirror_transfers_refused)).
+    mirror_transfers_refused: OnceLock<Tally<u64>>,
     /// Requests the editor instance made that were dropped, counted by the
     /// bridge (set by
     /// [`attach_editor_requests_dropped`](Self::attach_editor_requests_dropped)).
@@ -105,7 +105,7 @@ impl std::fmt::Debug for ChunkCounters {
             .field("commands_refused", &self.commands_refused())
             .field("responses_lost", &self.responses_lost())
             .field("leaked_buffers", &self.leaked_buffers())
-            .field("mirror_refused", &self.mirror_refused())
+            .field("mirror_transfers_refused", &self.mirror_transfers_refused())
             .field("editor_requests_dropped", &self.editor_requests_dropped())
             .finish_non_exhaustive()
     }
@@ -158,13 +158,13 @@ impl ChunkCounters {
     }
 
     /// Reads the editor mirror's count of refused transfers (the node's bind).
-    pub fn attach_mirror_refused(&self, refused: Tally<u64>) {
-        let _ = self.mirror_refused.set(refused);
+    pub fn attach_mirror_transfers_refused(&self, refused: Tally<u64>) {
+        let _ = self.mirror_transfers_refused.set(refused);
     }
 
-    /// See `PluginControls::mirror_writes_refused`.
-    pub fn mirror_refused(&self) -> u64 {
-        self.mirror_refused.get().map_or(0, Tally::get)
+    /// See `PluginControls::mirror_transfers_refused`.
+    pub fn mirror_transfers_refused(&self) -> u64 {
+        self.mirror_transfers_refused.get().map_or(0, Tally::get)
     }
 
     /// Reads the count of editor-instance requests dropped (the node's bind).

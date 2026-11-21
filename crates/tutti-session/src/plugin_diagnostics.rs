@@ -150,11 +150,11 @@ impl<'a> Diagnostics<'a> {
     }
 
     /// Transfers between the plugin and its editor instance that were refused: a parameter write the mirror dropped (the plugin still got it; the open editor's display missed it), an edit or a state one side did not take (an editor opened at the plugin's defaults among them). Zero for a plugin that runs in this process.
-    pub fn mirror_writes_refused(&self) -> u64 {
-        self.hosted
-            .controls
-            .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::mirror_writes_refused)
+    pub fn mirror_transfers_refused(&self) -> u64 {
+        self.hosted.controls.as_ref().map_or(
+            0,
+            tutti_plugin_host::PluginControls::mirror_transfers_refused,
+        )
     }
 
     /// Requests the plugin's editor instance made that were dropped: every request but a transport request (a restart, an I/O change, a parameter rescan, a latency or tail change, a reload, a callback, a MIDI-CC or note-expression change, a timer or a file descriptor), which the plugin's audio instance cannot be told. Zero for a plugin that runs in this process.

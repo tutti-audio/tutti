@@ -94,6 +94,30 @@ fn an_editor_reads_a_requested_size_once() {
     assert_eq!(editor.requested_size(), None, "a request is read once");
 }
 
+/// **An editor whose mirror failed still opens, and the failure reaches the app
+/// in the open's `mirrored`**, for the embedded and the floating kind alike.
+#[test]
+fn a_refused_mirror_passes_through_the_open() {
+    use tutti_plugin_types::{EditorMirrorError, StateError};
+    let (mut s, node, fake) = session_with_editor();
+    fake.with_editor_mirror_failure(EditorMirrorError::Unread(StateError::Unavailable));
+    let main = tutti_fixtures::main_thread();
+    let mut editor = s.editor(node, &main).unwrap();
+    let opened = editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let Opened::Embedded { size, mirrored } = opened else {
+        panic!("an embedded open: {opened:?}");
+    };
+    assert_eq!(size, PhysicalSize::new(640, 480).into());
+    assert!(
+        matches!(
+            mirrored,
+            Err(EditorMirrorError::Unread(StateError::Unavailable))
+        ),
+        "{mirrored:?}"
+    );
+    assert!(editor.is_open(), "the editor opened");
+}
+
 /// **A new editor is closed, opening it opens it, and dropping it closes
 /// the plugin's editor on the thread that made it**: the editor's state is the
 /// plugin handle's flag, and the fake's calls show the close.
@@ -104,7 +128,7 @@ fn an_editor_reads_open_after_open_and_a_drop_closes_it() {
     let mut editor = s.editor(node, &main).unwrap();
     assert!(editor.exists());
     assert!(!editor.is_open(), "a new editor is closed");
-    editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     assert!(editor.is_open());
     assert_eq!(closes(&fake), 0);
 
@@ -123,7 +147,7 @@ fn dropping_an_editor_that_never_opened_closes_nothing() {
     let (mut s, node, fake) = session_with_editor();
     let main = tutti_fixtures::main_thread();
     let mut opened = s.editor(node, &main).unwrap();
-    opened.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = opened.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     drop(s.editor(node, &main).unwrap());
     assert_eq!(closes(&fake), 0);
     assert!(opened.is_open());
@@ -150,7 +174,7 @@ fn update_services_the_open_editor_on_the_main_thread_and_no_other() {
     let _ = s.update_on(main);
     assert_eq!(idles(&fake), 0, "nothing is serviced before it opens");
 
-    editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     let _ = s.update_on(main);
     let _ = s.update_on(main);
     assert_eq!(idles(&fake), 2, "one idle per update");
@@ -165,7 +189,7 @@ fn update_services_the_open_editor_on_the_main_thread_and_no_other() {
     let _ = s.update_on(main);
     assert_eq!(idles(&fake), 2, "a closed editor is not serviced");
 
-    editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     drop(editor);
     let _ = s.update_on(main);
     assert_eq!(idles(&fake), 2, "a dropped editor is not serviced");
@@ -180,7 +204,7 @@ fn rescale_reaches_the_plugins_scale_call_or_is_refused_by_name() {
     let (mut s, node, fake) = session_with_editor();
     let main = tutti_fixtures::main_thread();
     let mut editor = s.editor(node, &main).unwrap();
-    editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     let two = ContentScale::new(2.0).unwrap();
 
     assert!(
@@ -273,7 +297,7 @@ fn a_removal_ends_the_editor() {
     let (mut s, node, fake) = session_with_editor();
     let main = tutti_fixtures::main_thread();
     let mut editor = s.editor(node, &main).unwrap();
-    editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = editor.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     s.remove(node).unwrap();
 
     assert!(
@@ -316,7 +340,7 @@ fn a_second_editor_cannot_open_over_the_first_and_a_closed_one_closes_nothing() 
     };
     let mut a = s.editor(node, &main).unwrap();
     let mut b = s.editor(node, &main).unwrap();
-    a.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = a.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     assert!(
         b.is_open(),
         "the plugin's editor is open, whoever opened it"
@@ -328,7 +352,7 @@ fn a_second_editor_cannot_open_over_the_first_and_a_closed_one_closes_nothing() 
     assert_eq!(opens(&fake), 1, "the plugin was not asked to open twice");
 
     a.close();
-    b.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
+    let _ = b.open(&StandInWindow, ContentScale::IDENTITY).unwrap();
     assert_eq!(opens(&fake), 2);
     let before = closes(&fake);
     drop(a);

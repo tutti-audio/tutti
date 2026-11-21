@@ -155,8 +155,10 @@ pub enum IpcError {
     Server(#[from] crate::ServerError),
 
     /// The plugin-server did not list the plugin's parameters: the request
-    /// could not be sent, the server answered something else, or the plugin
-    /// died first. A plugin with no parameters lists none, which is an answer;
+    /// could not be sent, the server answered something else, the plugin died
+    /// first, or the server did not answer within `param_wait`. A server slower
+    /// than `param_wait` fails the load, and any `Ipc::launch` relaunch, instead
+    /// of loading degraded. A plugin with no parameters lists none, which is an answer;
     /// this is the lack of one, and the node's per-parameter delivery cannot be
     /// sized without it.
     #[error("the plugin-server did not list the plugin's parameters")]

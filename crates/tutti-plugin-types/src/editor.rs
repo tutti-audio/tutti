@@ -381,17 +381,18 @@ impl WindowHandle {
     }
 }
 
-/// Why an editor opened without the audio instance's state: the editor shows
-/// the plugin at its defaults until the user changes something.
+/// Why an editor opened without the audio instance's state in step: the editor
+/// shows the plugin at its defaults until the user changes something.
 #[derive(thiserror::Error, Debug, Clone)]
 #[non_exhaustive]
 pub enum EditorMirrorError {
     /// The audio instance's state could not be read, so the editor instance
     /// was given none.
-    #[error("the audio instance's state could not be read for the editor: {0}")]
-    Unread(crate::StateError),
+    #[error("the audio instance's state could not be read for the editor")]
+    Unread(#[source] crate::StateError),
     /// The editor instance refused the audio instance's state.
-    #[error("the editor instance refused the audio instance's state: {0}")]
+    #[error("the editor instance refused the audio instance's state")]
+    // The `Arc` keeps `Opened` `Clone`.
     Refused(#[source] std::sync::Arc<crate::PluginError>),
 }
 
@@ -400,7 +401,9 @@ pub enum EditorMirrorError {
 ///
 /// An editor that could not be mirrored still opens (the user would have no
 /// window at all otherwise); `mirrored` says the editor shows the plugin at its
-/// defaults and the audio instance stays the source of truth.
+/// defaults and the audio instance stays the source of truth. An open whose
+/// mirror failed is also counted in `mirror_transfers_refused` of the plugin's
+/// controls, so an app that reads both does not add the two.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct EditorOpened<W> {

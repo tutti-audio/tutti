@@ -113,6 +113,9 @@ struct Mock {
     announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>>,
     /// The state the server saves when asked; `None` for a plugin that cannot.
     saved_state: Arc<Mutex<Option<Vec<u8>>>>,
+    /// Whether the server answers a parameter-list ask with the list; when
+    /// not, it answers with another kind of reply, which is no list.
+    lists: Arc<std::sync::atomic::AtomicBool>,
     _bridge: crate::IpcThread,
 }
 
@@ -285,6 +288,8 @@ fn mock_with(
     let announcing = Arc::clone(&announce_during_setup);
     let saved_state: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(Some(vec![1, 2, 3])));
     let saving = Arc::clone(&saved_state);
+    let lists = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let listing = Arc::clone(&lists);
     std::thread::spawn(move || {
         loop {
             let mut len = [0u8; 4];
@@ -403,6 +408,17 @@ fn mock_with(
                 ControlRequest::GetParameter { .. } => {
                     reply_control(&served, id, &ControlReply::ParameterValue { value: None })
                 }
+                ControlRequest::GetParameterList
+                    if !listing.load(std::sync::atomic::Ordering::Relaxed) =>
+                {
+                    reply_control(
+                        &served,
+                        id,
+                        &ControlReply::PresetList {
+                            presets: Vec::new(),
+                        },
+                    )
+                }
                 ControlRequest::GetParameterList => reply_control(
                     &served,
                     id,
@@ -444,6 +460,7 @@ fn mock_with(
             stream,
             states,
             refuse_slabs,
+            lists,
             announce_during_setup,
             saved_state,
             _bridge: thread,
@@ -1853,7 +1870,7 @@ mod editor_mirror {
     fn refused(ipc: &Ipc) -> u64 {
         ipc.bridge()
             .editor()
-            .mirror_refused_cell()
+            .mirror_transfers_refused_cell()
             .expect("an in-process editor has a mirror")
             .get()
     }
@@ -1896,7 +1913,7 @@ mod editor_mirror {
     }
 
     /// **A state the audio instance cannot give leaves the editor at its
-    /// defaults, and the embedded open says so.
+    /// defaults, and the embedded open says so.**
     #[test]
     fn an_unreadable_audio_state_is_reported_by_the_open() {
         let _machine = machine_lock();
@@ -1941,10 +1958,11 @@ mod editor_mirror {
         assert_eq!(refused(&ipc), 1);
     }
 
-    /// **A state the editor cannot read is counted when it is pulled** to the
-    /// audio instance.
+    /// **A state the editor cannot read is counted** twice over: at the open,
+    /// where it leaves no baseline, and when it is pulled to the audio
+    /// instance.
     #[test]
-    fn an_editor_state_that_cannot_be_pulled_is_counted() {
+    fn an_editor_state_that_cannot_be_read_is_counted() {
         let _machine = machine_lock();
         let (ipc, _server) = with_editor(Script {
             cannot_save: true,
@@ -1953,9 +1971,9 @@ mod editor_mirror {
         });
         let editor = ipc.bridge().editor();
         let _opened = editor.open_floating_editor(main_thread()).expect("opens");
-        assert_eq!(refused(&ipc), 0);
+        assert_eq!(refused(&ipc), 1, "the baseline the open could not take");
         editor.editor_idle(main_thread());
-        assert_eq!(refused(&ipc), 1);
+        assert_eq!(refused(&ipc), 2, "the pull");
     }
 
     /// **A state the editor refuses on a later mirror is counted**, beside the
@@ -1992,4 +2010,30 @@ mod editor_mirror {
         editor.editor_idle(main_thread());
         assert_eq!(dropped.get(), 2);
     }
+}
+
+/// **A server that gives no parameter list fails the launch's list step**, with
+/// the error that says so, rather than a plugin with an empty list.
+#[test]
+fn a_server_that_gives_no_parameter_list_is_unlisted() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    server
+        .lists
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    let err = super::listed_parameters(ipc.bridge()).expect_err("no list came");
+    assert!(
+        matches!(err, tutti_plugin_types::IpcError::ParametersUnlisted),
+        "{err:?}"
+    );
+}
+
+/// **A plugin with no parameters lists none, which is an answer**: the load's
+/// list step counts zero and does not fail.
+#[test]
+fn a_plugin_with_no_parameters_lists_none_and_loads() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    server.parameters.lock().unwrap().clear();
+    assert_eq!(super::listed_parameters(ipc.bridge()).ok(), Some(0));
 }
