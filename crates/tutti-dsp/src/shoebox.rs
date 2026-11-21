@@ -141,10 +141,13 @@ impl ShoeboxConfig {
         Self { speed, ..self }
     }
 
-    /// Whether the direct path is a tap too.
+    /// The direct path is a tap too.
     #[must_use]
-    pub fn direct(self, direct: bool) -> Self {
-        Self { direct, ..self }
+    pub fn direct(self) -> Self {
+        Self {
+            direct: true,
+            ..self
+        }
     }
 }
 

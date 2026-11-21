@@ -103,7 +103,7 @@ fn the_image_count_is_the_closed_form() {
     let second = room().order(ReflectionOrder::Second);
     assert_eq!(count(second), images_of_order(1) + images_of_order(2));
     assert_eq!(
-        count(second.direct(true)),
+        count(second.direct()),
         1 + images_of_order(1) + images_of_order(2)
     );
 }
@@ -112,7 +112,7 @@ fn the_image_count_is_the_closed_form() {
 #[test]
 fn the_delays_are_sorted() {
     for order in [ReflectionOrder::First, ReflectionOrder::Second] {
-        let taps = taps_of(room().order(order).direct(true));
+        let taps = taps_of(room().order(order).direct());
         let delays: Vec<f64> = taps.taps.iter().map(|t| t.delay.get()).collect();
         assert!(delays.windows(2).all(|w| w[0] <= w[1]), "{delays:?}");
     }
@@ -152,7 +152,7 @@ fn the_direct_path_is_a_tap_when_asked_and_a_near_one_is_not_louder() {
         )
     };
     let direct = |r: ShoeboxConfig| {
-        let all = pairs(&taps_of(r.direct(true)));
+        let all = pairs(&taps_of(r.direct()));
         let without = pairs(&taps_of(r));
         assert_eq!(all.len(), without.len() + 1);
         *all.iter().find(|t| !without.contains(t)).unwrap()
