@@ -191,7 +191,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
     }
     knob_of(&mut s, p0);
     let lane = s.mod_state().lane(p0.key()).expect("a lane").0;
-    let (clip, _) = s.graph().add(tutti_graph::ForkByClone(EventSource1));
+    let clip = s.graph().add(tutti_graph::ForkByClone(EventSource1));
     let _ = s.update();
     let mut side = s.graph().take_audio_side();
     let value = |s: &DetachedSession| {

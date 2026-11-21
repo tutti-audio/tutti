@@ -50,7 +50,7 @@ fn render(s: &mut Session, frames: usize) -> [Vec<f32>; 2] {
 #[test]
 fn a_write_reaches_the_index_it_names() {
     let mut s = offline();
-    let (node, _) = s.graph().add(Params(Bands::new(100.0, 500.0)));
+    let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
@@ -88,7 +88,7 @@ fn a_write_reaches_the_index_it_names() {
 #[test]
 fn the_graph_declares_each_index() {
     let mut s = offline();
-    let (node, _) = s.graph().add(Params(Bands::new(0.0, 0.0)));
+    let node = s.graph().add(Params(Bands::new(0.0, 0.0)));
     let _ = s.update();
     assert!(s.graph().declares_param(node, BAND0).unwrap());
     assert!(s.graph().declares_param(node, BAND1).unwrap());
@@ -114,7 +114,7 @@ fn the_graph_declares_each_index() {
 #[test]
 fn a_route_to_index_1_does_not_touch_index_0() {
     let mut s = offline();
-    let (node, _) = s.graph().add(Params(Bands::new(100.0, 500.0)));
+    let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();

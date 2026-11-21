@@ -29,10 +29,10 @@ fn session(workers: Workers) -> Session<&'static str, Offline<f64>> {
 /// `0.125 * (lane + 1)` with `Session::set`, render one block and return it.
 fn render(workers: Workers, lanes: usize) -> Vec<f64> {
     let mut s = session(workers);
-    let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
+    let dc = s.graph().add(ForkByClone(Dc(FINE)));
     let mut gains = Vec::new();
     for _ in 0..lanes {
-        let (gain, _) = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
+        let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
         s.graph()
             .connect(dc.out(0), gain.input(0))
             .unwrap()
@@ -62,8 +62,8 @@ fn an_f64_session_renders_a_figure_f32_rounds_away_through_a_set_gain() {
     assert_ne!(f64::from(FINE as f32), FINE, "FINE is not an f32");
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
     let mut s = session(Workers::SERIAL);
-    let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
-    let (gain, _) = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
+    let dc = s.graph().add(ForkByClone(Dc(FINE)));
+    let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
     s.graph()
         .connect(dc.out(0), gain.input(0))
         .unwrap()

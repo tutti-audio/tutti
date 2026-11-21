@@ -58,7 +58,7 @@ pub fn offline() -> Session {
 /// A tap in `s`'s graph, and what it hears.
 pub fn tap(s: &mut Session) -> (NodeKey, Seen) {
     let seen = Seen::default();
-    let (node, ()) = s.graph().add(Tap(Arc::clone(&seen)));
+    let node = s.graph().add(Tap(Arc::clone(&seen)));
     (node.erase(), seen)
 }
 

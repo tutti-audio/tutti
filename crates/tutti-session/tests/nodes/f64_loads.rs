@@ -87,7 +87,7 @@ fn a_loaded_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     assert_eq!(wave.at(0, 7), fine_value(7));
 
     let clip = tutti_sampler::Clip::<f64>::new(wave).expect("a placeable wave");
-    let (key, _handle) = s.graph().add(clip.at(Beat::new(0.0)));
+    let key = s.graph().add(clip.at(Beat::new(0.0)));
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(key, 0)])
         .expect("the clip into the root");
@@ -120,8 +120,8 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
         .run()
         .expect("the file reads");
     let (stream, reader) = s.apply(opened).expect("the session serves it");
-    let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
-    let (key, _) = s
+    let dc = s.graph().add(ForkByClone(Dc(FINE)));
+    let key = s
         .graph()
         .add(tutti_sampler::Clip::<f64>::streaming(reader, stream).at(Beat::new(0.0)));
     s.graph()

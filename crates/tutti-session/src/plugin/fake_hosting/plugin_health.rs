@@ -109,7 +109,7 @@ fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
+    let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(
         &mut s,
         node,
@@ -317,7 +317,7 @@ fn session_reporting() -> (
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
+    let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(
         &mut s,
         node,

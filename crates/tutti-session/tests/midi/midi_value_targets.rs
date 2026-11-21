@@ -213,8 +213,8 @@ fn harmony_session() -> (
 ) {
     let mut s = offline();
     let seen = Arc::default();
-    let (tap, ()) = s.graph().add(HarmonyTap(Arc::clone(&seen)));
-    let (harmony, _) = s.graph().add(HarmonyNode::new([]));
+    let tap = s.graph().add(HarmonyTap(Arc::clone(&seen)));
+    let harmony = s.graph().add(HarmonyNode::new([]));
     s.graph()
         .set_feed(tap, Feeder::Declared, vec![harmony.events_out()]);
     let _ = s.update();
@@ -312,8 +312,8 @@ fn blocks_adopting_written_values_do_not_allocate() {
     let mut s = offline();
     let notes = Arc::new(AtomicUsize::new(0));
     let chords = Arc::new(AtomicUsize::new(0));
-    let (note_sink, _) = s.graph().add(ForkByClone(Count(Arc::clone(&notes))));
-    let (chord_sink, _) = s.graph().add(ForkByClone(Count(Arc::clone(&chords))));
+    let note_sink = s.graph().add(ForkByClone(Count(Arc::clone(&notes))));
+    let chord_sink = s.graph().add(ForkByClone(Count(Arc::clone(&chords))));
     s.midi()
         .play_clip(
             note_sink,
@@ -322,7 +322,7 @@ fn blocks_adopting_written_values_do_not_allocate() {
         )
         .expect("the sink takes MIDI");
     let clip = s.midi().clip(note_sink).expect("the clip");
-    let (harmony, _) = s.graph().add(HarmonyNode::new([]));
+    let harmony = s.graph().add(HarmonyNode::new([]));
     s.graph()
         .set_feed(chord_sink, Feeder::Declared, vec![harmony.events_out()]);
     let _ = s.update();
@@ -368,7 +368,7 @@ fn blocks_adopting_written_values_do_not_allocate() {
 fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
-    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+    let clip = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
         Beat::new(0.0),
@@ -494,7 +494,7 @@ fn a_clip_written_is_pending_until_the_update_publishes_it() {
 #[test]
 fn a_pending_clip_write_to_a_removed_node_never_publishes_and_is_freed() {
     let mut s = offline();
-    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+    let clip = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
         Beat::new(0.0),

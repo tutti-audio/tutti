@@ -20,7 +20,7 @@ fn session() -> DetachedSession {
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
-    let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let dc = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();

@@ -1411,7 +1411,7 @@ impl<F: Float> Midi<'_, F> {
                 clip.erase()
             }
             None => {
-                let (clip, _) = self.graph.add(MidiClipNode::new([]));
+                let clip = self.graph.add(MidiClipNode::new([]));
                 // A clip that cannot take its events is not left in the
                 // graph.
                 if let Err(refused) = self.publish_clip(clip, events) {
@@ -1424,7 +1424,7 @@ impl<F: Float> Midi<'_, F> {
                 let clip = clip.erase();
                 // The clip's MIDI is classic MPE until the transform says
                 // otherwise: it is the one holder of the zones.
-                let (transform, _) = self.graph.add(MpeTransformNode::new(self.state.mpe()));
+                let transform = self.graph.add(MpeTransformNode::new(self.state.mpe()));
                 let transform = transform.erase();
                 self.graph.set_feed(
                     transform,
@@ -2120,7 +2120,7 @@ impl<F: Float> Midi<'_, F> {
     /// generation on when its last handle drops.
     pub(crate) fn add_output_node(&mut self) -> (NodeKey, EventTapReader, Departure) {
         let (departure, generation) = Departure::new();
-        let (key, _) = self.graph.add(tutti_graph::ForkByClone(
+        let key = self.graph.add(tutti_graph::ForkByClone(
             tutti_midi_runtime::MidiOutNode::new().following(&generation),
         ));
         let node = key.erase();

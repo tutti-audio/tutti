@@ -1648,7 +1648,12 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             .hearing(layout)
             .mpe(self.state.mpe())
             .following(&generation);
-        let (key, controls) = self.graph.add(node);
+        let key = self.graph.add(node);
+        let controls = self
+            .graph
+            .controls(&key)
+            .cloned()
+            .expect("the input node was added a moment ago");
         let node = key.erase();
         let info = found.clone().unwrap_or_else(|| saved.clone());
         // The cells start closed: a connection reopens them.

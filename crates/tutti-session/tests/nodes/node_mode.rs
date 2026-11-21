@@ -51,8 +51,8 @@ struct Rig {
 fn rig() -> Rig {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(A)));
-    let (halve, _) = g.add(ForkByClone(Halve));
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let halve = g.add(ForkByClone(Halve));
     g.set_sources_unfaded(InPort::new(halve, 0), [OutPort::new(a, 0)])
         .unwrap();
     g.set_sources_unfaded(Root::output(0), [OutPort::new(halve, 0)])

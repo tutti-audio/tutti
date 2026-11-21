@@ -115,10 +115,10 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
         .build_detached(RATE)
         .unwrap();
     let threads = Threads::default();
-    let (sum, _) = session.graph().add(ForkByClone(Sum));
+    let sum = session.graph().add(ForkByClone(Sum));
     let mut named = Vec::new();
     for i in 0..BRANCHES {
-        let (branch, _) = session.graph().add(ForkByClone(Branch {
+        let branch = session.graph().add(ForkByClone(Branch {
             hz: 110.0 * (i + 1) as f32 + 0.37 * i as f32,
             phase: 0.0,
             dt: 0.0,

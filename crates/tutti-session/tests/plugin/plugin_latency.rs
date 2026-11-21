@@ -284,7 +284,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
-    assert!(matches!(landed, Crossfade::Landed(())), "nothing waits");
+    assert!(matches!(landed, Crossfade::Landed(_)), "nothing waits");
     let _ = s.update();
     let _ = s.update();
 

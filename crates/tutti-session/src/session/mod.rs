@@ -12,7 +12,7 @@ mod taps;
 mod tests;
 mod transport;
 
-pub use event::{CrossfadeControls, SessionEvent};
+pub use event::SessionEvent;
 #[cfg(feature = "midi")]
 pub use parts::MidiNodes;
 pub use phases::{ModInput, PHASES, Phase, PhaseCx};
@@ -81,7 +81,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 ///     .outputs_floor(ChannelLayout::MONO)
 ///     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(64))).build()
 ///     .unwrap();
-/// let (dc, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
+/// let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
 /// session.graph().set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)]).unwrap();
 /// session.update();
 ///

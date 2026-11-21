@@ -20,7 +20,7 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     session.graph().set_sample_rate(SampleRate::of(48_000.0));
-    let (noisy, _) = session.graph().add(ForkByClone(Noisy));
+    let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(noisy, 0)])

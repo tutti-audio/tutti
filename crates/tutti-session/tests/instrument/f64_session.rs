@@ -5,9 +5,7 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_music::Adsr;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
-use tutti_session::{
-    AddedInstrument, InstrumentHandle, OfflineSession, OutPort, Root, Session, Stamp,
-};
+use tutti_session::{InstrumentHandle, OfflineSession, OutPort, Root, Session, Stamp};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::Settings;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity};
@@ -86,7 +84,7 @@ fn rising_crossings(samples: &[f64]) -> usize {
 #[test]
 fn an_f64_synth_instrument_sounds_the_notes_frequency() {
     let mut session = session();
-    let AddedInstrument { mut handle, .. } = session
+    let mut handle = session
         .add_instrument(sine_synth())
         .expect("a synth is an instrument");
     let _ = session.update();
@@ -114,7 +112,7 @@ fn an_f64_synth_instrument_sounds_the_notes_frequency() {
 #[test]
 fn an_f64_instrument_gain_scales_a_held_sine_linearly() {
     let mut session = session();
-    let AddedInstrument { mut handle, .. } = session
+    let mut handle = session
         .add_instrument(sine_synth())
         .expect("a synth is an instrument");
     let _ = session.update();

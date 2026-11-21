@@ -23,7 +23,6 @@ use tutti_nodes::{
 use tutti_soundfont::SoundFontUnit;
 use tutti_units::Amplitude;
 
-use crate::instrument::AddedInstrument;
 use crate::{InstrumentHandle, Key, OutPort, ParamTarget, RemoveError, Session, SessionNode};
 
 /// A SoundFont unit wired to its chorus and reverb, and what they sum to.
@@ -140,18 +139,16 @@ where
         &mut self,
         unit: SoundFontUnit<C::Float>,
     ) -> Result<GeneralMidi<C::Float>, crate::Error> {
-        let AddedInstrument {
-            handle: instrument, ..
-        } = self.add_instrument_unwired(unit)?;
+        let instrument = self.add_instrument_unwired(unit)?;
         let unit = instrument.node().erase();
         let graph = self.graph();
-        let (chorus, _) = graph.add(ModDelayNode::<C::Float>::from(
+        let chorus = graph.add(ModDelayNode::<C::Float>::from(
             ModDelayConfig::general_midi_chorus(BusTopology::STEREO),
         ));
-        let (reverb, _) = graph.add(FreeverbNode::<C::Float>::from(
+        let reverb = graph.add(FreeverbNode::<C::Float>::from(
             FreeverbConfig::general_midi(),
         ));
-        let (strip, _) = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+        let strip = graph.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.
         graph.connect(OutPort::new(unit, 2), chorus.input(0))?;
         graph.connect(OutPort::new(unit, 3), chorus.input(1))?;

@@ -70,7 +70,7 @@ use crate::NodeSlots;
 /// }
 /// ```
 pub trait SessionNode<F: Float = f32>:
-    IntoNode<F, Controls: Clone + Send + 'static> + Send + 'static
+    IntoNode<F, Controls: Send + 'static> + Send + 'static
 {
     /// The node's params by address, read off its controls once it is in:
     /// what a [`ParamTarget`](crate::ParamTarget) write goes through, and

@@ -40,9 +40,9 @@ fn limiter() -> LimiterNode<f32> {
 /// ch0 through a limiter, ch1 dry: ch1's source must pre-roll to match.
 /// Returns the limiter's node latency.
 fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (eff, _) = s.graph().add(limiter());
-    let (b, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let eff = s.graph().add(limiter());
+    let b = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources(InPort::new(eff, 0), [OutPort::new(a, 0)])
         .unwrap();
@@ -65,7 +65,7 @@ fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
 #[test]
 fn a_graph_with_no_latency_reports_none() {
     let mut s = detached();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(a, 0)])
         .unwrap();
@@ -184,7 +184,7 @@ fn the_latency_fold_and_the_compiled_plan_agree() {
     assert_eq!(figures(&s).1, lat);
 
     let mut s = detached();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph().connect(a, Root).unwrap();
     let _ = s.update();
     assert_eq!(figures(&s).1, Samples::new(0));
@@ -198,8 +198,8 @@ fn the_latency_fold_and_the_compiled_plan_agree() {
 #[test]
 fn a_re_prepare_republishes_the_figures_once_it_resumes() {
     let mut s = detached();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (eff, _) = s.graph().add(limiter());
+    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let eff = s.graph().add(limiter());
     s.graph()
         .set_sources(InPort::new(eff, 0), [OutPort::new(a, 0)])
         .unwrap();

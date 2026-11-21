@@ -77,7 +77,7 @@ fn add_addresses_a_hosts_param_node() {
     let mut s = session();
     let unit = ProbeUnit::of(UnitParam::Drive, BASE);
     let cell = unit.knob();
-    let (node, _) = s.graph().add(unit);
+    let node = s.graph().add(unit);
     modulate_drive(&mut s, node.erase());
     assert_knob_is(&s, node.erase(), cell);
 }
@@ -92,7 +92,7 @@ fn add_addresses_an_engine_node() {
         .cell(UnitParam::Drive)
         .expect("a distortion has a drive")
         .into();
-    let (key, _) = s.graph().add(node);
+    let key = s.graph().add(node);
     modulate_drive(&mut s, key.erase());
     assert_knob_is(&s, key.erase(), cell);
 }
@@ -104,7 +104,7 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
     let mut s = session();
     let outgoing = ProbeUnit::of(UnitParam::Drive, BASE);
     let old = outgoing.knob();
-    let (node, _) = s.graph().add(outgoing);
+    let node = s.graph().add(outgoing);
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();

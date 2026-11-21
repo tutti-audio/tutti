@@ -21,7 +21,7 @@ fn feed<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     session: &mut Session<K, C>,
     values: &[f32],
 ) {
-    let (node, _) = session.graph().add(ForkByClone(Const::frame(values)));
+    let node = session.graph().add(ForkByClone(Const::frame(values)));
     for c in 0..values.len() {
         session
             .graph()

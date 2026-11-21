@@ -57,7 +57,7 @@ fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
 #[test]
 fn a_placed_clip_adds_no_tail_to_the_range() {
     let mut session = session();
-    let (clip, _) = session
+    let clip = session
         .graph()
         .add(Clip::new(constant(2 * RATE as usize, 0.25)).expect("a placeable wave"));
     session.graph().connect(clip, Root).unwrap().unfaded();
@@ -76,7 +76,7 @@ fn a_free_running_voice_rings_out_its_wave() {
         let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
         source.set_speed(PlaybackRate::clamped(speed));
         source.set_loop(looped);
-        let (voice, _) = session.graph().add(source);
+        let voice = session.graph().add(source);
         session.graph().connect(voice, Root).unwrap().unfaded();
         length_of(&mut session, 1.0)
     };
@@ -88,7 +88,7 @@ fn a_free_running_voice_rings_out_its_wave() {
     let mut session = session();
     let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
     source.set_loop(Some(looped));
-    let (voice, _) = session.graph().add(source);
+    let voice = session.graph().add(source);
     session.graph().connect(voice, Root).unwrap().unfaded();
     let cap = Seconds::new(0.5);
     let bounce = Bounce::project()
@@ -117,7 +117,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
     )
     .expect("a placeable wave");
     pool.insert(SlotId(1), source, Playback::default());
-    let (pool, _) = session.graph().add(pool);
+    let pool = session.graph().add(pool);
     session.graph().connect(pool, Root).unwrap().unfaded();
 
     let bounce = Bounce::project()
@@ -143,7 +143,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
 #[test]
 fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
     let mut session = session();
-    let (pool, _) = session.graph().add(VoicePool::new());
+    let pool = session.graph().add(VoicePool::new());
     session.graph().connect(pool, Root).unwrap().unfaded();
     let source = MemorySource::placed(
         constant(RATE as usize, 0.25),

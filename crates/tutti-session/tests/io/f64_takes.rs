@@ -117,7 +117,7 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     assert!((0..200).all(|i| wave.at(0, i) == FINE && wave.at(1, i) == -FINE));
 
     let clip = done.clip::<f64>().expect("a clip of the file");
-    let (node, _) = session.graph().add(clip);
+    let node = session.graph().add(clip);
     session
         .graph()
         .connect(node.out(0), Root::output(0))
