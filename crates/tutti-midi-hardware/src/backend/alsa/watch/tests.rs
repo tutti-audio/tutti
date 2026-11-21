@@ -230,7 +230,11 @@ impl World {
     /// As [`with`](Self::with), the first `failing` looks of which fail.
     fn build(name: &str, queued: &[Announced], failing: usize) -> Self {
         let slot = Arc::new(Mutex::new(None));
-        let devices = crate::Devices::open_over(Box::new(Capture(Arc::clone(&slot)))).unwrap();
+        let devices = crate::Devices::open_over(
+            &tutti_platform::Executor::new(),
+            Box::new(Capture(Arc::clone(&slot))),
+        )
+        .unwrap();
         let events = devices.subscribe();
         let sink = slot.lock().unwrap().take().unwrap();
         let model = Model {

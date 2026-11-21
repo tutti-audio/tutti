@@ -79,8 +79,12 @@ pub trait InputConnection: Send {
 
 /// A running watch over the OS's device list. Method-less like
 /// [`InputConnection`]: it is a lifetime. Dropping it stops the backend's
-/// thread and returns once the thread has ended, so no report reaches the sink
-/// afterwards.
+/// work without waiting for it: a backend whose work is a future on an
+/// `Executor` returns at once, and the future ends just after, on its own thread.
+/// A report already under way reaches the [`ChangeSink`] as it ends, even after
+/// the last [`Devices`](crate::Devices) has dropped: the sink holds the list's
+/// state alive, takes the report into a list nobody reads and wakes no
+/// subscriber that has gone.
 pub trait Watch: Send + Sync {}
 
 /// A watch that watches nothing: where no OS reports changes.

@@ -4,15 +4,16 @@ use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
 use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend.
-pub(crate) fn active() -> Box<dyn MidiEndpoints> {
+pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
     Box::new(super::coremidi::CoreMidiEndpoints::new())
 }
 
 /// Publishes the virtual endpoint `spec` describes, delivering into `producer`.
 pub(crate) fn open_virtual_endpoint(
+    _executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
     main: MainThreadMarker,

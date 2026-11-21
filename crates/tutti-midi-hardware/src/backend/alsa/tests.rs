@@ -30,11 +30,17 @@ struct Watched {
 
 impl Watched {
     fn open() -> Self {
-        Self::of(Devices::open().unwrap())
+        Self::open_on(&tutti_platform::Executor::new())
+    }
+
+    /// As [`open`](Self::open), on `executor`, which the caller keeps: the
+    /// watch's thread outlasts the `Devices` only if the watch fails to stop.
+    fn open_on(executor: &tutti_platform::Executor) -> Self {
+        Self::of(Devices::open(executor).unwrap())
     }
 
     fn with_backend(backend: Box<dyn crate::MidiEndpoints>) -> Self {
-        Self::of(Devices::open_over(backend).unwrap())
+        Self::of(Devices::open_over(&tutti_platform::Executor::new(), backend).unwrap())
     }
 
     fn of(devices: Devices) -> Self {
@@ -158,8 +164,8 @@ fn info(event: DeviceEvent) -> DeviceInfo {
 
 /// Waits for the number of watch threads to be `want`. The kernel lists a task
 /// from `spawn` but names it only once it runs, and keeps it listed for a
-/// moment after `join`, so a count read at once can be one off either way; the
-/// wait is bounded, and the thing under test (the thread ends) is `join`'s.
+/// moment after it ends, so a count read at once can be one off either way; the
+/// wait is bounded, and the thing under test (the thread ends) is the stop's.
 fn settle_watch_threads(want: usize) {
     let deadline = Instant::now() + PATIENCE;
     while watch_threads() != want {
@@ -325,7 +331,10 @@ fn two_identical_clients_are_two_devices() {
 #[test]
 fn dropping_devices_ends_the_watch_thread() {
     assert_eq!(watch_threads(), 0);
-    let devices = Watched::open();
+    // Kept past the drop: only the watch's own stop ends its thread, not the
+    // executor's shutdown.
+    let executor = tutti_platform::Executor::new();
+    let devices = Watched::open_on(&executor);
     settle_watch_threads(1);
     drop(devices);
     settle_watch_threads(0);
@@ -463,12 +472,15 @@ fn the_kernels_system_client_is_not_listed() {
 
 /// A backend whose enumeration panics once `armed` is set (not before: other
 /// processes' clients wake the watch at any time).
-struct Panicky(std::sync::Arc<std::sync::atomic::AtomicBool>);
+struct Panicky {
+    armed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    executor: tutti_platform::Executor,
+}
 
 impl crate::MidiEndpoints for Panicky {
     fn watch(&self, sink: crate::ChangeSink) -> crate::Result<Box<dyn crate::Watch>> {
-        let armed = std::sync::Arc::clone(&self.0);
-        super::watch::start(sink, move |_| {
+        let armed = std::sync::Arc::clone(&self.armed);
+        super::watch::start(&self.executor, sink, move |_| {
             assert!(
                 !armed.load(std::sync::atomic::Ordering::SeqCst),
                 "enumeration panics"
@@ -502,7 +514,10 @@ impl crate::MidiEndpoints for Panicky {
 #[test]
 fn a_watch_that_panics_reports_its_failure() {
     let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let devices = Watched::with_backend(Box::new(Panicky(std::sync::Arc::clone(&armed))));
+    let devices = Watched::with_backend(Box::new(Panicky {
+        armed: std::sync::Arc::clone(&armed),
+        executor: tutti_platform::Executor::new(),
+    }));
     assert!(devices.watch_failure().is_none());
     armed.store(true, std::sync::atomic::Ordering::SeqCst);
     let _device = plug(&unique("panic"));
@@ -609,6 +624,8 @@ struct Pumped {
     rig: crate::testing::Rig,
     connection: Option<Box<dyn crate::endpoints::InputConnection>>,
     _ports: std::sync::Arc<HardwareMidiInputs>,
+    /// Declared last: the pump's thread ends with the connection, before the executor.
+    _executor: tutti_platform::Executor,
 }
 
 impl Pumped {
@@ -646,12 +663,15 @@ impl Pumped {
         rig.run(1);
         let (seq, clock) = super::input::prepare(id).expect("the pump's client");
         prime(&seq);
-        let connection = super::input::start(seq, clock, producer).expect("the pump to open");
+        let executor = tutti_platform::Executor::new();
+        let connection =
+            super::input::start(&executor, seq, clock, producer).expect("the pump to open");
         Self {
             device,
             rig,
             connection: Some(Box::new(connection)),
             _ports: ports,
+            _executor: executor,
         }
     }
 }
@@ -760,15 +780,15 @@ fn only_a_source_that_cannot_speak_midi2_is_opened_as_midi1() {
     );
 }
 
-/// Dropping an input returns while its pump is blocked in `poll`: the drop
-/// completes, where a pump that waited for its next wake would never end.
+/// Dropping an input wakes its pump out of `poll`, so the pump's thread ends: the
+/// executor it ran on, dropped after the input, joins that thread, and a pump
+/// that waited for its next wake would never let the join return.
 #[test]
 fn dropping_an_input_stops_a_blocked_pump() {
-    let mut pumped = Pumped::open(Duration::ZERO);
-    let connection = pumped.connection.take().unwrap();
+    let pumped = Pumped::open(Duration::ZERO);
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        drop(connection);
+        drop(pumped);
         let _ = done.send(());
     });
     finished.recv_timeout(PATIENCE).expect("the pump to stop");
@@ -804,11 +824,11 @@ fn a_pump_whose_reads_fail_ends_and_raises_its_latch() {
 /// `EIO`, what the injected failure reads as.
 const EIO: i32 = 5;
 
-/// Dropping an input does not wait for ever on a pump that will not stop: here
-/// one held in its first read, which `JOIN_BOUND` cuts short, so the drop
-/// returns and detaches it. The test waits for the pump to be held (the hook
-/// says so), drops on another thread, and requires that drop to complete while
-/// the pump is still held; `PATIENCE` only guards the hang a waiting drop is.
+/// Dropping an input does not wait on a pump that will not stop: here one held in
+/// its first read. The drop wakes the stop and drops the task, and returns. The
+/// test waits for the pump to be held (the hook says so), drops on another
+/// thread, and requires that drop to complete while the pump is still held;
+/// `PATIENCE` only guards the hang a waiting drop is.
 #[test]
 fn dropping_an_input_does_not_wait_on_a_stuck_pump() {
     let device = plug(&unique("stuck"));
@@ -1179,7 +1199,12 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
-    let mut session = crate::MidiSession::open(inlets, crate::MidiHardwareConfig::new()).unwrap();
+    let mut session = crate::MidiSession::open(
+        &tutti_platform::Executor::new(),
+        inlets,
+        crate::MidiHardwareConfig::new(),
+    )
+    .unwrap();
     let want = format!("{name}: port");
     let deadline = Instant::now() + PATIENCE;
     let id = loop {

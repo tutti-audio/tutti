@@ -53,11 +53,12 @@ fn find(peer: &Client, spec: &VirtualSpec) -> Option<PortEntry> {
 
 /// The endpoint `spec` describes, for a test that only sends: what peers write to
 /// it goes to an inlet nothing reads.
-fn open_sending(spec: &VirtualSpec) -> VirtualEndpoint {
+fn open_sending(executor: &tutti_platform::Executor, spec: &VirtualSpec) -> VirtualEndpoint {
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let ports = HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
-    VirtualEndpoint::open(spec, producer, plain_endpoint_main()).expect("a virtual endpoint")
+    VirtualEndpoint::open(executor, spec, producer, plain_endpoint_main())
+        .expect("a virtual endpoint")
 }
 
 fn peer(caps: PortCaps) -> (Client, PortId) {
@@ -98,8 +99,9 @@ fn read(peer: &Client, count: usize) -> Vec<Ump> {
 /// message whole and in the order sent.
 #[test]
 fn a_subscriber_receives_what_a_virtual_endpoint_sends_in_order() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("send");
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     let (peer, port) = peer(PortCaps::WRITE);
     let found = find(&peer, &spec).expect("the endpoint is listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -118,14 +120,15 @@ fn a_subscriber_receives_what_a_virtual_endpoint_sends_in_order() {
 /// whole and in the order sent.
 #[test]
 fn a_virtual_endpoint_delivers_what_a_client_sends_to_the_graph_in_order() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("receive");
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut listener = Listener::over(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let endpoint =
-        VirtualEndpoint::open(&spec, producer, plain_endpoint_main()).expect("a virtual endpoint");
+    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+        .expect("a virtual endpoint");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the endpoint is listed");
     peer.connect_to(port, found.address).expect("subscribes");
@@ -144,14 +147,15 @@ fn a_virtual_endpoint_delivers_what_a_client_sends_to_the_graph_in_order() {
 /// the note beside them.
 #[test]
 fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("jr");
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut listener = Listener::over(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let _endpoint =
-        VirtualEndpoint::open(&spec, producer, plain_endpoint_main()).expect("a virtual endpoint");
+    let _endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+        .expect("a virtual endpoint");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the endpoint is listed");
     peer.connect_to(port, found.address).expect("subscribes");
@@ -185,8 +189,9 @@ fn block() -> FunctionBlock {
 /// §7.1.2 and §7.1.8).
 #[test]
 fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("record").block(block());
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     assert_eq!(endpoint.protocol(), VirtualProtocol::Midi2);
     // The sequencer publishes the spec's own numbers, which `blocks` reports.
     assert_eq!(endpoint.blocks(), [block().id()]);
@@ -213,6 +218,7 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
 /// has none.
 #[test]
 fn the_published_endpoint_record_carries_the_device_identity_and_instance_id() {
+    let executor = tutti_platform::Executor::new();
     let id = ProductInstanceId::new(&"0123456789".repeat(5)[..42]).unwrap();
     let identified = |tag, instance| {
         VirtualSpec::new(
@@ -223,8 +229,8 @@ fn the_published_endpoint_record_carries_the_device_identity_and_instance_id() {
     };
     let named_spec = identified("ident-named", Some(id));
     let bare_spec = identified("ident-bare", None);
-    let _named = open_sending(&named_spec);
-    let _bare = open_sending(&bare_spec);
+    let _named = open_sending(&executor, &named_spec);
+    let _bare = open_sending(&executor, &bare_spec);
 
     let (peer, _) = peer(PortCaps::READ);
     let record = |spec| {
@@ -249,14 +255,15 @@ fn the_published_endpoint_record_carries_the_device_identity_and_instance_id() {
 /// Spec: m2-115/2.3#1
 #[test]
 fn a_midi1_endpoint_reports_midi1_and_its_messages_arrive_widened() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("midi1").protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let mut listener = Listener::over_input(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let endpoint =
-        VirtualEndpoint::open(&spec, producer, plain_endpoint_main()).expect("an endpoint");
+    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+        .expect("an endpoint");
     assert_eq!(endpoint.protocol(), VirtualProtocol::Midi1);
 
     let (peer, port) = peer(PortCaps::READ);
@@ -278,8 +285,9 @@ fn a_midi1_endpoint_reports_midi1_and_its_messages_arrive_widened() {
 /// Spec: m2-115/2.3#1
 #[test]
 fn a_midi2_note_sent_into_a_midi1_endpoint_arrives_as_a_midi1_note() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("translate").protocol(VirtualProtocol::Midi1);
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     assert_eq!(endpoint.protocol(), VirtualProtocol::Midi1);
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
@@ -298,8 +306,9 @@ fn a_midi2_note_sent_into_a_midi1_endpoint_arrives_as_a_midi1_note() {
 /// subscriber.
 #[test]
 fn a_message_with_no_midi1_form_is_refused_by_a_midi1_endpoint() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("noform").protocol(VirtualProtocol::Midi1);
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -329,8 +338,9 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_endpoint() {
 /// Change (M2-104 Appendix D.2.4): the bank is not lost.
 #[test]
 fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_program() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("bank").protocol(VirtualProtocol::Midi1);
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -359,8 +369,9 @@ fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_pr
 /// a second value for the same parameter is the four again.
 #[test]
 fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("rpn").protocol(VirtualProtocol::Midi1);
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -394,8 +405,9 @@ fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
 /// Spec: m2-115/2.3#1
 #[test]
 fn a_midi1_note_sent_into_a_midi2_endpoint_arrives_widened() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("widen");
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     let (peer, port) = peer(PortCaps::WRITE);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -412,8 +424,9 @@ fn a_midi1_note_sent_into_a_midi2_endpoint_arrives_widened() {
 /// dropped, and one sent while it lived was accepted.
 #[test]
 fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("sender-gone");
-    let endpoint = open_sending(&spec);
+    let endpoint = open_sending(&executor, &spec);
     let sender = endpoint.sender();
     assert!(sender.send(note_on(MidiChannel::of(1), 60, 0x8000)).is_ok());
     drop(endpoint);
@@ -428,8 +441,9 @@ fn a_sender_outlives_its_endpoint_and_refuses_by_name() {
 /// can be both subscribed to for reading and written to.
 #[test]
 fn a_virtual_endpoint_is_listed_as_one_client_with_one_port() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("one");
-    let _endpoint = open_sending(&spec);
+    let _endpoint = open_sending(&executor, &spec);
     let (peer, _) = peer(PortCaps::READ);
     let listed: Vec<PortEntry> = peer
         .list_ports()
@@ -448,14 +462,15 @@ fn a_virtual_endpoint_is_listed_as_one_client_with_one_port() {
 /// producer, each message whole and in order.
 #[test]
 fn a_virtual_endpoint_sends_to_a_subscriber_and_delivers_what_the_same_peer_writes() {
+    let executor = tutti_platform::Executor::new();
     let spec = spec("both");
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut listener = Listener::over(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
-    let endpoint =
-        VirtualEndpoint::open(&spec, producer, plain_endpoint_main()).expect("a virtual endpoint");
+    let endpoint = VirtualEndpoint::open(&executor, &spec, producer, plain_endpoint_main())
+        .expect("a virtual endpoint");
     let (peer, port) = peer(PortCaps::READ | PortCaps::WRITE);
     let found = find(&peer, &spec).expect("the endpoint is listed");
     peer.connect_to(port, found.address).expect("writes to it");

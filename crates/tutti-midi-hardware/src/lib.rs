@@ -31,7 +31,8 @@
 //! use tutti_midi_device::DeviceEvent;
 //! use tutti_midi_hardware::Devices;
 //!
-//! let devices = Devices::open()?;
+//! let executor = tutti_platform::Executor::new();
+//! let devices = Devices::open(&executor)?;
 //! let events = devices.subscribe();
 //! for device in events.initial() {
 //!     println!("{}: {}", device.id, device.name);
@@ -91,6 +92,16 @@
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
 //! client otherwise; the endpoint reports the protocol it got.
 //!
+//! ## Background work
+//!
+//! The work that waits on the OS (an ALSA input's pump, the device watch, Active
+//! Sensing, the legacy ports' poll) runs as futures on the [`Executor`](tutti_platform::Executor)
+//! the session is opened with: the ALSA input and watch each on a dedicated thread of
+//! it, Active Sensing and the poll as timer loops. Each component holds its task and
+//! drops it to stop. Until core-engine's R2-last, an
+//! executor the app drives (a session built with its own) runs this work only while
+//! the app drives it: in `tutti-session`, only inside `update`.
+//!
 //! ## Quick start
 //!
 //! [`MidiSession`] is the whole OS edge. Inbound events never pass *through* it:
@@ -115,7 +126,8 @@
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
-//! let mut session = MidiSession::open(Arc::clone(&inlets), MidiHardwareConfig::new())?;
+//! let executor = tutti_platform::Executor::new();
+//! let mut session = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
