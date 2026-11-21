@@ -21,11 +21,12 @@ use tutti_platform::Instant;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
-    AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, LoadStage,
-    LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
-    ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult,
-    Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, SampleRate,
-    Samples, Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
+    AutomationMode, Control, Effect, Event, Features, Hand, HostOp, IpcError, Layout, Lifecycle,
+    LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
+    ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef,
+    PluginResult, Prepare, Preset, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
+    RenderMode, RenderModeSupport, Request, SampleRate, Samples, Seat, Stage, State, StateError,
+    StateUse, TrackInfo, Widths,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -734,9 +735,7 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
     /// I/O change; the next rate revives it.
     fn set_sample_rate(&mut self, main: MainThreadMarker, rate: SampleRate) -> PluginResult<()> {
         let Some(previous) = self.state.prepare() else {
-            return Err(PluginError::Other(
-                "the plugin has no configuration to change".to_string(),
-            ));
+            return Err(refused(rate, RateRefusalCause::Unconfigured));
         };
         if self.is_active() && previous.rate() == rate {
             return Ok(());
@@ -744,15 +743,18 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         let wanted = previous.with_rate(rate);
         self.reconfigure(main, previous, wanted)
             .map_err(|(reason, rolled_back)| {
-                PluginError::Other(format!(
-                    "plugin refused sample rate {} ({}): {reason}",
-                    rate.get(),
+                let reason = reason.to_string();
+                refused(
+                    rate,
                     if rolled_back {
-                        format!("running at {}", previous.rate().get())
+                        RateRefusalCause::RolledBack {
+                            running: previous.rate(),
+                            reason,
+                        }
                     } else {
-                        "deactivated".to_string()
-                    }
-                ))
+                        RateRefusalCause::Deactivated { reason }
+                    },
+                )
             })
     }
 
@@ -929,4 +931,12 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
             .ok_or_else(lost)?
             .load_state(main, data, state_use)
     }
+}
+
+/// The error of a refused rate: the typed refusal, carried through the
+/// loader-facing [`PluginError`].
+fn refused(rate: SampleRate, cause: RateRefusalCause) -> PluginError {
+    PluginError::Bridge(Box::new(IpcError::RateRefused(RateRefusal::new(
+        rate, cause,
+    ))))
 }

@@ -32,3 +32,7 @@ pub(crate) fn exact_frames(time: Seconds, rate: SampleRate) -> f64 {
         0.0
     }
 }
+
+/// The frames under which a time is none: one that short has no frame to reach its end in, and a
+/// slope over it would not be finite.
+pub(crate) const NO_FRAME: f64 = 1e-12;

@@ -135,18 +135,40 @@ fn pink_noise_at_f64_falls_three_db_an_octave() {
     pink_power_falls_three_db_an_octave::<f64x4>();
 }
 
-/// The noise is zero-mean: the mean of `n` samples of a pink stream has a standard error of
-/// `sigma / sqrt(n / (2 tau))` for the stream's correlation time `tau`; at 2^20 samples the
-/// stream's power over the 1/f band is under 0.1 and `tau` under 2^12 samples, a bound of
-/// `5 sqrt(0.1 * 2 * 4096 / 2^20)` = 0.14, loose beside a mean of a unit-scale offset.
+/// Kellet's refined filter as `(pole, input gain)` per one-pole section, the delayed direct term
+/// and the direct term, from the published coefficients the pink source is built on, and its
+/// output scale.
+const KELLET_SECTIONS: [(f64, f64); 6] = [
+    (0.99886, 0.055_517_9),
+    (0.99332, 0.075_075_9),
+    (0.969, 0.153_852),
+    (0.8665, 0.310_485_6),
+    (0.55, 0.532_952_2),
+    (-0.7616, -0.016_898),
+];
+const KELLET_DIRECT: f64 = 0.115_926 + 0.5362;
+const KELLET_SCALE: f64 = 0.11;
+
+/// The noise is zero-mean. It is the white stream (uniform on `[-1, 1)`, variance 1/3) through a
+/// filter of DC gain `H(1) = 0.11 (sum g / (1 - a) + direct)`, so the mean of `n` samples has a
+/// standard deviation of `sqrt(H(1)^2 / 3 / n)` for `n` far beyond the filter's longest
+/// correlation time (`1 / (1 - 0.99886)` = 877 samples); the bound is five of them.
 #[test]
-fn pink_noise_has_a_mean_of_zero() {
+fn pink_noise_has_a_mean_of_zero_within_its_standard_error() {
+    let dc_gain = KELLET_SCALE
+        * (KELLET_SECTIONS
+            .iter()
+            .map(|&(a, g)| g / (1.0 - a))
+            .sum::<f64>()
+            + KELLET_DIRECT);
     let mut state = noise_state::<f32x8>();
     let n = 1 << 20;
     let sum: f64 = (0..n)
         .map(|_| f64::from(f32x8::noise(&mut state).as_slice()[0]))
         .sum();
-    assert!((sum / n as f64).abs() < 0.14, "mean {}", sum / n as f64);
+    let mean = sum / n as f64;
+    let bound = 5.0 * (dc_gain * dc_gain / 3.0 / n as f64).sqrt();
+    assert!(mean.abs() < bound, "mean {mean} over {bound}");
 }
 
 /// Sample rate and pitch for the aliasing measurements: 2990 Hz is exactly

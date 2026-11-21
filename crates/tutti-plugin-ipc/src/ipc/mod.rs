@@ -53,11 +53,11 @@ use tutti_rt::LockExt;
 use tutti_buffers::FloatWidth;
 use tutti_platform::{Executor, WeakExecutor};
 use tutti_plugin_types::{
-    ChunkCounters, Controller, IpcError, IpcResult, LoadStage, Loaded, LoadedPlugin,
-    MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
-    PluginDescriptor, PluginError, PluginFormat, PluginRef, PluginResult, PluginTail, Prepare,
-    PresetId, ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples,
-    StateError, StateUse, Stuck, Widths,
+    ChunkCounters, Controller, IpcError, IpcResult, Loaded, LoadedPlugin, MainThreadMarker,
+    ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError,
+    PluginFormat, PluginRef, PluginResult, PluginTail, Prepare, PresetId, ProcessWake, Refused,
+    Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
+    Widths,
 };
 use tutti_rt::AtomicSampleRate;
 use tutti_units::ParamId;
@@ -644,11 +644,7 @@ impl Ipc {
     /// as [`launch`](Self::launch).
     pub fn reopen_restoring(&self, state: Option<&[u8]>) -> IpcResult<Launched> {
         let Some(origin) = &self.link.origin else {
-            return Err(IpcError::LoadFailed {
-                path: None,
-                stage: LoadStage::Opening,
-                reason: "this served plugin has no origin to reopen".into(),
-            });
+            return Err(IpcError::NoOrigin);
         };
         origin.reopen(self.link.rate(), state)
     }
