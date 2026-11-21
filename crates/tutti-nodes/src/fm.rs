@@ -1,4 +1,4 @@
-//! [`FmNode`]: operators that modulate one another's phase, as an [`Algorithm`] says.
+//! [`FmNode`]: operators that modulate one another's phase, as an [`Algorithm`](tutti_dsp::Algorithm) says.
 //!
 //! The algorithm is `tutti_dsp::FmVoice`; the node holds the controls and the shape.
 
