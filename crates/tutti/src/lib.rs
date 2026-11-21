@@ -135,8 +135,9 @@
 pub use tutti_session::Error;
 
 // The graph's vocabulary a session hands out.
+pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
-    DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
+    EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
     InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
     TapOptions, TapReader, TapWriter,
 };
@@ -266,6 +267,7 @@ pub use tutti_session::{
 /// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
 /// ```
 pub mod nodes {
+    pub use tutti_curve::Breakpoint;
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
@@ -293,7 +295,7 @@ pub mod nodes {
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
     pub use tutti_nodes::automation::{
-        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, Breakpoint, ControlLaneNode,
+        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
         ForeignLaneConfig, LaneControls, LiveAutomationLane, RecordMode, RecordingConfig,
         Trajectory, UnitLaneConfig,
     };
