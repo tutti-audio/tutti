@@ -3,14 +3,13 @@
 
 #![cfg_attr(
     not(any(
-        feature = "sampler",
-        feature = "midi",
+        all(feature = "sampler", codec),
         feature = "soundfont",
         feature = "plugin"
     )),
     expect(
         dead_code,
-        reason = "the loads (features `sampler`, `midi`, `soundfont`, `plugin`) are its users"
+        reason = "the loads (features `sampler`, `soundfont`, `plugin`) are its users"
     )
 )]
 
