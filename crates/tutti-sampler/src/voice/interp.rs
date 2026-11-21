@@ -156,7 +156,12 @@ impl Gate {
     /// `None` where no block is in hand ([`window_position`]): the tempo is
     /// the transport's.
     #[inline]
-    fn origin(&self, now: Beat, tempo: Bpm, clock: Option<&BlockClock<'_>>) -> SamplePosition {
+    pub(crate) fn origin(
+        &self,
+        now: Beat,
+        tempo: Bpm,
+        clock: Option<&BlockClock<'_>>,
+    ) -> SamplePosition {
         // Reached within the tolerance may be a hair before the start: that
         // is the start itself.
         let seconds_offset = match clock {

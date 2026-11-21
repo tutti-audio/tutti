@@ -69,10 +69,11 @@ use tutti_units::{Amplitude, Latency, PlaybackRate, Tail, UnitParam};
 /// transport from its block's `Env`. A disk voice's node
 /// forks only for an offline render.
 ///
-/// A stretching voice's seat (its first block, a seek, a loop wrap, a stop and a
-/// start) primes the vocoder over blocks and is silent for 4 097 frames (85 ms at
-/// 48 kHz) before it sounds on the timeline; a clip placed ahead primes before its
-/// start and is not silent.
+/// A stretching voice's seat (a seek, a loop wrap, play from a position the transport
+/// has not stood at for 2 049 frames) primes the vocoder over blocks and is silent for
+/// 4 097 frames (85 ms at 48 kHz) before it sounds on the timeline; a clip placed ahead
+/// of the playhead, or at a position the transport has stood at, primes before it
+/// plays and is not silent.
 pub struct VoiceNode<F: SamplerFloat> {
     /// The single voice plus its resident vocoder and the per-sample
     /// read, shared with the pool's slots.

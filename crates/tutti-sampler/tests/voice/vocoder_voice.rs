@@ -110,7 +110,9 @@ fn render_from(
         for (channel, plane) in out.iter_mut().zip(&block) {
             channel.extend_from_slice(plane);
         }
-        transport.advance(BLOCK as i64, SampleRate::of(SR));
+        if transport.is_rolling() {
+            transport.advance(BLOCK as i64, SampleRate::of(SR));
+        }
     }
     out
 }
@@ -557,6 +559,101 @@ fn a_clip_placed_ahead_lands_its_first_frame_on_its_frame() {
         assert!(
             (f64::from(y) - want).abs() < bound,
             "frame {n}: {y}, the hit is due at 24000"
+        );
+    }
+}
+
+/// A voice whose window covers a stopped playhead seats there and primes at the same
+/// rate, so play from where it stands sounds at once: a hit on the first frame of a clip
+/// at frame 0 comes out on the first frame the transport rolls, after it stood for 40
+/// blocks (2 560 frames, past `prime / 2`), within the kernel's bound, and nothing sounds
+/// before it. (A vocoder at unity, as in the seek above.)
+#[test]
+fn a_clip_at_frame_zero_sounds_from_frame_zero_after_the_transport_stood() {
+    const STOOD: usize = 40;
+    assert!(STOOD * BLOCK >= prime().div_ceil(2));
+    let hit = |i: usize| if i == 0 { 1.0 } else { 0.0 };
+    let source = wave(20_000, &[&hit, &hit]);
+    let out = render(&source, 1.5, 0.0, 12_000, |index, handle, transport| {
+        if index == 0 {
+            transport.set_rolling(false);
+            handle
+                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+                .expect("the command queue has room in a test");
+        }
+        if index == STOOD {
+            transport.set_rolling(true);
+        }
+    });
+    let due = STOOD * BLOCK;
+    let bound = 4.0 * f32_transform_error();
+    for (n, &y) in out[0].iter().enumerate() {
+        let want = if n == due { 1.0 } else { 0.0 };
+        assert!(
+            (f64::from(y) - want).abs() < bound,
+            "frame {n}: {y}, the hit is due at {due}"
+        );
+    }
+}
+
+/// A locate while stopped seats again: the transport stands at beat 0, is located to beat
+/// 2 (frame 96 000) and stands there, and on rolling the voice plays the source from
+/// there, on the timeline, to the transforms' rounding (the seek's bound).
+#[test]
+fn a_locate_while_stopped_primes_the_new_place() {
+    let f = 1000.0;
+    let source = wave(300_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, 0.0)]);
+    let out = render(&source, 1.5, 0.0, 20_000, |index, handle, transport| {
+        if index == 0 {
+            transport.set_rolling(false);
+            handle
+                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+                .expect("the command queue has room in a test");
+        }
+        if index == 20 {
+            transport.seek(Beat::new(2.0));
+        }
+        if index == 80 {
+            transport.set_rolling(true);
+        }
+    });
+    let from = 80 * BLOCK;
+    let tone = sine(f, 0.5, 0.0);
+    let bound = 8.0 * f32_transform_error();
+    for (k, &y) in out[0][from..from + 2000].iter().enumerate() {
+        let want = tone(96_000 + k);
+        assert!(
+            (f64::from(y) - want).abs() < bound,
+            "frame {k} after rolling: {y} for {want}"
+        );
+    }
+}
+
+/// With no time stopped first, a clip at frame 0 is silent for exactly the documented
+/// priming (`prime`, 4 097 frames at speed 2), then plays the source on the timeline.
+/// This pins the figure in the docs.
+#[test]
+fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
+    let f = 1000.0;
+    let source = wave(60_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, 0.0)]);
+    let out = render(&source, 1.5, 0.0, 12_000, |index, handle, _| {
+        if index == 0 {
+            handle
+                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+                .expect("the command queue has room in a test");
+        }
+    });
+    let silent = prime();
+    assert_eq!(silent, 4_097, "the figure the docs state");
+    assert!(out[0][..silent].iter().all(|&x| x == 0.0));
+    let tone = sine(f, 0.5, 0.0);
+    let bound = 8.0 * f32_transform_error();
+    for (k, &y) in out[0][silent..silent + 2000].iter().enumerate() {
+        let want = tone(silent + k);
+        assert!(
+            (f64::from(y) - want).abs() < bound,
+            "frame {} : {y} for {want}",
+            silent + k
         );
     }
 }

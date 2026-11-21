@@ -48,7 +48,11 @@
 //! was too late for. A voice seated at the start of its window, and a seek or a loop
 //! wrap, sound that much later; a voice whose window opens ahead (a clip placed on
 //! the timeline) starts priming `prime / 2` frames, and a block, before its start,
-//! from a transport that rolls, so its first frame lands on its frame (`preroll`).
+//! from a transport that rolls, so its first frame lands on its frame (`preroll`). A
+//! stopped transport still runs blocks, and a voice whose window covers where it
+//! stands seats there and primes at the same rate, so play from a located position
+//! sounds at once once the transport has stood for `prime / 2` frames; a locate while
+//! stopped seats again.
 //!
 //! The cursor is an origin and the frames taken since: a position is the origin
 //! plus the step times all of them, one product, so the frames a source is read at
@@ -64,7 +68,7 @@ use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
 use tutti_dsp::{
     ColaGeometry, HopSize, PhaseVocoder, PhaseVocoderControls, StftGeometry, WindowLength,
 };
-use tutti_units::{ReadRate, SamplePosition, SampleRate, Samples, StretchFactor};
+use tutti_units::{Beat, ReadRate, SamplePosition, SampleRate, Samples, StretchFactor};
 
 use super::disk_voice::DiskVoice;
 use super::memory_source::MemorySource;
@@ -146,6 +150,9 @@ pub(crate) struct Cursor {
     /// Whether the seat was made ahead of the voice's window, which the voice has
     /// not yet entered.
     preroll: bool,
+    /// The beat a stopped transport stood at when the seat was made there, so a locate
+    /// is seen as one.
+    at: Option<Beat>,
 }
 
 impl Cursor {
@@ -157,6 +164,7 @@ impl Cursor {
             taken: Samples::new(0),
             owed,
             preroll: false,
+            at: None,
         }
     }
 
@@ -378,25 +386,40 @@ fn spend<F: SamplerFloat>(
 /// how the output is split into blocks. A block that has the window's start in it
 /// finishes the priming (the caller starts priming at least `prime / PRIME_SPEED`
 /// frames ahead). The voice keeps its seat in `render` until it enters its window.
+///
+/// A stopped transport is `standing`: the beat it stands at, with `ahead` 0 and `origin`
+/// the source's position at that beat. The voice seats there and primes at the same
+/// rate, one block's worth a block, so play from where the playhead stands sounds at
+/// once; a locate (another beat) seats again.
+#[allow(clippy::too_many_arguments)] // a seat: the vocoder, its source, and where each goes
 pub(crate) fn preroll<F: SamplerFloat>(
     st: &mut Stretch<'_, F>,
     feed: &mut impl Feed<F>,
     origin: SamplePosition,
+    standing: Option<Beat>,
     ahead: usize,
     block: usize,
     input: &mut Input<'_, F>,
     prime: &mut Lanes<F>,
 ) {
+    if standing.is_some() && st.cursor.is_some_and(|cursor| cursor.at != standing) {
+        st.unseat();
+    }
     let mut cursor = match *st.cursor {
         Some(cursor) => cursor,
         None => {
             let mut cursor = st.seat(feed, origin);
             cursor.preroll = true;
+            cursor.at = standing;
             cursor
         }
     };
     let keep = PRIME_SPEED * (ahead - ahead.min(block));
-    let frames = cursor.owed.get().saturating_sub(keep);
+    let frames = cursor
+        .owed
+        .get()
+        .saturating_sub(keep)
+        .min(PRIME_SPEED * block);
     discard(
         st.vocoder,
         &mut cursor,

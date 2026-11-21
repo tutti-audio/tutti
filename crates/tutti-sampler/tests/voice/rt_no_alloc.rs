@@ -230,6 +230,33 @@ fn a_stretching_voice_does_not_allocate_when_it_seats() {
     guarded(&mut rig, 3);
 }
 
+/// A stretching voice allocates nothing while it primes where a stopped transport stands:
+/// the stopped blocks that prime, a locate, and the blocks that play on from it.
+#[test]
+fn a_stretching_voice_does_not_allocate_while_priming_on_a_stopped_transport() {
+    let (pool, handle) = VoicePool::new().with_handle();
+    let mut rig = Rig::new(pool, 64);
+    rig.t.set_rolling(false);
+    let source = MemorySource::placed(sine_wave(4.0, 48_000.0), VoiceWindow::from(Beat::new(0.0)))
+        .expect("a placeable wave");
+    handle
+        .add(
+            SlotId(1),
+            source,
+            Playback {
+                stretch: StretchFactor::new(1.5),
+                ..Playback::default()
+            },
+        )
+        .expect("the command queue has room in a test");
+    rig.block();
+    guarded(&mut rig, 80);
+    rig.t.seek(Beat::new(0.5));
+    guarded(&mut rig, 80);
+    rig.t.set_rolling(true);
+    guarded(&mut rig, 40);
+}
+
 /// Removing a stretching voice and replacing its wave allocate nothing in the drain:
 /// the voice is retired for the control thread to free, and a voice that is added
 /// again primes inside the guard.

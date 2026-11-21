@@ -13,12 +13,13 @@ use crate::lanes::{BlockScratch, accumulate, audible_gain};
 use crate::nonempty;
 
 use super::clock::BlockClock;
+use super::memory_source::VoiceWindow;
 use super::stretched::{self, Cursor, DiskFeed, Input, MemoryFeed, PRIME_SPEED, Stretch};
 use super::types::{Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::PhaseVocoder;
-use tutti_units::{Beat, Cents, ReadRate, SamplePosition, StretchFactor};
+use tutti_units::{Beat, Bpm, Cents, ReadRate, SamplePosition, StretchFactor};
 
 /// A [`Voice`] plus the resident time-stretch DSP processor, and the read that
 /// turns the pair into audio.
@@ -348,6 +349,12 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                 let window = sampler.window();
                 let sounds =
                     sampler.placed_positions(clock, range.clone(), stretch.consumption, positions);
+                // A stopped transport standing inside the window: where the voice seats.
+                let standing = window.and_then(|w| standing_in(clock, range.start, w));
+                let standing_origin = standing.and_then(|(beat, tempo)| {
+                    let gate = sampler.gate(stretch.consumption)?;
+                    Some((beat, gate.origin(beat, tempo, Some(clock))))
+                });
                 let mut feed = MemoryFeed {
                     sampler,
                     direction,
@@ -356,10 +363,22 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                     gather,
                 };
                 let mut input = Input { raw, reads, n };
-                // A voice whose window opens soon primes ahead of it, so its first
+                // A voice that is seated before it sounds primes ahead of it: where the
+                // transport stands, or ahead of a window that opens soon, so its first
                 // frame lands on its frame (see `stretched`).
                 let ahead = window.and_then(|w| frames_until(clock, range.start, w.start));
-                if let Some(ahead) = ahead {
+                if let Some((beat, origin)) = standing_origin {
+                    stretched::preroll(
+                        &mut stretch,
+                        &mut feed,
+                        origin,
+                        Some(beat),
+                        0,
+                        frames,
+                        &mut input,
+                        prime,
+                    );
+                } else if let Some(ahead) = ahead {
                     let lead = stretched::prime(stretch.vocoder)
                         .get()
                         .div_ceil(PRIME_SPEED);
@@ -368,6 +387,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                             &mut stretch,
                             &mut feed,
                             SamplePosition::new(0.0),
+                            None,
                             ahead,
                             frames,
                             &mut input,
@@ -377,7 +397,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                 }
                 if !sounds {
                     // Any other silence unseats.
-                    if ahead.is_none() {
+                    if ahead.is_none() && standing_origin.is_none() {
                         stretch.unseat();
                     }
                     return Piece::Silent;
@@ -454,6 +474,18 @@ fn frames_until(clock: &BlockClock<'_>, from: usize, start: Beat) -> Option<usiz
     let per_beat = run.frames_per_beat()?;
     let beats = (start - run.beat_at(from.max(run.start))).get();
     (beats > 0.0).then_some((beats * per_beat) as usize)
+}
+
+/// The beat and tempo of a stopped transport at block frame `from`, when it stands
+/// inside `window`: a voice there seats on the spot and primes for play from it.
+fn standing_in(clock: &BlockClock<'_>, from: usize, window: VoiceWindow) -> Option<(Beat, Bpm)> {
+    let run = clock.runs_in(from..from + 1).next()?;
+    if run.rolling() {
+        return None;
+    }
+    let beat = run.beat_at(from.max(run.start));
+    let before_end = window.duration.is_none_or(|d| beat < window.start + d);
+    (beat >= window.start && before_end).then_some((beat, run.tempo()))
 }
 
 /// What [`PlaybackSlot::render_lanes`] left for its piece.
