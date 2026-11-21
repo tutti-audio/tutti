@@ -91,30 +91,21 @@ impl Drop for Inert {
 }
 
 impl tutti_plugin_types::AnyThread for Inert {
-    fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        None
+    fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+        let read = || None;
+        tutti_plugin_types::answered(read())
     }
     fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
         None
     }
-    fn parameter_descriptors_answer(
-        &self,
-    ) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
-        tutti_plugin_types::answered(self.parameter_descriptors())
-    }
+
     fn parameter_value_answer(
         &self,
         id: ParamId,
     ) -> tutti_plugin_types::Answer<Option<Normalized>> {
         tutti_plugin_types::answered(self.parameter_value(id))
     }
-    fn parameter_normalized_answer(
-        &self,
-        id: ParamId,
-        plain: f64,
-    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        tutti_plugin_types::answered(self.parameter_normalized(id, plain))
-    }
+
     fn set_parameter_value(
         &self,
         _id: ParamId,
@@ -125,8 +116,13 @@ impl tutti_plugin_types::AnyThread for Inert {
     fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
         None
     }
-    fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
-        None
+    fn parameter_normalized(
+        &self,
+        _id: ParamId,
+        _plain: f64,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        let read = || None;
+        tutti_plugin_types::answered(read())
     }
     fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
         None

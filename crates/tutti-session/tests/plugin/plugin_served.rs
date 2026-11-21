@@ -12,7 +12,7 @@ use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 
-use crate::loading::{AwaitParams as _, Perform as _};
+use crate::loading::Perform as _;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -317,7 +317,6 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     let second = load.block().expect("the plugin loads");
     let second_handle = second.handle();
     let b = s.add_plugin(second).unwrap();
-    s.await_params(b);
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -332,6 +331,21 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     let pid = |node| s.plugin_view(node).unwrap().diagnostics().server_pid();
     assert_ne!(pid(a), pid(b), "two plugins, two servers");
     assert_ne!(first.id(), second_handle.id());
+}
+
+/// **A served plugin arrives with its parameters read.** The load future awaits the
+/// read the server's replies feed, so the node's mirror is ready the moment the session
+/// adds it, with no `update` between: an app never sees a loaded plugin whose
+/// parameters are not read.
+#[test]
+fn a_served_plugin_arrives_with_its_parameters_read() {
+    const CUTOFF: ParamId = ParamId::new(101);
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let view = s.plugin_view(node).unwrap();
+    assert!(view.params().is_ready(), "read before the first update");
+    assert!(view.params().get(CUTOFF).is_ok(), "and declared");
 }
 
 /// **A reload composed from a node's info and state is awaited off the main
@@ -473,7 +487,6 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     load.initial_state(state).expect("its own plugin's state");
     let b = load.block().expect("the plugin loads");
     let b = s.add_plugin(b).unwrap();
-    s.await_params(b);
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -688,7 +701,6 @@ fn in_a_node<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     let opened = load(s, catalog, id);
     let plugin = opened.handle();
     let node = s.add_plugin(opened).expect("the plugin enters");
-    s.await_params(node);
     (plugin, node)
 }
 
@@ -1062,7 +1074,6 @@ fn a_save_awaited_on_a_spawned_thread_returns_the_plugins_state() {
     let b = s
         .add_plugin(load.block().expect("the plugin loads"))
         .unwrap();
-    s.await_params(b);
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -1147,7 +1158,6 @@ fn a_restore_dropped_before_it_is_awaited_sends_nothing() {
     let mut loaded = s.load_out_of_process(&first_id(), &catalog);
     loaded.initial_state(after).unwrap();
     let c = s.add_plugin(loaded.block().unwrap()).unwrap();
-    s.await_params(c);
     let held = s
         .plugin_view(c)
         .unwrap()

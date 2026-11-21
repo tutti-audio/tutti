@@ -279,18 +279,13 @@ where
     L: InProcess + 'static,
     L::Processor: 'static,
 {
-    /// `None` for a lost plugin, and when the main thread does not answer.
-    fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        self.on_main(|main, instance| Some(instance.control()?.parameters(main)))?
-    }
-
     /// `None` for a lost plugin, for a plugin that exposes no value to read,
     /// for an id it does not have, and when the main thread does not answer.
     fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
         self.on_main(move |main, instance| instance.control()?.parameter(main, id))?
     }
 
-    fn parameter_descriptors_answer(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+    fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
         self.on_main_answer(|main, instance| Some(instance.control()?.parameters(main)))
     }
 
@@ -298,7 +293,7 @@ where
         self.on_main_answer(move |main, instance| instance.control()?.parameter(main, id))
     }
 
-    fn parameter_normalized_answer(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
+    fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
         self.on_main_answer(move |main, instance| {
             instance.control()?.parameter_normalized(main, id, plain)
         })
@@ -358,13 +353,6 @@ where
     /// The format's own conversion ([`Control::parameter_plain`]).
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         self.on_main(move |main, instance| instance.control()?.parameter_plain(main, id, value))?
-    }
-
-    /// The format's own conversion ([`Control::parameter_normalized`]).
-    fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized> {
-        self.on_main(move |main, instance| {
-            instance.control()?.parameter_normalized(main, id, plain)
-        })?
     }
 
     /// The plugin's display string for `value`, as
@@ -724,7 +712,9 @@ mod off_main_tests {
     fn the_parameter_reads_answer_on_the_main_thread() {
         let (_unit, handle, _pump) = loaded();
         let any = handle.any_thread();
-        let catalog = any.parameter_descriptors().expect("the probe lists");
+        let catalog = futures_lite::future::block_on(any.parameter_descriptors())
+            .expect("answered")
+            .expect("the probe lists");
         assert!(catalog.iter().any(|p| p.id() == ParamId::new(1)));
         assert_eq!(
             any.parameter_value(ParamId::new(1)).map(Normalized::get),
@@ -934,7 +924,9 @@ mod off_main_tests {
         let (_unit, handle) = load(&work);
         let (catalog, text, from_text, mode, automation) = std::thread::spawn(move || {
             (
-                handle.any_thread().parameter_descriptors(),
+                futures_lite::future::block_on(handle.any_thread().parameter_descriptors())
+                    .ok()
+                    .flatten(),
                 handle
                     .any_thread()
                     .parameter_text(ParamId::new(1), Normalized::of(0.5)),

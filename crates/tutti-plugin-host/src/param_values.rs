@@ -112,7 +112,7 @@ impl IntoFuture for ParamRead {
 /// that lists none gives `Ok` of an empty snapshot.
 ///
 /// **What feeds it.** The plugin's hosting answers each question into a oneshot
-/// ([`AnyThread::parameter_descriptors_answer`](tutti_plugin_types::AnyThread::parameter_descriptors_answer) and its siblings): a served plugin's
+/// ([`AnyThread::parameter_descriptors`](tutti_plugin_types::AnyThread::parameter_descriptors) and its siblings): a served plugin's
 /// bridge control lane thread fills it with the server's reply, or with `None`
 /// at the query deadline; an in-process plugin's main thread fills it when it
 /// runs the work the question queued (at once, when the future is polled on the
@@ -180,7 +180,7 @@ impl Future for ReadingParams {
         let this = &mut *self;
         let params = this.handle.any_thread();
         if matches!(this.stage, Stage::Unstarted) {
-            this.stage = Stage::Listing(params.parameter_descriptors_answer());
+            this.stage = Stage::Listing(params.parameter_descriptors());
         }
         if let Stage::Listing(listing) = &mut this.stage {
             // A canceled answer is as unavailable as a `None` one.
@@ -224,8 +224,7 @@ impl Future for ReadingParams {
                     ParamRange::Normalized { default } => Normalized::clamped(default),
                     ParamRange::Plain { default, .. } => {
                         let id = info.id();
-                        *question =
-                            Question::Default(params.parameter_normalized_answer(id, default));
+                        *question = Question::Default(params.parameter_normalized(id, default));
                         continue;
                     }
                 },
@@ -446,6 +445,8 @@ mod tests {
     struct FakeParams {
         params: Vec<(ParamId, Option<f32>)>,
         mode: Mode,
+        /// The normalized default every listed parameter declares.
+        default: f64,
     }
 
     /// How the fake answers: at once, not at all, or when the test says.
@@ -498,17 +499,26 @@ mod tests {
         }
     }
 
-    impl AnyThread for FakeParams {
-        fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
+    impl FakeParams {
+        /// What the plugin lists, with no delivery in between.
+        fn listed(&self) -> Option<Vec<ParameterInfo>> {
             if matches!(self.mode, Mode::Unlisted) {
                 return None;
             }
             Some(
                 self.params
                     .iter()
-                    .map(|&(id, _)| ParameterInfo::new(id, "p"))
+                    .map(|&(id, _)| {
+                        ParameterInfo::new(id, "p").with_normalized_default(self.default)
+                    })
                     .collect(),
             )
+        }
+    }
+
+    impl AnyThread for FakeParams {
+        fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
+            self.deliver(self.listed(), matches!(self.mode, Mode::ListCanceled))
         }
         fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
             self.params
@@ -517,27 +527,14 @@ mod tests {
                 .1
                 .map(|v| Normalized::clamped(f64::from(v)))
         }
-        fn parameter_descriptors_answer(&self) -> Answer<Option<Vec<ParameterInfo>>> {
-            self.deliver(
-                self.parameter_descriptors(),
-                matches!(self.mode, Mode::ListCanceled),
-            )
-        }
         fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
             self.deliver(
                 self.parameter_value(id),
                 matches!(self.mode, Mode::ValuesCanceled),
             )
         }
-        fn parameter_normalized_answer(
-            &self,
-            id: ParamId,
-            plain: f64,
-        ) -> Answer<Option<Normalized>> {
-            self.deliver(
-                self.parameter_normalized(id, plain),
-                matches!(self.mode, Mode::ValuesCanceled),
-            )
+        fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Answer<Option<Normalized>> {
+            self.deliver(None, matches!(self.mode, Mode::ValuesCanceled))
         }
         fn set_parameter_value(
             &self,
@@ -547,9 +544,6 @@ mod tests {
             Ok(())
         }
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
-            None
-        }
-        fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
             None
         }
         fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
@@ -595,9 +589,22 @@ mod tests {
         params: Vec<(ParamId, Option<f32>)>,
         mode: Mode,
     ) -> (PluginHandle, ParameterChangeSink) {
+        handle_declaring(params, mode, 0.0)
+    }
+
+    /// [`handle_with`], whose parameters declare the normalized `default`.
+    fn handle_declaring(
+        params: Vec<(ParamId, Option<f32>)>,
+        mode: Mode,
+        default: f64,
+    ) -> (PluginHandle, ParameterChangeSink) {
         let sink = ParameterChangeSink::default();
         let handle = PluginHandle::from_backend(
-            Arc::new(FakeParams { params, mode }),
+            Arc::new(FakeParams {
+                params,
+                mode,
+                default,
+            }),
             None,
             PluginDescriptor::new("", PluginClass::Unknown),
             Default::default(),
@@ -763,15 +770,15 @@ mod tests {
             "a canceled list is an unavailable one"
         );
 
-        let (plugin, _) = handle_with(vec![(id, Some(0.8))], Mode::ValuesCanceled);
+        let (plugin, _) = handle_declaring(vec![(id, Some(0.8))], Mode::ValuesCanceled, 0.25);
         let (mut mirror, read) = PluginParamValues::start(&plugin);
         mirror.land(
             futures_lite::future::block_on(read.into_future()).expect("the list was answered"),
         );
         assert_eq!(
             mirror.get(id),
-            Some(Some(n(0.0))),
-            "a canceled value reads as the declared default, not the plugin's 0.8"
+            Some(Some(n(0.25))),
+            "a canceled value reads as the declared default (0.25), not the plugin's 0.8 or 0"
         );
     }
 

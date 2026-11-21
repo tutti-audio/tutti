@@ -608,6 +608,12 @@ pub enum PluginChange {
     /// The plugin's parameter list or its titles, units or flags changed:
     /// re-read the descriptors.
     ParamTitlesChanged,
+    /// Reading the plugin's parameters panicked, once: the read is not made
+    /// again, and the parameters stay unread
+    /// ([`PluginParams::is_ready`](crate::PluginParams::is_ready) is `false`)
+    /// until the plugin's own rescan ([`ParamsRescanned`](Self::ParamsRescanned))
+    /// starts a read afresh.
+    ParamsUnread,
     /// The plugin's declared latency moved, and the graph took it: the next
     /// commit compensates it.
     LatencyChanged {
@@ -1761,10 +1767,13 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                     self.land_params(node, &token, values);
                 }
                 Arrival::ParamsLost { node, token } => {
+                    // The read panicked: it is not made again (a plugin that panics at
+                    // every question would be read for ever). The mirror stays unread,
+                    // and the plugin's own rescan starts a read afresh.
                     if let Some(hosted) = self.graph.plugins.get_mut(&node)
                         && Arc::ptr_eq(&token, &hosted.mirror_token)
                     {
-                        hosted.reread_params();
+                        out.push(event(node, PluginChange::ParamsUnread));
                     }
                 }
                 Arrival::Snapshot {
@@ -3021,12 +3030,13 @@ mod tests {
         );
     }
 
-    /// **A parameter read whose poll panicked is asked for again.** The backend fails inside
-    /// the call that queues its question, which runs in the read's poll on the executor:
-    /// the panic is contained, the task sends that the read was lost, and the landing makes
-    /// the record read afresh.
+    /// **A parameter read whose poll panicked is given up, and reported.** The backend fails
+    /// inside the call that queues its question, which runs in the read's poll on the
+    /// executor: the panic is contained and the task sends that the read was lost. The
+    /// session reports [`PluginChange::ParamsUnread`] once and makes no second read, so a
+    /// plugin that panics at every question is not read for ever; the mirror stays unread.
     #[test]
-    fn a_parameter_read_whose_poll_panicked_is_asked_again() {
+    fn a_parameter_read_whose_poll_panicked_is_given_up_and_reported() {
         let mut rig = rig(None);
         let incoming = PluginHandle::from_backend(
             Arc::new(Fake {
@@ -3056,10 +3066,34 @@ mod tests {
             rig.session.graph.plugins[&rig.node].param_read.is_none(),
             "the read was consumed by the task"
         );
-        let _ = rig.land();
+        let is_unread = |e: &SessionEvent| {
+            matches!(
+                e,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::ParamsUnread,
+                    ..
+                })
+            )
+        };
+        let landed = rig.land();
         assert!(
-            rig.session.graph.plugins[&rig.node].param_read.is_some(),
-            "the lost read is made again"
+            landed.iter().any(is_unread),
+            "the give-up is reported: {landed:?}"
+        );
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_none(),
+            "and no second read is made"
+        );
+        let later = rig.events_at(20);
+        rig.settle();
+        let later_landed = rig.land();
+        assert!(
+            !later.iter().chain(&later_landed).any(is_unread),
+            "reported once"
+        );
+        assert!(
+            rig.session.graph.plugins[&rig.node].param_read.is_none(),
+            "still no second read after a later update"
         );
     }
 
@@ -3192,10 +3226,6 @@ mod tests {
     }
 
     impl tutti_plugin_types::AnyThread for Fake {
-        fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-            self.held();
-            self.listing()
-        }
         fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
             self.params
                 .iter()
@@ -3205,12 +3235,11 @@ mod tests {
         /// A held list is a round trip in flight: a thread of its own waits for the test's
         /// token and then answers, so no executor thread waits on it. A dropped sender
         /// (the thread panicked when the test's end of the hold went) cancels the answer.
-        fn parameter_descriptors_answer(
-            &self,
-        ) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+        fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
             assert!(!self.panics, "the backend failed while asked for its list");
             let Some(hold) = self.hold.clone() else {
-                return tutti_plugin_types::answered(self.parameter_descriptors());
+                self.held();
+                return tutti_plugin_types::answered(self.listing());
             };
             let listed = self.listing();
             let (tx, answer) = futures_channel::oneshot::channel();
@@ -3229,13 +3258,6 @@ mod tests {
         ) -> tutti_plugin_types::Answer<Option<Normalized>> {
             tutti_plugin_types::answered(self.parameter_value(id))
         }
-        fn parameter_normalized_answer(
-            &self,
-            id: ParamId,
-            plain: f64,
-        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::answered(self.parameter_normalized(id, plain))
-        }
         fn set_parameter_value(
             &self,
             _id: ParamId,
@@ -3246,8 +3268,12 @@ mod tests {
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
             None
         }
-        fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
-            None
+        fn parameter_normalized(
+            &self,
+            _id: ParamId,
+            _plain: f64,
+        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::answered(None)
         }
         fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
             None

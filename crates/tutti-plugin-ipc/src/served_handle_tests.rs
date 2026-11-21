@@ -576,7 +576,8 @@ fn a_served_read_resolves_through_the_control_lane_and_defaults_an_unanswered_va
         ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
             parameters: vec![
                 ParameterInfo::new(ParamId::new(1), "Answered".to_string()),
-                ParameterInfo::new(ParamId::new(2), "Silent".to_string()),
+                ParameterInfo::new(ParamId::new(2), "Silent".to_string())
+                    .with_normalized_default(0.25),
             ],
         }),
         ControlRequest::GetParameter { param_id } if param_id == ParamId::new(1) => {
@@ -598,8 +599,8 @@ fn a_served_read_resolves_through_the_control_lane_and_defaults_an_unanswered_va
     );
     assert_eq!(
         mirror.get(ParamId::new(2)),
-        Some(Some(Normalized::of(0.0))),
-        "an unanswered value reads as the declared default"
+        Some(Some(Normalized::of(0.25))),
+        "an unanswered value reads as the declared default (0.25), not 0"
     );
 }
 
