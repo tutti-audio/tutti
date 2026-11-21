@@ -256,9 +256,10 @@ fn declaring_the_same_topology_again_changes_nothing() {
 #[cfg(feature = "export")]
 #[test]
 fn an_export_is_placed_from_the_declaration() {
+    use crate::bounced::bounced;
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     let planes = |s: &mut tutti_session::DetachedSession| {
-        let request = Bounce::project()
+        let request = Bounce::new()
             .master_buffers()
             .channels(ChannelLayout::from(6u16))
             .range(Range::Seconds(
@@ -269,7 +270,7 @@ fn an_export_is_placed_from_the_declaration() {
             .clock(ExportClock::frozen())
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None);
-        let rendered = s.bounce(request).unwrap().into_master();
+        let rendered = bounced(s, request).unwrap().into_master();
         rendered.planes().iter().map(|p| p[0]).collect::<Vec<_>>()
     };
     let mut declared = Session::builder()

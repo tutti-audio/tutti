@@ -30,7 +30,12 @@ mod sealed {
 
     impl Cut {
         /// A cut from `session`, made when the session makes the value.
-        #[cfg(any(feature = "sampler", feature = "plugin", feature = "midi-hardware"))]
+        #[cfg(any(
+            feature = "sampler",
+            feature = "plugin",
+            feature = "midi-hardware",
+            feature = "export"
+        ))]
         pub(crate) const fn of<K: AppKey, C: Clock>(session: &Session<K, C>) -> Self {
             Self {
                 session: session.id,
@@ -86,7 +91,12 @@ impl<F: SessionFloat, T: sealed::Sealed<F>> Apply<F> for T {
     type Error = <T as sealed::Sealed<F>>::Error;
 }
 
-#[cfg(any(feature = "sampler", feature = "plugin", feature = "midi-hardware"))]
+#[cfg(any(
+    feature = "sampler",
+    feature = "plugin",
+    feature = "midi-hardware",
+    feature = "export"
+))]
 pub(crate) use sealed::{Cut, Sealed};
 
 impl<K: AppKey, C: Clock> Session<K, C> {

@@ -9,6 +9,7 @@
 //! stem that cannot be rendered, or two files at one path, are refused by name
 //! before anything is written.
 
+use crate::bounced::bounced;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -38,7 +39,7 @@ fn session() -> DetachedSession {
 /// The mix into memory for `seconds`: nothing trimmed, no tail, no musical
 /// time.
 fn base(seconds: f64) -> Bounce {
-    Bounce::project()
+    Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .clock(ExportClock::frozen())
         .latency(BounceLatency::Keep)
@@ -63,7 +64,7 @@ fn planes(out: Result<Bounced<BufferMaster>, BounceError>) -> Vec<Vec<Vec<f32>>>
 
 /// What a bounce is refused with, started and run on this thread.
 fn refused<M: Master>(session: &mut DetachedSession, bounce: Bounce<NodeKey, M>) -> BounceError {
-    match session.bounce(bounce) {
+    match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!("expected a refusal, got {:?}", out.stems().len()),
     }
@@ -161,7 +162,7 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
     };
 
     // BounceLatency kept: the programme starts `LATE` frames in.
-    let kept = planes(session.bounce(stems(bounce(seconds))));
+    let kept = planes(bounced(&mut session, stems(bounce(seconds))));
     let [master, constant, step] = kept.as_slice() else {
         panic!("the master and two stems")
     };
@@ -191,7 +192,10 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
     assert_eq!(master[0], master[1], "both master channels hear both");
 
     // BounceLatency trimmed: the programme from frame 0, and the same length.
-    let trimmed = planes(session.bounce(stems(bounce(seconds).latency(BounceLatency::Graph))));
+    let trimmed = planes(bounced(
+        &mut session,
+        stems(bounce(seconds).latency(BounceLatency::Graph)),
+    ));
     for (what, plane, level) in [
         ("master", &trimmed[0][0], 1.5),
         ("constant", &trimmed[1][0], 0.5),
@@ -228,15 +232,14 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
             .unwrap();
     }
 
-    let out = planes(
-        session.bounce(
-            bounce(0.01)
-                .stem_with(Stem::buffers(source.erase()))
-                .stem_with(Stem::buffers(half.erase()))
-                .stem_with(Stem::buffers(wide.erase()))
-                .stem_with(Stem::buffers(wide.erase()).channels([2, 0])),
-        ),
-    );
+    let out = planes(bounced(
+        &mut session,
+        bounce(0.01)
+            .stem_with(Stem::buffers(source.erase()))
+            .stem_with(Stem::buffers(half.erase()))
+            .stem_with(Stem::buffers(wide.erase()))
+            .stem_with(Stem::buffers(wide.erase()).channels([2, 0])),
+    ));
     let [master, source_stem, half_stem, wide_stem, picked] = out.as_slice() else {
         panic!("the master and four stems")
     };
@@ -309,14 +312,14 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     session.graph().connect(node, Root).unwrap();
     let master = dir.path().join("master.wav");
     let stem = dir.path().join("stem.wav");
-    let done = session
-        .bounce(
-            base(0.25)
-                .master(&master, Format::Wav(Pcm::Int16))
-                .resample(Resample::to(tutti_units::SampleRate::SR_44K1))
-                .stem_with(Stem::new(node.erase(), &stem, float_wav())),
-        )
-        .expect("renders");
+    let done = bounced(
+        &mut session,
+        base(0.25)
+            .master(&master, Format::Wav(Pcm::Int16))
+            .resample(Resample::to(tutti_units::SampleRate::SR_44K1))
+            .stem_with(Stem::new(node.erase(), &stem, float_wav())),
+    )
+    .expect("renders");
     assert_eq!(done.stems().len(), 1);
 
     let master_spec = hound::WavReader::open(&master).unwrap().spec();
@@ -360,15 +363,15 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     // The three files' samples, and the gain each reports.
     let run = |session: &mut DetachedSession, tag: &str, gain: StemGain| {
         let paths = ["master", "loud", "quiet"].map(|n| dir.path().join(format!("{tag}-{n}.wav")));
-        let done = session
-            .bounce(
-                base(0.1)
-                    .master(&paths[0], float_wav())
-                    .normalize(target)
-                    .stem_with(Stem::new(loud.erase(), &paths[1], float_wav()).gain(gain))
-                    .stem_with(Stem::new(quiet.erase(), &paths[2], float_wav()).gain(gain)),
-            )
-            .expect("renders");
+        let done = bounced(
+            session,
+            base(0.1)
+                .master(&paths[0], float_wav())
+                .normalize(target)
+                .stem_with(Stem::new(loud.erase(), &paths[1], float_wav()).gain(gain))
+                .stem_with(Stem::new(quiet.erase(), &paths[2], float_wav()).gain(gain)),
+        )
+        .expect("renders");
         let (master, stems) = done.into_parts();
         let gains: Vec<Option<Db>> = std::iter::once(master.gain)
             .chain(stems.into_iter().map(|p| match p {
@@ -484,14 +487,14 @@ fn a_host_resolves_its_own_names_once() {
     session.graph().connect(kick, Root).unwrap();
     let keys: HashMap<&str, _> = HashMap::from([("kick", kick.erase())]);
 
-    let named = |name| Bounce::<&str>::project().stem_with(Stem::buffers(name));
+    let named = |name| Bounce::<&str>::new().stem_with(Stem::buffers(name));
     let resolved = named("kick")
         .master_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
         .clock(ExportClock::frozen())
         .try_map(|name| keys.get(name).copied().ok_or(name))
         .expect("kick is a node");
-    let out = planes(session.bounce(resolved));
+    let out = planes(bounced(&mut session, resolved));
     assert!(out[1][0].iter().all(|&s| s == 0.5), "the kick's stem");
 
     let unresolved = named("snare").try_map(|name| keys.get(name).copied().ok_or(name));

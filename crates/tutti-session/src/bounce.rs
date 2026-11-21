@@ -1,8 +1,9 @@
 //! The session's bounce (feature `export`): the
 //! request ([`Bounce`]), the job ([`BounceJob`]: gathered on the control
-//! thread, built and rendered on any), and its return
-//! ([`Session::finish_bounce`]), which drops what the render leaves on the
-//! main thread and releases the bounce's token.
+//! thread, built and rendered by a blocking task of the session's executor), and
+//! its return ([`BounceRendered`]), which [`Session::apply`] takes back: it
+//! drops what the render leaves on the main thread, releases the bounce's token
+//! and gives the [`Bounced`].
 //!
 //! A [`Bounce`] is data. Every figure it does not state is derived from the
 //! session when the bounce starts and stored once: the range from
@@ -10,19 +11,19 @@
 //! rate from the session's, the latency and the tail from the compiled graph,
 //! the master's width from the root. Each has one explicit method.
 //!
-//! **One bounce at a time**: [`Session::bounce_start`] mints a bounce token, a
-//! clone of an `Arc<()>` the session holds, which rides in the job and then
-//! in what it returns ([`BounceRendered`]). A bounce is in flight while any
-//! token lives, and another is refused ([`BounceError::InFlight`]). With
-//! `plugin`, [`Phase::RenderMode`](crate::Phase::RenderMode) announces
-//! Offline from that level: `bounce_start` runs the phase before it returns
-//! (so a plugin hears Offline before the job can render a block),
-//! `finish_bounce` drops the token and runs it again, and a job or its return
-//! dropped unfinished (a cancelled task, a panic on the worker) drops its
-//! token, so the next update restores Realtime. A host that may start the next
-//! bounce before its next `Phase::RenderMode` finishes with
-//! [`Session::finish_bounce_unannounced`] instead, so its plugins are not told
-//! Realtime and then Offline again between two bounces.
+//! **One bounce at a time**: [`Session::bounce`] mints a bounce token, a
+//! clone of an `Arc<()>` the session holds, which rides in the job, in the
+//! future awaiting it ([`Bouncing`]) and then in what it returns
+//! ([`BounceRendered`]). A bounce is in flight while any token lives, and
+//! another is refused ([`BounceError::InFlight`]). With `plugin`,
+//! [`Phase::RenderMode`](crate::Phase::RenderMode) announces Offline from that
+//! level: `bounce` runs the phase before it returns (so a plugin hears Offline
+//! before the job can render a block), and the next phase run after the token
+//! drops (the next [`update`](Session::update)) announces Realtime. `apply`
+//! does not announce: a host that starts the next bounce before its next
+//! update never tells its plugins Realtime and then Offline again between two
+//! bounces. A job, a future or a return dropped unfinished (a cancelled task, a
+//! panic on the worker) drops its token, so the next update restores Realtime.
 //!
 //! **Cancelling and watching.** A job carries a [`BounceHandle`]
 //! ([`BounceJob::handle`]), cloned to whoever watches:
@@ -31,11 +32,12 @@
 //! stages, and before each file is finalized and put in place; or before it
 //! starts), and [`progress`](BounceHandle::progress) reads its stage and
 //! fraction, [`Stage::Preparing`](tutti_export::Stage::Preparing) included (the session's steps, in the band
-//! the pipeline leaves it). A cancelled job returns [`BounceError::Cancelled`]
-//! from [`Session::finish_bounce`], drops its token when the render has
+//! the pipeline leaves it). Dropping the [`Bouncing`] before it resolves
+//! cancels it. A cancelled job returns [`BounceError::Cancelled`]
+//! from [`Session::apply`], drops its token when the render has
 //! stopped, and leaves a file target's path as it was.
 //!
-//! **A token that never drops** (a job `mem::forget`ed, or kept unrun
+//! **A token that never drops** (a job `mem::forget`ed, or kept unawaited
 //! forever) keeps the bounce in flight: the plugins stay Offline and every
 //! later bounce is refused. [`Phase::Collect`](crate::Phase::Collect) warns,
 //! once, when one has been in flight for an hour of its `now`.
@@ -43,7 +45,7 @@
 //! **Leftovers drop on the main thread.** The rendered graph, what a failed
 //! fork build had made, an edit that never ran: each is wrapped so that
 //! wherever it is dropped, it is sent back to the session instead, and
-//! dropped by `finish_bounce` or the next
+//! dropped by `apply` or the next
 //! [`Phase::Collect`](crate::Phase::Collect). A forked in-process VST2
 //! plugin closes its instance when dropped, which VST2 confines to the main
 //! thread. Something sent once the session is gone drops where it is.
@@ -57,12 +59,15 @@
 //! for planes, with no `Option` to unwrap. A cancelled bounce is
 //! [`BounceError::Cancelled`].
 
+use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Instant, WeakExecutor};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_codec::Format;
@@ -78,7 +83,9 @@ use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
 use tutti_units::{Beat, Frame, SampleRate, Samples, Seconds};
 
-use crate::Session;
+use crate::apply::{Cut, Sealed as ApplySealed};
+use crate::unblocked::{Unanswered, Unblocked};
+use crate::{Session, SessionFloat};
 use tutti_buffers::Float;
 use tutti_dsp::FftFloat;
 
@@ -181,7 +188,7 @@ impl Default for BounceTail {
     }
 }
 
-/// A bounce that has not chosen its master yet: [`Bounce::project`]'s.
+/// A bounce that has not chosen its master yet: [`Bounce::new`]'s.
 /// It does not start; [`Bounce::master`] or [`Bounce::master_buffers`] choose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoMaster;
@@ -269,20 +276,22 @@ pub(crate) enum RootChoice {
 
 /// A bounce: what to render and where it goes, with every figure it does not
 /// name derived from the session when it starts. Start one with
-/// [`Session::bounce`] or [`Session::bounce_start`].
+/// [`Session::bounce`].
 ///
 /// ```no_run
 /// # use tutti_session::{Bounce, Range, Session};
 /// # use tutti_codec::{Format, Pcm};
 /// # use tutti_graph::NodeKey;
 /// # use tutti_units::Beat;
-/// # fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
-/// let done = session.bounce(
-///     Bounce::project()
+/// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
+/// let rendering = session.bounce(
+///     Bounce::new()
 ///         .range(Range::Beats(Beat::new(0.0), Beat::new(16.0)))
 ///         .master("out/master.wav", Format::Wav(Pcm::Int24))
 ///         .stem(drums, "out/drums.wav"),
 /// )?;
+/// let rendered = rendering.await;
+/// let done = session.apply(rendered)?;
 /// # let _ = done;
 /// # Ok(())
 /// # }
@@ -313,13 +322,19 @@ pub struct Bounce<N = NodeKey, M = NoMaster, F: Float = f32> {
     edit: Option<PrepareEdit<F>>,
 }
 
+impl<N, F: Float> Default for Bounce<N, NoMaster, F> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<N, F: Float> Bounce<N, NoMaster, F> {
     /// A bounce of the project's mix, with nothing chosen: a master
     /// ([`master`](Self::master) or [`master_buffers`](Self::master_buffers),
     /// without which it does not start) and a range when no loop is set. Name nodes as
     /// stems with [`stem`](Self::stem); `N` is what names one (a [`NodeKey`],
     /// or a host's own handle for it: [`try_map`](Self::try_map) resolves them).
-    pub fn project() -> Self {
+    pub fn new() -> Self {
         Self {
             master: NoMaster,
             stems: Vec::new(),
@@ -365,7 +380,7 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
     /// # use tutti_session::Bounce;
     /// # use tutti_export::Normalize;
     /// # use tutti_units::Db;
-    /// let _ = Bounce::<tutti_graph::NodeKey>::project()
+    /// let _ = Bounce::<tutti_graph::NodeKey>::new()
     ///     .master_buffers()
     ///     .normalize(Normalize::Peak { target: Db::new(-1.0) });
     /// ```
@@ -900,13 +915,16 @@ impl<M: Master, F: Float> Bounced<M, F> {
     /// ```no_run
     /// # use tutti_session::{Bounce, Session, Stem};
     /// # use tutti_graph::NodeKey;
-    /// # fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
-    /// let done = session.bounce(
-    ///     Bounce::project()
-    ///         .range(tutti_session::Range::Until(tutti_units::Beat::new(4.0)))
-    ///         .master_buffers()
-    ///         .stem_with(Stem::buffers(drums)),
-    /// )?;
+    /// # async fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
+    /// let rendered = session
+    ///     .bounce(
+    ///         Bounce::new()
+    ///             .range(tutti_session::Range::Until(tutti_units::Beat::new(4.0)))
+    ///             .master_buffers()
+    ///             .stem_with(Stem::buffers(drums)),
+    ///     )?
+    ///     .await;
+    /// let done = session.apply(rendered)?;
     /// // Neither call consumes `done`.
     /// let planes = done.stems()[0].buffers().map(|r| r.channels());
     /// let on_disk = done.stems()[0].file();
@@ -1096,12 +1114,12 @@ pub enum BounceConfigError {
     PrepareHookUnpaired,
 }
 
-/// Why a bounce could not start or finish.
+/// Why a bounce could not start, render or be applied.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BounceError {
-    /// Another bounce is in flight: its job, or what the job returned, is
-    /// still alive. Finish or drop it first.
+    /// Another bounce is in flight: its job, the future awaiting it, or what
+    /// that returned is still alive. Apply or drop it first.
     #[error("another bounce is in flight")]
     InFlight,
     /// The bounce asks for something no render could give.
@@ -1126,6 +1144,19 @@ pub enum BounceError {
     /// (naming its node's key), a lost event.
     #[error("bounce: {0}")]
     Export(tutti_export::RenderError),
+    /// The render did not run to an answer: the session was dropped before the
+    /// render started, or the executor dropped it before it ran.
+    #[error("the session shut down before the bounce rendered")]
+    ShutDown,
+    /// The render panicked: nothing was produced. The panic's message.
+    #[error("the bounce panicked: {message}")]
+    Panicked {
+        /// The panic's message.
+        message: String,
+    },
+    /// The render was made for another session, which cannot take it here.
+    #[error("the bounce was rendered for another session")]
+    Stale,
 }
 
 /// `file` with the bounce's resample, dither, noise shaping and normalize, each only when set.
@@ -1277,9 +1308,9 @@ impl BounceState {
         }
     }
 
-    /// Restarts the stall clock for an bounce starting now. A host that
+    /// Restarts the stall clock for a bounce starting now. A host that
     /// hands one bounce's slot to the next within a frame
-    /// ([`Session::finish_bounce_unannounced`], then [`Session::bounce`])
+    /// ([`Session::apply`], then [`Session::bounce`])
     /// never lets a collect see nothing in flight, so without this a queue
     /// of bounces each well inside the bound would be warned about.
     fn restart_stall_watch(&mut self) {
@@ -1465,22 +1496,25 @@ impl Figures {
 /// assembly.
 const PREPARING_STEPS: u32 = 4;
 
-/// A bounce, gathered on the control thread: `Send`, and
-/// [`run`](Self::run) builds the fork (a hosted plugin's fork launches a
-/// `plugin-server` and loads its state), runs the edit, and renders, on
-/// any thread. Hand what it returns to [`Session::finish_bounce`].
+/// A bounce, gathered on the control thread: `Send`, and a [`Future`] through
+/// [`IntoFuture`]. Awaiting it ([`Bouncing`]) builds the fork (a hosted
+/// plugin's fork launches a `plugin-server` and loads its state), runs the edit
+/// and renders, as a blocking task of the session's executor, and yields a
+/// [`BounceRendered`] to hand to [`Session::apply`]. There is no blocking form.
 ///
-/// Holds the bounce's token: dropping it unrun ends the bounce (the next
-/// update announces Realtime), and what it holds goes back to the session
-/// to drop.
+/// Holds the bounce's token: dropping it unawaited ends the bounce (the next
+/// update announces Realtime), and what it holds goes back to the session to
+/// drop. It holds no strong handle to the session's executor.
 ///
 /// **Do not leak it.** A job (or its [`BounceRendered`]) that is
-/// `mem::forget`ed, or kept unrun forever, keeps its token: the bounce
+/// `mem::forget`ed, or kept unawaited forever, keeps its token: the bounce
 /// stays in flight, hosted plugins stay Offline, and every later
-/// [`Session::bounce_start`] is refused with [`BounceError::InFlight`].
+/// [`Session::bounce`] is refused with [`BounceError::InFlight`].
 /// Nothing else reports it; the session warns once after an hour.
-#[must_use = "a bounce renders nothing until it is run and finished"]
+#[must_use = "a bounce renders nothing until it is awaited"]
 pub struct BounceJob<M: Master, F: FftFloat = f32> {
+    cut: Cut,
+    executor: WeakExecutor,
     pending: ToMain<PendingExport<F>>,
     edit: Option<ToMain<PrepareEdit<F>>>,
     ctx: OfflineTransport,
@@ -1514,11 +1548,13 @@ impl<M: Master, F: FftFloat> BounceJob<M, F> {
         self.handle.clone()
     }
 
-    /// Builds the fork, runs the edit, commits it, and renders. Any thread;
-    /// it blocks for the whole render, or until [`BounceHandle::cancel`]
-    /// stops it.
-    pub fn run(self) -> BounceRendered<M, F> {
+    /// Builds the fork, runs the edit, commits it, and renders, on this thread:
+    /// the one the render task runs on. It blocks for the whole render, or
+    /// until [`BounceHandle::cancel`] stops it.
+    fn render(self) -> BounceRendered<M, F> {
         let Self {
+            cut,
+            executor: _,
             pending,
             edit,
             ctx,
@@ -1531,6 +1567,7 @@ impl<M: Master, F: FftFloat> BounceJob<M, F> {
             handle,
             kind: _,
         } = self;
+        let token = Held { cut, _token: token };
         // The band the render leaves for the session's steps depends on the
         // targets alone: the readers do not exist until the taps are open.
         let targets: Vec<Target> = std::iter::once(master.clone())
@@ -1624,8 +1661,104 @@ impl<M: Master, F: FftFloat> BounceJob<M, F> {
             });
         BounceRendered {
             result,
+            held: token,
             graph: Some(graph.erase()),
-            _token: token,
+        }
+    }
+}
+
+impl<M: Master, F: FftFloat> IntoFuture for BounceJob<M, F> {
+    type Output = BounceRendered<M, F>;
+    type IntoFuture = Bouncing<M, F>;
+
+    fn into_future(self) -> Bouncing<M, F> {
+        let held = Held {
+            cut: self.cut,
+            _token: Arc::clone(&self.token),
+        };
+        Bouncing {
+            handle: self.handle.clone(),
+            held: Some(held),
+            render: Unblocked::new(
+                self.executor.clone(),
+                Box::new(self),
+                |job| Ok(job.render()),
+            ),
+        }
+    }
+}
+
+/// What a bounce holds of the session until it is applied: the session it was
+/// cut from, and the bounce's token.
+#[derive(Debug)]
+struct Held {
+    cut: Cut,
+    _token: Arc<()>,
+}
+
+impl Unanswered for BounceError {
+    fn shut_down() -> Self {
+        Self::ShutDown
+    }
+
+    fn panicked(message: String) -> Self {
+        Self::Panicked { message }
+    }
+}
+
+/// A bounce being awaited ([`BounceJob`]): resolves to the [`BounceRendered`]
+/// once the render has ended.
+///
+/// The first poll starts the render as a blocking task of the session's executor
+/// (the session's weak handle, upgraded for the spawn only), on a thread that
+/// drives no queue (the fork's plugin servers wait on such a thread), and awaits
+/// the receiver of a oneshot. **The render task fills the sender**: it builds
+/// the fork, renders, and sends the result when the render ends, which wakes the
+/// future. Nothing else drives it and no caller waits on code the app does not
+/// run: a poll never blocks, and `Session::update` is not needed.
+///
+/// Dropped before it resolves, the future cancels the render
+/// ([`BounceHandle::cancel`]): the render stops at its next check, finds its
+/// answer unwanted, and its token and leftovers go back as for any dropped
+/// return. A render that has not begun never starts.
+///
+/// The output carries the failure by name when the render could not answer
+/// ([`BounceError::ShutDown`] for a session that is gone, a thread the OS
+/// refused or an executor that dropped the render before it ran,
+/// [`BounceError::Panicked`] for a render that panicked); apply it to read it.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+#[must_use = "a bounce renders nothing unless it is awaited"]
+pub struct Bouncing<M: Master, F: FftFloat = f32> {
+    render: Unblocked<Box<BounceJob<M, F>>, BounceRendered<M, F>, BounceError>,
+    /// What the answer carries when the render gives none; taken on resolving.
+    held: Option<Held>,
+    handle: BounceHandle,
+}
+
+impl<M: Master, F: FftFloat> std::fmt::Debug for Bouncing<M, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Bouncing").finish_non_exhaustive()
+    }
+}
+
+impl<M: Master, F: FftFloat> Future for Bouncing<M, F> {
+    type Output = BounceRendered<M, F>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        let answered = std::task::ready!(Pin::new(&mut this.render).poll(cx));
+        let held = this.held.take().expect("held until it resolves");
+        Poll::Ready(answered.unwrap_or_else(|e| BounceRendered::failed(e, None, held)))
+    }
+}
+
+impl<M: Master, F: FftFloat> Drop for Bouncing<M, F> {
+    fn drop(&mut self) {
+        if self.held.is_some() {
+            self.handle.cancel();
         }
     }
 }
@@ -1694,32 +1827,72 @@ fn open_stem_taps<F: Float>(
         .collect()
 }
 
-/// What a finished [`BounceJob`] returns: the result, the rendered graph
-/// (dropped on the main thread by [`Session::finish_bounce`]), and the
-/// bounce's token. `Send`.
-#[must_use = "finish the bounce with `Session::finish_bounce` (or `finish_bounce_unannounced`)"]
+/// What an awaited [`BounceJob`] resolves to: the result, the rendered graph
+/// (dropped on the main thread by [`Session::apply`]), and the bounce's token.
+/// `Send`. [`Session::apply`] takes it back and gives the [`Bounced`] or the
+/// error the render ended in.
+///
+/// Applying releases the bounce's token but announces nothing: hosted plugins
+/// stay Offline until the next [`update`](Session::update)'s
+/// [`Phase::RenderMode`](crate::Phase::RenderMode) tells them Realtime. An app
+/// that plays live after a bounce updates right after applying.
+#[must_use = "a bounce is finished only when the session applies its render"]
 pub struct BounceRendered<M: Master, F: Float = f32> {
     result: Result<Bounced<M, F>, BounceError>,
+    /// Declared before `graph`: dropping this releases the token, then the graph
+    /// goes back to the session, so a session that finds the graph back finds the
+    /// bounce no longer in flight.
+    held: Held,
     /// The fork, sealed or not: whatever it holds is dropped on the main thread.
     graph: Option<ToMain<Box<dyn Send>>>,
-    _token: Arc<()>,
 }
 
 impl<M: Master, F: Float> BounceRendered<M, F> {
-    fn cancelled(graph: Option<ToMain<Box<dyn Send>>>, token: Arc<()>) -> Self {
-        Self {
-            result: Err(BounceError::Cancelled),
-            graph,
-            _token: token,
-        }
+    fn cancelled(graph: Option<ToMain<Box<dyn Send>>>, held: Held) -> Self {
+        Self::failed(BounceError::Cancelled, graph, held)
     }
 
-    fn failed(e: BounceError, graph: Option<ToMain<Box<dyn Send>>>, token: Arc<()>) -> Self {
+    fn failed(e: BounceError, graph: Option<ToMain<Box<dyn Send>>>, held: Held) -> Self {
         Self {
             result: Err(e),
+            held,
             graph,
-            _token: token,
         }
+    }
+}
+
+impl<M: Master, F: SessionFloat> ApplySealed<F> for BounceRendered<M, F> {
+    type Applied = Bounced<M, F>;
+    type Error = BounceError;
+
+    fn cut(&self) -> &Cut {
+        &self.held.cut
+    }
+
+    fn stale() -> BounceError {
+        BounceError::Stale
+    }
+
+    /// Drops the rendered graph (and every leftover sent back so far) here, which
+    /// closes an in-process plugin in it on the main thread, and releases the
+    /// bounce's token. It does not announce the render mode: the next
+    /// [`Phase::RenderMode`](crate::Phase::RenderMode) tells the plugins Realtime
+    /// once no bounce is in flight.
+    fn apply_to<K: crate::AppKey, C: crate::Clock<Float = F>>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<Bounced<M, F>, BounceError> {
+        let Self {
+            result,
+            held,
+            graph,
+        } = self;
+        if let Some(graph) = graph {
+            drop(graph.take());
+        }
+        session.bounce.drop_leftovers();
+        drop(held);
+        result
     }
 }
 
@@ -1734,7 +1907,7 @@ impl<M: Master, F: Float> std::fmt::Debug for BounceRendered<M, F> {
                     Err(_) => "Err".to_string(),
                 },
             )
-            .field("_token", &self._token)
+            .field("held", &self.held)
             .finish_non_exhaustive()
     }
 }
@@ -1806,9 +1979,9 @@ where
     /// gathers its fork of the live graph here (what it reads of the live graph
     /// and its nodes, now; an in-process VST2 plugin's second instance is built
     /// here too), mints the bounce's token, and (with `plugin`) announces
-    /// Offline to every hosted plugin before it returns.
-    /// [`run`](BounceJob::run) the job on any thread, then
-    /// [`finish_bounce`](Self::finish_bounce) what it returns.
+    /// Offline to every hosted plugin before it returns. Await the job (any
+    /// thread: the render runs on a thread of its own), then
+    /// [`apply`](Self::apply) the [`BounceRendered`] it resolves to.
     ///
     /// **What a fork keeps of the live inputs.** A live audio input (an inlet,
     /// `add_input`) cannot be copied: its frames come
@@ -1839,7 +2012,7 @@ where
     /// range, whose range keeps no frame, or for a graph with no outputs (all
     /// before anything is forked); [`BounceError::NotForkable`] and
     /// [`BounceError::Fork`] for a node the fork cannot copy.
-    pub fn bounce_start<M: Master>(
+    pub fn bounce<M: Master>(
         &mut self,
         bounce: Bounce<NodeKey, M, C::Float>,
     ) -> Result<BounceJob<M, C::Float>, BounceError> {
@@ -2046,6 +2219,8 @@ where
         self.bounce.restart_stall_watch();
         let drops = self.bounce.send.clone();
         let job = BounceJob {
+            cut: Cut::of(self),
+            executor: self.background.executor().downgrade(),
             pending: ToMain::new(pending, drops.clone()),
             edit: edit.map(|edit| ToMain::new(edit, drops.clone())),
             ctx,
@@ -2063,96 +2238,6 @@ where
         C::Float::announce_render_mode(self);
         Ok(job)
     }
-
-    /// Ends a bounce: drops the rendered graph (and every leftover sent
-    /// back so far) here, releases the bounce's token and (with `plugin`)
-    /// announces Realtime when no other bounce is in flight. Returns what
-    /// the render produced.
-    ///
-    /// Drops what the bounce left, here: an in-process plugin in it closes on the
-    /// main thread, or hands its close to the session's `MainWork` off it.
-    ///
-    /// # Errors
-    ///
-    /// The render's [`BounceError`]: [`Cancelled`](BounceError::Cancelled) for
-    /// a bounce its [`BounceHandle`] stopped, a failed fork build or render (a
-    /// fork that failed mid-render names its node's key), an I/O or encoder
-    /// error.
-    pub fn finish_bounce<M: Master>(
-        &mut self,
-        rendered: BounceRendered<M, C::Float>,
-    ) -> Result<Bounced<M, C::Float>, BounceError> {
-        let result = self.finish_bounce_unannounced(rendered);
-        C::Float::announce_render_mode(self);
-        result
-    }
-
-    /// [`finish_bounce`](Self::finish_bounce) without its announcement:
-    /// drops the rendered graph and the leftovers here and releases the
-    /// bounce's token, but leaves telling the plugins Realtime to the next
-    /// [`Phase::RenderMode`](crate::Phase::RenderMode) (the next
-    /// [`update`](Self::update), or the host's own run of the phase).
-    ///
-    /// For a host that may start another bounce before that phase runs (a
-    /// queue of them, one finished and the next started in one frame):
-    /// with `finish_bounce` each plugin would be told Realtime and then
-    /// Offline again between the two, and three of the four formats take a
-    /// mode change only while deactivated, so each announcement is a
-    /// deactivate and reactivate (and, for a plugin whose latency follows
-    /// the mode, a re-plan). The host must run `Phase::RenderMode` after it,
-    /// or the plugins stay Offline once the last bounce ends.
-    ///
-    /// Drops what the bounce left, here: an in-process plugin in it closes on the
-    /// main thread, or hands its close to the session's `MainWork` off it.
-    ///
-    /// # Errors
-    ///
-    /// As [`finish_bounce`](Self::finish_bounce).
-    pub fn finish_bounce_unannounced<M: Master>(
-        &mut self,
-        rendered: BounceRendered<M, C::Float>,
-    ) -> Result<Bounced<M, C::Float>, BounceError> {
-        let BounceRendered {
-            result,
-            graph,
-            _token,
-        } = rendered;
-        if let Some(graph) = graph {
-            drop(graph.take());
-        }
-        self.bounce.drop_leftovers();
-        drop(_token);
-        result
-    }
-
-    /// [`bounce_start`](Self::bounce_start), run on this thread, and finished.
-    ///
-    /// # Errors
-    ///
-    /// As `bounce_start` and `finish_bounce`.
-    pub fn bounce<M: Master>(
-        &mut self,
-        bounce: Bounce<NodeKey, M, C::Float>,
-    ) -> Result<Bounced<M, C::Float>, BounceError> {
-        let job = self.bounce_start(bounce)?;
-        self.finish_bounce(job.run())
-    }
-
-    /// Drops, here, what bounces sent back so far: what a dropped job or a
-    /// dropped return held (its fork, a hook's edit). `Phase::Collect` (each
-    /// [`update`](Self::update)) and [`finish_bounce`](Self::finish_bounce)
-    /// do this; a host that polls its bounces on a frame of its own calls it
-    /// there. A forked in-process VST2 plugin closes on the main thread
-    /// when dropped.
-    pub fn drop_bounce_leftovers(&mut self) {
-        self.bounce.drop_leftovers();
-    }
-
-    /// Whether a bounce is in flight: its job or what it returned is
-    /// still alive.
-    pub fn bounce_in_flight(&self) -> bool {
-        self.bounce.in_flight()
-    }
 }
 
 #[cfg(test)]
@@ -2160,6 +2245,7 @@ mod tests {
     use super::*;
     use crate::{InPort, Phase, PhaseCx, Root};
     use tutti_export::Stage;
+    use tutti_fixtures::block_on;
     use tutti_graph::ForkByClone;
     use tutti_tempo::{TempoPoint, Transition};
     use tutti_units::{Bpm, SampleRate};
@@ -2168,7 +2254,7 @@ mod tests {
 
     /// A render of a few blocks into memory.
     fn short() -> Bounce<NodeKey, BufferMaster, f32> {
-        Bounce::project()
+        Bounce::new()
             .master_buffers()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
     }
@@ -2181,6 +2267,15 @@ mod tests {
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
         session.graph().connect(dc, Root).unwrap();
         session
+    }
+
+    /// Starts `bounce`, awaits it and applies the render.
+    fn bounced<M: Master>(
+        session: &mut crate::DetachedSession,
+        bounce: Bounce<NodeKey, M, f32>,
+    ) -> Result<Bounced<M>, BounceError> {
+        let rendered = block_on(session.bounce(bounce)?);
+        session.apply(rendered)
     }
 
     /// The planes of a finished buffers bounce.
@@ -2199,7 +2294,7 @@ mod tests {
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
         session.graph().connect(half, Root).unwrap();
         assert!(session.graph().has_uncommitted_edits(), "no update has run");
-        let out = planes(session.bounce(short()));
+        let out = planes(bounced(&mut session, short()));
         assert!(out[0].iter().all(|&s| s == 0.5), "the edit is heard");
     }
 
@@ -2355,16 +2450,16 @@ mod tests {
             session: &mut crate::DetachedSession,
             b: Bounce<NodeKey, M, f32>,
         ) -> BounceConfigError {
-            match session.bounce_start(b) {
+            match session.bounce(b) {
                 Err(BounceError::Config(e)) => e,
                 other => panic!("expected a config error, got {other:?}"),
             }
         }
         assert_eq!(
-            refused(&mut session, Bounce::project().master_buffers()),
+            refused(&mut session, Bounce::new().master_buffers()),
             BounceConfigError::NoRange
         );
-        assert!(!session.bounce_in_flight());
+        assert!(!session.bounce.in_flight());
     }
 
     /// **The range is the one named, else the loop, else none.** An explicit
@@ -2379,10 +2474,10 @@ mod tests {
         assert_eq!(chosen(None, None), Err(BounceConfigError::NoRange));
 
         let mut session = session();
-        let until = Bounce::project()
+        let until = Bounce::new()
             .master_buffers()
             .range(Range::Until(Beat::new(2.0)));
-        assert_eq!(planes(session.bounce(until))[0].len(), 48_000);
+        assert_eq!(planes(bounced(&mut session, until))[0].len(), 48_000);
     }
 
     /// **The session's steps are reported as `Preparing`, in the band the
@@ -2397,7 +2492,7 @@ mod tests {
         let job_handle: Arc<Mutex<Option<BounceHandle>>> = Arc::default();
         let (into, handle) = (Arc::clone(&seen), Arc::clone(&job_handle));
         let job = session
-            .bounce_start(short().edit(Box::new(move |_: PreparedGraph<'_>| {
+            .bounce(short().edit(Box::new(move |_: PreparedGraph<'_>| {
                 let handle = handle.lock().unwrap().clone().expect("set before run");
                 into.lock().unwrap().extend(handle.progress());
             })))
@@ -2405,8 +2500,8 @@ mod tests {
         let handle = job.handle();
         assert!(handle.progress().is_none(), "nothing before the job runs");
         *job_handle.lock().unwrap() = Some(handle.clone());
-        let done = session.finish_bounce(job.run()).unwrap();
-        drop(done);
+        let rendered = block_on(job);
+        drop(session.apply(rendered).unwrap());
         let at_edit = seen.lock().unwrap()[0];
         assert_eq!(at_edit.stage(), Stage::Preparing);
         assert!((at_edit.fraction() - 0.025).abs() < 1e-6, "{at_edit:?}");
@@ -2416,24 +2511,25 @@ mod tests {
         assert_eq!(last.fraction(), 1.0);
     }
 
-    /// **An unannounced finish leaves the mode to the next
-    /// `Phase::RenderMode`**; the announcing one (and `bounce`) announces
-    /// Realtime itself. No plugin is needed: the mode asserted is the one the
-    /// session announced.
+    /// **An applied bounce leaves the mode to the next `Phase::RenderMode`**:
+    /// the apply releases the token and tells no plugin, so a bounce started
+    /// before the phase sees Offline throughout, and the phase after the last
+    /// apply announces Realtime. No plugin is needed: the mode asserted is the
+    /// one the session announced.
     #[cfg(feature = "plugin")]
     #[test]
-    fn an_unannounced_finish_leaves_the_mode_to_the_phase() {
+    fn an_applied_bounce_leaves_the_mode_to_the_phase() {
         use tutti_plugin_types::RenderMode;
         let mut session = session();
-        let job = session.bounce_start(short()).unwrap();
+        let job = session.bounce(short()).unwrap();
         assert_eq!(session.render_mode(), RenderMode::Offline);
-        session.finish_bounce_unannounced(job.run()).unwrap();
-        assert!(!session.bounce_in_flight(), "the token is released");
+        session.apply(block_on(job)).unwrap();
+        assert!(!session.bounce.in_flight(), "the token is released");
         assert_eq!(session.render_mode(), RenderMode::Offline, "not announced");
         // The next bounce starts with no Realtime in between.
-        let job = session.bounce_start(short()).unwrap();
+        let job = session.bounce(short()).unwrap();
         assert_eq!(session.render_mode(), RenderMode::Offline);
-        session.finish_bounce_unannounced(job.run()).unwrap();
+        session.apply(block_on(job)).unwrap();
         session.run_phase(
             Phase::RenderMode,
             PhaseCx::at(Instant::now()),
@@ -2443,13 +2539,6 @@ mod tests {
             session.render_mode(),
             RenderMode::Realtime,
             "the phase announces"
-        );
-
-        session.bounce(short()).unwrap();
-        assert_eq!(
-            session.render_mode(),
-            RenderMode::Realtime,
-            "the headless finish announces"
         );
     }
 
@@ -2488,12 +2577,15 @@ mod tests {
         );
 
         let request = || {
-            Bounce::project()
+            Bounce::new()
                 .master_buffers()
                 .range(Range::Frames(Frame::new(0), Frame::new(DURATION as u64)))
         };
 
-        let untrimmed = planes(session.bounce(request().latency(BounceLatency::Keep)));
+        let untrimmed = planes(bounced(
+            &mut session,
+            request().latency(BounceLatency::Keep),
+        ));
         assert_eq!(untrimmed[0].len(), DURATION + LATENCY, "duration + latency");
         assert!(untrimmed[0][..LATENCY].iter().all(|&s| s == 0.0));
         assert!(
@@ -2501,7 +2593,7 @@ mod tests {
             "every programme frame is kept"
         );
 
-        let trimmed = planes(session.bounce(request()));
+        let trimmed = planes(bounced(&mut session, request()));
         assert_eq!(trimmed[0].len(), DURATION);
         assert!(trimmed[0].iter().all(|&s| s != 0.0));
     }
@@ -2515,13 +2607,15 @@ mod tests {
         let mut session = session();
         let seen: Arc<Mutex<Option<(bool, tutti_units::Beat)>>> = Arc::default();
         let into = Arc::clone(&seen);
-        session
-            .bounce(short().clock(ExportClock::frozen()).edit(Box::new(
+        bounced(
+            &mut session,
+            short().clock(ExportClock::frozen()).edit(Box::new(
                 move |prepared: PreparedGraph<'_>| {
                     *into.lock().unwrap() = Some((prepared.ctx.is_rolling(), prepared.ctx.beat()));
                 },
-            )))
-            .expect("the bounce renders");
+            )),
+        )
+        .expect("the bounce renders");
         let (rolling, beat) = seen.lock().unwrap().expect("the edit ran");
         assert!(!rolling, "a frozen bounce's timeline must not roll");
         assert_eq!(beat, tutti_units::Beat::new(0.0));
@@ -2543,19 +2637,19 @@ mod tests {
             .expect("not following");
         let seen: Arc<Mutex<Option<(tutti_units::Beat, Bpm)>>> = Arc::default();
         let into = Arc::clone(&seen);
-        session
-            .bounce(
-                Bounce::project()
-                    .master_buffers()
-                    .range(Range::Beats(Beat::new(3.0), Beat::new(4.0)))
-                    .edit(Box::new(move |prepared: PreparedGraph<'_>| {
-                        *into.lock().unwrap() = Some((
-                            prepared.ctx.beat(),
-                            prepared.ctx.tempo_map().tempo_at(prepared.ctx.beat()),
-                        ));
-                    })),
-            )
-            .expect("renders");
+        bounced(
+            &mut session,
+            Bounce::new()
+                .master_buffers()
+                .range(Range::Beats(Beat::new(3.0), Beat::new(4.0)))
+                .edit(Box::new(move |prepared: PreparedGraph<'_>| {
+                    *into.lock().unwrap() = Some((
+                        prepared.ctx.beat(),
+                        prepared.ctx.tempo_map().tempo_at(prepared.ctx.beat()),
+                    ));
+                })),
+        )
+        .expect("renders");
         assert_eq!(
             seen.lock().unwrap().expect("the edit ran"),
             (Beat::new(3.0), Bpm::of(90.0))
@@ -2576,16 +2670,16 @@ mod tests {
         assert!(Arc::ptr_eq(&session.tempo_map(), &before), "staged only");
         let seen: Arc<Mutex<Option<Option<Bpm>>>> = Arc::default();
         let into = Arc::clone(&seen);
-        session
-            .bounce(
-                Bounce::project()
-                    .master_buffers()
-                    .range(Range::Beats(Beat::new(0.0), Beat::new(1.0)))
-                    .edit(Box::new(move |prepared: PreparedGraph<'_>| {
-                        *into.lock().unwrap() = Some(prepared.ctx.tempo_map().constant_tempo());
-                    })),
-            )
-            .expect("renders");
+        bounced(
+            &mut session,
+            Bounce::new()
+                .master_buffers()
+                .range(Range::Beats(Beat::new(0.0), Beat::new(1.0)))
+                .edit(Box::new(move |prepared: PreparedGraph<'_>| {
+                    *into.lock().unwrap() = Some(prepared.ctx.tempo_map().constant_tempo());
+                })),
+        )
+        .expect("renders");
         let seen = seen.lock().unwrap().expect("the edit ran");
         assert_eq!(seen, Some(Bpm::of(75.0)));
     }
@@ -2604,9 +2698,8 @@ mod tests {
         session
             .set(session.transport_handle().looping().to(region))
             .unwrap();
-        let bounced = session
-            .bounce(Bounce::project().master_buffers())
-            .expect("the loop is the range");
+        let bounced =
+            bounced(&mut session, Bounce::new().master_buffers()).expect("the loop is the range");
         let frames = bounced.master().frames();
         assert_eq!(frames.get(), 48_000, "two beats at 120 BPM and 48 kHz");
     }
@@ -2627,7 +2720,7 @@ mod tests {
             session.bounce.stall_warnings
         };
         let t0 = Instant::now();
-        let job = session.bounce_start(short()).expect("the bounce starts");
+        let job = session.bounce(short()).expect("the bounce starts");
         assert_eq!(collect(&mut session, t0), 0, "just started");
         let minute = Duration::from_secs(60);
         assert_eq!(
@@ -2648,7 +2741,7 @@ mod tests {
         drop(job);
         let t1 = t0 + 4 * BOUNCE_STALL_WARNING;
         assert_eq!(collect(&mut session, t1), 1);
-        let job = session.bounce_start(short()).expect("the next starts");
+        let job = session.bounce(short()).expect("the next starts");
         assert_eq!(collect(&mut session, t1 + minute), 1, "a new clock");
         assert_eq!(
             collect(&mut session, t1 + minute + BOUNCE_STALL_WARNING),
@@ -2661,12 +2754,12 @@ mod tests {
         let t2 = t1 + 4 * BOUNCE_STALL_WARNING;
         assert_eq!(collect(&mut session, t2), 2, "nothing in flight");
         let start = |session: &mut crate::DetachedSession| {
-            session.bounce_start(short()).expect("a bounce starts")
+            session.bounce(short()).expect("a bounce starts")
         };
         let first = start(&mut session);
         assert_eq!(collect(&mut session, t2), 2);
         assert_eq!(collect(&mut session, t2 + 50 * minute), 2);
-        session.finish_bounce_unannounced(first.run()).unwrap();
+        session.apply(block_on(first)).unwrap();
         let second = start(&mut session);
         assert_eq!(
             collect(&mut session, t2 + 70 * minute),
@@ -2674,6 +2767,98 @@ mod tests {
             "the second bounce has been in flight for 20 minutes, not 70"
         );
         assert_eq!(collect(&mut session, t2 + 129 * minute), 2, "59 minutes");
-        session.finish_bounce_unannounced(second.run()).unwrap();
+        session.apply(block_on(second)).unwrap();
+    }
+
+    /// **A render cut from another session is refused `Stale`, and refusing it
+    /// leaves this session's own bounce in flight**: the other session's token is
+    /// the one the refused render drops.
+    #[test]
+    fn a_render_of_another_session_is_stale_and_releases_nothing_here() {
+        let (mut here, mut there) = (session(), session());
+        let ours = here.bounce(short()).unwrap();
+        let theirs = block_on(there.bounce(short()).unwrap());
+        assert!(there.bounce.in_flight(), "the render holds its token");
+        assert!(matches!(here.apply(theirs), Err(BounceError::Stale)));
+        assert!(here.bounce.in_flight(), "this session's token is untouched");
+        assert!(
+            matches!(here.bounce(short()), Err(BounceError::InFlight)),
+            "this session's bounce is still the one in flight"
+        );
+        assert!(
+            !there.bounce.in_flight(),
+            "the refused render dropped its own token"
+        );
+        assert!(here.apply(block_on(ours)).is_ok(), "its own render applies");
+    }
+
+    /// **Dropping the awaited bounce cancels the render, and a bounce starts after
+    /// the next collect.** The edit holds the render open until the future is
+    /// dropped; the render then stops at its next check, short of rendering a
+    /// block (its last reading is a preparing step), and its graph comes back to
+    /// the session after its token is released.
+    #[test]
+    fn dropping_the_awaited_bounce_cancels_the_render() {
+        use std::sync::mpsc::channel;
+        let mut session = session();
+        let (started, running) = channel();
+        let (release, wait) = channel::<()>();
+        let job = session
+            .bounce(short().edit(Box::new(move |_: PreparedGraph<'_>| {
+                started.send(()).unwrap();
+                wait.recv().unwrap();
+            })))
+            .unwrap();
+        let handle = job.handle();
+        let mut awaited = Box::pin(job.into_future());
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        assert!(
+            awaited.as_mut().poll(&mut cx).is_pending(),
+            "the render began"
+        );
+        running.recv().unwrap();
+        drop(awaited);
+        release.send(()).unwrap();
+        // The render's graph is the last thing it hands back.
+        drop(session.bounce.recv.recv().expect("the render ended"));
+        assert!(!session.bounce.in_flight(), "the token is released");
+        let last = handle.progress().expect("reported");
+        assert_eq!(last.stage(), Stage::Preparing, "stopped before rendering");
+        session.run_phase(Phase::Collect, PhaseCx::at(Instant::now()), &mut Vec::new());
+        assert!(
+            bounced(&mut session, short()).is_ok(),
+            "the next bounce starts"
+        );
+    }
+
+    /// **A bounce whose session is dropped resolves to `ShutDown`**: the weak
+    /// executor does not upgrade, so nothing renders.
+    #[test]
+    fn a_bounce_of_a_dropped_session_is_shut_down() {
+        let mut session = session();
+        let job = session.bounce(short()).unwrap();
+        drop(session);
+        let rendered = block_on(job);
+        assert!(
+            matches!(rendered.result, Err(BounceError::ShutDown)),
+            "{rendered:?}"
+        );
+    }
+
+    /// **A panic in the render answers `Panicked` with its message**, and the
+    /// token is released by the apply that reads it.
+    #[test]
+    fn a_panic_in_the_render_is_a_named_error() {
+        let mut session = session();
+        let job = session
+            .bounce(short().edit(Box::new(|_: PreparedGraph<'_>| panic!("the edit gave up"))))
+            .unwrap();
+        let rendered = block_on(job);
+        assert!(session.bounce.in_flight(), "the answer holds the token");
+        match session.apply(rendered) {
+            Err(BounceError::Panicked { message }) => assert_eq!(message, "the edit gave up"),
+            other => panic!("expected Panicked, got {other:?}"),
+        }
+        assert!(!session.bounce.in_flight(), "the apply released it");
     }
 }

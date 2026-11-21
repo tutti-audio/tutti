@@ -80,11 +80,12 @@ impl Background {
             feature = "device",
             feature = "sampler",
             feature = "analyze",
-            feature = "midi"
+            feature = "midi",
+            feature = "export"
         )),
         expect(
             dead_code,
-            reason = "a device switch (feature `device`) and the file loads (features `sampler`, `analyze`, `midi`) are its users"
+            reason = "a device switch (feature `device`) and the file loads (features `sampler`, `analyze`, `midi`) and a bounce (feature `export`) are its users"
         )
     )]
     pub(crate) fn executor(&self) -> &Executor {

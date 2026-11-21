@@ -2596,6 +2596,7 @@ dependencies = [
 name = "tutti-book"
 version = "0.0.0"
 dependencies = [
+ "futures-lite",
  "tutti",
  "tutti-fixtures",
 ]

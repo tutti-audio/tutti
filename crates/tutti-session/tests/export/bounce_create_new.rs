@@ -1,6 +1,7 @@
 //! `Bounce::create_new`: a file that exists at a bounce's path is refused at the
 //! commit, and the bounce's whole file is kept beside it.
 
+use crate::bounced::bounced;
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::ForkByClone;
@@ -37,7 +38,7 @@ fn names(dir: &tempfile::TempDir) -> Vec<std::ffi::OsString> {
 }
 
 fn bounce() -> Bounce {
-    Bounce::project()
+    Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
         .clock(ExportClock::frozen())
         .latency(BounceLatency::Keep)
@@ -55,10 +56,12 @@ fn a_create_new_bounce_onto_an_existing_master_keeps_the_bounce_and_leaves_the_p
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
-    let error = session
-        .bounce(bounce().master(&master, float_wav()).create_new())
-        .map(|_| ())
-        .expect_err("the path exists");
+    let error = bounced(
+        &mut session,
+        bounce().master(&master, float_wav()).create_new(),
+    )
+    .map(|_| ())
+    .expect_err("the path exists");
     let BounceError::Export(tutti_export::RenderError::Encode(tutti_codec::EncodeError::Commit(
         commit,
     ))) = &error
@@ -84,9 +87,7 @@ fn a_bounce_replaces_an_existing_master_and_leaves_nothing_beside_it() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
-    session
-        .bounce(bounce().master(&master, float_wav()))
-        .expect("renders");
+    bounced(&mut session, bounce().master(&master, float_wav())).expect("renders");
     let planes = tutti_fixtures::signal::read_wav_f32(&master);
     assert!(planes.iter().all(|plane| plane.len() == FRAMES));
     assert_eq!(names(&dir), [std::ffi::OsString::from("master.wav")]);
