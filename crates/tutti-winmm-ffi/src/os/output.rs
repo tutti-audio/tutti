@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::Media::Audio::{
     CALLBACK_EVENT, HMIDIOUT, MIDIERR_STILLPLAYING, MIDIHDR, midiOutClose, midiOutLongMsg,
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
@@ -42,9 +44,9 @@ impl std::fmt::Debug for MidiOut {
     }
 }
 
-// SAFETY: a winmm handle names a driver object, and the event a kernel object; neither is tied to the thread
-// that opened it; `MidiOut` is used from one thread at a time (it is not
-// `Sync`).
+// SAFETY: a winmm handle names a driver object, and the event is a kernel
+// object; neither is tied to the thread that made it. `MidiOut` is used from one
+// thread at a time (it is not `Sync`).
 unsafe impl Send for MidiOut {}
 
 /// An output opened but not yet known to be the listed device: dropping it
@@ -69,11 +71,14 @@ impl Unconfirmed {
 
 impl Drop for Unconfirmed {
     fn drop(&mut self) {
-        // SAFETY: the handle is the output just opened, closed once; the event
-        // is closed after it, once, when the driver has no port to set it for.
+        // SAFETY: the handle is the output just opened, closed once. The event
+        // is closed only after a successful close, once, when the driver has no
+        // port to set it for; after a failed close the port may still be open and
+        // the event is left open.
         unsafe {
-            midiOutClose(self.handle);
-            CloseHandle(self.done);
+            if midiOutClose(self.handle) == 0 {
+                CloseHandle(self.done);
+            }
         }
     }
 }
@@ -247,10 +252,14 @@ impl MidiOut {
         // SAFETY: `done` is the open event, which this output keeps open for the
         // call.
         let result = unsafe { WaitForSingleObject(self.done, millis) };
-        if result == WAIT_OBJECT_0 || result == WAIT_TIMEOUT {
-            Ok(())
-        } else {
-            Err(last_os(OsOperation::WaitForSingleObject))
+        match result {
+            WAIT_OBJECT_0 | WAIT_TIMEOUT => Ok(()),
+            // An event is never abandoned; the code has no `GetLastError`.
+            WAIT_ABANDONED => Err(Error::Os {
+                operation: OsOperation::WaitForSingleObject,
+                source: std::io::Error::other("the wait was abandoned"),
+            }),
+            _ => Err(last_os(OsOperation::WaitForSingleObject)),
         }
     }
 }
@@ -264,11 +273,14 @@ impl Drop for MidiOut {
             // stays open so that header is never closed under it.
             return;
         }
-        // SAFETY: `handle` is the open output, closed once; the event is closed
-        // after it, once, when the driver has no port to set it for.
+        // SAFETY: `handle` is the open output, closed once. The event is closed
+        // only after a successful close, once, when the driver has no port to set
+        // it for; after a failed close the port may still be open and the event
+        // is left open.
         unsafe {
-            midiOutClose(self.handle);
-            CloseHandle(self.done);
+            if midiOutClose(self.handle) == 0 {
+                CloseHandle(self.done);
+            }
         }
     }
 }

@@ -96,8 +96,23 @@ struct Queue {
 struct Inbox {
     events: VecDeque<DeviceEvent>,
     ended: Option<WatchFailure>,
-    /// The futures waiting on this inbox, each woken by the next push or end.
-    wakers: Vec<Waker>,
+    /// The futures waiting on this inbox, each woken by the next push or end,
+    /// under the id its [`Recv`] holds.
+    wakers: Vec<(u64, Waker)>,
+    next_id: u64,
+}
+
+impl Inbox {
+    fn take_wakers(&mut self) -> Vec<Waker> {
+        std::mem::take(&mut self.wakers)
+            .into_iter()
+            .map(|(_, waker)| waker)
+            .collect()
+    }
+
+    fn forget(&mut self, id: u64) {
+        self.wakers.retain(|(held, _)| *held != id);
+    }
 }
 
 impl Queue {
@@ -111,7 +126,7 @@ impl Queue {
     fn push(&self, event: DeviceEvent) -> Vec<Waker> {
         let mut inbox = self.inbox();
         inbox.events.push_back(event);
-        std::mem::take(&mut inbox.wakers)
+        inbox.take_wakers()
     }
 
     /// Ends the stream; the wakers are woken as for [`push`](Self::push).
@@ -119,7 +134,7 @@ impl Queue {
     fn end(&self, failure: WatchFailure) -> Vec<Waker> {
         let mut inbox = self.inbox();
         inbox.ended.get_or_insert(failure);
-        std::mem::take(&mut inbox.wakers)
+        inbox.take_wakers()
     }
 }
 
@@ -504,9 +519,13 @@ impl DeviceEvents {
     ///
     /// It resolves to the change, or to the [`WatchFailure`] once the watch has
     /// ended and every change it reported has been taken. Several futures
-    /// awaiting one `DeviceEvents` are all woken; each change goes to one.
+    /// awaiting one `DeviceEvents` are all woken and the first to poll takes the
+    /// change; each change goes to one.
     pub fn recv(&self) -> Recv<'_> {
-        Recv { events: self }
+        Recv {
+            events: self,
+            id: None,
+        }
     }
 
     /// Why the watch ended on its own, if it did: the list is then the last it
@@ -521,6 +540,9 @@ impl DeviceEvents {
 #[must_use = "a recv does nothing until it is awaited"]
 pub struct Recv<'a> {
     events: &'a DeviceEvents,
+    /// The id of the waker this registered in the inbox, until it is woken,
+    /// resolved or dropped.
+    id: Option<u64>,
 }
 
 impl core::fmt::Debug for Recv<'_> {
@@ -533,17 +555,35 @@ impl Future for Recv<'_> {
     type Output = std::result::Result<DeviceEvent, WatchFailure>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut inbox = self.events.queue.inbox();
+        let this = self.get_mut();
+        let mut inbox = this.events.queue.inbox();
         if let Some(event) = inbox.events.pop_front() {
+            this.id.take().into_iter().for_each(|id| inbox.forget(id));
             return Poll::Ready(Ok(event));
         }
-        if let Some(failure) = &inbox.ended {
-            return Poll::Ready(Err(failure.clone()));
+        if let Some(failure) = inbox.ended.clone() {
+            this.id.take().into_iter().for_each(|id| inbox.forget(id));
+            return Poll::Ready(Err(failure));
         }
-        if !inbox.wakers.iter().any(|w| w.will_wake(cx.waker())) {
-            inbox.wakers.push(cx.waker().clone());
+        // A re-poll replaces this future's own waker; a waker already taken by a
+        // wake is registered again under the same id.
+        let id = *this.id.get_or_insert_with(|| {
+            inbox.next_id += 1;
+            inbox.next_id
+        });
+        match inbox.wakers.iter_mut().find(|(held, _)| *held == id) {
+            Some((_, waker)) => waker.clone_from(cx.waker()),
+            None => inbox.wakers.push((id, cx.waker().clone())),
         }
         Poll::Pending
+    }
+}
+
+impl Drop for Recv<'_> {
+    fn drop(&mut self) {
+        if let Some(id) = self.id {
+            self.events.queue.inbox().forget(id);
+        }
     }
 }
 

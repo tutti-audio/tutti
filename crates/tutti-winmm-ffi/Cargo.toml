@@ -24,6 +24,7 @@ windows-sys = { workspace = true, features = [
   "Win32_Media_Audio",
   "Win32_Media_Multimedia",
   "Win32_Security",
+  "Win32_System_Threading",
 ] }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 # `Instant`, the one clock type.

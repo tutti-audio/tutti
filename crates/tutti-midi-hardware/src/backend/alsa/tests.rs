@@ -140,8 +140,12 @@ fn when_listed<T>(devices: &Watched, open: impl Fn() -> crate::Result<T>) -> T {
         match open() {
             Ok(opened) => return opened,
             Err(e) => {
-                assert!(Instant::now() < deadline, "{e}");
-                devices.wait(PATIENCE);
+                // A failed open mid-replacement may have no event coming, so the
+                // wait is bounded by the time left, not by a whole `PATIENCE`.
+                let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                    panic!("{e}");
+                };
+                devices.wait(left);
             }
         }
     }
@@ -331,7 +335,7 @@ fn two_identical_clients_are_two_devices() {
     };
     while twins().len() < 2 {
         assert!(Instant::now() < deadline, "{:?}", devices.list());
-        devices.wait(PATIENCE);
+        devices.wait(deadline.saturating_duration_since(Instant::now()));
     }
     let twins = twins();
     assert_eq!(twins[0].id.identity(), twins[1].id.identity());
@@ -539,7 +543,7 @@ fn a_watch_that_panics_reports_its_failure() {
     let deadline = Instant::now() + PATIENCE;
     while devices.watch_failure().is_none() {
         assert!(Instant::now() < deadline, "no failure reported");
-        devices.wait(PATIENCE);
+        devices.wait(deadline.saturating_duration_since(Instant::now()));
     }
     assert!(matches!(
         devices.watch_failure(),
@@ -1186,7 +1190,7 @@ fn capability_of(devices: &Watched, name: &str) -> Endpoint {
             return devices.capability(&d.id).expect("a capability");
         }
         assert!(Instant::now() < deadline, "{name} never listed");
-        devices.wait(PATIENCE);
+        devices.wait(deadline.saturating_duration_since(Instant::now()));
     }
 }
 

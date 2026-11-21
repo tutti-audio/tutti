@@ -188,6 +188,41 @@ fn the_end_of_the_watch_wakes_the_pending_recv() {
     ));
 }
 
+/// A `recv` polled with one waker and then another, then dropped, leaves no
+/// waker in the inbox: a change wakes neither.
+#[test]
+fn a_dropped_recv_and_a_replaced_waker_leave_nothing_to_wake() {
+    let (_devices, events, fake) = fake();
+    let (a, b) = (
+        Arc::new(WakeCount::default()),
+        Arc::new(WakeCount::default()),
+    );
+    let (wa, wb) = (Waker::from(Arc::clone(&a)), Waker::from(Arc::clone(&b)));
+    let mut recv = Box::pin(events.recv());
+    assert!(
+        recv.as_mut()
+            .poll(&mut std::task::Context::from_waker(&wa))
+            .is_pending()
+    );
+    assert!(
+        recv.as_mut()
+            .poll(&mut std::task::Context::from_waker(&wb))
+            .is_pending()
+    );
+    assert_eq!(
+        events.queue.inbox().wakers.len(),
+        1,
+        "the re-poll replaced it"
+    );
+    drop(recv);
+    assert!(events.queue.inbox().wakers.is_empty());
+    fake.plug(endpoint(1, "Keys"), PortDirection::Input);
+    assert_eq!(
+        (a.0.load(Ordering::SeqCst), b.0.load(Ordering::SeqCst)),
+        (0, 0)
+    );
+}
+
 /// A waker that counts its wakes.
 #[derive(Default)]
 struct WakeCount(AtomicUsize);
