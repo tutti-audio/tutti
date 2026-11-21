@@ -1,11 +1,11 @@
 //! The subprocess probe, as the probe `tutti-plugin-db` scans with.
 
+use crate::Stop;
 use crate::probe::{ProbeState, measure_metadata_with, probe_metadata_with};
 use crate::{CatalogConfig, ProbeFailure, probe_plugin_fallback};
 use std::path::Path;
 use std::time::Duration;
 use tracing::debug;
-use tutti_platform::StopToken;
 use tutti_plugin_types::Described;
 use tutti_plugin_types::Locator;
 use tutti_plugin_types::PluginFormat;
@@ -39,10 +39,8 @@ pub enum Probing {
 pub fn probe_fn(
     config: &CatalogConfig,
     how: Probing,
-) -> impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<Described>, ProbeFailure>
-+ Send
-+ Sync
-+ 'static {
+) -> impl Fn(&Path, PluginFormat, &Stop) -> Result<Vec<Described>, ProbeFailure> + Send + Sync + 'static
+{
     let locator: Locator = config.probe_locator.clone();
     let timeout = match how {
         Probing::Describe { .. } => config.probe_timeout,
@@ -158,7 +156,7 @@ mod tests {
         let config =
             CatalogConfig::new("/pedal").probe_locator(Locator::at("/definitely/not/plugin-probe"));
         let path = Path::new("/plugins/Plain.vst3");
-        let stop = StopToken::new();
+        let stop = Stop::new();
 
         let measuring = probe_fn(&config, Probing::Measure { state: None });
         let failure = measuring(path, PluginFormat::Vst3, &stop)
