@@ -41,7 +41,7 @@
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
 //!   (`impl Into<Asset>`): a path or shared bytes, or an app's own [`Open`]
 //!   source that opens again and again, with an [`Identity`] to cache by (a
-//!   path's carries its [`Stamp`]). [`Destination`] is where one write goes: a
+//!   path's carries its [`FileStamp`]). [`Destination`] is where one write goes: a
 //!   path, written staged and replacing by default (or refusing an existing file
 //!   with [`create_new`](Destination::create_new)), or a borrowed writer;
 //!   [`Staged`] opens the temporary beside a path that a destination writes
@@ -96,8 +96,8 @@ mod sleep;
 mod thread;
 
 pub use asset::{
-    Asset, Destination, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
-    StagedKeep, Stamp,
+    Asset, Destination, FileStamp, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
+    StagedKeep,
 };
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;

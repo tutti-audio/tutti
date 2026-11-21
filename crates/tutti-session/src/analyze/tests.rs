@@ -41,6 +41,24 @@ fn peak_blocks(samples_per_block: usize) -> PeakConfig {
     PeakConfig::new(Samples::new(samples_per_block))
 }
 
+/// **An analysis of a dropped session is `ShutDown`**: the audio did not fail.
+#[test]
+fn an_analysis_of_a_dropped_session_is_shut_down() {
+    let wave = Wave::from_mono(RATE, Mono::new(&[0.5f32; 64]));
+    let job = session().analyze(wave, peak_blocks(32));
+    assert!(matches!(
+        tutti_fixtures::block_on(job),
+        Err(AnalyzeError::ShutDown)
+    ));
+}
+
+/// **An analysis and its future are `Send`.**
+const fn send<T: Send>() {}
+const _: () = {
+    send::<super::Analyze<PeakConfig, f32>>();
+    send::<super::Analyzing<PeakConfig, f32>>();
+};
+
 #[test]
 fn a_sine_of_half_amplitude_has_a_peak_of_half_in_memory() {
     let s = session();
@@ -53,7 +71,7 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_in_memory() {
     );
     let wave = Wave::from_mono(RATE, Mono::new(&samples));
     let job = s.analyze(wave, peak_blocks(512));
-    let blocks = job.run().unwrap();
+    let blocks = tutti_fixtures::block_on(job).unwrap();
     assert!((peak_of(&blocks) - 0.5).abs() < 1e-6);
 }
 
@@ -71,7 +89,7 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_streamed_from_a_file() {
     );
     write(&path, RATE, 1, &samples);
     let job = s.analyze::<f32, _>(path.as_path(), peak_blocks(512));
-    let blocks = job.run().unwrap();
+    let blocks = tutti_fixtures::block_on(job).unwrap();
     assert!((peak_of(&blocks) - 0.5).abs() < 1e-6);
     // 48 000 frames in blocks of 512: 93 whole blocks and a part.
     assert_eq!(blocks.blocks_per_channel(), 94);
@@ -90,7 +108,7 @@ fn a_peak_past_the_first_chunks_is_found_in_its_block_across_chunk_edges() {
     samples[late] = -0.75;
     write(&path, RATE, 1, &samples);
     let job = s.analyze::<f32, _>(path, peak_blocks(1000));
-    let blocks = job.run().unwrap();
+    let blocks = tutti_fixtures::block_on(job).unwrap();
     let found: Vec<(usize, f64)> = blocks
         .channel(0)
         .unwrap()
@@ -114,7 +132,7 @@ fn a_stereo_file_keeps_each_channels_peak() {
     samples[2 * (frames - 1) + 1] = 0.125;
     write(&path, RATE, 2, &samples);
     let job = s.analyze::<f32, _>(path, peak_blocks(256));
-    let blocks = job.run().unwrap();
+    let blocks = tutti_fixtures::block_on(job).unwrap();
     let peak = |channel: usize| {
         blocks
             .channel(channel)
@@ -136,7 +154,7 @@ fn a_band_above_the_files_nyquist_fails_the_job_with_the_meters_error() {
     write(&path, rate, 1, &vec![0.0; 8_000]);
     let band = FrequencyBand::new(Hz::new(100.0), Hz::new(20_000.0)).unwrap();
     let job = s.analyze::<f32, _>(path, ChromaConfig::new().band(band));
-    let failed = job.run().unwrap_err();
+    let failed = tutti_fixtures::block_on(job).unwrap_err();
     assert!(
         matches!(
             failed,
@@ -151,7 +169,7 @@ fn a_stereo_analysis_of_mono_audio_fails_with_the_widths() {
     let s = session();
     let wave = Wave::from_mono(RATE, Mono::new(&[0.0; 64]));
     let job = s.analyze(wave, VectorscopeConfig::new(NonZeroUsize::MIN));
-    let failed = job.run().unwrap_err();
+    let failed = tutti_fixtures::block_on(job).unwrap_err();
     assert!(
         matches!(
             failed,
@@ -170,7 +188,7 @@ fn a_file_that_cannot_be_opened_fails_with_the_decode_error() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("missing.wav");
     let job = s.analyze::<f32, _>(path, peak_blocks(512));
-    let failed = job.run().unwrap_err();
+    let failed = tutti_fixtures::block_on(job).unwrap_err();
     assert!(matches!(failed, AnalyzeError::Decode(_)), "{failed:?}");
 }
 
@@ -191,7 +209,7 @@ fn a_mono_analysis_of_stereo_audio_reads_the_fold_of_its_channels() {
     }
     let config = SilenceConfig::new(FiniteLevel::of(Db::new(-40.0)), Seconds::new(0.01));
     let job = s.analyze(wave, config);
-    let regions = job.run().unwrap();
+    let regions = tutti_fixtures::block_on(job).unwrap();
     let spans: Vec<_> = regions
         .iter()
         .map(|region| (region.start().get(), region.end().get()))
@@ -234,7 +252,7 @@ fn a_run_pushes_every_chunk_of_the_audio() {
     let pushed = std::sync::Arc::default();
     let wave = Wave::from_mono(RATE, Mono::new(&vec![0.0; 2 * CHUNK_FRAMES + 1]));
     let job = s.analyze(wave, Counting(std::sync::Arc::clone(&pushed)));
-    assert_eq!(job.run().unwrap(), 3);
+    assert_eq!(tutti_fixtures::block_on(job).unwrap(), 3);
 }
 
 /// An analysis that reads a stereo pair as planes and keeps each channel's peak.
@@ -287,7 +305,7 @@ fn a_stereo_wave_reads_each_channels_peak_through_its_own_planes() {
             .unwrap();
     }
     let job = s.analyze(wave, ChannelPeaks);
-    assert_eq!(job.run().unwrap(), [0.5, 0.25]);
+    assert_eq!(tutti_fixtures::block_on(job).unwrap(), [0.5, 0.25]);
 }
 
 #[cfg(codec)]
@@ -301,7 +319,7 @@ fn a_stereo_file_reads_each_channels_peak_through_deinterleaved_planes() {
     samples[2 * (CHUNK_FRAMES + 11) + 1] = -0.25;
     write(&path, RATE, 2, &samples);
     let job = s.analyze(path, ChannelPeaks);
-    assert_eq!(job.run().unwrap(), [0.5, 0.25]);
+    assert_eq!(tutti_fixtures::block_on(job).unwrap(), [0.5, 0.25]);
 }
 
 /// An analysis in the audio's own format: the largest absolute sample of a
@@ -351,7 +369,7 @@ fn an_f64_wave_reports_a_value_f32_cannot_hold_exactly_through_an_f64_measure() 
     assert_ne!(f64::from(value as f32), value);
     let wave: Wave<f64> = Wave::from_mono(RATE, Mono::new(&[0.0, value, -0.5]));
     let job = s.analyze(wave, MaxAbs);
-    assert_eq!(job.run().unwrap(), value);
+    assert_eq!(tutti_fixtures::block_on(job).unwrap(), value);
 }
 
 #[cfg(codec)]
@@ -372,5 +390,5 @@ fn a_full_scale_i16_file_decoded_into_f32_peaks_at_32767_over_32768() {
     }
     w.finalize().unwrap();
     let job = s.analyze::<f32, _>(path, MaxAbs);
-    assert_eq!(job.run().unwrap(), 32767.0 / 32768.0);
+    assert_eq!(tutti_fixtures::block_on(job).unwrap(), 32767.0 / 32768.0);
 }

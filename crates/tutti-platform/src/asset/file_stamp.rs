@@ -10,12 +10,12 @@ use std::time::SystemTime;
 /// as far as its length and modification time can tell. A stamp is taken before
 /// the file is read, so a change during the read shows at the next stamp.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Stamp {
+pub struct FileStamp {
     len: u64,
     modified: Option<SystemTime>,
 }
 
-impl Stamp {
+impl FileStamp {
     /// The stamp of the file at `path`.
     ///
     /// # Errors

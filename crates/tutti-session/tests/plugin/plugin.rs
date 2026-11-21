@@ -446,6 +446,20 @@ fn is_quarter(v: Option<f64>) -> bool {
     v.is_some_and(|v| (v - 0.25).abs() < 1e-4)
 }
 
+/// Waits until the plugin reads back the 0.25 that was set at `id`. The write rides one
+/// block to the server, so one block is rendered and the echo is awaited without
+/// rendering: the number of blocks the plugin has processed does not depend on how long
+/// the echo takes, which a plugin that aborts on its Nth block relies on. A hang guard
+/// bounds the wait.
+fn take_value(s: &mut Session, node: NodeKey, id: tutti_units::ParamId) {
+    let _ = renders_sound(s);
+    let guard = Instant::now() + Duration::from_secs(30);
+    while !is_quarter(param(s, node, id)) {
+        assert!(Instant::now() < guard, "the probe never took the value");
+        std::thread::yield_now();
+    }
+}
+
 /// A marker path for `TUTTI_CLAP_PROBE_ONCE_FILE`, free now: the first server
 /// to start fails, replacements do not. The path is this test process's own:
 /// two runs of one test over one target directory (two gates at once) would
@@ -580,17 +594,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
 
     s.set(target.to(tutti_units::Normalized::of(0.25)))
         .expect("the gain is writable");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !is_quarter(param(&s, node, id)) {
-        assert!(
-            Instant::now() < deadline,
-            "the probe never took the value: {:?}",
-            param(&s, node, id)
-        );
-        // The write rides the next block to the server.
-        let _ = renders_sound(&mut s);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    take_value(&mut s, node, id);
     let t0 = Instant::now();
     snapshot_now(&mut s, node);
     let total_before = s.latency();
@@ -951,16 +955,16 @@ mod reaped_on_drop {
 
         drop(s);
         // A session dropped before the plugin opened the fifo leaves the releaser blocked
-        // opening it for writing. Opening it for reading and writing never blocks and pairs
-        // with that open, so the releaser ends whenever the plugin did.
-        drop(
-            std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&fifo)
-                .expect("the fifo opens"),
-        );
+        // (or not yet started) opening it for writing. Opening it for reading and writing
+        // never blocks and pairs with that open, whenever the releaser reaches it; the
+        // handle stays open until the releaser ended, so the pairing cannot be missed.
+        let pairing = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .expect("the fifo opens");
         releaser.join().expect("the releaser ended");
+        drop(pairing);
         assert_eq!(
             children_of_this_process(),
             Vec::<u32>::new(),
@@ -1368,7 +1372,8 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
 /// Captures a snapshot of `node` at once, as a host's worker would (the
 /// session's snapshot cadence is 1 s here, driven by the virtual clock). The first phase
 /// starts the cadence, the second, a virtual 2 s on, asks the plugin, and the phases after
-/// it land the task's end; a hang guard bounds the wait.
+/// it land the task's end; a hang guard bounds the wait, and a plugin that died first ends it at
+/// once.
 fn snapshot_now(s: &mut Session, node: NodeKey) {
     let t0 = Instant::now();
     s.run_phase(Phase::Plugins, PhaseCx::at(t0), &mut Vec::new());
@@ -1376,7 +1381,21 @@ fn snapshot_now(s: &mut Session, node: NodeKey) {
     let guard = Instant::now() + Duration::from_secs(30);
     while s.plugin_view(node).unwrap().state().last_good().is_none() {
         assert!(Instant::now() < guard, "the snapshot never landed");
-        s.run_phase(Phase::Plugins, cx, &mut Vec::new());
+        let mut out = Vec::new();
+        s.run_phase(Phase::Plugins, cx, &mut out);
+        // A plugin that died before it was asked has nothing to snapshot.
+        assert!(
+            !out.iter().any(|e| matches!(
+                e,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::Reloading { .. }
+                        | PluginChange::Died { .. }
+                        | PluginChange::GaveUp { .. },
+                    ..
+                })
+            )),
+            "the plugin died before its snapshot: {out:?}"
+        );
         std::thread::yield_now();
     }
 }
@@ -1434,12 +1453,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
 
     s.set(target.to(tutti_units::Normalized::of(0.25)))
         .expect("the gain is writable");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !is_quarter(param(&s, node, id)) {
-        assert!(Instant::now() < deadline, "the probe never took the value");
-        let _ = renders_sound(&mut s);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    take_value(&mut s, node, id);
     snapshot_now(&mut s, node);
     let users = s
         .plugin_view(node)

@@ -15,7 +15,7 @@
 //! the one `encode_with_fixed_block_size` writes (the same function, block,
 //! frame number and stream info).
 
-use crate::error::{Codec, Error, Result};
+use crate::error::{Codec, EncodeError, Result};
 use crate::format::FlacLevel;
 use crate::pcm::IntDepth;
 use crate::spec::Spec;
@@ -68,14 +68,14 @@ impl<W: Write + Seek> FlacWriter<W> {
 
         let verify = |c: EncoderConfig| {
             c.into_verified()
-                .map_err(|e| Error::encoding(Codec::Flac, format!("invalid config: {e:?}")))
+                .map_err(|e| EncodeError::encoding(Codec::Flac, format!("invalid config: {e:?}")))
         };
         let configs = Configs {
             full: verify(encoder_config(level))?,
             short: verify(short_block_config(level))?,
         };
         let info = StreamInfo::new(rate, channels, bits)
-            .map_err(|e| Error::encoding(Codec::Flac, format!("invalid stream: {e:?}")))?;
+            .map_err(|e| EncodeError::encoding(Codec::Flac, format!("invalid stream: {e:?}")))?;
 
         // A placeholder of the final header's size (STREAMINFO is fixed
         // length), rewritten once the totals and the MD5 are known.
@@ -135,7 +135,9 @@ fn header_bytes(info: &StreamInfo) -> Result<Vec<u8>> {
     let mut sink = ByteSink::new();
     Stream::with_stream_info(info.clone())
         .write(&mut sink)
-        .map_err(|e| Error::encoding(Codec::Flac, format!("failed to write header: {e:?}")))?;
+        .map_err(|e| {
+            EncodeError::encoding(Codec::Flac, format!("failed to write header: {e:?}"))
+        })?;
     Ok(sink.into_inner())
 }
 
@@ -173,7 +175,7 @@ struct FrameWriter {
 impl FrameWriter {
     fn start(configs: Configs, info: StreamInfo, channels: usize, bits: usize) -> Result<Self> {
         let buf = FrameBuf::with_size(channels, BLOCK_SIZE)
-            .map_err(|e| Error::encoding(Codec::Flac, format!("frame buffer: {e:?}")))?;
+            .map_err(|e| EncodeError::encoding(Codec::Flac, format!("frame buffer: {e:?}")))?;
         Ok(Self {
             configs,
             buf,
@@ -220,20 +222,20 @@ impl FrameWriter {
         self.buf.resize(frames);
         self.buf
             .fill_interleaved(pcm)
-            .map_err(|e| Error::encoding(Codec::Flac, format!("frame buffer: {e:?}")))?;
+            .map_err(|e| EncodeError::encoding(Codec::Flac, format!("frame buffer: {e:?}")))?;
         let config = if frames < MIN_BLOCK_SIZE {
             &self.configs.short
         } else {
             &self.configs.full
         };
         let mut frame = encode_fixed_size_frame(config, &self.buf, self.written, &self.info)
-            .map_err(|e| Error::encoding(Codec::Flac, format!("encoding failed: {e:?}")))?;
+            .map_err(|e| EncodeError::encoding(Codec::Flac, format!("encoding failed: {e:?}")))?;
         frame.precompute_bitstream();
         self.info.update_frame_info(&frame);
         self.sink.clear();
-        frame
-            .write(&mut self.sink)
-            .map_err(|e| Error::encoding(Codec::Flac, format!("failed to write frame: {e:?}")))?;
+        frame.write(&mut self.sink).map_err(|e| {
+            EncodeError::encoding(Codec::Flac, format!("failed to write frame: {e:?}"))
+        })?;
         out.write_all(self.sink.as_slice())?;
         self.written += 1;
         Ok(())
@@ -249,12 +251,12 @@ impl FrameWriter {
         // states it too, rather than `update_frame_info`'s unset 65535 and 0.
         self.info
             .set_block_sizes(BLOCK_SIZE, BLOCK_SIZE)
-            .map_err(|e| Error::encoding(Codec::Flac, format!("block size: {e:?}")))?;
+            .map_err(|e| EncodeError::encoding(Codec::Flac, format!("block size: {e:?}")))?;
         if self.written == 0 {
             // Zero is "unknown"; unset, the two would read u32::MAX and 0.
             self.info
                 .set_frame_sizes(0, 0)
-                .map_err(|e| Error::encoding(Codec::Flac, format!("frame size: {e:?}")))?;
+                .map_err(|e| EncodeError::encoding(Codec::Flac, format!("frame size: {e:?}")))?;
         }
         // `update_frame_info` has summed every block's length, the last at its
         // own, so the sample count is already exact.
@@ -263,8 +265,8 @@ impl FrameWriter {
     }
 }
 
-fn lost_frame() -> Error {
-    Error::encoding(
+fn lost_frame() -> EncodeError {
+    EncodeError::encoding(
         Codec::Flac,
         "an earlier frame failed, so the stream cannot be completed",
     )

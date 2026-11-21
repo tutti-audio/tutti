@@ -16,7 +16,7 @@ use tutti_midi_device::DeviceEvent;
 /// are written around.
 struct Watched {
     devices: Devices,
-    events: crate::DeviceEvents,
+    events: std::cell::RefCell<crate::DeviceEvents>,
 }
 
 impl Watched {
@@ -29,17 +29,21 @@ impl Watched {
     }
 
     fn of(devices: Devices) -> Self {
-        let events = devices.subscribe();
+        let events = std::cell::RefCell::new(devices.subscribe());
         Self { devices, events }
     }
 
     /// The change that comes before the hang guard `within` and any queued
     /// behind it; none if the guard passes first.
     fn wait(&self, within: Duration) -> Vec<DeviceEvent> {
-        tutti_fixtures::block_on_within(self.events.recv(), within)
-            .and_then(|received| received.ok())
+        let first = {
+            let mut events = self.events.borrow_mut();
+            tutti_fixtures::block_on_within(futures_lite::StreamExt::next(&mut *events), within)
+        };
+        first
+            .flatten()
             .into_iter()
-            .chain(self.events.pending())
+            .chain(self.events.borrow().pending().collect::<Vec<_>>())
             .collect()
     }
 }

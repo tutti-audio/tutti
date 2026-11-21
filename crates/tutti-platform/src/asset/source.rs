@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::stamp::Stamp;
+use super::file_stamp::FileStamp;
 
 /// A reader that seeks and moves between threads: what [`Open::open`] hands out.
 ///
@@ -17,7 +17,7 @@ impl<T: Read + Seek + Send + ?Sized> ReadSeek for T {}
 
 /// A cache key for one source: two equal identities name the same content.
 ///
-/// It is opaque. A path's identity carries its [`Stamp`], so a file that changed
+/// It is opaque. A path's identity carries its [`FileStamp`], so a file that changed
 /// is another identity; a source of bytes carries an id minted once per source,
 /// never an address, so a freed source's key is not reused.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -25,7 +25,7 @@ pub struct Identity(Key);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Key {
-    File(PathBuf, Stamp),
+    File(PathBuf, FileStamp),
     Minted(u64),
 }
 
@@ -40,7 +40,7 @@ impl Identity {
 
     /// The identity of the file at `path`, as it is now.
     fn of_file(path: &Path) -> io::Result<Self> {
-        Ok(Self(Key::File(path.to_path_buf(), Stamp::of(path)?)))
+        Ok(Self(Key::File(path.to_path_buf(), FileStamp::of(path)?)))
     }
 }
 
@@ -135,7 +135,7 @@ impl Open for BytesSource {
 /// is cheap to clone: clones share the source and keep the [`identity`](Self::identity).
 ///
 /// - A path opens a `File` on every [`open`](Self::open). Its identity is the
-///   path with the file's [`Stamp`] as of the call that made the asset, so a file
+///   path with the file's [`FileStamp`] as of the call that made the asset, so a file
 ///   edited since is another asset; it is `None` when the file cannot be stamped.
 /// - Bytes open a cursor over the shared buffer, with no copy. Their identity is
 ///   minted when the asset is made, so two assets of equal bytes differ and a
@@ -208,7 +208,7 @@ impl Asset {
     }
 
     /// The cache key, taken now; see [`Open::identity`]. A file's key is its path and
-    /// its current [`Stamp`], so a file changed since the last call has a new key;
+    /// its current [`FileStamp`], so a file changed since the last call has a new key;
     /// `None` for a source that is not cached.
     #[must_use]
     pub fn identity(&self) -> Option<Identity> {

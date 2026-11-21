@@ -2,11 +2,11 @@
 //! destination that is written once, staged.
 
 mod destination;
+mod file_stamp;
 mod source;
 mod staged;
-mod stamp;
 
 pub use destination::Destination;
+pub use file_stamp::FileStamp;
 pub use source::{Asset, Identity, Open, ReadSeek};
 pub use staged::{Staged, StagedCommitError, StagedFile, StagedKeep};
-pub use stamp::Stamp;
