@@ -1,0 +1,7 @@
+# Umbrella names a spec itself gives to items of more than one crate
+# (`cargo xtask umbrella-api`). One `<name>  <crates>  <spec citation>: <reason>` row per
+# collision; a row that no longer collides fails, so the list only shrinks.
+
+Stream  tutti_sampler,tutti_ump  M2-104: the UMP Stream is the spec's own term for a stream of UMP packets
+System  tutti_dsp,tutti_ump  M2-104: the UMP System message group is the spec's own name
+ResourceId  tutti_midi_ci,tutti_session  M2-103 §8.5: the Property Exchange resource id is the spec's own name

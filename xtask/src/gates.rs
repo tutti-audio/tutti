@@ -50,6 +50,8 @@ mod toml;
 mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
 mod umbrella_api;
+// Read by `check-umbrella`.
+mod umbrella_collisions;
 mod units_bare;
 mod use_tree;
 mod value_traits;
