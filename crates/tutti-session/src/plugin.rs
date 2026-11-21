@@ -3236,11 +3236,13 @@ mod tests {
     }
 
     impl tutti_plugin_types::AnyThread for Fake {
-        fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
-            self.params
-                .iter()
-                .find(|(a, _)| *a == id)
-                .map(|&(_, v)| Normalized::clamped(f64::from(v)))
+        fn parameter_value(&self, id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::Answer::ready(
+                self.params
+                    .iter()
+                    .find(|(a, _)| *a == id)
+                    .map(|&(_, v)| Normalized::clamped(f64::from(v))),
+            )
         }
         /// A held list is a round trip in flight: a thread of its own waits for the test's
         /// token and then answers, so no executor thread waits on it. A dropped sender
@@ -3249,10 +3251,10 @@ mod tests {
             assert!(!self.panics, "the backend failed while asked for its list");
             let Some(hold) = self.hold.clone() else {
                 self.held();
-                return tutti_plugin_types::answered(self.listing());
+                return tutti_plugin_types::Answer::ready(self.listing());
             };
             let listed = self.listing();
-            let (tx, answer) = futures_channel::oneshot::channel();
+            let (tx, answer) = tutti_plugin_types::Answer::channel();
             std::thread::spawn(move || {
                 hold.lock()
                     .unwrap()
@@ -3262,18 +3264,15 @@ mod tests {
             });
             answer
         }
-        fn parameter_value_answer(
-            &self,
-            id: ParamId,
-        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::answered(self.parameter_value(id))
-        }
         fn set_parameter_value(
             &self,
             _id: ParamId,
             _value: Normalized,
         ) -> Result<(), tutti_plugin_types::UnknownParam> {
             Ok(())
+        }
+        fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
+            None
         }
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
             None
@@ -3283,7 +3282,7 @@ mod tests {
             _id: ParamId,
             _plain: f64,
         ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::answered(None)
+            tutti_plugin_types::Answer::ready(None)
         }
         fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
             None

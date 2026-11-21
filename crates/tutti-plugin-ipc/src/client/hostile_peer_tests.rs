@@ -2046,9 +2046,7 @@ fn an_editor_request_that_goes_wrong_names_how() {
 /// Awaits `answer` on a thread of its own, as an app's executor would: it is
 /// polled when the reader or the lane fills it, and nothing else polls it. The
 /// budget only guards a hang.
-fn await_answer<T: Send + 'static>(
-    answer: futures_channel::oneshot::Receiver<T>,
-) -> std::result::Result<T, futures_channel::oneshot::Canceled> {
+fn await_answer<T: Send + 'static>(answer: tutti_plugin_types::Answer<T>) -> Option<T> {
     call_within(move || futures_lite::future::block_on(answer))
         .unwrap_or_else(|w| panic!("an answer was never filled; waited {w:?}"))
 }
@@ -2070,7 +2068,7 @@ fn an_awaited_save_state_is_filled_with_the_servers_state() {
         .bridge
         .audio()
         .save_state_answer(tutti_plugin_types::StateUse::Project);
-    assert_eq!(await_answer(answer), Ok(Ok(bytes)));
+    assert_eq!(await_answer(answer), Some(Ok(bytes)));
 }
 
 /// **A server that never answers a save is cut off by the control lane's
@@ -2164,7 +2162,7 @@ fn an_awaited_save_state_the_server_dies_in_is_canceled() {
         .bridge
         .audio()
         .save_state_answer(tutti_plugin_types::StateUse::Project);
-    assert!(await_answer(answer).is_err(), "no reply was sent");
+    assert!(await_answer(answer).is_none(), "no reply was sent");
 }
 
 /// Assert that a stall left the session genuinely usable, not merely unflagged.

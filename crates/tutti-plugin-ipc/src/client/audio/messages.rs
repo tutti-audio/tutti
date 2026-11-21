@@ -598,21 +598,27 @@ mod tests {
     /// dead plugin**: the answer is filled, where a dropped reply would cancel it.
     #[test]
     fn a_refused_request_answers_busy() {
-        let (mut save, reply) = super::super::ask::awaited();
+        let (save, reply) = super::super::ask::awaited();
         ControlCommand::SaveState {
             state_use: StateUse::Project,
             flush: None,
             reply,
         }
         .refuse();
-        assert_eq!(save.try_recv(), Ok(Some(Err(StateError::Busy))));
-        let (mut preset, reply) = super::super::ask::awaited();
+        assert_eq!(
+            futures_lite::future::block_on(save),
+            Some(Err(StateError::Busy))
+        );
+        let (preset, reply) = super::super::ask::awaited();
         ControlCommand::LoadPreset {
             id: PresetId::Location("/x".into()),
             reply,
         }
         .refuse();
-        assert_eq!(preset.try_recv(), Ok(Some(Err(PresetError::Busy))));
+        assert_eq!(
+            futures_lite::future::block_on(preset),
+            Some(Err(PresetError::Busy))
+        );
     }
 
     /// Each drained event as a short label, for whole-sequence asserts.
