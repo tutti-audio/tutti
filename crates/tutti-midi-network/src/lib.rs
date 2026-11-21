@@ -90,7 +90,7 @@ pub use datagram::{
 };
 pub use discovery::{
     Advertisement, Browser, DiscoveryError, FoundHost, HostEvent, InstanceName, InstanceNameError,
-    KEY_ENDPOINT_NAME, KEY_PRODUCT_INSTANCE_ID, Pending, SERVICE_TYPE, identity_from_txt,
+    KEY_ENDPOINT_NAME, KEY_PRODUCT_INSTANCE_ID, PendingHosts, SERVICE_TYPE, identity_from_txt,
     instance_name, txt_properties,
 };
 pub use endpoint::{Client, Host, HostConfig, MAX_QUEUED_EVENTS, NetworkEndpoint};

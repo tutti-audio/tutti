@@ -342,8 +342,8 @@ impl Browser {
 
     /// The Host events that have arrived and not been taken, oldest first,
     /// taking each as it is iterated. Never waits.
-    pub fn pending(&self) -> Pending<'_> {
-        Pending { browser: self }
+    pub fn pending(&self) -> PendingHosts<'_> {
+        PendingHosts { browser: self }
     }
 }
 
@@ -358,11 +358,11 @@ impl Stream for Browser {
 /// The Host events of a [`Browser`] that have arrived and not been taken:
 /// [`Browser::pending`].
 #[derive(Debug)]
-pub struct Pending<'a> {
+pub struct PendingHosts<'a> {
     browser: &'a Browser,
 }
 
-impl Iterator for Pending<'_> {
+impl Iterator for PendingHosts<'_> {
     type Item = HostEvent;
 
     fn next(&mut self) -> Option<HostEvent> {
