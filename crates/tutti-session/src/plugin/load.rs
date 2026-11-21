@@ -131,7 +131,7 @@ impl LoadPlugin {
 /// dropping every clone, a node's among them.
 #[derive(Clone, Debug)]
 pub struct LoadedPlugin {
-    shared: Arc<Shared>,
+    pub(super) shared: Arc<Shared>,
 }
 
 impl LoadedPlugin {
