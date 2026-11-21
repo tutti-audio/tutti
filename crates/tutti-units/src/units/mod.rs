@@ -63,6 +63,7 @@ mod macros;
 mod amounts;
 mod angles;
 mod ballistics;
+mod distance;
 mod frames;
 mod level;
 mod measures;
@@ -83,6 +84,7 @@ pub use angles::{
     RunningPhase,
 };
 pub use ballistics::Ballistics;
+pub use distance::{Metres, MetresOutOfRange, Speed, SpeedOutOfRange};
 pub use frames::{ReadPosition, SampleSpan, SampleSpanOutOfRange};
 pub use level::{Amplitude, Db, Gain};
 pub use measures::{Confidence, Correlation, StereoBalance, Velocity};

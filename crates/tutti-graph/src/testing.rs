@@ -1066,6 +1066,10 @@ impl TestPool {
         Self::build_with(participants, no_alloc, crate::BlockWaits::DEFAULT)
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test support: the job gate's helpers race the test's own thread"
+    )]
     fn build_with(participants: usize, no_alloc: bool, waits: crate::BlockWaits) -> Arc<Self> {
         let gate = Arc::new(tutti_rt::JobGate::with_waits(participants, waits));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));

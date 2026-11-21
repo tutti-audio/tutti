@@ -30,6 +30,7 @@ fn fdn(lines: &[Line], matrix: Matrix) -> Fdn {
         matrix,
         input: Gains::filled(Gain::UNITY, lines.len()).unwrap(),
         output: NetworkOutputMap::default(),
+        loop_delay: SampleSpan::ZERO,
     }
 }
 

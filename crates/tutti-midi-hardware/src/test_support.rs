@@ -507,6 +507,10 @@ impl FakeBackend {
 }
 
 impl MidiEndpoints for FakeBackend {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test support: the fake backend's watch thread stands in for an OS one"
+    )]
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
         let (changes, incoming) = mpsc::channel();
         let mut devices = self.devices();

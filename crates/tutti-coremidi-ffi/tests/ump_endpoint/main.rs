@@ -11,6 +11,10 @@
 //! Each case that reads CoreMIDI's own listing of UMP Endpoints (`ump_endpoints`)
 //! reads it as another app would. The class exists from macOS 15: a case creates
 //! the endpoint on 15 or later and asserts the refusal by name before it.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the threads it races, outside any executor"
+)]
 
 #[cfg_attr(target_os = "macos", path = "macos.rs")]
 #[cfg_attr(not(target_os = "macos"), path = "other.rs")]

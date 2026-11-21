@@ -40,6 +40,7 @@ fn fdn(lines: &[Line], matrix: Matrix, input: &[f64], output: &[f64]) -> Fdn {
         matrix,
         input: gains(input),
         output: NetworkOutputMap { rows },
+        loop_delay: SampleSpan::ZERO,
     }
 }
 

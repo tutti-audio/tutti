@@ -334,11 +334,11 @@ pub mod nodes {
         MultibandControls, NoiseConfig, NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes,
         NoteTimesError, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
         PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder,
-        SweepError, SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls,
-        TiltFilterNode, TransientControls, TransientShaperConfig, TransientShaperNode, VbapError,
-        VbapPannerConfig, VbapPannerNode,
+        SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts,
+        Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode,
+        SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterControls, TiltFilterNode, TransientControls, TransientShaperConfig,
+        TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -346,13 +346,13 @@ pub mod nodes {
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, GraphicEqKernel, Kernel,
         KernelConfig, KernelNode, LadderKernel, LevellerKernel, LimiterKernel, ModDelayKernel,
-        PhaserKernel, ReconcileError, SvfKernel, TiltFilterKernel,
+        PhaserKernel, ReconcileError, ShimmerKernel, SvfKernel, TiltFilterKernel,
     };
     pub use tutti_nodes::{
         BellFilterSet, BitCrusherSet, BrickwallSet, CompressorSet, CrossoverSet, CutFilterSet,
         DcBlockerSet, DelaySet, DistortionSet, DynamicEqSet, EnvelopeFilterSet, FdnSet,
         FreeverbSet, GateSet, GraphicEqSet, HasControl, LadderSet, LevellerSet, LimiterSet,
-        ModDelaySet, PhaserSet, PlateKernel, PlateSet, SvfSet, TiltFilterSet,
+        ModDelaySet, PhaserSet, PlateKernel, PlateSet, ShimmerSet, SvfSet, TiltFilterSet,
         TransientShaperKernel, TransientShaperSet,
     };
     pub use tutti_nodes::{
@@ -404,12 +404,12 @@ pub mod types {
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Mix, Moment, NormalizedOutOfRange,
-        Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate,
-        PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance, RunningPhase,
-        SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Spread, SrcRatio,
-        StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
-        UnitParamOutOfRange, Velocity,
+        Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
+        Moment, NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep,
+        PlayReading, PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate,
+        Resonance, RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan,
+        SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
+        StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }

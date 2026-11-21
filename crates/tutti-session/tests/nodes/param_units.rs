@@ -107,6 +107,11 @@ units! {
             Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
             Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db, Freeze => bool
         }
+        tutti_nodes::ShimmerNode<f32> {
+            Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
+            Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db,
+            Pitch => Cents, Feedback => Feedback
+        }
         tutti_nodes::VbapPannerNode<f32> {
             Azimuth => Azimuth, Elevation => Elevation, Spread => Spread,
             StereoWidth => StereoWidth

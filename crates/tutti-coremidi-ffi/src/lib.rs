@@ -38,6 +38,13 @@
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![warn(unsafe_op_in_unsafe_fn)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 // The OS-free checks and decisions: one seam, since only `os` uses them off tests.
 #[cfg(any(target_os = "macos", test))]
