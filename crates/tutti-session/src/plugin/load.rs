@@ -29,9 +29,9 @@ use std::task::{Context as TaskContext, Poll};
 
 use tutti_graph::NodeKey;
 use tutti_platform::{Asset, Task};
+use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::{Catalog, Hosting, Loadable};
-use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{IpcError, Preset, PresetError};
@@ -93,7 +93,7 @@ impl Request {
     fn open(
         self,
         open: impl FnOnce(PluginLoad) -> Open,
-        presets: impl FnOnce(&PluginHandle) -> Result<Vec<Preset>, PresetError>,
+        presets: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
     ) -> Result<PluginNode, LoadError> {
         let stamp = Stamp::take(Asset::from(module_of(self.loadable.plugin())?));
         let cx = self.cx;
@@ -157,7 +157,7 @@ impl LoadInProcess {
         caught(|| {
             self.request.open(
                 |load| load.run_in_process(main),
-                |handle| handle.presets(main),
+                |plugin| plugin.handle().presets(main),
             )
         })
     }
@@ -257,10 +257,12 @@ impl Future for LoadingOutOfProcess {
             };
             let launched = executor.unblock(move || {
                 caught(|| {
-                    request.open(
-                        PluginLoad::run_out_of_process,
-                        PluginHandle::presets_out_of_process,
-                    )
+                    request.open(PluginLoad::run_out_of_process, |plugin| {
+                        plugin
+                            .client()
+                            .and_then(PluginClient::presets)
+                            .ok_or(PresetError::Lost)
+                    })
                 })
             });
             match launched {
@@ -479,19 +481,10 @@ pub enum SwapPluginError {
 
 /// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
-    /// A plugin to open, hosted as the format's default ([`Hosting::Auto`]):
-    /// [`load_plugin_as`](Self::load_plugin_as).
-    ///
-    /// # Errors
-    ///
-    /// As [`load_plugin_as`](Self::load_plugin_as).
-    pub fn load_plugin(&self, id: &PluginId, catalog: &Catalog) -> Result<LoadPlugin, LoadError> {
-        self.load_plugin_as(id, catalog, Hosting::Auto)
-    }
-
     /// A plugin to open, as a value the app runs: a [`LoadInProcess`] on the
     /// main thread or a [`LoadOutOfProcess`] on any thread, by where `hosting`
-    /// resolves for the plugin's format in this build.
+    /// resolves for the plugin's format in this build ([`Hosting::Auto`] is the
+    /// format's default).
     ///
     /// `id` is resolved and bound against `catalog` now ([`Catalog::resolve`]),
     /// and the load keeps the answer. The load runs at the session's rate and
@@ -511,7 +504,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     ///
     /// [`IpcError::NotOutOfProcess`]: tutti_plugin_types::IpcError::NotOutOfProcess
     /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
-    pub fn load_plugin_as(
+    pub fn load_plugin(
         &self,
         id: &PluginId,
         catalog: &Catalog,

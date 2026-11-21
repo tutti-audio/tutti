@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Timebase, Track};
 use tutti::session::Master;
 use tutti::{
-    Beat, Bounce, Bpm, Format, LoadPlugin, MaxBlock, NodeKey, Pcm, PeerState, Range, Root,
+    Beat, Bounce, Bpm, Format, Hosting, LoadPlugin, MaxBlock, NodeKey, Pcm, PeerState, Range, Root,
     SampleRate, Samples, Session, SessionEvent, Written,
 };
 
@@ -83,7 +83,7 @@ fn load(
         .ok_or("the scan could not read the plugin's id")?;
     let plugin = entry.plugin_ref();
     let state = state.map(|bytes| PeerState::of_plugin(plugin, bytes));
-    let loaded = match s.load_plugin(&id, &catalog)? {
+    let loaded = match s.load_plugin(&id, &catalog, Hosting::Auto)? {
         LoadPlugin::InProcess(mut load) => {
             if let Some(state) = state {
                 load.initial_state(state)?;

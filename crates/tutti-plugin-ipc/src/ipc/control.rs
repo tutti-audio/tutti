@@ -108,10 +108,6 @@ macro_rules! served_control {
                 self.link.bridge.audio().save_state(state_use)
             }
 
-            fn presets(&self) -> Option<Vec<Preset>> {
-                self.link.bridge.audio().presets()
-            }
-
             /// Queued on the command bus as the blocks around it are, so the
             /// change lands between two blocks. `true` when queued, which is
             /// not whether the plugin acts on the mode (the load-time
@@ -302,7 +298,7 @@ macro_rules! served_control {
             }
 
             fn presets(&mut self, _main: MainThreadMarker) -> Vec<Preset> {
-                AnyThread::presets(self).unwrap_or_default()
+                self.link.bridge.audio().presets().unwrap_or_default()
             }
 
             fn load_preset(&mut self, _main: MainThreadMarker, id: &PresetId) -> bool {

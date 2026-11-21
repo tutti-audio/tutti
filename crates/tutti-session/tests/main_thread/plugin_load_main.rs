@@ -128,14 +128,14 @@ fn an_in_process_load_stamps_its_module() {
     s.close(tutti_fixtures::main_thread());
 }
 
-/// **An in-process load resolves in process from the catalog**: `load_plugin_as`
+/// **An in-process load resolves in process from the catalog**: `load_plugin`
 /// with `Hosting::InProcess` returns the in-process load, which the format's
 /// default does not.
 fn an_in_process_hosting_resolves_to_an_in_process_load() {
     let (catalog, _dir) = catalog();
     let s = session();
     assert!(matches!(
-        s.load_plugin_as(&id(), &catalog, Hosting::InProcess),
+        s.load_plugin(&id(), &catalog, Hosting::InProcess),
         Ok(tutti_session::LoadPlugin::InProcess(_))
     ));
 }

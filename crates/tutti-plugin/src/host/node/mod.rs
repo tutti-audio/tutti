@@ -557,6 +557,14 @@ impl<S> PluginClient<S> {
             .with_tail(self.controls.tail())
     }
 
+    /// The presets the plugin lists, asked of its server: a round trip that
+    /// takes no main thread, bounded by the parameter wait. `None` when the
+    /// server is gone or did not answer.
+    #[must_use]
+    pub fn presets(&self) -> Option<Vec<tutti_plugin_types::Preset>> {
+        self.bridge.audio().presets()
+    }
+
     /// The main-thread control handle for this plugin: editor, parameters,
     /// state.
     ///

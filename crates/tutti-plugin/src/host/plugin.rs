@@ -491,6 +491,15 @@ impl Plugin {
         (BoundPlugin { bound }, rebinder)
     }
 
+    /// The out-of-process plugin's client: `None` for a plugin that runs in
+    /// this process.
+    pub fn client(&self) -> Option<&PluginClient> {
+        match &self.placed {
+            Placed::Served(client) => Some(client),
+            Placed::InProcess(_) => None,
+        }
+    }
+
     /// Returns the node as the concrete out-of-process [`PluginClient`],
     /// unbound.
     ///

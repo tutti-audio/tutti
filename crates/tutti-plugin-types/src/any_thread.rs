@@ -8,8 +8,8 @@
 
 use crate::{
     AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass, ParameterInfo,
-    PluginFailure, Preset, RenderMode, SampleRate, StateError, StateUse, TerminationReason,
-    UnknownParam, bypass_value, is_bypassed,
+    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, UnknownParam,
+    bypass_value, is_bypassed,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -113,14 +113,6 @@ pub trait AnyThread: Send + Sync {
     /// or ([`StateError::Unavailable`]) the plugin was not asked because the
     /// main thread did not answer in time.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError>;
-
-    /// The presets the plugin lists, from any thread, for a plugin that answers
-    /// them over its wire (an out-of-process one): a round trip. `None` when the
-    /// plugin is lost, and for a plugin whose list is the main thread's
-    /// ([`Control::presets`](crate::Control::presets)).
-    fn presets(&self) -> Option<Vec<Preset>> {
-        None
-    }
 
     /// Tells the plugin whether it is rendering offline, and returns whether it
     /// *accepted* the mode (`false` is a refusal or an unavailable plugin, not

@@ -33,8 +33,8 @@ use tutti::plugin::PresetSupport;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
 use tutti::session::Peer as _;
 use tutti::{
-    Beat, Bounce, Catalog, Format, LoadPlugin, MaxBlock, ParamId, Pcm, PluginEvent, Range, Root,
-    SampleRate, Samples, Session, SessionEvent, StateUse,
+    Beat, Bounce, Catalog, Format, Hosting, LoadPlugin, MaxBlock, ParamId, Pcm, PluginEvent, Range,
+    Root, SampleRate, Samples, Session, SessionEvent, StateUse,
 };
 use tutti_units::Normalized;
 
@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or_else(|| format!("no plugin named {name:?} in the scan"))?;
     let instrument = entry.is_instrument();
     // The request's `Hosting::Auto` serves CLAP, VST3 and AU from a
-    //    `plugin-server` process and runs VST2 here; `load_plugin_as` with
+    //    `plugin-server` process and runs VST2 here; `load_plugin` with
     //    `Hosting::InProcess` asks for this process where the format allows it.
     let plugin = entry.plugin_ref();
     eprintln!("{name}: {:?} in {}", plugin.id(), plugin.path().display());
@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .id
         .cloned()
         .ok_or("the scan could not read the plugin's id")?;
-    let opened = match session.load_plugin(&id, &catalog)? {
+    let opened = match session.load_plugin(&id, &catalog, Hosting::Auto)? {
         LoadPlugin::InProcess(load) => load.run(main)?,
         LoadPlugin::OutOfProcess(load) => tutti_fixtures::block_on(load)?,
     };

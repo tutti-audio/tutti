@@ -168,7 +168,7 @@ fn a_failed_load_returns_its_error() {
     let s = session();
     let absent = PluginId::Clap("com.example.absent".into());
     let error = s
-        .load_plugin(&absent, &catalog)
+        .load_plugin(&absent, &catalog, Hosting::Auto)
         .expect_err("no such plugin");
     assert!(matches!(error, LoadError::Unresolved(_)), "{error:?}");
 

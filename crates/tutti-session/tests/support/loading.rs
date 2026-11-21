@@ -228,7 +228,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         hosting: Hosting,
         state: Option<PeerState>,
     ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError> {
-        let opened = match self.load_plugin_as(id, catalog, hosting)? {
+        let opened = match self.load_plugin(id, catalog, hosting)? {
             Load::InProcess(mut load) => {
                 if let Some(state) = state {
                     load.initial_state(state).expect("a state of the plugin");
@@ -270,14 +270,14 @@ pub trait Hosted {
 
 impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> Hosted for Session<K, C> {
     fn load_out_of_process(&self, id: &PluginId, catalog: &Catalog) -> LoadOutOfProcess {
-        match self.load_plugin_as(id, catalog, Hosting::OutOfProcess) {
+        match self.load_plugin(id, catalog, Hosting::OutOfProcess) {
             Ok(Load::OutOfProcess(load)) => load,
             other => panic!("an out-of-process load: {other:?}"),
         }
     }
 
     fn load_in_process(&self, id: &PluginId, catalog: &Catalog) -> LoadInProcess {
-        match self.load_plugin_as(id, catalog, Hosting::InProcess) {
+        match self.load_plugin(id, catalog, Hosting::InProcess) {
             Ok(Load::InProcess(load)) => load,
             other => panic!("an in-process load: {other:?}"),
         }

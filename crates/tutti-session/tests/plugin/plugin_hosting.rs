@@ -93,7 +93,7 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
     let plugin = PluginRef::file(tutti_fixtures::vst2_probe());
     let (catalog, id, _dir) = catalog_of(&plugin);
     let s = session();
-    match s.load_plugin_as(&id, &catalog, Hosting::OutOfProcess) {
+    match s.load_plugin(&id, &catalog, Hosting::OutOfProcess) {
         Err(LoadError::Plugin(error)) => match &*error {
             IpcError::NotOutOfProcess { format, .. } => {
                 assert_eq!(*format, tutti_plugin_types::PluginFormat::Vst2)
@@ -136,15 +136,15 @@ fn the_hosting_a_catalog_resolves_picks_the_variant_of_the_load() {
     let (catalog, id, _dir) = catalog_of(&plugin);
     let s = session();
     assert!(matches!(
-        s.load_plugin(&id, &catalog),
+        s.load_plugin(&id, &catalog, Hosting::Auto),
         Ok(Load::OutOfProcess(_))
     ));
     assert!(matches!(
-        s.load_plugin_as(&id, &catalog, Hosting::OutOfProcess),
+        s.load_plugin(&id, &catalog, Hosting::OutOfProcess),
         Ok(Load::OutOfProcess(_))
     ));
     assert!(matches!(
-        s.load_plugin_as(&id, &catalog, Hosting::InProcess),
+        s.load_plugin(&id, &catalog, Hosting::InProcess),
         Ok(Load::InProcess(_))
     ));
 }
@@ -157,7 +157,7 @@ fn a_vst2_plugin_resolves_to_an_in_process_load() {
     let plugin = PluginRef::file(tutti_fixtures::vst2_probe());
     let (catalog, id, _dir) = catalog_of(&plugin);
     assert!(matches!(
-        session().load_plugin(&id, &catalog),
+        session().load_plugin(&id, &catalog, Hosting::Auto),
         Ok(Load::InProcess(_))
     ));
 }

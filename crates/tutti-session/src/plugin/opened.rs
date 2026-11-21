@@ -201,7 +201,7 @@ impl Shared {
         open: Open,
         loadable: Loadable,
         config: AudioConfig,
-        read: impl FnOnce(&PluginHandle) -> Result<Vec<Preset>, PresetError>,
+        read: impl FnOnce(&HostPlugin) -> Result<Vec<Preset>, PresetError>,
     ) -> Result<(Self, Install), LoadError> {
         let Open {
             plugin,
@@ -218,7 +218,7 @@ impl Shared {
         let id = cx.ids.mint();
         let presets = PluginPresets::new(handle.preset_support(), handle.instance());
         if presets.support().can_list() {
-            presets.fill(read(&handle));
+            presets.fill(read(&plugin));
         }
         let info = PluginInfo {
             plugin: plugin.plugin().clone(),
