@@ -380,9 +380,8 @@ pub mod types {
         snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek,
-        Shutdown, Sleep, Staged, StagedCommitError, StagedFile, StagedKeep, Stamp, Threads, Timer,
-        WeakExecutor,
+        Asset, Destination, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
+        StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -489,14 +488,14 @@ pub mod session {
     pub use tutti_session::LoadError;
     pub use tutti_session::WorkerError;
     pub use tutti_session::{
-        BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade, CrossfadeId,
-        CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
-        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
-        RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError,
-        Weighted, Wire, root_width,
+        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
+        CrossfadeId, CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin,
+        Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen,
+        PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
+        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, SessionOutputTapError, Taps,
+        TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -691,10 +690,9 @@ pub mod soundfont {
 /// spawns; build it with `cargo build -p tutti-plugin-server`.
 #[cfg(feature = "plugin")]
 pub mod plugin {
-    pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        Mtime, PluginEntry, ProbeFailure, RowChange, ScanError, ScanOutcome, ScanProgress,
+        Mtime, PluginEntry, ProbeFailure, RowChange, ScanBusy, ScanOutcome, ScanProgress,
         ScannedFile,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
@@ -728,8 +726,8 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin_db::{
-            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, Scan, ScanPoll,
-            ScanResult,
+            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, ScanCanceller,
+            ScanPlugins, ScanProgressReader, ScanReport, ScannedPlugins, StaleScan,
         };
         pub use tutti_plugin_ipc::AudioConfig;
         pub use tutti_plugin_types::{

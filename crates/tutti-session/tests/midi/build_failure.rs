@@ -1,4 +1,4 @@
-//! A build that fails after the session's executor exists leaves nothing of it.
+//! A build whose MIDI layer fails to open returns that error.
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::{
@@ -42,17 +42,13 @@ fn failing() -> tutti_session::SessionBuilder<tutti_session::Offline<f32>> {
         .sample_rate(SampleRate::SR_48K)
 }
 
-/// **A MIDI open that fails returns its error and drops every clone of the app's
-/// executor**: the builder, the session's parts and the half-built MIDI layer
-/// hold none afterwards.
+/// **A MIDI open that fails returns its error**: the build fails with the backend's
+/// refusal, and no session is made.
 #[test]
-fn a_failed_midi_open_returns_its_error_and_drops_the_executor() {
-    let executor = tutti_platform::Executor::new();
-    let weak = executor.downgrade();
-    let built = failing().executor(executor).build();
+fn a_failed_midi_open_returns_its_error() {
+    let built = failing().build();
     assert!(matches!(
         built,
         Err(Error::MidiHardware(MidiHardwareError::Unsupported(_)))
     ));
-    assert!(weak.upgrade().is_none(), "no clone of the executor is left");
 }

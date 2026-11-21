@@ -1,12 +1,11 @@
-//! A session on an executor that `update` drives: its jobs run inside `update`, and its
-//! streamer on the thread of its own that `spawn_dedicated` gives it, so a stream opens,
-//! primes and bounces with no thread but those and the bells' tick.
+//! A session's streamer runs on the thread of its own that `spawn_dedicated` gives it, so
+//! a stream opens, primes and bounces with no thread but that and the bells' tick.
 
 use std::path::Path;
 use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
-use tutti_platform::{Executor, Instant};
+use tutti_platform::Instant;
 use tutti_sampler::{Clip, StreamFault, StreamPhase, StreamStart};
 use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
 use tutti_units::{Beat, SampleRate, Seconds};
@@ -38,9 +37,8 @@ fn write_ramp(path: &Path) {
 fn session() -> Session {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
-        .executor(Executor::new())
         .build()
-        .expect("a session builds on a polled executor")
+        .expect("a session builds")
 }
 
 /// Reads `asset` on the calling thread and applies it to `s`.
@@ -123,12 +121,7 @@ fn a_dropped_session_ends_its_streamer_and_tells_the_stream() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let executor = Executor::new();
-    let mut s = Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .executor(executor.clone())
-        .build()
-        .expect("a session builds on a polled executor");
+    let mut s = session();
     let (stream, _reader) = open(&mut s, &path);
     assert_ne!(
         stream.status().phase,
@@ -147,5 +140,4 @@ fn a_dropped_session_ends_its_streamer_and_tells_the_stream() {
         StreamPhase::Faulted(StreamFault::StreamerGone),
         "the woken streamer never ended and dropped the stream"
     );
-    drop(executor);
 }

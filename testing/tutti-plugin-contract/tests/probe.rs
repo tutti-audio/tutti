@@ -15,7 +15,6 @@
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tutti_platform::Instant;
 
 use tutti_plugin_contract::{
     Clap, Format, Vst2, Vst3, Vst3Cpp, bundle_of, clap_path, library, spec, state_with_fault,
@@ -23,7 +22,7 @@ use tutti_plugin_contract::{
 };
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{
-    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, ProbeFailure, ScanPoll,
+    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, ProbeFailure,
 };
 use tutti_plugin_ipc::{Ipc, IpcConfig, Launched};
 use tutti_plugin_types::{
@@ -47,21 +46,13 @@ fn config(dir: &Path) -> CatalogConfig {
 /// file, so a task has at most one.
 fn run_task(
     config: CatalogConfig,
-    start: impl FnOnce(&mut Catalog) -> tutti_plugin_db::Scan,
+    start: impl FnOnce(&mut Catalog) -> tutti_plugin_db::ScanPlugins,
 ) -> Result<PluginDb, ProbeFailure> {
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
-    let mut task = start(&mut catalog);
-    let deadline = Instant::now() + Duration::from_secs(300);
-    let result = loop {
-        match catalog.try_apply(&mut task) {
-            ScanPoll::Running => {
-                assert!(Instant::now() < deadline, "the task never ended");
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            ScanPoll::Done(result) => break result,
-            ScanPoll::Died => panic!("the task's worker died"),
-        }
-    };
+    let task = start(&mut catalog);
+    let result = catalog
+        .apply(task.run())
+        .expect("the output of this catalog's own scan");
     match result.failures().into_iter().next() {
         Some(failed) => Err(failed.failure),
         None => Ok(catalog.db().clone()),

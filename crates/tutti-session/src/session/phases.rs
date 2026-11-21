@@ -19,8 +19,7 @@ use crate::{AppKey, Clock, Committed, Session, SessionEvent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Phase {
-    /// The bells tick and the session's executor polls what was woken
-    /// (`SessionBuilder::executor`), then what the jobs sent lands (each message,
+    /// The bells tick, then what the jobs sent lands (each message,
     /// then each end, in arrival order). Then crossfades
     /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for

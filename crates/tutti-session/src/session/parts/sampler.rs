@@ -28,7 +28,8 @@ impl<F: SessionFloat> SamplerPart<F> {
         executor: &Executor,
         bells: &Bells,
     ) -> crate::Result<Self> {
-        let streamer = if streamer {
+        // A target with no thread has no streamer: `open_stream` says so by name.
+        let streamer = if streamer && crate::background::THREADS {
             Some(DiskStreamer::start(
                 rate,
                 DiskStreamerConfig::default(),

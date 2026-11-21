@@ -317,6 +317,34 @@ impl std::fmt::Display for RouteDeclarer {
     }
 }
 
+/// The work tutti keeps pace with on its own thread, which a target that starts none
+/// (the web) cannot run: what a build or a call names in [`Error::NeedsThreads`] and
+/// [`SamplerError::NeedsThreads`](crate::SamplerError::NeedsThreads).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum BackgroundWork {
+    /// The system clock's timer thread
+    /// ([`SessionBuilder::system_clock`](crate::SessionBuilder::system_clock)).
+    Timer,
+    /// The audio device's callback.
+    Device,
+    /// The OS MIDI layer's input pumps and device watch.
+    MidiHardware,
+    /// The disk streamer that feeds an open stream.
+    Streamer,
+}
+
+impl std::fmt::Display for BackgroundWork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Timer => "the system clock's timer",
+            Self::Device => "the audio device",
+            Self::MidiHardware => "the MIDI hardware",
+            Self::Streamer => "the disk streamer",
+        })
+    }
+}
+
 /// Every subsystem's error, so `?` propagates across crate boundaries.
 ///
 /// Each variant wraps a subsystem error via `#[from]`. Device failures arrive
@@ -504,6 +532,12 @@ pub enum Error {
     /// ([`SessionBuilder::build`](crate::SessionBuilder)).
     #[error("the session's bell thread did not start: {0}")]
     Bells(std::io::Error),
+
+    /// The build needs work that keeps pace with the hardware or the audio thread, and
+    /// this target starts no thread to run it (the web): an offline build with no
+    /// hardware does not.
+    #[error("{0} needs a thread of tutti's, and this target starts none")]
+    NeedsThreads(BackgroundWork),
 
     /// Standard I/O error encountered while reading or writing audio data.
     #[error(transparent)]

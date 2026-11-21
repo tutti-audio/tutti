@@ -1,13 +1,25 @@
 //! What every loaded handle shares: the asset with the identity it was read
 //! under, and a load's panic caught as an error.
 
+#![cfg_attr(
+    not(any(
+        all(feature = "sampler", codec),
+        feature = "soundfont",
+        feature = "plugin"
+    )),
+    expect(
+        dead_code,
+        reason = "the loads (features `sampler`, `soundfont`, `plugin`) are its users; the job table needs only `panic_message`"
+    )
+)]
+
+use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use tutti_platform::{Asset, Identity};
 
 use crate::WorkerError;
-use crate::jobs::panic_message;
 
 /// An asset and its [`Identity`] as taken before a load read it.
 #[derive(Clone, Debug)]
@@ -97,6 +109,15 @@ pub(crate) fn caught<T>(read: impl FnOnce() -> Result<T, LoadError>) -> Result<T
             message: panic_message(payload.as_ref()),
         })
     })
+}
+
+/// The message a caught panic carried, or a stand-in when its payload is no string.
+pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a payload that is not a string".to_owned())
 }
 
 #[cfg(test)]
