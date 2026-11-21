@@ -80,8 +80,9 @@ fn render_click(frames: usize) -> Vec<f32> {
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(port), [OutPort::new(click, port)])
-            .unwrap();
+            .set_sources(Root::output(port), [OutPort::new(click, port)])
+            .unwrap()
+            .unfaded();
     }
     let _ = s.update();
     run(&s, frames, 512, true)
@@ -135,8 +136,9 @@ fn render_click_under(meter: MeterMap, frames: usize) -> Vec<f32> {
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(port), [OutPort::new(click, port)])
-            .unwrap();
+            .set_sources(Root::output(port), [OutPort::new(click, port)])
+            .unwrap()
+            .unfaded();
     }
     let _ = s.update();
     s.transport_handle()
@@ -251,8 +253,9 @@ fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
     let voice = s.graph().add(tutti_graph::Unforkable(voice(cents)));
     for port in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(port), [OutPort::new(voice, port)])
-            .unwrap();
+            .set_sources(Root::output(port), [OutPort::new(voice, port)])
+            .unwrap()
+            .unfaded();
     }
     let _ = s.update();
     run(&s, frames, block, false)
@@ -372,11 +375,13 @@ fn an_offline_render_feeds_the_master_meter() {
     let mut meter = s.take_master_meter().expect("declared at the build");
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     let mut block = vec![0.0f32; 128 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
@@ -393,8 +398,9 @@ fn an_offline_render_feeds_the_master_meter() {
     let dc = detached.graph().add(ForkByClone(Const::mono(0.5)));
     detached
         .graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     let mut frame = [0.0f32];
     detached.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
     assert_eq!(meter.read()[0].peak.get(), 0.5);
@@ -405,7 +411,7 @@ fn an_offline_render_feeds_the_master_meter() {
 }
 
 /// Opening a tap or a meter on a source the graph lacks is refused, with the
-/// source named, and opens nothing; a key no node has is no zero-width meter.
+/// source named, and opens nothing; a node no graph holds is `MissingSource::Node`.
 /// A node inserted since the last update is accepted (the edited graph is
 /// what is checked).
 #[test]
@@ -414,7 +420,10 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let ghost = tutti_graph::NodeKey(0xdead);
     assert_eq!(
-        s.graph().meters().open_node(ghost).err(),
+        s.graph()
+            .meters()
+            .open(&[OutPort::new(ghost, 0)], TapAlign::Raw)
+            .err(),
         Some(MissingSource::Node { node: ghost })
     );
     assert_eq!(
@@ -445,18 +454,19 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     // wiring call refuses it and the output tap has nothing to refuse.
     assert_eq!(
         s.graph()
-            .set_sources_unfaded(Root::output(0), [OutPort::new(a, 5)])
+            .set_sources(Root::output(0), [OutPort::new(a, 5)])
             .err(),
         Some(tutti_session::ConnectError::NoSuchOutPort(OutPort::new(
             a, 5
         )))
     );
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
         .meters()
-        .open_node(a)
+        .open(&[OutPort::new(a, 0)], TapAlign::Raw)
         .expect("it exists, uncommitted");
     s.graph()
         .taps()
@@ -474,11 +484,16 @@ fn a_track_meter_reads_a_nodes_port_and_goes_with_the_node() {
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let b = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .unwrap()
+        .unfaded();
     // The meters are the only edit of the second update.
     let _ = s.update();
-    let mut track = s.graph().meters().open_node(a).expect("the sources exist");
+    let mut track = s
+        .graph()
+        .meters()
+        .open(&[OutPort::new(a, 0)], TapAlign::Raw)
+        .expect("the sources exist");
     let mut other = s
         .graph()
         .meters()
@@ -518,7 +533,11 @@ fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
     };
     let mut s = offline();
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
-    let track = s.graph().meters().open_node(a).expect("the sources exist");
+    let track = s
+        .graph()
+        .meters()
+        .open(&[OutPort::new(a, 0)], TapAlign::Raw)
+        .expect("the sources exist");
     let _ = s.update();
     assert_eq!(meters(&s), 2, "the master's and the track's");
     drop(track);
@@ -550,7 +569,11 @@ fn closing_a_meter_names_one_that_is_not_open() {
     };
     let mut s = offline();
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
-    let track = s.graph().meters().open_node(a).expect("the sources exist");
+    let track = s
+        .graph()
+        .meters()
+        .open(&[OutPort::new(a, 0)], TapAlign::Raw)
+        .expect("the sources exist");
     let _ = s.update();
     assert_eq!(meters(&s), 2, "the master's and the track's");
 
@@ -563,7 +586,11 @@ fn closing_a_meter_names_one_that_is_not_open() {
     let _ = s.update();
     assert_eq!(meters(&s), 1, "the track's op left with the close");
 
-    let dropped = s.graph().meters().open_node(a).expect("the sources exist");
+    let dropped = s
+        .graph()
+        .meters()
+        .open(&[OutPort::new(a, 0)], TapAlign::Raw)
+        .expect("the sources exist");
     let id = dropped.id();
     let _ = s.update();
     drop(dropped);
@@ -618,8 +645,9 @@ fn an_offline_render_feeds_an_output_tap() {
     let mut s = offline();
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     // The tap is the only edit of the second update.
     let _ = s.update();
     let mut tap = s
@@ -654,8 +682,9 @@ fn an_output_tap_follows_a_rewired_output() {
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let b = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .unwrap()
+        .unfaded();
     let mut tap = s
         .graph()
         .taps()
@@ -665,8 +694,9 @@ fn an_output_tap_follows_a_rewired_output() {
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(b, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(b, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
 
@@ -724,8 +754,9 @@ fn a_detached_render_feeds_a_tap() {
         .expect("builds");
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     let mut tap = s
         .graph()
         .taps()
@@ -790,11 +821,13 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let mut s = offline();
     let gate = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(gate, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(gate, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(gate, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(gate, 0)])
+        .unwrap()
+        .unfaded();
     let mut tap = s
         .graph()
         .taps()
@@ -855,11 +888,13 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     let mut s = offline();
     let gate = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(gate, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(gate, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(gate, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(gate, 0)])
+        .unwrap()
+        .unfaded();
     let mut plan = s
         .graph()
         .taps()
@@ -925,11 +960,13 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     let mut s = offline();
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(dc, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(dc, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     let tap = s
         .open_output_tap(Samples::new(1_024))

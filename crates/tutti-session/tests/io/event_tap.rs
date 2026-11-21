@@ -195,9 +195,11 @@ fn reopening_replaces_the_tap_at_the_new_rate() {
     frames(5, &mut s);
     assert_eq!(drain(&mut old), vec![0, 4]);
     s.graph().set_sample_rate(SampleRate::SR_44K1);
-    let mut readers = s.graph().taps().reopen_events();
-    assert_eq!(readers.len(), 1);
-    let mut new = readers.remove(0);
+    let mut new = s
+        .graph()
+        .taps()
+        .reopen_event(old.id())
+        .expect("the tap is open");
     assert_eq!(new.id(), old.id());
     assert_eq!(old.rate(), SampleRate::SR_48K);
     assert_eq!(new.rate(), SampleRate::SR_44K1);
@@ -226,7 +228,7 @@ impl Node for Hears {
 
 /// A tap opened on an event input (`key.events_in()`) copies what the node
 /// hears there: the events its source wrote, on their frames, and the tap
-/// survives a re-rate through `reopen_events`. A port past the node's inputs
+/// survives a re-rate through `reopen_event`. A port past the node's inputs
 /// is refused as an input.
 #[test]
 fn a_tap_of_an_event_input_hears_what_the_node_hears() {
@@ -260,9 +262,11 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
     frames(16, &mut s);
     assert_eq!(drain(&mut tap), vec![0, 4, 8, 12]);
     s.graph().set_sample_rate(SampleRate::SR_44K1);
-    let mut readers = s.graph().taps().reopen_events();
-    assert_eq!(readers.len(), 1);
-    let mut new = readers.remove(0);
+    let mut new = s
+        .graph()
+        .taps()
+        .reopen_event(tap.id())
+        .expect("the tap is open");
     assert_eq!(new.rate(), SampleRate::SR_44K1);
     frames(8, &mut s);
     assert!(

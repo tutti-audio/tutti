@@ -82,7 +82,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 ///     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(64))).build()
 ///     .unwrap();
 /// let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
-/// session.graph().set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)]).unwrap();
+/// session.graph().set_sources(Root::output(0), [OutPort::new(dc, 0)]).unwrap().unfaded();
 /// session.update();
 ///
 /// let mut block = [0.0f32; 64];

@@ -78,12 +78,12 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     let ghost_out = OutPort::new(GHOST, 0);
     let ghost_in = InPort::new(GHOST, 0);
     assert_eq!(
-        g.disconnect(ghost_out, Root::output(0)),
-        Err(ConnectError::NoSuchNode(GHOST))
+        g.disconnect(ghost_out, Root::output(0)).err(),
+        Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
-        g.disconnect_unfaded(a.out(0), ghost_in),
-        Err(ConnectError::NoSuchNode(GHOST))
+        g.disconnect(a.out(0), ghost_in).err(),
+        Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
         g.disconnect_all(ghost_in),
@@ -91,8 +91,9 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     );
     assert_eq!(g.sources(ghost_in), Err(ConnectError::NoSuchNode(GHOST)));
     assert_eq!(
-        g.disconnect(a.events_out(), EventInPort::new(GHOST, 0)),
-        Err(ConnectError::NoSuchEventOut(a.events_out())),
+        g.disconnect(a.events_out(), EventInPort::new(GHOST, 0))
+            .err(),
+        Some(ConnectError::NoSuchEventOut(a.events_out())),
         "the source side is checked first: a constant has no event output"
     );
     assert_eq!(
@@ -100,8 +101,9 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
         Err(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
-        g.disconnect(EventOutPort::new(GHOST, 0), EventInPort::new(a.erase(), 0)),
-        Err(ConnectError::NoSuchNode(GHOST))
+        g.disconnect(EventOutPort::new(GHOST, 0), EventInPort::new(a.erase(), 0))
+            .err(),
+        Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
         g.bus_sources(tutti_session::BusRef {
@@ -113,7 +115,11 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     );
 
     // Real ends with no edge between them: absent, not an error.
-    assert_eq!(g.disconnect(a.out(0), Root::output(0)), Ok(false));
+    assert!(
+        !g.disconnect(a.out(0), Root::output(0))
+            .unwrap()
+            .was_connected()
+    );
     assert_eq!(g.disconnect_all(Root::output(0)), Ok(false));
     assert_eq!(g.sources(Root::output(0)), Ok(Vec::new()));
     // A port a real node does not have is a named error too.
