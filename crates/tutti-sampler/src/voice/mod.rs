@@ -5,7 +5,7 @@
 //! - [`disk_voice`] — disk-streaming playback, fed by the streamer thread.
 //! - `offline_read` — a forked disk voice's file, read on demand offline.
 //! - [`types`] — the voice vocabulary: `Voice`, `VoiceSource`, `Playback`.
-//! - [`slot`] — a voice plus its stretch filter, and the per-voice block read.
+//! - [`slot`] — a voice plus its stretch vocoder, and the per-voice block read.
 //! - [`command`] — the ECS → audio-thread protocol and its handle.
 //! - [`pool`] — per-track multi-voice mixer over both tiers.
 //! - [`node`] — one voice as a standalone graph node.
@@ -34,6 +34,7 @@ pub mod command;
 pub mod node;
 pub mod pool;
 pub mod slot;
+pub(crate) mod stretched;
 pub mod types;
 // Tests only: they exercise the five modules above in combination and reach
 // private state a sibling module could not see.

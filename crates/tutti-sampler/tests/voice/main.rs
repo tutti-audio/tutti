@@ -11,6 +11,7 @@ mod reverse_and_loop;
 mod rt_no_alloc;
 mod stretched_seek;
 mod tier_parity;
+mod vocoder_voice;
 mod voice_gain_survives_commit;
 mod voice_node_commands;
 mod wrap_fade_modes;

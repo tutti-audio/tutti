@@ -221,10 +221,6 @@ tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_sp
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_src_ratio
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_stretch_rate
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamer::set_sample_rate
-tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_enabled
-tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_pitch_cents
-tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_sample_rate
-tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_stretch_factor
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_gain

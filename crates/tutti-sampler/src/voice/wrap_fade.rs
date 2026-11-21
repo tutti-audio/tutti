@@ -71,7 +71,7 @@ enum Host {
 enum Hosted {
     Pool(VoicePool<f32>),
     Node(MemorySource<f32>),
-    Voice(Option<VoiceNode<f32>>),
+    Voice(Option<Box<VoiceNode<f32>>>),
 }
 
 /// Runs a test on each [`Host`], as `name::pool` and `name::node`.
@@ -172,7 +172,7 @@ impl Rig {
                     SampleRate::of(SR),
                     MaxBlock::of(Samples::new(self.max_block)),
                 ));
-                *slot = Some(node);
+                *slot = Some(Box::new(node));
             }
             Hosted::Node(node) => {
                 source.set_gain(play.gain);
@@ -197,7 +197,7 @@ impl Rig {
             }
             Hosted::Voice(node) => {
                 let node = node.as_mut().expect("placed");
-                contract::drive_input(node, env, Planes::default(), &[], &[]).audio
+                contract::drive_input(&mut **node, env, Planes::default(), &[], &[]).audio
             }
         }
     }

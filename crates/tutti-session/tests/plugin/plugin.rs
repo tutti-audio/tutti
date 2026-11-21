@@ -863,6 +863,16 @@ mod reaped_on_drop {
         });
 
         drop(s);
+        // A session dropped before the plugin opened the fifo leaves the releaser blocked
+        // opening it for writing. Opening it for reading and writing never blocks and pairs
+        // with that open, so the releaser ends whenever the plugin did.
+        drop(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&fifo)
+                .expect("the fifo opens"),
+        );
         releaser.join().expect("the releaser ended");
         assert!(
             weak.upgrade().is_none(),
