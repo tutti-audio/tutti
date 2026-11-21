@@ -1,13 +1,14 @@
 //! What a load asks of the catalog and of the load's `Hosting`, through the
 //! session: the reference CLAP plugin (`clap_probe`).
 
-use crate::loading::{LoadFrom, LoadPlugin, Spec, catalog_of, probe};
+use crate::loading::{Block as _, Hosted, LoadFrom, LoadPlugin, Spec, catalog_of, probe};
 use crate::support::clap_probe;
 use tutti_buffers::MaxBlock;
+use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::Hosting;
 use tutti_plugin_types::IpcError;
 use tutti_plugin_types::PluginRef;
-use tutti_session::{LoadError, Session};
+use tutti_session::{LoadError, LoadPlugin as Load, Session};
 use tutti_units::Samples;
 
 fn session() -> Session {
@@ -62,13 +63,12 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     let path = clap_probe();
     let plugin = PluginRef::file(&path);
     let (mut catalog, id, _dir) = catalog_of(&plugin);
-    let main = tutti_fixtures::main_thread();
     let s = session();
 
     // Blacklisted before the load runs, and still: refused.
-    let load = s.load_plugin(&id, &catalog);
+    let load = s.load_out_of_process(&id, &catalog);
     catalog.blacklist(&path, "hung in its load");
-    match load.run(main) {
+    match load.block() {
         Err(LoadError::Plugin(error)) => match &*error {
             IpcError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
             other => panic!("expected a Blacklisted refusal, got {other:?}"),
@@ -80,27 +80,21 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     // keeps no descriptors, so its load is built before the blacklist.
     assert!(catalog.unblacklist(&path));
     probe(&mut catalog, &path);
-    let load = s.load_plugin(&id, &catalog);
+    let load = s.load_out_of_process(&id, &catalog);
     catalog.blacklist(&path, "hung in its load");
     assert!(catalog.unblacklist(&path));
-    let _admitted = load.run(main).expect("an unblacklisted plugin was refused");
+    let _admitted = load.block().expect("an unblacklisted plugin was refused");
 }
 
-/// **A hosting the format cannot have is refused at load**: VST2 asked to be
-/// served is `NotOutOfProcess`, and the load is not changed to in process.
+/// **A hosting the format cannot have is refused where the load is built**:
+/// VST2 asked to be out of process is `NotOutOfProcess`, and the load is not changed to in process.
 #[cfg(feature = "vst2")]
 #[test]
 fn vst2_asked_for_out_of_process_is_refused_at_load() {
     let plugin = PluginRef::file(tutti_fixtures::vst2_probe());
     let (catalog, id, _dir) = catalog_of(&plugin);
-    let mut s = session();
-    match s.load_from(
-        tutti_fixtures::main_thread(),
-        &catalog,
-        &id,
-        Hosting::OutOfProcess,
-        None,
-    ) {
+    let s = session();
+    match s.load_plugin_as(&id, &catalog, ResolvedHosting::OutOfProcess) {
         Err(LoadError::Plugin(error)) => match &*error {
             IpcError::NotOutOfProcess { format, .. } => {
                 assert_eq!(*format, tutti_plugin_types::PluginFormat::Vst2)
@@ -131,4 +125,40 @@ fn a_clap_plugin_asked_in_process_is_hosted_here() {
         crate::loading::clap_id(hosted.plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8")
     );
+}
+
+/// **The catalog's hosting picks the load's variant**: the reference CLAP
+/// plugin is out of process by the format's default, and in process when asked.
+/// A VST2 plugin is in process by default.
+#[test]
+fn the_hosting_a_catalog_resolves_picks_the_variant_of_the_load() {
+    set_server("/nonexistent/plugin-server");
+    let plugin = PluginRef::file(clap_probe());
+    let (catalog, id, _dir) = catalog_of(&plugin);
+    let s = session();
+    assert!(matches!(
+        s.load_plugin(&id, &catalog),
+        Ok(Load::OutOfProcess(_))
+    ));
+    assert!(matches!(
+        s.load_plugin_as(&id, &catalog, ResolvedHosting::OutOfProcess),
+        Ok(Load::OutOfProcess(_))
+    ));
+    assert!(matches!(
+        s.load_plugin_as(&id, &catalog, ResolvedHosting::InProcess),
+        Ok(Load::InProcess(_))
+    ));
+}
+
+/// **A VST2 plugin resolves in process by default**: its `AEffect` fuses the
+/// editor and the audio instance, so the load is the in-process one.
+#[cfg(feature = "vst2")]
+#[test]
+fn a_vst2_plugin_resolves_to_an_in_process_load() {
+    let plugin = PluginRef::file(tutti_fixtures::vst2_probe());
+    let (catalog, id, _dir) = catalog_of(&plugin);
+    assert!(matches!(
+        session().load_plugin(&id, &catalog),
+        Ok(Load::InProcess(_))
+    ));
 }

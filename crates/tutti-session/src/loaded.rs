@@ -19,8 +19,6 @@ use std::sync::Arc;
 
 use tutti_platform::{Asset, Identity};
 
-use crate::WorkerError;
-
 /// An asset and its [`Identity`] as taken before a load read it.
 #[derive(Clone, Debug)]
 pub(crate) struct Stamp {
@@ -96,9 +94,6 @@ pub enum LoadError {
         /// The panic's message, or a placeholder for a payload of another type.
         message: String,
     },
-    /// The load's job did not finish: it panicked, or the executor dropped it.
-    #[error(transparent)]
-    Job(#[from] WorkerError),
 }
 
 /// Runs `read`, a panic in it (a decoder, a parser) becoming

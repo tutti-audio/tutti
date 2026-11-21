@@ -3440,6 +3440,7 @@ dependencies = [
  "assert_no_alloc",
  "atomic_float",
  "dpi",
+ "futures-channel",
  "hound",
  "libloading 0.9.1",
  "raw-window-handle",
