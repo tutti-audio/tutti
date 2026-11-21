@@ -4,7 +4,6 @@
 //! Every figure is counted by hand from the clip below, not from another
 //! render. The clip plays at 120 BPM and 48 kHz, so a beat is 24,000 frames.
 
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 
 use crate::common::{at, beat_of, connect};
@@ -68,7 +67,7 @@ impl Keys {
     }
 }
 
-struct Sink(Arc<Mutex<Tally>>);
+struct Sink(tutti_fixtures::Shared<Tally>);
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
@@ -113,7 +112,7 @@ fn off(i: u32) -> Ump {
 struct Rig {
     ed: Editor,
     exec: Executor,
-    tally: Arc<Mutex<Tally>>,
+    tally: tutti_fixtures::Shared<Tally>,
 }
 
 /// A clip at key 1 into the sink at key 2, blocks of at most `max`.
@@ -123,8 +122,12 @@ fn rig(events: impl IntoIterator<Item = TimedMidiEvent>, max: usize) -> Rig {
         MaxBlock::of(Samples::new(max)),
     ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
-    let tally = Arc::new(Mutex::new(Tally::default()));
-    ed.insert(NodeKey(2), "sink", Unforkable(Sink(Arc::clone(&tally))));
+    let tally = tutti_fixtures::Shared::default();
+    ed.insert(
+        NodeKey(2),
+        "sink",
+        Unforkable(Sink(tutti_fixtures::Shared::clone(&tally))),
+    );
     connect(&mut ed, 1, 2);
     ed.commit().expect("commits");
     Rig { ed, exec, tally }

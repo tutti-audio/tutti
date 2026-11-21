@@ -12,7 +12,7 @@ use tutti_buffers::MaxBlock;
 
 use common::test_pool;
 
-use tutti_fixtures::midi;
+use tutti_fixtures::{Shared, midi};
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventKind, EventLoss, EventOut, Executor, Io, Node,
@@ -74,7 +74,7 @@ impl Node for Writer {
 /// Counts what arrives on each input port: `(note-ons, note-offs)`.
 struct Counter {
     ports: u16,
-    seen: Arc<Mutex<Vec<(u32, u32)>>>,
+    seen: Shared<Vec<(u32, u32)>>,
 }
 
 impl Node for Counter {
@@ -104,20 +104,20 @@ fn rig(
     workers: usize,
     cap: u32,
     writers: &[Vec<Script>],
-) -> (Editor, Executor, Arc<Mutex<Vec<(u32, u32)>>>) {
+) -> (Editor, Executor, Shared<Vec<(u32, u32)>>) {
     let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
     let (mut ed, mut exec) = Editor::new(prep);
     if workers > 1 {
         exec.set_pool(Some(test_pool(workers)));
     }
     let ports: u16 = writers.iter().map(|w| w.len() as u16).sum();
-    let seen = Arc::new(Mutex::new(vec![(0, 0); ports as usize]));
+    let seen = Shared::new(vec![(0, 0); ports as usize]);
     ed.insert(
         NodeKey(100),
         "counter",
         tutti_graph::Unforkable(Counter {
             ports,
-            seen: Arc::clone(&seen),
+            seen: seen.clone(),
         }),
     );
     let mut next = 0;
