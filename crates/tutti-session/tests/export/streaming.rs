@@ -49,11 +49,9 @@ fn open(
     tutti_sampler::StreamHandle<f32>,
     tutti_sampler::StreamReader<f32>,
 ) {
-    let opened = s
-        .open_stream(asset, StreamStart::HEAD)
-        .expect("a streamer")
-        .run()
-        .expect("the file reads");
+    let opened =
+        tutti_fixtures::block_on(s.open_stream(asset, StreamStart::HEAD).expect("a streamer"))
+            .expect("the file reads");
     s.apply(opened).expect("the session serves it")
 }
 

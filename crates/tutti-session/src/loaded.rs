@@ -70,6 +70,15 @@ pub enum LoadError {
     #[cfg(feature = "sampler")]
     #[error("{0} cannot be streamed")]
     NotStreamable(String),
+    /// A MIDI file could not be read.
+    #[cfg(feature = "midi")]
+    #[error(transparent)]
+    Midi(Arc<tutti_midi_file::ReadError>),
+    /// A file could not be opened to stream it, or is not audio this build
+    /// decodes.
+    #[cfg(feature = "sampler")]
+    #[error(transparent)]
+    Stream(Arc<tutti_sampler::OpenError>),
     /// A SoundFont could not be opened.
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
@@ -93,16 +102,37 @@ pub enum LoadError {
         /// The panic's message, or a placeholder for a payload of another type.
         message: String,
     },
+    /// The session was dropped before the load could run: its executor was gone,
+    /// refused the task, or dropped it before it ran. The file did not fail.
+    #[error("the session shut down before the load ran")]
+    ShutDown,
+}
+
+#[cfg(any(feature = "sampler", feature = "midi", feature = "soundfont"))]
+impl crate::unblocked::Unanswered for LoadError {
+    fn shut_down() -> Self {
+        Self::ShutDown
+    }
+
+    fn panicked(message: String) -> Self {
+        Self::Panicked { message }
+    }
 }
 
 /// Runs `read`, a panic in it (a decoder, a parser) becoming
 /// [`LoadError::Panicked`].
 pub(crate) fn caught<T>(read: impl FnOnce() -> Result<T, LoadError>) -> Result<T, LoadError> {
-    catch_unwind(AssertUnwindSafe(read)).unwrap_or_else(|payload| {
-        Err(LoadError::Panicked {
-            message: tutti_platform::panic_message(payload.as_ref()),
-        })
-    })
+    caught_by(read, |message| LoadError::Panicked { message })
+}
+
+/// Runs `work`, a panic in it becoming the error `panicked` makes of the panic's
+/// message.
+pub(crate) fn caught_by<T, E>(
+    work: impl FnOnce() -> Result<T, E>,
+    panicked: impl FnOnce(String) -> E,
+) -> Result<T, E> {
+    catch_unwind(AssertUnwindSafe(work))
+        .unwrap_or_else(|payload| Err(panicked(tutti_platform::panic_message(payload.as_ref()))))
 }
 
 #[cfg(test)]

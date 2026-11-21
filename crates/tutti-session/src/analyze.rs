@@ -1,6 +1,6 @@
 //! Offline analysis as a value: [`Session::analyze`] returns an [`Analyze`]
-//! that, when the app runs it, folds a wave or a file through any
-//! [`Measure`]'s meter and returns the meter's output.
+//! that, when the app awaits it, folds a wave or a file through any
+//! [`Measure`]'s meter and resolves to the meter's output.
 //!
 //! The audio states the rate and the width, so the caller states only the
 //! analysis: the meter's [`Context`](Measure::Context) is built from them
@@ -19,19 +19,25 @@ mod live;
 #[cfg(test)]
 mod tests;
 
+use std::fmt;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, StreamMeter};
 #[cfg(codec)]
 use tutti_platform::Asset;
+use tutti_platform::WeakExecutor;
 use tutti_units::{SampleRate, Samples};
 
 pub use feed::{AudioContext, AudioInput, BindError};
 use feed::{Bind, Chunk, View};
 pub use live::{Analyzer, AnalyzerError};
 
+use crate::unblocked::{Unanswered, Unblocked};
 use crate::{AppKey, Clock, Session};
 
 /// Frames decoded, and pushed to the meter, at a time.
@@ -113,19 +119,44 @@ pub enum AnalyzeError {
     /// The audio's channels cannot be shown to the meter in the view it takes.
     #[error(transparent)]
     Bind(#[from] BindError),
+    /// The analysis panicked (a decoder, a meter); `message` is the panic's, when
+    /// it was a string.
+    #[error("the analysis panicked: {message}")]
+    Panicked {
+        /// The panic's message, or a placeholder for a payload of another type.
+        message: String,
+    },
+    /// The session was dropped before the analysis could run: its executor was
+    /// gone, refused the task, or dropped it before it ran. The audio did not fail.
+    #[error("the session shut down before the analysis ran")]
+    ShutDown,
 }
 
-/// An analysis of one audio, built by [`Session::analyze`] and not yet run:
-/// [`run`](Self::run) folds the audio through the meter and returns its
-/// [`Output`](StreamMeter::Output).
+impl Unanswered for AnalyzeError {
+    fn shut_down() -> Self {
+        Self::ShutDown
+    }
+
+    fn panicked(message: String) -> Self {
+        Self::Panicked { message }
+    }
+}
+
+/// An analysis of one audio, built by [`Session::analyze`]. It is `Send` when
+/// the analysis is, and it is a [`Future`] through [`IntoFuture`]: awaiting it
+/// folds the audio through the meter as a task on the session's executor and
+/// resolves to the meter's [`Output`](StreamMeter::Output). There is no blocking
+/// form.
 ///
-/// It holds the audio and the analysis and nothing of the session, so the app
-/// runs it on any thread it chooses; dropping it unrun cancels it.
+/// It holds the audio, the analysis and a weak handle to the session's
+/// executor, and nothing else of the session. Dropping it unawaited reads
+/// nothing.
 #[derive(Debug)]
-#[must_use = "work does nothing until it runs"]
+#[must_use = "an analysis does nothing unless it is awaited"]
 pub struct Analyze<A, S: Float = f32> {
     audio: Audio<S>,
     analysis: A,
+    executor: WeakExecutor,
 }
 
 impl<A, S> Analyze<A, S>
@@ -135,21 +166,12 @@ where
     A::Context: AudioContext,
     for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, S>,
 {
-    /// Folds the audio through the meter the analysis builds, on the calling
-    /// thread, and returns the meter's output.
+    /// Folds the audio through the meter the analysis builds and returns the
+    /// meter's output.
     ///
     /// The cost is a full read of the audio: a file is decoded a chunk at a
-    /// time, so its length is not held in memory, and the call returns when
-    /// the last chunk is folded.
-    ///
-    /// # Errors
-    ///
-    /// [`AnalyzeError::Measure`] when the meter refuses the audio or a chunk,
-    /// `AnalyzeError::Decode` when a file cannot be decoded, and
-    /// [`AnalyzeError::Bind`] when the audio cannot be shown to the meter (a
-    /// stereo analysis of audio of another width, a mono analysis with no
-    /// fold from the audio's topology, a chunk that is not a valid view).
-    pub fn run(self) -> Result<<A::Meter as StreamMeter>::Output, AnalyzeError> {
+    /// time, so its length is not held in memory.
+    fn run(self) -> Result<<A::Meter as StreamMeter>::Output, AnalyzeError> {
         let mut reader = Reader::open(&self.audio)?;
         let topology = reader.topology();
         let context = A::Context::from_audio(reader.sample_rate(), topology.width());
@@ -168,14 +190,92 @@ where
     }
 }
 
+impl<A, S> IntoFuture for Analyze<A, S>
+where
+    S: Float,
+    A: Measure<S> + Send + 'static,
+    A::Context: AudioContext,
+    for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, S>,
+    <A::Meter as StreamMeter>::Output: Send + 'static,
+{
+    type Output = Result<<A::Meter as StreamMeter>::Output, AnalyzeError>;
+    type IntoFuture = Analyzing<A, S>;
+
+    fn into_future(self) -> Analyzing<A, S> {
+        Analyzing {
+            analysis: Unblocked::new(self.executor.clone(), self, Self::run),
+        }
+    }
+}
+
+/// An analysis being awaited ([`Analyze`]): resolves to the meter's output
+/// once the audio is folded.
+///
+/// The first poll starts the fold as a task on the session's executor (the
+/// session's weak handle, upgraded for the spawn only) and awaits the receiver
+/// of a oneshot. **The task fills the sender**: it folds the audio chunk by
+/// chunk and sends the output or the error, which wakes the future. A poll never
+/// blocks, and `Session::update` is not needed.
+///
+/// Dropped before it resolves, the future drops the receiver: a fold that has
+/// not begun reads nothing, and one in flight finishes and its output is dropped.
+/// Dropped before its first poll it starts nothing.
+///
+/// # Errors
+///
+/// The output is [`AnalyzeError::Measure`] when the meter refuses the audio or a
+/// chunk, `AnalyzeError::Decode` when a file cannot be decoded, and
+/// [`AnalyzeError::Bind`] when the audio cannot be shown to the meter (a stereo
+/// analysis of audio of another width, a mono analysis with no fold from the
+/// audio's topology, a chunk that is not a valid view);
+/// [`AnalyzeError::Panicked`] when a decoder or the meter panicked;
+/// [`AnalyzeError::ShutDown`] when the session is gone.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+#[must_use = "an analysis does nothing unless it is awaited"]
+pub struct Analyzing<A, S = f32>
+where
+    S: Float,
+    A: Measure<S>,
+{
+    analysis: Unblocked<Analyze<A, S>, <A::Meter as StreamMeter>::Output, AnalyzeError>,
+}
+
+impl<A, S> Future for Analyzing<A, S>
+where
+    S: Float,
+    A: Measure<S> + Send + 'static,
+    A::Context: AudioContext,
+    for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, S>,
+    <A::Meter as StreamMeter>::Output: Send + 'static,
+{
+    type Output = Result<<A::Meter as StreamMeter>::Output, AnalyzeError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.analysis).poll(cx)
+    }
+}
+
+impl<A, S> fmt::Debug for Analyzing<A, S>
+where
+    S: Float,
+    A: Measure<S>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Analyzing").finish_non_exhaustive()
+    }
+}
+
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// An [`Analyze`] of `audio` through the meter `analysis` builds; nothing
-    /// is read until the app calls [`run`](Analyze::run), which runs on the
-    /// caller's thread and costs a full read of the audio.
+    /// is read until the app awaits it, and the fold costs a full read of the
+    /// audio.
     ///
     /// The rate and the width come from the audio: the analysis is bound to
     /// them ([`AudioContext`]), so a config that cannot hold the audio's rate
-    /// fails the run.
+    /// fails the analysis.
     ///
     /// The analysis reads the measure's own format `S` (`A: Measure<S>`): a
     /// [`Wave<S>`] is read through its own planes, and a file is decoded into
@@ -193,6 +293,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         Analyze {
             audio: audio.into(),
             analysis,
+            executor: self.background.executor().downgrade(),
         }
     }
 }
