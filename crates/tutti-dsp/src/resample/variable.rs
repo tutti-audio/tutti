@@ -1,48 +1,4 @@
-//! A variable-ratio windowed-sinc resampler: a read head that moves `r` input frames per
-//! output frame, `r` set afresh on every call.
-//!
-//! It reads the input as a band-limited signal, `x(t) = sum_m x[m] K(t - m)`, at the
-//! positions `p_n = p_0 + r n` of the output frames. `K` is a [`WindowedSinc`] with its
-//! cutoff at Nyquist (so `K(m) = 0` at every other integer and the kernel reads an input
-//! frame back unchanged where the head sits on it) and a Blackman-Harris window over
-//! `CROSSINGS` zero crossings each side: `TAPS` input frames per output frame. The
-//! kernel is tabulated once, control-side, at `PHASES` fractional offsets, and a read
-//! interpolates linearly between the two nearest rows, so a call allocates nothing.
-//!
-//! # Ratio
-//!
-//! The ratio is a [`ReadRate`]: input frames consumed per output frame. It is read within
-//! [`VARIABLE_MIN_RATE`]..=[`VARIABLE_MAX_RATE`] (0.95 to 1.05, 50 000 ppm either side of unity,
-//! fifty times the drift of a pair of free-running audio clocks) and a ratio that is not
-//! finite is unity. It is constant within a call and may differ between calls; the head is a
-//! [`ReadPosition`], a `2^-32` frame count, so a head moved a million times keeps its
-//! place. A ratio of exactly 1 reads every frame at phase 0: the output is the input
-//! delayed by [`VARIABLE_LATENCY`] frames, to the round-off of the table's zeros.
-//!
-//! # Input and output
-//!
-//! A call is driven by its output: [`process`](VariableResampler::process) fills every
-//! frame of the output view, and [`input_needed`](VariableResampler::input_needed) says how
-//! many input frames that takes at a ratio, so a ring-fed caller peeks that many, calls
-//! `process`, and pops the [`Samples`] it returns. The count returned never exceeds the
-//! count needed and is at most one less than it; the frame between is offered again by the
-//! next call. The resampler keeps its own history of the 63 frames before the head.
-//!
-//! # Spec figures
-//!
-//! For ratios within the range, in units of the input Nyquist frequency `f_N = fs / 2`:
-//!
-//! | figure | value |
-//! |---|---|
-//! | passband edge | [`VARIABLE_PASSBAND_EDGE`] (`0.85 f_N`; 20.4 kHz at 48 kHz) |
-//! | passband ripple | at most [`VARIABLE_PASSBAND_RIPPLE`] dB to the edge |
-//! | stopband attenuation | at least [`VARIABLE_STOPBAND_ATTENUATION`] dB for the images of a component at or under the edge (everything at or above `2 f_N` minus the edge) |
-//! | latency | [`VARIABLE_LATENCY`] input frames |
-//!
-//! An image is the mirror a sampled signal has about `fs`: a component at `f` under the
-//! edge has its image at `2 f_N - f`, which the kernel attenuates. A component between the
-//! edge and `f_N` is not guaranteed: at ratios over 1 the part above `f_N / r` folds
-//! into the output band.
+//! A variable-ratio windowed-sinc resampler and the PI loop that steers it.
 
 use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
 use tutti_units::{ReadPosition, ReadRate, SampleSpan, Samples};
@@ -74,7 +30,51 @@ pub const VARIABLE_PASSBAND_RIPPLE: f64 = 0.001;
 /// The least attenuation of the images of a component under [`VARIABLE_PASSBAND_EDGE`], in dB.
 pub const VARIABLE_STOPBAND_ATTENUATION: f64 = 100.0;
 
-/// A resampler of any width whose ratio is set per call; see the [module](self).
+/// A resampler of any width whose ratio is set per call.
+///
+///
+/// It reads the input as a band-limited signal, `x(t) = sum_m x[m] K(t - m)`, at the
+/// positions `p_n = p_0 + r n` of the output frames. `K` is a [`WindowedSinc`] with its
+/// cutoff at Nyquist (so `K(m) = 0` at every other integer and the kernel reads an input
+/// frame back unchanged where the head sits on it) and a Blackman-Harris window over
+/// `CROSSINGS` zero crossings each side: `TAPS` input frames per output frame. The
+/// kernel is tabulated once, control-side, at `PHASES` fractional offsets, and a read
+/// interpolates linearly between the two nearest rows, so a call allocates nothing.
+///
+/// # Ratio
+///
+/// The ratio is a [`ReadRate`]: input frames consumed per output frame. It is read within
+/// [`VARIABLE_MIN_RATE`]..=[`VARIABLE_MAX_RATE`] (0.95 to 1.05, 50 000 ppm either side of unity,
+/// fifty times the drift of a pair of free-running audio clocks) and a ratio that is not
+/// finite is unity. It is constant within a call and may differ between calls; the head is a
+/// [`ReadPosition`], a `2^-32` frame count, so a head moved a million times keeps its
+/// place. A ratio of exactly 1 reads every frame at phase 0: the output is the input
+/// delayed by [`VARIABLE_LATENCY`] frames, to the round-off of the table's zeros.
+///
+/// # Input and output
+///
+/// A call is driven by its output: [`process`](Self::process) fills every
+/// frame of the output view, and [`input_needed`](Self::input_needed) says how
+/// many input frames that takes at a ratio, so a ring-fed caller peeks that many, calls
+/// `process`, and pops the [`Samples`] it returns. The count returned never exceeds the
+/// count needed and is at most one less than it; the frame between is offered again by the
+/// next call. The resampler keeps its own history of the 63 frames before the head.
+///
+/// # Spec figures
+///
+/// For ratios within the range, in units of the input Nyquist frequency `f_N = fs / 2`:
+///
+/// | figure | value |
+/// |---|---|
+/// | passband edge | [`VARIABLE_PASSBAND_EDGE`] (`0.85 f_N`; 20.4 kHz at 48 kHz) |
+/// | passband ripple | at most [`VARIABLE_PASSBAND_RIPPLE`] dB to the edge |
+/// | stopband attenuation | at least [`VARIABLE_STOPBAND_ATTENUATION`] dB for the images of a component at or under the edge (everything at or above `2 f_N` minus the edge) |
+/// | latency | [`VARIABLE_LATENCY`] input frames |
+///
+/// An image is the mirror a sampled signal has about `fs`: a component at `f` under the
+/// edge has its image at `2 f_N - f`, which the kernel attenuates. A component between the
+/// edge and `f_N` is not guaranteed: at ratios over 1 the part above `f_N / r` folds
+/// into the output band.
 ///
 /// Built on the control side ([`new`](Self::new) allocates the table and the history); every
 /// method after it allocates nothing.
