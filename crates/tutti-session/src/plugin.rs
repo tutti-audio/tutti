@@ -618,8 +618,7 @@ pub enum PluginChange {
     /// bypass lasts.
     IoChanged,
     /// The plugin was rebuilt in place and did not take the state it was saved
-    /// with: it is at its defaults. Reported for an in-process plugin; a
-    /// served plugin's server logs it.
+    /// with: it is at its defaults.
     StateNotRestored {
         /// Why the state was not restored.
         reason: String,

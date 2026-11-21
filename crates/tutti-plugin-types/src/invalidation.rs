@@ -115,8 +115,6 @@ pub enum PluginInvalidation {
     },
     /// The plugin was rebuilt in place ([`Reloaded`](Self::Reloaded)) and
     /// did not take the state it was saved with: it is at its defaults.
-    /// Reported by an in-process plugin only; a served plugin's server logs
-    /// it.
     StateNotRestored {
         /// Why the state was not restored.
         reason: String,

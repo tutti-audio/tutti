@@ -422,6 +422,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                 }
                 IpcEvent::TailChanged { .. }
                 | IpcEvent::Resync(_)
+                | IpcEvent::StateNotRestored { .. }
                 | IpcEvent::IoLayout(_)
                 | IpcEvent::RateRefusal(_)
                 | IpcEvent::ProcessRequested

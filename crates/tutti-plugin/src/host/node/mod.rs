@@ -372,6 +372,9 @@ impl PluginClient<Unbound> {
                 ResyncClass::Refresh(r) => listener_refresh_sink.fire(r),
                 ResyncClass::Invalidate(i) => listener_invalidate_sink.fire(i),
             },
+            IpcEvent::StateNotRestored { reason } => {
+                listener_invalidate_sink.fire(PluginInvalidation::StateNotRestored { reason });
+            }
             IpcEvent::RateRefusal(Some(refusal)) => {
                 listener_invalidate_sink.fire(PluginInvalidation::RateRefused(refusal));
             }

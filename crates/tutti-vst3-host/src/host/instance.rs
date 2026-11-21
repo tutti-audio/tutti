@@ -38,14 +38,27 @@ use super::processor::{AudioIO, InputStaging, OutputStaging, ProcessConfig};
 /// then sticks.
 const OUTPUT_PARAM_QUEUE_RESERVE: usize = 32;
 
-/// The UMP Groups a plugin with `buses` event input buses is addressed by:
-/// one for none (it is sent Group 0's events), and at most 16 (a bus past the
-/// 16th has no Group to name it).
-fn group_span(buses: i32) -> GroupSpan {
-    u8::try_from(buses.clamp(1, 16))
+/// The UMP Groups a plugin with `buses` event input buses is addressed by (a
+/// Group is the bus of its number): `None` for a plugin with no event input
+/// bus, which takes no events.
+///
+/// # Errors
+///
+/// [`Vst3Error::NotSupported`] for more than 16 buses: a bus past the 16th has
+/// no Group to name it.
+fn event_groups(buses: i32) -> Result<Option<GroupSpan>> {
+    if buses <= 0 {
+        return Ok(None);
+    }
+    u8::try_from(buses)
         .ok()
         .and_then(GroupSpan::new)
-        .unwrap_or(GroupSpan::of(1))
+        .map(Some)
+        .ok_or_else(|| {
+            Vst3Error::NotSupported(format!(
+                "the plugin has {buses} event input buses, at most 16 (one for each UMP Group)"
+            ))
+        })
 }
 
 /// The arrangement to propose for a bus of `layout` channels, when the host has
@@ -148,6 +161,15 @@ impl<T: Vst3Sample> Staged<T> {
             ));
         }
 
+        let event_groups = match event_groups(loaded.plugin.bus_count(
+            main,
+            MediaType::Event,
+            BusDirection::Input,
+        )) {
+            Ok(groups) => groups,
+            Err(error) => return Err((loaded, error)),
+        };
+
         // The `IMidiMapping` table is read at every activation (and again after
         // `kMidiCCAssignmentChanged`): ivsteditcontroller.h has the host
         // rebuild the CC to parameter mapping, and a controller routes only
@@ -217,14 +239,8 @@ impl<T: Vst3Sample> Staged<T> {
             input: InputStaging {
                 buses: in_scratch,
                 events: EventList::input(),
-                // A UMP Group is an event input bus: its number. A plugin
-                // with no event bus is sent Group 0's events, and buses past
-                // the 16th have no Group to name them.
-                stager: Stager::new(group_span(loaded.plugin.bus_count(
-                    main,
-                    MediaType::Event,
-                    BusDirection::Input,
-                ))),
+                // A UMP Group is an event input bus: its number.
+                stager: event_groups.map_or_else(Stager::without_buses, Stager::new),
                 param_changes: ParameterChangesImpl::with_queues(chunk_queues, floor, input_pool),
             },
             output: OutputStaging {
@@ -693,18 +709,28 @@ mod scratch_resolution_tests {
 }
 
 #[cfg(test)]
-mod group_span_tests {
+mod event_groups_tests {
     use super::*;
 
-    /// **A plugin's event bus count is the Groups it is addressed by**: none is
-    /// the one Group 0's events go to, a count is itself, and a bus past the
-    /// 16th has no Group (M2-104 section 2.1.2).
+    /// **A plugin's event bus count is the Groups it is addressed by**: none
+    /// is no Group (it takes no events), a count up to 16 is itself, and more
+    /// is refused (M2-104 section 2.1.2).
     #[test]
     fn an_event_bus_count_is_the_groups_it_is_addressed_by() {
-        let spans: Vec<u8> = [-1, 0, 1, 2, 16, 17, i32::MAX]
+        let spans: Vec<Option<u8>> = [-1, 0, 1, 2, 16]
             .into_iter()
-            .map(|buses| group_span(buses).get())
+            .map(|buses| event_groups(buses).expect("within 16").map(GroupSpan::get))
             .collect();
-        assert_eq!(spans, [1, 1, 1, 2, 16, 16, 16]);
+        assert_eq!(spans, [None, None, Some(1), Some(2), Some(16)]);
+    }
+
+    #[test]
+    fn more_than_sixteen_event_buses_are_refused() {
+        for buses in [17, 1_000, i32::MAX] {
+            assert!(
+                matches!(event_groups(buses), Err(Vst3Error::NotSupported(_))),
+                "{buses} buses"
+            );
+        }
     }
 }
