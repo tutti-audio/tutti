@@ -18,8 +18,6 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::WorkerError;
-
 /// A resource's identity in one session: unique among every token the session
 /// has handed out, and never reused.
 ///
@@ -200,10 +198,6 @@ pub enum PeerError<E> {
     /// The peer answered, and the answer is not success.
     #[error("the peer refused the request: {0}")]
     Refused(E),
-    /// The job's work ended without an answer (the session ended it, or it
-    /// panicked).
-    #[error(transparent)]
-    Worker(#[from] WorkerError),
 }
 
 #[cfg(test)]

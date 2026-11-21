@@ -3420,6 +3420,7 @@ dependencies = [
  "atomic_float",
  "dpi",
  "futures-channel",
+ "futures-lite",
  "hound",
  "libloading 0.9.1",
  "raw-window-handle",

@@ -13,8 +13,8 @@
 //!   transport, the heard tap and the load meter. The transport keeps
 //!   its place: a rolling one resumes at the beat the last block ended on, so
 //!   the switch costs wall-clock time and no musical time.
-//! - **Jobs in flight carry over:** a job's lander names nothing of the clock,
-//!   so a job still running when the switch begins lands on the converted
+//! - **Takes in flight carry over:** a take's pump names nothing of the clock,
+//!   so a take still running when the switch begins reports to the converted
 //!   session, once.
 //! - **Captures end** when the session leaves the sound card: each input the
 //!   session held closes and is reported as
@@ -166,7 +166,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     ) -> std::result::Result<LiveSession<K, F>, ClockError<Self>> {
         let config = device.into();
         let device = config.device().clone();
-        let executor = self.jobs.executor().clone();
+        let executor = self.background.executor().clone();
         let opened = DeviceHost::open(self.running.audio_host).and_then(|host| {
             let engine = AudioEngine::open(&executor, host, config)?;
             let resolved = engine.resolve_device()?;
