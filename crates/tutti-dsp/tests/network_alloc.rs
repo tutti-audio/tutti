@@ -78,6 +78,7 @@ fn the_fdn_retargets_and_renders_without_allocating() {
             width: StereoWidth::new(2.0 * k),
             wet: Db::new(-12.0 * k),
             freeze: block % 11 == 0,
+            ..FdnControls::DEFAULT
         };
         let n = allocations(|| {
             bank.retarget(&mut ramps, &c);

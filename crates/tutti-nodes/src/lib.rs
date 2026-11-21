@@ -432,6 +432,10 @@ pub use reverb_freeverb::{FreeverbConfig, FreeverbKernel, FreeverbNode, Freeverb
 mod reverb_fdn;
 pub use reverb_fdn::{FdnConfig, FdnKernel, FdnNode, FdnSet};
 
+// The feedback delay network with a pitch shifter in its feedback, as a `KernelNode`.
+mod reverb_shimmer;
+pub use reverb_shimmer::{ShimmerConfig, ShimmerKernel, ShimmerNode, ShimmerSet};
+
 // Dattorro's plate as a `KernelNode`.
 mod reverb_plate;
 pub use reverb_plate::{PlateKernel, PlateReverbConfig, PlateReverbNode, PlateSet};
