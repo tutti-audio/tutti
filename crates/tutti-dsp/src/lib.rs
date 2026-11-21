@@ -113,6 +113,8 @@
 //! - **Envelope** (`envelope.rs`): an [`EnvelopeStages`] description, designed once into an
 //!   [`EnvelopeDesign`] of [`EnvelopeLeg`]s (linear or dB-linear, [`EnvelopeCurve`], timed by an
 //!   [`EnvelopePace`]), and the [`Envelope`] runner that reads it a chunk at a time.
+//! - **LFO** (`lfo.rs`): [`Lfo`], a sine or triangle ([`LfoWave`]) on a running phase, after a
+//!   delay and fading in; a control signal, not band-limited.
 //! - **Noise** (`noise.rs`): [`Noise`], a seeded white, pink (Kellet's filter) or brown
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
@@ -186,6 +188,7 @@ mod follower;
 mod frequency_shifter;
 mod interp;
 mod level;
+mod lfo;
 mod loudness;
 mod modulation;
 mod noise;
@@ -277,6 +280,7 @@ pub use frequency_shifter::{
 };
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
+pub use lfo::{Lfo, LfoWave};
 pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};
 pub use mel::{
     MelBandCount, MelBandCountError, MelConfig, MelError, MelFilterbank, MelNorm, MelScale,

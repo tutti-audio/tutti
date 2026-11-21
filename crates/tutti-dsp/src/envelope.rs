@@ -42,6 +42,8 @@ use tutti_buffers::Float;
 use tutti_music::Adsr;
 use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 
+use crate::design::exact_frames;
+
 /// A relative tolerance on a leg's length: a leg whose elapsed frames are within it of its
 /// length has ended, so a rounding error in a product never costs a frame.
 const END_TOLERANCE: f64 = 1e-12;
@@ -319,7 +321,7 @@ struct Fall {
 impl Fall {
     fn new(time: Seconds, curve: EnvelopeCurve, rate: SampleRate) -> Self {
         Self {
-            frames: frames(time, rate),
+            frames: exact_frames(time, rate),
             depth: match curve {
                 EnvelopeCurve::Linear => None,
                 EnvelopeCurve::DbLinear { depth } => Some(depth.get().abs()),
@@ -370,16 +372,6 @@ impl Fall {
     }
 }
 
-/// `time` in frames at `rate`, exactly; a negative or non-finite time is none.
-fn frames(time: Seconds, rate: SampleRate) -> f64 {
-    let frames = time.get() * rate.get();
-    if frames.is_finite() {
-        frames.max(0.0)
-    } else {
-        0.0
-    }
-}
-
 /// The stages of an envelope at a sample rate, in frames and `f64` levels: the one place the
 /// timing and the curves are decided.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -400,9 +392,9 @@ impl EnvelopeDesign {
     pub fn new(stages: &EnvelopeStages, rate: SampleRate) -> Self {
         Self {
             rate,
-            delay: frames(stages.delay, rate),
-            attack: frames(stages.attack, rate),
-            hold: frames(stages.hold, rate),
+            delay: exact_frames(stages.delay, rate),
+            attack: exact_frames(stages.attack, rate),
+            hold: exact_frames(stages.hold, rate),
             decay: Fall::new(stages.decay, stages.decay_curve, rate),
             release: Fall::new(stages.release, stages.release_curve, rate),
             sustain: stages.sustain.get().clamp(0.0, 1.0),
@@ -414,7 +406,7 @@ impl EnvelopeDesign {
     /// kept, so it never slows a fall.
     #[must_use]
     pub fn release_within(mut self, time: Seconds) -> Self {
-        self.release.frames = self.release.frames.min(frames(time, self.rate));
+        self.release.frames = self.release.frames.min(exact_frames(time, self.rate));
         self
     }
 

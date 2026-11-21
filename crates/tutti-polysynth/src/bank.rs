@@ -174,7 +174,6 @@ pub(crate) struct VoiceBank<F: SynthFloat> {
     inc: Vec<V<F>>,
     inc_target: Vec<V<F>>,
     rng: Vec<Rng<F>>,
-    pink: Vec<[V<F>; 3]>,
 
     // Filter: integrator state (SVF uses two, the ladder four) and the
     // coefficients (SVF `d`, `a2`, `a3`; ladder `g1`, `k`), current and target.
@@ -287,7 +286,6 @@ impl<F: SynthFloat> VoiceBank<F> {
             inc: Vec::new(),
             inc_target: Vec::new(),
             rng: Vec::new(),
-            pink: Vec::new(),
             z: Vec::new(),
             coef: Vec::new(),
             coef_target: Vec::new(),
@@ -343,7 +341,6 @@ impl<F: SynthFloat> VoiceBank<F> {
                 })
             })
             .collect();
-        self.pink = vec![[zero; 3]; groups];
         self.z = vec![[zero; 4]; groups];
         self.coef = vec![[zero; 3]; groups];
         self.coef_target = vec![[zero; 3]; groups];
@@ -407,7 +404,6 @@ impl<F: SynthFloat> VoiceBank<F> {
             field.fill(zero);
         }
         self.env_gain.fill(V::<F>::splat(F::ONE));
-        self.pink.fill([zero; 3]);
         self.z.fill([zero; 4]);
         self.coef.fill([zero; 3]);
         self.coef_target.fill([zero; 3]);
@@ -510,9 +506,6 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.phase_err[g].as_mut_slice()[k] = F::ZERO;
         for z in &mut self.z[g][..4] {
             z.as_mut_slice()[k] = F::ZERO;
-        }
-        for pink in &mut self.pink[g][..3] {
-            pink.as_mut_slice()[k] = F::ZERO;
         }
     }
 
@@ -676,7 +669,6 @@ impl<F: SynthFloat> VoiceBank<F> {
             _ => V::<F>::lit(0.5),
         };
         let mut rng = self.rng[g].clone();
-        let mut pink = self.pink[g];
 
         let mut z = self.z[g];
         let mut c = self.coef[g];
@@ -708,7 +700,7 @@ impl<F: SynthFloat> VoiceBank<F> {
                 OSC_SAW => kernel::saw(phase, dt, V::<F>::ONE / dt),
                 OSC_PULSE => kernel::pulse(phase, width, dt, V::<F>::ONE / dt),
                 OSC_TRIANGLE => kernel::triangle(phase, dt, V::<F>::ONE / dt),
-                _ => kernel::pink(V::<F>::white(&mut rng), &mut pink),
+                _ => V::<F>::noise(&mut rng),
             };
             // The phase adds its increment compensated: the error of each sum is
             // taken back by the next, so the pitch is the increment's however
@@ -774,7 +766,6 @@ impl<F: SynthFloat> VoiceBank<F> {
         // rounding in the ramp never builds up across steps.
         self.inc[g] = inc_target;
         self.rng[g] = rng;
-        self.pink[g] = pink;
         self.z[g] = z;
         self.coef[g] = c_target;
         self.set_regs(g, env);
