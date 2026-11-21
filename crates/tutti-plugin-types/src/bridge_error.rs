@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use crate::SlabError;
 use thiserror::Error;
+use tutti_buffers::FloatWidth;
 
 use crate::{
     EditorError, FrameTooLarge, LoadStage, PluginError, PluginFailure, ResultError,
@@ -171,6 +172,39 @@ pub enum IpcError {
         path: PathBuf,
         /// Why no host can.
         why: NoEditorHost,
+    },
+
+    /// The plugin refused its first activation: `cause` is the loader's own
+    /// failure.
+    #[error("the plugin failed its activation")]
+    ActivationFailed(#[source] Arc<PluginError>),
+
+    /// The plugin was lost (a call into it panicked) before its activation
+    /// ended.
+    #[error("the plugin was lost in its activation")]
+    LostInActivation,
+
+    /// The plugin has more channels in a direction than a block serves.
+    #[error(transparent)]
+    TooWide(#[from] crate::PluginTooWide),
+
+    /// The plugin does not process the width the graph renders at.
+    #[error("the plugin does not process {requested:?} audio (it processes {widths:?})")]
+    WidthRefused {
+        /// The width the graph renders at.
+        requested: FloatWidth,
+        /// The widths the plugin processes.
+        widths: crate::Widths,
+    },
+
+    /// The plugin was activated at one width and its client is for a graph of
+    /// another.
+    #[error("the plugin was activated at {activated:?}, not the {hosted:?} of the graph")]
+    WidthMismatch {
+        /// The width the Processor was activated at.
+        activated: FloatWidth,
+        /// The width of the graph the client was asked for.
+        hosted: FloatWidth,
     },
 
     /// The subprocess replied with a message the host was not waiting for.

@@ -23,9 +23,9 @@ use crate::NodeSlots;
 /// - its own impl with the default `params` (none), for a node with
 ///   controls of another shape.
 ///
-/// The controls are `Clone + Send + 'static`: the graph keeps a clone for the
-/// node's life ([`Graph::add`](crate::Graph::add)), so a clone shares the node's
-/// cells, and the node's removal drops it.
+/// The controls are `Send + 'static`: the graph owns them for the node's life
+/// ([`Graph::add`](crate::Graph::add)) and drops them once the node has left
+/// the render.
 ///
 /// Every impl states what frees what its controls publish
 /// ([`reclaimer`](Self::reclaimer)): [`Reclaims::Cells`] for a node whose
@@ -70,7 +70,7 @@ use crate::NodeSlots;
 /// }
 /// ```
 pub trait SessionNode<F: Float = f32>:
-    IntoNode<F, Controls: Clone + Send + 'static> + Send + 'static
+    IntoNode<F, Controls: Send + 'static> + Send + 'static
 {
     /// The node's params by address, read off its controls once it is in:
     /// what a [`ParamTarget`](crate::ParamTarget) write goes through, and
@@ -283,6 +283,7 @@ param_session_node!(
     SpringReverbNode,
     ConvolverNode,
     NoiseNode,
+    WavetableNode,
 );
 param_session_node!(any: tutti_nodes::LfoNode, tutti_nodes::OscillatorNode);
 

@@ -38,6 +38,7 @@ use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_nodes::{
     KarplusStrongConfig, KarplusStrongNode, WaveguideStringConfig, WaveguideStringNode,
 };
+use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
 use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Cents, Db, Drive, Feedback, Frame, HoldFactor, Hz, Metres, Mix, Q, Resonance,
@@ -346,6 +347,20 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(WaveguideStringNode::<f32>::from(
                 WaveguideStringConfig::new(ChannelLayout::STEREO),
             )),
+        ),
+        (
+            "modal bank",
+            Box::new(ModalBankNode::<f32>::from(ModalBankConfig::new(
+                ChannelLayout::STEREO,
+                Modes::try_from(
+                    &[Mode {
+                        frequency: Hz::new(440.0),
+                        decay: Seconds::new(0.3),
+                        gain: Gain::new(1.0),
+                    }][..],
+                )
+                .unwrap(),
+            ))),
         ),
         (
             "early reflections",

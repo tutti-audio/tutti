@@ -27,7 +27,7 @@
 //!
 //! // A 440 Hz sine into the session's output. The node's own controls come back
 //! // with its key; they set its parameters live.
-//! let (tone, _controls) = session
+//! let tone = session
 //!     .graph()
 //!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
 //! session.graph().connect(tone, Root).expect("both ends exist");
@@ -214,8 +214,8 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, Clock, ConnectError, CrossfadeControls, Edge, EventInPort, EventOutPort,
-    InPort, Key, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
+    AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Key,
+    NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
     SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, TransportHandle,
     Workers,
 };
@@ -314,7 +314,13 @@ pub mod nodes {
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
     };
+    pub use tutti_dsp::{
+        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+    };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
+    pub use tutti_dsp::{
+        TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
+    };
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
@@ -367,6 +373,7 @@ pub mod nodes {
         SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
         SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
         TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        WavetableConfig, WavetableNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -397,6 +404,7 @@ pub mod nodes {
         KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
         WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,
     };
+    pub use tutti_nodes::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};
 }
 
 /// The shared vocabulary (units, music types, buffers and the param cells: `tutti-units`,
@@ -432,9 +440,8 @@ pub mod types {
         StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
-        AtomicCell, AtomicWord, Bell, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
-        LevelSpan, Listener, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter,
-        Words,
+        AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
+        LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
     };
     pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
@@ -898,10 +905,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
-        InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport,
-        MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink,
-        Stamping, TrackError,
+        AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
+        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport, MidiRouteId,
+        MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
+        TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

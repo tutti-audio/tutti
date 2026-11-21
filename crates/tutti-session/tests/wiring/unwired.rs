@@ -102,11 +102,11 @@ fn refused(events: &[SessionEvent]) -> bool {
 fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(A)));
-    let (b, _) = g.add(ForkByClone(Const::mono(B)));
-    let (x, _) = g.add(ForkByClone(Pass::<2, 2>));
-    let (src, _) = g.add(ForkByClone(Ports::<0, 2>));
-    let (sink, _) = g.add(ForkByClone(Ports::<2, 0>));
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let b = g.add(ForkByClone(Const::mono(B)));
+    let x = g.add(ForkByClone(Pass::<2, 2>));
+    let src = g.add(ForkByClone(Ports::<0, 2>));
+    let sink = g.add(ForkByClone(Ports::<2, 0>));
     for (from, to) in [
         (OutPort::new(a, 0), x.input(0)),
         (OutPort::new(b, 0), x.input(1)),
@@ -204,8 +204,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
 fn a_wider_reinsert_reports_nothing() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(A)));
-    let (x, _) = g.add(ForkByClone(Pass::<1, 1>));
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let x = g.add(ForkByClone(Pass::<1, 1>));
     g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
     g.connect(x.out(0), Root::output(0)).unwrap().unfaded();
     let events = s.update();
@@ -245,9 +245,9 @@ fn a_wider_reinsert_reports_nothing() {
 fn a_feed_naming_a_lost_event_output_is_not_written_back() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (src, _) = g.add(ForkByClone(Ports::<0, 2>));
-    let (other, _) = g.add(ForkByClone(Ports::<0, 1>));
-    let (sink, _) = g.add(ForkByClone(Ports::<1, 0>));
+    let src = g.add(ForkByClone(Ports::<0, 2>));
+    let other = g.add(ForkByClone(Ports::<0, 1>));
+    let sink = g.add(ForkByClone(Ports::<1, 0>));
     g.set_feed(sink, Feeder::Sequencer, vec![src.events_out_at(0)]);
     g.set_feed(sink, Feeder::Routes, vec![src.events_out_at(1)]);
     let events = s.update();
@@ -314,9 +314,9 @@ impl Node for Bused {
 fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Bused { aux: true }));
-    let (y, _) = g.add(ForkByClone(Bused { aux: true }));
-    let (t, _) = g.add(ForkByClone(Bused { aux: true }));
+    let a = g.add(ForkByClone(Bused { aux: true }));
+    let y = g.add(ForkByClone(Bused { aux: true }));
+    let t = g.add(ForkByClone(Bused { aux: true }));
     g.connect(a.bus_out(0), y.bus_in(0)).unwrap().unfaded();
     g.connect(a.bus_out(1), y.bus_in(1)).unwrap().unfaded();
     g.connect(y.bus_out(0), t.bus_in(0)).unwrap().unfaded();
@@ -359,7 +359,7 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
 fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (y, _) = g.add(ForkByClone(Bused { aux: true }));
+    let y = g.add(ForkByClone(Bused { aux: true }));
     s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo");
     let g = s.graph();
@@ -396,10 +396,10 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
 fn unwired_waits_for_the_commit_that_lands() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(A)));
-    let (x, _) = g.add(ForkByClone(Pass::<2, 1>));
-    let (u, _) = g.add(ForkByClone(Pass::<1, 1>));
-    let (v, _) = g.add(ForkByClone(Pass::<1, 1>));
+    let a = g.add(ForkByClone(Const::mono(A)));
+    let x = g.add(ForkByClone(Pass::<2, 1>));
+    let u = g.add(ForkByClone(Pass::<1, 1>));
+    let v = g.add(ForkByClone(Pass::<1, 1>));
     g.connect(OutPort::new(a, 0), x.input(1)).unwrap().unfaded();
     let _ = s.update();
 

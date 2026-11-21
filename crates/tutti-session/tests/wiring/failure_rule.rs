@@ -53,7 +53,7 @@ fn a_query_of_a_node_that_is_not_there_names_it() {
 #[test]
 fn a_query_of_a_node_that_is_there_answers() {
     let mut s = detached();
-    let (through, _) = s
+    let through = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
     let g = s.graph_ref();
@@ -72,7 +72,7 @@ fn a_query_of_a_node_that_is_there_answers() {
 #[test]
 fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     let mut s = detached();
-    let (a, _) = s.graph().add(ForkByClone(Const::frame(&[0.5])));
+    let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let g = s.graph();
 
     let ghost_out = OutPort::new(GHOST, 0);
@@ -129,7 +129,7 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
 #[test]
 fn a_param_modulation_of_a_missing_node_is_refused_at_the_call() {
     let mut s = detached();
-    let (through, _) = s
+    let through = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
     let _ = s.update();
@@ -168,7 +168,7 @@ fn a_param_modulation_of_a_missing_node_is_refused_at_the_call() {
 fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
     let mut s = detached();
     let _side = s.graph().take_audio_side();
-    let (knob, _) = s.graph().add(ForkByClone(Const::frame(&[1.0])));
+    let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
     let _ = s.update();
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
@@ -203,7 +203,7 @@ fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     use tutti_graph::{MissingSource, TapAlign, TapOptions};
     use tutti_units::Samples;
     let mut s = detached();
-    let (a, _) = s.graph().add(ForkByClone(Const::frame(&[0.5])));
+    let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let far = OutPort::new(a.erase(), 70_000);
     let refused = s
         .graph()

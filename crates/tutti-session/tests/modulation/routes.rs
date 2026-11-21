@@ -21,7 +21,7 @@ fn session() -> Session {
 }
 
 fn filter(s: &mut Session) -> ParamRef {
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
@@ -173,7 +173,7 @@ fn recording_where_nothing_is_automated_is_refused() {
     use tutti_units::Hz;
 
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),

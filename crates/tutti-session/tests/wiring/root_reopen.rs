@@ -23,7 +23,7 @@ fn session() -> Session {
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("builds");
-    let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
+    let node = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
             .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])

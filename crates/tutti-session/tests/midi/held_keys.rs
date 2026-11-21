@@ -113,7 +113,7 @@ fn retarget_with_a_held_clip_note() {
 fn set_routes_with_a_held_key() {
     let mut s = offline();
     let mail = Arc::new(Mutex::new(Vec::new()));
-    let (src, ()) = s.graph().add(Src(Arc::clone(&mail)));
+    let src = s.graph().add(Src(Arc::clone(&mail)));
     let (a, a_seen) = tap(&mut s);
     let (b, b_seen) = tap(&mut s);
     let resolve = |k: u8| match k {
@@ -197,7 +197,7 @@ fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
         .expect("the builder's MIDI nodes")
         .input_ports;
     let mail = Arc::new(Mutex::new(Vec::new()));
-    let (src, ()) = s.graph().add(GroupSrc(Arc::clone(&mail), ports));
+    let src = s.graph().add(GroupSrc(Arc::clone(&mail), ports));
     let (a, a_seen) = tap(&mut s);
     let resolve = |k: u8| (k == 1).then_some(a);
     let by_group_2 = [MidiRouteRule::<u8>::any_channel()

@@ -68,12 +68,12 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     // The sampler: the same mono wave on beats 0 and 4, each a node as it
     // stands, placed at stereo to join the stereo chain.
     let wave = std::sync::Arc::new(saw());
-    let (first, _) = s.graph().add(
+    let first = s.graph().add(
         Clip::new(wave.clone())?
             .channels(ChannelLayout::STEREO)?
             .at(Beat::new(0.0)),
     );
-    let (second, _) = s.graph().add(
+    let second = s.graph().add(
         Clip::new(wave)?
             .channels(ChannelLayout::STEREO)?
             .at(Beat::new(4.0))
@@ -82,12 +82,12 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
 
     // A stereo low-pass, then a reverb whose input is mono: that width change
     // is a bus edge, never a truncation (`connect` would refuse it).
-    let (filter, _) = s.graph().add(SvfFilterNode::from(
+    let filter = s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
     ));
-    let (reverb, _) = s
+    let reverb = s
         .graph()
         .add(FreeverbNode::from(FreeverbConfig::general_midi()));
     s.graph().connect(first, filter)?;

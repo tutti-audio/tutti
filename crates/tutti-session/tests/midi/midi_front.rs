@@ -76,8 +76,8 @@ impl Node for Latent {
 fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     let mut s = offline();
     let seen = Seen::default();
-    let (target, ()) = s.graph().add(Tap(Arc::clone(&seen)));
-    let (latent, ()) = s.graph().add(ForkByClone(Latent));
+    let target = s.graph().add(Tap(Arc::clone(&seen)));
+    let latent = s.graph().add(ForkByClone(Latent));
     s.graph().connect(latent, tutti_session::Root).unwrap();
     let mut take = s
         .midi()
@@ -113,8 +113,7 @@ fn a_take_of_an_instrument_records_what_its_handle_plays() {
     let mut s = offline();
     let mut synth = s
         .add_instrument(Probe(ForkByClone(Five)))
-        .expect("an instrument")
-        .handle;
+        .expect("an instrument");
     let mut take = s
         .midi()
         .tap(synth.node(), EventCapacity::of(64))
@@ -144,8 +143,7 @@ fn an_instrument_has_its_handles_keys_and_no_second_live_input() {
     let mut s = offline();
     let synth = s
         .add_instrument(Probe(ForkByClone(Five)))
-        .expect("an instrument")
-        .handle;
+        .expect("an instrument");
     let key = synth.node().erase();
     assert!(matches!(
         s.midi().input(key),
@@ -166,7 +164,7 @@ fn an_instrument_has_its_handles_keys_and_no_second_live_input() {
 #[test]
 fn a_node_whose_live_input_has_its_keys_is_not_made_an_instrument() {
     let mut s = offline();
-    let (node, ()) = s.graph().add(Probe(ForkByClone(Five)));
+    let node = s.graph().add(Probe(ForkByClone(Five)));
     let key = node.erase();
     let _keys = s.midi().input(key).expect("the live input's keys");
     assert!(matches!(
@@ -192,8 +190,7 @@ fn an_instruments_typed_key_takes_a_wire_of_the_callers_own() {
     let mut s = offline();
     let synth = s
         .add_instrument(Probe(ForkByClone(Five)))
-        .expect("an instrument")
-        .handle;
+        .expect("an instrument");
     let (inlet, _writer) = s.graph().open_event_inlet(EventCapacity::of(8));
     s.graph()
         .connect(inlet.events_out(), synth.node().events_in())
@@ -211,7 +208,7 @@ fn an_instruments_typed_key_takes_a_wire_of_the_callers_own() {
 #[test]
 fn recording_a_target_with_no_event_input_is_refused() {
     let mut s = offline();
-    let (dc, _) = s
+    let dc = s
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     assert!(matches!(

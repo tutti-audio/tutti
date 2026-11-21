@@ -129,8 +129,8 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
     let events = s.devices().subscribe();
     counters.unplug(EndpointId::from_raw(2));
     assert!(
-        events
-            .recv_timeout(std::time::Duration::from_secs(10))
+        tutti_fixtures::block_on_within(events.recv(), std::time::Duration::from_secs(10))
+            .expect("an event before the guard")
             .is_ok()
     );
     assert!(s.connect_input(crate::testing::started(), &gone).is_err());

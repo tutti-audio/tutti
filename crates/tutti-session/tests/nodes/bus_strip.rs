@@ -57,11 +57,11 @@ fn heard(s: &mut Session, device: u16) -> Vec<f32> {
 fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
     let mut s = offline(Session::builder(), 2);
     let g = s.graph();
-    let (src, _) = g.add(Unforkable(Src {
+    let src = g.add(Unforkable(Src {
         values: vec![0.5],
         out: BusTopology::MONO,
     }));
-    let (strip, _) = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    let strip = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     g.connect(src.bus_out(0), strip.bus_in(0))
         .expect("a mono bus folds onto a stereo one")
         .unfaded();
@@ -79,11 +79,11 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
     let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
     let mut s = offline(Session::builder().root_topology(five_one), 6);
     let g = s.graph();
-    let (src, _) = g.add(Unforkable(Src {
+    let src = g.add(Unforkable(Src {
         values: vec![0.25, 0.75],
         out: BusTopology::STEREO,
     }));
-    let (strip, _) = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    let strip = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     g.connect(src, strip).expect("same width").unfaded();
     g.connect(strip.bus_out(0), Root)
         .expect("a placed stereo bus folds onto 5.1")
@@ -96,10 +96,10 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
 #[test]
 fn a_strip_without_a_pair_refuses_a_balance_by_name() {
     let mut s = offline(Session::builder(), 2);
-    let (stereo, _) = s
+    let stereo = s
         .graph()
         .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
-    let (mono, _) = s
+    let mono = s
         .graph()
         .add(BusStripNode::from(BusStripConfig::new(BusTopology::MONO)));
     s.set(stereo.balance().to(Balance::new(0.5)))

@@ -59,13 +59,13 @@ fn rig() -> (Session, Key<MultibandCompressorNode<f32>>) {
         .build()
         .expect("builds");
     let g = s.graph();
-    let (low, _) = g.add(ForkByClone(
+    let low = g.add(ForkByClone(
         Osc::sine(Hz::new(LOW)).with_amplitude(Amplitude::new(A)),
     ));
-    let (high, _) = g.add(ForkByClone(
+    let high = g.add(ForkByClone(
         Osc::sine(Hz::new(HIGH)).with_amplitude(Amplitude::new(A)),
     ));
-    let (mb, _) = g.add(MultibandCompressorNode::<f32>::from(
+    let mb = g.add(MultibandCompressorNode::<f32>::from(
         MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
     ));
     g.set_sources(InPort::new(mb, 0), [OutPort::new(low, 0)])

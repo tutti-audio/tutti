@@ -47,7 +47,7 @@ fn square(frames: usize) -> Wave {
 #[wasm_bindgen_test]
 fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() {
     let mut session = session();
-    let (clip, _) = session
+    let clip = session
         .graph()
         .add(Clip::new(Arc::new(wave_of(vec![0.25; 2 * 48_000]))).expect("a placeable wave"));
     session.graph().connect(clip, Root).unwrap().unfaded();

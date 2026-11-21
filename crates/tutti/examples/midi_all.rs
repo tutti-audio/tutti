@@ -18,8 +18,8 @@
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
-    AddedInstrument, FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup,
-    MidiHardwareConfig, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
+    FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup, MidiHardwareConfig,
+    MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
     PitchBendSensitivity, SmfDivision, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
@@ -111,9 +111,7 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     s.set(s.mpe().to(MpeMode::Zones(zone)))?;
 
     // A synth as an instrument: its strip is wired to the master.
-    let AddedInstrument {
-        handle: mut synth, ..
-    } = s.add_instrument(PolySynth::new(SynthConfig::default()))?;
+    let mut synth = s.add_instrument(PolySynth::new(SynthConfig::default()))?;
 
     // A tap on what the instrument's handle plays, read with `drain`.
     let mut take = s.midi().tap(synth.node(), EventCapacity::of(256))?;

@@ -51,7 +51,7 @@ fn frames(s: &mut DetachedSession, n: usize) -> Vec<f32> {
 fn a_connect_fades_in_and_reaches_unity_at_declick() {
     assert_eq!(declick_frames(SampleRate::SR_48K).get(), SPAN);
     let mut s = session();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph().connect(src.out(0), Root::output(0)).unwrap();
     let _ = s.update();
 
@@ -90,7 +90,7 @@ fn a_connect_fades_in_and_reaches_unity_at_declick() {
 #[test]
 fn hard_connects_at_full_weight_at_once() {
     let mut s = session();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
@@ -115,7 +115,7 @@ fn hard_connects_at_full_weight_at_once() {
 #[test]
 fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
     let mut s = session();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
@@ -159,7 +159,7 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
 #[test]
 fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
     let mut s = session();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
@@ -186,7 +186,7 @@ fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
 #[test]
 fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
     let mut s = session();
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let src = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
@@ -217,8 +217,8 @@ fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
 #[test]
 fn set_sources_and_remove_fade_what_leaves() {
     let mut s = session();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (b, _) = s.graph().add(ForkByClone(Const::mono(2.0)));
+    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     let sink = Root::output(0);
     s.graph()
         .set_sources_unfaded(sink, [OutPort::new(a.erase(), 0)])

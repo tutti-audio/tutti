@@ -31,7 +31,7 @@ fn session() -> Session {
 #[test]
 fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
@@ -80,7 +80,7 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
 #[test]
 fn a_typed_range_declares_the_target_an_untyped_ref_names() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
@@ -113,7 +113,7 @@ fn a_typed_range_keeps_bounds_f32_cannot_hold() {
     assert_ne!(f64::from(lo as f32), lo, "f32 loses the lower bound");
     assert_ne!(f64::from(hi as f32), hi, "f32 loses the upper bound");
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
@@ -130,7 +130,7 @@ fn a_typed_range_keeps_bounds_f32_cannot_hold() {
 #[test]
 fn a_second_declaration_keeps_the_range_the_target_holds() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
@@ -162,7 +162,7 @@ fn a_second_declaration_keeps_the_range_the_target_holds() {
 #[test]
 fn a_range_write_is_refused_at_the_call() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),
@@ -209,7 +209,7 @@ fn a_range_write_is_refused_at_the_call() {
 #[test]
 fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
     let (mut s, mut side) = rig(1);
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     master(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
@@ -250,7 +250,7 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
 #[test]
 fn a_range_write_republishes_no_program() {
     let (mut s, mut side) = rig(1);
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     master(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
@@ -285,7 +285,7 @@ fn a_range_write_republishes_no_program() {
 #[test]
 fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
     let mut s = session();
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+    let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
             .q(Q::new(0.7)),

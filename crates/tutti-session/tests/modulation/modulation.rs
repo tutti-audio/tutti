@@ -126,9 +126,9 @@ fn ducked(f: usize, ta: f64, tr: f64) -> f64 {
 #[test]
 fn the_8_1_example_renders_its_analytic_values() {
     let mut s = offline();
-    let (filter, _) = s.graph().add(ProbeUnit::new(500.0));
-    let (pad, _) = s.graph().add(ProbeUnit::of(UnitParam::Volume, 0.8));
-    let (kick_bus, _) = s.graph().add(ForkByClone(Pulse {
+    let filter = s.graph().add(ProbeUnit::new(500.0));
+    let pad = s.graph().add(ProbeUnit::of(UnitParam::Volume, 0.8));
+    let kick_bus = s.graph().add(ForkByClone(Pulse {
         from: 4_800,
         to: 7_200,
         level: 0.8,
@@ -273,7 +273,7 @@ fn a_target_placed_one_update_later_resolves_on_that_update() {
     );
     assert!(s.mod_state().lane(HOST_TARGET).is_none());
 
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     keys.node.set(Some(probe.erase()));
     update_at(&mut s, now, Some(decl.input(&keys)));
     assert_eq!(
@@ -345,7 +345,7 @@ fn the_unresolved_warning_fires_after_four_seconds_not_n_updates() {
 #[test]
 fn a_refusal_names_the_node_and_the_param() {
     let mut s = offline();
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
@@ -400,7 +400,7 @@ fn a_refusal_names_the_node_and_the_param() {
 #[test]
 fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
     let mut s = offline();
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
@@ -432,7 +432,7 @@ fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
 #[test]
 fn a_host_and_the_session_cannot_both_declare() {
     let mut s = offline();
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     s.mods_mut().macro_(0.5);
     let keys = HostKeys {
         node: Cell::new(Some(probe.erase())),
@@ -461,7 +461,7 @@ fn a_host_and_the_session_cannot_both_declare() {
 #[test]
 fn removing_a_node_through_the_graph_forgets_its_declarations() {
     let mut s = offline();
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
@@ -485,7 +485,7 @@ fn removing_a_node_through_the_graph_forgets_its_declarations() {
 #[test]
 fn removing_a_node_forgets_its_declarations() {
     let mut s = offline();
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
@@ -550,7 +550,7 @@ impl tutti_graph::Node for Late {
 #[test]
 fn a_re_apply_that_moves_the_latency_publishes_it() {
     let mut s = offline();
-    let (late, _) = s.graph().add(ForkByClone(Late));
+    let late = s.graph().add(ForkByClone(Late));
     let _ = s.update();
     assert_eq!(
         s.latency(),
@@ -558,7 +558,7 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
         "precondition: nothing latent out"
     );
 
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(probe, 0)])
         .unwrap();
@@ -608,7 +608,7 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
 #[test]
 fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
     let mut s = offline();
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
@@ -639,7 +639,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
 #[test]
 fn an_own_edit_after_a_steady_state_applies() {
     let mut s = offline();
-    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))

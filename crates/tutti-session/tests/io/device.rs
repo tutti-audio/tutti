@@ -38,7 +38,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let (dc, _) = session
+    let dc = session
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
@@ -106,8 +106,8 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
-    let (lim, _) = s.graph().add(LimiterNode::<f32>::from(
+    let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
+    let lim = s.graph().add(LimiterNode::<f32>::from(
         LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
             threshold: Db::new(0.0),
             ceiling: Db::new(0.0),
@@ -1016,7 +1016,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .unwrap();
     // Something is heard, so the old root has outputs to fade; the root in
     // force fits both devices, and the change to it starts a fade.
-    let (dc, _) = session
+    let dc = session
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
@@ -1101,7 +1101,7 @@ fn a_panic_in_the_render_is_a_device_fault_event() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let (node, _) = session.graph().add(ForkByClone(AlwaysPanics));
+    let node = session.graph().add(ForkByClone(AlwaysPanics));
     session
         .graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])

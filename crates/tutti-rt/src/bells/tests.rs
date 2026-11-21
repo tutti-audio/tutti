@@ -100,6 +100,25 @@ fn dropping_the_bells_ends_the_tick_task() {
     );
 }
 
+/// **Making a bell forgets the bells whose both sides are gone**, with no pass
+/// between: a set whose rings find nobody waiting stays as large as its live
+/// bells.
+#[test]
+fn making_a_bell_forgets_the_dead_ones() {
+    let (shared, _parker) = Bells::shared();
+    let bells = Bells {
+        shared,
+        tick: tick::Tick::none(),
+    };
+    for _ in 0..3 {
+        let (bell, listener) = bells.bell();
+        bell.ring();
+        drop((bell, listener));
+    }
+    let (_bell, _listener) = bells.bell();
+    assert_eq!(bells.shared.bells().len(), 1, "only the live bell is kept");
+}
+
 #[test]
 fn a_pass_wakes_a_rung_bell_and_not_an_unrung_one() {
     let (shared, _parker) = Bells::shared();

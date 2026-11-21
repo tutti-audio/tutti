@@ -176,7 +176,12 @@ pub(crate) mod wire;
 ///   rate, deactivated, no answer) in place of the reason text, and `Error`
 ///   carries a `ServerError` (a load's stage and reason, a state's two lengths,
 ///   a slab setup's failure) in place of the message.
-pub const PROTOCOL_VERSION: u32 = 56;
+/// - **Version 57** types the rest of the failures the control wire carried as
+///   text. `StateLoaded` and `PluginLoaded` carry a `StateError` (a state's
+///   refusal, its two lengths, no plugin, an object the transport refused) in
+///   place of the message, and `EditorOpened` and `EditorSized` carry an
+///   `EditorError` in place of the refusal text.
+pub const PROTOCOL_VERSION: u32 = 57;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///

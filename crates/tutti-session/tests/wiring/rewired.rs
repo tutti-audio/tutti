@@ -66,9 +66,9 @@ fn rewired(events: &[SessionEvent]) -> Vec<(NodeKey, Wired, Wired)> {
 fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
-    let (a, _) = g.add(ForkByClone(Const::mono(0.5)));
-    let (x, _) = g.add(ForkByClone(Bused));
-    let (_idle, _) = g.add(ForkByClone(Bused));
+    let a = g.add(ForkByClone(Const::mono(0.5)));
+    let x = g.add(ForkByClone(Bused));
+    let _idle = g.add(ForkByClone(Bused));
     assert_eq!(rewired(&s.update()), [], "unwired nodes: nothing moved");
 
     let g = s.graph();

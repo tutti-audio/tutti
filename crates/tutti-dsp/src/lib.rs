@@ -119,6 +119,8 @@
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
+//! - **Wavetable** (`wavetable.rs`): [`Wavetable`], single-cycle frames mipmapped by FFT bin
+//!   zeroing, played by a [`WavetableOscillator`] with the level crossfaded from the frequency.
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
 //!   channels a block inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a ramped
 //!   [`StereoWidth`](tutti_units::StereoWidth)); [`PanLaw`] and [`pan_gains`].
@@ -191,6 +193,7 @@ mod karplus_strong;
 mod level;
 mod lfo;
 mod loudness;
+mod modal;
 mod modulation;
 mod noise;
 mod novelty;
@@ -209,6 +212,7 @@ mod string_tuning;
 mod tremolo;
 mod waveguide;
 mod waveshape;
+mod wavetable;
 
 mod mel;
 mod mfcc;
@@ -290,6 +294,7 @@ pub use mel::{
     MelBandCount, MelBandCountError, MelConfig, MelError, MelFilterbank, MelNorm, MelScale,
 };
 pub use mfcc::Mfcc;
+pub use modal::{MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes};
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{
@@ -361,3 +366,6 @@ pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
+pub use wavetable::{
+    TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
+};

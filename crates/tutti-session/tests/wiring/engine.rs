@@ -248,7 +248,7 @@ fn voice(cents: f64) -> tutti_sampler::VoicePool<f32> {
 /// frames in `block`-frame device blocks.
 fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
     let mut s = offline();
-    let (voice, _handle) = s.graph().add(tutti_graph::Unforkable(voice(cents)));
+    let voice = s.graph().add(tutti_graph::Unforkable(voice(cents)));
     for port in 0..2 {
         s.graph()
             .set_sources_unfaded(Root::output(port), [OutPort::new(voice, port)])
@@ -370,7 +370,7 @@ fn an_offline_render_feeds_the_load_and_the_block_counts() {
 fn an_offline_render_feeds_the_master_meter() {
     let mut s = offline();
     let mut meter = s.take_master_meter().expect("declared at the build");
-    let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
@@ -390,7 +390,7 @@ fn an_offline_render_feeds_the_master_meter() {
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     let mut meter = detached.take_master_meter().expect("declared at the build");
-    let (dc, _) = detached.graph().add(ForkByClone(Const::mono(0.5)));
+    let dc = detached.graph().add(ForkByClone(Const::mono(0.5)));
     detached
         .graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
@@ -411,7 +411,7 @@ fn an_offline_render_feeds_the_master_meter() {
 #[test]
 fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     let mut s = offline();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let ghost = tutti_graph::NodeKey(0xdead);
     assert_eq!(
         s.graph().meters().open_node(ghost).err(),
@@ -471,8 +471,8 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
 #[test]
 fn a_track_meter_reads_a_nodes_port_and_goes_with_the_node() {
     let mut s = offline();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
-    let (b, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let a = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let b = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
         .unwrap();
@@ -517,7 +517,7 @@ fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
             .count()
     };
     let mut s = offline();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let track = s.graph().meters().open_node(a).expect("the sources exist");
     let _ = s.update();
     assert_eq!(meters(&s), 2, "the master's and the track's");
@@ -549,7 +549,7 @@ fn closing_a_meter_names_one_that_is_not_open() {
             .count()
     };
     let mut s = offline();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let track = s.graph().meters().open_node(a).expect("the sources exist");
     let _ = s.update();
     assert_eq!(meters(&s), 2, "the master's and the track's");
@@ -616,7 +616,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
 #[test]
 fn an_offline_render_feeds_an_output_tap() {
     let mut s = offline();
-    let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
@@ -651,8 +651,8 @@ fn an_offline_render_feeds_an_output_tap() {
 #[test]
 fn an_output_tap_follows_a_rewired_output() {
     let mut s = offline();
-    let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
-    let (b, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
+    let a = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let b = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
         .unwrap();
@@ -722,7 +722,7 @@ fn a_detached_render_feeds_a_tap() {
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
-    let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
@@ -788,7 +788,7 @@ impl tutti_graph::Node for Gated {
 fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     use tutti_units::{At, Frame};
     let mut s = offline();
-    let (gate, _) = s.graph().add(tutti_graph::Unforkable(Gated));
+    let gate = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(gate, 0)])
         .unwrap();
@@ -853,7 +853,7 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
 fn the_heard_tap_carries_the_fade_at_a_stop() {
     use tutti_units::{At, Frame};
     let mut s = offline();
-    let (gate, _) = s.graph().add(tutti_graph::Unforkable(Gated));
+    let gate = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(gate, 0)])
         .unwrap();
@@ -923,7 +923,7 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
 #[test]
 fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     let mut s = offline();
-    let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+    let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();

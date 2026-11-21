@@ -31,7 +31,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// A session whose outputs hear `node`, one second of a project.
 fn session_with(node: impl Node + Clone + 'static) -> Session {
     let mut session = Session::new(RATE).expect("a session builds");
-    let (node, _) = session.graph().add(ForkByClone(node));
+    let node = session.graph().add(ForkByClone(node));
     session.graph().connect(node, Root).unwrap();
     session
 }

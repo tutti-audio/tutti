@@ -20,7 +20,7 @@ use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
     ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, RateRefusalCause,
-    SampleRate, ServerError, StateUse, Wakeups, WindowHandle,
+    SampleRate, ServerError, StateError, StateUse, Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -386,7 +386,7 @@ impl Session {
                         Ok(()) => None,
                         Err(e) => {
                             tracing::warn!(requested = %rate, "sample rate not applied: {e}");
-                            Some(RateRefusalCause::from(&e))
+                            Some(e.cause)
                         }
                     },
                     None => None,
@@ -408,10 +408,9 @@ impl Session {
                 Ok(Reaction::None)
             }
             M::OpenEditor { parent, scale } => {
-                // The wire's result carries the reason as text.
                 let result = self
                     .open_editor(main, parent, scale)
-                    .map_err(|e| editor_wire_text(&e));
+                    .map_err(editor_wire_error);
                 Ok(ControlReply::EditorOpened { result }.into())
             }
             M::CloseEditor => {
@@ -419,9 +418,7 @@ impl Session {
                 Ok(Reaction::None)
             }
             M::SetEditorSize { size } => {
-                let result = self
-                    .set_editor_size(main, size)
-                    .map_err(|e| editor_wire_text(&e));
+                let result = self.set_editor_size(main, size).map_err(editor_wire_error);
                 Ok(ControlReply::EditorSized { result }.into())
             }
 
@@ -786,7 +783,7 @@ impl Session {
             descriptor: Box::new(descriptor),
             loaded,
             negotiated_format: negotiated,
-            state_error: state_error.map(|e| e.to_string()),
+            state_error: state_error.map(StateError::from),
         }
         .into())
     }
@@ -861,7 +858,7 @@ impl Session {
     /// Answers a state whose object the transport refused (`error` says why),
     /// the stream still in step. A refused stage leaves nothing staged: the next
     /// load must not restore a stage left by an earlier request.
-    pub(crate) fn refuse_state(&mut self, staging: bool, error: String) -> Reaction {
+    pub(crate) fn refuse_state(&mut self, staging: bool, error: StateError) -> Reaction {
         if staging {
             self.discard_staged();
         }
@@ -881,11 +878,12 @@ impl Session {
     ) -> Reaction {
         self.forget_informs();
         let error = match self.plugin.as_mut() {
-            None => Some("no plugin is loaded".to_string()),
-            Some(plugin) => match plugin.plugin_mut().load_state(main, state, state_use) {
-                Ok(()) => None,
-                Err(e) => Some(format!("failed to load state: {e}")),
-            },
+            None => Some(StateError::NoPlugin),
+            Some(plugin) => plugin
+                .plugin_mut()
+                .load_state(main, state, state_use)
+                .err()
+                .map(StateError::from),
         };
         self.forget_informs();
         self.publish();
@@ -893,12 +891,12 @@ impl Session {
     }
 }
 
-/// An editor call's failure as the text the wire carries: an editor error says
-/// itself, not through the "plugin editor error" of the error that wraps it.
-fn editor_wire_text(e: &PluginError) -> String {
+/// An editor call's failure as the wire carries it: an editor error is itself,
+/// and any other failure is the plugin's own message.
+fn editor_wire_error(e: PluginError) -> EditorError {
     match e {
-        PluginError::Editor(editor) => editor.to_string(),
-        other => other.to_string(),
+        PluginError::Editor(editor) => editor,
+        other => EditorError::PluginError(other.to_string()),
     }
 }
 
@@ -1331,10 +1329,16 @@ mod tests {
             .load_state(main_thread(), &[1, 2, 3], StateUse::Project)
             .into_reply();
         match reply {
-            ControlReply::StateLoaded { error: Some(msg) } => {
-                assert!(msg.contains("no plugin"), "unhelpful message: {msg:?}");
-            }
+            ControlReply::StateLoaded {
+                error: Some(StateError::NoPlugin),
+            } => {}
             other => panic!("expected a StateLoaded carrying a refusal, got {other:?}"),
+        }
+    }
+
+    fn not_sealed() -> StateError {
+        StateError::ObjectRefused {
+            reason: "the object is not sealed".into(),
         }
     }
 
@@ -1344,17 +1348,14 @@ mod tests {
     #[test]
     fn a_refused_state_is_answered_and_a_refused_stage_is_discarded() {
         let mut s = Rig::new();
-        match s
-            .refuse_state(false, "the object is not sealed".into())
-            .into_reply()
-        {
-            ControlReply::StateLoaded { error: Some(msg) } => {
-                assert!(msg.contains("not sealed"), "{msg:?}");
+        match s.refuse_state(false, not_sealed()).into_reply() {
+            ControlReply::StateLoaded { error } => {
+                assert_eq!(error, Some(not_sealed()));
             }
             other => panic!("expected the refusal, got {other:?}"),
         }
         assert_state_loaded_reply(s.stage_state(vec![1, 2, 3]));
-        let _ = s.refuse_state(true, "the object is not sealed".into());
+        let _ = s.refuse_state(true, not_sealed());
         assert!(s.staged.is_none(), "a refused stage left the earlier one");
     }
 
@@ -1483,17 +1484,17 @@ mod tests {
         assert!(s.plugin_lost());
     }
 
-    /// **An editor error reaches the wire as its own text**, without the
-    /// "plugin editor error" prefix of the error that wraps it.
+    /// **An editor error reaches the wire as itself**, and any other failure
+    /// as the plugin's own message.
     #[test]
-    fn an_editor_error_is_flattened_to_its_own_text() {
+    fn an_editor_error_reaches_the_wire_as_itself() {
         assert_eq!(
-            editor_wire_text(&PluginError::Editor(EditorError::NotOpen)),
-            "the editor is not open"
+            editor_wire_error(PluginError::Editor(EditorError::NotOpen)),
+            EditorError::NotOpen
         );
         assert_eq!(
-            editor_wire_text(&PluginError::Other("no".into())),
-            "plugin error: no"
+            editor_wire_error(PluginError::Other("no".into())),
+            EditorError::PluginError("plugin error: no".into())
         );
     }
 
@@ -2325,7 +2326,7 @@ mod tests {
     }
 
     #[cfg(feature = "clap")]
-    fn load_reply(s: &mut Rig, declared: Option<StagedState>) -> Option<String> {
+    fn load_reply(s: &mut Rig, declared: Option<StagedState>) -> Option<StateError> {
         let reply = s
             .handle(
                 main_thread(),
@@ -2479,14 +2480,16 @@ mod tests {
         let mut s = Rig::new();
         assert_state_loaded(stage_state_bytes(&mut s, &[1, 2, 3]));
         assert!(
-            load_reply(
-                &mut s,
-                Some(StagedState {
-                    len: 3,
-                    state_use: StateUse::Project,
-                })
-            )
-            .is_some(),
+            matches!(
+                load_reply(
+                    &mut s,
+                    Some(StagedState {
+                        len: 3,
+                        state_use: StateUse::Project,
+                    })
+                ),
+                Some(StateError::Rejected(_))
+            ),
             "bytes the plugin cannot parse are refused in the reply"
         );
         assert!(s.plugin.is_some(), "and the plugin is loaded all the same");

@@ -142,6 +142,9 @@ std only. A rule the compiler already enforces is not a gate.
 - An app writes a value one way: `Session::set` (or `Values::set`) over an assignment built
   from a target, and reads it with `get`; a new `pub fn set_*` on the session is refused
   (`cargo xtask check-values`, whose baseline only shrinks).
+- A node's values are targets on its key: `Graph::add` returns the key alone, and an app
+  never holds a node's cells. The sampler's handles are `Graph::handle` until their
+  commands are targets.
 - A main-thread method takes `MainThreadMarker`. No public type in `tutti-session` holds one, no `pub fn` is named `*_blocking` and no borrowing `pub fn run` (a work value's `run(self ..)` is the app's call), bar the rows of `xtask/session-api-allow.txt` (`cargo xtask check-session-api`).
 
 ### The audio thread
@@ -207,7 +210,8 @@ touched.
 - A refusable push returns `tutti_rt::PushError { Full, Disconnected }`.
 - A thread's wake-up is `tutti_rt::parker()`: any number of `Unparker`s unpark one
   `Parker`. A future's wake-up is a `tutti_rt::Bell` from the session's `Bells`: the audio
-  thread rings it, and the future awaits its `Listener::rung()`.
+  thread rings it, and the future awaits its `Listener::rung()`. An app never names either:
+  a session's tap carries one, and the app awaits `TapReader::notified()`.
 - A value the audio thread must never drop holds a `tutti_rt::ControlDrop`.
 - A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at

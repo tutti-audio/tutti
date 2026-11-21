@@ -26,7 +26,7 @@ fn session() -> Session {
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("builds");
-    let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
+    let node = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
             .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
@@ -359,7 +359,7 @@ fn a_bus_fed_root_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends() {
         .root_topology(root(2))
         .build()
         .expect("builds");
-    let (src, _) = s.graph().add(Unforkable(Src {
+    let src = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],
         out: BusTopology::unassigned(ChannelLayout::STEREO).unwrap(),
     }));
