@@ -531,13 +531,19 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
 }
 
 /// The frames from block frame `from` until the playhead reaches `start`, while the
-/// transport rolls (`None` when it does not, or `start` is not ahead): the first run's
-/// tempo carried on, a few blocks' extrapolation.
+/// transport rolls (`None` when it does not, or `start` is not ahead), counted through the
+/// project's tempo map ([`BlockClock::frames_between`]).
 fn frames_until(clock: &BlockClock<'_>, from: usize, start: Beat) -> Option<usize> {
     let run = clock.runs_in(from..from + 1).next()?;
-    let per_beat = run.frames_per_beat()?;
-    let beats = (start - run.beat_at(from.max(run.start))).get();
-    (beats > 0.0).then_some((beats * per_beat) as usize)
+    if !run.rolling() {
+        return None;
+    }
+    let beat = run.beat_at(from.max(run.start));
+    (start > beat).then(|| {
+        clock
+            .frames_between(beat, start, run.tempo(), run.sample_rate())
+            .get()
+    })
 }
 
 /// The beat and tempo of a stopped transport at block frame `from`, when it stands
@@ -554,7 +560,8 @@ fn standing_in(clock: &BlockClock<'_>, from: usize, window: VoiceWindow) -> Opti
 
 /// The frames from block frame `from` to the end of the loop the rolling transport plays
 /// over, the loop's start beat and the tempo, when `window` covers the loop's start:
-/// what a voice needs to prime for the wrap. The tempo carried on from the first run.
+/// what a voice needs to prime for the wrap, counted through the project's tempo map
+/// ([`BlockClock::frames_between`]).
 fn wrap_ahead(
     clock: &BlockClock<'_>,
     from: usize,
@@ -562,11 +569,16 @@ fn wrap_ahead(
 ) -> Option<(usize, Beat, Bpm)> {
     let region = clock.looping()?;
     let run = clock.runs_in(from..from + 1).next()?;
-    let per_beat = run.frames_per_beat()?;
+    if !run.rolling() {
+        return None;
+    }
     let beat = run.beat_at(from.max(run.start));
     let (start, end) = (region.start(), region.end());
     let covers = window.start <= start && window.duration.is_none_or(|d| start < window.start + d);
-    (covers && beat < end).then(|| (((end - beat).get() * per_beat) as usize, start, run.tempo()))
+    (covers && beat < end).then(|| {
+        let frames = clock.frames_between(beat, end, run.tempo(), run.sample_rate());
+        (frames.get(), start, run.tempo())
+    })
 }
 
 /// What [`PlaybackSlot::render_lanes`] left for its piece.

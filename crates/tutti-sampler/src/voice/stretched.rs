@@ -115,9 +115,9 @@ const NOMINAL_RATE: SampleRate = SampleRate::SR_48K;
 /// A stretching voice's vocoders: the one it sounds through, and a second that primes
 /// for a loop wrap ahead of it and takes over at the wrap (see the module docs).
 ///
-/// Both are built together, control-side, and move together: a voice cannot tell
-/// the transport's loop before the audio thread reads it, so it carries the spare
-/// whether or not a loop comes.
+/// Every stretched voice carries the spare, built with it control-side, because the loop
+/// region is known only on the audio thread, in the block's `Env`: a voice cannot tell
+/// before then whether a loop comes, and nothing may be built there.
 pub(crate) struct Vocoders<F: SamplerFloat> {
     pub(crate) live: PhaseVocoder<F>,
     pub(crate) spare: PhaseVocoder<F>,

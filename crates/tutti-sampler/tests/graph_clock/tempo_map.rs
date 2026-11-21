@@ -42,7 +42,7 @@ use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{MotionCommand, Transport};
-use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
+use tutti_units::{Beat, BeatDuration, Bpm, Cents, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const MAX_BLOCK: usize = 4_096;
@@ -289,5 +289,178 @@ fn a_time_locked_voice_ignores_the_tempo_map() {
                 assert_eq!(got.to_bits(), (f as f32 / SCALE).to_bits(), "frame {f}");
             }
         }
+    }
+}
+
+/// 60 BPM, then 240 from beat 2.9: a step 0.1 beat before a clip placed at beat 3.
+fn late_step() -> Arc<TempoMap> {
+    map(&[
+        (0.0, 60.0, Transition::Step),
+        (2.9, 240.0, Transition::Step),
+    ])
+}
+
+/// The seconds of beat `b` of `late_step()`.
+fn late_step_seconds(b: f64) -> f64 {
+    b.min(2.9) * 60.0 / 60.0 + (b - 2.9).max(0.0) * 60.0 / 240.0
+}
+
+/// **A clip placed ahead of a tempo change primes in time for its start.** A stretching
+/// voice primes before its window opens, `prime / 2` frames and a block ahead, and it must
+/// find how far off the start is across the map's tempo changes: here the playhead is at
+/// 60 BPM, and 240 BPM comes 0.1 beat before the clip (beat 3, which is at
+/// `2.9 + 0.1 / 4 = 2.925` s, frame 140 400). Counted at the playhead's own tempo the
+/// start looks 4 times as far off past the step, so priming would start late and the clip's
+/// first frames would be silent. A hit on the clip's first source frame, through a vocoder
+/// at unity, comes out on the clip's start frame, within the kernel's bound (four
+/// overlapped frames, each in error by an `f32` transform pair's rounding) and nothing
+/// sounds before it.
+#[test]
+fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
+    let m = late_step();
+    let transport = Transport::new(SampleRate::of(SR));
+    let mut wave = Wave::new(1, SampleRate::of(SR));
+    for i in 0..4 * SR as usize {
+        wave.append(Interleaved::new(&[if i == 0 { 1.0 } else { 0.0 }], wave.layout()).unwrap())
+            .unwrap();
+    }
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
+    ));
+    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
+        .expect("a placeable wave");
+    let pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
+    // The handle the insert hands back is the pool's live one.
+    let handle = ed.insert(NodeKey(1), "voice", pool).controls;
+    handle
+        .add(
+            SlotId(1),
+            source,
+            Playback {
+                stretch: StretchFactor::new(1.5),
+                ..Playback::default()
+            },
+        )
+        .expect("room");
+    handle
+        .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+        .expect("room");
+    ed.spec_mut().topology.set_outputs((0..2).map(|port| {
+        PortSource::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
+    transport.settings().set_tempo_map(Arc::clone(&m));
+    transport
+        .motion()
+        .try_send(MotionCommand::Play)
+        .expect("room");
+    let frames = 3 * 48_000 + 12_000;
+    let mut left = Vec::with_capacity(frames + 64);
+    let mut buf = vec![0.0f32; 64 * 2];
+    while left.len() < frames {
+        engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+        left.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));
+    }
+    let due = frame_after(late_step_seconds(3.0) * SR);
+    assert_eq!(due, 140_400);
+    let bound = 4.0 * 2.0 * 11.0 * f64::from(f32::EPSILON);
+    for (n, &y) in left.iter().enumerate() {
+        let want = if n == due { 1.0 } else { 0.0 };
+        assert!(
+            (f64::from(y) - want).abs() < bound,
+            "frame {n}: {y}, the hit is due at {due}"
+        );
+    }
+}
+
+/// **A looping stretched clip sounds across a wrap that comes after a tempo change.** The
+/// voice's second vocoder primes for the wrap when the loop's end is `prime / 2` frames and
+/// a block off, and has to find how far that is across the map's tempo changes. Here the
+/// tempo is 60 BPM until beat 1.38 and 240 after, and the loop is beats 0.25 to 1.5, so the
+/// playhead's own tempo counts the end 4 times as far off as it is past the step: priming
+/// would start late, and the wrap would be silent for what is still owed. With the map the
+/// wraps (the first at 1.38 + 0.03 s, frame 67 680) are seamless: a 1500 Hz tone, whose
+/// phase at both ends of the loop is whole turns (375 and 2 115), sounds every block of 128
+/// frames from 6 016 on (the first priming over) within 1 dB of its RMS, which is two
+/// overlapped frames' phase mismatch of `acos(10^(-1/20)) = 0.48` rad.
+#[test]
+fn a_looping_stretched_clip_sounds_across_a_wrap_after_a_tempo_change() {
+    let m = map(&[
+        (0.0, 60.0, Transition::Step),
+        (1.38, 240.0, Transition::Step),
+    ]);
+    let transport = Transport::new(SampleRate::of(SR));
+    let mut wave = Wave::new(1, SampleRate::of(SR));
+    for i in 0..4 * SR as usize {
+        let s = 0.5 * (std::f64::consts::TAU * 1500.0 * i as f64 / SR).sin();
+        wave.append(Interleaved::new(&[s as f32], wave.layout()).unwrap())
+            .unwrap();
+    }
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
+    ));
+    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
+        .expect("a placeable wave");
+    let pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
+    let handle = ed.insert(NodeKey(1), "voice", pool).controls;
+    handle
+        .add(
+            SlotId(1),
+            source,
+            Playback {
+                stretch: StretchFactor::new(1.5),
+                ..Playback::default()
+            },
+        )
+        .expect("room");
+    handle
+        .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
+        .expect("room");
+    ed.spec_mut().topology.set_outputs((0..2).map(|port| {
+        PortSource::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+        .expect("within the limits");
+    transport.settings().set_tempo_map(Arc::clone(&m));
+    transport
+        .motion()
+        .schedule(
+            tutti_units::At::NextBlock,
+            tutti_timeline::LoopEdit::over(
+                tutti_music::LoopRange::new(Beat::new(0.25), Beat::new(1.5)).expect("a loop"),
+            ),
+        )
+        .expect("room");
+    transport
+        .motion()
+        .try_send(MotionCommand::Play)
+        .expect("room");
+    let frames = 130_000;
+    let mut left = Vec::with_capacity(frames + 64);
+    let mut buf = vec![0.0f32; 64 * 2];
+    while left.len() < frames {
+        engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+        left.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));
+    }
+    let steady = 0.5 / 2.0f64.sqrt();
+    for (b, block) in left[6_016..].as_chunks::<128>().0.iter().enumerate() {
+        let rms = (block.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>() / 128.0).sqrt();
+        let db = 20.0 * (rms / steady).log10();
+        assert!(
+            db.abs() < 1.0,
+            "block {b} (frame {}): {db} dB",
+            6_016 + b * 128
+        );
     }
 }
