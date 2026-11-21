@@ -458,7 +458,7 @@ impl Plugin {
     /// plugin the tempo from (and CLAP its slope), wherever it
     /// runs: [`PluginClient::bind`] for a subprocess plugin,
     /// `InProcessClient::bind` for an in-process one. The result is the graph
-    /// node ([`BoundPlugin`]); `Session::add_pooled_plugin` binds every plugin with
+    /// node ([`BoundPlugin`]); `Session::add_plugin` binds every plugin with
     /// the session's reader, and a host with no session passes a
     /// [`TempoReader::fixed`](tutti_timeline::TempoReader::fixed) one.
     #[must_use]

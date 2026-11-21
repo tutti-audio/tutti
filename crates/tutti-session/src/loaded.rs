@@ -48,3 +48,31 @@ pub(crate) fn caught<T>(read: impl FnOnce() -> Result<T, LoadError>) -> Result<T
         })
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A panic in a load is `Panicked`, carrying the panic's message**: a
+    /// decoder, a parser or a plugin open that panics fails its load and leaves
+    /// the app's thread running.
+    #[test]
+    fn a_panic_in_a_load_is_a_panicked_error_with_its_message() {
+        let error = caught::<()>(|| panic!("a decoder gave up")).expect_err("it panicked");
+        assert!(
+            matches!(&error, LoadError::Panicked { message } if message == "a decoder gave up"),
+            "{error:?}"
+        );
+    }
+
+    /// **A load that returns is passed through, value and error alike.**
+    #[test]
+    fn a_load_that_returns_is_passed_through() {
+        assert_eq!(caught(|| Ok(7)).expect("a value"), 7);
+        let own = || LoadError::Panicked {
+            message: "from the load".into(),
+        };
+        let error = caught::<()>(|| Err(own())).expect_err("an error");
+        assert!(matches!(error, LoadError::Panicked { message } if message == "from the load"));
+    }
+}

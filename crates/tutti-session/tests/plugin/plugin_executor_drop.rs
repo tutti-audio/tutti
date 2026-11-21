@@ -5,7 +5,7 @@
 //!
 //! **Build `plugin-server` first** (`cargo build -p tutti-plugin-server`).
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use crate::support::clap_probe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

@@ -16,7 +16,7 @@
 //! every test here fails, naming that command. They must fail rather than
 //! skip.
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use crate::support;
 
 use std::time::Duration;
@@ -44,7 +44,7 @@ const FIRE: usize = 100;
 /// the first server is spawned, from the test's own thread.
 fn set_server() {
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()));
+    crate::loading::prime(&PluginRef::file(clap_probe()));
     unsafe {
         std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "1");

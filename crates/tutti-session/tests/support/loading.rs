@@ -1,6 +1,5 @@
-//! Loading a plugin file through the pool, as a test does where an app declares
-//! the entry: a catalog probes the file, the entry is declared under a key of
-//! its own, the session updates until it lands, and the node is added.
+//! Loading a plugin file, as a test does where an app runs the load: a catalog
+//! probes the file, the load runs on the main thread, and the node is added.
 //!
 //! The probe is the repo's `plugin-probe`, built beside the test binaries
 //! (`cargo build -p tutti-plugin-probe`).
@@ -8,8 +7,6 @@
 #![allow(dead_code)]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use std::sync::Mutex;
 use std::time::Duration;
 use tutti_platform::Instant;
@@ -18,7 +15,7 @@ use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{Locator, PluginId, PluginRef};
 use tutti_rt::LockExt;
-use tutti_session::{AnyPlugin, Key, LoadError, PeerState, PoolEvent, Session, SessionEvent};
+use tutti_session::{AnyPlugin, Key, LoadError, LoadedPlugin, PeerState, Session};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
 #[derive(Clone, Debug)]
@@ -120,9 +117,9 @@ pub fn clap_id(plugin: &PluginRef) -> &str {
     }
 }
 
-/// A plugin loaded through the pool and in a node, in one call.
+/// A plugin loaded and in a node, in one call.
 pub trait LoadPlugin {
-    /// Loads `spec` through the pool and adds its node.
+    /// Loads `spec` and adds its node.
     ///
     /// # Errors
     ///
@@ -132,23 +129,21 @@ pub trait LoadPlugin {
         main: MainThreadMarker,
         spec: Spec,
     ) -> Result<Key<AnyPlugin>, LoadError> {
-        self.load_plugin_keyed(main, spec).map(|(_, node)| node)
+        self.load_plugin_handle(main, spec).map(|(_, node)| node)
     }
 
-    /// As [`load_plugin_blocking`](Self::load_plugin_blocking), with the pool
-    /// key the entry is declared under: what the session's jobs take.
+    /// As [`load_plugin_blocking`](Self::load_plugin_blocking), with the handle
+    /// the node was made from.
     ///
     /// # Errors
     ///
     /// Why the load failed.
-    fn load_plugin_keyed(
+    fn load_plugin_handle(
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
-    ) -> Result<(u64, Key<AnyPlugin>), LoadError>;
+    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError>;
 }
-
-static KEYS: AtomicU64 = AtomicU64::new(0);
 
 /// A catalog `load_plugin_blocking` loads from: probed once per process, for the
 /// file and the id a ref names.
@@ -181,121 +176,66 @@ pub fn prime(plugin: &PluginRef) {
 }
 
 impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadPlugin for Session<K, C> {
-    fn load_plugin_keyed(
+    fn load_plugin_handle(
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
-    ) -> Result<(u64, Key<AnyPlugin>), LoadError> {
+    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError> {
         prime(&spec.plugin);
-        let key = {
-            let primed = PRIMED.lock_recover();
-            let file = tutti_plugin_db::canonical_path(spec.plugin.path());
-            let id = spec.plugin.id().cloned();
-            let found = primed
-                .iter()
-                .find(|p| p.file == file && p.id == id)
-                .expect("primed above");
-            self.declare_entry(
-                main,
-                &found.catalog,
-                &found.plugin_id,
-                spec.hosting,
-                spec.state,
-            )
-        };
-        self.await_entry(main, key).map(|node| (key, node))
+        let primed = PRIMED.lock_recover();
+        let file = tutti_plugin_db::canonical_path(spec.plugin.path());
+        let id = spec.plugin.id().cloned();
+        let found = primed
+            .iter()
+            .find(|p| p.file == file && p.id == id)
+            .expect("primed above");
+        self.load_from(
+            main,
+            &found.catalog,
+            &found.plugin_id,
+            spec.hosting,
+            spec.state,
+        )
     }
 }
 
-/// What a test does with an entry it declares itself: the entry of `id` in
-/// `catalog`, loaded and in a node.
-pub trait LoadEntry {
-    /// Declares the entry under a key of its own, updates until it lands, and
-    /// adds its node.
+/// What a test does with a plugin of its own catalog: `id` in `catalog`, loaded
+/// and in a node.
+pub trait LoadFrom {
+    /// Loads `id` (hosted as `hosting`, from `state` when given) and adds its
+    /// node.
     ///
     /// # Errors
     ///
     /// Why the load failed.
-    fn load_entry_blocking(
+    fn load_from(
         &mut self,
         main: MainThreadMarker,
         catalog: &Catalog,
         id: &PluginId,
         hosting: Hosting,
         state: Option<PeerState>,
-    ) -> Result<Key<AnyPlugin>, LoadError> {
-        let key = self.declare_entry(main, catalog, id, hosting, state);
-        self.await_entry(main, key)
-    }
-
-    /// Declares the entry under a key of its own, after an update on the main
-    /// thread (an in-process load's main stage waits for one).
-    fn declare_entry(
-        &mut self,
-        main: MainThreadMarker,
-        catalog: &Catalog,
-        id: &PluginId,
-        hosting: Hosting,
-        state: Option<PeerState>,
-    ) -> u64;
-
-    /// Updates until the entry under `key` lands, and adds its node.
-    ///
-    /// # Errors
-    ///
-    /// Why the load failed.
-    fn await_entry(
-        &mut self,
-        main: MainThreadMarker,
-        key: u64,
-    ) -> Result<Key<AnyPlugin>, LoadError>;
+    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError>;
 }
 
-impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadEntry for Session<K, C> {
-    fn declare_entry(
+impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom for Session<K, C> {
+    fn load_from(
         &mut self,
         main: MainThreadMarker,
         catalog: &Catalog,
         id: &PluginId,
         hosting: Hosting,
         state: Option<PeerState>,
-    ) -> u64 {
-        let key = KEYS.fetch_add(1, Ordering::Relaxed);
-        let _ = self.update_on(main);
-        let mut declared = self.plugin_entry(key, id, catalog).hosting(hosting);
+    ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError> {
+        let mut load = self.load_plugin(id, catalog).hosting(hosting);
         if let Some(state) = state {
-            declared = declared
-                .initial_state(state)
-                .expect("a state of the plugin");
+            load = load.initial_state(state).expect("a state of the plugin");
         }
-        self.pool(declared).expect("a pool the session takes");
-        key
-    }
-
-    fn await_entry(
-        &mut self,
-        main: MainThreadMarker,
-        key: u64,
-    ) -> Result<Key<AnyPlugin>, LoadError> {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        loop {
-            for event in self.update_on(main) {
-                let SessionEvent::Pool { key: k, event } = event else {
-                    continue;
-                };
-                if k.get::<u64>() != Some(&key) {
-                    continue;
-                }
-                match event {
-                    PoolEvent::Failed(error) => return Err(error),
-                    PoolEvent::Loaded => {
-                        return Ok(self.add_pooled_plugin(&key).expect("the entry just loaded"));
-                    }
-                    _ => {}
-                }
-            }
-            assert!(Instant::now() < deadline, "the load never landed");
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        let opened = load.run(main)?;
+        let handle = opened.handle();
+        let node = self
+            .add_plugin(opened)
+            .expect("a plugin just loaded enters");
+        Ok((handle, node))
     }
 }

@@ -4,8 +4,8 @@
 //!
 //! The plugin is the reference VST2 probe, in process.
 
+use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
-use crate::pooled::{LoadPlugin, Spec};
 use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;

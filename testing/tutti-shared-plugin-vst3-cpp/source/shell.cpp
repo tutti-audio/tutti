@@ -366,7 +366,7 @@ public:
 	{
 		auto b = readAll (s);
 		if (b.size () < shared::kStateHead) return kResultFalse;
-		shared::Core tmp;
+		shared::Core tmp {false};
 		if (!tmp.load (b.data (), b.size ())) return kResultFalse;
 		for (uint32_t id = 0; id < shared::kTone; ++id) { double v; tmp.param (id, v); setParamNormalized (id, v); }
 		// The notice (core.rs): an edit of `aux` to 0.75, or the gesture of the spec (a change to each of

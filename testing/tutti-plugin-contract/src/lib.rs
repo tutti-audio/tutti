@@ -30,8 +30,9 @@ pub use formats::{Clap, Vst2, Vst3, Vst3Cpp};
 pub use plugin::au_bundle;
 pub use plugin::{bundle_of, clap as clap_path, library, vst3_cpp_module, vst3_module};
 pub use transcript::{
-    Kind, Logged, Told, Transcript, find_blob, patch_level, patch_mode, replace_blob, select,
-    set_level, set_mode, state_with_fault, state_with_rings, transcript,
+    CLOSED_ON_CREATOR, Kind, Logged, Told, Transcript, close_record_path, find_blob, patch_level,
+    patch_mode, replace_blob, select, set_level, set_mode, state_with_fault, state_with_rings,
+    transcript,
 };
 pub use tutti_plugin_types::{InProcess, OutOfProcess};
 
@@ -86,6 +87,7 @@ macro_rules! contract {
             widths_report_the_declared_precision,
             f64_carries_same_audio,
             overflowing_log_fails_the_oracle,
+            the_last_handle_dropped_off_the_main_thread_closes_on_the_main_thread,
             process_does_not_allocate);
     };
     (@each $fmt:ty, $gaps:expr, $($case:ident),*) => {

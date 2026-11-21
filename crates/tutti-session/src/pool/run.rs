@@ -95,10 +95,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         }
         self.pool_openings();
         self.pool.entries.sweep();
-        // Before the waits settle: a swap the graph refuses fails the entry the
-        // wait would otherwise report as loaded.
-        #[cfg(feature = "plugin")]
-        <C::Float as crate::format::Sealed>::swap_pooled_plugins(self);
         self.pool.entries.poll_waiters();
         // One at a time, each over the pool as the run before it left it. A run
         // asked during these waits for the next update; one that panics leaves

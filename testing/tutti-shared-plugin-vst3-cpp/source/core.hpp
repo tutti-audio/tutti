@@ -8,8 +8,16 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace shared {
 
@@ -36,7 +44,8 @@ constexpr uint32_t kRingsExact = 1, kRingsLonger = 2, kRingsHiss = 3, kRingsLate
 constexpr uint32_t kRingFrames = 8191, kRingExtra = 4096, kLateFrames = 64;
 constexpr float kRingLevel = 0.1f, kHissLevel = 0.001f;
 // The fault nibble (core.rs, "Faults"): the high nibble of the mode byte; the first `process` aborts or never returns.
-constexpr uint32_t kFaultCrash = 1, kFaultHang = 2, kFaults = 3;
+// kFaultRecordClose is no fault: on close the plugin writes one byte to the close record (core.rs, "Faults").
+constexpr uint32_t kFaultCrash = 1, kFaultHang = 2, kFaultRecordClose = 3, kFaults = 4;
 constexpr uint32_t kMagic = 0x31505354; // "TSP1"
 constexpr size_t kStateHead = 24;
 // A transport's flags (core.rs, "State"), and how many the log keeps.
@@ -57,6 +66,23 @@ struct Core
 {
 	std::atomic<double> level {0.5}, aux {0.25}, tone {0.5}, bypass {0.0};
 	std::atomic<uint32_t> mode {0}, notice {0}, tailSel {0}, ringsSel {0}, faultSel {0};
+	std::thread::id creator = std::this_thread::get_id ();
+	// A scratch Core, which parses a state and is never a plugin, does not record (`records` false).
+	bool records;
+	explicit Core (bool records_ = true) : records (records_) {}
+	// With kFaultRecordClose selected, writes whether the closing thread is the creating one: the file and bytes of
+	// transcript.rs's `close_record_path`, `CLOSED_ON_CREATOR` and `CLOSED_OFF_CREATOR`.
+	~Core ()
+	{
+		if (!records || faultSel != kFaultRecordClose) return;
+#ifdef _WIN32
+		auto pid = _getpid ();
+#else
+		auto pid = getpid ();
+#endif
+		auto path = std::filesystem::temp_directory_path () / ("tutti-shared-plugin-close-" + std::to_string (pid));
+		std::ofstream (path, std::ios::binary | std::ios::trunc) << (std::this_thread::get_id () == creator ? '1' : '0');
+	}
 	uint32_t tailSamples () const
 	{
 		return tailSel == kTailInfinite ? 0xFFFFFFFFu : tailSel == kTailPastCap ? kTailPastCapFrames : kTail;

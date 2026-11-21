@@ -95,7 +95,11 @@ mod latency;
 mod load_audio;
 #[cfg(feature = "soundfont")]
 mod load_soundfont;
-#[cfg(any(all(feature = "sampler", codec), feature = "soundfont"))]
+#[cfg(any(
+    all(feature = "sampler", codec),
+    feature = "soundfont",
+    feature = "plugin"
+))]
 mod loaded;
 #[cfg(feature = "midi")]
 mod midi;
@@ -246,10 +250,10 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, LoadedPreset, Plugin, PluginApplyError,
-    PluginCause, PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo,
-    PluginPorts, PoolPluginEntry, PooledPlugin, PortsRefusal, PresetStartError, RestoreState,
-    RestoredState, SaveState, StateRestore, StateStartError, StateView,
+    AddPluginError, AnyPlugin, LoadPlugin, LoadPreset, LoadedPlugin, LoadedPreset, Plugin,
+    PluginApplyError, PluginCause, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode,
+    PluginPorts, PortsRefusal, PresetStartError, RestoreState, RestoredState, SaveState,
+    StateRestore, StateStartError, StateView, SwapPluginError,
 };
 pub(crate) use pool::Pool;
 pub use pool::{
@@ -257,8 +261,6 @@ pub use pool::{
     PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
     PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
 };
-#[cfg(feature = "plugin")]
-pub(crate) use pool::{Hold, HoldKind};
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;

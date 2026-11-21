@@ -8,7 +8,7 @@
 //! own view: how many closes ran, and when. The target runs on the process's main thread, so
 //! a load never waits out a deadline for a main-thread tick that nothing pumps.
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use std::path::PathBuf;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;

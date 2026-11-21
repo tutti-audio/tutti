@@ -1,13 +1,17 @@
 //! [`DevicePart`] with the `device` feature: the one-shot listing of the host's output devices.
 
-use tutti_platform::Instant;
+use tutti_cpal::DeviceListing;
+use tutti_platform::{Executor, Instant, WeakExecutor};
 
 use crate::SessionEvent;
-use crate::watch::OutputListing;
+use crate::watch::{OutputListing, PolledSource};
 
 /// The output-device listing the session started.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct DevicePart {
+    /// The session's executor, reached by the listing and the poller loops this
+    /// session starts.
+    executor: WeakExecutor,
     /// The one-shot listing of the output devices, until it answers.
     listing: Option<OutputListing>,
     /// A listing was started by [`Session::list_outputs_once`](crate::Session::list_outputs_once).
@@ -15,9 +19,30 @@ pub(crate) struct DevicePart {
 }
 
 impl DevicePart {
-    /// Starts `listing`, replacing one still waiting.
-    pub(crate) fn start(&mut self, listing: tutti_cpal::DeviceListing) {
-        self.listing = Some(OutputListing::new(listing));
+    /// The part for a session on `executor`.
+    pub(crate) fn new(executor: &Executor) -> Self {
+        Self {
+            executor: executor.downgrade(),
+            listing: None,
+            listed: false,
+        }
+    }
+
+    /// Starts `listing`, replacing one still waiting, whose blocking step is
+    /// left to end on its own.
+    pub(crate) fn start(&mut self, listing: DeviceListing) {
+        let Some(executor) = self.executor.upgrade() else {
+            self.listing = None;
+            return;
+        };
+        self.listing = Some(OutputListing::new(&executor, listing));
+    }
+
+    /// The loop of `poller` on the session's executor, or `None` once the
+    /// executor has shut down.
+    pub(crate) fn poll_source(&self, poller: tutti_cpal::DevicePoller) -> Option<PolledSource> {
+        let executor = self.executor.upgrade()?;
+        Some(PolledSource::start(&executor, poller))
     }
 
     /// Whether a listing was started once ([`mark_listed`](Self::mark_listed)).
