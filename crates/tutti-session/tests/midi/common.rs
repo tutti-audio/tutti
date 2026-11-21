@@ -178,15 +178,23 @@ pub trait OpenPorts {
     ) -> Result<tutti_session::MidiOutput, tutti_session::MidiPortError>;
 }
 
+/// What `future` resolved to when polled once, or `None` while it is pending.
+#[cfg(feature = "midi-hardware")]
+pub fn polled<T>(future: impl std::future::Future<Output = T>) -> Option<T> {
+    use std::task::{Context, Poll, Waker};
+    match std::pin::pin!(future).poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(out) => Some(out),
+        Poll::Pending => None,
+    }
+}
+
 /// What `wait` resolved to on its first poll: a fake backend has nothing to
 /// start.
 #[cfg(feature = "midi-hardware")]
 pub fn ready<T, E: std::fmt::Debug>(wait: impl std::future::Future<Output = Result<T, E>>) -> T {
-    use std::task::{Context, Poll, Waker};
-    match std::pin::pin!(wait).poll(&mut Context::from_waker(Waker::noop())) {
-        Poll::Ready(outcome) => outcome.expect("a fake backend starts at once"),
-        Poll::Pending => panic!("a fake backend's start is ready on the first poll"),
-    }
+    polled(wait)
+        .expect("a fake backend's start is ready on the first poll")
+        .expect("a fake backend starts at once")
 }
 
 #[cfg(feature = "midi-hardware")]

@@ -38,7 +38,7 @@ pub fn open(
 ) -> Result<VirtualEndpoint, MidiHardwareError> {
     // The one way to a `Started`: a `Devices` over the platform's backend.
     let devices = Devices::open(executor)?;
-    let started = tutti_fixtures::block_on(devices.start())?;
+    let started = tutti_fixtures::block_on(devices.start()).expect("the backend starts");
     finished(
         VirtualEndpoint::open(executor, spec, producer, started, main)?,
         main,

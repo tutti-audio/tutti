@@ -156,11 +156,11 @@ fn a_hub_thread_that_ends_before_answering_fails_the_start() {
     let start = hub.gate.start(begin(&hub.gate));
     *hub.unparker.lock_recover() = Some(parker().0);
     hub.thread_ended();
-    let Err(MidiHardwareError::BackendFailed(why)) = tutti_fixtures::block_on(start) else {
+    let Err(why) = tutti_fixtures::block_on(start) else {
         panic!("the start fails");
     };
     assert!(matches!(
-        *why,
+        why.cause(),
         MidiHardwareError::ThreadEnded {
             thread: MidiThread::DeviceWatch
         }

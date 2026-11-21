@@ -31,7 +31,7 @@
 //! use tutti_midi_device::DeviceEvent;
 //! use tutti_midi_hardware::Devices;
 //!
-//! # async fn watch() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
+//! # async fn watch() -> Result<(), Box<dyn std::error::Error>> {
 //! let executor = tutti_platform::Executor::new();
 //! let devices = Devices::open(&executor)?;
 //! // The backend may need a moment to start (macOS makes CoreMIDI's client on a thread
@@ -111,7 +111,7 @@
 //! return a [`Start`], a `Send` [`Future`] that thread wakes, with no executor of
 //! this crate behind it. It resolves to the [`Started`] that opening a port or a
 //! virtual endpoint takes, so a port is never opened before the backend can open it.
-//! A start that failed is [`MidiHardwareError::BackendFailed`] for every future
+//! A start that failed is [`StartFailed`] for every future
 //! waiting on it; the device watches stay registered, and the next [`Start`] asks the
 //! backend again and, when it succeeds, seeds them. Every other backend is ready on
 //! the first poll.
@@ -147,7 +147,7 @@
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
 //!
-//! # async fn play() -> Result<(), tutti_midi_hardware::MidiHardwareError> {
+//! # async fn play() -> Result<(), Box<dyn std::error::Error>> {
 //! // The inlets inbound events land in (1024 events each, placed 10 ms after
 //! // they arrive), then a session over this platform's backend.
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
@@ -337,7 +337,7 @@ pub use profiles::{
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
-pub use start::{Start, Started};
+pub use start::{Start, StartFailed, Started};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{
     OpeningVirtualEndpoint, VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec,

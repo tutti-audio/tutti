@@ -25,7 +25,7 @@ fn woken(count: &Count) -> usize {
     count.0.load(Ordering::SeqCst)
 }
 
-fn poll_with(start: &mut Start, waker: &Waker) -> Poll<Result<Started, MidiHardwareError>> {
+fn poll_with(start: &mut Start, waker: &Waker) -> Poll<Result<Started, crate::StartFailed>> {
     Pin::new(start).poll(&mut Context::from_waker(waker))
 }
 
@@ -78,11 +78,10 @@ fn a_failed_start_wakes_its_waker_and_resolves_to_the_error() {
     assert!(poll_with(&mut start, &waker).is_pending());
     gate.publish_failed(error(), None).wake();
     assert_eq!(woken(&count), 1);
-    let Poll::Ready(Err(MidiHardwareError::BackendFailed(why))) = poll_with(&mut start, &waker)
-    else {
+    let Poll::Ready(Err(why)) = poll_with(&mut start, &waker) else {
         panic!("the start failed");
     };
-    assert!(matches!(*why, MidiHardwareError::DescriptorBroken));
+    assert!(matches!(why.cause(), MidiHardwareError::DescriptorBroken));
 }
 
 #[test]
@@ -93,16 +92,35 @@ fn a_thread_that_ends_before_answering_fails_the_start_and_wakes_its_waker() {
     assert!(poll_with(&mut start, &waker).is_pending());
     gate.ended(false).wake();
     assert_eq!(woken(&count), 1);
-    let Poll::Ready(Err(MidiHardwareError::BackendFailed(why))) = poll_with(&mut start, &waker)
-    else {
+    let Poll::Ready(Err(why)) = poll_with(&mut start, &waker) else {
         panic!("the start failed");
     };
     assert!(matches!(
-        *why,
+        why.cause(),
         MidiHardwareError::ThreadEnded {
             thread: MidiThread::DeviceWatch
         }
     ));
+}
+
+/// **Every future waiting on one failed start gets the one cause**: both resolve to
+/// the same error value, not a copy each.
+#[test]
+fn every_waiter_of_a_failed_start_shares_its_cause() {
+    let gate = Arc::new(StartGate::new());
+    let mut first = gate.start(begin(&gate));
+    let mut second = gate.start(begin(&gate));
+    let (_, waker) = counting();
+    assert!(poll_with(&mut first, &waker).is_pending());
+    assert!(poll_with(&mut second, &waker).is_pending());
+    let _ = gate.publish_failed(error(), None);
+    let (Poll::Ready(Err(first)), Poll::Ready(Err(second))) = (
+        poll_with(&mut first, &waker),
+        poll_with(&mut second, &waker),
+    ) else {
+        panic!("both failed");
+    };
+    assert!(std::ptr::eq(first.cause(), second.cause()));
 }
 
 #[test]
@@ -211,10 +229,7 @@ fn the_window_a_start_ended_is_carried_into_the_restart_and_a_later_failure_keep
 fn a_start_failed_before_it_could_wait_resolves_to_the_error() {
     let mut start = failed_start(MidiHardwareError::DescriptorBroken);
     let (_, waker) = counting();
-    assert!(matches!(
-        poll_with(&mut start, &waker),
-        Poll::Ready(Err(MidiHardwareError::BackendFailed(_)))
-    ));
+    assert!(matches!(poll_with(&mut start, &waker), Poll::Ready(Err(_))));
 }
 
 /// A start that another thread publishes wakes the thread waiting on it. The bound
@@ -382,10 +397,7 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
 
     // The round fails: the future says so, and the watch is neither seeded nor ended.
     gate.publish_failed(error(), None).wake();
-    assert!(matches!(
-        poll_with(&mut first, &waker),
-        Poll::Ready(Err(MidiHardwareError::BackendFailed(_)))
-    ));
+    assert!(matches!(poll_with(&mut first, &waker), Poll::Ready(Err(_))));
     assert!(devices.list().is_empty());
     assert!(
         events.failure().is_none(),

@@ -29,6 +29,20 @@ impl Started {
     }
 }
 
+/// Why a [`Start`] did not resolve to a [`Started`]: the error the backend failed to
+/// start with, or [`MidiHardwareError::ThreadEnded`] when its thread ended before it
+/// answered. Every future waiting on one start gets the same cause, shared.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("the MIDI backend did not start: {0}")]
+pub struct StartFailed(#[source] Arc<MidiHardwareError>);
+
+impl StartFailed {
+    /// The error the start failed with.
+    pub fn cause(&self) -> &MidiHardwareError {
+        &self.0
+    }
+}
+
 /// What a [`Start`] waits on: a backend's state, polled with the waker to wake.
 pub(crate) trait Waiting: Send + Sync {
     /// The outcome of the start numbered `from`, or `Pending` with `waker` stored to
@@ -54,7 +68,7 @@ impl Waiting for Done {
 /// backend with nothing to start (ALSA, Windows Multimedia, the stub) is ready on
 /// the first poll. On macOS the process's one CoreMIDI client is made on a thread of
 /// the backend's own, and this resolves when that thread has made it, or fails with
-/// [`MidiHardwareError::BackendFailed`]. Making a `Start` after a failed one asks
+/// [`StartFailed`]. Making a `Start` after a failed one asks
 /// the backend to start again.
 ///
 /// ```
@@ -87,14 +101,12 @@ impl Start {
 }
 
 impl Future for Start {
-    type Output = Result<Started, MidiHardwareError>;
+    type Output = Result<Started, StartFailed>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.wait.poll(self.from, cx.waker()).map(|outcome| {
-            outcome
-                .map(|()| Started::new())
-                .map_err(MidiHardwareError::BackendFailed)
-        })
+        self.wait
+            .poll(self.from, cx.waker())
+            .map(|outcome| outcome.map(|()| Started::new()).map_err(StartFailed))
     }
 }
 

@@ -796,7 +796,7 @@ pub mod midi {
         InputTiming, NotAChannelCount, ProcessChange, ReportAsk, Reporter, WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
+    pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
         MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,

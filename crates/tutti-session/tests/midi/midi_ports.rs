@@ -1433,8 +1433,9 @@ fn the_sessions_mpe_mode_reaches_a_ports_input_node() {
     assert_eq!(registered(&seen), 7, "the same mode: nothing sent");
 }
 
-/// A second session over a fake OS with the devices plugged by `plug`.
-fn another_session() -> (Session, FakeCounters) {
+/// A session over a fake OS with an input `Keys` (endpoint 1) and an output `Synth`
+/// (endpoint 2) plugged.
+fn a_session_with_keys_and_synth() -> (Session, FakeCounters) {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     plug(&fake, 2, "Synth", PortDirection::Output);
@@ -1442,21 +1443,12 @@ fn another_session() -> (Session, FakeCounters) {
     (s, fake)
 }
 
-/// What `wait` resolved to when polled once, or `None` while it is pending.
-fn polled_once<T>(wait: impl std::future::Future<Output = T>) -> Option<T> {
-    use std::task::{Context, Poll, Waker};
-    match std::pin::pin!(wait).poll(&mut Context::from_waker(Waker::noop())) {
-        Poll::Ready(out) => Some(out),
-        Poll::Pending => None,
-    }
-}
-
 /// **An open over a backend with nothing to start is ready on its first poll, and
 /// its apply installs a live input that hears**: the wait resolves to the proof
 /// and the saved device, and the port opens only at the apply.
 #[test]
 fn an_open_is_ready_on_the_first_poll_and_its_apply_installs_a_live_input() {
-    let (mut s, fake) = another_session();
+    let (mut s, fake) = a_session_with_keys_and_synth();
     let (synth, seen) = tap(&mut s);
     s.midi()
         .route(MidiRouteRule::any_channel().to(synth))
@@ -1468,7 +1460,7 @@ fn an_open_is_ready_on_the_first_poll_and_its_apply_installs_a_live_input() {
         fake.connected_inputs().is_empty(),
         "nothing opens before the apply"
     );
-    let opened = polled_once(opening)
+    let opened = crate::common::polled(opening)
         .expect("a backend with nothing to start is ready on the first poll")
         .expect("it started");
     let port = s.apply(opened).expect("installs");
@@ -1486,14 +1478,10 @@ fn an_open_is_ready_on_the_first_poll_and_its_apply_installs_a_live_input() {
 /// present ones could be.
 #[test]
 fn a_device_that_cannot_bind_fails_at_the_call() {
-    let (with, _fake) = another_session();
+    let (with, _fake) = a_session_with_keys_and_synth();
     let mut with = with;
     let keys = device(&mut with, "Keys");
     let without = Session::builder().build().expect("builds");
-    let error = without
-        .open_midi_input(keys.clone())
-        .expect_err("no OS MIDI layer");
-    assert!(matches!(error, MidiPortError::NoHardware(_)), "{error:?}");
     let error = without
         .open_midi_output(keys)
         .expect_err("no OS MIDI layer");
@@ -1522,9 +1510,9 @@ fn a_device_that_cannot_bind_fails_at_the_call() {
 /// applied to a session other than the one that began it is refused as `Stale`
 /// and installs nothing.
 #[test]
-fn an_open_of_another_session_is_stale() {
-    let (a, _fake_a) = another_session();
-    let (mut b, fake_b) = another_session();
+fn an_open_of_a_session_with_keys_and_synth_is_stale() {
+    let (a, _fake_a) = a_session_with_keys_and_synth();
+    let (mut b, fake_b) = a_session_with_keys_and_synth();
     let mut a = a;
     let keys = device(&mut a, "Keys");
     let synth = device(&mut a, "Synth");
@@ -1543,20 +1531,20 @@ fn an_open_of_another_session_is_stale() {
 /// its session is gone, and its apply refuses by name instead of pending.
 #[test]
 fn an_open_outlives_its_session_and_is_stale_in_another() {
-    let (mut a, _fake_a) = another_session();
-    let (mut b, _fake_b) = another_session();
+    let (mut a, _fake_a) = a_session_with_keys_and_synth();
+    let (mut b, _fake_b) = a_session_with_keys_and_synth();
     let keys = device(&mut a, "Keys");
     let synth = device(&mut a, "Synth");
     let opening_input = a.open_midi_input(keys).expect("binds");
     let opening_output = a.open_midi_output(synth).expect("binds");
     drop(a);
 
-    let opened = polled_once(opening_input)
+    let opened = crate::common::polled(opening_input)
         .expect("a dropped session does not hold the wait")
         .expect("it started");
     let error = b.apply(opened).expect_err("the session is gone");
     assert!(matches!(error, MidiPortError::Stale), "{error:?}");
-    let opened = polled_once(opening_output)
+    let opened = crate::common::polled(opening_output)
         .expect("a dropped session does not hold the wait")
         .expect("it started");
     let error = b.apply(opened).expect_err("the session is gone");
@@ -1568,7 +1556,7 @@ fn an_open_outlives_its_session_and_is_stale_in_another() {
 /// opens behind the same handle when the device returns.
 #[test]
 fn a_device_that_departs_while_the_open_is_pending_installs_a_lost_port() {
-    let (mut s, fake) = another_session();
+    let (mut s, fake) = a_session_with_keys_and_synth();
     let keys = device(&mut s, "Keys");
     let opened = crate::common::ready(s.open_midi_input(keys).expect("binds"));
 
@@ -1608,32 +1596,4 @@ fn a_device_that_makes_the_saved_one_ambiguous_while_pending_fails_the_apply() {
         fake.connected_inputs().is_empty(),
         "the failed apply left no port"
     );
-}
-
-/// **A backend whose start failed, or whose watch thread ended unanswered, is a
-/// named error**: the hardware's `BackendFailed` keeps its shared cause, and any
-/// other failure is wrapped, so an open never pends for ever.
-#[test]
-fn a_backend_that_failed_to_start_is_a_named_open_error() {
-    use tutti_midi_hardware::{MidiHardwareError, MidiThread};
-    use tutti_session::MidiOpenError;
-
-    let ended = std::sync::Arc::new(MidiHardwareError::ThreadEnded {
-        thread: MidiThread::DeviceWatch,
-    });
-    let MidiOpenError::BackendFailed(cause) = MidiOpenError::from(
-        MidiHardwareError::BackendFailed(std::sync::Arc::clone(&ended)),
-    ) else {
-        panic!("a backend failure");
-    };
-    assert!(
-        std::sync::Arc::ptr_eq(&cause, &ended),
-        "the shared cause is carried, not wrapped again"
-    );
-    let MidiOpenError::BackendFailed(cause) =
-        MidiOpenError::from(MidiHardwareError::Unsupported("no sequencer"))
-    else {
-        panic!("a backend failure");
-    };
-    assert!(matches!(*cause, MidiHardwareError::Unsupported(_)));
 }
