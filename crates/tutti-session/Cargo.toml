@@ -19,8 +19,8 @@ categories = ["multimedia::audio"]
 workspace = true
 
 [dependencies]
-# The editor's sizes, which name their unit (`dpi::Size`).
-dpi.workspace = true
+# The editor's sizes, which name their unit (`dpi::Size`); the editor is `plugin`'s.
+dpi = { workspace = true, optional = true }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # Always: the graph, the engine and transport, the vocabulary, and the nodes
 # the builder inserts (the click) and modulation applies (`Modulation`).
@@ -126,6 +126,7 @@ encode-wav = ["tutti-codec/encode-wav"]
 encode-flac = ["tutti-codec/encode-flac"]
 encode-aiff = ["tutti-codec/encode-aiff"]
 plugin = [
+    "dep:dpi",
     "dep:futures-channel",
     "dep:tutti-plugin",
     "dep:tutti-plugin-db",

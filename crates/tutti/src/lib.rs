@@ -306,6 +306,9 @@ pub mod nodes {
         EnvelopeStages, EnvelopeStep,
     };
     pub use tutti_dsp::{
+        GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
+    };
+    pub use tutti_dsp::{
         KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
         WaveguidePositions, WaveguideString,
     };
@@ -400,6 +403,7 @@ pub mod nodes {
         DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
+    pub use tutti_nodes::{GranularConfig, GranularError, GranularNode};
     pub use tutti_nodes::{
         KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
         WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,

@@ -14,8 +14,10 @@
 //! is read-only, or frozen by its fork when it is not — its own unit test
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
+use std::sync::Arc;
 use tutti_buffers::Mono;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
+use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::Wavetable;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
@@ -39,6 +41,7 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TransientShaperConfig,
     TransientShaperNode,
 };
+use tutti_nodes::{GranularConfig, GranularNode};
 use tutti_nodes::{
     GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
     SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
@@ -49,8 +52,8 @@ use tutti_nodes::{
 };
 use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
 use tutti_units::{
-    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Gain, Hz, Metres, Q, Resonance,
-    Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
+    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, Gain, Hz, Metres, Normalized,
+    Q, Resonance, SampleRate, Samples, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -580,6 +583,28 @@ fn distance() {
     })
     .control("distance", |r| {
         assert!(r.param_set().set(UnitParam::Distance, 30.0))
+    })
+    .check();
+}
+
+#[test]
+fn granular() {
+    IsolateRow::new("GranularNode (stereo)", || {
+        let mut wave = Wave::<f32>::new(2, SampleRate::SR_48K);
+        let frames: Vec<f32> = (0..2 * 4_800).map(|i| (i as f32 * 0.05).sin()).collect();
+        wave.append(Interleaved::new(&frames, ChannelLayout::STEREO).unwrap())
+            .unwrap();
+        GranularNode::<f32>::try_from(
+            GranularConfig::new(ChannelLayout::STEREO, Arc::new(wave))
+                .density(Hz::new(80.0))
+                .position_jitter(Normalized::of(0.2))
+                .timing_jitter(Normalized::of(0.3))
+                .seed(5),
+        )
+        .unwrap()
+    })
+    .control("density", |r| {
+        assert!(r.param_set().set(UnitParam::Rate, 300.0))
     })
     .check();
 }
