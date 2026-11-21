@@ -163,6 +163,22 @@ mod tests {
         assert_eq!(n.param_base(0), Some(440.0));
     }
 
+    /// Every channel of a three-wide node is processed: a constant input times the carrier
+    /// `sin(2 pi 440 n / fs)` is nonzero on each channel from frame 1 on.
+    #[test]
+    fn every_channel_of_a_three_wide_node_is_modulated() {
+        let mut n = prepared(RingModNode::from(RingModConfig::new(3u16)));
+        let ones = [1.0f32; 64];
+        let out = crate::test_support::drive_block(&mut n, &[&ones, &ones, &ones]);
+        assert_eq!(out.len(), 3);
+        for (c, ch) in out.iter().enumerate() {
+            assert!(
+                ch[1..].iter().any(|v| v.abs() > 0.1),
+                "channel {c} is silent"
+            );
+        }
+    }
+
     /// An empty layout is no channels, not one.
     #[test]
     fn an_empty_layout_has_no_channels() {
