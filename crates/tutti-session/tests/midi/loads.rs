@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 use tutti_midi_file::{Normalized, TimelineDrop};
 use tutti_music::TimeSignature;
-use tutti_session::{DetachedSession, LoadedMidi, NoCommonTimelineError, Session, TrackError};
+use tutti_session::{
+    DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
+};
 use tutti_units::{Beat, SampleRate, Seconds};
 
 fn session() -> DetachedSession {
@@ -18,6 +20,23 @@ fn session() -> DetachedSession {
         .build_detached(SampleRate::SR_48K)
         .expect("builds")
 }
+
+/// **A MIDI load of a dropped session is `ShutDown`**: the file did not fail.
+#[test]
+fn a_midi_load_of_a_dropped_session_is_shut_down() {
+    let load = session().midi().load_midi(vec![0u8]);
+    assert!(matches!(
+        tutti_fixtures::block_on(load),
+        Err(LoadError::ShutDown)
+    ));
+}
+
+/// **A MIDI load and its future are `Send`.**
+const fn send<T: Send>() {}
+const _: () = {
+    send::<tutti_session::LoadMidi>();
+    send::<tutti_session::LoadingMidi>();
+};
 
 /// Set Tempo, 120 beats a minute (500 000 microseconds a quarter), at tick 0.
 const TEMPO_120: [u8; 7] = [0, 0xFF, 0x51, 3, 0x07, 0xA1, 0x20];
@@ -60,8 +79,8 @@ fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 /// Loads the file at `path`.
-fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, tutti_midi_file::ReadError> {
-    s.midi().load_midi(path).run()
+fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadError> {
+    tutti_fixtures::block_on(s.midi().load_midi(path))
 }
 
 /// A file held only as bytes loads as the file at its path does: the same
@@ -76,7 +95,7 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
         ],
     );
     let mut s = session();
-    let loaded = s.midi().load_midi(bytes).run().expect("loads");
+    let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
     assert_eq!(loaded.file().tracks().len(), 2);
     assert_eq!(loaded.track(1).unwrap().events.len(), 4);
     let tempo = loaded.tempo().expect("one timeline");
@@ -242,7 +261,10 @@ fn a_missing_file_is_an_io_read_error() {
     let dir = tempfile::tempdir().unwrap();
     let outcome = load(&mut session(), dir.path().join("none.mid"));
     assert!(
-        matches!(outcome, Err(tutti_midi_file::ReadError::Io(_))),
+        matches!(
+            &outcome,
+            Err(LoadError::Midi(error)) if matches!(**error, tutti_midi_file::ReadError::Io(_))
+        ),
         "{outcome:?}"
     );
 }
@@ -250,8 +272,26 @@ fn a_missing_file_is_an_io_read_error() {
 #[cfg(feature = "soundfont")]
 mod soundfont {
     use super::*;
-    use tutti_session::LoadError;
+    use tutti_session::{LoadError, LoadSoundFont, LoadingSoundFont};
     use tutti_soundfont::Settings;
+
+    /// **A SoundFont load of a dropped session is `ShutDown`.**
+    #[test]
+    fn a_soundfont_load_of_a_dropped_session_is_shut_down() {
+        let bytes = std::fs::read(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap();
+        let load = session().load_soundfont(bytes);
+        assert!(matches!(
+            tutti_fixtures::block_on(load),
+            Err(LoadError::ShutDown)
+        ));
+    }
+
+    /// **The SoundFont load and its future are `Send`.**
+    const _: () = {
+        const fn send<T: Send>() {}
+        send::<LoadSoundFont>();
+        send::<LoadingSoundFont>();
+    };
 
     /// The record count of the `phdr` chunk of the SoundFont `bytes` (SF2 2.04
     /// section 7.2): a 38-byte record per preset, and a terminal record.
@@ -285,7 +325,7 @@ mod soundfont {
         let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
         let declared = declared_presets(&std::fs::read(&path).unwrap());
         assert!(declared > 0);
-        let font = session().load_soundfont(path).run().unwrap();
+        let font = tutti_fixtures::block_on(session().load_soundfont(path)).unwrap();
         assert_eq!(font.font().presets().len(), declared);
         let unit = Settings::new().build::<f32>(std::sync::Arc::clone(font.font()));
         assert!(unit.is_ok(), "{:?}", unit.err());
@@ -295,7 +335,7 @@ mod soundfont {
     fn a_soundfont_loads_from_bytes_and_never_changes() {
         let bytes = std::fs::read(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap();
         let declared = declared_presets(&bytes);
-        let font = session().load_soundfont(bytes).run().unwrap();
+        let font = tutti_fixtures::block_on(session().load_soundfont(bytes)).unwrap();
         assert_eq!(font.font().presets().len(), declared);
         assert!(!font.changed(), "an asset of bytes never changes");
     }
@@ -306,7 +346,7 @@ mod soundfont {
         let path = dir.path().join("junk.sf2");
         std::fs::write(&path, b"this is not a RIFF file at all").unwrap();
         assert!(matches!(
-            session().load_soundfont(path).run(),
+            tutti_fixtures::block_on(session().load_soundfont(path)),
             Err(LoadError::SoundFont(_))
         ));
     }
@@ -329,7 +369,7 @@ mod soundfont {
                 .unwrap();
         };
         at(1_000);
-        let font = session().load_soundfont(&path).run().unwrap();
+        let font = tutti_fixtures::block_on(session().load_soundfont(&path)).unwrap();
         assert!(!font.changed());
         at(2_000);
         assert!(font.changed());

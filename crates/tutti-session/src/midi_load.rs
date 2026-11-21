@@ -1,9 +1,9 @@
 //! A MIDI file as a value: [`Midi::load_midi`] returns a [`LoadMidi`] that,
-//! when the app runs it, reads the file and returns a [`LoadedMidi`], each
+//! when the app awaits it, reads the file and resolves to a [`LoadedMidi`], each
 //! track already a clip value.
 //!
 //! The reading, the conversion of every track's events to a [`ClipEvents`], and
-//! the tempo map and meter of its timeline are all [`LoadMidi::run`]'s; the
+//! the tempo map and meter of its timeline are all the awaited load's; the
 //! control thread publishes the finished values ([`Midi::play_track`]). A
 //! file's ticks become beats over its division, so no sample rate enters and
 //! the load never converts to frames.
@@ -12,46 +12,105 @@
 //! (a [`DroppedEvent`]) is the loaded value's [`report`](LoadedMidi::report),
 //! never a log line.
 
+use std::fmt;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use tutti_buffers::Float;
 use tutti_midi_file::{
-    FileEvent, MidiFile, Normalized, ReadError, RefusedTimeSignature, Timebase, TimelineDrop, Track,
+    FileEvent, MidiFile, Normalized, RefusedTimeSignature, Timebase, TimelineDrop, Track,
 };
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
-use tutti_platform::Asset;
+use tutti_platform::{Asset, WeakExecutor};
 use tutti_tempo::TempoMap;
 use tutti_timeline::ProjectMeter;
 use tutti_ump::TicksPerQuarterNote;
 use tutti_units::Beat;
 
+use crate::LoadError;
 use crate::Midi;
+use crate::unblocked::Unblocked;
 
 /// A MIDI file to read and convert to clip values, built by
-/// [`Midi::load_midi`] and not yet run: [`run`](Self::run) returns a
-/// [`LoadedMidi`].
+/// [`Midi::load_midi`]. It is `Send`, and it is a [`Future`] through
+/// [`IntoFuture`]: awaiting it reads the file and converts each track as a task
+/// on the session's executor, and resolves to a [`LoadedMidi`]. There is no
+/// blocking form.
 ///
-/// It holds the asset and nothing of the session, so the app runs it on any
-/// thread it chooses; dropping it unrun cancels it.
+/// A file in SMPTE time has seconds and no beats: it resolves with its
+/// [`file`](LoadedMidi::file) and report, and [`TrackError::SmpteTiming`] for
+/// every track.
+///
+/// It holds the asset and a weak handle to the session's executor, and nothing
+/// else of the session. Dropping it unawaited reads nothing.
 #[derive(Debug)]
-#[must_use = "work does nothing until it runs"]
+#[must_use = "a load does nothing unless it is awaited"]
 pub struct LoadMidi {
     asset: Asset,
+    executor: WeakExecutor,
 }
 
 impl LoadMidi {
-    /// Reads the file and converts each track to a clip value, on the calling
-    /// thread. The cost is a full read of the file.
-    ///
-    /// A file in SMPTE time has seconds and no beats: it returns with its
-    /// [`file`](LoadedMidi::file) and report, and [`TrackError::SmpteTiming`]
-    /// for every track.
-    ///
-    /// # Errors
-    ///
-    /// The [`ReadError`] of a file that cannot be read.
-    pub fn run(self) -> Result<LoadedMidi, ReadError> {
-        Ok(convert(MidiFile::read(self.asset)?))
+    /// Reads the file and converts each track to a clip value. The cost is a
+    /// full read of the file.
+    fn run(self) -> Result<LoadedMidi, LoadError> {
+        MidiFile::read(self.asset)
+            .map(convert)
+            .map_err(|error| LoadError::Midi(Arc::new(error)))
+    }
+}
+
+impl IntoFuture for LoadMidi {
+    type Output = Result<LoadedMidi, LoadError>;
+    type IntoFuture = LoadingMidi;
+
+    fn into_future(self) -> LoadingMidi {
+        LoadingMidi {
+            load: Unblocked::new(self.executor.clone(), self, Self::run),
+        }
+    }
+}
+
+/// A MIDI file load being awaited ([`LoadMidi`]): resolves to the
+/// [`LoadedMidi`] once the file is read and converted.
+///
+/// The first poll starts the read as a task on the session's executor (the
+/// session's weak handle, upgraded for the spawn only) and awaits the receiver
+/// of a oneshot. **The task fills the sender**: it reads the file, converts its
+/// tracks, and sends the value or the error, which wakes the future. A poll
+/// never blocks, and `Session::update` is not needed.
+///
+/// Dropped before it resolves, the future drops the receiver: a read that has
+/// not begun reads nothing, and one in flight finishes and its value is dropped.
+/// Dropped before its first poll it starts nothing.
+///
+/// # Errors
+///
+/// The output is [`LoadError::Midi`] for a file that cannot be read,
+/// [`LoadError::Panicked`] when the parser panicked, and
+/// [`LoadError::ShutDown`] when the session is gone.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+#[must_use = "a load does nothing unless it is awaited"]
+pub struct LoadingMidi {
+    load: Unblocked<LoadMidi, LoadedMidi, LoadError>,
+}
+
+impl Future for LoadingMidi {
+    type Output = Result<LoadedMidi, LoadError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.load).poll(cx)
+    }
+}
+
+impl fmt::Debug for LoadingMidi {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadingMidi").finish_non_exhaustive()
     }
 }
 
@@ -222,12 +281,13 @@ impl LoadedMidi {
 
 impl<F: Float> Midi<'_, F> {
     /// A [`LoadMidi`] of the MIDI file `asset` (a path, or bytes); nothing is
-    /// read until the app calls [`run`](LoadMidi::run), which runs on the
-    /// caller's thread. A file that cannot be read fails with its
-    /// [`ReadError`]. The value holds nothing of the session.
+    /// read until the app awaits it. A file that cannot be read fails with its
+    /// [`tutti_midi_file::ReadError`]. The value holds the session's weak executor and nothing
+    /// else of the session.
     pub fn load_midi(&self, asset: impl Into<Asset>) -> LoadMidi {
         LoadMidi {
             asset: asset.into(),
+            executor: self.executor.clone(),
         }
     }
 }

@@ -1223,6 +1223,8 @@ pub struct Midi<'a, F: Float = f32> {
     pub(crate) settings: &'a tutti_timeline::TransportSettings,
     /// The project meter a follower overlays.
     pub(crate) meter: tutti_timeline::ProjectMeter,
+    /// The session's executor, which a file load runs on.
+    pub(crate) executor: tutti_platform::WeakExecutor,
     /// The OS MIDI layer, when the builder opened it.
     #[cfg(feature = "midi-hardware")]
     pub(crate) io: Option<&'a mut tutti_midi_hardware::MidiSession>,

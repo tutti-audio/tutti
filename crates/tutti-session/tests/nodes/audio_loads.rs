@@ -1,17 +1,19 @@
-//! `load_audio` is a value the app runs anywhere and its handle is the app's:
+//! `load_audio` is a value the app awaits anywhere and its handle is the app's:
 //! two loads of one file are two waves, the wave is freed with the last clone,
 //! `changed` reads the file's metadata, and a streamed load opens a stream.
 
 use std::f64::consts::TAU;
 use std::fs::File;
+use std::future::IntoFuture;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 use tutti_platform::{Asset, Open, ReadSeek};
 use tutti_sampler::StreamStart;
-use tutti_session::{AudioData, LoadError, Session, Tier};
+use tutti_session::{AudioData, LoadAudio, LoadError, LoadingAudio, Session, Tier};
 use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
@@ -50,15 +52,17 @@ fn at(path: &Path, seconds: u64) {
         .expect("sets the modification time");
 }
 
-/// **A load holds nothing of the session, so it runs on any thread.** The wave
-/// it returns is the file's sine: frame `n` is `0.5 * sin(2 pi * 1000 n / 48000)`.
+/// **A load holds nothing of the session but its executor, so any thread
+/// awaits it.** The wave it resolves to is the file's sine: frame `n` is
+/// `0.5 * sin(2 pi * 1000 n / 48000)`.
 #[test]
-fn load_audio_runs_where_the_app_runs_it() {
+fn load_audio_is_awaited_on_any_thread() {
     let dir = dir();
     let path = dir.path().join("sine.wav");
     write_sine(&path);
-    let load = session().load_audio(&path).tier(Tier::Resident);
-    let audio = std::thread::spawn(move || load.run())
+    let s = session();
+    let load = s.load_audio(&path).tier(Tier::Resident);
+    let audio = std::thread::spawn(move || tutti_fixtures::block_on(load))
         .join()
         .expect("the thread ends")
         .expect("loads");
@@ -80,12 +84,8 @@ fn two_loads_of_one_file_are_two_values() {
     let path = dir.path().join("sine.wav");
     write_sine(&path);
     let s = session();
-    let load = || {
-        s.load_audio(&path)
-            .tier(Tier::Resident)
-            .run()
-            .expect("loads")
-    };
+    let load =
+        || tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Resident)).expect("loads");
     let (first, second) = (load(), load());
     let clone = first.clone();
     let (AudioData::Resident(first), AudioData::Resident(second), AudioData::Resident(clone)) =
@@ -105,11 +105,7 @@ fn the_session_keeps_no_clone_of_a_loaded_wave() {
     let path = dir.path().join("sine.wav");
     write_sine(&path);
     let s = session();
-    let audio = s
-        .load_audio(&path)
-        .tier(Tier::Resident)
-        .run()
-        .expect("loads");
+    let audio = tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Resident)).expect("loads");
     let AudioData::Resident(wave) = audio.data() else {
         panic!("a resident load");
     };
@@ -131,16 +127,16 @@ fn changed_is_false_until_the_file_is_rewritten_and_true_after() {
     write_sine(&path);
     at(&path, 1_000);
     let s = session();
-    let audio = s.load_audio(&path).run().expect("loads");
+    let audio = tutti_fixtures::block_on(s.load_audio(&path)).expect("loads");
     assert!(!audio.changed(), "nothing was written since the load");
     write_sine(&path);
     at(&path, 2_000);
     assert!(audio.changed(), "the modification time moved");
-    let fresh = s.load_audio(audio.asset().clone()).run().expect("loads");
+    let fresh = tutti_fixtures::block_on(s.load_audio(audio.asset().clone())).expect("loads");
     assert!(!fresh.changed(), "a reload reads the file as it is");
 
     let bytes = std::fs::read(&path).expect("reads");
-    let held = s.load_audio(bytes).run().expect("loads");
+    let held = tutti_fixtures::block_on(s.load_audio(bytes)).expect("loads");
     assert!(!held.changed(), "an asset of bytes never changes");
 }
 
@@ -152,20 +148,16 @@ fn a_streamed_handle_opens_a_stream() {
     let path = dir.path().join("sine.wav");
     write_sine(&path);
     let mut s = session();
-    let audio = s
-        .load_audio(&path)
-        .tier(Tier::Streamed)
-        .run()
-        .expect("loads");
+    let audio = tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Streamed)).expect("loads");
     let AudioData::Streamed(info) = audio.data() else {
         panic!("a streamed load decodes nothing");
     };
     assert_eq!(info.frames.map(|f| f.get()), Some(FRAMES));
-    let opened = s
-        .open_stream(audio.asset().clone(), StreamStart::HEAD)
-        .expect("a streamer")
-        .run()
-        .expect("the file reads");
+    let opened = tutti_fixtures::block_on(
+        s.open_stream(audio.asset().clone(), StreamStart::HEAD)
+            .expect("a streamer"),
+    )
+    .expect("the file reads");
     let (stream, reader) = s.apply(opened).expect("the session serves it");
     assert_eq!(stream.id(), reader.id());
 }
@@ -178,14 +170,12 @@ fn a_file_removed_after_the_load_reads_changed() {
     let path = dir.path().join("sine.wav");
     write_sine(&path);
     let s = session();
-    let audio = s.load_audio(&path).run().expect("loads");
+    let audio = tutti_fixtures::block_on(s.load_audio(&path)).expect("loads");
     assert!(!audio.changed());
     std::fs::remove_file(&path).expect("removes");
     assert!(audio.changed(), "the file is gone");
     assert!(matches!(
-        s.load_audio(audio.asset().clone())
-            .tier(Tier::Resident)
-            .run(),
+        tutti_fixtures::block_on(s.load_audio(audio.asset().clone()).tier(Tier::Resident)),
         Err(LoadError::Decode(_))
     ));
 }
@@ -208,7 +198,7 @@ impl Open for Panics {
 #[test]
 fn a_decoder_panic_is_a_load_error() {
     let asset = Asset::from(Arc::new(Panics) as Arc<dyn Open>);
-    let outcome = session().load_audio(asset).tier(Tier::Resident).run();
+    let outcome = tutti_fixtures::block_on(session().load_audio(asset).tier(Tier::Resident));
     match outcome {
         Err(LoadError::Panicked { message }) => {
             assert!(message.contains("the decoder panicked"), "{message}");
@@ -224,12 +214,83 @@ fn a_file_that_cannot_be_read_is_a_load_error() {
     let path: PathBuf = dir.path().join("none.wav");
     let s = session();
     assert!(matches!(
-        s.load_audio(&path).tier(Tier::Resident).run(),
+        tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Resident)),
         Err(LoadError::Decode(_))
     ));
     std::fs::write(&path, b"not audio").expect("writes");
     assert!(matches!(
-        s.load_audio(&path).tier(Tier::Streamed).run(),
+        tutti_fixtures::block_on(s.load_audio(&path).tier(Tier::Streamed)),
         Err(LoadError::Probe(_))
     ));
 }
+
+/// An asset of the sine file's bytes that counts how often it is opened.
+struct Counting {
+    bytes: Vec<u8>,
+    opens: Arc<AtomicUsize>,
+}
+
+impl Open for Counting {
+    fn open(&self) -> io::Result<Box<dyn ReadSeek>> {
+        self.opens.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(io::Cursor::new(self.bytes.clone())))
+    }
+
+    fn name(&self) -> String {
+        "counting".to_owned()
+    }
+}
+
+fn counting(dir: &Path) -> (Asset, Arc<AtomicUsize>) {
+    let path = dir.join("sine.wav");
+    write_sine(&path);
+    let opens = Arc::new(AtomicUsize::new(0));
+    let asset = Counting {
+        bytes: std::fs::read(&path).expect("reads"),
+        opens: Arc::clone(&opens),
+    };
+    (Asset::from(Arc::new(asset) as Arc<dyn Open>), opens)
+}
+
+/// **A load of a session that was dropped is `ShutDown`**: the executor is gone,
+/// so nothing reads the file, and the file did not fail.
+#[test]
+fn a_load_of_a_dropped_session_is_shut_down() {
+    let (asset, opens) = counting(dir().path());
+    let load = session().load_audio(asset).tier(Tier::Resident);
+    assert!(matches!(
+        tutti_fixtures::block_on(load),
+        Err(LoadError::ShutDown)
+    ));
+    assert_eq!(opens.load(Ordering::SeqCst), 0, "nothing read the file");
+}
+
+/// **A load dropped before its first poll reads nothing**, and one awaited
+/// reads the file once.
+#[test]
+fn a_load_dropped_before_its_first_poll_never_opens_the_file() {
+    let dir = dir();
+    let (dropped, dropped_opens) = counting(dir.path());
+    let (awaited, awaited_opens) = counting(dir.path());
+    let s = session();
+    drop(s.load_audio(dropped.clone()).tier(Tier::Resident));
+    drop(s.load_audio(dropped).tier(Tier::Resident).into_future());
+    tutti_fixtures::block_on(s.load_audio(awaited).tier(Tier::Resident)).expect("loads");
+    assert_eq!(
+        awaited_opens.load(Ordering::SeqCst),
+        1,
+        "an awaited load reads once"
+    );
+    assert_eq!(
+        dropped_opens.load(Ordering::SeqCst),
+        0,
+        "a dropped one reads nothing"
+    );
+}
+
+/// **The load and its future are `Send`**, so any thread awaits them.
+const fn send<T: Send>() {}
+const _: () = {
+    send::<LoadAudio<f32>>();
+    send::<LoadingAudio<f32>>();
+};

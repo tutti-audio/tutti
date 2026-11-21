@@ -59,10 +59,8 @@
 //! for planes, with no `Option` to unwrap. A cancelled bounce is
 //! [`BounceError::Cancelled`].
 
-use futures_channel::oneshot;
 use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -86,6 +84,7 @@ use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, R
 use tutti_units::{Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::apply::{Cut, Sealed as ApplySealed};
+use crate::unblocked::{Unanswered, Unblocked};
 use crate::{Session, SessionFloat};
 use tutti_buffers::Float;
 use tutti_dsp::FftFloat;
@@ -1547,7 +1546,7 @@ impl<M: Master, F: FftFloat> BounceJob<M, F> {
             handle,
             kind: _,
         } = self;
-        let token = Held { cut, token };
+        let token = Held { cut, _token: token };
         // The band the render leaves for the session's steps depends on the
         // targets alone: the readers do not exist until the taps are open.
         let targets: Vec<Target> = std::iter::once(master.clone())
@@ -1652,9 +1651,18 @@ impl<M: Master, F: FftFloat> IntoFuture for BounceJob<M, F> {
     type IntoFuture = Bouncing<M, F>;
 
     fn into_future(self) -> Bouncing<M, F> {
+        let held = Held {
+            cut: self.cut,
+            _token: Arc::clone(&self.token),
+        };
         Bouncing {
             handle: self.handle.clone(),
-            stage: Stage::Unstarted(Box::new(self)),
+            held: Some(held),
+            render: Unblocked::new(
+                self.executor.clone(),
+                Box::new(self),
+                |job| Ok(job.render()),
+            ),
         }
     }
 }
@@ -1664,7 +1672,17 @@ impl<M: Master, F: FftFloat> IntoFuture for BounceJob<M, F> {
 #[derive(Debug)]
 struct Held {
     cut: Cut,
-    token: Arc<()>,
+    _token: Arc<()>,
+}
+
+impl Unanswered for BounceError {
+    fn shut_down() -> Self {
+        Self::ShutDown
+    }
+
+    fn panicked(message: String) -> Self {
+        Self::Panicked { message }
+    }
 }
 
 /// A bounce being awaited ([`BounceJob`]): resolves to the [`BounceRendered`]
@@ -1676,9 +1694,7 @@ struct Held {
 /// the receiver of a oneshot. **The render task fills the sender**: it builds
 /// the fork, renders, and sends the result when the render ends, which wakes the
 /// future. Nothing else drives it and no caller waits on code the app does not
-/// run: a poll never blocks, and `Session::update` is not needed on a target
-/// with threads (on the web, where no thread runs the executor, the update runs
-/// the render).
+/// run: a poll never blocks, and `Session::update` is not needed.
 ///
 /// Dropped before it resolves, the future cancels the render
 /// ([`BounceHandle::cancel`]): the render stops at its next check, finds its
@@ -1686,28 +1702,19 @@ struct Held {
 /// return. A render that has not begun never starts.
 ///
 /// The output carries the failure by name when the render could not answer
-/// ([`BounceError::ShutDown`] for a session that is gone or an executor that
-/// dropped the render before it ran, [`BounceError::Export`] for a thread the
-/// OS refused, [`BounceError::Panicked`] for a render that panicked); apply it
-/// to read it.
+/// ([`BounceError::ShutDown`] for a session that is gone, a thread the OS
+/// refused or an executor that dropped the render before it ran,
+/// [`BounceError::Panicked`] for a render that panicked); apply it to read it.
 ///
 /// # Panics
 ///
 /// When polled after it resolved.
 #[must_use = "a bounce renders nothing unless it is awaited"]
 pub struct Bouncing<M: Master, F: FftFloat = f32> {
-    stage: Stage<M, F>,
+    render: Unblocked<Box<BounceJob<M, F>>, BounceRendered<M, F>, BounceError>,
+    /// What the answer carries when the render gives none; taken on resolving.
+    held: Option<Held>,
     handle: BounceHandle,
-}
-
-enum Stage<M: Master, F: FftFloat> {
-    Unstarted(Box<BounceJob<M, F>>),
-    Running {
-        reply: oneshot::Receiver<BounceRendered<M, F>>,
-        /// What the answer carries when the render gives none.
-        held: Held,
-    },
-    Finished,
 }
 
 impl<M: Master, F: FftFloat> std::fmt::Debug for Bouncing<M, F> {
@@ -1716,91 +1723,20 @@ impl<M: Master, F: FftFloat> std::fmt::Debug for Bouncing<M, F> {
     }
 }
 
-impl<M: Master, F: FftFloat> Bouncing<M, F> {
-    /// Starts the render of `job` as a blocking task of the session's executor:
-    /// the task owns the sender of the reply this returns the receiver of.
-    fn launch(
-        job: Box<BounceJob<M, F>>,
-    ) -> Result<(oneshot::Receiver<BounceRendered<M, F>>, Held), Box<BounceRendered<M, F>>> {
-        let held = Held {
-            cut: job.cut,
-            token: Arc::clone(&job.token),
-        };
-        // Upgraded for the spawn only: the task holds no strong handle.
-        let Some(executor) = job.executor.upgrade() else {
-            return Err(Box::new(BounceRendered::failed(
-                BounceError::ShutDown,
-                None,
-                held,
-            )));
-        };
-        let (reply, receiver) = oneshot::channel();
-        let fallback = Held {
-            cut: held.cut,
-            token: Arc::clone(&held.token),
-        };
-        let task = executor.unblock(move || {
-            // A future dropped before the render began has nobody to answer.
-            if reply.is_canceled() {
-                return;
-            }
-            let rendered =
-                catch_unwind(AssertUnwindSafe(|| job.render())).unwrap_or_else(|payload| {
-                    let message = tutti_platform::panic_message(payload.as_ref());
-                    BounceRendered::failed(BounceError::Panicked { message }, None, fallback)
-                });
-            // Refused when the future was dropped meanwhile: the render drops
-            // here, its token released and its graph sent back to the session.
-            drop(reply.send(rendered));
-        });
-        match task {
-            Ok(task) => {
-                // The render runs on without the future: its end is the reply.
-                task.detach();
-                Ok((receiver, held))
-            }
-            Err(refused) => Err(Box::new(BounceRendered::failed(
-                BounceError::Export(refused.into()),
-                None,
-                held,
-            ))),
-        }
-    }
-}
-
 impl<M: Master, F: FftFloat> Future for Bouncing<M, F> {
     type Output = BounceRendered<M, F>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
-        if matches!(this.stage, Stage::Unstarted(_)) {
-            let Stage::Unstarted(job) = std::mem::replace(&mut this.stage, Stage::Finished) else {
-                unreachable!("matched above");
-            };
-            match Self::launch(job) {
-                Ok((reply, held)) => this.stage = Stage::Running { reply, held },
-                Err(refused) => return Poll::Ready(*refused),
-            }
-        }
-        let Stage::Running { reply, .. } = &mut this.stage else {
-            panic!("a bounce future is polled after it resolved");
-        };
-        let answered = std::task::ready!(Pin::new(reply).poll(cx));
-        let Stage::Running { held, .. } = std::mem::replace(&mut this.stage, Stage::Finished)
-        else {
-            unreachable!("matched above");
-        };
-        // A sender dropped unanswered: the executor dropped the render before
-        // it ran (the render is caught, so a panic answers).
-        Poll::Ready(
-            answered.unwrap_or_else(|_| BounceRendered::failed(BounceError::ShutDown, None, held)),
-        )
+        let answered = std::task::ready!(Pin::new(&mut this.render).poll(cx));
+        let held = this.held.take().expect("held until it resolves");
+        Poll::Ready(answered.unwrap_or_else(|e| BounceRendered::failed(e, None, held)))
     }
 }
 
 impl<M: Master, F: FftFloat> Drop for Bouncing<M, F> {
     fn drop(&mut self) {
-        if matches!(self.stage, Stage::Running { .. }) {
+        if self.held.is_some() {
             self.handle.cancel();
         }
     }

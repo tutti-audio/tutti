@@ -39,8 +39,8 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
 thiserror = { workspace = true, features = ["std"] }
-# `oneshot`: the reply of an out-of-process plugin load, and of a MIDI-CI peer request.
-futures-channel = { workspace = true, optional = true }
+# `oneshot`: the reply of a file load, an out-of-process plugin load, and a MIDI-CI peer request.
+futures-channel = { workspace = true }
 # `FutureExt::catch_unwind`: a take's pump reports its panic as its end.
 futures-lite = { workspace = true, optional = true }
 tracing.workspace = true
@@ -101,7 +101,7 @@ midi = [
     "dep:tutti-midi-runtime",
     "dep:tutti-midi-file",
 ]
-midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci", "dep:futures-channel"]
+midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci"]
 # `serde` for `MidiRouteRule<T>` (keyed by the app's own stable id, not a
 # `NodeKey`): its Group and channel are `tutti-ump`'s, with its `serde`; and for
 # `PeerState`, whose plugin and device are `tutti-plugin`'s and `tutti-midi-device`'s.
@@ -120,14 +120,13 @@ soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "dep:tutti-dsp"]
 synth = ["midi", "dep:tutti-polysynth"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`).
-export = ["dep:tutti-export", "dep:tutti-dsp", "dep:futures-channel", "encode-wav"]
+export = ["dep:tutti-export", "dep:tutti-dsp", "encode-wav"]
 # The encoders `tutti-codec` writes, under the codec's own names; none implies `export`.
 encode-wav = ["tutti-codec/encode-wav"]
 encode-flac = ["tutti-codec/encode-flac"]
 encode-aiff = ["tutti-codec/encode-aiff"]
 plugin = [
     "dep:dpi",
-    "dep:futures-channel",
     "dep:tutti-plugin",
     "dep:tutti-plugin-db",
     "dep:tutti-plugin-host",
