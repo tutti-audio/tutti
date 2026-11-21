@@ -78,7 +78,7 @@ impl Subject for Soundfont {
 pub struct Plugin;
 
 impl Plugin {
-    /// A session and the plugin loaded through its pool and in the graph.
+    /// A session and the plugin it loaded, in the graph.
     pub fn load(
         path: std::path::PathBuf,
         state: Option<Vec<u8>>,

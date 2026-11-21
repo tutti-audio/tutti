@@ -13,7 +13,6 @@ use tutti_rt::LockExt;
 
 use crate::graph::Graph;
 use crate::plugin::{Inbox, RenderModeState, SNAPSHOT_INTERVAL};
-use crate::pool::Defer;
 use crate::{HangPolicy, RecoveryPolicy};
 
 /// The plugin policies a builder sets.
@@ -334,13 +333,6 @@ impl PluginPart {
                 self.tasks.in_flight()
             );
         }
-    }
-
-    /// What a main stage dropped off the main thread hands its discard to: this
-    /// part's collector.
-    pub(crate) fn main_deferral(&self) -> Option<Defer> {
-        let work = self.work.clone();
-        Some(Arc::new(move |discard| work.defer(discard)))
     }
 
     /// Runs the work other threads handed to the main thread, when `main` is the

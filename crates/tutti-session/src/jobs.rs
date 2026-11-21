@@ -252,22 +252,9 @@ impl fmt::Debug for Jobs {
 /// What a job's lander may do to the session, whichever clock it is on: a
 /// lander is typed to nothing of the clock, so the jobs in flight at a clock
 /// switch land on the converted session.
-pub(crate) trait JobSession {
-    /// A pool load's worker ended with what it staged.
-    fn land_pool_load(&mut self, flight: u64, done: Result<crate::pool::Staged, crate::LoadError>);
-}
+pub(crate) trait JobSession {}
 
-impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
-    fn land_pool_load(&mut self, flight: u64, done: Result<crate::pool::Staged, crate::LoadError>) {
-        self.pool.entries.worker_ended();
-        match done {
-            Ok(crate::pool::Staged::Done(value)) => self.pool.entries.land(flight, Ok(value)),
-            Ok(crate::pool::Staged::Main(stage)) => self.pool.entries.stage_main(flight, stage),
-            Err(error) => self.pool.entries.land(flight, Err(error)),
-        }
-        self.pool_pump();
-    }
-}
+impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {}
 
 impl Jobs {
     pub(crate) fn new(executor: Executor, drive: Drive, bells: Bells) -> Self {
@@ -307,7 +294,7 @@ impl Jobs {
         not(test),
         expect(
             dead_code,
-            reason = "the job table's tests submit on the pool; no session call does"
+            reason = "the job table's tests submit jobs; no session call does"
         )
     )]
     pub(crate) fn submit_job<J, R, W, L>(&mut self, work: W, land: L) -> Job<J>
@@ -398,6 +385,7 @@ impl Jobs {
     /// thread is posted to the session's `MainWork` (`tutti_plugin_types`).
     ///
     /// A future must not block, and a closure here is one `poll` long.
+    #[cfg(test)]
     pub(crate) fn submit<R, W, L>(&mut self, work: W, land: L)
     where
         R: Send + 'static,

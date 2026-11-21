@@ -1,7 +1,7 @@
 //! Work that takes time: one typed [`Job`] per piece of work.
 //!
-//! A [`Session`] call that cannot answer at once (a plugin's state, a pool
-//! check) returns a [`Job<J>`](Job). Its kind `J` names the answer: `J::Output`
+//! A [`Session`] call that cannot answer at once (a plugin's state, a file
+//! decode) returns a [`Job<J>`](Job). Its kind `J` names the answer: `J::Output`
 //! on success, `J::Error` on failure. The answer lands once, in an
 //! [`update`](Session::update), as a [`SessionEvent::JobDone`] the app reads
 //! with [`JobOutput::take`]; or [`Job::wait`] runs updates until it finishes and
@@ -22,9 +22,8 @@
 //!    [`update`](Session::update) on the control thread and ends with
 //!    `Ticket::land(result)`.
 //! 3. A stage that must run on the main thread is posted to the session's main
-//!    work (`Session::work`); it sets `Ticket::set_main_wait` first and lands
-//!    its result with `Ticket::land`, checking `Ticket::cancelled` before it
-//!    changes anything.
+//!    work (`Session::work`); it lands its result with `Ticket::land`, checking
+//!    `Ticket::cancelled` before it changes anything.
 //! 4. Work that needs no worker (a result the session already waits for) takes
 //!    `Jobs::new_job::<Kind>()` and lands through its [`Ticket`] when the
 //!    session has the answer.
@@ -109,9 +108,6 @@ pub enum JobStatus {
     Pending,
     /// The work is running off the caller's thread.
     Running,
-    /// The work waits for a stage that runs on the main thread, in an
-    /// [`update`](Session::update) called there.
-    WaitingForMainThread,
     /// The result is in the session's hands: it lands in the next update.
     Done,
 }
@@ -121,10 +117,6 @@ pub enum JobStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum WaitError {
-    /// The job waits for the main thread and the caller is not on it: call
-    /// `wait`, or [`update`](Session::update), there.
-    #[error("the job waits for the main thread and the caller is not on it")]
-    NeedsMainThread,
     /// The job's result already landed and was taken: by the app from its
     /// [`SessionEvent::JobDone`], or by an earlier `wait`.
     #[error("the job's result was already taken")]
@@ -154,7 +146,6 @@ pub enum WorkerError {
 
 const PENDING: u8 = 0;
 const RUNNING: u8 = 1;
-const WAITING: u8 = 2;
 const DONE: u8 = 3;
 
 /// What a job and its ticket share.
@@ -206,7 +197,6 @@ impl<J: JobKind> Job<J> {
         match self.cell.status.load(Ordering::Acquire) {
             PENDING => JobStatus::Pending,
             RUNNING => JobStatus::Running,
-            WAITING => JobStatus::WaitingForMainThread,
             _ => JobStatus::Done,
         }
     }
@@ -217,12 +207,6 @@ impl<J: JobKind> Job<J> {
     ///
     /// Waiting takes `&self`: an error does not cancel the job. Call it on the
     /// session that made the job.
-    ///
-    /// The main-thread stage of a job runs inside an `update`, so `wait` runs
-    /// it only when called on the thread that holds the process claim
-    /// ([`tutti_platform::MainThreadMarker::new`]). Called elsewhere on a job that
-    /// is [`WaitingForMainThread`](JobStatus::WaitingForMainThread), it
-    /// answers [`WaitError::NeedsMainThread`] and the job runs on.
     ///
     /// The result is taken: a later [`JobOutput::take`] of the job answers `None`,
     /// and a second `wait`, or one after the app took the job's
@@ -243,11 +227,6 @@ impl<J: JobKind> Job<J> {
             // Read before the update: an ended ticket has already queued its
             // landing, which that update then finds.
             let ended = self.cell.ended.load(Ordering::Acquire);
-            if self.status() == JobStatus::WaitingForMainThread
-                && tutti_platform::MainThreadMarker::new().is_none()
-            {
-                return Err(WaitError::NeedsMainThread.into());
-            }
             let mut events = session.update();
             let landed = events.iter_mut().find_map(|event| match event {
                 SessionEvent::JobDone(landed) => landed.take(self),
@@ -435,14 +414,6 @@ impl<J: JobKind> Ticket<J> {
     /// The job was dropped: nothing will read what lands.
     pub(crate) fn cancelled(&self) -> bool {
         self.cell.cancelled.load(Ordering::Acquire)
-    }
-
-    /// Marks the job as waiting for the main thread (`true`) or running
-    /// (`false`), while it is not done.
-    pub(crate) fn set_main_wait(&self, waiting: bool) {
-        self.cell
-            .status
-            .store(if waiting { WAITING } else { RUNNING }, Ordering::Release);
     }
 
     /// Queues the result to land in the next update, unless the job was

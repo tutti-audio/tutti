@@ -126,7 +126,6 @@ pub(crate) struct Options {
     unresolved_warning: std::time::Duration,
     pub(crate) plugins: crate::session::parts::PluginOptions,
     executor: Option<tutti_platform::Executor>,
-    pool: crate::PoolConfig,
 }
 
 /// A MIDI backend a host supplies, held until the session takes it.
@@ -164,7 +163,6 @@ impl Default for Options {
             unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
             plugins: Default::default(),
             executor: None,
-            pool: crate::PoolConfig::default(),
         }
     }
 }
@@ -795,14 +793,6 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// How the pool runs its loads ([`PoolConfig`](crate::PoolConfig)): how
-    /// many worker stages run at once. Default four.
-    #[must_use]
-    pub const fn pool_config(mut self, config: crate::PoolConfig) -> Self {
-        self.opts.pool = config;
-        self
-    }
-
     /// Open the OS MIDI layer: its devices are listed by
     /// [`Midi::devices`](crate::Midi::devices) and opened by
     /// [`Session::open_midi_input`](crate::Session::open_midi_input) and
@@ -994,7 +984,7 @@ impl<C: Clock> SessionBuilder<C> {
 
         // The engine's MIDI as graph nodes: the sync node (sends nothing until a
         // host sets its messages). An input port's input node and an output's
-        // node are made when their pool entries load, and the sync node feeds
+        // node are made when their ports open, and the sync node feeds
         // each output.
         #[cfg(feature = "midi")]
         let midi = {
@@ -1063,7 +1053,7 @@ impl<C: Clock> SessionBuilder<C> {
             values: crate::value::ValueState::new(Arc::clone(&table)),
             _early_work,
             running,
-            pool: crate::session::parts::PoolPart::new(self.opts.pool),
+            resource_ids: crate::peer::ResourceIds::new(),
             transport: crate::session::parts::TransportPart::new(
                 parts.transport.clone(),
                 parts.click,

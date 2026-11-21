@@ -376,18 +376,6 @@ pub enum Error {
         source: tutti_engine::RoutingError,
     },
 
-    /// A clock switch was refused before anything stopped: runs asked with
-    /// [`Session::when_loaded`](crate::Session::when_loaded) wait for these
-    /// entries, which have not loaded. A run takes the session of the clock it
-    /// was asked of and cannot follow the session to another, so the switch
-    /// waits until they have run. Nothing moved, but the runs that were due
-    /// (their entry loaded) have run, as the next update would have run them.
-    #[error("a clock switch waits for runs pending on entries not loaded: {keys:?}")]
-    RunsPending {
-        /// The entries the runs wait for, in the order asked.
-        keys: Vec<crate::PoolKey>,
-    },
-
     /// A clock switch failed after the old stream stopped, and starting the old
     /// clock again failed too: the session is **stopped**, on the clock it was
     /// on. Once what broke is fixed (a graph the re-prepare poisoned, a device
