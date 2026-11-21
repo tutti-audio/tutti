@@ -11,8 +11,8 @@ use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
     Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
     LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor, PluginError,
-    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
-    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, UnknownParam,
+    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RateRefusal, RenderMode,
+    RenderModeSupport, Request, StateError, StateUse, TerminationReason, TrackInfo, UnknownParam,
     WindowHandle, bypass_value,
 };
 use tutti_rt::LockExt;
@@ -377,7 +377,7 @@ impl Health for IpcController {
         self.link.bridge.audio().crash_cause()
     }
 
-    fn rate_refusal(&self) -> Option<(SampleRate, String)> {
+    fn rate_refusal(&self) -> Option<RateRefusal> {
         self.link.bridge.audio().rate_refusal()
     }
 

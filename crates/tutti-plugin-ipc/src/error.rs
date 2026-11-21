@@ -6,7 +6,6 @@
 
 use thiserror::Error;
 use tutti_plugin_types::{IpcError, PluginFailure};
-use tutti_units::SampleRate;
 
 /// How a forked plugin instance failed while rendering.
 ///
@@ -25,13 +24,8 @@ pub enum PluginRenderFault {
     },
     /// The fork's plugin refused the sample rate it renders at, so it renders
     /// silence: the whole export is wrong from the first block.
-    #[error("the forked instance refused its sample rate ({rate}): {reason}")]
-    RateRefused {
-        /// The rate it refused.
-        rate: SampleRate,
-        /// The plugin's reason.
-        reason: String,
-    },
+    #[error("the forked instance refused its sample rate")]
+    RateRefused(#[source] tutti_plugin_types::RateRefusal),
     /// The fork's server did not publish a block within the budget
     /// (`IpcConfig::timeout_ms`). The fork stopped waiting: every later
     /// block is silence, at once.

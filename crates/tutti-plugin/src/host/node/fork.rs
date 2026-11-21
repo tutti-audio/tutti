@@ -181,8 +181,8 @@ impl ForkHealth for ForkWatch {
         if self.wait.server_died() {
             return self.wait.death().map(crashed);
         }
-        if let Some((rate, reason)) = self.wait.refusal() {
-            let cause = PluginRenderFault::RateRefused { rate, reason };
+        if let Some(refusal) = self.wait.refusal() {
+            let cause = PluginRenderFault::RateRefused(refusal);
             return Some((ForkFaultKind::Failed, ForkCause::new(cause)));
         }
         self.latency_moved().map(|(planned, now)| {

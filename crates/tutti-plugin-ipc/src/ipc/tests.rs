@@ -326,7 +326,7 @@ fn mock_with(
                     id,
                     &ControlReply::SampleRateSet {
                         rate: *rate,
-                        error: None,
+                        refusal: None,
                     },
                 ),
                 // The server's editor: a parent of 0 is a window it cannot embed
@@ -356,7 +356,9 @@ fn mock_with(
                         id,
                         &if refusing.load(std::sync::atomic::Ordering::Acquire) {
                             ControlReply::Error {
-                                message: "the slab does not open".into(),
+                                error: tutti_plugin_types::ServerError::SlabNotOpened {
+                                    reason: "the slab does not open".into(),
+                                },
                             }
                         } else {
                             ControlReply::SharedMemoryReady
@@ -823,7 +825,10 @@ fn a_plugin_with_no_origin_is_not_reopened() {
     let _machine = machine_lock();
     let (ipc, _server) = mock();
     let err = ipc.reopen_restoring(None).expect_err("no origin");
-    assert!(err.to_string().contains("no origin"), "{err}");
+    assert!(
+        matches!(err, tutti_plugin_types::IpcError::NoOrigin),
+        "{err:?}"
+    );
     assert!(ipc.reopen(main_thread()).is_err());
 }
 
