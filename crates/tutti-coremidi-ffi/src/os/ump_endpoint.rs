@@ -17,6 +17,7 @@
 //! releasing it all happen on the main thread. What may cross threads is the
 //! [`UmpSender`]: the source's `u32` reference and the callback's counters.
 
+use super::client::SharedClient;
 use super::error::{Error, Operation};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
@@ -67,6 +68,9 @@ pub struct UmpEndpoint {
     endpoint: Option<Retained<MIDIUMPMutableEndpoint>>,
     sender: UmpSender,
     blocks: Vec<FunctionBlockId>,
+    // The process's client, which holds the connection to the MIDI server for as long as the
+    // endpoint exists.
+    _client: SharedClient,
     // Makes the type `!Send` and `!Sync` whatever its fields are.
     _main: MainThreadMarker,
     // Dropped after the endpoint is disabled and released (see `Drop`).
@@ -136,11 +140,17 @@ impl UmpSender {
 }
 
 impl UmpEndpoint {
-    /// Creates the endpoint `name` carrying `protocol`, identified as `device`
+    /// Creates the endpoint `name` on `client`, carrying `protocol`, identified as `device`
     /// (the Device Identity, M2-104 §7.1.3) with Product Instance Id `instance`
     /// (§7.1.5, `None` for none), registers `blocks` as its static Function Blocks
     /// and enables it. `on_ump` gets each message sent to it, on CoreMIDI's
     /// delivery thread. `main` proves the caller is on the main thread.
+    ///
+    /// `client` is the process's [`SharedClient`]: the endpoint API takes no client, and
+    /// CoreMIDI raises an exception that Objective-C's handler does not catch when the MIDI
+    /// server is gone and the process has no connection to it. A process that holds a
+    /// client has the connection, and one whose [`SharedClient::start`] failed has no
+    /// way to create an endpoint.
     ///
     /// CoreMIDI numbers the blocks itself, in registration order. `blocks` are
     /// given in number order with their numbers running from 0 without a gap, and
@@ -157,9 +167,11 @@ impl UmpEndpoint {
     /// exception, [`Error::Objc`] or [`Error::NoObject`] when CoreMIDI refuses
     /// the endpoint, [`Error::BlockNumber`] for a number the spec cannot hold, and
     /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the registered ones.
+    /// [`Error::NotPermitted`] when CoreMIDI answers a call with `kMIDINotPermitted`.
     /// An `Err` leaves no endpoint published.
     pub fn new<F>(
         main: MainThreadMarker,
+        client: SharedClient,
         name: &str,
         protocol: Protocol,
         device: &DeviceIdentity,
@@ -210,6 +222,7 @@ impl UmpEndpoint {
                 counts: receiver.counts(),
             },
             blocks: numbers,
+            _client: client,
             _main: main,
             _receiver: receiver,
         })
@@ -332,12 +345,12 @@ fn function_block(block: &PlatformBlock) -> Result<Retained<MIDIUMPMutableFuncti
 
 /// `operation` failed with `error`. Called inside [`catch`].
 fn objc(operation: Operation, error: &NSError) -> Error {
-    Error::Objc {
+    Error::from_ns_error(
         operation,
-        code: error.code(),
-        domain: error.domain().to_string(),
-        description: error.localizedDescription().to_string(),
-    }
+        error.code(),
+        error.domain().to_string(),
+        error.localizedDescription().to_string(),
+    )
 }
 
 /// Disables `endpoint` and releases it, each in its own [`catch`] (releasing runs the
