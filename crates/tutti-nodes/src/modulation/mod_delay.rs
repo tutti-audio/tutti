@@ -10,7 +10,7 @@ use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, DELAY_SLEW, GAIN_RAMP, Lerp, ModDelayBank, ModDelayControls, ModDelayLayout,
-    Ramp, Steps,
+    ModulationRate, Ramp, Steps,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Cents, Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
@@ -122,8 +122,10 @@ impl ModDelayConfig {
     /// dry path to blend.
     #[must_use]
     pub fn vibrato(input: BusTopology) -> Self {
-        Self::new(ModDelayLayout::vibrato(input))
-            .controls(ModDelayControls::vibrato(Cents::new(50.0), Hz::new(5.0)))
+        Self::new(ModDelayLayout::vibrato(input)).controls(ModDelayControls::vibrato(
+            Cents::new(50.0),
+            ModulationRate::of(Hz::new(5.0)),
+        ))
     }
 
     /// The General MIDI chorus on the bus `input`: [`ModDelayLayout::general_midi_chorus`] at
@@ -1125,7 +1127,8 @@ mod tests {
         for (cents, hz) in [(50.0, 5.0), (100.0, 2.0), (200.0, 8.0)] {
             let mut k = ModDelayKernel::<f64>::new(ModDelayLayout::vibrato(BusTopology::MONO));
             k.prepare(RATE, MaxBlock::of(Samples::new(len)));
-            let controls = ModDelayControls::vibrato(Cents::new(cents), Hz::new(hz));
+            let controls =
+                ModDelayControls::vibrato(Cents::new(cents), ModulationRate::of(Hz::new(hz)));
             assert_eq!(controls.feedback, Feedback::NONE);
             let x: Vec<f64> = (0..len).map(|n| n as f64).collect();
             let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
