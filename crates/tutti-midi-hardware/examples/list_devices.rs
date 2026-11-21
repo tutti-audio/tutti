@@ -5,7 +5,8 @@
 //! and the Function Blocks it declares where the OS exposes them (ALSA does).
 //! Expect `Midi1` for most of it: most hardware in the world is still MIDI 1.0,
 //! and only a `Midi2` device carries per-note controllers and JR Timestamps to
-//! the wire. Then it waits ten seconds and prints each change.
+//! the wire. Then it prints each change until the watch ends or the process is
+//! interrupted.
 //!
 //! No flag is needed: this crate has no cargo features.
 //!
@@ -13,12 +14,8 @@
 //! cargo run --example list_devices
 //! ```
 
-use std::time::Duration;
-
-use tutti_platform::Instant;
-
 use tutti_midi_device::Endpoint;
-use tutti_midi_hardware::{Devices, RecvTimeoutError};
+use tutti_midi_hardware::Devices;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let executor = tutti_platform::Executor::new();
@@ -53,14 +50,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\nwatching for 10 s; plug or unplug a device");
-    let until = Instant::now() + Duration::from_secs(10);
-    while let Some(left) = until.checked_duration_since(Instant::now()) {
-        match events.recv_timeout(left) {
-            Ok(event) => println!("  {event:?}"),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(ended) => return Err(ended.into()),
-        }
+    println!("\nwatching; plug or unplug a device (Ctrl-C to stop)");
+    loop {
+        println!("  {:?}", tutti_fixtures::block_on(events.recv())?);
     }
-    Ok(())
 }

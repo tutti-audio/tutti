@@ -48,10 +48,11 @@ impl Watched {
         Self { devices, events }
     }
 
-    /// The change that comes within `timeout` and any queued behind it.
-    fn wait(&self, timeout: Duration) -> Vec<DeviceEvent> {
-        self.events
-            .recv_timeout(timeout)
+    /// The change that comes before the hang guard `within` and any queued
+    /// behind it; none if the guard passes first.
+    fn wait(&self, within: Duration) -> Vec<DeviceEvent> {
+        tutti_fixtures::block_on_within(self.events.recv(), within)
+            .and_then(Result::ok)
             .into_iter()
             .chain(self.events.try_iter())
             .collect()
@@ -140,7 +141,7 @@ fn when_listed<T>(devices: &Watched, open: impl Fn() -> crate::Result<T>) -> T {
             Ok(opened) => return opened,
             Err(e) => {
                 assert!(Instant::now() < deadline, "{e}");
-                devices.wait(Duration::from_millis(20));
+                devices.wait(PATIENCE);
             }
         }
     }
@@ -330,7 +331,7 @@ fn two_identical_clients_are_two_devices() {
     };
     while twins().len() < 2 {
         assert!(Instant::now() < deadline, "{:?}", devices.list());
-        devices.wait(Duration::from_millis(50));
+        devices.wait(PATIENCE);
     }
     let twins = twins();
     assert_eq!(twins[0].id.identity(), twins[1].id.identity());
@@ -538,7 +539,7 @@ fn a_watch_that_panics_reports_its_failure() {
     let deadline = Instant::now() + PATIENCE;
     while devices.watch_failure().is_none() {
         assert!(Instant::now() < deadline, "no failure reported");
-        devices.wait(Duration::from_millis(50));
+        devices.wait(PATIENCE);
     }
     assert!(matches!(
         devices.watch_failure(),
@@ -1185,7 +1186,7 @@ fn capability_of(devices: &Watched, name: &str) -> Endpoint {
             return devices.capability(&d.id).expect("a capability");
         }
         assert!(Instant::now() < deadline, "{name} never listed");
-        devices.wait(Duration::from_millis(20));
+        devices.wait(PATIENCE);
     }
 }
 

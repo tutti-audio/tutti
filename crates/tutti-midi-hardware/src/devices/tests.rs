@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::Waker;
 use std::time::Duration;
 
 use super::*;
@@ -13,12 +15,15 @@ use tutti_ump::ProductInstanceId;
 /// Long enough to be a failure, not a race: a wake returns at once.
 const PATIENCE: Duration = Duration::from_secs(30);
 
-/// `recv_timeout` with a long timeout: it returns the event, or fails at the
-/// timeout when the change did not notify the waiter.
-///
-/// Returns the event that woke it and any queued behind it.
+/// Waits for the next change, failing at the hang guard when the change did
+/// not wake the waiter.
+fn next(events: &DeviceEvents) -> std::result::Result<DeviceEvent, WatchFailure> {
+    tutti_fixtures::block_on_within(events.recv(), PATIENCE).expect("an event before the guard")
+}
+
+/// The event that woke the waiter and any queued behind it.
 fn wake(events: &DeviceEvents) -> Vec<DeviceEvent> {
-    let first = events.recv_timeout(PATIENCE).expect("an event");
+    let first = next(events).expect("an event");
     std::iter::once(first).chain(events.try_iter()).collect()
 }
 
@@ -138,13 +143,59 @@ fn a_watch_that_fails_says_so_and_the_list_freezes() {
     assert_eq!(devices.list().len(), 1);
 }
 
+/// With no change reported, a `recv` is pending and takes nothing.
 #[test]
-fn recv_times_out_empty() {
+fn recv_is_pending_while_nothing_changed() {
     let (_devices, events, _fake) = fake();
+    let mut recv = std::pin::pin!(events.recv());
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(recv.as_mut().poll(&mut cx).is_pending());
+    assert!(events.try_iter().next().is_none());
+}
+
+/// A pending `recv` is woken by the change that resolves it, once.
+#[test]
+fn a_change_wakes_the_pending_recv() {
+    let (_devices, events, fake) = fake();
+    let count = Arc::new(WakeCount::default());
+    let waker = Waker::from(Arc::clone(&count));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut recv = std::pin::pin!(events.recv());
+    assert!(recv.as_mut().poll(&mut cx).is_pending());
+    assert_eq!(count.0.load(Ordering::SeqCst), 0);
+    fake.plug(endpoint(1, "Keys"), PortDirection::Input);
+    assert_eq!(count.0.load(Ordering::SeqCst), 1);
     assert!(matches!(
-        events.recv_timeout(Duration::from_millis(20)),
-        Err(RecvTimeoutError::Timeout)
+        recv.as_mut().poll(&mut cx),
+        std::task::Poll::Ready(Ok(DeviceEvent::Added(_)))
     ));
+}
+
+/// A pending `recv` is woken when the watch ends, and resolves to why.
+#[test]
+fn the_end_of_the_watch_wakes_the_pending_recv() {
+    let (_devices, events, fake) = fake();
+    let count = Arc::new(WakeCount::default());
+    let waker = Waker::from(Arc::clone(&count));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut recv = std::pin::pin!(events.recv());
+    assert!(recv.as_mut().poll(&mut cx).is_pending());
+    fake.fail_watch();
+    assert_eq!(count.0.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        recv.as_mut().poll(&mut cx),
+        std::task::Poll::Ready(Err(WatchFailure::Failed(_)))
+    ));
+}
+
+/// A waker that counts its wakes.
+#[derive(Default)]
+struct WakeCount(AtomicUsize);
+
+impl std::task::Wake for WakeCount {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 #[test]
@@ -201,18 +252,9 @@ fn a_failed_watch_ends_the_stream_after_what_it_reported() {
     let (devices, events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     fake.fail_watch();
-    assert!(matches!(
-        events.recv_timeout(PATIENCE),
-        Ok(DeviceEvent::Added(_))
-    ));
-    assert!(matches!(
-        events.recv_timeout(PATIENCE),
-        Err(RecvTimeoutError::Ended(WatchFailure::Failed(_)))
-    ));
-    assert!(matches!(
-        devices.subscribe().recv_timeout(PATIENCE),
-        Err(RecvTimeoutError::Ended(_))
-    ));
+    assert!(matches!(next(&events), Ok(DeviceEvent::Added(_))));
+    assert!(matches!(next(&events), Err(WatchFailure::Failed(_))));
+    assert!(next(&devices.subscribe()).is_err());
 }
 
 /// A dropped `OpenInput` retires its port.
