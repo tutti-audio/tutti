@@ -24,12 +24,15 @@ thiserror = { workspace = true, features = ["std"] }
 
 # `request_priority`: the OS thread-priority call, behind one outcome type. The
 # web has no thread priorities.
-# `Executor`: the run queue (`async-executor`) and the `Task` a spawn returns (`async-task`).
+# `Executor`: the run queue (`async-executor`), the `Task` a spawn returns (`async-task`)
+# and `join`'s `block_on` (`futures-lite`).
 # A loom build leaves the executor out: its models cover `tutti-rt`'s atomics, and
 # `async-executor` does not build under the loom cfg.
 [target.'cfg(not(loom))'.dependencies]
 async-executor.workspace = true
 async-task.workspace = true
+# `join`: `block_on` over the task's handle.
+futures-lite.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 thread-priority = "3.1"

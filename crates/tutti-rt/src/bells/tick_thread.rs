@@ -35,7 +35,7 @@ impl Tick {
         let shared = Arc::clone(shared);
         let task = executor.spawn_dedicated("tutti-bells", None, async move {
             while shared.tick_once(&mut parker) {
-                tutti_platform::yield_now().await;
+                futures_lite::future::yield_now().await;
             }
         })?;
         Ok(Self { task: Some(task) })
