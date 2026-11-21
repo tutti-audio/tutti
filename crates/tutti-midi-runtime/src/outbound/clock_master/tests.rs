@@ -999,8 +999,7 @@ fn a_locate_past_the_song_position_field_is_skipped_and_counted() {
 /// **A refused timecode sends no quarter-frame of its cycle and counts one
 /// refusal a cycle**: a transport at a time no frame count holds (a beat of
 /// 1e300) has no timecode, so piece 0 is refused and pieces 1 to 7 are not
-/// sent either, not even the previous cycle's. (A beat before the start reads
-/// as time 0 on the MTC timeline, so it is a refusal only for the pointer.)
+/// sent either, not even the previous cycle's.
 #[test]
 fn a_refused_timecode_sends_no_quarter_frame_and_counts_one_refusal_a_cycle() {
     let (mut rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
@@ -1021,6 +1020,51 @@ fn a_refused_timecode_sends_no_quarter_frame_and_counts_one_refusal_a_cycle() {
         .count();
     assert_eq!(sent, 0, "{events:?}");
     assert_eq!(rig.cm.take_refused(), 3, "two cycles and the Full Message");
+}
+
+/// **A transport before beat 0 sends no timecode and counts one refusal for
+/// the stretch, then the grid starts on the first block past it**: MTC has no
+/// time before the start, so a count-in sends neither a Full Message nor
+/// quarter-frames (not time 0), however many blocks it lasts. Past beat 0 the
+/// quarter-frames resume with piece 0.
+#[test]
+fn a_transport_before_beat_0_sends_no_timecode_and_counts_the_stretch_once() {
+    let (mut rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
+    rig.messages = SyncMessages {
+        mtc: true,
+        rate: MtcRate::Fps25,
+        ..SyncMessages::OFF
+    };
+    // Two beats of count-in at 120 BPM: 48 000 frames, ten blocks of 4 800
+    // (a fifth of a beat each), the transport running on.
+    transport.set_playing(true);
+    for block in 0..10 {
+        transport.set_beat(-2.0 + 0.2 * f64::from(block));
+        rig.tick(4_800);
+    }
+    let timecodes = |events: &[_]| -> Vec<u8> {
+        events
+            .iter()
+            .filter_map(|e: &UmpAt| match system(e.1) {
+                Some(System::TimeCode(data)) => Some(data.get() >> 4),
+                _ => None,
+            })
+            .collect()
+    };
+    let count_in = drain_all(&cons);
+    assert_eq!(timecodes(&count_in), Vec::<u8>::new(), "{count_in:?}");
+    assert_eq!(
+        rig.cm.take_refused(),
+        2,
+        "the Full Message at the start and the stretch, once"
+    );
+
+    // At beat 0 the grid starts on its piece 0 and runs in order.
+    transport.set_beat(0.0);
+    rig.tick(4_800);
+    let pieces = timecodes(&drain_all(&cons));
+    assert_eq!(pieces, [0, 1, 2, 3, 4, 5, 6, 7, 0, 1]);
+    assert_eq!(rig.cm.take_refused(), 0);
 }
 
 /// **A master sends on the Group it was built with**: Start, Timing Clocks,

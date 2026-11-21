@@ -184,9 +184,10 @@ struct MtcGrid {
     /// The grid was just restarted: its first piece 0 is still to be placed
     /// on an even frame ([`ClockMaster::tick_mtc`]).
     align: bool,
-    /// The cycle in progress had no timecode to state (its piece 0 was refused):
-    /// its remaining pieces are not sent either, so no receiver reads half of
-    /// a position or the previous cycle's.
+    /// The cycle in progress had no timecode to state (its piece 0 was refused),
+    /// or the passes since the grid restarted have no MIDI time (before beat
+    /// 0): nothing of it is sent, so no receiver reads half of a position or
+    /// the previous cycle's, and the refusal is counted once.
     skipped: bool,
 }
 
@@ -512,8 +513,9 @@ impl ClockMaster {
         emit: &mut impl FnMut(UmpAt),
     ) {
         let per_sample = tutti_music::beats_per_sample(transport.tempo, sample_rate);
-        let seconds = Seconds::new(samples_at(beat, per_sample) / sample_rate.get());
-        let Some(position) = MtcTimeCode::at(seconds, self.fps) else {
+        let Some(position) = samples_at(beat, per_sample).and_then(|samples| {
+            MtcTimeCode::at(Seconds::new(samples / sample_rate.get()), self.fps)
+        }) else {
             self.refused = self.refused.saturating_add(1);
             return;
         };
@@ -660,8 +662,18 @@ impl ClockMaster {
         let at = self.mtc.frames;
         let mut next = self.mtc.next;
 
-        // The sample position of the block's first frame, from beat 0.
-        let block_pos = samples_at(beat, beats_per_sample);
+        // The sample position of the block's first frame, from beat 0. A pass
+        // with none sends no quarter-frame and leaves the grid restarted, to
+        // align on the first pass that has one; the stretch counts one
+        // refusal.
+        let Some(block_pos) = samples_at(beat, beats_per_sample) else {
+            if !self.mtc.skipped {
+                self.refused = self.refused.saturating_add(1);
+            }
+            self.restart_mtc();
+            self.mtc.skipped = true;
+            return;
+        };
         // A restarted grid puts its first piece 0 on the next even-frame
         // boundary of the timeline (a multiple of two frames' samples from
         // beat 0), so the label is the frame it goes out on. The grid then
@@ -760,14 +772,12 @@ fn frame_offset(frames: usize, block_size: usize) -> Offset {
 }
 
 /// The sample position of `beat` from beat 0 at a steady `beats_per_sample`:
-/// the timeline the MTC grid and the Full Message share. Before zero, or at a
-/// tempo that does not advance, it is 0.
-fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
-    if beats_per_sample > BeatDuration::new(0.0) {
-        (beat.get() / beats_per_sample.get()).max(0.0)
-    } else {
-        0.0
-    }
+/// the timeline the MTC grid and the Full Message share. A beat before zero
+/// (or not a number), or a tempo that does not advance, has none: MTC states
+/// no time there.
+fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> Option<f64> {
+    let samples = beat.get() / beats_per_sample.get();
+    (beats_per_sample > BeatDuration::new(0.0) && samples >= 0.0).then_some(samples)
 }
 
 /// The eight Quarter Frames of the cycle that starts at `position` from
