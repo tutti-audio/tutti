@@ -212,12 +212,14 @@ fn restore_round_trip(hosting: Hosting) {
     set(&s, 0.9);
     blocks(&mut s);
     let main = tutti_fixtures::main_thread();
-    // A plugin in this process hands out the main-thread arm of each value.
+    // The arm of each value is the node's hosting.
+    let in_process = matches!(hosting, Hosting::InProcess);
     let save = s
         .save_state(&node, tutti_plugin_types::StateUse::Project)
         .expect("a node holds the plugin");
-    assert!(
+    assert_eq!(
         matches!(save, tutti_session::SaveState::InProcess(_)),
+        in_process,
         "{save:?}"
     );
     let state = save.perform(main).expect("a state");
@@ -225,8 +227,9 @@ fn restore_round_trip(hosting: Hosting) {
     set(&s, 0.1);
     blocks(&mut s);
     let restore = s.restore_state(&node, state).expect("its own plugin's");
-    assert!(
+    assert_eq!(
         matches!(restore, tutti_session::RestoreState::InProcess(_)),
+        in_process,
         "{restore:?}"
     );
     let restored = restore.perform(main).expect("the plugin takes it");
