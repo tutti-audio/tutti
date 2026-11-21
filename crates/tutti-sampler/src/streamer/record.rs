@@ -26,9 +26,9 @@ use super::command::StreamId;
 use super::decode::panic_message;
 use super::io::refill::Refilled;
 use super::prefetch::RegionOut;
-use super::status::{Served, StatusCell, StreamFault};
+use super::status::{Served, StatusCell, StreamFailure};
 use crate::Loop;
-use crate::voice::Direction;
+use crate::voice::PlayDirection;
 use tutti_rt::{Exclusive, Reader, RingFloat};
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
@@ -65,7 +65,7 @@ pub(crate) struct Record<F: RingFloat> {
     /// life, so a fully-buffered (hence cold) stream is never evicted
     /// mid-read.
     _pin: StreamPin,
-    /// What the control side reads of this stream ([`Stream::status`](crate::Stream::status)).
+    /// What the control side reads of this stream ([`StreamHandle::status`](crate::StreamHandle::status)).
     status: Arc<StatusCell>,
     /// How full the ring was at the last refill, as a fraction of its
     /// capacity: what the loop asks whether the stream is healthy by. A ring
@@ -83,10 +83,10 @@ pub(crate) struct Record<F: RingFloat> {
     /// cell opens holding.
     asked_loop: Option<Loop>,
     /// The direction the control side asks for, held as the loop is.
-    direction: Exclusive<Reader<Direction>>,
+    direction: Exclusive<Reader<PlayDirection>>,
     /// The direction the stream was last asked for: forwards, the value its
     /// cell opens holding.
-    asked_direction: Direction,
+    asked_direction: PlayDirection,
 }
 
 impl<F: RingFloat> std::fmt::Debug for Record<F> {
@@ -107,7 +107,7 @@ impl<F: RingFloat> Record<F> {
         pin: StreamPin,
         status: Arc<StatusCell>,
         looping: Reader<Option<Loop>>,
-        direction: Reader<Direction>,
+        direction: Reader<PlayDirection>,
     ) -> Self {
         Self {
             phase: Phase::Opening,
@@ -122,7 +122,7 @@ impl<F: RingFloat> Record<F> {
             looping: Exclusive::new(looping),
             asked_loop: None,
             direction: Exclusive::new(direction),
-            asked_direction: Direction::Forward,
+            asked_direction: PlayDirection::Forward,
         }
     }
 
@@ -138,7 +138,7 @@ impl<F: RingFloat> Record<F> {
 
     /// The direction the control side now asks for, when it differs from the
     /// one last asked. A stream starts asked for forwards.
-    pub(super) fn direction_asked(&mut self) -> Option<Direction> {
+    pub(super) fn direction_asked(&mut self) -> Option<PlayDirection> {
         let ask = *self.direction.get_mut().lend();
         (ask != self.asked_direction).then(|| {
             self.asked_direction = ask;
@@ -148,7 +148,7 @@ impl<F: RingFloat> Record<F> {
 
     /// Runs `work` on this stream under `catch_unwind`. A panic is this stream's
     /// fault, not the streamer's: the stream is faulted
-    /// ([`StreamFault::Panicked`]) and marked for removal, and `None` comes
+    /// ([`StreamFailure::Panicked`]) and marked for removal, and `None` comes
     /// back; every other stream goes on.
     pub(super) fn contained<R>(&mut self, work: impl FnOnce(&mut Self) -> R) -> Option<R> {
         match catch_unwind(AssertUnwindSafe(|| work(self))) {
@@ -159,7 +159,7 @@ impl<F: RingFloat> Record<F> {
                     self.id(),
                     panic_message(payload.as_ref())
                 );
-                self.status.fault(StreamFault::Panicked);
+                self.status.fault(StreamFailure::Panicked);
                 self.dead = true;
                 None
             }
@@ -173,7 +173,7 @@ impl<F: RingFloat> Record<F> {
     pub(super) fn settle(&mut self, refilled: &Refilled) {
         self.fill = refilled.fill;
         if !refilled.read_ok {
-            self.status.fault(StreamFault::Decode);
+            self.status.fault(StreamFailure::Decode);
         }
         let ended = self
             .out
@@ -224,7 +224,7 @@ impl<F: RingFloat> Record<F> {
 /// the whole table.
 impl<F: RingFloat> Drop for Record<F> {
     fn drop(&mut self) {
-        self.status.fault(StreamFault::StreamerGone);
+        self.status.fault(StreamFailure::StreamerGone);
         self.status.close();
     }
 }

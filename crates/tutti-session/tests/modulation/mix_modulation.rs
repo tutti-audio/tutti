@@ -130,7 +130,7 @@ fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
     settle(&mut s);
     figure(&mut s, 0.75, "the base moved while routed");
     assert_eq!(
-        s.graph_ref().mix(node).unwrap(),
+        s.get(node.mix()).unwrap(),
         Mix::new(0.5),
         "the base, not the lane"
     );
@@ -144,7 +144,7 @@ fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
     settle(&mut s);
     figure(&mut s, 1.0, "clamped to the blend");
     assert_eq!(
-        s.graph_ref().mix(node).unwrap(),
+        s.get(node.mix()).unwrap(),
         Mix::new(0.875),
         "the knob is the mix"
     );

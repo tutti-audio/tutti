@@ -20,11 +20,11 @@
 //!   fields of its track ([`Lead`]).
 //!   The file layer does not translate: a MIDI 1.0 Note On at velocity 0 stays one.
 //! - **Lossless in its events.** A read, a write and a read give the same file:
-//!   SysEx and meta included, but for what a read normalizes (below). Running status and a Delta Clockstamp's spelling
+//!   SysEx and meta included, but for what a read repairs (below). Running status and a Delta Clockstamp's spelling
 //!   may differ. A Clip File read leaves out what is no event: its Null messages
 //!   (a write puts them back where a long gap needs them), JR Clock and JR
 //!   Timestamp messages, and the Utility messages M2-104 does not define.
-//! - **A track's opening metas are fields, a reader normalizes.** A [`Track`]
+//! - **A track's opening metas are fields, a reader repairs.** A [`Track`]
 //!   holds its Track Name ([`Track::named`]) and nothing of the file's other
 //!   opening metas, so a track cloned out of a file carries none. The Sequence
 //!   Number, SMPTE Offset and copyright notice are those of the [`LeadTrack`]
@@ -39,7 +39,7 @@
 //!   A read accepts a file that has such an event out of place, makes it
 //!   writable (a late or duplicate one dropped, one at tick 0 but not first
 //!   moved into the field, a SysEx message closed) and lists each change in
-//!   [`MidiFile::normalized`].
+//!   [`MidiFile::repairs`].
 //!   SMF 1.0 section 2.2 asks every file to specify its tempo and time
 //!   signature, so a file is never without them: [`MidiFile::smf`] and a read
 //!   add a Set Tempo and a Time Signature at tick 0 of the first track of a
@@ -48,7 +48,7 @@
 //!   minute in 4/4 a reader assumes without them. A format above 2 is read as
 //!   format 2, each track its own pattern (section 2.1). An SMPTE division gets
 //!   them too, where they are inert. A read lists each one it added
-//!   ([`Normalized::DefaultTempo`], [`Normalized::DefaultTimeSignature`]).
+//!   ([`ReadRepair::DefaultTempo`], [`ReadRepair::DefaultTimeSignature`]).
 //! - **Truncation is an error** ([`SmfParseError::ChunkCutOff`] and its siblings, with the position it was found at), not a shorter file.
 //! - **Format 2** keeps its sequences apart: [`MidiFile::timebase`] gives it
 //!   [`MetricalSequences`] (or [`SmpteSequences`]), whose sequences each have
@@ -166,11 +166,11 @@ pub use config::{OutOfOrder, Refusal, TrackPart, TracksError};
 pub use error::{ReadError, WriteError};
 pub use fault::SmfParseError;
 pub use file::{
-    Altered, Converted, DropReason, Dropped, FileEvent, Layout, Lead, LeadTrack, LyricChange,
-    MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
-    MicrosPerQuarterOutOfRange, MidiFile, Moved, Normalized, OtherMetaKind,
+    Altered, Converted, DropReason, Dropped, FileEvent, Layout, Lead, LeadRepair, LeadTrack,
+    LyricChange, MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView,
+    MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, OtherMetaKind,
     OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Pattern,
-    Placement, RefusedTimeSignature, SmfFormat, SmfPart, SmfTimeline, SmpteFractionalFrames,
+    ReadRepair, RefusedTimeSignature, SmfFormat, SmfPart, SmfTimeline, SmpteFractionalFrames,
     SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView, SysEx,
     TextKind, Tick, Timebase, TimelineDrop, ToClipError, Track,
 };

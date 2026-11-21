@@ -1,8 +1,8 @@
-//! The controllers a source leaves off their normal position, per [`Lane`].
+//! The controllers a source leaves off their normal position, per [`GroupChannelIndex`].
 
 use crate::{
-    BendValue, CCNumber, ControlValue, Lane, Message, MidiGroup, Protocol, U7, U14, Ump, Voice1,
-    Voice2,
+    BendValue, CCNumber, ControlValue, GroupChannelIndex, Message, MidiGroup, Protocol, U7, U14,
+    Ump, Voice1, Voice2,
 };
 
 /// The hold controllers, in bit order: sustain, sostenuto, soft pedal, hold 2.
@@ -17,7 +17,7 @@ const BEND: u8 = 4;
 /// The bits of a lane's state that are off their normal position.
 const HELD: u16 = 0x1f;
 
-/// Which controllers are off their normal position, per [`Lane`]: the four
+/// Which controllers are off their normal position, per [`GroupChannelIndex`]: the four
 /// hold pedals and the pitch bend. 1 KiB, one `u16` per lane, and no
 /// allocation; a caller that wants it off the stack boxes it.
 ///
@@ -48,7 +48,7 @@ const HELD: u16 = 0x1f;
 pub struct HeldControllers {
     /// The held bits in the low byte, and the ones whose release is owed in the
     /// high byte (the same bits).
-    lanes: [u16; Lane::COUNT],
+    lanes: [u16; GroupChannelIndex::COUNT],
     /// How many controllers are held.
     len: u32,
     /// Some controller is owed: a block with no debt pays in one test.
@@ -75,7 +75,7 @@ impl HeldControllers {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            lanes: [0; Lane::COUNT],
+            lanes: [0; GroupChannelIndex::COUNT],
             len: 0,
             owing: false,
         }
@@ -146,7 +146,7 @@ impl HeldControllers {
             }
             _ => return,
         };
-        let Some(lane) = Lane::new(protocol, address) else {
+        let Some(lane) = GroupChannelIndex::new(protocol, address) else {
             return;
         };
         let state = &mut self.lanes[lane.index()];
@@ -157,7 +157,7 @@ impl HeldControllers {
     }
 
     /// The message that returns control `bit` of `lane` to its normal position.
-    fn reset(lane: Lane, bit: u8) -> Ump {
+    fn reset(lane: GroupChannelIndex, bit: u8) -> Ump {
         let address = lane.address();
         let pedal = PEDALS.get(usize::from(bit)).copied();
         // Each pedal returns to 0 (MIDI 1.0 Detailed Specification, Control
@@ -192,8 +192,8 @@ impl HeldControllers {
     }
 
     /// The held controllers' (lane, bit), in lane and bit order.
-    fn held(&self) -> impl Iterator<Item = (Lane, u8)> + '_ {
-        Lane::all()
+    fn held(&self) -> impl Iterator<Item = (GroupChannelIndex, u8)> + '_ {
+        GroupChannelIndex::all()
             .zip(&self.lanes)
             .filter(|(_, state)| **state & HELD != 0)
             .flat_map(|(lane, &state)| {
@@ -217,7 +217,7 @@ impl HeldControllers {
         Some(Self::reset(lane, bit))
     }
 
-    fn forget(&mut self, lane: Lane, bit: u8) {
+    fn forget(&mut self, lane: GroupChannelIndex, bit: u8) {
         let state = &mut self.lanes[lane.index()];
         self.len -= u32::from(*state >> bit & 1);
         *state &= !(0x101 << bit);
@@ -236,7 +236,7 @@ impl HeldControllers {
         if self.len == 0 {
             return true;
         }
-        for lane in Lane::all() {
+        for lane in GroupChannelIndex::all() {
             if group.is_some_and(|g| lane.address().group != g) {
                 continue;
             }
@@ -262,7 +262,7 @@ impl HeldControllers {
         if self.len == 0 {
             return;
         }
-        for lane in Lane::all() {
+        for lane in GroupChannelIndex::all() {
             for bit in 0..=BEND {
                 let state = self.lanes[lane.index()];
                 if state >> bit & 1 == 0 {
@@ -286,7 +286,7 @@ impl HeldControllers {
             return;
         }
         let mut left = false;
-        for lane in Lane::all() {
+        for lane in GroupChannelIndex::all() {
             for bit in 0..=BEND {
                 if self.lanes[lane.index()] >> (8 + bit) & 1 == 0 {
                     continue;

@@ -57,7 +57,7 @@ tutti-clap-host  setter  crates/tutti-clap-host/src/instance/thread_pool.rs::Cla
 
 # tutti-codec
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create
-tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
+tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::new
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_path
 
@@ -279,7 +279,6 @@ tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_feed
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback

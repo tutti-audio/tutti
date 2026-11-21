@@ -57,8 +57,8 @@ use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, Voice1, parse_exact}
 use super::{SmfDivision, SmfParts};
 use crate::file::split_extra;
 use crate::file::{
-    FileEvent, Lead, MalformedMeta, Meta, MicrosPerQuarter, Normalized, Opening, OtherMetaKind,
-    Placement, SmfFormat, SmpteOffset, SysEx, TextKind, Tick, Track,
+    FileEvent, Lead, LeadRepair, MalformedMeta, Meta, MicrosPerQuarter, Opening, OtherMetaKind,
+    ReadRepair, SmfFormat, SmpteOffset, SysEx, TextKind, Tick, Track,
 };
 use crate::{ReadError, SmfParseError};
 
@@ -407,15 +407,15 @@ struct Leads {
 }
 
 /// Settles a track's `lead` at `tick` into its field, and answers what the file
-/// had wrong: the event with its [`Placement`] when it is not where SMF 1.0
+/// had wrong: the event with its [`LeadRepair`] when it is not where SMF 1.0
 /// section 3.3 puts it. `leading` says the track has had only meta events at
 /// tick 0 so far.
-fn settle(track: &mut Leads, lead: Lead, tick: Tick, leading: bool) -> Option<(Lead, Placement)> {
+fn settle(track: &mut Leads, lead: Lead, tick: Tick, leading: bool) -> Option<(Lead, LeadRepair)> {
     // A Sequence Number and an SMPTE Offset are at the very start; a name and
     // a notice only at time 0.
     let at_start_only = matches!(lead, Lead::SequenceNumber(_) | Lead::SmpteOffset(_));
     if tick != Tick(0) || (at_start_only && !leading) {
-        return Some((lead, Placement::Late));
+        return Some((lead, LeadRepair::Late));
     }
     let taken = match lead {
         Lead::SequenceNumber(_) => track.number.is_some(),
@@ -424,9 +424,9 @@ fn settle(track: &mut Leads, lead: Lead, tick: Tick, leading: bool) -> Option<(L
         Lead::Copyright(_) => track.copyright.is_some(),
     };
     if taken {
-        return Some((lead, Placement::Duplicate));
+        return Some((lead, LeadRepair::Duplicate));
     }
-    let moved = (!at_start_only && !leading).then(|| (lead.clone(), Placement::Moved));
+    let moved = (!at_start_only && !leading).then(|| (lead.clone(), LeadRepair::Moved));
     match lead {
         Lead::SequenceNumber(number) => track.number = Some(number),
         Lead::TrackName(name) => track.name = Some(name),
@@ -445,13 +445,13 @@ fn close_sysex(
     track: usize,
     events: &mut [(Tick, FileEvent)],
     raw: &[usize],
-    changes: &mut Vec<Normalized>,
+    changes: &mut Vec<ReadRepair>,
 ) {
     let mut close = |events: &mut [(Tick, FileEvent)], index: usize| {
         let (at, event) = &mut events[index];
         if let FileEvent::SysEx(SysEx::Start(data)) = event {
             *event = FileEvent::SysEx(SysEx::Complete(std::mem::take(data)));
-            changes.push(Normalized::SysExClosed { track, at: *at });
+            changes.push(ReadRepair::SysExClosed { track, at: *at });
         }
     };
     let mut open: Option<usize> = None;
@@ -482,7 +482,7 @@ fn close_sysex(
 /// A track body: its events at absolute ticks, its end, and what was changed
 /// to make it writable (`index` is the track's). The last event, if it is an
 /// End of Track (`FF 2F 00`), is the track's end and not an event.
-fn track(index: usize, body: &[u8]) -> Result<(Track, Leads, Vec<Normalized>), Failure> {
+fn track(index: usize, body: &[u8]) -> Result<(Track, Leads, Vec<ReadRepair>), Failure> {
     let items = steps(body)
         .scan(0u64, |tick, step| {
             Some(step.map(|s| {
@@ -519,23 +519,23 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Leads, Vec<Normalized>), F
                 raw.push(events.len());
                 let bytes = std::iter::once(0xF0).chain(data.iter().copied()).collect();
                 events.push((tick, FileEvent::Escape(bytes)));
-                changes.push(Normalized::SysExEscaped {
+                changes.push(ReadRepair::SysExEscaped {
                     track: index,
                     at: tick,
                 });
             }
             Item::Lead(lead, extra) => {
                 if !extra.is_empty() {
-                    changes.push(Normalized::Lead {
+                    changes.push(ReadRepair::Lead {
                         track: index,
                         at: tick,
                         lead: lead.clone(),
-                        placement: Placement::Truncated(extra),
+                        placement: LeadRepair::Truncated(extra),
                     });
                 }
                 changes.extend(
                     settle(&mut leads, lead, tick, leading).map(|(lead, placement)| {
-                        Normalized::Lead {
+                        ReadRepair::Lead {
                             track: index,
                             at: tick,
                             lead,
@@ -606,14 +606,14 @@ pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
     if header.format == SmfFormat::SingleTrack && declared != 1 {
         return Err(smf_error(0, SmfParseError::FormatZeroTracks));
     }
-    let (mut tracks, mut found, mut normalized) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut tracks, mut found, mut repairs) = (Vec::new(), Vec::new(), Vec::new());
     for (index, &(at, body)) in chunks.iter().enumerate() {
         // The body starts after the chunk's type and length.
         let (read, leads, changes) =
             track(index, body).map_err(|f| refused(Some(index), at + 8 + f.at, &f.faults))?;
         tracks.push(read);
         found.push(leads);
-        normalized.extend(changes);
+        repairs.extend(changes);
     }
     // SMF 1.0 section 3.3: a format 0 or 1 file's one sequence is numbered in
     // its first track, a format 1 file's SMPTE Offset is stored with its tempo
@@ -627,11 +627,11 @@ pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
             copyright = leads.copyright.take();
         }
         let mut outside = |lead: Option<Lead>| {
-            normalized.extend(lead.map(|lead| Normalized::Lead {
+            repairs.extend(lead.map(|lead| ReadRepair::Lead {
                 track: index,
                 at: Tick(0),
                 lead,
-                placement: Placement::NotInFirstTrack,
+                placement: LeadRepair::NotInFirstTrack,
             }));
         };
         if index > 0 {
@@ -654,6 +654,6 @@ pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
         tracks,
         openings,
         copyright,
-        normalized,
+        repairs,
     })
 }

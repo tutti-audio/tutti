@@ -68,15 +68,15 @@
 //!
 //! - **one-shot**, like scipy: `x(&config, view, rate)` over a whole buffer;
 //! - **streaming**: the config is a [`Measure`] and `config.measure(context)`
-//!   makes its meter, which is a [`Meter`]: `meter.push(view, &mut out)` takes
+//!   makes its meter, which is a [`StreamMeter`]: `meter.push(view, &mut out)` takes
 //!   the audio in chunks of any length and extends `out` with the items each
-//!   chunk completes, and `meter.finish()` reads the [`Output`](Meter::Output)
+//!   chunk completes, and `meter.finish()` reads the [`Output`](StreamMeter::Output)
 //!   of the whole run. `meter.reset()` starts over. Import the two traits to
 //!   call them; a consumer that is generic over `A: Measure<S>` takes any analysis
-//!   (a [`Meter`] is not object-safe).
+//!   (a [`StreamMeter`] is not object-safe).
 //!
 //! The one-shot feeds a meter the whole buffer, so the two cannot drift, with
-//! one stated exception: `chroma` under `Tuning::Estimate` finds the tuning in a
+//! one stated exception: `chroma` under `TuningReference::Estimate` finds the tuning in a
 //! first pass over the whole buffer, which a streaming meter cannot do. A meter
 //! changes only through `push` and `reset`, counts the frames pushed (a push
 //! takes no position) and owns its transform scratch. `push` returns a `Result`
@@ -104,7 +104,7 @@
 //! | waveform blocks | [`PeakConfig`] | [`summarize`] | [`PeakMeter`] | `ChannelLayout` | `Interleaved` | [`ChannelBlock`], a whole block of a channel | [`PeakBlocks`] | no: grows per block |
 //! | vectorscope | [`VectorscopeConfig`] | [`vectorscope_points`] | [`VectorscopeMeter`] | `()` | `StereoPlanes` | [`ScopePoint`] | `()` | no: grows the caller's collection |
 //!
-//! [`StereoSmoother`] (of a [`Ballistics`](tutti_units::Ballistics)) is not a [`Meter`]: it is a display
+//! [`StereoSmoother`] (of a [`Ballistics`](tutti_units::Ballistics)) is not a [`StreamMeter`]: it is a display
 //! filter over stereo level readings, with no stream behind it. It allocates
 //! nothing and costs a few flops, so it is fit for the audio thread.
 //!
@@ -224,7 +224,7 @@
 //! A config is `Config::new(required..)` and then chained options (`self` in,
 //! a bare name, `Self` out); `new` takes only what has no default. An option
 //! cannot fail: a setting with one range of its own is a range-checked type
-//! (`Harmonics`, `Tightness`, `SpectrumFloor`, `NoteSpan`, `FiniteLevel`,
+//! (`HarmonicCount`, `Tightness`, `SpectrumFloor`, `NoteSpan`, `FiniteLevel`,
 //! `PitchHop`, `OnsetThreshold`, ...) whose `new` refuses a value outside the
 //! range, and a setting that spans two values is one type (`FrequencyBand`,
 //! `TempoRange`: a low below a high). What depends on the rate, the framing or
@@ -308,7 +308,7 @@
 //!   takes your own pitch track, [`frame_levels`] and onsets;
 //!   [`VelocityRange`] maps a level to a MIDI velocity.
 //! - Harmony: [`chroma()`] with a [`ChromaConfig`] folds spectral peaks into
-//!   twelve pitch classes and estimates the [`Tuning`], or incrementally with a
+//!   twelve pitch classes and estimates the [`TuningReference`], or incrementally with a
 //!   [`ChromaMeter`]; [`estimate_key`] finds a [`Key`] by
 //!   Krumhansl-Schmuckler over a [`KeyProfile`]; [`detect_chords`] with a
 //!   [`ChordConfig`] smooths triads into [`ChordSpan`]s by Viterbi.
@@ -360,11 +360,11 @@ pub use error::{Error, Result};
 pub use framing::Framing;
 #[cfg(test)]
 pub(crate) use measure::fold_uneven;
-pub use measure::{Measure, Meter};
+pub use measure::{Measure, StreamMeter};
 pub use meters::chroma::{
-    Chroma, ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
-    HarmonicDecayError, Harmonics, HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset,
-    TuningOffsetError, chroma,
+    Chroma, ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicCount,
+    HarmonicCountError, HarmonicDecay, HarmonicDecayError, PeakFloor, PeakFloorError, TuningOffset,
+    TuningOffsetError, TuningReference, chroma,
 };
 pub use meters::loudness::{
     Loudness, LoudnessConfig, LoudnessMeter, TruePeakConfig, TruePeakMeter, WindowedLoudnessConfig,

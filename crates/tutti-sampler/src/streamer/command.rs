@@ -8,7 +8,7 @@ tutti_rt::id! {
     /// One open stream's identity: minted on the control side when the open is
     /// asked for ([`DiskStreamer::open`](crate::DiskStreamer::open)), never
     /// reused, and what every command about the stream names. A host is
-    /// handed one ([`Stream::id`](crate::Stream::id),
+    /// handed one ([`StreamHandle::id`](crate::StreamHandle::id),
     /// [`StreamReader::id`](crate::StreamReader::id)); a number it makes up
     /// names no open stream, which the streamer ignores.
     pub struct StreamId;
@@ -22,7 +22,7 @@ pub(crate) enum StreamerCommand<F: RingFloat> {
     /// table, live.
     Adopt(Box<Record<F>>),
     /// End a stream: its record, and with it its ring and region, goes in the
-    /// step that handles this. Sent by `Drop for Stream`. A stream the
+    /// step that handles this. Sent by `Drop for StreamHandle`. A stream the
     /// streamer no longer holds ignores it.
     Close { stream: StreamId },
 

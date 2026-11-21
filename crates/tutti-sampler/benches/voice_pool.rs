@@ -35,7 +35,8 @@ use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, Manual, MemorySource, Playback, SlotId,
-    StepOutcome, Stream, StreamStart, Voice, VoiceNode, VoicePool, VoicePoolHandle, VoiceSource,
+    StepOutcome, StreamHandle, StreamStart, Voice, VoiceNode, VoicePool, VoicePoolHandle,
+    VoiceSource,
 };
 use tutti_units::{Beat, Bpm, Cents, PlaybackRate, SampleRate, StretchFactor};
 
@@ -233,7 +234,7 @@ struct Pool64 {
 /// A voice the pool bench adds: a memory source, or a disk voice with its stream.
 enum Built {
     Memory(MemorySource<f32>),
-    Disk(DiskVoice<f32>, Stream<f32>),
+    Disk(DiskVoice<f32>, StreamHandle<f32>),
 }
 
 /// The stereo tone every `pool64` voice reads, sample `i`.

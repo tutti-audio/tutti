@@ -132,7 +132,7 @@ fn an_onset_that_finds_no_free_slot_is_counted_and_not_started() {
     assert_eq!((cloud.dropped(), cloud.active()), (0, 0));
 }
 
-fn onsets(seed: u64, settings: &GrainSettings, count: usize) -> Vec<Onset> {
+fn onsets(seed: u64, settings: &GrainSettings, count: usize) -> Vec<GrainStart> {
     let mut scheduler = GrainScheduler::new(seed);
     let mut list = vec![scheduler.restart(Samples::ZERO, settings, RATE).unwrap()];
     while list.len() < count {

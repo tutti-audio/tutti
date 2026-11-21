@@ -18,7 +18,8 @@
 //!   nothing holds it open); dropping the encoder first removes it, and so does
 //!   `finish` after a failed `write`.
 //! - `FileOut` is the file sink, `FileIn`'s mirror: a `Sink` over an
-//!   `Encoder`, created from a `Spec` and a path, for any `Format` the build can
+//!   `Encoder`, created from a `Spec` and a `File` the caller opened (and so
+//!   chose to replace or refuse what was there), for any `Format` the build can
 //!   write. It keeps whole frames only, keeps the first write error (later
 //!   writes are skipped and return `SinkFailed`) and `finalize` returns that
 //!   error, else the result of `finish`. It writes in place rather than staged,

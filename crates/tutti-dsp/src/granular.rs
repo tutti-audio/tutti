@@ -91,7 +91,7 @@ impl GrainSettings {
 
 /// One grain's start: the output frame it begins at and where in the source it reads from.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Onset {
+pub struct GrainStart {
     /// The output frame the grain's first sample is at.
     pub frame: Samples,
     /// Where the grain's first sample is in the source: `0` its first frame, `1` its end.
@@ -99,7 +99,7 @@ pub struct Onset {
 }
 
 /// The places and times of grains: seeded, so the same seed and settings give the same
-/// [`Onset`]s.
+/// [`GrainStart`]s.
 ///
 /// Onset `k` of a run is at the whole frame of `k * rate / density` after the run's first,
 /// computed from the index, never summed: it is exact however long the run, and an onset
@@ -153,7 +153,7 @@ impl GrainScheduler {
     }
 
     /// The onset at the run's current index, its timing moved by `settings`' jitter.
-    fn onset(&mut self, settings: &GrainSettings, rate: SampleRate) -> Onset {
+    fn onset(&mut self, settings: &GrainSettings, rate: SampleRate) -> GrainStart {
         let nominal = Self::nominal(self.base, self.index, self.density, rate);
         let (timing, place) = (self.draw().get(), self.draw().get());
         let interval = Self::nominal(SampleSpan::ZERO, 1, self.density, rate);
@@ -165,7 +165,7 @@ impl GrainScheduler {
         } else {
             nominal + moved
         };
-        Onset {
+        GrainStart {
             frame: time.to_samples_floor(),
             position: Normalized::clamped(
                 settings.position.get() + settings.position_jitter.get() * place,
@@ -185,7 +185,7 @@ impl GrainScheduler {
         at: Samples,
         settings: &GrainSettings,
         rate: SampleRate,
-    ) -> Option<Onset> {
+    ) -> Option<GrainStart> {
         if !Self::valid(settings) {
             return None;
         }
@@ -197,7 +197,7 @@ impl GrainScheduler {
 
     /// The onset after the last one. A density that differs from the run's starts a new run
     /// from the last onset's nominal time. `None` when the density is not above zero.
-    pub fn next(&mut self, settings: &GrainSettings, rate: SampleRate) -> Option<Onset> {
+    pub fn next(&mut self, settings: &GrainSettings, rate: SampleRate) -> Option<GrainStart> {
         if !Self::valid(settings) {
             return None;
         }
@@ -343,7 +343,7 @@ pub struct Granular<F: Float> {
     rate: SampleRate,
     scheduler: GrainScheduler,
     /// The onset to start next, `None` until one is placed.
-    pending: Option<Onset>,
+    pending: Option<GrainStart>,
     /// Output frames rendered since the start.
     now: Samples,
     slots: Vec<Option<Grain<F>>>,
@@ -389,7 +389,7 @@ impl<F: Float> Granular<F> {
     }
 
     /// Starts the grain of `onset` in a free slot, or counts it dropped.
-    fn start(&mut self, onset: Onset, settings: &GrainSettings) {
+    fn start(&mut self, onset: GrainStart, settings: &GrainSettings) {
         let Some(slot) = self.slots.iter_mut().find(|s| s.is_none()) else {
             self.dropped += 1;
             return;

@@ -60,6 +60,8 @@ mod headroom {
     use tutti_buffers::ChannelLayout;
     use tutti_codec::{Format, Pcm};
 
+    const RATE: SampleRate = SampleRate::SR_48K;
+
     fn config(pcm: Pcm, dither: Option<DitherShape>) -> FileTarget {
         let target = FileTarget::new("unused.wav", Format::Wav(pcm), ChannelLayout::STEREO);
         match dither {
@@ -84,7 +86,7 @@ mod headroom {
                 (Some(DitherShape::Rectangular), 1.5),
                 (Some(DitherShape::Triangular), 2.0),
             ] {
-                let got = headroom_ceiling(&config(pcm, dither)).expect("quantizes");
+                let got = headroom_ceiling(&config(pcm, dither), RATE).expect("quantizes");
                 let want = below_full_scale(bits, lsbs);
                 assert!(
                     (got.get() - want).abs() < 1e-12,
@@ -92,6 +94,36 @@ mod headroom {
                 );
             }
         }
+    }
+
+    /// With noise shaping the ceiling drops by the feedback: the dither's amplitude plus half
+    /// an LSB (the largest recorded error) times the filter's `Σ|c_k|`, designed for the
+    /// file's rate, which is the resample target when there is one.
+    #[test]
+    fn noise_shaping_lowers_the_ceiling_by_the_feedback_bound() {
+        for (shape, error_lsbs) in [
+            (None, 0.5),
+            (Some(DitherShape::Rectangular), 1.0),
+            (Some(DitherShape::Triangular), 1.5),
+        ] {
+            let plain = config(Pcm::Int16, shape);
+            let shaped = plain.clone().noise_shaping();
+            let gain = NoiseShaping::new(RATE).feedback_gain().get();
+            let lsbs = 0.5 + error_lsbs + gain * error_lsbs;
+            let got = headroom_ceiling(&shaped, RATE).expect("quantizes");
+            assert!(
+                (got.get() - below_full_scale(16, lsbs)).abs() < 1e-12,
+                "{shape:?}: {got:?}"
+            );
+            assert!(got < headroom_ceiling(&plain, RATE).unwrap(), "{shape:?}");
+        }
+        let resampled = config(Pcm::Int16, Some(DitherShape::Triangular))
+            .noise_shaping()
+            .resample(crate::Resample::to(SampleRate::SR_96K));
+        let want = NoiseShaping::new(SampleRate::SR_96K).feedback_gain().get();
+        let lsbs = 2.0 + want * 1.5;
+        let got = headroom_ceiling(&resampled, RATE).unwrap();
+        assert!((got.get() - below_full_scale(16, lsbs)).abs() < 1e-12);
     }
 
     /// A target above the limit is pulled to it, one under it is left, the
@@ -103,12 +135,12 @@ mod headroom {
         let limit = Db::new(below_full_scale(16, 2.0));
         let near = |a: Db, b: Db| (a.get() - b.get()).abs() < 1e-12;
 
-        let Normalize::Peak { target } = Normalize::peak(Db::new(0.0)).within(&int16) else {
+        let Normalize::Peak { target } = Normalize::peak(Db::new(0.0)).within(&int16, RATE) else {
             unreachable!()
         };
         assert!(near(target, limit), "{target:?}");
         assert_eq!(
-            Normalize::peak(Db::new(-1.0)).within(&int16),
+            Normalize::peak(Db::new(-1.0)).within(&int16, RATE),
             Normalize::peak(Db::new(-1.0))
         );
 
@@ -116,20 +148,20 @@ mod headroom {
             target: Db::new(-14.0),
             ceiling: Db::new(0.5),
         }
-        .within(&int16) else {
+        .within(&int16, RATE) else {
             unreachable!()
         };
         assert_eq!(target, Db::new(-14.0));
         assert!(near(ceiling, limit), "{ceiling:?}");
         assert_eq!(
-            Normalize::lufs(Db::new(-14.0)).within(&int16),
+            Normalize::lufs(Db::new(-14.0)).within(&int16, RATE),
             Normalize::lufs(Db::new(-14.0)),
             "the default -1 dBTP ceiling is under the limit"
         );
 
         let float = config(Pcm::Float32, Some(DitherShape::Triangular));
         assert_eq!(
-            Normalize::peak(Db::new(0.0)).within(&float),
+            Normalize::peak(Db::new(0.0)).within(&float, RATE),
             Normalize::peak(Db::new(0.0))
         );
     }

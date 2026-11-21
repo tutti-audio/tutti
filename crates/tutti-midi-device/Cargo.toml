@@ -15,7 +15,7 @@ workspace = true
 
 [features]
 default = []
-# `Serialize`/`Deserialize` on the values an app stores: `DeviceId`, `DeviceInfo`, `Identity`,
+# `Serialize`/`Deserialize` on the values an app stores: `MidiDeviceId`, `DeviceInfo`, `OsEndpointIdentity`,
 # `SavedDevice`, `Learned`, `Endpoint`, `FunctionBlock`, `MidiIdentity`, `Capabilities` and
 # `Supports`; a checked type reads back through its check.
 serde = ["dep:serde", "tutti-ump/serde", "tutti-midi-ci/serde"]

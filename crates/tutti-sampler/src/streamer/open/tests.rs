@@ -328,7 +328,7 @@ fn a_stopped_streams_handle_commands_nothing() {
 
     // The handle of the stream that is gone: what a late command still
     // reaching the queue looks like.
-    let ghost = Stream::detached(id_a, StreamerPort::new(streamer.streamer_tx.clone()));
+    let ghost = StreamHandle::detached(id_a, StreamerPort::new(streamer.streamer_tx.clone()));
     ghost
         .looping_cell()
         .publish(Some(loop_frames(1_000, 3_000, 0)));

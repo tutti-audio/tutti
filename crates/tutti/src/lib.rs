@@ -231,7 +231,7 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
-    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget,
+    Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeFile, TakeTarget,
 };
 #[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
 pub use tutti_session::{
@@ -278,8 +278,8 @@ pub mod nodes {
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
         Line, LineModulation, LookaheadError, Matrix, MatrixConvolver, MatrixConvolverConfig,
-        MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap, ResampleError, SimdLanes,
-        SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
+        MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap, NetworkStage,
+        ResampleError, SimdLanes, SpeakerGeometryError, Tap, TapSet, WaveshaperControls,
     };
     pub use tutti_dsp::{
         AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, FmControls, FmPatch, FmVoice,
@@ -322,13 +322,12 @@ pub mod nodes {
         VariableResampler,
     };
     pub use tutti_dsp::{
-        GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
+        GrainScheduler, GrainSettings, GrainStart, Granular, MaxGrains, MaxGrainsError,
     };
     pub use tutti_dsp::{
         KarplusStrong, KarplusStrongBank, KarplusStrongControls, LowestPitch, LowestPitchError,
         WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString,
     };
-    pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
@@ -667,9 +666,9 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, Direction, Error, GUARD_FRAMES, OpenError, RefusedStreamStart, SamplerFloat, Stream,
-        StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStart, StreamStatus,
-        VoiceNodeHandle,
+        Block, Error, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart, SamplerFloat,
+        StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
+        StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
@@ -682,7 +681,7 @@ pub mod sampler {
         feature = "decode-mp3",
         feature = "decode-ogg"
     ))]
-    pub use tutti_sampler::{ProbeError, SampleFacts};
+    pub use tutti_sampler::{SampleFacts, SampleProbeError};
 }
 
 /// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
@@ -691,7 +690,7 @@ pub mod sampler {
 /// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
-    pub use tutti_measure::{Error, Measure, Meter};
+    pub use tutti_measure::{Error, Measure, StreamMeter};
     // Silence and onsets.
     pub use tutti_measure::{
         DetectionFunction, FiniteLevel, FiniteLevelError, Framing, Novelty, Onset, OnsetConfig,
@@ -701,10 +700,11 @@ pub mod measure {
     // Spectrum and chroma.
     pub use tutti_measure::{
         BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, Chroma,
-        ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
-        HarmonicDecayError, Harmonics, HarmonicsError, PeakDecay, PeakDecayError, PeakFloor,
-        PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
-        SpectrumMeter, SpectrumTime, SpectrumTimeError, Tuning, TuningOffset, TuningOffsetError,
+        ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicCount,
+        HarmonicCountError, HarmonicDecay, HarmonicDecayError, PeakDecay, PeakDecayError,
+        PeakFloor, PeakFloorError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError,
+        SpectrumMeter, SpectrumTime, SpectrumTimeError, TuningOffset, TuningOffsetError,
+        TuningReference,
     };
     // Loudness, waveform blocks and the vectorscope.
     pub use tutti_measure::{
@@ -724,13 +724,13 @@ pub mod measure {
 /// declares, and the `Lfo` and `Follower` that read them.
 pub mod modulation {
     pub use tutti_modulation::{
-        Amount, CompileError, ControlSource, Corners, Curve, CurveSegment, DepthBy, Follower,
-        LevelFollower, Lfo, LfoRate, Macro, NoteAdsr, NoteEnvelope, Polarity, ProgramError,
+        Amount, ControlSource, Corners, Curve, CurveSegment, DepthBy, Follower, LevelFollower, Lfo,
+        LfoRate, Macro, NoteAdsr, NoteEnvelope, Polarity, ProgramCompileError, ProgramError,
         SignalKind, TargetDecl,
     };
     pub use tutti_modulation::{
-        Clock, DepthSnapshot, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey, SourceKey,
-        TargetKey,
+        DepthSnapshot, LayerClock, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey,
+        SourceKey, TargetKey,
     };
 }
 
@@ -822,7 +822,7 @@ pub mod plugin {
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
-/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`DeviceId`,
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`MidiDeviceId`,
 /// `DeviceInfo`), the ports a session opens for them
 /// (`MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
@@ -850,16 +850,16 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::EndpointId;
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{Identity, PortDirection, WinMmDevice};
+    pub use tutti_midi_device::{OsEndpointIdentity, PortDirection, WinMmDevice};
     pub use tutti_midi_file::{
-        Altered, Converted, DropReason, Dropped, Layout, Lead, LeadTrack, LyricChange,
+        Altered, Converted, DropReason, Dropped, Layout, Lead, LeadRepair, LeadTrack, LyricChange,
         MalformedMeta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
-        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, Normalized, OtherMetaKind,
-        OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
-        Pattern, Placement, RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame,
-        SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmfTimeline,
-        SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
-        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, TimelineDrop,
+        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, OtherMetaKind, OtherMetaKindOutOfRange,
+        OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote, Pattern, ReadRepair,
+        RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
+        SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmfTimeline, SmpteFractionalFrames,
+        SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView,
+        SysEx, TextKind, Timebase, TimelineDrop,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
@@ -894,8 +894,8 @@ pub mod midi {
         BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
         ChordType, ControlValue, Data128, DeltaTicks, DiscoveryFilter, EndpointInfoNotification,
         Field, FirstGroup, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, Framed,
-        FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
-        KeySignature, Lane, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
+        FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupChannelIndex,
+        GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Metronome,
         Midi1Bytes, Midi1Port, MixedDataHeader, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan,
         NotChunkSize, NotManufacturerId, NoteKey, NoteKeyEvent, PerNoteManagement, Pitch,
         RegisteredData, RegisteredPerNoteController, Reserved, ReservedAccents, ReservedAttribute,
@@ -915,10 +915,10 @@ pub mod midi {
         SharpsFlatsOutOfRange, TicksPerQuarterNoteOutOfRange, U4OutOfRange, U7OutOfRange,
         U14OutOfRange,
     };
-    pub use tutti_ump::{Join, PacketSpan, Spans};
     pub use tutti_ump::{
-        LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision, TextError,
+        FlexTextError, LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision,
     };
+    pub use tutti_ump::{Join, PacketSpan, Spans};
 
     /// The session's one MIDI error: each cause (hardware, send, route) is its
     /// source.
@@ -942,12 +942,14 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice};
+    pub use tutti_midi_device::{
+        DeviceInfo, Learned, Match, MidiDeviceId, MidiIdentity, SavedDevice,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, Errno, ErrnoOutOfRange, InputFault,
-        MidiHardwareConfig, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError, ProfileSwitch,
-        ProfilesChange, Switcher, WholeSwitcher,
+        MidiHardwareConfig, PeerId, PeerProfiles, PeerRef, PeerRequestError, ProfileError,
+        ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

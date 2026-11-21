@@ -1,7 +1,7 @@
 use tutti_units::{Amplitude, Gain, SampleSpan};
 
 use super::*;
-use crate::reverb::network::{Band, Fdn, Matrix, Network, Stage};
+use crate::reverb::network::{Band, Fdn, Matrix, Network, NetworkStage};
 use crate::{Lti as _, System as _};
 
 fn freezable() -> FdnLayout {
@@ -29,7 +29,7 @@ fn design_of(d: &FdnLayout, c: &FdnControls) -> Box<Network> {
 }
 
 fn fdn_of(n: &Network) -> &Fdn {
-    let Some(Stage::Fdn(f)) = n.stages.first() else {
+    let Some(NetworkStage::Fdn(f)) = n.stages.first() else {
         panic!("one FDN stage")
     };
     f
