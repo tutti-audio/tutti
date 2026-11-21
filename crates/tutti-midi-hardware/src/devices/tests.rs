@@ -706,7 +706,6 @@ fn a_reference_to_the_events_iterates_the_queued_changes() {
 /// schedule's timing is `Pulse`'s tests; these cover the thread that runs it.
 mod sensing {
     use std::num::NonZeroUsize;
-    use std::time::Duration;
     use tutti_platform::{Executor, Instant, Threads};
 
     use tutti_midi_device::{EndpointId, PortDirection};
@@ -750,14 +749,14 @@ mod sensing {
 
     /// What the output is sent next, polled under a hang guard.
     fn next_sent(fake: &FakeCounters) -> Vec<Ump> {
-        let start = Instant::now();
+        let deadline = Instant::now() + PATIENCE;
         loop {
             let got = sent(fake);
             if !got.is_empty() {
                 return got;
             }
-            assert!(start.elapsed() < PATIENCE, "nothing was sent");
-            std::thread::sleep(Duration::from_millis(1));
+            assert!(Instant::now() < deadline, "nothing was sent");
+            std::thread::yield_now();
         }
     }
 

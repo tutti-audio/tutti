@@ -19,12 +19,11 @@
 //! A wait that must end is bounded by a [`Patience`], a deadline that is a
 //! function of the `now` it is asked at.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use crate::latch::Latch;
 use tutti_rt::{LockExt, Parker, Unparker, parker};
 
 use crate::main_loop::Bell;
@@ -107,9 +106,9 @@ pub(crate) struct Ties {
     pub(crate) wake: Bell,
     /// The render thread's progress.
     pub(crate) settle: Settle,
-    /// Raised when the host process has ended: the main loop then shuts down
+    /// Set when the host process has ended: the main loop then shuts down
     /// as it does when the control connection ends.
-    pub(crate) host_gone: Arc<Latch>,
+    pub(crate) host_gone: Arc<AtomicBool>,
 }
 
 /// The render thread's half of [`Ties`].
