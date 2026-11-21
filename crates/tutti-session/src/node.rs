@@ -277,6 +277,7 @@ param_session_node!(
     SpringReverbNode,
     ConvolverNode,
     NoiseNode,
+    WavetableNode,
 );
 param_session_node!(any: tutti_nodes::LfoNode, tutti_nodes::OscillatorNode);
 
