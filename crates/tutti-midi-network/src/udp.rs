@@ -141,8 +141,8 @@ impl<E> Shared<E> {
 ///
 /// Dropping the link stops the task: the thread leaves its read within
 /// 100 ms of the drop (at once when the poke it is sent lands)
-/// and closes its socket handle. The drop does not send a Bye: end a Session
-/// with [`with`](Self::with) first.
+/// and closes its socket handle. Dropping the link first sends a Bye
+/// ([`NetworkEndpoint::close_all`]) to every Session it holds.
 pub struct NetworkLink<E: NetworkEndpoint + Send + 'static> {
     shared: Arc<Shared<E>>,
     /// The caller's handle: it sends what [`with`](Self::with) queued and
@@ -250,8 +250,8 @@ impl<E: NetworkEndpoint + Send + 'static> NetworkLink<E> {
     }
 
     /// The events queued now, taken as iterated; never blocks.
-    pub fn pending(&self) -> Pending<'_, E> {
-        Pending { link: self }
+    pub fn pending(&self) -> PendingEvents<'_, E> {
+        PendingEvents { link: self }
     }
 
     /// How many events were dropped before the application read them: those
@@ -277,6 +277,9 @@ impl<E: NetworkEndpoint + Send + 'static> Drop for NetworkLink<E> {
     fn drop(&mut self) {
         let wakers = {
             let mut state = self.shared.state();
+            state.endpoint.close_all(Instant::now());
+            // Nobody is left to tell of a Bye that cannot be sent.
+            let _ = state.flush(&self.socket);
             state.stop = true;
             state.take_wakers()
         };
@@ -458,17 +461,17 @@ impl<E: NetworkEndpoint + Send + 'static> Drop for NetworkEvents<'_, E> {
 
 /// The events of a [`NetworkLink`] queued now, taken as they are read:
 /// [`NetworkLink::pending`].
-pub struct Pending<'a, E: NetworkEndpoint + Send + 'static> {
+pub struct PendingEvents<'a, E: NetworkEndpoint + Send + 'static> {
     link: &'a NetworkLink<E>,
 }
 
-impl<E: NetworkEndpoint + Send + 'static> core::fmt::Debug for Pending<'_, E> {
+impl<E: NetworkEndpoint + Send + 'static> core::fmt::Debug for PendingEvents<'_, E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Pending").finish_non_exhaustive()
+        f.debug_struct("PendingEvents").finish_non_exhaustive()
     }
 }
 
-impl<E: NetworkEndpoint + Send + 'static> Iterator for Pending<'_, E> {
+impl<E: NetworkEndpoint + Send + 'static> Iterator for PendingEvents<'_, E> {
     type Item = Event;
 
     fn next(&mut self) -> Option<Event> {

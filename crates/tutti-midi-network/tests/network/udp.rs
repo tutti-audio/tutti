@@ -8,7 +8,7 @@ use tutti_platform::{Executor, Instant};
 
 use tutti_midi_network::{
     Admission, ByeReason, Client, Credentials, EndedBy, EndpointIdentity, Event, Host, HostConfig,
-    NetworkEndpoint, NetworkLink, SessionConfig, SessionState,
+    MAX_QUEUED_EVENTS, NetworkEndpoint, NetworkLink, SessionConfig, SessionState,
 };
 
 use crate::sim::{identity, note_on};
@@ -215,6 +215,7 @@ impl NetworkEndpoint for Panics {
     fn deadline(&self) -> Option<Instant> {
         None
     }
+    fn close_all(&mut self, _: Instant) {}
 }
 
 /// A stream whose link's socket task has ended yields `None`, and `None`
@@ -263,4 +264,68 @@ fn pending_takes_only_what_is_queued_and_does_not_wait() {
     }
     assert!(matches!(&got[..], [Event::Ump { packet, .. }] if *packet == note_on(60)));
     assert_eq!(host.pending().count(), 0, "a taken event is not read again");
+}
+
+/// A [`NetworkEndpoint`] that yields `owed` events, one per `poll_event`.
+#[derive(Debug, Default)]
+struct Flood {
+    owed: usize,
+}
+
+impl NetworkEndpoint for Flood {
+    fn on_message(&mut self, _: std::net::SocketAddr, _: &[u8], _: Instant) {}
+    fn on_timeout(&mut self, _: Instant) {}
+    fn poll_transmit(&mut self) -> Option<tutti_midi_network::Transmit> {
+        None
+    }
+    fn poll_event(&mut self) -> Option<Event> {
+        self.owed = self.owed.checked_sub(1)?;
+        Some(Event::Reset {
+            peer: "127.0.0.1:9".parse().unwrap(),
+        })
+    }
+    fn events_lost(&self) -> u64 {
+        0
+    }
+    fn deadline(&self) -> Option<Instant> {
+        None
+    }
+    fn close_all(&mut self, _: Instant) {}
+}
+
+/// Events past the link's queue bound are counted lost, exactly the excess,
+/// and the queue keeps its bound.
+#[test]
+fn events_past_the_queue_bound_are_counted_lost_exactly() {
+    let executor = Executor::new();
+    let link = NetworkLink::bind(&executor, "127.0.0.1:0", Flood::default()).unwrap();
+    let excess = 7;
+    link.with(|flood, _| flood.owed = MAX_QUEUED_EVENTS + excess)
+        .unwrap();
+    assert_eq!(link.events_lost(), excess as u64);
+    assert_eq!(link.pending().count(), MAX_QUEUED_EVENTS);
+}
+
+/// Dropping a Client's link sends its Bye: the Host sees the Session end
+/// from the remote side.
+/// Spec: m2-124/6#1
+#[test]
+fn dropping_a_client_link_ends_its_session_at_the_host() {
+    let executor = Executor::new();
+    let host = host(&executor, HostConfig::new(identity("Studio", "HOST-1")));
+    let client = client(
+        &executor,
+        identity("Laptop", "CLIENT-1"),
+        host.local_addr().unwrap(),
+    );
+    established(&host);
+    established(&client);
+    drop(client);
+    let (ended_by, reason) = next_event(&host, |e| match e {
+        Event::Closed {
+            ended_by, reason, ..
+        } => Some((*ended_by, *reason)),
+        _ => None,
+    });
+    assert_eq!((ended_by, reason), (EndedBy::Remote, ByeReason::PowerDown));
 }

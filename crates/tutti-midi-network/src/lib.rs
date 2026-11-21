@@ -99,4 +99,4 @@ pub use event::{AuthFailure, EndedBy, Event, SendError, SessionState, Transmit};
 pub use policy::{Admission, Credentials};
 pub use sequence::SequenceNumber;
 pub use text::{ByeText, NakText, Username};
-pub use udp::{LinkEnded, NetworkEvents, NetworkLink, Pending};
+pub use udp::{LinkEnded, NetworkEvents, NetworkLink, PendingEvents};

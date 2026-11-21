@@ -45,6 +45,10 @@ pub trait NetworkEndpoint {
 
     /// When [`on_timeout`](Self::on_timeout) next has work, if ever.
     fn deadline(&self) -> Option<Instant>;
+
+    /// Ends every Session with a Bye, as an endpoint that powers down does
+    /// ([`ByeReason::PowerDown`]).
+    fn close_all(&mut self, now: Instant);
 }
 
 /// The most events an endpoint holds for the application; the queue never
@@ -222,6 +226,10 @@ impl NetworkEndpoint for Client {
     fn deadline(&self) -> Option<Instant> {
         self.session.deadline()
     }
+
+    fn close_all(&mut self, now: Instant) {
+        self.close(now, ByeReason::PowerDown);
+    }
 }
 
 const DEFAULT_MAX_SESSIONS: NonZeroUsize = NonZeroUsize::new(16).unwrap();
@@ -348,14 +356,6 @@ impl Host {
         self.with_session(peer, |session| session.reset(now));
     }
 
-    /// Ends every Session, as a Host that powers down does.
-    pub fn close_all(&mut self, now: Instant) {
-        let peers: Vec<SocketAddr> = self.sessions.keys().copied().collect();
-        for peer in peers {
-            self.close(now, peer, ByeReason::PowerDown);
-        }
-    }
-
     fn with_session(&mut self, peer: SocketAddr, act: impl FnOnce(&mut Session)) {
         if let Some(session) = self.sessions.get_mut(&peer) {
             act(session);
@@ -441,5 +441,12 @@ impl NetworkEndpoint for Host {
 
     fn deadline(&self) -> Option<Instant> {
         self.sessions.values().filter_map(Session::deadline).min()
+    }
+
+    fn close_all(&mut self, now: Instant) {
+        let peers: Vec<SocketAddr> = self.sessions.keys().copied().collect();
+        for peer in peers {
+            self.close(now, peer, ByeReason::PowerDown);
+        }
     }
 }
