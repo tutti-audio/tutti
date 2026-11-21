@@ -201,6 +201,20 @@ pub struct DiskVoiceConfig {
 /// (it reads its render's `Env`), read as the memory tier reads it; see
 /// `offline_read`. That path blocks on file I/O and is never taken live: a
 /// live fork of a disk voice is refused.
+///
+/// # Under a stretch it sounds late
+///
+/// A stretched or transposed disk voice runs a
+/// [`PhaseVocoder`](tutti_dsp::PhaseVocoder), and its ring reads only forward
+/// from where it seats, so it cannot read ahead of its place on the timeline as
+/// a memory voice does. It sounds [`latency`](tutti_dsp::PhaseVocoder::latency)
+/// frames late. A standalone `VoiceNode` declares that latency for delay
+/// compensation; in a [`VoicePool`](crate::VoicePool) it is not compensated.
+///
+/// Its seat is not primed either, so its first `latency` frames after a seat
+/// are silence, and the end of its window cuts the vocoder's output where it
+/// stands: the last `latency` frames of the source before the gate closes are
+/// still inside the vocoder and never sound.
 pub struct DiskVoice<F: SamplerFloat> {
     inner: DiskSource<F>,
     /// The playback controls: the streamer's cell, shared with `inner`, while
@@ -579,10 +593,21 @@ impl<F: SamplerFloat> DiskVoice<F> {
     /// never told a rate takes the streamer's conversion for the session.
     #[inline]
     fn step_rate(&self) -> ReadRate {
-        let (speed, stretch) = (
-            self.shared_state.effective_speed(),
-            self.shared_state.stretch_rate(),
-        );
+        self.step_at(self.shared_state.stretch_rate())
+    }
+
+    /// File frames per frame a time stretcher's vocoder takes in: varispeed
+    /// and the conversion, without the stretch (the vocoder's own consumption
+    /// supplies it).
+    #[inline]
+    pub(crate) fn input_step(&self) -> ReadRate {
+        self.step_at(ReadRate::UNITY)
+    }
+
+    /// [`step_rate`](Self::step_rate) at the stretcher's rate `stretch`.
+    #[inline]
+    fn step_at(&self, stretch: ReadRate) -> ReadRate {
+        let speed = self.shared_state.effective_speed();
         match self.sample_rate {
             Some(render_rate) => speed
                 .read_rate(SrcRatio::for_rates(self.file_sample_rate, render_rate))
@@ -707,36 +732,58 @@ impl<F: SamplerFloat> DiskVoice<F> {
         }
     }
 
-    /// A fork's frames `range`, frame `i - range.start` handed to `emit`.
-    ///
-    /// The placement is the live one; where the live voice reads the ring,
-    /// this reads the file at the placed position. Once the playhead is past
-    /// the window's end, the file is closed: a render holding many voices
-    /// keeps a file open per voice sounding. `positions` is scratch, at
-    /// least `range.len()` long.
+    /// A fork's frames `range`, frame `i - range.start` handed to `emit`: the
+    /// placement is the live one, and where the live voice reads the ring, this
+    /// reads the file at the placed position. `positions` is scratch, at least
+    /// `range.len()` long.
     fn offline_render(
         &mut self,
         clock: &BlockClock<'_>,
         range: Range<usize>,
         positions: &mut [Option<SamplePosition>],
+        emit: impl FnMut(usize, &[F]),
+    ) {
+        let frames = range.len();
+        self.offline_place(clock, range, &mut positions[..frames]);
+        self.offline_read(&positions[..frames], emit);
+    }
+
+    /// A fork's placement of frames `range`, as the live voice's: the straight
+    /// positions in `positions` (as many as `range`). Once the playhead is past
+    /// the window's end the file is closed.
+    fn offline_place(
+        &mut self,
+        clock: &BlockClock<'_>,
+        range: Range<usize>,
+        positions: &mut [Option<SamplePosition>],
+    ) {
+        let gate = self.gate();
+        let rate = self.step_rate();
+        place(clock, range.clone(), gate, rate, positions);
+        if past_window(clock, range, gate)
+            && let Some(read) = self.offline.as_mut().and_then(|o| o.read.as_mut())
+        {
+            read.close();
+        }
+    }
+
+    /// A fork's file read at `positions`, frame `i` handed to `emit`.
+    fn offline_read(
+        &mut self,
+        positions: &[Option<SamplePosition>],
         mut emit: impl FnMut(usize, &[F]),
     ) {
         let w = self.width().min(MAX_CHANNELS);
         let silent = [F::ZERO; MAX_CHANNELS];
-        let frames = range.len();
-        let gate = self.gate();
-        let rate = self.step_rate();
         let gain = audible_gain::<F>(self.shared_state.gain());
         let told_rate = self.sample_rate.is_some();
-        place(clock, range.clone(), gate, rate, &mut positions[..frames]);
-        let past = past_window(clock, range, gate);
         let Some(offline) = self.offline.as_mut() else {
-            (0..frames).for_each(|i| emit(i, &silent[..w]));
+            (0..positions.len()).for_each(|i| emit(i, &silent[..w]));
             return;
         };
         let direction = offline.direction;
         let mut frame = [F::ZERO; MAX_CHANNELS];
-        for (i, pos) in positions[..frames].iter().enumerate() {
+        for (i, pos) in positions.iter().enumerate() {
             let Some(pos) = pos else {
                 emit(i, &silent[..w]);
                 continue;
@@ -764,9 +811,63 @@ impl<F: SamplerFloat> DiskVoice<F> {
             }
             emit(i, &frame[..w]);
         }
-        if past && let Some(read) = offline.read.as_mut() {
-            read.close();
+    }
+
+    /// The positions the transport puts a stretching voice's output frames
+    /// `range` at, in `positions` (as many as `range`): where its read seats.
+    /// Whether any frame has one.
+    pub(crate) fn seat_positions(
+        &mut self,
+        clock: &BlockClock<'_>,
+        range: Range<usize>,
+        positions: &mut [Option<SamplePosition>],
+    ) -> bool {
+        let positions = &mut positions[..range.len()];
+        if self.offline.is_some() {
+            self.offline_place(clock, range, positions);
+            positions.iter().any(Option::is_some)
+        } else {
+            self.live_place(clock, range, positions)
         }
+    }
+
+    /// Reads the voice at `positions` (`None`: silence) into the first `n`
+    /// lanes, frame `i` into frame `i`, gained, in the read `generation` (a
+    /// new one is a jump wherever it lands). The vocoder's input: positions
+    /// that follow one another by [`input_step`](Self::input_step), apart
+    /// from the clock.
+    pub(crate) fn read_at(
+        &mut self,
+        positions: &[Option<SamplePosition>],
+        generation: u64,
+        lanes: &mut Lanes<F>,
+        n: usize,
+        gather: &mut Gather<F>,
+    ) {
+        let w = self.width().min(n);
+        let frames = positions.len();
+        lanes.clear(n, frames);
+        if self.offline.is_some() {
+            self.offline_read(positions, |i, f| lanes.put(i, &f[..w]));
+            return;
+        }
+        let rate = self.input_step();
+        let declick = self.declick;
+        let gain = self.shared_state.gain();
+        let state = &*self.shared_state;
+        let mut out: Out<'_, fn(usize, &[F]), F> = Out::Lanes {
+            lanes: &mut lanes.lanes_mut()[..w],
+            gather,
+        };
+        self.inner.read.render(
+            positions, generation, rate, declick, gain, state, 0, &mut out,
+        );
+    }
+
+    /// A stretching voice's piece in which nothing sounds: the ring's reader
+    /// claims nothing, as for a silent block of [`render_lanes`](Self::render_lanes).
+    pub(crate) fn idle(&mut self) {
+        self.inner.read.silence();
     }
 
     /// Run at `sample_rate` under `mode`: the step converts the file's rate to

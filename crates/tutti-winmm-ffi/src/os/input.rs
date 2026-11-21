@@ -29,9 +29,8 @@ use std::cell::UnsafeCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::thread::JoinHandle;
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant, Task, join};
 
 use windows_sys::Win32::Media::Audio::{
     CALLBACK_FUNCTION, HMIDIIN, MIDIHDR, midiInAddBuffer, midiInClose, midiInOpen,
@@ -172,7 +171,7 @@ pub struct MidiIn {
     /// Taken by `Drop`.
     owner: Option<Owner<'static, Shared>>,
     handle: HMIDIIN,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<Task<()>>,
 }
 
 impl std::fmt::Debug for MidiIn {
@@ -183,7 +182,7 @@ impl std::fmt::Debug for MidiIn {
 
 // SAFETY: the `HMIDIIN` is a token for a driver object; winmm takes it from any
 // thread, and `MidiIn` uses it only in `Drop`, once. The rest of `MidiIn` is
-// `Send` (an `Arc` of `Sync` state and a `JoinHandle`).
+// `Send` (an `Arc` of `Sync` state and the worker's task).
 unsafe impl Send for MidiIn {}
 
 fn header_size() -> u32 {
@@ -196,7 +195,14 @@ impl MidiIn {
     ///
     /// The handler is called from a thread winmm owns, one call at a time, and
     /// must return quickly and call no winmm function. Buffers are handed back
-    /// to winmm by a thread of this input's own, never by the callback.
+    /// to winmm by a future on a dedicated thread of `executor`, never by the
+    /// callback.
+    ///
+    /// The worker blocks on a wait it cannot interrupt but by its wake, so it
+    /// cannot see its executor shut down: an input still open when the last clone
+    /// of its executor drops costs the executor's shutdown bound, and the thread is
+    /// then detached with a warning (it ends when the input drops). Drop an input
+    /// before its executor.
     ///
     /// `handler` is dropped when the last reference to the input's state goes,
     /// which can be on winmm's thread after the `MidiIn` has been dropped (a
@@ -221,6 +227,7 @@ impl MidiIn {
     /// gone), a buffer's preparation, `midiInStart`, or the worker's or its
     /// wake event's creation.
     pub fn open(
+        executor: &Executor,
         port: &InputPort,
         handler: impl FnMut(Event<'_>) + Send + 'static,
     ) -> Result<Self, Error> {
@@ -280,18 +287,18 @@ impl MidiIn {
         };
         let worker = {
             let shared = Arc::clone(&shared);
-            // A raw thread: the worker stops by the input's own wake and closing
-            // flag and is joined (or forgotten when the wake fails) in a fixed
-            // order with the port's close, and `spawn_named`'s handle would own a
-            // second stop and join, and a priority request, beside them.
-            std::thread::Builder::new()
-                .name("tutti-winmm-in".to_string())
-                .spawn(move || requeue(&shared, wait))
+            // The worker stops by the input's own wake and closing flag, and
+            // `Drop` waits for it to end before it closes the port.
+            executor
+                .spawn_dedicated("tutti-winmm-in", None, async move {
+                    requeue(&shared, wait);
+                })
+                .map_err(|source| Error::Os {
+                    operation: OsOperation::SpawnInputWorker,
+                    source,
+                })?
         };
-        input.worker = Some(worker.map_err(|source| Error::Os {
-            operation: OsOperation::SpawnInputWorker,
-            source,
-        })?);
+        input.worker = Some(worker);
         for buffer in &shared.buffers {
             // SAFETY: `header` is this buffer's header, whose `lpData` is its
             // bytes; both live in `Shared`, which this input and the registry
@@ -329,22 +336,25 @@ impl Drop for MidiIn {
         let shared = owner.slot();
         // No callback that looks the id up from here on finds the input.
         let closing = owner.begin_close(LEAVE_BOUND);
-        // The worker queues no buffer after it has been joined. A wake that
-        // failed would leave the join waiting for ever, so the worker is left
-        // running and, with the port still open, nothing is freed.
+        // `midiInClose` runs only after the worker has ended, because a closed
+        // handle may be reused by another port and the worker queues buffers on
+        // it. A wake that failed would leave that wait for ever, so the task is
+        // detached, the worker is left running and, with the port still open,
+        // nothing is freed.
         if let Err(e) = shared.worker.wake() {
             tracing::warn!(
                 "winmm MIDI input: the worker could not be woken, so the port is left open: {e}"
             );
-            std::mem::forget(self.worker.take());
+            if let Some(task) = self.worker.take() {
+                task.detach();
+            }
             drop(closing.leak());
             return;
         }
-        if let Some(worker) = self.worker.take()
-            && worker.join().is_err()
-        {
-            // The worker panicked; it queues nothing more.
-            tracing::warn!("winmm MIDI input: the worker panicked");
+        if let Some(task) = self.worker.take() {
+            // The wake above is what ends the worker. A `None` means its future
+            // panicked or was dropped unrun; it no longer touches the handle.
+            let _ = join(task);
         }
         // Callbacks that found the input before it was removed finish. This
         // loop is the only place that reads the clock.
@@ -418,7 +428,7 @@ fn requeue(shared: &Slot<Shared>, mut wait: TimerWaiter) {
                 let handle = shared.handle.load(Ordering::Acquire);
                 // SAFETY: the header is prepared and has been returned to us
                 // by the callback that set `done`; `handle` is the open port,
-                // which is not closed until this thread has been joined.
+                // which is not closed until this thread has ended.
                 let code = unsafe { midiInAddBuffer(handle, buffer.header(), header_size()) };
                 if code != 0 {
                     shared.dead.store(true, Ordering::Release);

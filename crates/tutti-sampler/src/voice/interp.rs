@@ -156,7 +156,12 @@ impl Gate {
     /// `None` where no block is in hand ([`window_position`]): the tempo is
     /// the transport's.
     #[inline]
-    fn origin(&self, now: Beat, tempo: Bpm, clock: Option<&BlockClock<'_>>) -> SamplePosition {
+    pub(crate) fn origin(
+        &self,
+        now: Beat,
+        tempo: Bpm,
+        clock: Option<&BlockClock<'_>>,
+    ) -> SamplePosition {
         // Reached within the tolerance may be a hair before the start: that
         // is the start itself.
         let seconds_offset = match clock {
@@ -1677,7 +1682,7 @@ mod tests {
 
     /// A loop wrap inside a block re-seats the read at the loop's start on
     /// the wrap's frame, and the clock reports it as a jump (a new
-    /// generation): the buffered state behind a read — a stretch filter, the
+    /// generation): the buffered state behind a read — a stretch vocoder, the
     /// live disk reader — is flushed or crossfaded there.
     #[test]
     fn a_loop_wrap_inside_a_block_reseats_at_the_loop_start() {

@@ -33,6 +33,10 @@
 //!         ScanPoll::Died => break,
 //!     }
 //! }
+//! // A change is in memory until the app runs the save where it chooses.
+//! if let Err(unsaved) = catalog.save().run() {
+//!     eprintln!("{unsaved}");
+//! }
 //! # Ok(())
 //! # }
 //! ```
@@ -58,16 +62,14 @@ use crate::{
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 use tutti_plugin_types::{IpcError, IpcResult};
 use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId, PluginRef};
-use tutti_rt::LockExt;
 
 /// Why the persistence a catalog was given could not store the database.
 ///
 /// The persistence closure builds one from whatever failed (an I/O error, a
-/// serializer's error); the catalog hands it back from [`Catalog::save`] and
-/// [`Catalog::take_persist_error`].
+/// serializer's error); the catalog hands it back from [`SaveCatalog::run`].
 #[derive(Debug, thiserror::Error)]
 #[error("the plugin database could not be persisted: {source}")]
 pub struct PersistError {
@@ -87,17 +89,13 @@ impl PersistError {
 /// How a catalog stores its database: the host's own closure.
 type Persist = Arc<dyn Fn(&PluginDb) -> Result<(), PersistError> + Send + Sync>;
 
-/// The failure of the last save a catalog started itself, until it is taken.
-type Unreported = Arc<Mutex<Option<PersistError>>>;
-
 /// A catalog of scanned plugins that can list and blacklist them, and says
 /// whether a load may open one ([`check`](Self::check)).
 ///
 /// Wraps a [`PluginDb`] and the persistence the host supplies
-/// ([`Catalog::new`]). Every change is in memory until [`save`](Self::save) is
-/// called, or a scan or a crash recovery saves it. A scan's save runs on its
-/// own thread: an app polls [`take_persist_error`](Self::take_persist_error)
-/// after each scan's [`Done`](ScanPoll::Done).
+/// ([`Catalog::new`]). Every change is in memory until the app runs
+/// [`save`](Self::save)'s value, where it chooses: a crash recovery is the one
+/// change the catalog persists itself.
 pub struct Catalog {
     db: PluginDb,
     /// The blacklisted rows of `db`, republished by every method that changes
@@ -105,9 +103,6 @@ pub struct Catalog {
     blacklist: Arc<RwLock<PluginDb>>,
     config: CatalogConfig,
     persist: Persist,
-    unreported: Unreported,
-    /// The write a finished rescan started on its own thread.
-    pending_save: Option<tutti_platform::ThreadHandle<()>>,
 }
 
 impl std::fmt::Debug for Catalog {
@@ -118,34 +113,51 @@ impl std::fmt::Debug for Catalog {
     }
 }
 
-impl Drop for Catalog {
-    fn drop(&mut self) {
-        self.finish_pending_save();
+/// A write of the catalog's table, taken by [`Catalog::save`] and run by the
+/// app.
+///
+/// Holds a copy of the table as it was at `save()` and the persistence the
+/// catalog was built with, so a change made after `save()` is not in what
+/// [`run`](Self::run) writes. It holds no thread and no executor: the app runs
+/// it inline, on its own thread or on its executor. It is `Send`, since a file
+/// write has no main-thread rule. Runs are not ordered and the last run wins, so
+/// run saves in the order `save()` took them. Dropping it writes nothing.
+#[must_use = "a SaveCatalog writes nothing until it is run"]
+pub struct SaveCatalog {
+    table: PluginDb,
+    persist: Persist,
+}
+
+impl std::fmt::Debug for SaveCatalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SaveCatalog").finish_non_exhaustive()
     }
 }
 
-/// Runs `persist` for a save the catalog starts itself. A failure is logged and
-/// kept in `unreported` for [`Catalog::take_persist_error`]; a success clears
-/// an older failure, since the newer table is what is stored.
-fn persist_unattended(
-    persist: &Persist,
-    unreported: &Unreported,
-    db: &PluginDb,
-) -> Result<(), String> {
-    let outcome = persist(db);
-    let mut slot = unreported.lock_recover();
-    match outcome {
-        Ok(()) => {
-            *slot = None;
-            Ok(())
-        }
-        Err(e) => {
+impl SaveCatalog {
+    /// Writes the table through the catalog's persistence, on the calling
+    /// thread.
+    ///
+    /// # Errors
+    ///
+    /// The [`PersistError`] the persistence returned; what it stored before is
+    /// then as the persistence leaves it.
+    pub fn run(self) -> Result<(), PersistError> {
+        let outcome = (self.persist)(&self.table);
+        if let Err(e) = &outcome {
             tracing::warn!("{e}");
-            let message = e.to_string();
-            *slot = Some(e);
-            Err(message)
         }
+        outcome
     }
+}
+
+/// Runs `persist` for the save a crash recovery needs before it removes its
+/// sentinel. A failure is logged and handed to the scanner as an I/O error.
+fn persist_unattended(persist: &Persist, db: &PluginDb) -> std::io::Result<()> {
+    persist(db).map_err(|e| {
+        tracing::warn!("{e}");
+        std::io::Error::other(e)
+    })
 }
 
 /// The key a path has in the database: what a scan keys the file by, so an
@@ -304,10 +316,9 @@ impl Catalog {
     /// Creates a catalog over `db`, which `persist` stores.
     ///
     /// `persist` receives the table and stores it wherever the host keeps it. It
-    /// runs on the owning thread for [`save`](Self::save) and for a crash
-    /// recovery, and on a short-lived thread for the save after a rescan, which
-    /// gets a copy of the table. A crash recovery removes its sentinel only
-    /// after `persist` succeeds.
+    /// runs where the app runs a [`SaveCatalog`], and on the owning thread for a
+    /// crash recovery. A crash recovery removes its sentinel only after
+    /// `persist` succeeds.
     #[must_use]
     pub fn new(
         db: PluginDb,
@@ -320,8 +331,6 @@ impl Catalog {
             blacklist,
             config,
             persist: Arc::new(persist),
-            unreported: Unreported::default(),
-            pending_save: None,
         }
     }
 
@@ -336,11 +345,11 @@ impl Catalog {
         &self.db
     }
 
-    /// The save the scanner and the pedal's recovery run: `persist`, with its
-    /// failure kept for [`take_persist_error`](Self::take_persist_error).
+    /// The save the scanner and the pedal's recovery run: `persist`, its
+    /// failure logged and handed back as an I/O error.
     fn autosave(&self) -> impl FnOnce(&PluginDb) -> std::io::Result<()> + use<> {
-        let (persist, unreported) = (Arc::clone(&self.persist), Arc::clone(&self.unreported));
-        move |db| persist_unattended(&persist, &unreported, db).map_err(std::io::Error::other)
+        let persist = Arc::clone(&self.persist);
+        move |db| persist_unattended(&persist, db)
     }
 
     /// Starts a scan of the plugin directories on a background thread.
@@ -378,7 +387,6 @@ impl Catalog {
     /// # }
     /// ```
     pub fn scan(&mut self) -> std::result::Result<Scan, ScanError> {
-        self.finish_pending_save();
         let save = self.autosave();
         self.change(|db, scanner, config| scanner.spawn(db, &config.scan_dirs, save))
     }
@@ -429,7 +437,6 @@ impl Catalog {
         path: &Path,
         format: PluginFormat,
     ) -> std::result::Result<Scan, FilesError> {
-        self.finish_pending_save();
         let save = self.autosave();
         let scanner = self.scanner(probing);
         self.change_with(|db, _| scanner.spawn_files(db, [(path, format)], save))
@@ -439,66 +446,11 @@ impl Catalog {
     /// [`measure`](Self::measure)) has sent so far and reports where it stands.
     /// Never blocks.
     ///
-    /// A finished task is saved when this returns [`ScanPoll::Done`]: the table
-    /// is copied here and written on a short-lived thread, so the fsync is not
-    /// on the owner's thread. A failed save is logged and kept for
-    /// [`take_persist_error`](Self::take_persist_error). The write is finished
-    /// before the next task, `save` or drop. Drop the task once it reports
-    /// `Done` or `Died`.
+    /// A finished task is not saved: run [`save`](Self::save)'s value once this
+    /// returns [`ScanPoll::Done`]. Drop the task once it reports `Done` or
+    /// `Died`.
     pub fn try_apply(&mut self, task: &mut Scan) -> ScanPoll {
-        let poll = self.change_with(|db, _| task.poll(db));
-        if matches!(poll, ScanPoll::Done(_)) {
-            self.save_in_background();
-        }
-        poll
-    }
-
-    /// Writes a copy of the table on its own thread. The clone is the only cost
-    /// on the owner's thread. A write still in flight is finished first, so two
-    /// writes never race and the newer table is the one stored.
-    fn save_in_background(&mut self) {
-        self.finish_pending_save();
-        let copy = Arc::new(self.db.clone());
-        let for_thread = (
-            Arc::clone(&copy),
-            Arc::clone(&self.persist),
-            Arc::clone(&self.unreported),
-        );
-        let spawned = tutti_platform::spawn_named("plugin-db-save", None, move |_| {
-            let (copy, persist, unreported) = for_thread;
-            let _ = persist_unattended(&persist, &unreported, &copy);
-        });
-        match spawned {
-            Ok(handle) => self.pending_save = Some(handle),
-            Err(e) => {
-                tracing::warn!(
-                    "could not start a thread for the database save, saving inline: {e}"
-                );
-                let _ = persist_unattended(&self.persist, &self.unreported, &copy);
-            }
-        }
-    }
-
-    fn finish_pending_save(&mut self) {
-        if let Some(handle) = self.pending_save.take()
-            && handle.join().is_err()
-        {
-            let panicked = PersistError::new("the persistence panicked");
-            tracing::warn!("{panicked}");
-            *self.unreported.lock_recover() = Some(panicked);
-        }
-    }
-
-    /// The failure of the last save this catalog started itself (after
-    /// a task's [`try_apply`](Self::try_apply), or in a
-    /// [`recover_crash`](Self::recover_crash)), or `None` if it succeeded or
-    /// the failure was already taken. A later successful save clears an older
-    /// failure: the table it stored is newer. Waits for a rescan's write still in
-    /// flight.
-    #[must_use]
-    pub fn take_persist_error(&mut self) -> Option<PersistError> {
-        self.finish_pending_save();
-        self.unreported.lock_recover().take()
+        self.change_with(|db, _| task.poll(db))
     }
 
     /// Iterates the refs and descriptors of all non-blacklisted plugins.
@@ -712,19 +664,23 @@ impl Catalog {
         self.change_with(|db, _| db.apply(change));
     }
 
-    /// Writes the in-memory catalog through the catalog's persistence.
+    /// The write of the in-memory catalog through the catalog's persistence, as
+    /// a value the app runs where it chooses.
     ///
-    /// # Errors
+    /// The value holds a copy of the table as it is now; a change made after
+    /// this call is not in it.
     ///
-    /// The [`PersistError`] the persistence returned; what it stored before is
-    /// then as the persistence leaves it.
-    pub fn save(&mut self) -> Result<(), PersistError> {
-        self.finish_pending_save();
-        let outcome = (self.persist)(&self.db);
-        if outcome.is_ok() {
-            *self.unreported.lock_recover() = None;
+    /// ```no_run
+    /// # fn ex(catalog: &tutti_plugin_db::Catalog) -> Result<(), tutti_plugin_db::PersistError> {
+    /// catalog.save().run()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn save(&self) -> SaveCatalog {
+        SaveCatalog {
+            table: self.db.clone(),
+            persist: Arc::clone(&self.persist),
         }
-        outcome
     }
 
     /// Blacklists the plugin a previous scan was probing when it died.
@@ -743,14 +699,13 @@ impl Catalog {
     /// The sentinel is removed only after the blacklist is saved. If the
     /// persistence fails, the blacklist lives in memory, the sentinel stays armed
     /// (the next start blacklists the plugin again rather than forgetting it) and
-    /// the failure is kept for [`take_persist_error`](Self::take_persist_error).
+    /// the failure is logged.
     ///
     /// # Errors
     ///
     /// [`ScanBusy`] while a rescan is in flight: its armed sentinel names a live
     /// probe, not a crash.
     pub fn recover_crash(&mut self) -> std::result::Result<Vec<PathBuf>, ScanBusy> {
-        self.finish_pending_save();
         let save = self.autosave();
         self.change(|db, scanner, _| scanner.recover_crash(db, save))
     }
@@ -1179,10 +1134,10 @@ mod tests {
     }
 
     /// A persistence that always fails cannot have saved the blacklist, so the
-    /// pedal stays armed, the blacklist is in memory only, and the failure
-    /// reaches the caller as the persistence's own error.
+    /// pedal stays armed and the blacklist is in memory only; the failure of a
+    /// save the app runs is the persistence's own error, returned by `run`.
     #[test]
-    fn a_failing_persistence_keeps_the_pedal_armed_and_reports_its_error() {
+    fn a_failing_persistence_keeps_the_pedal_armed_and_run_returns_its_error() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = CatalogConfig::new(dir.path());
         let crashy = dir.path().join("Crashy.vst3");
@@ -1193,69 +1148,86 @@ mod tests {
             Err(PersistError::new("disk full"))
         });
         assert_eq!(plugins.recover_crash(), Ok(vec![key(&crashy)]));
-        let recovery = plugins
-            .take_persist_error()
-            .expect("the recovery's save failed");
-        assert!(recovery.to_string().contains("disk full"), "{recovery}");
-        assert_eq!(plugins.take_persist_error().map(|_| ()), None, "taken once");
         // A rescan recovers first; it must not delete what it could not save.
         rescan(&mut plugins);
-        let scan = plugins
-            .take_persist_error()
-            .expect("the scan's save failed");
-        assert!(scan.to_string().contains("disk full"), "{scan}");
 
         assert!(plugins.db().is_blacklisted(&key(&crashy)));
         assert!(config.pedal_path().exists());
-        let saved = plugins.save().unwrap_err();
+        let saved = plugins.save().run().unwrap_err();
         assert!(saved.to_string().contains("disk full"), "{saved}");
         assert!(std::error::Error::source(&saved).is_some());
     }
 
-    /// The save after a rescan is off the owner's thread: `try_apply` reports
-    /// `Done` while the persistence is still running, and the next `save` waits for
-    /// it, and dropping the catalog waits for it.
+    /// **A save writes the table as it was at `save()`**: a row put afterwards is
+    /// in the catalog and not in the write, which runs later.
     #[test]
-    fn the_save_after_a_rescan_does_not_block_the_owner() {
+    fn a_save_writes_the_table_as_cloned_at_save() {
         let dir = tempfile::TempDir::new().unwrap();
-        let config = CatalogConfig::new(dir.path());
-        let (started_tx, started_rx) = crossbeam_channel::bounded::<()>(8);
-        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
+        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&written);
+        let mut plugins =
+            Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), move |db| {
+                sink.lock().unwrap().push(db.rows().count());
+                Ok(())
+            });
+        let (before, after) = (dir.path().join("a.clap"), dir.path().join("b.clap"));
+        std::fs::write(&before, b"x").unwrap();
+        std::fs::write(&after, b"x").unwrap();
+        plugins.apply(RowChange::put(key(&before), blacklisted_row(&before, "a")));
+
+        let save = plugins.save();
+        plugins.apply(RowChange::put(key(&after), blacklisted_row(&after, "b")));
+        save.run().unwrap();
+
+        assert_eq!(*written.lock().unwrap(), vec![1]);
+        assert_eq!(
+            plugins.db().rows().count(),
+            2,
+            "the catalog kept the later row"
+        );
+    }
+
+    /// **A dropped value writes nothing.**
+    #[test]
+    fn a_dropped_save_writes_nothing() {
+        let dir = tempfile::TempDir::new().unwrap();
         let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let done = Arc::clone(&writes);
-        let mut plugins = Catalog::new(PluginDb::new(), config, move |_| {
-            started_tx.send(()).unwrap();
-            // Held far past the hang guard: an owner that waited for this save
-            // would outlast it.
-            let _ = release_rx.recv_timeout(std::time::Duration::from_secs(300));
-            done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let counted = Arc::clone(&writes);
+        let plugins = Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), move |_| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         });
 
-        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
-        let mut scan = plugins.scan().unwrap();
-        let end = loop {
-            match plugins.try_apply(&mut scan) {
-                ScanPoll::Running => std::thread::yield_now(),
-                other => break other,
-            }
-        };
-        assert!(matches!(end, ScanPoll::Done(_)), "{end:?}");
-        // A hang guard: `try_apply` returns at once, and one that waited for the
-        // save would take the save's 300 s hold.
-        assert!(
-            tutti_platform::Instant::now() < deadline,
-            "try_apply waited for the save"
-        );
-        started_rx
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("the save started");
-        assert_eq!(writes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        drop(plugins.save());
+        drop(plugins);
 
-        release_tx.send(()).unwrap();
-        drop(scan);
-        drop(plugins); // joins the save
-        assert_eq!(writes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(writes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// The value moves to the thread the app picks: it is `Send`, and `run` writes
+    /// there.
+    #[test]
+    fn a_save_runs_on_another_thread() {
+        fn is_send<T: Send>(_: &T) {}
+        let dir = tempfile::TempDir::new().unwrap();
+        let writer = Arc::new(std::sync::Mutex::new(None));
+        let sink = Arc::clone(&writer);
+        let plugins = Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), move |_| {
+            *sink.lock().unwrap() = Some(std::thread::current().id());
+            Ok(())
+        });
+        let save = plugins.save();
+        is_send(&save);
+
+        let spawned = std::thread::spawn(move || {
+            save.run().unwrap();
+            std::thread::current().id()
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(*writer.lock().unwrap(), Some(spawned));
+        assert_ne!(spawned, std::thread::current().id());
     }
 
     /// A plugin the user unblacklists, or removes, is not put back by the next

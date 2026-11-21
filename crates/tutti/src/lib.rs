@@ -720,7 +720,8 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin_db::{
-            CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
+            CatalogConfig, FormatMismatch, PluginDb, Probed, SaveCatalog, Scan, ScanPoll,
+            ScanResult,
         };
         pub use tutti_plugin_ipc::AudioConfig;
         pub use tutti_plugin_types::{

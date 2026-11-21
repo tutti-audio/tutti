@@ -83,9 +83,7 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
         }
     }
     drop(task);
-    // The catalog writes its table on a thread of its own when a probe ends;
-    // `save` waits for it.
-    catalog.save().expect("the catalog's table saves");
+    catalog.save().run().expect("the catalog's table saves");
 }
 
 /// A catalog that probed `plugin`'s file, and the id the ref names in it (the
