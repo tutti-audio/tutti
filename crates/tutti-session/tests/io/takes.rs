@@ -1023,8 +1023,11 @@ fn a_take_with_no_dither_writes_the_rounded_value_exactly() {
 #[test]
 fn a_take_with_noise_shaping_feeds_the_rounding_error_back() {
     let (shaped, first) = signal_take(tone, |path| int16(path).no_dither().noise_shaping());
-    let bound =
-        0.5 * (1.0 + tutti_session::NoiseShaping::new(SampleRate::of(RATE)).feedback_gain());
+    let bound = 0.5
+        * (1.0
+            + tutti_session::NoiseShaping::new(SampleRate::of(RATE))
+                .feedback_gain()
+                .get());
     let mut moved = 0;
     for (n, &s) in shaped.iter().enumerate() {
         let exact = f64::from(tone(first + n / 2)) * 32_768.0;

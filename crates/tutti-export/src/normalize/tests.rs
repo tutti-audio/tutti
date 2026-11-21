@@ -108,7 +108,7 @@ mod headroom {
         ] {
             let plain = config(Pcm::Int16, shape);
             let shaped = plain.clone().noise_shaping();
-            let gain = NoiseShaping::new(RATE).feedback_gain();
+            let gain = NoiseShaping::new(RATE).feedback_gain().get();
             let lsbs = 0.5 + error_lsbs + gain * error_lsbs;
             let got = headroom_ceiling(&shaped, RATE).expect("quantizes");
             assert!(
@@ -120,7 +120,7 @@ mod headroom {
         let resampled = config(Pcm::Int16, Some(DitherShape::Triangular))
             .noise_shaping()
             .resample(crate::Resample::to(SampleRate::SR_96K));
-        let want = NoiseShaping::new(SampleRate::SR_96K).feedback_gain();
+        let want = NoiseShaping::new(SampleRate::SR_96K).feedback_gain().get();
         let lsbs = 2.0 + want * 1.5;
         let got = headroom_ceiling(&resampled, RATE).unwrap();
         assert!((got.get() - below_full_scale(16, lsbs)).abs() < 1e-12);

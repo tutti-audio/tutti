@@ -887,7 +887,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
     /// pump into `target` on the session's executor. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the
-    /// device does; the module docs say where it is placed.
+    /// device does; the module docs say where it is placed. `target` is a
+    /// [`TakeFile`] (an integer format triangular-dithered unless it says
+    /// otherwise) or a sink ([`TakeTarget::sink`]).
     ///
     /// The pump is a future that awaits the tap's bell: the audio thread rings it as it
     /// writes each block, so the pump runs only when there are frames. It runs on a

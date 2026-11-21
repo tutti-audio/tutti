@@ -126,7 +126,11 @@ fn noise_shaping_feeds_the_rounding_error_back() {
     assert_eq!(plain.len(), shaped.len());
     let moved = plain.iter().zip(&shaped).filter(|(a, b)| a != b).count();
     assert!(moved * 10 > plain.len(), "{moved} of {}", plain.len());
-    let bound = 0.5 * (1.0 + tutti_session::NoiseShaping::new(SampleRate::SR_48K).feedback_gain());
+    let bound = 0.5
+        * (1.0
+            + tutti_session::NoiseShaping::new(SampleRate::SR_48K)
+                .feedback_gain()
+                .get());
     for (n, &s) in shaped.iter().enumerate() {
         assert!((f64::from(s) - tone(n)).abs() <= bound + 0.01, "sample {n}");
     }

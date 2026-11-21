@@ -166,7 +166,7 @@ fn an_infinity_is_a_clip_and_a_nan_is_not() {
 fn a_shaped_zero_dbtp_export_leaves_the_feedback_its_headroom() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("shaped.wav");
-    let gain = tutti_dsp::NoiseShaping::new(RATE).feedback_gain();
+    let gain = tutti_dsp::NoiseShaping::new(RATE).feedback_gain().get();
     for (pcm, bits) in [(Pcm::Int16, 16u32), (Pcm::Int24, 24)] {
         for (dither, peak) in [
             (None, 0.0),

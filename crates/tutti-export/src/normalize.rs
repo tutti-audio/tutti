@@ -288,7 +288,7 @@ fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> 
     // filter passes at most `feedback_gain` times that.
     let feedback_peak = if target.noise_shaping {
         let rate = output_rate(target, render_rate);
-        NoiseShaping::new(rate).feedback_gain() * (dither_peak + 0.5)
+        NoiseShaping::new(rate).feedback_gain().get() * (dither_peak + 0.5)
     } else {
         0.0
     };
