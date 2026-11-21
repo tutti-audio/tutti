@@ -65,6 +65,23 @@ pub(super) fn spawn_dedicated<T: Send + 'static>(
     Ok(executor.spawn(future))
 }
 
+/// A future that is not `Send` needs a thread of its own, and a page starts none.
+pub(super) fn spawn_dedicated_local<T, F>(
+    _executor: &Executor,
+    _name: &str,
+    _priority: Option<PriorityRequest>,
+    _make: impl FnOnce() -> F + Send + 'static,
+) -> io::Result<Task<T>>
+where
+    T: Send + 'static,
+    F: Future<Output = T> + 'static,
+{
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "a web page starts no threads for a future that is not Send",
+    ))
+}
+
 /// No value: a web page starts no threads, so nothing builds a [`super::Threads`].
 #[derive(Debug)]
 pub(super) enum Threads {}
