@@ -42,7 +42,7 @@ fn second_id() -> PluginId {
 /// A catalog that scanned the reference bundle (both of its plugins), probed
 /// before the plugin's variables are set.
 fn catalog() -> (Catalog, tempfile::TempDir) {
-    let (catalog, _id, dir) = crate::pooled::catalog_of(&PluginRef::file(clap_probe()));
+    let (catalog, _id, dir) = crate::loading::catalog_of(&PluginRef::file(clap_probe()));
     (catalog, dir)
 }
 
@@ -97,7 +97,7 @@ fn a_load_gives_a_handle_whose_node_renders() {
         .run(tutti_fixtures::main_thread())
         .expect("the reference plugin loads");
     assert_eq!(
-        crate::pooled::clap_id(plugin.info().plugin()),
+        crate::loading::clap_id(plugin.info().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
         "the plugin the id names, not the file's first"
     );
@@ -106,6 +106,14 @@ fn a_load_gives_a_handle_whose_node_renders() {
     assert!(!plugin.changed(), "the file is as it was loaded");
 
     let node = s.add_plugin(plugin.node()).expect("the plugin enters");
+    assert!(
+        s.plugin_view(node)
+            .unwrap()
+            .diagnostics()
+            .server_pid()
+            .is_some(),
+        "an out-of-process plugin has its server"
+    );
     s.graph().connect(node.out(0), Root::output(0)).unwrap();
     render_until(&mut s, "the plugin's tag", |left| {
         left.iter().all(|&x| x == 1.0)

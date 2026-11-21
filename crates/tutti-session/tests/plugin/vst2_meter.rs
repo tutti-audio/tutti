@@ -1,11 +1,11 @@
 //! **An in-process VST2 plugin is given the project meter**, as an
-//! out-of-process one is: `Session::add_pooled_plugin` captures its meter cell on
+//! out-of-process one is: `Session::add_plugin` captures its meter cell on
 //! the way in and installs the project's (the click settings') through it,
 //! and the plugin's `audioMasterGetTime` answers in the project's 7/8, read
 //! back out of the reference VST2 probe.
 //!
 
-use crate::pooled::{LoadPlugin, Spec};
+use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_session::Root;
@@ -68,6 +68,8 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
         .load_plugin_blocking(main, Spec::new(PluginRef::file(vst2_probe())))
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();
+    // The meter written above and the wiring take effect at an update.
+    let _ = s.update_on(main);
 
     let hosted = s.plugin_view(node).expect("hosted");
     assert!(

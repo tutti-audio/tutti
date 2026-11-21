@@ -13,8 +13,8 @@
 //! it every test here fails, naming that command. They must fail rather than
 //! skip.
 
+use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
-use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_rt::LockExt;
 use tutti_session::InPort;
@@ -70,7 +70,7 @@ fn session_built(
     build: impl FnOnce(tutti_session::SessionBuilder) -> tutti_session::SessionBuilder,
 ) -> Session {
     // The probe of the plugin's file runs before any fault variable is set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()));
+    crate::loading::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     set_env(
         "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",

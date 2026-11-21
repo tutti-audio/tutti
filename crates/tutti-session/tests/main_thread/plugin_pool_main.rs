@@ -268,7 +268,7 @@ fn a_changed_identity_swaps_an_in_process_node() {
     let first = s.plugin(&"fx").unwrap();
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
     assert_ne!(
-        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         second
     );
 
@@ -279,7 +279,7 @@ fn a_changed_identity_swaps_an_in_process_node() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
     let deadline = Instant::now() + Duration::from_secs(10);
-    while crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()) != second {
+    while crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()) != second {
         assert!(Instant::now() < deadline, "the node never swapped");
         let _ = s.update();
         thread::sleep(Duration::from_millis(2));
@@ -301,7 +301,7 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
     let node = s.add_pooled_plugin(&"fx").unwrap();
-    let before = crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()).to_owned();
+    let before = crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()).to_owned();
 
     // The next plugin opened has the probe's aux-bus layout.
     probe().set(ClapSwitch::PortLayout, 1);
@@ -329,7 +329,7 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
         "{events:?}"
     );
     assert_eq!(
-        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         before
     );
     // The unused plugin was closed where the refusal ran, on the main thread,
@@ -375,7 +375,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
     assert_ne!(
-        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         second
     );
 
@@ -391,7 +391,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
         }
         let _ = s.update();
         assert_ne!(
-            crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+            crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
             second,
             "an update off the main thread does not swap an in-process plugin"
         );
@@ -401,7 +401,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     .unwrap();
     let _ = s.update();
     assert_eq!(
-        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         second
     );
     s.close(tutti_fixtures::main_thread());

@@ -3,7 +3,7 @@
 //! the hosted plugin. The reference CLAP bundle exports two plugins, in a real
 //! `plugin-server`.
 
-use crate::pooled::{LoadPlugin, Spec, catalog_of};
+use crate::loading::{LoadPlugin, Spec, catalog_of};
 use crate::support::clap_probe;
 use tutti_buffers::MaxBlock;
 use tutti_plugin_db::PluginEntry;
@@ -68,22 +68,22 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
         .load_plugin_blocking(main, Spec::new(entry_ref(&path, second_id())))
         .expect("the second plugin loads");
     let hosted = s.plugin_view(second).unwrap();
-    assert_eq!(crate::pooled::clap_id(hosted.plugin()), second_id());
-    assert_eq!(crate::pooled::clap_id(hosted.plugin()), second_id());
+    assert_eq!(crate::loading::clap_id(hosted.plugin()), second_id());
+    assert_eq!(crate::loading::clap_id(hosted.plugin()), second_id());
 
     let first = s
         .load_plugin_blocking(main, Spec::new(PluginRef::file(&path)))
         .expect("the file's first plugin loads");
     let hosted = s.plugin_view(first).unwrap();
-    assert_eq!(crate::pooled::clap_id(hosted.plugin()), first_id());
+    assert_eq!(crate::loading::clap_id(hosted.plugin()), first_id());
     assert_eq!(
-        crate::pooled::clap_id(hosted.plugin()),
+        crate::loading::clap_id(hosted.plugin()),
         first_id(),
         "the record names the plugin the file's first turned out to be"
     );
 }
 
-/// **A state saved from one plugin is refused by an entry for the other, and
+/// **A state saved from one plugin is refused by a load for the other, and
 /// by the other's hosted plugin; its own takes it.** The refusal comes before
 /// the plugin is asked: `OtherPeer` names both.
 #[test]
@@ -122,26 +122,25 @@ fn a_state_is_refused_by_another_plugin() {
         .run(main)
         .expect("saves");
 
-    // The entry's declaration. The key an entry is declared under is never
-    // pooled here: the declaration is built and its state checked, nothing more.
-    const UNPOOLED: u8 = 0;
+    // The load's initial state: the load is built and its state checked, and
+    // never run.
     let (catalog, _id, _dir) = catalog_of(&PluginRef::file(&path));
     let id_of = |id: &str| PluginId::Clap(id.into());
     let refused = s
-        .plugin_entry(UNPOOLED, &id_of(second_id()), &catalog)
+        .load_plugin(&id_of(second_id()), &catalog)
         .initial_state(from_first.clone())
         .expect_err("the first plugin's state is not the second's");
     let SavedPeer::Plugin(expected) = refused.expected() else {
         panic!("a plugin: {:?}", refused.expected());
     };
-    assert_eq!(crate::pooled::clap_id(expected), second_id());
+    assert_eq!(crate::loading::clap_id(expected), second_id());
     assert_eq!(refused.found(), from_first.peer());
     assert!(
         refused.to_string().contains(first_id()) && refused.to_string().contains(second_id()),
         "the text names both: {refused}"
     );
     assert!(
-        s.plugin_entry(UNPOOLED, &id_of(first_id()), &catalog)
+        s.load_plugin(&id_of(first_id()), &catalog)
             .initial_state(from_first.clone())
             .is_ok(),
         "its own state is accepted"

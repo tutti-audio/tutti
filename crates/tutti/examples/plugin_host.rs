@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use tutti::midi::{Address, Message, MidiChannel, NoteNumber, TimedMidiEvent, U7, Ump, Voice1};
 use tutti::plugin::PresetSupport;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
-use tutti::session::{Peer as _, PoolEvent};
+use tutti::session::Peer as _;
 use tutti::{
     Beat, Bounce, Catalog, Format, MaxBlock, ParamId, Pcm, PluginEvent, Range, Root, SampleRate,
     Samples, Session, SessionEvent, StateUse,
@@ -87,11 +87,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plugin = entry.plugin_ref();
     eprintln!("{name}: {:?} in {}", plugin.id(), plugin.path().display());
 
-    // 3. Declare it to an offline session as a pool entry, and update until it
-    //    lands. The entry names the catalog's answer for the plugin's id, so a
-    //    plugin the catalog blacklisted does not resolve and fails its load,
-    //    before any server starts. The thread that finishes an in-process load
-    //    is the main thread: make the token once.
+    // 3. Load it on the main thread and add it to an offline session. The load
+    //    names the catalog's answer for the plugin's id, so a plugin the catalog
+    //    blacklisted does not resolve and fails, before any server starts. The
+    //    thread that runs the load is the main thread: make the token once. The
+    //    handle is the plugin as loaded; the node is made from it, and holds
+    //    its own clone.
     let mut session = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(512)))
@@ -101,27 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .id
         .cloned()
         .ok_or("the scan could not read the plugin's id")?;
-    session.pool(session.plugin_entry("plugin", &id, &catalog))?;
-    let node = loop {
-        let mut landed = false;
-        for event in session.update() {
-            match event {
-                SessionEvent::Pool {
-                    event: PoolEvent::Loaded,
-                    ..
-                } => landed = true,
-                SessionEvent::Pool {
-                    event: PoolEvent::Failed(error),
-                    ..
-                } => return Err(error.into()),
-                _ => {}
-            }
-        }
-        if landed {
-            break session.add_pooled_plugin(&"plugin")?;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    };
+    let loaded = session.load_plugin(&id, &catalog).run(main)?;
+    let node = session.add_plugin(loaded.node())?;
 
     // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
     //    `Key<AnyPlugin>`: ports come from it as from any node's key
@@ -199,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    `load_preset_file`) or has none. A load is work the app runs on the
     //    main thread, then applies.
     {
-        let info = session.plugin(&"plugin")?.info();
+        let info = loaded.info();
         let presets = info.presets();
         match presets.support() {
             PresetSupport::None => eprintln!("no presets"),
