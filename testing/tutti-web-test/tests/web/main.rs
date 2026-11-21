@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tutti::codec::{read_wave, write_wave};
 use tutti::measure::PeakConfig;
 use tutti::sampler::StreamStart;
-use tutti::session::{KeepPace, SamplerError};
+use tutti::session::{BackgroundWork, SamplerError};
 use tutti::{
     Bounce, ChannelLayout, Clip, Format, Interleaved, MaxBlock, Pcm, Range, Root, SampleRate,
     Samples, Seconds, Session, Wave,
@@ -113,7 +113,7 @@ fn a_midi_file_loaded_from_bytes_has_its_notes() {
 }
 
 /// **On a target with no thread, an offline build with the sampler on succeeds and
-/// `open_stream` refuses by name**: the streamer is keep-pace work of tutti's own thread,
+/// `open_stream` refuses by name**: the streamer is background work of tutti's own thread,
 /// so the session has none, and the refusal names it.
 #[wasm_bindgen_test]
 fn open_stream_names_the_streamer_where_no_thread_starts() {
@@ -122,7 +122,7 @@ fn open_stream_names_the_streamer_where_no_thread_starts() {
     assert!(
         matches!(
             refused,
-            Some(SamplerError::NeedsThreads(KeepPace::Streamer))
+            Some(SamplerError::NeedsThreads(BackgroundWork::Streamer))
         ),
         "{refused:?}"
     );

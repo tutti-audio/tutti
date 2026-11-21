@@ -230,7 +230,7 @@ pub(crate) struct Parts<F: Float> {
     /// clones it into the session's jobs, sampler and plugins.
     executor: tutti_platform::Executor,
     /// The thread that drives `executor`; the session's jobs take it over in `session()`.
-    keep_pace: crate::keep_pace::Running,
+    background: crate::background::Running,
     graph: Graph<F>,
     transport: Transport,
     click: Option<NodeKey>,
@@ -434,11 +434,11 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         );
         graph.set_render_workers(self.opts.render_workers);
         graph.declare_root(self.opts.root.clone(), true)?;
-        let (executor, keep_pace) = Self::session_executor()?;
+        let (executor, background) = Self::session_executor()?;
         self.session(
             Parts {
                 executor,
-                keep_pace,
+                background,
                 graph,
                 transport,
                 click: None,
@@ -475,7 +475,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
     /// ([`Error::Clock`](crate::Error::Clock)). A target that starts no thread (the web)
     /// refuses with [`Error::NeedsThreads`](crate::Error::NeedsThreads).
     pub fn build(mut self) -> Result<crate::SystemSession<&'static str, F>> {
-        crate::keep_pace::require(crate::KeepPace::Timer)?;
+        crate::background::require(crate::BackgroundWork::Timer)?;
         let BlockConfig {
             rate,
             outputs: layout,
@@ -557,7 +557,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// When the device cannot be opened or started, or the graph cannot be
     /// built over it.
     pub fn build(self) -> Result<crate::LiveSession<&'static str, F>> {
-        crate::keep_pace::require(crate::KeepPace::Device)?;
+        crate::background::require(crate::BackgroundWork::Device)?;
         let host = tutti_cpal::DeviceHost::open(self.opts.host)?;
         let engine = tutti_cpal::AudioEngine::open(host, self.config.clone())?;
         let device = self.config.device().clone();
@@ -606,7 +606,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             Arc<tutti_engine::AudioCallbackState<F>>,
         ) -> tutti_cpal::Result<()>,
     ) -> Result<crate::LiveSession<&'static str, F>> {
-        crate::keep_pace::require(crate::KeepPace::Device)?;
+        crate::background::require(crate::BackgroundWork::Device)?;
         let spec = audio_engine.spec().clone();
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
@@ -898,9 +898,9 @@ impl<C: Clock> SessionBuilder<C> {
     ) -> Result<Parts<C::Float>> {
         #[cfg(feature = "midi-hardware")]
         if self.opts.midi_hardware.is_some() {
-            crate::keep_pace::require(crate::KeepPace::MidiHardware)?;
+            crate::background::require(crate::BackgroundWork::MidiHardware)?;
         }
-        let (executor, keep_pace) = Self::session_executor()?;
+        let (executor, background) = Self::session_executor()?;
         // Built first so its port list can feed the graph's MIDI input.
         #[cfg(feature = "midi-hardware")]
         let backend = self.opts.midi_backend.take();
@@ -970,7 +970,7 @@ impl<C: Clock> SessionBuilder<C> {
 
         Ok(Parts {
             executor,
-            keep_pace,
+            background,
             graph,
             transport,
             click: Some(click.erase()),
@@ -985,10 +985,10 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The session's executor, and the one thread of tutti's that drives it.
-    fn session_executor() -> Result<(tutti_platform::Executor, crate::keep_pace::Running)> {
+    fn session_executor() -> Result<(tutti_platform::Executor, crate::background::Running)> {
         let executor = tutti_platform::Executor::new();
-        let keep_pace = crate::keep_pace::start(&executor)?;
-        Ok((executor, keep_pace))
+        let background = crate::background::start(&executor)?;
+        Ok((executor, background))
     }
 
     /// The session over `parts`, `engine` its offline engine if any, with
@@ -1036,7 +1036,7 @@ impl<C: Clock> SessionBuilder<C> {
             devices: Default::default(),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
-            jobs: crate::jobs::Jobs::new(executor, parts.keep_pace, bells),
+            jobs: crate::jobs::Jobs::new(executor, parts.background, bells),
             plugins,
         };
         session.provide_values(&table, click_settings);

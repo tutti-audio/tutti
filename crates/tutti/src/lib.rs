@@ -487,9 +487,9 @@ pub mod session {
     pub use tutti_session::LoadError;
     pub use tutti_session::WorkerError;
     pub use tutti_session::{
-        BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade, CrossfadeId,
-        CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        Inlet, InletError, KeepPace, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection, Crossfade,
+        CrossfadeId, CrossfadeRefused, DeclarationError, Event, EventEdge, EventTapPort, Fanin,
+        Feeder, Graph, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
         NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen,
         PHASES, Peer, PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
         Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,

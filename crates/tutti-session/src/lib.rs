@@ -62,6 +62,7 @@
 #[cfg(feature = "analyze")]
 mod analyze;
 mod apply;
+mod background;
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
@@ -96,7 +97,6 @@ mod instrument;
 )]
 mod job;
 mod jobs;
-mod keep_pace;
 mod key;
 #[cfg(any(feature = "capture", feature = "midi"))]
 mod latency;
@@ -189,8 +189,8 @@ pub use device::{
 #[cfg(feature = "plugin")]
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
-    ConnectError, DeclarationError, Error, InletError, KeepPace, NoSuchNode, RemoveError, Result,
-    SessionOutputTapError, TempoError,
+    BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
+    Result, SessionOutputTapError, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};

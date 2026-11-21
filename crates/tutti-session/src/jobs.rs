@@ -43,8 +43,8 @@ use std::time::Duration;
 use tutti_platform::{Executor, Task};
 use tutti_rt::{Bells, LockExt};
 
+use crate::background::Running;
 use crate::job::{Cancel, Job, JobKind, JobOutputQueue, Ticket};
-use crate::keep_pace::Running;
 use crate::loaded::panic_message;
 use crate::{Clock, Session, SessionEvent, WorkerError};
 
@@ -223,7 +223,7 @@ impl Arrivals {
 pub(crate) struct Jobs {
     /// Declared first: the thread that drives the queue stops and joins before the rest
     /// drops.
-    _keep_pace: Running,
+    _background: Running,
     executor: Executor,
     bells: Bells,
     tx: Sender<Arrival>,
@@ -253,10 +253,10 @@ pub(crate) trait JobSession {}
 impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {}
 
 impl Jobs {
-    pub(crate) fn new(executor: Executor, keep_pace: Running, bells: Bells) -> Self {
+    pub(crate) fn new(executor: Executor, background: Running, bells: Bells) -> Self {
         let (tx, rx) = channel();
         Self {
-            _keep_pace: keep_pace,
+            _background: background,
             executor,
             bells,
             tx,

@@ -34,7 +34,7 @@ pub enum SamplerError {
     /// The streamer is thread work of tutti's, and this target starts none (the web):
     /// only an offline session that opens no stream runs there.
     #[error("{0} needs a thread of tutti's, and this target starts none")]
-    NeedsThreads(crate::KeepPace),
+    NeedsThreads(crate::BackgroundWork),
     /// The disk streamer could not be started ([`SessionBuilder`](crate::SessionBuilder)).
     #[error(transparent)]
     Streamer(#[from] tutti_sampler::Error),
@@ -187,10 +187,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             .sampler
             .streamer
             .as_ref()
-            .ok_or(if crate::keep_pace::THREADS {
+            .ok_or(if crate::background::THREADS {
                 SamplerError::NoStreamer
             } else {
-                SamplerError::NeedsThreads(crate::KeepPace::Streamer)
+                SamplerError::NeedsThreads(crate::BackgroundWork::Streamer)
             })?;
         Ok(OpenStream {
             cut: Cut::of(self),

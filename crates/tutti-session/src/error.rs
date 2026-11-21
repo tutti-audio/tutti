@@ -322,7 +322,7 @@ impl std::fmt::Display for RouteDeclarer {
 /// [`SamplerError::NeedsThreads`](crate::SamplerError::NeedsThreads).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum KeepPace {
+pub enum BackgroundWork {
     /// The system clock's timer thread
     /// ([`SessionBuilder::system_clock`](crate::SessionBuilder::system_clock)).
     Timer,
@@ -334,7 +334,7 @@ pub enum KeepPace {
     Streamer,
 }
 
-impl std::fmt::Display for KeepPace {
+impl std::fmt::Display for BackgroundWork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Timer => "the system clock's timer",
@@ -537,7 +537,7 @@ pub enum Error {
     /// this target starts no thread to run it (the web): an offline build with no
     /// hardware does not.
     #[error("{0} needs a thread of tutti's, and this target starts none")]
-    NeedsThreads(KeepPace),
+    NeedsThreads(BackgroundWork),
 
     /// Standard I/O error encountered while reading or writing audio data.
     #[error(transparent)]
