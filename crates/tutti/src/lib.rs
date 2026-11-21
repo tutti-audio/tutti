@@ -291,14 +291,18 @@ pub mod nodes {
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
     pub use tutti_dsp::{
-        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics,
-        Rotation, SpeakerLayout,
+        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, GainsLengthMismatch,
+        HarmonicNormalization, Harmonics, Rotation, SpeakerLayout,
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
         Cookbook, CutResponse, Elliptic, EllipticTolerances, FirError, LinearPhaseDesign,
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
+    };
+    pub use tutti_dsp::{
+        BlockTooLong, MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+        Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
     pub use tutti_dsp::{
@@ -325,10 +329,6 @@ pub mod nodes {
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
-    };
-    pub use tutti_dsp::{
-        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes, Oversampler,
-        Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_dsp::{
@@ -711,7 +711,7 @@ pub mod measure {
     pub use tutti_dsp::{
         BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
         CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
-        StftGeometry, WindowLength, WindowLengthError,
+        StftGeometry, TooManyOutputs, WindowLength, WindowLengthError,
     };
 }
 

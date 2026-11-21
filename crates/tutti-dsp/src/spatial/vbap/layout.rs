@@ -276,7 +276,7 @@ impl SpeakerLayout {
     ///
     /// # Errors
     ///
-    /// [`GainsLengthMismatch`] when `out` is not [`speaker_count`](Self::speaker_count)
+    /// [`GainsLengthMismatch`] when `out` is not `speaker_count`
     /// long; `out` is left as it was.
     pub fn gains_into(
         &self,
