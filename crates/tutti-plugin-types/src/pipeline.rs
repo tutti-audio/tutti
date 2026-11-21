@@ -87,6 +87,10 @@ pub struct ChunkCounters {
     /// bridge (set by
     /// [`attach_editor_requests_dropped`](Self::attach_editor_requests_dropped)).
     editor_requests_dropped: OnceLock<Tally<u64>>,
+    /// Host-side tasks of the server (bridge lanes, the exit task) that did not
+    /// stop in time and were left running (set by
+    /// [`attach_detached`](Self::attach_detached)).
+    detached: OnceLock<Tally<u64>>,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -107,6 +111,7 @@ impl std::fmt::Debug for ChunkCounters {
             .field("leaked_buffers", &self.leaked_buffers())
             .field("mirror_transfers_refused", &self.mirror_transfers_refused())
             .field("editor_requests_dropped", &self.editor_requests_dropped())
+            .field("detached", &self.detached())
             .finish_non_exhaustive()
     }
 }
@@ -175,6 +180,16 @@ impl ChunkCounters {
     /// See `PluginControls::editor_requests_dropped`.
     pub fn editor_requests_dropped(&self) -> u64 {
         self.editor_requests_dropped.get().map_or(0, Tally::get)
+    }
+
+    /// Reads the server watch's count of detached tasks (the node's bind).
+    pub fn attach_detached(&self, detached: Tally<u64>) {
+        let _ = self.detached.set(detached);
+    }
+
+    /// See `PluginControls::detached_tasks`.
+    pub fn detached(&self) -> u64 {
+        self.detached.get().map_or(0, Tally::get)
     }
 
     /// See `PluginControls::skipped_chunks`.

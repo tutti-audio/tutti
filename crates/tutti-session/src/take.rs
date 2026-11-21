@@ -941,7 +941,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let reader = self
             .graph
             .taps()
-            .open(&ports, TapOptions::new(capacity).align(TapAlign::Raw))?;
+            .open_ports(&ports, TapOptions::new(capacity).align(TapAlign::Raw))?;
 
         let id = self.inputs.takes().next_id();
         let shared = Arc::new(Shared::default());

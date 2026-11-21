@@ -133,7 +133,10 @@ fn a_missing_event_port_is_refused_and_stores_nothing() {
         g.connect(src.events_out(), gone.events_in()).err(),
         Some(ConnectError::NoSuchNode(gone.erase()))
     );
-    assert!(!s.graph_ref().is_edited(), "a refusal stores nothing");
+    assert!(
+        !s.graph_ref().has_uncommitted_edits(),
+        "a refusal stores nothing"
+    );
 }
 
 /// **`set_sources` sets exactly what feeds an event input, and

@@ -522,6 +522,7 @@ impl Ipc {
             counters.attach_commands_refused(bridge.audio().commands_refused_cell());
             counters.attach_responses_lost(bridge.audio().responses_lost_cell());
             counters.attach_leaked_buffers(bridge.audio().leaked_buffers_cell());
+            counters.attach_detached(guard.watch().detached_cell());
             if let Some(refused) = bridge.editor().mirror_transfers_refused_cell() {
                 counters.attach_mirror_transfers_refused(refused);
             }

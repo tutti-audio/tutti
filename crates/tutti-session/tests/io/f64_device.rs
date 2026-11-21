@@ -85,10 +85,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     let mut tap = None;
     tutti_fixtures::wait_until("the audio side never took the graph", guard, || {
         let _ = system.update();
-        tap = system
-            .open_output_tap(Samples::new(2_048))
-            .unwrap()
-            .reader();
+        tap = system.open_heard_tap(Samples::new(2_048)).unwrap().reader();
         tap.is_some()
     });
     let mut tap = tap.expect("opened");

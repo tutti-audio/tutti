@@ -110,7 +110,7 @@ fn start_fade(s: &mut Session) -> tutti_graph::TapReader {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples::new(8192))
+        .open_root(Samples::new(8192))
         .expect("opens");
     assert_eq!(tap.width(), 2);
     s.declare_root_topology(Some(mono())).expect("mono");

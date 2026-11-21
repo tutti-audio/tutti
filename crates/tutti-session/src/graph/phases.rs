@@ -10,15 +10,13 @@ use super::{Graph, Retried};
 use crate::SessionEvent;
 
 impl<F: Float> Graph<F> {
-    /// Retries the crossfades that waited out a re-prepare, and reports each
+    /// Retries the replacements that waited out a re-prepare, and reports each
     /// as it landed or failed.
-    pub(crate) fn report_crossfades(&mut self, out: &mut Vec<SessionEvent>) {
-        for retried in self.retry_crossfades() {
+    pub(crate) fn report_replacements(&mut self, out: &mut Vec<SessionEvent>) {
+        for retried in self.retry_replacements() {
             out.push(match retried {
-                Retried::Landed { node, id } => SessionEvent::CrossfadeLanded { node, id },
-                Retried::Failed { node, id, refused } => {
-                    SessionEvent::CrossfadeFailed { node, id, refused }
-                }
+                Retried::Landed { node } => SessionEvent::Replaced { node },
+                Retried::Failed { node, refused } => SessionEvent::ReplaceFailed { node, refused },
             });
         }
     }

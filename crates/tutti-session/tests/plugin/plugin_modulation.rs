@@ -15,7 +15,7 @@ use crate::param_reads::ParamReads as _;
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
-use tutti_session::{PluginChange, PluginEvent};
+use tutti_session::{PluginChange, PluginEvent, Replacement};
 
 use std::time::Duration;
 
@@ -29,8 +29,8 @@ use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
-    Session, SessionEvent,
+    DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
+    SessionEvent,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -292,15 +292,15 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     .expect("load a second instance of the reference plugin");
     let landed = s
         .graph()
-        .crossfade_plugin(
-            node,
-            Box::new(incoming),
-            Seconds::new(0.005),
-            tutti_graph::FadeLaw::EqualAmplitude,
-        )
-        .expect("the crossfade is accepted");
-    assert!(matches!(landed, Crossfade::Landed(_)), "nothing waits");
-    // Rebuilt by the crossfade: not ready until the job is run and landed.
+        .replace_plugin(node, Replacement::new(Box::new(incoming)))
+        .expect("the replace is accepted");
+    assert_eq!(landed, node);
+    assert_eq!(
+        s.graph_ref().testing().waiting_replacements(),
+        0,
+        "nothing waits"
+    );
+    // Rebuilt by the replace: not ready until the job is run and landed.
     assert!(
         !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),
         "the incoming plugin's mirror starts unread"

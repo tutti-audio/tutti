@@ -165,6 +165,15 @@ impl<'a> Diagnostics<'a> {
         )
     }
 
+    /// Host-side tasks of the plugin's server that did not stop in time and were
+    /// left running. Zero for a plugin that runs in this process.
+    pub fn detached_tasks(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::detached_tasks)
+    }
+
     /// The latency the graph compensates for this plugin's node, as of the last
     /// update: the plugin's own, and out of process one chunk of the pipeline
     /// that carries its audio.
@@ -208,7 +217,7 @@ impl<'a> Diagnostics<'a> {
     /// Whether the node follows the project's meter (the time signature and bar
     /// it tells the plugin). True for every plugin the session added; false for
     /// one a host inserted itself
-    /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)), whose node the
+    /// ([`Graph::add_plugin`](crate::Graph::add_plugin)), whose node the
     /// session did not give a meter.
     pub fn follows_project_meter(&self) -> bool {
         self.hosted.node.has_meter()

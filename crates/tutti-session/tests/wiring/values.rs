@@ -6,7 +6,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
-    Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
+    Cx, Fade, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::{
     CompressorConfig, CompressorControls, CompressorNode, KeySource, MultibandBands,
@@ -14,9 +14,10 @@ use tutti_nodes::{
 };
 use tutti_rt::Param;
 use tutti_session::{
-    Assign, DetachedSession, ParamTarget, Session, SetRefusal, TargetInfo, ValueErrorKind, Values,
+    Assign, DetachedSession, ParamTarget, Replacement, Session, SetRefusal, TargetInfo,
+    ValueErrorKind, Values,
 };
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds, UnitAddr, UnitParam};
 
 fn detached() -> DetachedSession {
     Session::builder()
@@ -422,7 +423,10 @@ fn swap<N: tutti_session::SessionNode>(
     incoming: N,
 ) {
     s.graph()
-        .replace(key, incoming, Seconds::new(0.0), FadeLaw::EqualPower)
+        .replace(
+            key,
+            Replacement::new(incoming).fade(Fade::new(Samples::new(0)).law(FadeLaw::EqualPower)),
+        )
         .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
 }
 

@@ -36,6 +36,21 @@ pub enum IpcError {
     #[error("the plugin-server's exit cannot be watched")]
     ExitUnwatched(#[source] std::io::Error),
 
+    /// `IpcConfig::protect_host_memory` was asked for and the host's memory
+    /// could not be protected, so no server is started.
+    #[error("the host's memory cannot be protected from its plugins")]
+    HostMemoryUnprotected(#[source] std::io::Error),
+
+    /// The subprocess could not be bound to the host's end (Windows: the
+    /// kill-on-close job), so it could outlive a dead host; it was killed and
+    /// no server runs.
+    #[error("the plugin-server cannot be bound to the host's end")]
+    ServerNotBound(#[source] std::io::Error),
+
+    /// The bridge cannot watch its control connection, so it does not run.
+    #[error("the bridge cannot watch its control connection")]
+    ConnectionUnwatched(#[source] std::io::Error),
+
     /// The subprocess ended before it bound its control socket.
     #[error("the plugin-server exited before binding its socket")]
     ServerExited {
