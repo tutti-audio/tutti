@@ -1011,8 +1011,8 @@ impl<C: Clock> SessionBuilder<C> {
         running: N::Running,
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
-        let bells = tutti_rt::Bells::new().map_err(crate::Error::Bells)?;
         let executor = parts.executor.clone();
+        let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),

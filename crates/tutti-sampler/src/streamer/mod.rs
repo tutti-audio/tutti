@@ -118,7 +118,7 @@ use tutti_units::SampleRate;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let executor = tutti_platform::Executor::new();
-/// let bells = tutti_rt::Bells::new()?;
+/// let bells = tutti_rt::Bells::new(&executor)?;
 /// let streamer = DiskStreamer::<Running, f32>::start(
 ///     tutti_units::SampleRate::SR_48K,
 ///     Default::default(),
@@ -146,7 +146,8 @@ use tutti_units::SampleRate;
 ///
 /// ```compile_fail
 /// # fn run() -> tutti_sampler::Result<()> {
-/// let (executor, bells) = (tutti_platform::Executor::new(), tutti_rt::Bells::new()?);
+/// let executor = tutti_platform::Executor::new();
+/// let bells = tutti_rt::Bells::new(&executor)?;
 /// let mut streamer = tutti_sampler::DiskStreamer::<tutti_sampler::Running, f32>::start(
 ///     tutti_units::SampleRate::SR_48K,
 ///     Default::default(),
@@ -282,7 +283,10 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
         config: DiskStreamerConfig,
         seams: Seams,
     ) -> Result<Self> {
-        let bells = Bells::new().map_err(crate::Error::Spawn)?;
+        // The bells register the rings' wakes while the streamer is built; a manual
+        // streamer is stepped by its caller, so the set and its tick end here.
+        let executor = tutti_platform::Executor::new();
+        let bells = Bells::new(&executor).map_err(crate::Error::Spawn)?;
         let built = Built::new(256, sample_rate, config.buffer_config, seams, &bells);
         let (streamer_tx, shared, config) =
             (built.command_sender(), built.shared(), built.config());
