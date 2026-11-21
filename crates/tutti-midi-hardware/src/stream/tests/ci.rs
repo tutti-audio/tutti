@@ -1547,7 +1547,7 @@ fn an_invalidate_muid_drops_the_peers_profiles_and_refuses_its_handles() {
     );
     assert_eq!(
         wire.session.set_profile(c.enable(ChannelCount::ONE)),
-        Err(ProfileError::Peer(PeerError::NoSuchPeer))
+        Err(ProfileError::Peer(PeerRequestError::NoSuchPeer))
     );
 }
 
@@ -1647,7 +1647,7 @@ fn a_channel_count_is_at_least_one_and_fits_fourteen_bits() {
     assert_eq!(ChannelCount::new(1), Some(ChannelCount::ONE));
 }
 
-use crate::{PeerError, ProcessChange};
+use crate::{PeerRequestError, ProcessChange};
 use tutti_midi_ci::{
     ChannelControllers, DataControl, Nak, NoteData, ProcessFeatures, ReportRequest, ReportScope,
     SUB_ID2_MESSAGE_REPORT_INQUIRY, SystemMessages,
@@ -1937,7 +1937,7 @@ fn a_lost_peer_drops_its_process_inquiry_and_refuses_its_handles() {
     assert!(wire.session.report_peers(&wire.id).is_empty());
     assert_eq!(
         wire.session.report(handle.ask(function_block_request())),
-        Err(PeerError::NoSuchPeer)
+        Err(PeerRequestError::NoSuchPeer)
     );
 }
 
@@ -2636,13 +2636,13 @@ fn a_call_for_a_peer_that_is_gone_is_refused_or_reported_not_sent() {
     );
     assert_eq!(
         wire.session.ask_property(handle.ask(get())),
-        Err(PeerError::NoSuchPeer)
+        Err(PeerRequestError::NoSuchPeer)
     );
 
     wire.session.disconnect_input(&wire.id.clone()).unwrap();
     assert_eq!(
         wire.session.ask_property(handle.ask(get())),
-        Err(PeerError::NotOpen)
+        Err(PeerRequestError::NotOpen)
     );
 }
 

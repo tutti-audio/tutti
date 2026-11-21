@@ -436,7 +436,7 @@ impl Meta {
 /// [`start`](Self::start)). A packet that ends in `F7` is a whole message on the
 /// wire, so a `Start` never does. A file whose `F0` event holds an 8-bit byte
 /// is read as an [`Escape`](FileEvent::Escape) of the bytes it transmits
-/// ([`Normalized::SysExEscaped`]).
+/// ([`ReadRepair::SysExEscaped`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SysEx {
@@ -532,7 +532,7 @@ impl FileEvent {
 /// One of the four meta events that open an SMF track (SMF 1.0 section 3.3),
 /// each a field of its file or track and so never an event placed late: a Sequence
 /// Number, a Track Name, an SMPTE Offset and a copyright notice. A
-/// [`Normalized`] names the one it changed.
+/// [`ReadRepair`] names the one it changed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Lead {
@@ -562,10 +562,10 @@ impl Lead {
 }
 
 /// What a read did to a [`Lead`] event that was not as SMF 1.0 section 3.3 has
-/// it ([`Normalized::Lead`]).
+/// it ([`ReadRepair::Lead`]).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum Placement {
+pub enum LeadRepair {
     /// The event was at tick 0 but not at the start of its track (a Track
     /// Name after a channel message, a copyright notice after a SysEx): it
     /// became the track's field and is written first.
@@ -587,10 +587,10 @@ pub enum Placement {
 }
 
 /// One change a read made to the file so that it can be written
-/// ([`MidiFile::normalized`]).
+/// ([`MidiFile::repairs`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Normalized {
+pub enum ReadRepair {
     /// A [`Lead`] event the file had out of place, with the tick it was at.
     Lead {
         /// The track.
@@ -598,10 +598,10 @@ pub enum Normalized {
         /// The tick the event was at.
         at: Tick,
         /// The event: kept as the track's field when `placement` is
-        /// [`Moved`](Placement::Moved), dropped otherwise.
+        /// [`Moved`](LeadRepair::Moved), dropped otherwise.
         lead: Lead,
         /// What was done.
-        placement: Placement,
+        placement: LeadRepair,
     },
     /// The track held the tempo map or a timeline of its own and had no Set
     /// Tempo at tick 0 (SMF 1.0 section 2.2: a file specifies its tempo): the
@@ -639,7 +639,7 @@ pub enum Normalized {
     },
 }
 
-impl Normalized {
+impl ReadRepair {
     /// The track the change was made in.
     fn track(&self) -> usize {
         match self {
@@ -1376,7 +1376,7 @@ pub struct MidiFile {
     /// none for SMPTE time.
     tempo_maps: Vec<Arc<TempoMap>>,
     /// What a read changed to make the tracks writable.
-    normalized: Vec<Normalized>,
+    repairs: Vec<ReadRepair>,
 }
 
 /// Two files are equal when their container, division and tracks are; the
@@ -1557,7 +1557,7 @@ impl MidiFile {
             openings,
             copyright,
             tempo_maps,
-            normalized: if authoring { Vec::new() } else { defaulted },
+            repairs: if authoring { Vec::new() } else { defaulted },
         })
     }
 
@@ -1608,10 +1608,10 @@ impl MidiFile {
                     parts.copyright,
                     false,
                 )?;
-                let defaulted = std::mem::take(&mut file.normalized);
-                file.normalized = parts.normalized;
-                file.normalized.extend(defaulted);
-                file.normalized.sort_by_key(Normalized::track);
+                let defaulted = std::mem::take(&mut file.repairs);
+                file.repairs = parts.repairs;
+                file.repairs.extend(defaulted);
+                file.repairs.sort_by_key(ReadRepair::track);
                 Ok(file)
             }
             Some(MidiFileKind::ClipFile) => {
@@ -1827,12 +1827,12 @@ impl MidiFile {
     /// they don't, the time signature is assumed to be 4/4, and the tempo 120
     /// beats per minute"), so a read adds the ones that no track of a format 0 or
     /// 1 file, or that a format 2 pattern (or a track of a format above 2),
-    /// lacks at tick 0 ([`Normalized::DefaultTempo`],
-    /// [`Normalized::DefaultTimeSignature`]), in an SMPTE division too, where
+    /// lacks at tick 0 ([`ReadRepair::DefaultTempo`],
+    /// [`ReadRepair::DefaultTimeSignature`]), in an SMPTE division too, where
     /// they are inert.
     #[must_use]
-    pub fn normalized(&self) -> &[Normalized] {
-        &self.normalized
+    pub fn repairs(&self) -> &[ReadRepair] {
+        &self.repairs
     }
 
     /// The file's copyright notice as the file stores it (no encoding is
@@ -2627,7 +2627,7 @@ fn check_smf(format: SmfFormat, tracks: &[Track]) -> Result<(), TracksError> {
 /// Time Signature example's 24 clocks a click and 8 32nd notes to the
 /// quarter), so the file plays as it did. In an SMPTE division they are as
 /// inert as any other tempo. Returns what it added.
-fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<Normalized> {
+fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<ReadRepair> {
     let timelines: Vec<std::ops::Range<usize>> = if format.shares_timeline() {
         std::iter::once(0..tracks.len()).collect()
     } else {
@@ -2661,10 +2661,10 @@ fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<Norma
             track.events.insert(lead + offset, (Tick(0), meta.into()));
         }
         if tempo {
-            added.push(Normalized::DefaultTempo { track: first });
+            added.push(ReadRepair::DefaultTempo { track: first });
         }
         if meter {
-            added.push(Normalized::DefaultTimeSignature { track: first });
+            added.push(ReadRepair::DefaultTimeSignature { track: first });
         }
     }
     added

@@ -16,7 +16,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, ControlProgramBuilder, Layer, LayerId, Polarity, Waveform,
+    Amount, ControlProgram, ControlProgramBuilder, Layer, LayerClock, LayerId, Polarity, Waveform,
 };
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
@@ -141,7 +141,7 @@ fn roll(
 fn constant(depth: f64) -> Layer {
     Layer {
         id: LayerId(1),
-        clock: Clock::Seconds {
+        clock: LayerClock::Seconds {
             rate: tutti_units::Hz::new(1.0),
             phase: tutti_units::PhaseIncrement::new(0.0),
             anchor: None,

@@ -475,7 +475,7 @@ fn removing_a_node_through_the_graph_forgets_its_declarations() {
         .unwrap();
     settle(&mut s);
 
-    s.graph().remove(probe).unwrap();
+    s.remove(probe).unwrap();
     for _ in 0..8 {
         let _ = s.update();
     }
@@ -677,11 +677,6 @@ fn an_own_edit_after_a_steady_state_applies() {
     s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(2_000.0)))
         .unwrap();
     let _ = s.update();
-    let range = s
-        .graph()
-        .param_mod(probe, UnitParam::Cutoff)
-        .unwrap()
-        .expect("a modulated port")
-        .range;
-    assert_eq!(range.max, 2_000.0, "the range edit is stored");
+    let range = s.mods().range_of(probe.cutoff()).expect("a declared range");
+    assert_eq!(*range.end(), 2_000.0, "the range edit is stored");
 }

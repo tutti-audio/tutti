@@ -21,7 +21,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, ControlProgramBuilder, Curve, DepthBy, InputLayer, Layer,
+    Amount, ControlProgram, ControlProgramBuilder, Curve, DepthBy, InputLayer, Layer, LayerClock,
     LayerId, LfoShape, PeriodPoint, Polarity, RateAnchor, SourceId, Waveform,
 };
 use tutti_music::FrameClock;
@@ -294,15 +294,15 @@ fn amount(depth: f64) -> Amount {
     }
 }
 
-fn beats(per_cycle: f64) -> Clock {
-    Clock::Beats {
+fn beats(per_cycle: f64) -> LayerClock {
+    LayerClock::Beats {
         per_cycle: BeatsPerCycle::of(per_cycle),
         phase: PhaseIncrement::new(0.0),
     }
 }
 
-fn seconds(rate: f64) -> Clock {
-    Clock::Seconds {
+fn seconds(rate: f64) -> LayerClock {
+    LayerClock::Seconds {
         rate: Hz::new(rate),
         phase: PhaseIncrement::new(0.0),
         anchor: None,
@@ -313,7 +313,7 @@ fn wave(shape: LfoShape) -> Waveform {
     Waveform::Shape { shape, seed: 0 }
 }
 
-fn layer(id: u64, clock: Clock, wave: Waveform, amount: Amount) -> Layer {
+fn layer(id: u64, clock: LayerClock, wave: Waveform, amount: Amount) -> Layer {
     Layer {
         id: LayerId(id),
         clock,
@@ -694,7 +694,7 @@ fn a_rate_anchor_holds_two_lanes_in_phase() {
     let (mut host, mut all) = (Host::new(), Vec::new());
     const AT: u64 = 4_010;
     let anchored = |epoch: u32| {
-        tri(Clock::Seconds {
+        tri(LayerClock::Seconds {
             rate: Hz::new(5.0),
             phase: PhaseIncrement::new(0.0),
             anchor: Some(RateAnchor {

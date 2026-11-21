@@ -8,7 +8,7 @@ use crate::HardwareMidiInputs;
 use crate::capability::OsEndpoint;
 use crate::devices::reporter::{Reporter, os_devices};
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-use tutti_midi_device::Identity;
+use tutti_midi_device::OsEndpointIdentity;
 use tutti_midi_runtime::DeviceWriters;
 use tutti_ump::ProductInstanceId;
 
@@ -38,7 +38,7 @@ fn fake_on(executor: &tutti_platform::Executor) -> (Devices, DeviceEvents, FakeC
     (devices, events, counters)
 }
 
-fn id_of(devices: &Devices, name: &str) -> DeviceId {
+fn id_of(devices: &Devices, name: &str) -> MidiDeviceId {
     devices
         .list()
         .into_iter()
@@ -382,7 +382,7 @@ fn a_change_during_subscribe_is_in_initial_or_in_the_stream_once() {
             for n in 0..DEVICES {
                 sink.send(OsChange::Present(OsDevice {
                     handle: EndpointId::from_raw(1_000 + u64::try_from(n).unwrap()),
-                    identity: Identity::CoreMidi(n),
+                    identity: OsEndpointIdentity::CoreMidi(n),
                     name: format!("d{n}"),
                     direction: PortDirection::Input,
                 }));
@@ -420,7 +420,7 @@ fn a_saved_device_resolves_through_devices() {
     let (devices, events, fake) = fake();
     let port = |raw, name: &str, direction| {
         let mut e = endpoint(raw, name);
-        e.identity = Identity::Product(ProductInstanceId::new("unit-1").unwrap());
+        e.identity = OsEndpointIdentity::Product(ProductInstanceId::new("unit-1").unwrap());
         fake.plug(e, direction);
     };
     port(1, "Pad In", PortDirection::Input);
@@ -442,7 +442,7 @@ fn a_saved_device_resolves_through_devices() {
         Resolved::Ambiguous(vec![by_name("Pad In")])
     );
     let mut again = endpoint(7, "Pad Out");
-    again.identity = Identity::Product(ProductInstanceId::new("unit-1").unwrap());
+    again.identity = OsEndpointIdentity::Product(ProductInstanceId::new("unit-1").unwrap());
     fake.plug(again, PortDirection::Output);
     assert_eq!(
         devices.resolve(&pad_out),

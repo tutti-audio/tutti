@@ -284,8 +284,8 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
     );
     assert!(all_are(&out0(&mut r.s), 0.5));
 
+    r.s.remove(r.stereo).unwrap();
     let g = r.s.graph();
-    g.remove(r.stereo).unwrap();
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
     // The removed node's lanes fade out over 256 frames before they go.
     let silent = (0..64).any(|_| all_are(&out0(&mut r.s), 0.0));

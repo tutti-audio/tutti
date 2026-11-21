@@ -13,7 +13,7 @@
 //!   to a param or to another route's depth) and targets (`TargetDecl`: range
 //!   and automation) in, a `Compiled` out. Pure: no clock, no state, no
 //!   `Publisher`. Equal declarations compile equal, so a host republishes only
-//!   the programs that changed. Refusals are by name (`CompileError`).
+//!   the programs that changed. Refusals are by name (`ProgramCompileError`).
 //! - **The program.** `ControlProgram`: automation (which replaces the knob
 //!   where it has a value) plus time-function layers and event-input layers
 //!   (which add), summed in `LayerId` order. A description: equal programs
@@ -46,7 +46,7 @@
 //!
 //! ```rust
 //! use tutti_modulation::{
-//!     compile, Clock, Law, Declarations, LfoShape, Polarity, ProgramTime, RouteDecl,
+//!     compile, LayerClock, Law, Declarations, LfoShape, Polarity, ProgramTime, RouteDecl,
 //!     RouteKey, RouteTarget, Source, SourceKey, TargetDecl, TargetKey, Waveform,
 //! };
 //! use tutti_units::{Beat, BeatsPerCycle, Depth, Frame, ParamAddr, PhaseIncrement, PlayReading, SamplePosition, SampleRate, UnitParam};
@@ -56,7 +56,7 @@
 //!     SourceKey(1),
 //!     Source::Lfo {
 //!         wave: Waveform::Shape { shape: LfoShape::Square, seed: 0 },
-//!         clock: Clock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
+//!         clock: LayerClock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
 //!     },
 //! )];
 //! let routes = [(
@@ -103,14 +103,14 @@ mod source;
 mod sources;
 
 pub use compile::{
-    CompileError, Compiled, Declarations, MAX_CLOCK_PHASE, RATE_ANCHOR_MARGIN, RouteDecl, RouteKey,
-    RouteTarget, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey, compile,
-    layer_id,
+    Compiled, Declarations, MAX_CLOCK_PHASE, ProgramCompileError, RATE_ANCHOR_MARGIN, RouteDecl,
+    RouteKey, RouteTarget, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey,
+    compile, layer_id,
 };
 pub use curve::{Curve, CurveSegment};
 pub use program::{
-    Amount, Clock, ControlProgram, ControlProgramBuilder, Corners, DepthBy, DepthSnapshot,
-    InputLayer, Layer, LayerId, MAX_LANE_DEPTHS, MAX_LANE_INPUTS, MAX_LANE_LAYERS, PeriodPoint,
+    Amount, ControlProgram, ControlProgramBuilder, Corners, DepthBy, DepthSnapshot, InputLayer,
+    Layer, LayerClock, LayerId, MAX_LANE_DEPTHS, MAX_LANE_INPUTS, MAX_LANE_LAYERS, PeriodPoint,
     ProgramError, ProgramTime, RateAnchor, SourceId, Waveform,
 };
 pub use shape::{LfoShape, Polarity, shape};

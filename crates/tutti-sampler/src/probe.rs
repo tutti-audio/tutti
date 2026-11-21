@@ -75,7 +75,7 @@ pub struct SampleFacts {
 /// Errors a probe can report. Terminal: none of these fix themselves on retry.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum ProbeError {
+pub enum SampleProbeError {
     /// The file could not be opened, or has no track this build can decode.
     #[error("could not read {name}: {source}")]
     Unreadable {
@@ -94,7 +94,7 @@ pub enum ProbeError {
 ///
 /// # Errors
 ///
-/// [`ProbeError::Unreadable`] when the file cannot be opened or holds no track
+/// [`SampleProbeError::Unreadable`] when the file cannot be opened or holds no track
 /// this build can decode. A file that decodes but cannot be streamed is not an
 /// error: it reports `streamable: false`.
 ///
@@ -108,12 +108,12 @@ pub enum ProbeError {
 /// } else {
 ///     // must be resident — the streaming path does not exist for this file
 /// }
-/// # Ok::<(), tutti_sampler::ProbeError>(())
+/// # Ok::<(), tutti_sampler::SampleProbeError>(())
 /// ```
-pub fn probe(asset: impl Into<Asset>) -> Result<SampleFacts, ProbeError> {
+pub fn probe(asset: impl Into<Asset>) -> Result<SampleFacts, SampleProbeError> {
     let asset = asset.into();
     let meta = tutti_codec::read_wave_metadata(asset.clone()).map_err(|source| {
-        ProbeError::Unreadable {
+        SampleProbeError::Unreadable {
             name: asset.name(),
             source,
         }
@@ -210,7 +210,7 @@ mod tests {
         // voice on a file that is not there and hear nothing, with no error
         // anywhere.
         let err = probe("/nonexistent/nowhere.wav").unwrap_err();
-        assert!(matches!(err, ProbeError::Unreadable { .. }));
+        assert!(matches!(err, SampleProbeError::Unreadable { .. }));
     }
 
     /// An unstreamable file is not an error — it is a legitimate verdict that

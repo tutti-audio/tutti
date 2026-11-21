@@ -16,7 +16,7 @@
 //! [`Devices`] lists the MIDI devices and keeps the list current while it lives:
 //! `open()` starts a watch, which stops when the last `Devices` and [`DeviceEvents`]
 //! over it are dropped. `subscribe()` gives a [`DeviceEvents`] of its own, so one
-//! reader never takes another's events. Each device has a [`DeviceId`](tutti_midi_device::DeviceId), and
+//! reader never takes another's events. Each device has a [`MidiDeviceId`](tutti_midi_device::MidiDeviceId), and
 //! `open_input(&id, &ports)` returns an [`OpenInput`] that closes the connection
 //! and retires its ring when dropped.
 //! `resolve(&saved)` restores a remembered [`DeviceInfo`](tutti_midi_device::DeviceInfo) (see `tutti-midi-device`'s
@@ -55,7 +55,7 @@
 //! ```
 //!
 //! - **Linux:** a thread subscribes to the sequencer's `System:Announce` port, so a
-//!   device that vanishes is noticed when the kernel says so. A [`DeviceId`](tutti_midi_device::DeviceId) is the
+//!   device that vanishes is noticed when the kernel says so. A [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the
 //!   client and port name plus an ordinal for identical devices; the client number
 //!   is a handle to the current connection and not part of it. A client number the
 //!   kernel hands to a new device straight after an old one exits is a new device,
@@ -65,17 +65,17 @@
 //! - **macOS:** `tutti-coremidi-ffi`'s `SharedClient` runs its run loop on one thread
 //!   for setup notifications (the ports still use a second client, until they
 //!   move to that crate), and each [`Devices`] registers with it. A
-//!   [`DeviceId`](tutti_midi_device::DeviceId) is the endpoint's `MIDIUniqueID`. Untested by the author.
+//!   [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the endpoint's `MIDIUniqueID`. Untested by the author.
 //! - If the watch ends on its own, [`DeviceEvents::recv`] says why, once the events the watch reported are taken, and the list
 //!   stays as it was.
 //! - **Windows:** Windows Multimedia has no notification, so the watch lists the
 //!   ports once a second and reports the difference; a device shows within about
-//!   that long. A [`DeviceId`](tutti_midi_device::DeviceId) is the device interface path the driver reports,
+//!   that long. A [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the device interface path the driver reports,
 //!   or the product name and ids when it reports none, with the direction.
 //! - **Linux without alsa-lib 1.2.10:** the list is empty and stays so, as
 //!   enumeration is; opening reports [`MidiHardwareError::Unsupported`].
 //!
-//! A [`DeviceId`](tutti_midi_device::DeviceId) built on the UMP Product Instance Id is in the types, but no
+//! A [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) built on the UMP Product Instance Id is in the types, but no
 //! backend reads one yet: alsa-lib exposes none, and CoreMIDI's unique id stands in.
 //!
 //! ## Virtual endpoints
@@ -186,12 +186,12 @@
 //! - [`Devices`]: the devices present, and the changes to them.
 //! - [`MidiSession`]: connect and disconnect inputs; owns a [`Devices`] and the
 //!   [`HardwareMidiInputs`] over the inlets it was opened with. `connect_input`,
-//!   `disconnect_input` and `connect_output` take a `&DeviceId`; `connect_output` returns the [`OpenOutput`], which
+//!   `disconnect_input` and `connect_output` take a `&MidiDeviceId`; `connect_output` returns the [`OpenOutput`], which
 //!   the caller owns and sends through.
 //! - [`HardwareMidiInputs`]: the open input ports, each named by its
 //!   [`InputId`](tutti_midi_runtime::InputId) and the [`InputProducerHandle`] its driver thread pushes through,
 //!   whose `push` answers a `Result` of [`Delivered`].
-//! - [`DeviceInfo`](tutti_midi_device::DeviceInfo), [`DeviceId`](tutti_midi_device::DeviceId), [`DeviceEvent`](tutti_midi_device::DeviceEvent): what the list holds and reports;
+//! - [`DeviceInfo`](tutti_midi_device::DeviceInfo), [`MidiDeviceId`](tutti_midi_device::MidiDeviceId), [`DeviceEvent`](tutti_midi_device::DeviceEvent): what the list holds and reports;
 //!   they live in `tutti-midi-device`, with the pure `DeviceTable` behind them.
 //! - [`OsEndpoint`], [`EndpointId`](tutti_midi_device::EndpointId), what a backend enumerates.
 //! - [`DeviceStream`], [`Basis`]: what a device's UMP Stream conversation settled
@@ -326,7 +326,7 @@ pub use devices::{
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{MidiHardwareError, MidiThread, NotFound, Result};
 pub use fault::{Errno, ErrnoOutOfRange, InputFault};
-pub use peer::{PeerError, PeerRef};
+pub use peer::{PeerRef, PeerRequestError};
 pub use port::{
     Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StaleInput, StreamDrain,
 };

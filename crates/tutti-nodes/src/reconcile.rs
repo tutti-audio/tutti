@@ -22,7 +22,7 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_modulation::{
-    CompileError, Compiled, ControlProgram, Declarations, LayerId, RouteDecl, RouteKey,
+    Compiled, ControlProgram, Declarations, LayerId, ProgramCompileError, RouteDecl, RouteKey,
     RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
     TargetKey, compile, layer_id,
 };
@@ -140,7 +140,7 @@ pub enum Feed {
 pub enum ReconcileError {
     /// The declarations do not compile.
     #[error("modulation does not compile")]
-    Compile(#[from] CompileError),
+    Compile(#[from] ProgramCompileError),
     /// A route from a signal source whose input is downstream of the route's
     /// own target: its edge would close a cycle.
     #[error("route {}: its source's input is downstream of its target", route.0)]
@@ -420,7 +420,7 @@ struct SourcePlan {
 /// use std::sync::Arc;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_modulation::{
-///     Clock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
+///     LayerClock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
 ///     Source, SourceKey, TargetDecl, TargetKey, Waveform,
 /// };
 /// use tutti_buffers::ChannelLayout;
@@ -460,7 +460,7 @@ struct SourcePlan {
 ///     SourceKey(1),
 ///     Source::Lfo {
 ///         wave: Waveform::Shape { shape: LfoShape::Sine, seed: 0 },
-///         clock: Clock::Seconds { rate: Hz::new(2.0), phase: PhaseIncrement::new(0.0), anchor: None },
+///         clock: LayerClock::Seconds { rate: Hz::new(2.0), phase: PhaseIncrement::new(0.0), anchor: None },
 ///     },
 /// )];
 /// let mut routes = [(
@@ -1638,7 +1638,7 @@ fn attach_depths(
     compiled: &mut Compiled,
     decl: &Declarations<'_>,
     host: &dyn ModHost,
-) -> Result<(), CompileError> {
+) -> Result<(), ProgramCompileError> {
     let mut cells: BTreeMap<TargetKey, Vec<(LayerId, Param<Depth>)>> = BTreeMap::new();
     for (key, route) in decl.routes {
         if let RouteTarget::Param(target) = route.to
@@ -1655,7 +1655,7 @@ fn attach_depths(
             let count = cells.len();
             program
                 .bind_depths(cells)
-                .map_err(|_| CompileError::TooManyLayers { target, count })?;
+                .map_err(|_| ProgramCompileError::TooManyLayers { target, count })?;
         }
     }
     Ok(())

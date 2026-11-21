@@ -651,8 +651,8 @@ impl tutti_graph::Node for Probe8 {
 fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
     use std::sync::Arc;
     use tutti_modulation::{
-        Amount, Clock, ControlProgramBuilder, Law, Layer, LayerId, LfoShape, PeriodPoint, Polarity,
-        Waveform,
+        Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, LfoShape, PeriodPoint,
+        Polarity, Waveform,
     };
     use tutti_nodes::automation::{Breakpoint, Exponent, Trajectory};
     use tutti_units::{Beat, BeatsPerCycle, Depth, Hz, Phase, PhaseIncrement};
@@ -666,11 +666,11 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
             Law::Linear
         },
     };
-    let beats = Clock::Beats {
+    let beats = LayerClock::Beats {
         per_cycle: BeatsPerCycle::new(0.25 + 0.125 * (k % 5) as f64).expect("above zero"),
         phase: PhaseIncrement::new(0.0),
     };
-    let seconds = Clock::Seconds {
+    let seconds = LayerClock::Seconds {
         rate: Hz::new(1.0 + (k % 11) as f64),
         phase: PhaseIncrement::new(0.0),
         anchor: None,
@@ -1332,8 +1332,8 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     use tutti_graph::{Edge, InPort, OutPort, PortSource};
     use tutti_graph::{Editor, ForkByClone, Prepare, TransportPosition};
     use tutti_modulation::{
-        Clock, Declarations, Law, Polarity, RouteDecl, RouteKey, RouteTarget, Source as ModSource,
-        SourceKey, TargetDecl, TargetKey, Waveform,
+        Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, RouteTarget,
+        Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
     };
     use tutti_nodes::testing::Osc;
     use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
@@ -1425,7 +1425,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
                     shape: tutti_modulation::LfoShape::Sine,
                     seed: 0,
                 },
-                clock: Clock::Seconds {
+                clock: LayerClock::Seconds {
                     rate: Hz::new(2.0),
                     phase: PhaseIncrement::new(0.0),
                     anchor: None,

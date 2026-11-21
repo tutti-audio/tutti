@@ -1,4 +1,4 @@
-//! [`Stream`], the control side of an open stream, and the port its close
+//! [`StreamHandle`], the control side of an open stream, and the port its close
 //! travels by.
 //!
 //! A stream is addressed by its [`StreamId`], which every command carries; the
@@ -18,7 +18,7 @@ use super::control_cell::ControlCell;
 use super::loops::RingControl;
 use super::status::{StatusCell, StreamStatus};
 use crate::Loop;
-use crate::voice::Direction;
+use crate::voice::PlayDirection;
 use tutti_rt::Publisher;
 use tutti_rt::RingFloat;
 
@@ -27,7 +27,7 @@ use tutti_rt::RingFloat;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PortClosed;
 
-/// The way onto one streamer's command queue, cloned into every [`Stream`].
+/// The way onto one streamer's command queue, cloned into every [`StreamHandle`].
 ///
 /// Private to the crate: a stream's drop sends its close through it.
 /// Control threads only: a send waits while the bounded queue is full and
@@ -56,19 +56,19 @@ impl<F: RingFloat> StreamerPort<F> {
 ///
 /// What a stream's [`StreamReader`](crate::StreamReader) plays is the ring the
 /// streamer keeps filled; this is how the control thread steers and ends it.
-/// Dropping the `Stream` sends the streamer a close, and the streamer frees the
+/// Dropping the `StreamHandle` sends the streamer a close, and the streamer frees the
 /// stream's region in the step that handles it. A voice built from the reader
 /// outlives that only as long as the ring it holds (the last holder of the
-/// ring frees it), so a host keeps the `Stream` for as long as the voice
-/// plays. A `Stream` is control-thread only: it is never a part of a voice,
+/// ring frees it), so a host keeps the `StreamHandle` for as long as the voice
+/// plays. A `StreamHandle` is control-thread only: it is never a part of a voice,
 /// so its drop is never on the audio thread.
 ///
 /// Dropping waits while the streamer's queue is full, as every control
 /// command does.
 ///
 /// ```compile_fail
-/// # use tutti_sampler::Stream;
-/// # fn two(stream: Stream<f32>) {
+/// # use tutti_sampler::StreamHandle;
+/// # fn two(stream: StreamHandle<f32>) {
 /// let second = stream.clone(); // a stream has one handle
 /// # }
 /// ```
@@ -76,12 +76,12 @@ impl<F: RingFloat> StreamerPort<F> {
 /// Its compiling twin only borrows it:
 ///
 /// ```
-/// # use tutti_sampler::Stream;
-/// # fn one(stream: Stream<f32>) {
+/// # use tutti_sampler::StreamHandle;
+/// # fn one(stream: StreamHandle<f32>) {
 /// let _again = &stream;
 /// # }
 /// ```
-pub struct Stream<F: RingFloat> {
+pub struct StreamHandle<F: RingFloat> {
     id: StreamId,
     port: StreamerPort<F>,
     /// What the streamer publishes of the stream ([`status`](Self::status)).
@@ -100,16 +100,18 @@ pub struct Stream<F: RingFloat> {
     /// thread. The same cell the stream's node steers.
     looping: ControlCell<Option<Loop>>,
     /// The direction asked for, read and applied the same way.
-    direction: ControlCell<Direction>,
+    direction: ControlCell<PlayDirection>,
 }
 
-impl<F: RingFloat> std::fmt::Debug for Stream<F> {
+impl<F: RingFloat> std::fmt::Debug for StreamHandle<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Stream").field("id", &self.id).finish()
+        f.debug_struct("StreamHandle")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
-impl<F: RingFloat> Stream<F> {
+impl<F: RingFloat> StreamHandle<F> {
     pub(crate) fn new(
         id: StreamId,
         port: StreamerPort<F>,
@@ -118,7 +120,7 @@ impl<F: RingFloat> Stream<F> {
         file: Arc<StreamFile<F>>,
         control: Publisher<RingControl<F>>,
         looping: ControlCell<Option<Loop>>,
-        direction: ControlCell<Direction>,
+        direction: ControlCell<PlayDirection>,
     ) -> Self {
         Self {
             id,
@@ -179,7 +181,7 @@ impl<F: RingFloat> Stream<F> {
 
     /// The direction asked for.
     #[must_use]
-    pub fn direction(&self) -> Direction {
+    pub fn direction(&self) -> PlayDirection {
         *self.direction.current()
     }
 
@@ -221,7 +223,7 @@ impl<F: RingFloat> Stream<F> {
     /// direction is published with the ring's control: the voice and a fork
     /// read it from there, and nothing polls a flag.
     #[must_use]
-    pub fn direction_cell(&self) -> &ControlCell<Direction> {
+    pub fn direction_cell(&self) -> &ControlCell<PlayDirection> {
         &self.direction
     }
 
@@ -232,19 +234,19 @@ impl<F: RingFloat> Stream<F> {
     }
 }
 
-/// A dropped `Stream` ends its stream. A streamer that is already gone has
+/// A dropped `StreamHandle` ends its stream. A streamer that is already gone has
 /// nothing left to end.
-impl<F: RingFloat> Drop for Stream<F> {
+impl<F: RingFloat> Drop for StreamHandle<F> {
     fn drop(&mut self) {
         let _ = self.port.send(StreamerCommand::Close { stream: self.id });
     }
 }
 
 #[cfg(test)]
-impl<F: RingFloat> Stream<F> {
+impl<F: RingFloat> StreamHandle<F> {
     /// A handle on no streamer's stream: only its sends are in question (tests).
     pub(crate) fn detached(id: StreamId, port: StreamerPort<F>) -> Self {
-        Stream::new(
+        StreamHandle::new(
             id,
             port,
             Arc::new(StatusCell::new()),
@@ -262,7 +264,7 @@ impl<F: RingFloat> Stream<F> {
                 None,
             )),
             ControlCell::new(None),
-            ControlCell::new(Direction::Forward),
+            ControlCell::new(PlayDirection::Forward),
         )
     }
 }
@@ -281,8 +283,8 @@ mod tests {
         let (tx, queue) = std::sync::mpsc::sync_channel::<StreamerCommand<f32>>(16);
         let port = StreamerPort::new(tx);
         let (a, b) = (
-            Stream::detached(StreamId::of(1), port.clone()),
-            Stream::detached(StreamId::of(2), port),
+            StreamHandle::detached(StreamId::of(1), port.clone()),
+            StreamHandle::detached(StreamId::of(2), port),
         );
         drop(a);
         drop(b);

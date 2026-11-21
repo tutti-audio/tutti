@@ -5,7 +5,7 @@ use tutti_units::{
 };
 
 use super::*;
-use crate::reverb::network::{Fdn, Network, Stage};
+use crate::reverb::network::{Fdn, Network, NetworkStage};
 use crate::{FreezeMode, MaxDecay};
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
@@ -47,7 +47,7 @@ fn design(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> Box<Network>
 }
 
 fn fdn_of(n: &Network) -> &Fdn {
-    let Some(Stage::Fdn(f)) = n.stages.first() else {
+    let Some(NetworkStage::Fdn(f)) = n.stages.first() else {
         panic!("one FDN stage")
     };
     f

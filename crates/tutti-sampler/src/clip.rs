@@ -10,7 +10,7 @@ use tutti_graph::{HasParam, IntoNode, NodeParts};
 use tutti_timeline::TempoReader;
 use tutti_units::{Amplitude, Beat, PlaybackRate};
 
-use crate::streamer::{Stream, StreamReader};
+use crate::streamer::{StreamHandle, StreamReader};
 use crate::{
     DiskVoice, GainError, Loop, MemorySource, PlaceError, Playback, Voice, VoiceNode,
     VoiceNodeHandle, VoiceSource, VoiceWindow, voice_width,
@@ -74,7 +74,7 @@ enum Tier<F: SamplerFloat> {
     /// A stream and the reader the streamer feeds.
     Streamed {
         reader: Box<StreamReader<F>>,
-        stream: Stream<F>,
+        stream: StreamHandle<F>,
     },
 }
 
@@ -124,7 +124,7 @@ impl<F: SamplerFloat> Clip<F> {
     /// [`DiskStreamer::adopt`](crate::DiskStreamer::adopt) or
     /// `Session::open_stream`), at beat 0, at unit gain, playing once. The
     /// clip owns the stream: it ends when the clip's node leaves the graph.
-    pub fn streaming(reader: StreamReader<F>, stream: Stream<F>) -> Self {
+    pub fn streaming(reader: StreamReader<F>, stream: StreamHandle<F>) -> Self {
         Self::over(Tier::Streamed {
             reader: Box::new(reader),
             stream,

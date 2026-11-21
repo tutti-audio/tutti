@@ -36,7 +36,7 @@ impl std::fmt::Display for TrackPart {
 /// of section 3.3's placement is a [`Layout`](crate::Layout)'s: the Sequence
 /// Number, SMPTE Offset and copyright notice are fields of its lead track or
 /// patterns, written first at tick 0, and a read makes a file keep it
-/// ([`MidiFile::normalized`](crate::MidiFile::normalized)). tutti's writer also
+/// ([`MidiFile::repairs`](crate::MidiFile::repairs)). tutti's writer also
 /// refuses what the specification only recommends: the format 1 tempo map
 /// outside the first track
 /// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)).

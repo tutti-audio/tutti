@@ -139,7 +139,7 @@ fn a_node_that_is_not_there_or_feeds_itself_is_refused() {
     let gone = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
-    s.graph().remove(gone).unwrap();
+    s.remove(gone).unwrap();
     assert_eq!(
         s.graph().connect(a, gone).err(),
         Some(ConnectError::NoSuchNode(gone.erase()))

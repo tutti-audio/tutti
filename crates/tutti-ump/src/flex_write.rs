@@ -24,7 +24,7 @@ pub const FLEX_TEXT_MAX_LEN: usize = MAX_PACKETS * BYTES_PER_PACKET;
 /// Why a [`Text`] cannot be made.
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum TextError {
+pub enum FlexTextError {
     /// The text holds a NUL, which is the padding: a reader cannot tell it
     /// from the end of the text.
     #[error("a Flex text holds no NUL byte")]
@@ -46,7 +46,7 @@ pub enum EntryError {
     Empty,
     /// The entry is not a [`Text`].
     #[error(transparent)]
-    Text(#[from] TextError),
+    Text(#[from] FlexTextError),
 }
 
 /// A text a Flex Data message carries: UTF-8 with no NUL and at most
@@ -72,17 +72,17 @@ impl core::hash::Hash for Text {
 }
 
 impl TryFrom<&str> for Text {
-    type Error = TextError;
+    type Error = FlexTextError;
 
     /// The text `text`.
     ///
     /// # Errors
     ///
-    /// [`TextError::Nul`] for a NUL, [`TextError::TooLong`] past
+    /// [`FlexTextError::Nul`] for a NUL, [`FlexTextError::TooLong`] past
     /// [`FLEX_TEXT_MAX_LEN`] bytes.
-    fn try_from(text: &str) -> Result<Self, TextError> {
+    fn try_from(text: &str) -> Result<Self, FlexTextError> {
         if text.as_bytes().contains(&0) {
-            return Err(TextError::Nul);
+            return Err(FlexTextError::Nul);
         }
         let mut out = Self::empty();
         out.push(text)?;
@@ -91,7 +91,7 @@ impl TryFrom<&str> for Text {
 }
 
 impl TryFrom<&[Entry]> for Text {
-    type Error = TextError;
+    type Error = FlexTextError;
 
     /// The entries as one text, separated by a comma and a space: "John
     /// Lennon, Paul McCartney" (M2-104 section 7.5.9.1, Multiple
@@ -99,7 +99,7 @@ impl TryFrom<&[Entry]> for Text {
     ///
     /// # Errors
     ///
-    /// [`TextError::TooLong`] past [`FLEX_TEXT_MAX_LEN`] bytes.
+    /// [`FlexTextError::TooLong`] past [`FLEX_TEXT_MAX_LEN`] bytes.
     ///
     /// ```
     /// use tutti_ump::{Entry, Text};
@@ -108,7 +108,7 @@ impl TryFrom<&[Entry]> for Text {
     /// let composers = Text::try_from(&entries[..]).unwrap();
     /// assert_eq!(composers.as_str(), "John Lennon, Paul McCartney");
     /// ```
-    fn try_from(entries: &[Entry]) -> Result<Self, TextError> {
+    fn try_from(entries: &[Entry]) -> Result<Self, FlexTextError> {
         let mut out = Self::empty();
         for (i, entry) in entries.iter().enumerate() {
             if i > 0 {
@@ -128,11 +128,11 @@ impl Text {
         }
     }
 
-    fn push(&mut self, part: &str) -> Result<(), TextError> {
+    fn push(&mut self, part: &str) -> Result<(), FlexTextError> {
         let end = self.len + part.len();
         self.bytes
             .get_mut(self.len..end)
-            .ok_or(TextError::TooLong)?
+            .ok_or(FlexTextError::TooLong)?
             .copy_from_slice(part.as_bytes());
         self.len = end;
         Ok(())
@@ -313,7 +313,7 @@ pub enum SyllableError {
     /// The syllable is not a [`Text`], or is too long to keep room for the
     /// longest end, a carriage return and a line feed.
     #[error(transparent)]
-    Text(#[from] TextError),
+    Text(#[from] FlexTextError),
 }
 
 /// The text of one syllable of a Lyric Data or Ruby Data message: no space,
@@ -337,7 +337,7 @@ impl TryFrom<&str> for SyllableBody {
             return Err(SyllableError::Separator);
         }
         if body.len() > FLEX_TEXT_MAX_LEN - 2 {
-            return Err(TextError::TooLong.into());
+            return Err(FlexTextError::TooLong.into());
         }
         Ok(Text::try_from(body).map(Self)?)
     }

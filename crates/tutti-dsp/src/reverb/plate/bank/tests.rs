@@ -2,7 +2,7 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
-use crate::reverb::network::Stage;
+use crate::reverb::network::NetworkStage;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -232,9 +232,12 @@ fn a_lattice_has_the_direct_term_minus_g_and_unit_energy() {
     let mut network = Box::new(Network::new(rate));
     PlateControls::DEFAULT.design_into(rate, &mut network);
     let mut stages = network.stages.iter();
-    let (Some(Stage::AllPass(input)), Some(Stage::Fdn(tank))) = (
+    let (Some(NetworkStage::AllPass(input)), Some(NetworkStage::Fdn(tank))) = (
         stages.next(),
-        network.stages.iter().find(|s| matches!(s, Stage::Fdn(_))),
+        network
+            .stages
+            .iter()
+            .find(|s| matches!(s, NetworkStage::Fdn(_))),
     ) else {
         panic!("an input diffuser and the tank")
     };

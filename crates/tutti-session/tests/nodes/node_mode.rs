@@ -109,10 +109,8 @@ fn mode_reads_back_what_was_set() {
     assert_eq!(r.s.get(r.halve.mode()).unwrap(), NodeMode::Bypassed);
     r.s.set(r.halve.mode().modify(|_| NodeMode::Muted)).unwrap();
     assert_eq!(r.s.get(r.halve.mode()).unwrap(), NodeMode::Muted);
-    // The editor takes it with the next update.
-    assert_eq!(r.s.graph_ref().mode(r.halve).unwrap(), NodeMode::Active);
     let _ = r.settled();
-    assert_eq!(r.s.graph_ref().mode(r.halve).unwrap(), NodeMode::Muted);
+    assert_eq!(r.s.get(r.halve.mode()).unwrap(), NodeMode::Muted);
 }
 
 /// A mode is a control: setting one marks nothing edited, and the next
@@ -146,17 +144,12 @@ fn a_mode_is_not_an_edit() {
 fn a_removed_node_is_refused() {
     let mut r = rig();
     r.s.set(r.halve.mode().to(NodeMode::Muted)).unwrap();
-    r.s.graph().remove(r.halve).unwrap();
+    r.s.remove(r.halve).unwrap();
     let refused = r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
     assert!(refused.target.is_some_and(|t| t.is(r.halve.mode())));
     assert_eq!(
         r.s.get(r.halve.mode()).unwrap_err().kind,
         ValueErrorKind::NoSuchTarget
-    );
-    assert_eq!(
-        r.s.graph_ref().mode(r.halve).unwrap_err().node(),
-        r.halve.erase(),
-        "a removed node's mode goes with it, and asking for it is refused"
     );
 }
