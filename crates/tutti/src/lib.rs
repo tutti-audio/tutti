@@ -298,6 +298,10 @@ pub mod nodes {
         VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
     };
     pub use tutti_dsp::{
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
+        WaveguidePositions, WaveguideString,
+    };
+    pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
     };
@@ -379,6 +383,10 @@ pub mod nodes {
     pub use tutti_nodes::{
         DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
+    };
+    pub use tutti_nodes::{
+        KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
+        WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,
     };
 }
 

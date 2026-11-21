@@ -35,6 +35,9 @@ use tutti_nodes::{
     DecorrelatorConfig, DecorrelatorNode, EarlyReflectionsConfig, EarlyReflectionsNode,
 };
 use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
+use tutti_nodes::{
+    KarplusStrongConfig, KarplusStrongNode, WaveguideStringConfig, WaveguideStringNode,
+};
 use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Cents, Db, Drive, Feedback, Frame, HoldFactor, Hz, Metres, Mix, Q, Resonance,
@@ -331,6 +334,18 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 CombForm::Feedback,
                 Seconds::new(0.002),
             ))),
+        ),
+        (
+            "karplus-strong",
+            Box::new(KarplusStrongNode::<f32>::from(KarplusStrongConfig::new(
+                ChannelLayout::STEREO,
+            ))),
+        ),
+        (
+            "waveguide string",
+            Box::new(WaveguideStringNode::<f32>::from(
+                WaveguideStringConfig::new(ChannelLayout::STEREO),
+            )),
         ),
         (
             "early reflections",
