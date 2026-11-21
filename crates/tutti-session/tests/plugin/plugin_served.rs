@@ -23,7 +23,7 @@ use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
     DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
-    PluginHealth, PluginNode, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState,
+    PluginHealth, PluginInstance, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState,
     SaveState, Session, SessionEvent, StateStartError, SwapPluginError,
 };
 use tutti_units::Normalized;
@@ -229,7 +229,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_a_new_plugin_swaps_in() {
     // A new plugin loaded and swapped in takes the stand-in's place, and its
     // own tail back.
     let opened = load(&s, &catalog, &first_id());
-    let after = opened.handle();
+    let after = opened.instance();
     assert!(matches!(after.presence(), Presence::Live));
     s.swap_plugin(node, opened, main)
         .expect("a live plugin swaps in at the node");
@@ -315,8 +315,8 @@ fn an_initial_state_is_restored_and_two_loads_are_two_plugins() {
     let mut load = s.load_out_of_process(&first_id(), &catalog);
     load.initial_state(state).expect("its own plugin's state");
     let second = load.block().expect("the plugin loads");
-    let second_handle = second.handle();
-    let b = s.add_plugin(second).unwrap();
+    let second_handle = second.instance();
+    let b = s.apply(second).unwrap();
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -486,7 +486,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let mut load = s.load_out_of_process(&first_id(), &catalog);
     load.initial_state(state).expect("its own plugin's state");
     let b = load.block().expect("the plugin loads");
-    let b = s.add_plugin(b).unwrap();
+    let b = s.apply(b).unwrap();
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -575,7 +575,7 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
     // The next server starts with the probe's aux-bus layout.
     layout("1");
     let other = load(&s, &catalog, &second_id());
-    let handle = other.handle();
+    let handle = other.instance();
     let refused = s.swap_plugin(node, other, tutti_fixtures::main_thread());
     let Err(SwapPluginError::Ports { node: returned, .. }) = refused else {
         panic!("other ports are refused: {refused:?}");
@@ -596,7 +596,7 @@ fn a_swap_to_a_plugin_with_other_ports_is_refused() {
         "the graph still commits"
     );
     // The node comes back whole: it has a node of its own to add.
-    let own = s.add_plugin(returned).expect("the returned node adds");
+    let own = s.apply(returned).expect("the returned node adds");
     assert_ne!(own, node);
     assert!(matches!(handle.presence(), Presence::Live));
 }
@@ -618,7 +618,7 @@ fn a_swap_replaces_the_plugin_at_the_node() {
     let first_pid = pid_of(&s, node);
 
     let second = load(&s, &catalog, &second_id());
-    let incoming = second.handle();
+    let incoming = second.instance();
     s.swap_plugin(node, second, tutti_fixtures::main_thread())
         .expect("a plugin with the node's ports swaps in");
 
@@ -686,7 +686,7 @@ fn load<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &Session<K, C>,
     catalog: &Catalog,
     id: &PluginId,
-) -> PluginNode {
+) -> LoadedPlugin {
     s.load_out_of_process(id, catalog)
         .block()
         .expect("the plugin loads")
@@ -697,10 +697,10 @@ fn in_a_node<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     catalog: &Catalog,
     id: &PluginId,
-) -> (LoadedPlugin, tutti_session::Key<tutti_session::AnyPlugin>) {
+) -> (PluginInstance, tutti_session::Key<tutti_session::AnyPlugin>) {
     let opened = load(s, catalog, id);
-    let plugin = opened.handle();
-    let node = s.add_plugin(opened).expect("the plugin enters");
+    let plugin = opened.instance();
+    let node = s.apply(opened).expect("the plugin enters");
     (plugin, node)
 }
 
@@ -825,7 +825,7 @@ fn a_swap_into_a_removed_node_is_refused_and_hands_the_node_back() {
         panic!("a removed node is refused by name");
     };
     let next = s
-        .add_plugin(second)
+        .apply(second)
         .expect("the refused plugin is the next node's");
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(next).unwrap().plugin()),
@@ -844,7 +844,7 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
     // here and the grenade's panic has poisoned the editor when this returns.
     s.graph().set_sample_rate(SampleRate::SR_96K);
     let second = load(&s, &catalog, &second_id());
-    let handle = second.handle();
+    let handle = second.instance();
     let refused = s.swap_plugin(node, second, tutti_fixtures::main_thread());
     let Err(SwapPluginError::Graph(refused)) = refused else {
         panic!("{refused:?}");
@@ -1071,9 +1071,7 @@ fn a_save_awaited_on_a_spawned_thread_returns_the_plugins_state() {
 
     let mut load = s.load_out_of_process(&first_id(), &catalog);
     load.initial_state(state).expect("its own plugin's state");
-    let b = s
-        .add_plugin(load.block().expect("the plugin loads"))
-        .unwrap();
+    let b = s.apply(load.block().expect("the plugin loads")).unwrap();
     let read = s
         .plugin_view(b)
         .unwrap()
@@ -1157,7 +1155,7 @@ fn a_restore_dropped_before_it_is_awaited_sends_nothing() {
     let after = block_on_save(s.save_state(&node, StateUse::Project).unwrap());
     let mut loaded = s.load_out_of_process(&first_id(), &catalog);
     loaded.initial_state(after).unwrap();
-    let c = s.add_plugin(loaded.block().unwrap()).unwrap();
+    let c = s.apply(loaded.block().unwrap()).unwrap();
     let held = s
         .plugin_view(c)
         .unwrap()

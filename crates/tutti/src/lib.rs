@@ -194,11 +194,12 @@ pub use tutti_session::windows_from_signal;
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadInProcess, LoadOutOfProcess,
     LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPlugin,
-    LoadedPreset, LoadingOutOfProcess, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
-    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPresets,
-    PortCounts, PresetStartError, RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess,
-    RestoredState, RestoringStateOutOfProcess, SaveState, SaveStateInProcess,
-    SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError, SwapPluginError,
+    LoadedPreset, LoadingPlugin, LoadingPresetOutOfProcess, Opened, Plugin, PluginApplyError,
+    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo, PluginInstance,
+    PluginPresets, PortCounts, PresetStartError, RestoreState, RestoreStateInProcess,
+    RestoreStateOutOfProcess, RestoredState, RestoringStateOutOfProcess, SaveState,
+    SaveStateInProcess, SaveStateOutOfProcess, SavingStateOutOfProcess, StateStartError,
+    SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{

@@ -16,11 +16,11 @@ mod clap {
     use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::{PresetError, PresetSupport};
     use tutti_session::{
-        AnyPlugin, Key, LoadPreset, LoadedPlugin, Peer as _, PluginApplyError, Session,
+        AnyPlugin, Key, LoadPreset, Peer as _, PluginApplyError, PluginInstance, Session,
     };
     use tutti_units::Samples;
 
-    fn loaded() -> (Session, LoadedPlugin, Key<AnyPlugin>) {
+    fn loaded() -> (Session, PluginInstance, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
         crate::loading::prime(&PluginRef::file(clap_probe()));
         // SAFETY: nextest runs each test in its own process, and this is set
@@ -259,7 +259,7 @@ mod vst3 {
             .load_out_of_process(&id, &catalog)
             .block()
             .expect("the shared plugin loads");
-        let loaded = opened.handle();
+        let loaded = opened.instance();
 
         assert!(loaded.info().presets().support().can_list());
         for info in [loaded.info(), loaded.clone().info()] {
@@ -361,7 +361,7 @@ mod vst3 {
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
         let plugin = s.load_out_of_process(&id, &catalog).block().unwrap();
-        let node = s.add_plugin(plugin).unwrap();
+        let node = s.apply(plugin).unwrap();
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
         let preset = s
             .plugin_view(node)
@@ -410,11 +410,11 @@ mod vst2 {
     use tutti_plugin_types::{PresetError, PresetSupport};
     use tutti_session::DetachedSession;
     use tutti_session::{
-        AnyPlugin, Key, LoadedPlugin, Peer as _, PluginApplyError, PresetStartError, Session,
+        AnyPlugin, Key, Peer as _, PluginApplyError, PluginInstance, PresetStartError, Session,
     };
     use tutti_units::SampleRate;
 
-    fn probe_with(programs: &str) -> (DetachedSession, LoadedPlugin, Key<AnyPlugin>, ScopedEnv) {
+    fn probe_with(programs: &str) -> (DetachedSession, PluginInstance, Key<AnyPlugin>, ScopedEnv) {
         let mut env = ScopedEnv::new();
         env.set("TUTTI_VST2_PROBE_PROGRAMS", programs);
         let mut s = Session::builder()
@@ -519,7 +519,7 @@ mod vst2 {
         DetachedSession,
         tutti_plugin_db::Catalog,
         tutti_plugin_types::PluginId,
-        LoadedPlugin,
+        PluginInstance,
         Key<AnyPlugin>,
         ScopedEnv,
         tempfile::TempDir,
@@ -553,7 +553,7 @@ mod vst2 {
             .load_in_process(&id, &catalog)
             .run(main)
             .expect("a second VST2 loads");
-        let incoming = second.handle();
+        let incoming = second.instance();
         let new = incoming.info().presets().iter().nth(2).unwrap();
         assert_ne!(new, old, "another plugin instance listed it");
 

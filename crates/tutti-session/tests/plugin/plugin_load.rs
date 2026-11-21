@@ -95,7 +95,7 @@ fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
         .load_out_of_process(&second_id(), &catalog)
         .block()
         .expect("the reference plugin loads");
-    let plugin = opened.handle();
+    let plugin = opened.instance();
     assert_eq!(
         crate::loading::clap_id(plugin.info().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
@@ -106,7 +106,7 @@ fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
     assert!(matches!(plugin.presence(), Presence::Live));
     assert!(!plugin.changed(), "the file is as it was loaded");
 
-    let node = s.add_plugin(opened).expect("the plugin enters");
+    let node = s.apply(opened).expect("the plugin enters");
     assert!(
         s.plugin_view(node)
             .unwrap()
@@ -140,7 +140,7 @@ fn an_out_of_process_load_runs_on_a_spawned_thread_and_its_node_renders() {
     .join()
     .expect("the load's thread ends")
     .expect("the reference plugin loads off the main thread");
-    let plugin = opened.handle();
+    let plugin = opened.instance();
     assert_eq!(plugin.info().hosting(), ResolvedHosting::OutOfProcess);
     assert_eq!(plugin.info().id(), &second_id());
     assert_eq!(
@@ -151,12 +151,8 @@ fn an_out_of_process_load_runs_on_a_spawned_thread_and_its_node_renders() {
         "the stamp is of the plugin's module"
     );
     assert!(!plugin.changed(), "the module is as it was stamped");
-    let mut other = session();
-    let Err(AddPluginError::OtherSession(opened)) = other.add_plugin(opened) else {
-        panic!("another session refuses the node");
-    };
 
-    let node = s.add_plugin(opened).expect("its session adds it");
+    let node = s.apply(opened).expect("its session adds it");
     s.graph().connect(node.out(0), Root::output(0)).unwrap();
     render_until(&mut s, "the plugin's tag", |left| {
         left.iter().all(|&x| x == 1.0)
@@ -193,34 +189,46 @@ fn a_failed_load_returns_its_error() {
     );
 }
 
-/// **A plugin loaded by one session is refused by another and handed back**,
-/// by `add_plugin` and by `swap_plugin`: the other session's rate and collector
-/// of main-thread work are not the plugin's. The node then enters the session
-/// that loaded it.
+/// **A plugin loaded by one session is refused `Stale` by another, by `apply`
+/// and by `swap_plugin`**: the other session's rate and collector of main-thread
+/// work are not the plugin's. The refused apply hands nothing back and drops
+/// the load, so its instance reads `Closed`; the refused swap hands the load
+/// back, and the session that loaded it takes it.
 #[test]
-fn a_plugin_of_another_session_is_refused_by_name_and_handed_back() {
+fn a_plugin_of_another_session_is_refused_stale() {
     let (catalog, _dir) = catalog();
-    let a = session();
-    let mut a = a;
+    let mut a = session();
     let mut b = session();
     let main = tutti_fixtures::main_thread();
+    let refused = a
+        .load_out_of_process(&first_id(), &catalog)
+        .block()
+        .unwrap();
+    let dropped = refused.instance();
+    assert!(
+        matches!(b.apply(refused), Err(AddPluginError::Stale)),
+        "apply in another session"
+    );
+    assert!(
+        matches!(dropped.presence(), Presence::Closed),
+        "the refused load is released"
+    );
+    assert_eq!(b.plugins().count(), 0, "no node was added");
+
     let opened = a
         .load_out_of_process(&first_id(), &catalog)
         .block()
         .unwrap();
-    let Err(AddPluginError::OtherSession(opened)) = b.add_plugin(opened) else {
-        panic!("add to another session");
-    };
     let hosted = b
         .load_out_of_process(&first_id(), &catalog)
         .block()
         .unwrap();
-    let at = b.add_plugin(hosted).unwrap();
-    let Err(SwapPluginError::OtherSession(opened)) = b.swap_plugin(at, opened, main) else {
+    let at = b.apply(hosted).unwrap();
+    let Err(SwapPluginError::Stale(opened)) = b.swap_plugin(at, opened, main) else {
         panic!("swap in another session");
     };
     assert!(
-        a.add_plugin(opened).is_ok(),
+        a.apply(opened).is_ok(),
         "the session that loaded it takes it"
     );
 }
@@ -244,7 +252,7 @@ mod process {
             .load_out_of_process(&first_id(), &catalog)
             .block()
             .unwrap();
-        let plugin = opened.handle();
+        let plugin = opened.instance();
         let pid = plugin.info().server_pid().expect("a served plugin");
         assert!(alive(pid));
         let clone = plugin.clone();
@@ -320,9 +328,9 @@ mod process {
             .load_out_of_process(&first_id(), &catalog)
             .block()
             .unwrap();
-        let watch = opened.handle();
+        let watch = opened.instance();
         let pid = watch.info().server_pid().expect("a served plugin");
-        let node = s.add_plugin(opened).unwrap();
+        let node = s.apply(opened).unwrap();
         s.graph().connect(node.out(0), Root::output(0)).unwrap();
         let kept = watch.clone();
         drop(watch);
@@ -348,7 +356,7 @@ mod process {
             .load_out_of_process(&first_id(), &catalog)
             .block()
             .unwrap();
-        let plugin = opened.handle();
+        let plugin = opened.instance();
         let pid = plugin.info().server_pid().expect("a served plugin");
         let killed = std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
@@ -364,11 +372,11 @@ mod process {
             .load_out_of_process(&first_id(), &catalog)
             .block()
             .unwrap();
-        let node = s.add_plugin(host).unwrap();
+        let node = s.apply(host).unwrap();
         let Err(SwapPluginError::Lost(dead)) = s.swap_plugin(node, opened, main) else {
             panic!("a lost plugin is refused by a swap");
         };
-        assert!(matches!(s.add_plugin(dead), Err(AddPluginError::Lost)));
+        assert!(matches!(s.apply(dead), Err(AddPluginError::Lost)));
     }
 
     /// **`changed()` reads the plugin's module, not its bundle directory.** A
@@ -391,7 +399,7 @@ mod process {
             .load_out_of_process(&id, &catalog)
             .block()
             .expect("the bundle loads");
-        let plugin = opened.handle();
+        let plugin = opened.instance();
         assert_eq!(plugin.asset().name(), module.display().to_string());
         assert!(!plugin.changed(), "as loaded");
         let file = std::fs::OpenOptions::new()
