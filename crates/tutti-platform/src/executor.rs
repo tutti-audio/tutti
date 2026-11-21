@@ -3,8 +3,9 @@
 //! One type: a run queue of woken tasks, a queue of sleep deadlines, and a drive that
 //! fires the due sleeps and runs the ready tasks. Whoever calls
 //! [`run_until_stalled`](Executor::run_until_stalled) or
-//! [`try_tick`](Executor::try_tick) drives it, and on a native target
-//! [`spawn_threads`](Executor::spawn_threads) starts threads that drive it for good.
+//! [`try_tick`](Executor::try_tick) drives it; on a native target
+//! [`spawn_threads`](Executor::spawn_threads) starts threads that drive it for good, and on
+//! the web [`drive_on_page`](Executor::drive_on_page) hands the browser's queue a future that does.
 //! This is not an async runtime: it has no I/O reactor.
 
 use std::fmt;
@@ -95,6 +96,25 @@ pub struct Threads {
     _threads: os::Threads,
 }
 
+/// The handle of the future that drives an [`Executor`] from the browser's queue, started by
+/// `Executor::drive_on_page` on the web. A native target has no constructor for it.
+///
+/// Each turn fires the due sleeps, runs a bounded batch of ready tasks, and yields to the
+/// page or waits (as a pending future, never a spin) for a task, the next deadline, or the
+/// stop. Dropping the `PageDriver`, or the executor's last clone, stops it and clears its
+/// pending browser timeout.
+#[must_use = "dropping `PageDriver` stops the driver"]
+pub struct PageDriver {
+    /// Held for its drop, which stops the driver.
+    _page: os::Page,
+}
+
+impl fmt::Debug for PageDriver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PageDriver").finish_non_exhaustive()
+    }
+}
+
 /// A `Mutex`'s guard whether or not a panicking holder poisoned it. Each lock here
 /// guards a queue or a slot that a panic leaves consistent.
 fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -112,14 +132,16 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// - **The caller.** [`run_until_stalled`](Self::run_until_stalled) fires every sleep that
 ///   is due and runs ready tasks on the calling thread until none is ready;
-///   [`try_tick`](Self::try_tick) runs one. Neither waits. On the web the caller is the
-///   only driver.
+///   [`try_tick`](Self::try_tick) runs one. Neither waits.
 /// - **Threads** (native only). [`spawn_threads`](Self::spawn_threads) starts threads
 ///   that each fire the due sleeps, run a ready task, and park until a task is scheduled
 ///   or the next deadline. Dropping the returned `Threads` stops and joins them.
+/// - **The browser's queue** (web only). `drive_on_page` hands it one future that fires
+///   the due sleeps and runs the ready tasks in bounded batches, awaiting a browser
+///   timeout for the next deadline. Dropping the returned [`PageDriver`] stops it.
 ///
 /// Blocking work does not run on a driver: [`unblock`](Self::unblock) runs a closure on a
-/// small pool of its own (native), or inside the next drive (web), and
+/// small pool of its own (native), or as a task of the queue on the page's thread (web), and
 /// [`spawn_dedicated`](Self::spawn_dedicated) gives one long-lived future a thread of its
 /// own (native), or queues it like [`spawn`](Self::spawn) (web).
 ///
@@ -267,9 +289,10 @@ impl Executor {
     ///
     /// On a native target `f` runs on a small pool of threads started on demand, which
     /// end once idle, so a driver never blocks on it; it starts at once, whether or not
-    /// anything drives the queue. On the web there are no threads: `f` runs inside the
-    /// next [`run_until_stalled`](Self::run_until_stalled) or
-    /// [`try_tick`](Self::try_tick), on the caller's thread, for as long as it takes.
+    /// anything drives the queue. On the web there are no threads: `f` is a task of the
+    /// queue, and runs on the page's thread inside a turn of the driver (or of the next
+    /// [`run_until_stalled`](Self::run_until_stalled) or [`try_tick`](Self::try_tick)) for as
+    /// long as it takes, holding the page's other tasks off until it returns.
     ///
     /// Dropping the task before `f` starts cancels it; one that has started finishes and
     /// its output is dropped.
@@ -340,7 +363,8 @@ impl Executor {
     /// A future that resolves once [`Instant::now`] is at or past `deadline`; a deadline
     /// already past resolves on its first poll.
     ///
-    /// A driver fires it, so its resolution is the cadence of whoever drives. Dropping the
+    /// A driver fires it, so its resolution is the cadence of whoever drives (on the web, the
+    /// browser's timeout). Dropping the
     /// [`Sleep`] before it resolves removes it from the queue. It resolves at once with
     /// `Err(`[`Shutdown`]`)` once this executor has shut down.
     ///
