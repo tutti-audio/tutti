@@ -624,8 +624,6 @@ pub struct OpenOutput {
     /// being polled when it is cancelled ends on its driver, which then drops the
     /// sink it holds, so the connection may close on that thread.
     heartbeat: Option<Heartbeat>,
-    /// What the heartbeat is spawned on.
-    executor: Executor,
     info: DeviceInfo,
     sink: Arc<dyn DeviceOut>,
     wire: Wire,
