@@ -33,15 +33,30 @@ use crate::{DELAY_SLEW, DelayLine, InterpolationMode, Ramp, TAIL_FLOOR};
 /// many frames, so a distance sent once a block or less is a straight line between them.
 pub const DISTANCE_GLIDE: Samples = Samples::new(64);
 
-/// The smallest reference distance, 1 mm: a reference of zero would divide by it.
-const MIN_REFERENCE: Metres = Metres::of(0.001);
+tutti_units::ranged! {
+    /// The distance at which a [`Distance`]'s level is 1: at least 1 mm, since the level is
+    /// the reference over the distance.
+    ReferenceDistance(Metres), ReferenceDistanceError, "a distance of at least 1 mm",
+    |raw| raw.get() >= 0.001
+}
+
+impl ReferenceDistance {
+    /// 1 m, the default reference.
+    pub const DEFAULT: Self = Self(Metres::of(1.0));
+}
+
+impl Default for ReferenceDistance {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
 
 /// What a [`Distance`] is built for: the farthest source, the reference, the medium and the
 /// air's absorption.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DistanceSpec {
     max: Metres,
-    reference: Metres,
+    reference: ReferenceDistance,
     speed: Speed,
     absorption: Option<Hz>,
 }
@@ -53,19 +68,16 @@ impl DistanceSpec {
     pub fn new(max: Metres) -> Self {
         Self {
             max,
-            reference: Metres::of(1.0),
+            reference: ReferenceDistance::DEFAULT,
             speed: Speed::SOUND_IN_AIR_20C,
             absorption: None,
         }
     }
 
-    /// The distance at which the level is 1 (at least a millimetre).
+    /// The distance at which the level is 1.
     #[must_use]
-    pub fn reference(self, reference: Metres) -> Self {
-        Self {
-            reference: reference.max(MIN_REFERENCE),
-            ..self
-        }
+    pub fn reference(self, reference: ReferenceDistance) -> Self {
+        Self { reference, ..self }
     }
 
     /// The speed of the wave the delay is computed from.
@@ -93,7 +105,7 @@ impl DistanceSpec {
     /// The reference distance.
     #[must_use]
     pub fn reference_distance(&self) -> Metres {
-        self.reference
+        self.reference.get()
     }
 
     /// The delay of `distance` at `rate`, as a position, held to the farthest distance.
@@ -151,7 +163,7 @@ impl<F: Float> Distance<F> {
     ) -> Self {
         let capacity = Samples::new(spec.far(rate).frames().get().saturating_add(1));
         let width = usize::from(width.count());
-        let reference = ReadPosition::of(spec.reference / spec.speed, rate).span();
+        let reference = ReadPosition::of(spec.reference.get() / spec.speed, rate).span();
         Self {
             spec,
             rate,

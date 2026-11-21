@@ -9,11 +9,11 @@
 use dpi::Size;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
-    Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
-    LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor, PluginError,
-    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RateRefusal, RenderMode,
-    RenderModeSupport, Request, StateError, StateUse, TerminationReason, TrackInfo, UnknownParam,
-    WindowHandle, bypass_value,
+    Control, Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features,
+    Health, LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor,
+    PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RateRefusal,
+    RenderMode, RenderModeSupport, Request, StateError, StateUse, TerminationReason, TrackInfo,
+    UnknownParam, WindowHandle, bypass_value,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
@@ -139,11 +139,14 @@ macro_rules! served_control {
                 main: MainThreadMarker,
                 parent: WindowHandle,
                 scale: ContentScale,
-            ) -> PluginResult<Size> {
+            ) -> PluginResult<EditorOpened<Size>> {
                 Ok(self.link.bridge.editor().open_editor(main, parent, scale)?)
             }
 
-            fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<()> {
+            fn open_floating_editor(
+                &mut self,
+                main: MainThreadMarker,
+            ) -> PluginResult<EditorOpened<()>> {
                 Ok(self.link.bridge.editor().open_floating_editor(main)?)
             }
 

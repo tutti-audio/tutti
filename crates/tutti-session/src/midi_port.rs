@@ -630,7 +630,9 @@ fn poll_start(start: &mut Start, cx: &mut Context<'_>) -> Poll<Result<Started, M
 
 /// The wait for the OS MIDI layer before an input port opens, from
 /// [`Session::open_midi_input`]: a `Send` [`Future`] that resolves to the
-/// [`OpenedMidiInput`] that [`Session::apply`] installs.
+/// [`OpenedMidiInput`] that [`Session::apply`] installs. Fed by the OS MIDI
+/// layer's start: ready at once off macOS, woken by the device-watch thread on
+/// macOS; no [`Session::update`] is needed.
 ///
 /// It resolves at once off macOS. On macOS it resolves when the device-watch
 /// thread has made the process's CoreMIDI client or given up, and that thread
@@ -702,7 +704,8 @@ impl<F: crate::SessionFloat> Sealed<F> for OpenedMidiInput {
 
 /// The wait for the OS MIDI layer before an output port opens, from
 /// [`Session::open_midi_output`]: as [`OpeningMidiInput`], resolving to the
-/// [`OpenedMidiOutput`] that [`Session::apply`] installs.
+/// [`OpenedMidiOutput`] that [`Session::apply`] installs. Fed as
+/// [`OpeningMidiInput`] is: no [`Session::update`] is needed.
 ///
 /// The port's Active Sensing is set here and not on the handle: a transmitter
 /// that has started Active Sensing goes on (MIDI 1.0 Detailed Specification

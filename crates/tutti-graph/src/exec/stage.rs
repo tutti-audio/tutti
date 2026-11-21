@@ -25,6 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::Float;
+use tutti_rt::CappedVec;
 
 use tutti_curve::declick_frames;
 
@@ -899,7 +900,7 @@ impl Stager {
                     .and_then(|o| o.unit(inc.key))
                     .and_then(|u| u.shape.chase)
                     .map_or(0, |n| n.get() as usize);
-                f.chase.reserve_exact(n);
+                f.chase = CappedVec::with_capacity(n);
             }
         }
     }

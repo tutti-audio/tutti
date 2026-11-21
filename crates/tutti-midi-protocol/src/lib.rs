@@ -60,7 +60,7 @@
 //!
 //! Going down has four entry points; pick by what you hold and what you need.
 //!
-//! - [`Message::try_to_midi1`](tutti_ump::Message::try_to_midi1) for one
+//! - [`Message::to_midi1`](tutti_ump::Message::to_midi1) for one
 //!   stateless [`Message`](tutti_ump::Message) to its MIDI 1.0
 //!   [`Message`](tutti_ump::Message), the group and channel kept (the inverse of
 //!   [`Message::to_midi2`](tutti_ump::Message::to_midi2)).

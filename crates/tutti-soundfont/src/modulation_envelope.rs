@@ -3,7 +3,7 @@
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
 use tutti_dsp::{Envelope, EnvelopeDesign, EnvelopeStages};
-use tutti_units::{Amplitude, Normalized, SampleRate, Samples, Seconds};
+use tutti_units::{Normalized, SampleRate, Samples, Seconds};
 
 use crate::render::Render;
 
@@ -23,7 +23,7 @@ impl ModulationEnvelope {
         let idle = EnvelopeStages::new(
             Seconds::new(0.0),
             Seconds::new(0.0),
-            Amplitude::SILENT,
+            Normalized::of(0.0),
             Seconds::new(0.0),
         );
         Self {
@@ -41,7 +41,7 @@ impl ModulationEnvelope {
         sustain: Normalized,
         release: Seconds,
     ) {
-        let stages = EnvelopeStages::new(attack, decay, Amplitude::new(sustain.get()), release)
+        let stages = EnvelopeStages::new(attack, decay, sustain, release)
             .delay(delay)
             .hold(hold);
         self.envelope.start(EnvelopeDesign::new(&stages, self.rate));

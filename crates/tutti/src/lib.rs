@@ -304,7 +304,10 @@ pub mod nodes {
         BlockTooLong, MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
         Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
-    pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
+    pub use tutti_dsp::{
+        DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ModulationRate,
+        ModulationRateError, ReferenceDistance, ReferenceDistanceError,
+    };
     pub use tutti_dsp::{
         Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, ReflectionOrder,
         ShoeboxConfig, ShoeboxError, ShoeboxRoom, VelvetDensity, VelvetDensityError, VelvetLength,
@@ -322,8 +325,8 @@ pub mod nodes {
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
     pub use tutti_dsp::{
-        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
-        WaveguidePositions, WaveguideString,
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, LowestPitch, LowestPitchError,
+        WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString,
     };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
@@ -353,12 +356,12 @@ pub mod nodes {
         DirectionSet,
     };
     pub use tutti_nodes::{
-        Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
-        ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour, OscillatorWave, PanLaw,
-        PolarityConfig, PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel,
-        RingModNode, RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode,
-        StereoWidthSet, TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet,
-        WidthControls,
+        Antialiasing, AntialiasingError, AutoPanConfig, AutoPanControls, AutoPanKernel,
+        AutoPanNode, AutoPanSet, ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour,
+        OscillatorWave, PanLaw, PolarityConfig, PolarityError, PolarityNode, RingModConfig,
+        RingModControls, RingModKernel, RingModNode, RingModSet, StereoWidthConfig,
+        StereoWidthKernel, StereoWidthNode, StereoWidthSet, TremoloConfig, TremoloControls,
+        TremoloKernel, TremoloNode, TremoloSet, WidthControls,
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
@@ -788,8 +791,8 @@ pub mod plugin {
         AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
     };
     pub use tutti_plugin_types::{
-        EditorError, LoadStage, NoEditorHost, RateRefusal, RateRefusalCause, ServerError,
-        TerminationReason,
+        EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,
+        RateRefusalCause, ServerError, TerminationReason,
     };
     pub use tutti_plugin_types::{
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,

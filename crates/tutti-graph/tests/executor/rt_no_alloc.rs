@@ -590,6 +590,68 @@ fn parallel_a_held_chase_is_delivered_allocation_free() {
     a_held_chase_is_delivered_allocation_free_on(4);
 }
 
+/// **A replace queued behind a running fade is applied without allocating**:
+/// B fades in over A, and the commit replacing B with C (a fade that waits
+/// behind B's) is applied inside the gate. B's chase of three messages is
+/// held by C's crossfade, whose buffer the editor sized when it built the
+/// commit; the count of what C later receives proves the chase was held.
+#[test]
+fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    let (a, b, c) = (
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+    );
+    ed.insert(NodeKey(1), "chaser", Unforkable(HeldChaser(Arc::clone(&a))));
+    ed.spec_mut()
+        .topology
+        .set_outputs([PortSource::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        })]);
+    ed.commit().expect("commits");
+    let mut out = vec![0.0f32; 64];
+    let transport = TransportPosition::default();
+    let mut block = |exec: &mut tutti_graph::Executor| {
+        let mut slices: [&mut [f32]; 1] = [out.as_mut_slice()];
+        exec.process(64, &transport, &[], &mut slices);
+    };
+    block(&mut exec);
+    let fade = |n| Fade::new(Samples::new(n)).law(FadeLaw::EqualPower);
+    ed.replace(
+        NodeKey(1),
+        Unforkable(HeldChaser(Arc::clone(&b))),
+        fade(256),
+    )
+    .expect("fits");
+    ed.commit().expect("commits");
+    block(&mut exec);
+    assert_eq!(b.load(Ordering::Relaxed), 3, "A's chase reached B");
+    ed.replace(
+        NodeKey(1),
+        Unforkable(HeldChaser(Arc::clone(&c))),
+        fade(256),
+    )
+    .expect("fits");
+    ed.commit().expect("commits");
+    // The commit queuing C behind B's running fade is applied inside the gate.
+    apply(&mut exec);
+    block(&mut exec);
+    assert_eq!(c.load(Ordering::Relaxed), 0, "C waits behind B's fade");
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..16 {
+            block(&mut exec);
+        }
+    });
+    assert_eq!(
+        c.load(Ordering::Relaxed),
+        3,
+        "C took over and received B's chase, once"
+    );
+    assert_eq!(exec.dropped_event_count(), 0);
+}
+
 /// Pushes `burst` events on the first frame of every 256-frame bar into a
 /// port declaring `cap` per block, counting what its writer refuses.
 struct Spray {

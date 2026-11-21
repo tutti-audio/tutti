@@ -138,7 +138,7 @@ impl Members {
                     slid: false,
                     ..*slot
                 };
-                if let Ok(on) = Voice1::try_from_with(extremes, voice) {
+                if let Ok(on) = Voice1::from_voice2(voice, extremes) {
                     send(member, on);
                 }
             }
@@ -147,7 +147,7 @@ impl Members {
                     let slot = &mut members[member.index()];
                     slot.held = None;
                     slot.released = self.tick;
-                    if let Ok(off) = Voice1::try_from_with(extremes, voice) {
+                    if let Ok(off) = Voice1::from_voice2(voice, extremes) {
                         send(member, off);
                     }
                 }
@@ -155,7 +155,7 @@ impl Members {
             Voice2::PerNotePitchBend { note, value } => {
                 if let Some(member) = find(members, note) {
                     members[member.index()].bent = true;
-                    if let Ok(bend) = Voice1::try_from_with(extremes, Voice2::PitchBend(value)) {
+                    if let Ok(bend) = Voice1::from_voice2(Voice2::PitchBend(value), extremes) {
                         send(member, bend);
                     }
                 }
@@ -164,7 +164,7 @@ impl Members {
                 if let Some(member) = find(members, note) {
                     members[member.index()].pressed = true;
                     if let Ok(pressure) =
-                        Voice1::try_from_with(extremes, Voice2::ChannelPressure(value))
+                        Voice1::from_voice2(Voice2::ChannelPressure(value), extremes)
                     {
                         send(member, pressure);
                     }
@@ -184,7 +184,7 @@ impl Members {
                         controller: CCNumber::BRIGHTNESS,
                         value,
                     };
-                    if let Ok(slide) = Voice1::try_from_with(extremes, slide) {
+                    if let Ok(slide) = Voice1::from_voice2(slide, extremes) {
                         send(member, slide);
                     }
                 }

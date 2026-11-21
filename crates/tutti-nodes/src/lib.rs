@@ -347,7 +347,7 @@ mod distortion;
 pub use distortion::{DistortionConfig, DistortionKernel, DistortionNode, DistortionSet};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
-pub use tutti_dsp::{Antialiasing, OversamplingFactor, ShapeKind};
+pub use tutti_dsp::{Antialiasing, AntialiasingError, OversamplingFactor, ShapeKind};
 
 // A sample-and-hold and a quantizer.
 mod bit_crusher;
@@ -464,6 +464,8 @@ pub use tutti_dsp::{
 // Distance: a source's delay, level and air absorption.
 mod distance;
 pub use distance::{DistanceConfig, DistanceKernel, DistanceNode, DistanceSet};
+// The reference distance and its refusal are in `DistanceConfig`'s signature.
+pub use tutti_dsp::{ReferenceDistance, ReferenceDistanceError};
 
 // Pitch shifter.
 mod pitch_shifter;
@@ -531,8 +533,9 @@ pub use modulation::{
 // The layout, the sweep, its stagger and the controls are in `ModDelayConfig`'s and
 // `PhaserConfig`'s signatures.
 pub use tutti_dsp::{
-    ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder, PhaserControls, Stages, StagesError,
-    Stagger, StaggerError, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError,
+    ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder, ModulationRate, ModulationRateError,
+    PhaserControls, Stages, StagesError, Stagger, StaggerError, Sweep, SweepBuilder, SweepError,
+    SweepRange, SweepRangeError,
 };
 
 // The control sources' node (`SourceNode<S: ControlSource>`) and the
