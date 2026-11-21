@@ -208,6 +208,15 @@ unit! {
 // which invites an off-by-a-loop-start bug. The real operation is
 // `(beat - start) % len + start`, where the origin is explicit.
 impl Beat {
+    /// The checked constructor for a beat entering from outside (a file, the
+    /// wire, an app list): `None` for NaN and the infinities, which
+    /// [`new`](Self::new) takes unchecked.
+    #[inline]
+    #[must_use]
+    pub fn finite(raw: f64) -> Option<Beat> {
+        raw.is_finite().then_some(Beat(raw))
+    }
+
     /// The start of the beat this position falls in.
     #[inline]
     #[must_use]

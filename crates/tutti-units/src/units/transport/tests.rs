@@ -423,3 +423,14 @@ fn the_beats_in_a_span_are_bpm_times_seconds_over_sixty() {
         assert_eq!(tempo.beats_in(tempo.beat_period()), BeatDuration::new(1.0));
     }
 }
+
+/// `Beat::finite` refuses NaN and the infinities and keeps any finite value.
+#[test]
+fn a_beat_from_outside_must_be_finite() {
+    for raw in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(Beat::finite(raw), None, "{raw}");
+    }
+    for raw in [0.0, -2.5, 1e9] {
+        assert_eq!(Beat::finite(raw).map(Beat::get), Some(raw));
+    }
+}

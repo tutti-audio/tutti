@@ -24,7 +24,7 @@
 //!   refuses it (`disallowed-methods`), bar a real-time thread whose `#[expect]` says why.
 //! - [`Executor`] — where tutti's background work runs: a run queue and a deadline queue
 //!   that the caller's [`run_until_stalled`](Executor::run_until_stalled) and
-//!   [`try_tick`](Executor::try_tick), or the [`Threads`] of
+//!   [`tick`](Executor::tick), or the [`Threads`] of
 //!   [`spawn_threads`](Executor::spawn_threads) (native), drive.
 //!   [`spawn`](Executor::spawn) returns a [`Task`] that cancels on drop;
 //!   [`unblock`](Executor::unblock) runs a blocking closure off the drive;

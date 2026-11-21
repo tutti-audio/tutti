@@ -101,6 +101,33 @@ fn a_spill_past_the_budget_moves_to_a_file_beside_the_target_and_is_removed() {
     assert!(listing(dir.path()).is_empty(), "the spill file was removed");
 }
 
+/// `remove` deletes the file and answers `None`; a file it cannot remove is
+/// answered as its path, for the result to carry.
+#[test]
+fn remove_answers_the_path_of_a_file_it_could_not_remove() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("out.wav");
+    let spill_file = || {
+        let mut budget = SpillBudget::new(0);
+        let mut spill = Spill::new(STEREO, &target);
+        spill.push(&frames(0, 100), &mut budget).unwrap();
+        spill.finish().unwrap();
+        spill
+    };
+
+    let mut spill = spill_file();
+    assert_eq!(spill.remove(), None);
+    assert!(listing(dir.path()).is_empty());
+
+    // A directory under the file's name is not removable as a file.
+    let mut spill = spill_file();
+    let name = listing(dir.path()).remove(0);
+    let path = dir.path().join(&name);
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    assert_eq!(spill.remove(), Some(path));
+}
+
 /// The budget is shared: a spill that has taken all of it leaves the next one
 /// nothing, so the second moves to a file at its first block while the first
 /// stays in memory, and both read back everything.

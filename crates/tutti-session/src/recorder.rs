@@ -12,7 +12,7 @@
 //!   itself (`pump`, private: nothing else calls it).
 //! - A recording does not dither unless asked. To dither a take as an export
 //!   does, open the file for its integer format and wrap it in one line:
-//!   `PumpLoop::new(src, DitherSink::<_, f32>::new(FileOut::<i16>::create(&spec, path)?, Some(shape)), capacity)`.
+//!   `PumpLoop::new(src, DitherSink::<_, f32>::new(FileOut::<i16>::new(&spec, File::create(path)?)?, Some(shape)), capacity)`.
 //!   The stage adds the noise at one LSB of `i16`, converts and counts the values it clipped.
 //! - The scratch buffer is allocated once, so a pass never allocates.
 //! - An empty pull means "back off", "finished" or "broken" according to the
@@ -192,7 +192,8 @@ pub enum PumpPass {
 ///
 /// let dir = tempfile::tempdir().expect("temp dir");
 /// let spec = Spec::of_width(Format::Wav(Pcm::Float32), ChannelLayout::STEREO, SampleRate::SR_48K);
-/// let sink = FileOut::create(&spec, dir.path().join("take.wav")).expect("sink opens");
+/// let file = std::fs::File::create(dir.path().join("take.wav")).expect("file opens");
+/// let sink = FileOut::new(&spec, file).expect("sink opens");
 ///
 /// // `new` checks the widths agree, before a frame moves.
 /// let mut pump = PumpLoop::new(reader, sink, Samples::new(1024)).expect("stereo into stereo");

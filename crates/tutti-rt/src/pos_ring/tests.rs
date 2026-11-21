@@ -9,6 +9,21 @@ fn ring(frames: usize, stride: usize, keep: u64) -> (PosWriter, PosReader) {
     PosRing::new(frames, ChannelLayout::clamped(stride), keep).expect("a non-empty layout")
 }
 
+/// A slot count of zero or past the maximum is refused, never clamped; the
+/// maximum is accepted.
+#[test]
+fn a_slot_count_outside_one_to_the_maximum_is_refused() {
+    let layout = ChannelLayout::clamped(1);
+    for frames in [0, MAX_POS_RING_FRAMES + 1] {
+        assert!(matches!(
+            PosRing::<f32>::new(frames, layout, 0),
+            Err(BufferError::CapacityOutOfRange { .. })
+        ));
+    }
+    let (writer, _) = PosRing::<f32>::new(MAX_POS_RING_FRAMES, layout, 0).expect("the maximum");
+    assert_eq!(writer.frames(), MAX_POS_RING_FRAMES);
+}
+
 /// Pushes whole frames of `samples` and returns how many landed.
 fn push(writer: &mut PosWriter, samples: &[f32]) -> usize {
     let frames = Interleaved::new(samples, writer.layout()).expect("whole frames");

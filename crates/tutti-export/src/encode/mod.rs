@@ -136,6 +136,7 @@ pub(crate) fn written(
         gain: None,
         measured: None,
         placement,
+        spill_left: None,
     }
 }
 

@@ -15,7 +15,7 @@
 
 use alloc::format;
 use alloc::string::String;
-use tutti_units::{Cents, Hz, Semitones};
+use tutti_units::{Cents, FrequencyRatio, Hz, Semitones};
 
 /// One of the twelve pitch classes.
 ///
@@ -266,16 +266,15 @@ impl Note {
     /// Returns the nearest note to `freq`, and how far off it is.
     ///
     /// The offset is signed and lands in −50..=+50 cents: past that, a
-    /// different note is nearer. `None` for a frequency at or below zero.
+    /// different note is nearer. `None` for a frequency that is not finite and
+    /// above zero.
     pub fn nearest_to(freq: Hz) -> Option<(Self, Cents)> {
-        if freq.get() <= 0.0 {
-            return None;
-        }
         // The named inverse of `frequency`'s `Semitones::to_pitch_ratio`, not a
         // hand-rolled `12.0 * ratio.log2()`: both directions go through the one
-        // converter. The guard above duplicates `from_pitch_ratio`'s on purpose
-        // — `None` is a better answer here than a unison.
-        let steps = Semitones::from_pitch_ratio(freq.get() / Self::A4_HZ.get());
+        // converter. A frequency whose ratio is not a `FrequencyRatio` has no
+        // nearest note.
+        let ratio = FrequencyRatio::new(freq.get() / Self::A4_HZ.get())?;
+        let steps = Semitones::from_pitch_ratio(ratio);
         let nearest = libm::round(steps.get());
         let note = Self::from_semitones_from_c0(Self::A4.semitones_from_c0() + nearest as i32);
         Some((note, Semitones::new(steps.get() - nearest).to_cents()))
