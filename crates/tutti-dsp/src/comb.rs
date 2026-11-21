@@ -13,8 +13,8 @@
 //! `s[n] = (1 - d) y[n] + d s[n - 1]`, so each trip loses highs, and `d = 0` is the plain
 //! comb. Freeverb's combs are this filter at their own tunings.
 
-use core::num::{NonZeroU16, NonZeroUsize};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use core::num::NonZeroUsize;
+use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
 use tutti_units::{Feedback, SampleRate, Samples, Tail};
 
 use crate::TAIL_FLOOR;
@@ -150,11 +150,11 @@ pub struct CombBank<F: Float> {
 }
 
 impl<F: Float> CombBank<F> {
-    /// `width` silent combs of `form` and `delay`, at `gain`. Allocates.
+    /// `width` silent combs (an empty layout has none) of `form` and `delay`, at `gain`. Allocates.
     #[must_use]
-    pub fn new(form: CombForm, delay: NonZeroUsize, gain: Feedback, width: NonZeroU16) -> Self {
+    pub fn new(form: CombForm, delay: NonZeroUsize, gain: Feedback, width: ChannelLayout) -> Self {
         Self {
-            combs: vec![CombFilter::new(form, delay, gain); usize::from(width.get())],
+            combs: vec![CombFilter::new(form, delay, gain); usize::from(width.count())],
         }
     }
 

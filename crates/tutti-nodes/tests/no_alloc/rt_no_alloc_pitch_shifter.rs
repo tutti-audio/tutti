@@ -1,7 +1,7 @@
 //! Regression gate: the pitch shifter must not allocate per block, held and with its pitch moved
 //! across the whole range between blocks, a block of 480 frames among hops of 512.
 
-use core::num::NonZeroU16;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{PitchShifterConfig, PitchShifterNode};
 use tutti_units::{SampleRate, UnitParam};
@@ -9,7 +9,7 @@ use tutti_units::{SampleRate, UnitParam};
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the pitch moved before each.
 #[test]
 fn pitch_shifter_process_is_allocation_free_with_the_pitch_moving() {
-    let node = PitchShifterNode::<f32>::from(PitchShifterConfig::new(NonZeroU16::new(2).unwrap()));
+    let node = PitchShifterNode::<f32>::from(PitchShifterConfig::new(ChannelLayout::STEREO));
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 480);
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
         for (i, x) in ch.into_samples_mut().iter_mut().enumerate() {

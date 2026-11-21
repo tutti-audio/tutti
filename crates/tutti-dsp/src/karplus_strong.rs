@@ -16,8 +16,8 @@
 //! A control that moves the frequency re-tunes the loop at once: the delay line's length jumps
 //! and the loop's content is kept, so a sweep is not click-free.
 
-use core::num::{NonZeroU16, NonZeroUsize};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use core::num::NonZeroUsize;
+use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
 use tutti_units::{Db, Feedback, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use crate::delay::{DelayRing, ring_seconds, trips};
@@ -145,9 +145,9 @@ pub struct KarplusStrongBank<F: Float> {
 impl<F: Float> KarplusStrongBank<F> {
     /// `width` silent strings down to `lowest` at `rate`. Allocates.
     #[must_use]
-    pub fn new(lowest: LowestPitch, rate: SampleRate, width: NonZeroU16) -> Self {
+    pub fn new(lowest: LowestPitch, rate: SampleRate, width: ChannelLayout) -> Self {
         Self {
-            strings: vec![KarplusStrong::new(lowest, rate); usize::from(width.get())],
+            strings: vec![KarplusStrong::new(lowest, rate); usize::from(width.count())],
         }
     }
 

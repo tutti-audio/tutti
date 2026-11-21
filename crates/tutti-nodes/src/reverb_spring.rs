@@ -4,7 +4,6 @@
 //! its low-pass); this file holds the kernel that retargets it, the cells and how the graph
 //! reaches them.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages};
@@ -17,7 +16,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// start.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpringReverbConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     layout: SpringLayout,
     controls: SpringControls,
 }
@@ -27,9 +26,9 @@ impl SpringReverbConfig {
     /// [`SpringLayout::DEFAULT`] and [`SpringControls::DEFAULT`]: forty stages, a 40 ms loop,
     /// a decay of 2 s, a 4 kHz tone and full dispersion.
     #[must_use]
-    pub fn new(width: NonZeroU16) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width,
+            width: width.into(),
             layout: SpringLayout::DEFAULT,
             controls: SpringControls::DEFAULT,
         }
@@ -131,7 +130,7 @@ control_set! {
 /// The spring's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
 pub struct SpringReverbKernel<F: Float> {
-    width: NonZeroU16,
+    width: ChannelLayout,
     layout: SpringLayout,
     rate: SampleRate,
     spring: SpringReverb<F>,
@@ -141,7 +140,7 @@ pub struct SpringReverbKernel<F: Float> {
 
 impl<F: Float> SpringReverbKernel<F> {
     /// A spring at a placeholder rate: an unprepared node renders nothing.
-    fn new(width: NonZeroU16, layout: SpringLayout) -> Self {
+    fn new(width: ChannelLayout, layout: SpringLayout) -> Self {
         let rate = SampleRate::SR_48K;
         Self {
             width,
@@ -162,7 +161,7 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
 
     /// `width` channels in and out; `Heavy` (the default cost), as the stages are many.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.width.get()))
+        let bus = BusTopology::unassigned(self.width)
             .expect("a spring reverb is at most 16 channels wide");
         Shape::through(bus)
     }
@@ -219,17 +218,13 @@ mod tests {
     use tutti_units::UnitParam;
 
     fn node(width: u16) -> SpringReverbNode<f32> {
-        prepared(SpringReverbNode::from(SpringReverbConfig::new(
-            NonZeroU16::new(width).unwrap(),
-        )))
+        prepared(SpringReverbNode::from(SpringReverbConfig::new(width)))
     }
 
     /// A fork starts from the controls last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(SpringReverbNode::<f32>::from(SpringReverbConfig::new(
-            NonZeroU16::new(2).unwrap(),
-        )));
+        assert_param_fork(SpringReverbNode::<f32>::from(SpringReverbConfig::new(2u16)));
     }
 
     /// The shape is the width in and out and declares the decay, the tone and the dispersion
@@ -246,18 +241,18 @@ mod tests {
             shape.params.as_slice(),
             &[UnitParam::Decay, UnitParam::Cutoff, UnitParam::Diffusion][..]
         );
-        let d = SpringReverbNode::<f32>::from(SpringReverbConfig::new(NonZeroU16::MIN));
+        let d = SpringReverbNode::<f32>::from(SpringReverbConfig::new(1u16));
         assert_eq!(
             (d.param_base(0), d.param_base(1), d.param_base(2)),
             (Some(2.0), Some(4_000.0), Some(1.0))
         );
     }
 
-    /// A width of one is one channel in and out.
+    /// An empty layout is no channels, not one.
     #[test]
-    fn a_width_of_one_is_mono() {
-        let n = SpringReverbNode::<f32>::from(SpringReverbConfig::new(NonZeroU16::MIN));
-        assert_eq!(n.shape().audio_in().count(), 1);
+    fn an_empty_layout_has_no_channels() {
+        let n = SpringReverbNode::<f32>::from(SpringReverbConfig::new(ChannelLayout::EMPTY));
+        assert_eq!(n.shape().audio_in().count(), 0);
     }
 
     /// Started at no dispersion the node delays an impulse by the cascades' `M K = 40 * 4 =
@@ -265,7 +260,7 @@ mod tests {
     #[test]
     fn a_dry_spring_is_a_delay_of_the_cascade() {
         let mut n = prepared(SpringReverbNode::<f32>::from(
-            SpringReverbConfig::new(NonZeroU16::MIN).dispersion(Mix::DRY),
+            SpringReverbConfig::new(1u16).dispersion(Mix::DRY),
         ));
         let mut x = vec![0.0f32; 64];
         x[0] = 1.0;

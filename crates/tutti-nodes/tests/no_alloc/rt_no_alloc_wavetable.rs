@@ -1,8 +1,7 @@
 //! Regression gate: the wavetable node must not allocate per block, with its frequency swept
 //! across the mip levels and its frame position moved between blocks.
 
-use core::num::NonZeroU16;
-use tutti_buffers::Mono;
+use tutti_buffers::{ChannelLayout, Mono};
 use tutti_dsp::Wavetable;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{WavetableConfig, WavetableNode};
@@ -17,7 +16,7 @@ fn wavetable_process_is_allocation_free_with_the_frequency_and_position_moving()
         .map(|i| if i < 512 { 1.0 } else { -1.0 })
         .collect();
     let table = Wavetable::new(&[Mono::new(&saw), Mono::new(&square)]).expect("two frames");
-    let node = WavetableNode::<f32>::from(WavetableConfig::new(NonZeroU16::new(2).unwrap(), table));
+    let node = WavetableNode::<f32>::from(WavetableConfig::new(ChannelLayout::STEREO, table));
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     let hz = |i: usize| 30.0 * 1.0037f64.powi((i % 1_900) as i32);
     let at = |i: usize| (i % 7) as f64 / 6.0;

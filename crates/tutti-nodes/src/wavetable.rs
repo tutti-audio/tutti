@@ -5,7 +5,6 @@
 //! `tutti_dsp::WavetableOscillator`.
 
 use crate::ramp::LastGood;
-use core::num::NonZeroU16;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Float};
 use tutti_dsp::{Wavetable, WavetableOscillator, WavetableStep};
@@ -49,7 +48,7 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 /// let table = Wavetable::new(&[Mono::new(&cycle)]).expect("one frame");
 /// let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
 /// let tone = g.add_with_controls(Params(WavetableNode::from(
-///     WavetableConfig::new(NonZeroU16::MIN, table).frequency(Hz::new(440.0)),
+///     WavetableConfig::new(ChannelLayout::MONO, table).frequency(Hz::new(440.0)),
 /// )));
 /// g.pipe_output(tone.0);
 /// let mut r = g
@@ -86,7 +85,7 @@ tutti_graph::declare_params!([F: Float] WavetableNode<F>, n {
 /// What a [`WavetableNode`] is made from: its width, its table and its starting params.
 #[derive(Clone, Debug)]
 pub struct WavetableConfig<F: Float> {
-    width: NonZeroU16,
+    width: ChannelLayout,
     table: Arc<Wavetable<F>>,
     frequency: Hz,
     level: Amplitude,
@@ -94,11 +93,12 @@ pub struct WavetableConfig<F: Float> {
 }
 
 impl<F: Float> WavetableConfig<F> {
-    /// `table` on `width` channels, at 440 Hz, unity level and the first frame.
+    /// `table` on `width` channels, at 440 Hz, unity
+    /// level and the first frame.
     #[must_use]
-    pub fn new(width: NonZeroU16, table: Arc<Wavetable<F>>) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>, table: Arc<Wavetable<F>>) -> Self {
         Self {
-            width,
+            width: width.into(),
             table,
             frequency: Hz::new(440.0),
             level: Amplitude::UNITY,
@@ -131,7 +131,7 @@ impl<F: Float> WavetableConfig<F> {
 impl<F: Float> From<WavetableConfig<F>> for WavetableNode<F> {
     fn from(config: WavetableConfig<F>) -> Self {
         Self {
-            width: ChannelLayout::from_count(config.width.get()),
+            width: config.width,
             wave: WavetableOscillator::new(config.table),
             frequency: Param::new(config.frequency),
             level: Param::new(config.level),

@@ -1,6 +1,5 @@
 //! [`BitCrusherNode`]: a sample-and-hold and a quantizer.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{BitCrusher, BitCrusherControls, COEFF_INTERVAL};
@@ -12,16 +11,17 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`BitCrusherNode`] is made from: its width and, optionally, its bit depth and hold.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BitCrusherConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     controls: BitCrusherControls,
 }
 
 impl BitCrusherConfig {
     /// A crusher of `width` channels at 8 bits and no hold.
     #[must_use]
-    pub fn new(width: NonZeroU16) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>) -> Self {
+        let width = width.into();
         Self {
-            width,
+            width: width,
             controls: BitCrusherControls::DEFAULT,
         }
     }
@@ -80,10 +80,7 @@ pub type BitCrusherNode<F> = KernelNode<BitCrusherKernel<F>>;
 impl<F: Float> From<BitCrusherConfig> for BitCrusherNode<F> {
     fn from(config: BitCrusherConfig) -> Self {
         Self::with_kernel(
-            BitCrusherKernel::<F>::new(
-                ChannelLayout::from_count(config.width.get()),
-                config.controls,
-            ),
+            BitCrusherKernel::<F>::new(config.width, config.controls),
             BitCrusherSet,
             config.controls,
         )
@@ -172,7 +169,7 @@ mod tests {
     // The node tests run `F = f32`, the session's audio format.
     fn node(width: u16, bits: f64, hold: f64) -> BitCrusherNode<f32> {
         prepared(BitCrusherNode::<f32>::from(
-            BitCrusherConfig::new(NonZeroU16::new(width).unwrap())
+            BitCrusherConfig::new(width)
                 .bits(BitDepth::new(bits))
                 .hold(HoldFactor::new(hold)),
         ))
@@ -181,9 +178,7 @@ mod tests {
     /// A fork starts from the controls last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(BitCrusherNode::<f32>::from(BitCrusherConfig::new(
-            NonZeroU16::new(2).unwrap(),
-        )));
+        assert_param_fork(BitCrusherNode::<f32>::from(BitCrusherConfig::new(2u16)));
     }
 
     /// The shape is the width in and out, `Light`, no tail, declares the depth and the hold
@@ -203,16 +198,15 @@ mod tests {
             shape.params.as_slice(),
             &[UnitParam::BitDepth, UnitParam::HoldFactor][..]
         );
-        let d = BitCrusherNode::<f32>::from(BitCrusherConfig::new(NonZeroU16::MIN));
+        let d = BitCrusherNode::<f32>::from(BitCrusherConfig::new(1u16));
         assert_eq!((d.param_base(0), d.param_base(1)), (Some(8.0), Some(1.0)));
     }
 
-    /// A width of one is one channel in and out.
+    ///
     #[test]
-    fn a_width_of_one_is_mono() {
-        let n = BitCrusherNode::<f32>::from(BitCrusherConfig::new(NonZeroU16::MIN));
-        assert_eq!(n.shape().audio_in().count(), 1);
-        assert_eq!(n.shape().audio_out().count(), 1);
+    fn an_empty_layout_has_no_channels() {
+        let n = BitCrusherNode::<f32>::from(BitCrusherConfig::new(0u16));
+        assert_eq!(n.shape().audio_in().count(), 0);
     }
 
     /// Both controls are settable by their kinds and land whole: at 4 bits (`q = 8`) with a

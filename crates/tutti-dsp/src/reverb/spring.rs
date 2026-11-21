@@ -27,8 +27,8 @@
 //! (a coefficient in `0..=0.6`, a gain in `Feedback`'s, a pole in `0..1`), so every
 //! intermediate point is a valid design and `|L| < 1` holds throughout the glide.
 
-use core::num::{NonZeroU16, NonZeroUsize};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use core::num::NonZeroUsize;
+use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Samples, Seconds, Tail};
 
 use crate::delay::trips;
@@ -284,10 +284,10 @@ impl<F: Float> SpringReverb<F> {
     /// The frames between the glide's steps: the chunk.
     pub const CHUNK: usize = CHUNK;
 
-    /// A silent spring of `width` channels at `rate`, at
+    /// A silent spring of `width` channels (an empty layout has none) at `rate`, at
     /// [`SpringControls::DEFAULT`].
     #[must_use]
-    pub fn new(width: NonZeroU16, rate: SampleRate, layout: SpringLayout) -> Self {
+    pub fn new(width: ChannelLayout, rate: SampleRate, layout: SpringLayout) -> Self {
         let design = Design::of(layout, rate, &SpringControls::DEFAULT);
         let delay = loop_frames(layout, rate);
         let spring = Spring {
@@ -305,7 +305,7 @@ impl<F: Float> SpringReverb<F> {
             pole: F::ZERO,
             leave: F::ONE,
             into: 0,
-            springs: vec![spring; usize::from(width.get())],
+            springs: vec![spring; usize::from(width.count())],
         };
         spring_reverb.apply();
         spring_reverb

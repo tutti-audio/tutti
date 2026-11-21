@@ -1,6 +1,5 @@
 //! [`KarplusStrongNode`]: a plucked string excited by its input.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, KarplusStrongBank, KarplusStrongControls, LowestPitch};
@@ -13,7 +12,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// controls start.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct KarplusStrongConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     lowest: LowestPitch,
     controls: KarplusStrongControls,
 }
@@ -22,9 +21,9 @@ impl KarplusStrongConfig {
     /// A string on each of `width` channels, down to 20 Hz,
     /// at [`KarplusStrongControls::DEFAULT`] (220 Hz, a decay of 2 s).
     #[must_use]
-    pub fn new(width: NonZeroU16) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width,
+            width: width.into(),
             lowest: LowestPitch::DEFAULT,
             controls: KarplusStrongControls::DEFAULT,
         }
@@ -101,7 +100,7 @@ control_set! {
 /// The string as a [`Kernel`]: a [`KarplusStrongBank`] sized at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct KarplusStrongKernel<F: Float> {
-    width: NonZeroU16,
+    width: ChannelLayout,
     lowest: LowestPitch,
     controls: KarplusStrongControls,
     rate: SampleRate,
@@ -110,7 +109,7 @@ pub struct KarplusStrongKernel<F: Float> {
 }
 
 impl<F: Float> KarplusStrongKernel<F> {
-    fn new(width: NonZeroU16, lowest: LowestPitch) -> Self {
+    fn new(width: ChannelLayout, lowest: LowestPitch) -> Self {
         Self {
             width,
             lowest,
@@ -130,8 +129,8 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
     /// `width` channels in and out, `Moderate`: a ring, an all-pass and a multiply-add per
     /// sample and channel.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.width.get()))
-            .expect("a string is at most 16 channels wide");
+        let bus =
+            BusTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Moderate)
     }
 
@@ -190,7 +189,7 @@ mod tests {
 
     fn node(frequency: f64, decay: f64) -> KarplusStrongNode<f32> {
         KarplusStrongNode::from(
-            KarplusStrongConfig::new(NonZeroU16::new(2).unwrap())
+            KarplusStrongConfig::new(2u16)
                 .frequency(Hz::new(frequency))
                 .decay(Seconds::new(decay)),
         )

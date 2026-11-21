@@ -44,7 +44,7 @@ fn the_chains_are_in_quadrature_within_the_stated_error_over_the_stated_band() {
 /// wanted frequency and `sin(e / 2)` at the image, for the quadrature error `e` at the input's
 /// frequency, which is at most [`QUADRATURE_ERROR`].
 fn shifted(input: f64, shift: f64) -> (Vec<f64>, usize) {
-    let mut bank = FrequencyShifterBank::<f64>::new(NonZeroU16::MIN, RATE);
+    let mut bank = FrequencyShifterBank::<f64>::new(ChannelLayout::MONO, RATE);
     bank.retarget(&FrequencyShifterControls {
         shift: Hz::new(shift),
     });
@@ -109,7 +109,7 @@ fn no_shift_is_a_unit_gain_phase_network() {
 fn any_block_size_gives_the_same_bits() {
     let x: Vec<f64> = (0..500).map(|n| (0.3 * n as f64).sin() + 0.1).collect();
     let run = |block: usize| {
-        let mut bank = FrequencyShifterBank::<f64>::new(NonZeroU16::MIN, RATE);
+        let mut bank = FrequencyShifterBank::<f64>::new(ChannelLayout::MONO, RATE);
         bank.retarget(&FrequencyShifterControls {
             shift: Hz::new(-123.4),
         });
@@ -133,7 +133,7 @@ fn any_block_size_gives_the_same_bits() {
 /// The impulse response is under [`TAIL_FLOOR`] of its peak after the declared tail.
 #[test]
 fn the_tail_covers_the_impulse_response_down_to_the_floor() {
-    let mut bank = FrequencyShifterBank::<f64>::new(NonZeroU16::MIN, RATE);
+    let mut bank = FrequencyShifterBank::<f64>::new(ChannelLayout::MONO, RATE);
     let Tail::Finite(tail) = bank.tail() else {
         panic!("a finite tail");
     };
@@ -158,7 +158,7 @@ fn the_tail_covers_the_impulse_response_down_to_the_floor() {
 /// them (the Hilbert pair's response to a sine is a sine of the same amplitude, `cos(e / 2)`).
 #[test]
 fn every_channel_of_a_three_wide_bank_shifts() {
-    let mut bank = FrequencyShifterBank::<f64>::new(NonZeroU16::new(3).unwrap(), RATE);
+    let mut bank = FrequencyShifterBank::<f64>::new(ChannelLayout::from_count(3), RATE);
     bank.retarget(&FrequencyShifterControls {
         shift: Hz::new(100.0),
     });

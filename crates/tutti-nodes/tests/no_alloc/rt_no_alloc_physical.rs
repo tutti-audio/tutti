@@ -2,7 +2,7 @@
 //! per block, held and with the pitch and the decay moved between blocks (a pitch move retunes
 //! the loop on the audio thread).
 
-use core::num::NonZeroU16;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
@@ -43,7 +43,7 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 #[test]
 fn karplus_strong_process_is_allocation_free_with_the_pitch_and_decay_moving() {
     gate(
-        KarplusStrongNode::from(KarplusStrongConfig::new(NonZeroU16::new(2).unwrap())),
+        KarplusStrongNode::from(KarplusStrongConfig::new(ChannelLayout::STEREO)),
         |controls, i| {
             controls.set(
                 UnitParam::Frequency,
@@ -60,7 +60,7 @@ fn karplus_strong_process_is_allocation_free_with_the_pitch_and_decay_moving() {
 #[test]
 fn waveguide_string_process_is_allocation_free_with_the_pitch_and_decay_moving() {
     gate(
-        WaveguideStringNode::from(WaveguideStringConfig::new(NonZeroU16::new(2).unwrap())),
+        WaveguideStringNode::from(WaveguideStringConfig::new(ChannelLayout::STEREO)),
         |controls, i| {
             controls.set(
                 UnitParam::Frequency,

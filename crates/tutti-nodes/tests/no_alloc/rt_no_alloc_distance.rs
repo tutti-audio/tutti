@@ -1,7 +1,7 @@
 //! Regression gate: the distance node must not allocate per block, held and with its distance
 //! moved across the line between blocks, with air absorption on.
 
-use core::num::NonZeroU16;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{DistanceConfig, DistanceNode};
 use tutti_units::{Hz, Metres, SampleRate, UnitParam};
@@ -10,7 +10,7 @@ use tutti_units::{Hz, Metres, SampleRate, UnitParam};
 #[test]
 fn distance_process_is_allocation_free_with_the_distance_moving() {
     let node = DistanceNode::<f32>::from(
-        DistanceConfig::new(NonZeroU16::new(2).unwrap(), Metres::of(60.0))
+        DistanceConfig::new(ChannelLayout::STEREO, Metres::of(60.0))
             .air_absorption(Hz::new(6000.0)),
     );
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 480);

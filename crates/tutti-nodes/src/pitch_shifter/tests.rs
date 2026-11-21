@@ -1,6 +1,5 @@
 use super::*;
 use core::f64::consts::TAU;
-use core::num::NonZeroU16;
 use tutti_fixtures::signal::{hann_image_leak, sine_frequency};
 use tutti_graph::Node;
 use tutti_graph::contract::{BlockRig, assert_param_fork, prepared};
@@ -75,18 +74,18 @@ fn f32_transform_error() -> f64 {
 #[test]
 fn a_fork_shares_no_cell() {
     assert_param_fork(PitchShifterNode::from(
-        PitchShifterConfig::new(NonZeroU16::new(2).unwrap()).pitch(Cents::new(300.0)),
+        PitchShifterConfig::new(2u16).pitch(Cents::new(300.0)),
     ));
 }
 
 /// The shape is the width in and out, declares the shift as `Pitch` starting as configured,
-/// reports the fixed-rate vocoder's latency, and a finite tail.
+/// reports the fixed-rate vocoder's latency, and a finite tail; an empty layout is no channels.
 #[test]
 fn the_shape_declares_the_shift_the_latency_and_a_finite_tail() {
     let hop = HopSize::new(Samples::new(256)).unwrap();
     let n = prepared(
         PitchShifterNode::<f32>::from(
-            PitchShifterConfig::new(NonZeroU16::new(3).unwrap())
+            PitchShifterConfig::new(3u16)
                 .hop(hop)
                 .pitch(Cents::new(-250.0)),
         ),
@@ -102,8 +101,8 @@ fn the_shape_declares_the_shift_the_latency_and_a_finite_tail() {
     assert!(matches!(shape.tail, Tail::Finite(_)));
     assert_eq!(shape.params.as_slice(), &[UnitParam::Pitch][..]);
     assert_eq!(n.param_base(0), Some(-250.0));
-    let mono = PitchShifterNode::<f32>::from(PitchShifterConfig::new(NonZeroU16::MIN));
-    assert_eq!(mono.shape().audio_in().count(), 1);
+    let empty = PitchShifterNode::<f32>::from(PitchShifterConfig::new(ChannelLayout::EMPTY));
+    assert_eq!(empty.shape().audio_in().count(), 0);
 }
 
 /// An impulse rings for the window read at the shift's ratio: a frame's window is `WINDOW`
@@ -114,7 +113,7 @@ fn the_shape_declares_the_shift_the_latency_and_a_finite_tail() {
 #[test]
 fn an_impulse_rings_for_a_window_at_the_ratio_and_the_declared_tail_is_past_it() {
     for cents in [-2400.0, -1200.0, 0.0, 700.0, 2400.0] {
-        let config = PitchShifterConfig::new(NonZeroU16::MIN).pitch(Cents::new(cents));
+        let config = PitchShifterConfig::new(1u16).pitch(Cents::new(cents));
         let n = prepared(PitchShifterNode::<f32>::from(config), RATE, 64);
         let shape = n.shape();
         let latency = shape.latency.samples().get();
@@ -143,8 +142,7 @@ fn an_impulse_rings_for_a_window_at_the_ratio_and_the_declared_tail_is_past_it()
 #[test]
 fn the_reported_latency_is_the_fixed_rate_vocoders() {
     for (width, hop) in [(1u16, 512usize), (2, 512), (6, 512), (2, 256)] {
-        let config = PitchShifterConfig::new(NonZeroU16::new(width).unwrap())
-            .hop(HopSize::new(Samples::new(hop)).unwrap());
+        let config = PitchShifterConfig::new(width).hop(HopSize::new(Samples::new(hop)).unwrap());
         let n = prepared(PitchShifterNode::<f32>::from(config), RATE, 64);
         assert_eq!(
             n.shape().latency,
@@ -163,18 +161,13 @@ fn an_impulse_comes_out_at_the_reported_latency_in_any_block_size() {
         let mut impulse = vec![0.0f32; 20_000];
         impulse[4000] = 1.0;
         let n = prepared(
-            PitchShifterNode::<f32>::from(PitchShifterConfig::new(NonZeroU16::MIN)),
+            PitchShifterNode::<f32>::from(PitchShifterConfig::new(1u16)),
             RATE,
             block,
         );
         let latency = n.shape().latency.samples().get();
         assert_eq!(latency, vocoder_latency(1, HOP).get());
-        let out = stream(
-            PitchShifterConfig::new(NonZeroU16::MIN),
-            &[impulse],
-            block,
-            |_| 0.0,
-        );
+        let out = stream(PitchShifterConfig::new(1u16), &[impulse], block, |_| 0.0);
         let bound = 4.0 * f32_transform_error();
         for (i, &y) in out[0].iter().enumerate() {
             let want = if i == 4000 + latency { 1.0 } else { 0.0 };
@@ -195,7 +188,7 @@ fn at_zero_cents_the_output_is_the_input_delayed_by_the_latency() {
     let delay = vocoder_latency(1, HOP).get();
     for block in [300, 4096] {
         let out = stream(
-            PitchShifterConfig::new(NonZeroU16::MIN),
+            PitchShifterConfig::new(1u16),
             std::slice::from_ref(&input),
             block,
             |_| 0.0,
@@ -226,7 +219,7 @@ fn a_shift_lands_at_the_input_times_two_to_the_cents_over_1200() {
         (440.0, 50.0),
     ] {
         let out = stream(
-            PitchShifterConfig::new(NonZeroU16::MIN),
+            PitchShifterConfig::new(1u16),
             &[sine::<f64>(f, 0.5, 70_000)],
             480,
             |_| cents,
@@ -266,7 +259,7 @@ fn a_live_pitch_change_keeps_every_block_within_one_db_on_a_steady_sine() {
     ] {
         for block in [64, 480, 1024] {
             let out = stream(
-                PitchShifterConfig::new(NonZeroU16::MIN).pitch(Cents::new(first)),
+                PitchShifterConfig::new(1u16).pitch(Cents::new(first)),
                 &[sine::<f32>(1500.0, 0.5, 60_000)],
                 block,
                 |i| if i * block < 30_000 { first } else { second },
@@ -291,7 +284,7 @@ fn equal_channels_stay_equal_bit_for_bit() {
     let other = sine::<f32>(2468.0, 0.25, 30_000);
     let mix: Vec<f32> = one.iter().zip(&other).map(|(a, b)| a + b).collect();
     let out = stream(
-        PitchShifterConfig::new(NonZeroU16::new(2).unwrap()),
+        PitchShifterConfig::new(2u16),
         &[mix.clone(), mix],
         480,
         |i| if i < 30 { 300.0 } else { -500.0 },

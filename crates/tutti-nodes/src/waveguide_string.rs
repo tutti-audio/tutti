@@ -1,6 +1,5 @@
 //! [`WaveguideStringNode`]: a string as two travelling waves, excited by its input.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
@@ -15,7 +14,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// controls start.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WaveguideStringConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     lowest: LowestPitch,
     positions: WaveguidePositions,
     controls: WaveguideControls,
@@ -26,9 +25,9 @@ impl WaveguideStringConfig {
     /// excited and read at [`WaveguidePositions::DEFAULT`], at [`WaveguideControls::DEFAULT`]
     /// (220 Hz, a decay of 2 s).
     #[must_use]
-    pub fn new(width: NonZeroU16) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width,
+            width: width.into(),
             lowest: LowestPitch::DEFAULT,
             positions: WaveguidePositions::DEFAULT,
             controls: WaveguideControls::DEFAULT,
@@ -123,7 +122,7 @@ control_set! {
 /// The string as a [`Kernel`]: a [`WaveguideBank`] sized at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct WaveguideStringKernel<F: Float> {
-    width: NonZeroU16,
+    width: ChannelLayout,
     lowest: LowestPitch,
     positions: WaveguidePositions,
     controls: WaveguideControls,
@@ -133,7 +132,7 @@ pub struct WaveguideStringKernel<F: Float> {
 }
 
 impl<F: Float> WaveguideStringKernel<F> {
-    fn new(width: NonZeroU16, lowest: LowestPitch, positions: WaveguidePositions) -> Self {
+    fn new(width: ChannelLayout, lowest: LowestPitch, positions: WaveguidePositions) -> Self {
         Self {
             width,
             lowest,
@@ -154,8 +153,8 @@ impl<F: Float> Kernel for WaveguideStringKernel<F> {
     /// `width` channels in and out, `Moderate`: two rings, an all-pass and two averages per
     /// sample and channel.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.width.get()))
-            .expect("a string is at most 16 channels wide");
+        let bus =
+            BusTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Moderate)
     }
 
@@ -214,7 +213,7 @@ mod tests {
 
     fn node(frequency: f64, decay: f64) -> WaveguideStringNode<f32> {
         WaveguideStringNode::from(
-            WaveguideStringConfig::new(NonZeroU16::new(2).unwrap())
+            WaveguideStringConfig::new(2u16)
                 .frequency(Hz::new(frequency))
                 .decay(Seconds::new(decay)),
         )

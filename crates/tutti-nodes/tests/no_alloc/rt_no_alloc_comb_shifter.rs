@@ -1,7 +1,7 @@
 //! Regression gate: the comb filter and the frequency shifter must not allocate per block,
 //! held and with their controls moved between blocks.
 
-use core::num::NonZeroU16;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
@@ -44,7 +44,7 @@ fn comb_filter_process_is_allocation_free_with_the_coefficient_moving() {
     for form in [CombForm::Feedforward, CombForm::Feedback] {
         gate(
             CombFilterNode::from(CombFilterConfig::new(
-                NonZeroU16::new(2).unwrap(),
+                ChannelLayout::STEREO,
                 form,
                 Seconds::new(0.003),
             )),
@@ -61,7 +61,7 @@ fn comb_filter_process_is_allocation_free_with_the_coefficient_moving() {
 #[test]
 fn frequency_shifter_process_is_allocation_free_with_the_shift_moving() {
     gate(
-        FrequencyShifterNode::from(FrequencyShifterConfig::new(NonZeroU16::new(2).unwrap())),
+        FrequencyShifterNode::from(FrequencyShifterConfig::new(ChannelLayout::STEREO)),
         |controls, i| {
             let hz = if i.is_multiple_of(2) { -220.0 } else { 1_700.0 };
             controls.set(UnitParam::Frequency, hz);

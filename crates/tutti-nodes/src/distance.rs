@@ -1,7 +1,6 @@
 //! [`DistanceNode`]: a source at a distance, as the delay `r / c`, the level `r_ref / r` and
 //! optional air absorption.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock, Planes, PlanesMut};
 use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
 use tutti_graph::{Cost, Shape};
@@ -13,7 +12,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// source at, and where its distance starts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DistanceConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     spec: DistanceSpec,
     controls: DistanceControls,
 }
@@ -23,9 +22,9 @@ impl DistanceConfig {
     /// to `max` away (it sets the delay line's length), at the default distance of 1 m, with a
     /// reference of 1 m, the speed of sound in air and no air absorption.
     #[must_use]
-    pub fn new(width: NonZeroU16, max: Metres) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>, max: Metres) -> Self {
         Self {
-            width,
+            width: width.into(),
             spec: DistanceSpec::new(max),
             controls: DistanceControls::DEFAULT,
         }
@@ -93,7 +92,7 @@ impl<F: Float> From<DistanceConfig> for DistanceNode<F> {
     fn from(config: DistanceConfig) -> Self {
         Self::with_kernel(
             DistanceKernel::new(
-                ChannelLayout::from_count(config.width.get()),
+                config.width,
                 config.spec,
                 SampleRate::SR_48K,
                 config.controls,

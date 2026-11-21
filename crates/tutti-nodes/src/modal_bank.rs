@@ -1,6 +1,5 @@
 //! [`ModalBankNode`]: a struck body as a bank of damped resonators, excited by its input.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, ModalBank, ModalControls, Modes};
@@ -12,15 +11,18 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`ModalBankNode`] is made from: its width and its modes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModalBankConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     modes: Modes,
 }
 
 impl ModalBankConfig {
     /// A bank of `modes` on each of `width` channels.
     #[must_use]
-    pub fn new(width: NonZeroU16, modes: Modes) -> Self {
-        Self { width, modes }
+    pub fn new(width: impl Into<ChannelLayout>, modes: Modes) -> Self {
+        Self {
+            width: width.into(),
+            modes,
+        }
     }
 }
 
@@ -74,7 +76,7 @@ control_set! {
 /// The bank as a [`Kernel`]: a [`ModalBank`] built at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct ModalBankKernel<F: Float> {
-    width: NonZeroU16,
+    width: ChannelLayout,
     modes: Modes,
     controls: ModalControls,
     rate: SampleRate,
@@ -83,7 +85,7 @@ pub struct ModalBankKernel<F: Float> {
 }
 
 impl<F: Float> ModalBankKernel<F> {
-    fn new(width: NonZeroU16, modes: Modes) -> Self {
+    fn new(width: ChannelLayout, modes: Modes) -> Self {
         Self {
             width,
             controls: ModalControls::of_first(&modes),
@@ -102,8 +104,8 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
 
     /// `width` channels in and out, `Heavy`: two multiply-adds per mode, sample and channel.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(ChannelLayout::from_count(self.width.get()))
-            .expect("a modal bank is at most 16 channels wide");
+        let bus =
+            BusTopology::unassigned(self.width).expect("a modal bank is at most 16 channels wide");
         Shape::through(bus).with_cost(Cost::Heavy)
     }
 
@@ -174,7 +176,7 @@ mod tests {
     }
 
     fn node() -> ModalBankNode<f32> {
-        ModalBankNode::from(ModalBankConfig::new(NonZeroU16::new(2).unwrap(), modes()))
+        ModalBankNode::from(ModalBankConfig::new(2u16, modes()))
     }
 
     /// A fork starts from the controls last set and shares no cell.

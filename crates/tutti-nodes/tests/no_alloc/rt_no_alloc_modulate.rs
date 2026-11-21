@@ -1,7 +1,7 @@
 //! Regression gate: tremolo, auto-pan and the ring modulator must not allocate per block,
 //! held and with their controls moved between blocks.
 
-use core::num::NonZeroU16;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
@@ -42,7 +42,7 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 #[test]
 fn tremolo_process_is_allocation_free_with_the_controls_moving() {
     gate(
-        TremoloNode::from(TremoloConfig::new(NonZeroU16::new(2).unwrap())),
+        TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO)),
         |controls, i| {
             controls.set(
                 UnitParam::Rate,
@@ -73,7 +73,7 @@ fn auto_pan_process_is_allocation_free_with_the_controls_moving() {
 #[test]
 fn ring_mod_process_is_allocation_free_with_the_controls_moving() {
     gate(
-        RingModNode::from(RingModConfig::new(NonZeroU16::new(2).unwrap())),
+        RingModNode::from(RingModConfig::new(ChannelLayout::STEREO)),
         |controls, i| {
             let hz = if i.is_multiple_of(2) { 220.0 } else { 1_700.0 };
             controls.set(UnitParam::Frequency, hz);

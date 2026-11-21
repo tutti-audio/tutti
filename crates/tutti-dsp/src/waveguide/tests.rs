@@ -217,7 +217,7 @@ fn every_channel_of_a_three_wide_bank_rings() {
         },
         LowestPitch::new(Hz::new(50.0)).unwrap(),
         SampleRate::of(RATE),
-        NonZeroU16::new(3).unwrap(),
+        ChannelLayout::from_count(3),
     );
     let mut x = vec![0.0; 1024];
     x[0] = 1.0;

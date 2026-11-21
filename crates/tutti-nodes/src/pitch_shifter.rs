@@ -1,6 +1,5 @@
 //! [`PitchShifterNode`]: a pitch shift in cents over a phase vocoder, at the input's duration.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_dsp::{
     ColaGeometry, FftFloat, HopSize, PhaseVocoder, PhaseVocoderControls, StftGeometry, WindowLength,
@@ -13,7 +12,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`PitchShifterNode`] is made from: its width, its geometry and its starting shift.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PitchShifterConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     hop: HopSize,
     controls: PhaseVocoderControls,
 }
@@ -25,9 +24,9 @@ impl PitchShifterConfig {
     /// A pitch shifter of `width` channels at no shift, on a
     /// hop of [`DEFAULT_HOP`](Self::DEFAULT_HOP).
     #[must_use]
-    pub fn new(width: NonZeroU16) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width,
+            width: width.into(),
             hop: Self::DEFAULT_HOP,
             controls: PhaseVocoderControls::UNITY,
         }
@@ -83,7 +82,7 @@ impl<F: FftFloat> From<PitchShifterConfig> for PitchShifterNode<F> {
     fn from(config: PitchShifterConfig) -> Self {
         Self::with_kernel(
             PitchShifterKernel::new(
-                ChannelLayout::from_count(config.width.get()),
+                config.width,
                 config.hop,
                 SampleRate::SR_48K,
                 config.controls,

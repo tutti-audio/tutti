@@ -2,7 +2,6 @@
 //! at most one block of output, and every block after that block is finite, for every
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
@@ -138,7 +137,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             // an infinity quantizes to +-1, which is finite, and the next capture replaces it.
             "bit crusher",
             Box::new(BitCrusherNode::<f32>::from(
-                BitCrusherConfig::new(NonZeroU16::new(2).unwrap())
+                BitCrusherConfig::new(ChannelLayout::STEREO)
                     .bits(BitDepth::new(12.0))
                     .hold(HoldFactor::new(91.0)),
             )),
@@ -284,16 +283,14 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "spring",
             Box::new(SpringReverbNode::<f32>::from(SpringReverbConfig::new(
-                NonZeroU16::new(2).unwrap(),
+                ChannelLayout::STEREO,
             ))),
         ),
         // The LFO and the carrier are state of the clock, not of the input: a NaN sample is
         // heard at its own frame and nowhere else.
         (
             "tremolo",
-            Box::new(TremoloNode::from(TremoloConfig::new(
-                NonZeroU16::new(2).unwrap(),
-            ))),
+            Box::new(TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO))),
         ),
         (
             "auto-pan",
@@ -329,14 +326,12 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "ring mod",
-            Box::new(RingModNode::from(RingModConfig::new(
-                NonZeroU16::new(2).unwrap(),
-            ))),
+            Box::new(RingModNode::from(RingModConfig::new(ChannelLayout::STEREO))),
         ),
         (
             "comb (feedback)",
             Box::new(CombFilterNode::<f32>::from(CombFilterConfig::new(
-                NonZeroU16::new(2).unwrap(),
+                ChannelLayout::STEREO,
                 CombForm::Feedback,
                 Seconds::new(0.002),
             ))),
@@ -344,19 +339,19 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "karplus-strong",
             Box::new(KarplusStrongNode::<f32>::from(KarplusStrongConfig::new(
-                NonZeroU16::new(2).unwrap(),
+                ChannelLayout::STEREO,
             ))),
         ),
         (
             "waveguide string",
             Box::new(WaveguideStringNode::<f32>::from(
-                WaveguideStringConfig::new(NonZeroU16::new(2).unwrap()),
+                WaveguideStringConfig::new(ChannelLayout::STEREO),
             )),
         ),
         (
             "modal bank",
             Box::new(ModalBankNode::<f32>::from(ModalBankConfig::new(
-                NonZeroU16::new(2).unwrap(),
+                ChannelLayout::STEREO,
                 Modes::try_from(
                     &[Mode {
                         frequency: Hz::new(440.0),
@@ -371,7 +366,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "early reflections",
             Box::new(
                 EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
-                    NonZeroU16::new(2).unwrap(),
+                    ChannelLayout::STEREO,
                     Taps {
                         taps: Inline::from_slice(&[Tap {
                             delay: SampleSpan::new(300.0).unwrap(),
@@ -387,19 +382,19 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "decorrelator",
             Box::new(DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(
-                NonZeroU16::new(2).unwrap(),
+                ChannelLayout::STEREO,
             ))),
         ),
         (
             "frequency shifter",
             Box::new(FrequencyShifterNode::<f32>::from(
-                FrequencyShifterConfig::new(NonZeroU16::new(2).unwrap()).shift(Hz::new(300.0)),
+                FrequencyShifterConfig::new(ChannelLayout::STEREO).shift(Hz::new(300.0)),
             )),
         ),
         (
             "distance",
             Box::new(DistanceNode::<f32>::from(
-                DistanceConfig::new(NonZeroU16::new(2).unwrap(), Metres::of(50.0))
+                DistanceConfig::new(ChannelLayout::STEREO, Metres::of(50.0))
                     .air_absorption(Hz::new(4000.0))
                     .distance(Metres::of(3.0)),
             )),
@@ -407,7 +402,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "pitch shifter",
             Box::new(PitchShifterNode::<f32>::from(
-                PitchShifterConfig::new(NonZeroU16::new(2).unwrap()).pitch(Cents::new(700.0)),
+                PitchShifterConfig::new(ChannelLayout::STEREO).pitch(Cents::new(700.0)),
             )),
         ),
         (

@@ -18,8 +18,8 @@
 //! / (fs T60))`, below 1 for any finite decay: the signal falls 60 dB in the decay
 //! time, the average's loss apart. A frequency is held between the string's lowest and `fs / 8`.
 
-use core::num::{NonZeroU16, NonZeroUsize};
-use tutti_buffers::{Float, Planes, PlanesMut};
+use core::num::NonZeroUsize;
+use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
 use tutti_units::{Feedback, Hz, Normalized, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use crate::delay::DelayRing;
@@ -206,10 +206,13 @@ impl<F: Float> WaveguideBank<F> {
         positions: WaveguidePositions,
         lowest: LowestPitch,
         rate: SampleRate,
-        width: NonZeroU16,
+        width: ChannelLayout,
     ) -> Self {
         Self {
-            strings: vec![WaveguideString::new(positions, lowest, rate); usize::from(width.get())],
+            strings: vec![
+                WaveguideString::new(positions, lowest, rate);
+                usize::from(width.count())
+            ],
         }
     }
 

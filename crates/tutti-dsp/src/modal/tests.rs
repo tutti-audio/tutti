@@ -29,7 +29,7 @@ fn modes_of(modes: &[Mode]) -> Modes {
 }
 
 fn bank(modes: &[Mode]) -> ModalBank<f64> {
-    ModalBank::new(&modes_of(modes), NonZeroU16::MIN, SampleRate::of(RATE))
+    ModalBank::new(&modes_of(modes), ChannelLayout::MONO, SampleRate::of(RATE))
 }
 
 fn impulse(b: &mut ModalBank<f64>, len: usize) -> Vec<f64> {
@@ -162,7 +162,7 @@ fn a_late_impulse_rings_the_same_response_later_on_every_channel() {
     let m = modes();
     let mut b = ModalBank::<f64>::new(
         &modes_of(&m),
-        NonZeroU16::new(2).unwrap(),
+        ChannelLayout::from_count(2),
         SampleRate::of(RATE),
     );
     let mut x0 = vec![0.0; 512];

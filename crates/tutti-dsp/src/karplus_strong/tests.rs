@@ -263,7 +263,7 @@ fn every_channel_of_a_three_wide_bank_rings() {
     let mut bank = KarplusStrongBank::<f64>::new(
         LowestPitch::new(Hz::new(50.0)).unwrap(),
         SampleRate::of(48_000.0),
-        NonZeroU16::new(3).unwrap(),
+        ChannelLayout::from_count(3),
     );
     let mut x = vec![0.0; 512];
     x[0] = 1.0;

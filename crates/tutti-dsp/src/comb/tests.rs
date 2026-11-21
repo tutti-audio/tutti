@@ -84,7 +84,7 @@ fn a_bank_retargets_every_channel() {
         CombForm::Feedback,
         NonZeroUsize::new(4).unwrap(),
         Feedback::new(0.5),
-        NonZeroU16::new(2).unwrap(),
+        ChannelLayout::from_count(2),
     );
     assert_eq!(bank.delay(), Samples::new(4));
     bank.retarget(&CombControls {
@@ -113,7 +113,7 @@ fn the_tail_covers_the_ring_out_to_the_floor() {
         CombForm::Feedback,
         NonZeroUsize::new(d).unwrap(),
         Feedback::new(g),
-        NonZeroU16::MIN,
+        ChannelLayout::MONO,
     );
     let Tail::Finite(tail) = bank.tail(Feedback::new(g), rate) else {
         panic!("finite");
@@ -125,7 +125,7 @@ fn the_tail_covers_the_ring_out_to_the_floor() {
         CombForm::Feedforward,
         NonZeroUsize::new(d).unwrap(),
         Feedback::new(g),
-        NonZeroU16::MIN,
+        ChannelLayout::MONO,
     );
     assert_eq!(
         ff.tail(Feedback::new(g), rate),

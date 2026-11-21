@@ -15,7 +15,6 @@
 //! Each render is preceded by one block of silence, the block the mix's ramp from
 //! the unit's `WET` start lands on, and only the frames after it are compared.
 
-use core::num::NonZeroU16;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, ChannelLayout};
@@ -310,7 +309,7 @@ fn the_reverbs_are_blended_by_the_graph() {
     );
     check_io(
         "spring",
-        &|| SpringReverbNode::<f32>::from(SpringReverbConfig::new(NonZeroU16::new(2).unwrap())),
+        &|| SpringReverbNode::<f32>::from(SpringReverbConfig::new(2u16)),
         2,
         2,
         0,

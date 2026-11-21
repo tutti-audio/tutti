@@ -1,6 +1,5 @@
 //! [`TremoloNode`]: an LFO scales the level.
 
-use core::num::NonZeroU16;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
@@ -13,7 +12,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// controls start.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TremoloConfig {
-    width: NonZeroU16,
+    width: ChannelLayout,
     wave: OscillatorWave,
     controls: TremoloControls,
 }
@@ -22,9 +21,9 @@ impl TremoloConfig {
     /// A tremolo of `width` channels on a sine LFO, at [`TremoloControls::DEFAULT`] (5 Hz,
     /// half depth).
     #[must_use]
-    pub fn new(width: NonZeroU16) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>) -> Self {
         Self {
-            width,
+            width: width.into(),
             wave: OscillatorWave::Sine,
             controls: TremoloControls::DEFAULT,
         }
@@ -73,7 +72,7 @@ pub type TremoloNode<F> = KernelNode<TremoloKernel<F>>;
 impl<F: Float> From<TremoloConfig> for TremoloNode<F> {
     fn from(config: TremoloConfig) -> Self {
         Self::with_kernel(
-            TremoloKernel::new(ChannelLayout::from_count(config.width.get()), config.wave),
+            TremoloKernel::new(config.width, config.wave),
             TremoloSet,
             config.controls,
         )
@@ -165,7 +164,7 @@ mod tests {
 
     fn node(width: u16, rate: f64, depth: f64) -> TremoloNode<f32> {
         prepared(TremoloNode::from(
-            TremoloConfig::new(NonZeroU16::new(width).unwrap())
+            TremoloConfig::new(width)
                 .rate(Hz::new(rate))
                 .depth(Depth::of(depth)),
         ))
@@ -174,9 +173,7 @@ mod tests {
     /// A fork starts from the controls last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(TremoloNode::from(TremoloConfig::new(
-            NonZeroU16::new(2).unwrap(),
-        )));
+        assert_param_fork(TremoloNode::from(TremoloConfig::new(2u16)));
     }
 
     /// The shape is the width in and out, `Moderate`, with no tail, and declares the rate and
@@ -195,7 +192,7 @@ mod tests {
             shape.params.as_slice(),
             &[UnitParam::Rate, UnitParam::Depth][..]
         );
-        let d = TremoloNode::<f32>::from(TremoloConfig::new(NonZeroU16::MIN));
+        let d = TremoloNode::<f32>::from(TremoloConfig::new(1u16));
         assert_eq!((d.param_base(0), d.param_base(1)), (Some(5.0), Some(0.5)));
     }
 
@@ -213,10 +210,10 @@ mod tests {
         assert!(out[360].abs() < 1e-4, "{}", out[360]);
     }
 
-    /// A width of one is one channel in and out.
+    /// An empty layout is no channels, not one.
     #[test]
-    fn a_width_of_one_is_mono() {
-        let n = TremoloNode::<f32>::from(TremoloConfig::new(NonZeroU16::MIN));
-        assert_eq!(n.shape().audio_in().count(), 1);
+    fn an_empty_layout_has_no_channels() {
+        let n = TremoloNode::<f32>::from(TremoloConfig::new(ChannelLayout::EMPTY));
+        assert_eq!(n.shape().audio_in().count(), 0);
     }
 }
