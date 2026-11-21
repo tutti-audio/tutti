@@ -19,8 +19,8 @@ use crate::{
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError};
+use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -502,8 +502,8 @@ impl ControlState {
                 )),
                 Heard::Abandoned(Abandoned::Discard) => Ok(None),
                 Heard::Abandoned(Abandoned::Rate) => {
-                    if let ControlReply::SampleRateSet { rate, error } = reply {
-                        inbox.late_rate_answer(rate, error);
+                    if let ControlReply::SampleRateSet { rate, refusal } = reply {
+                        inbox.late_rate_answer(rate, refusal);
                     }
                     Ok(None)
                 }
@@ -1130,7 +1130,7 @@ pub(super) fn handle_control(
             )?;
             let value = match wait_for(stream, inbox, state, id, None)? {
                 Waited::Reply(ControlReply::EditorOpened { result }) => result,
-                Waited::Reply(ControlReply::Error { message }) => Err(message),
+                Waited::Reply(ControlReply::Error { error }) => Err(error.to_string()),
                 Waited::Reply(other) => Err(format!("unexpected reply to OpenEditor: {other:?}")),
                 Waited::Pending | Waited::GaveUp => Err(format!(
                     "the server did not open the editor within {window:?}"
@@ -1158,7 +1158,7 @@ pub(super) fn handle_control(
             )?;
             let value = match wait_for(stream, inbox, state, id, None)? {
                 Waited::Reply(ControlReply::EditorSized { result }) => result,
-                Waited::Reply(ControlReply::Error { message }) => Err(message),
+                Waited::Reply(ControlReply::Error { error }) => Err(error.to_string()),
                 Waited::Reply(other) => {
                     Err(format!("unexpected reply to SetEditorSize: {other:?}"))
                 }
@@ -1233,20 +1233,18 @@ pub(super) fn handle_setting(
                             lifecycle,
                             inbox,
                             rate,
-                            Some(format!(
-                                "the plugin did not answer the rate change within {budget:?}"
-                            )),
+                            Some(RateRefusalCause::NoAnswer { within: budget }),
                         );
                         break;
                     }
                     // A refusal is not a failure of the connection: the plugin
                     // stays loaded, the server renders silence for it, and the
                     // next rate change retries it.
-                    Waited::Reply(ControlReply::SampleRateSet { rate, error }) => {
+                    Waited::Reply(ControlReply::SampleRateSet { rate, refusal }) => {
                         // Recorded before the blocks go on, a refusal and its
                         // clearing alike: a block that finds the old refusal
                         // would latch it (an offline fork's wait does).
-                        apply_rate_reply(lifecycle, inbox, rate, error);
+                        apply_rate_reply(lifecycle, inbox, rate, refusal);
                         break;
                     }
                     Waited::Reply(other) => {
@@ -1351,12 +1349,13 @@ pub(super) fn apply_rate_reply(
     lifecycle: &Lifecycle,
     inbox: &mut Unsolicited,
     rate: SampleRate,
-    error: Option<String>,
+    refusal: Option<RateRefusalCause>,
 ) {
-    match error {
-        Some(reason) => {
-            lifecycle.set_rate_refusal(Some((rate, reason.clone())));
-            inbox.rate_refusal(Some((rate, reason)));
+    match refusal {
+        Some(cause) => {
+            let refusal = RateRefusal::new(rate, cause);
+            lifecycle.set_rate_refusal(Some(refusal.clone()));
+            inbox.rate_refusal(Some(refusal));
         }
         None => {
             if lifecycle.rate_refusal().is_some() {
@@ -1642,7 +1641,7 @@ mod tests {
         let error = |id| ControlFrame::Reply {
             id,
             reply: ControlReply::Error {
-                message: "refused".into(),
+                error: tutti_plugin_types::ServerError::StateWithoutObject,
             },
         };
         assert!(matches!(

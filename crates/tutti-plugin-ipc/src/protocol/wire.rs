@@ -283,7 +283,7 @@ mod tests {
 
         let set_reply = ControlReply::SampleRateSet {
             rate: SampleRate::SR_48K,
-            error: None,
+            refusal: None,
         };
         // variant 13, 48000.0f64, no error
         assert_eq!(

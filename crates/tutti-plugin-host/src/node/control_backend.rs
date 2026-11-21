@@ -416,7 +416,7 @@ impl<L: InProcess> Health for ControlBackend<L> {
         self.lost.cause()
     }
 
-    fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
+    fn rate_refusal(&self) -> Option<tutti_plugin_types::RateRefusal> {
         None
     }
 
