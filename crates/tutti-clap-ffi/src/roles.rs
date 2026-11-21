@@ -26,6 +26,16 @@ pub struct ThreadRoles {
 
 const NO_AUDIO_THREAD: u64 = 0;
 
+/// Why [`ThreadRoles::try_claim`] refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// Another claim is held; a later try can succeed.
+    Held,
+    /// A holder panicked, which kills the claim: no audio-side entry runs on
+    /// this instance again.
+    Dead,
+}
+
 fn thread_id_hash(id: ThreadId) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -47,8 +57,8 @@ fn thread_id_hash(id: ThreadId) -> u64 {
 /// there). Not re-entrant: claiming twice on one thread never returns.
 ///
 /// It holds no guard once the claim is dead (a holder panicked): a dead
-/// claim admits no audio-side entry again, so the waiting entries that
-/// still run are alone without one.
+/// claim admits no audio-side entry again, so the only entries left are the
+/// main-thread ones, which run on the one main thread and so one at a time.
 #[derive(Debug)]
 pub(crate) struct AudioClaim<'a> {
     roles: &'a ThreadRoles,
@@ -145,19 +155,25 @@ impl ThreadRoles {
     }
 
     /// Claims the `[audio-thread]` role if no other claim is held, and never
-    /// waits: `None` while a claim is held, by the main thread's lifecycle
-    /// and parameter calls or by another audio entry, and for good once the
-    /// claim is dead. What the audio thread takes: one compare-exchange, so
-    /// a main-thread call never stalls a block and a block never locks or
-    /// allocates.
-    pub(crate) fn try_claim(&self) -> Option<AudioClaim<'_>> {
-        let guard = self.claim.try_claim()?;
+    /// waits: [`Refused::Held`] while a claim is held, by the main thread's
+    /// lifecycle and parameter calls or by another audio entry, and
+    /// [`Refused::Dead`] for good once the claim is dead. What the audio
+    /// thread takes: one compare-exchange, so a main-thread call never stalls
+    /// a block and a block never locks or allocates.
+    pub(crate) fn try_claim(&self) -> Result<AudioClaim<'_>, Refused> {
+        let guard = self.claim.try_claim().ok_or_else(|| {
+            if self.claim.is_dead() {
+                Refused::Dead
+            } else {
+                Refused::Held
+            }
+        })?;
         // `Release` pairs with the `Acquire` in `is_audio_thread`.
         self.audio.store(
             thread_id_hash(std::thread::current().id()),
             Ordering::Release,
         );
-        Some(AudioClaim {
+        Ok(AudioClaim {
             roles: self,
             _guard: Some(guard),
         })
@@ -262,12 +278,33 @@ mod tests {
         let held = roles.claim();
         let other = Arc::clone(&roles);
         assert!(
-            std::thread::spawn(move || other.try_claim().is_none())
+            std::thread::spawn(move || other.try_claim().err() == Some(Refused::Held))
                 .join()
                 .unwrap()
         );
         drop(held);
-        assert!(roles.try_claim().is_some());
+        assert!(roles.try_claim().is_ok());
+    }
+
+    /// A panic while the claim is held ends the instance for the audio side:
+    /// every later audio claim is refused as dead, never as held, so a block
+    /// can name the instance as gone rather than momentarily busy.
+    #[test]
+    fn a_panic_under_a_claim_refuses_every_later_audio_claim_as_dead() {
+        let roles = roles();
+        assert_eq!(roles.try_claim().err(), None);
+        let panicked = {
+            let roles = Arc::clone(&roles);
+            std::thread::spawn(move || {
+                let _claim = roles.claim();
+                panic!("host code panics under the claim");
+            })
+            .join()
+        };
+        assert!(panicked.is_err(), "the holder panicked");
+        for _ in 0..3 {
+            assert_eq!(roles.try_claim().err(), Some(Refused::Dead));
+        }
     }
 
     /// Claiming allocates nothing from the first claim of fresh roles on: an

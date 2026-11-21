@@ -449,6 +449,7 @@ impl ClapProcessor {
             Ok(status) => status,
             Err(ProcessError::Retired) => return Err(ClapError::NotActive),
             Err(ProcessError::Busy) => return Err(ClapError::Busy),
+            Err(ProcessError::Poisoned) => return Err(ClapError::Poisoned),
             Err(ProcessError::StartFailed) => return Err(ClapError::StartProcessingFailed),
             Err(ProcessError::FormatMismatch) => return Err(ClapError::FormatMismatch),
             Err(ProcessError::BufferTooShort) => return Err(ClapError::BufferTooShort),
