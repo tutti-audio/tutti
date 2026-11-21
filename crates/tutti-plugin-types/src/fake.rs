@@ -952,7 +952,7 @@ impl Loaded for FakeLoaded {
                 reason: PluginError::Other("the fake cannot rebuild".into()),
             });
         }
-        Ok(Rebuilt::restored(self))
+        Ok(Rebuilt::whole(self))
     }
 }
 

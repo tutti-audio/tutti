@@ -432,10 +432,10 @@ pub trait Loaded: Control + Sized + Send {
     ///
     /// [`Refused`], holding the plugin if it survived, when the instance cannot
     /// be rebuilt. A rebuilt plugin that refuses the state it was saved with is
-    /// not a refusal: it is [`Rebuilt::restored`].
+    /// not a refusal: it is [`Rebuilt::restored`] (the field).
     fn rebuild(self, main: MainThreadMarker) -> Result<Rebuilt<Self>, Refused<Self>> {
         let _ = main;
-        Ok(Rebuilt::restored(self))
+        Ok(Rebuilt::whole(self))
     }
 }
 
@@ -970,16 +970,17 @@ pub struct Rebuilt<L> {
     /// The new instance, loaded. When [`restored`](Self::restored) is an
     /// error it holds its defaults.
     pub plugin: L,
-    /// `Ok` when the new instance took the saved state, or the old one had
-    /// none to give; otherwise why the state was not restored: the old
-    /// instance would not save it, or the new one refused it.
+    /// `Ok` when the new instance took the state the old one was saved with
+    /// (an empty state is taken). Otherwise why it did not: the old instance
+    /// would not save its state, or the new one refused it. A format with no
+    /// state to carry over reports `Ok` ([`whole`](Rebuilt::whole)).
     pub restored: Result<(), PluginError>,
 }
 
 impl<L> Rebuilt<L> {
-    /// `plugin`, which needed no state restored.
+    /// `plugin`, rebuilt with nothing to restore.
     #[must_use]
-    pub fn restored(plugin: L) -> Self {
+    pub fn whole(plugin: L) -> Self {
         Self {
             plugin,
             restored: Ok(()),

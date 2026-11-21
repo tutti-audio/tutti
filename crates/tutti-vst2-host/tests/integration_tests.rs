@@ -1221,6 +1221,13 @@ fn a_plugin_with_no_set_parameter_refuses_the_write() {
         Control::set_parameter(bare.loaded_mut(), main_thread(), id, Normalized::of(0.5)),
         Err(ParamWriteError::ReadOnly(id))
     );
+    assert_eq!(
+        bare.loaded()
+            .parameter_info(id)
+            .and_then(|info| info.flag(tutti_plugin_types::ParamFlags::READ_ONLY)),
+        Some(true),
+        "the descriptor says the host cannot write it"
+    );
     // An id the plugin does not declare is still undeclared.
     let past = pid(1_000);
     assert_eq!(
@@ -1230,6 +1237,14 @@ fn a_plugin_with_no_set_parameter_refuses_the_write() {
     drop(bare);
 
     let mut whole = load_probe();
+    assert_eq!(
+        whole
+            .loaded()
+            .parameter_info(id)
+            .and_then(|info| info.flag(tutti_plugin_types::ParamFlags::READ_ONLY)),
+        None,
+        "a plugin with a setter reports no read-only bit"
+    );
     assert_eq!(
         Control::set_parameter(whole.loaded_mut(), main_thread(), id, Normalized::of(0.5)),
         Ok(())

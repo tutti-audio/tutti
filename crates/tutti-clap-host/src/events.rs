@@ -889,8 +889,9 @@ impl InputRooms {
     }
 }
 
-/// A list of more input note ports than the 16 UMP Groups that name them
-/// ([`InputEventList::set_note_ports`]); the count listed.
+/// More input note ports than the 16 UMP Groups that name them: a list given
+/// to [`InputEventList::set_note_ports`], or the count a plugin declares. The
+/// count is carried.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{0} input note ports listed, at most 16 (one for each UMP Group)")]
 pub struct TooManyNotePorts(pub usize);
@@ -999,9 +1000,8 @@ impl InputEventList {
     }
 
     /// Sets the plugin's input note ports, one entry each (at most 16, the
-    /// Groups of MIDI 2.0; a longer list is refused with
-    /// [`TooManyNotePorts`] and nothing changes), `true` for a port that takes the MIDI dialect
-    /// only: notes go out as `clap_event_midi`, a MIDI event's per-note
+    /// Groups of MIDI 2.0; a longer list is refused with [`TooManyNotePorts`]
+    /// and nothing changes), `true` for a port that takes the MIDI dialect only: notes go out as `clap_event_midi`, a MIDI event's per-note
     /// expression is sent as its MIDI 1.0 bytes where it has them (poly
     /// pressure), and `add_note_expressions`
     /// adds nothing for it. A UMP Group is

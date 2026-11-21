@@ -90,6 +90,7 @@ Set `TUTTI_PROBE_MISBEHAVIOUR` to one of the `ProbeMisbehaviour` values in
 | 7 | `setupProcessing` returns `kResultFalse` |
 | 8 | `getState`/`setState` return `kNotImplemented` — **not a violation**; see below |
 | 9 | `IComponent::initialize` returns `kResultFalse` |
+| 17 | declares no event input bus |
 
 Value 8 is the odd one out: it is what the SDK's own `Component` base returns,
 so every plugin that does not override state behaves that way. It lives here

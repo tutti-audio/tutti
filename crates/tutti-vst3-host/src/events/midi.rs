@@ -100,10 +100,11 @@ impl Default for MidiEncoder {
 
 impl MidiEncoder {
     /// An encoder for a plugin with `buses` event input buses (1 to 16, the
-    /// Groups of MIDI 2.0: a plugin with no event bus is given one, and is
-    /// sent Group 0's events). Every channel's per-note bend
-    /// sensitivity starts at the MPE default, ±48 (RP-053). Allocates (about
-    /// 270 KiB for each bus): off the audio thread.
+    /// Groups of MIDI 2.0). A plugin with no event input bus has no encoder:
+    /// its [`Stager`](super::Stager) is built
+    /// [`without_buses`](super::Stager::without_buses). Every channel's
+    /// per-note bend sensitivity starts at the MPE default, ±48 (RP-053).
+    /// Allocates (about 270 KiB for each bus): off the audio thread.
     #[must_use]
     pub fn new(buses: GroupSpan) -> Self {
         Self {

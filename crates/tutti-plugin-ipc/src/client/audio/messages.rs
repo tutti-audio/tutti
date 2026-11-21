@@ -488,9 +488,12 @@ impl Unsolicited {
         }
     }
 
-    /// A rebuilt plugin's refusal of its saved state, replacing one already held.
+    /// A rebuilt plugin's refusal of its saved state. One already held is
+    /// replaced and counted with the dropped events.
     pub(super) fn state_not_restored(&mut self, reason: String) {
-        self.state_not_restored = Some(reason);
+        if self.state_not_restored.replace(reason).is_some() {
+            self.dropped += 1;
+        }
     }
 
     /// A resync request; a second of the same kind adds nothing.
@@ -570,6 +573,22 @@ impl ControlCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A refusal of the saved state replaced before it was drained is
+    /// counted**, and the latest reason is the one delivered.
+    #[test]
+    fn a_replaced_state_refusal_is_counted_and_the_latest_is_delivered() {
+        let mut inbox = Unsolicited::new();
+        inbox.state_not_restored("first".into());
+        assert_eq!(inbox.take_dropped(), 0);
+        inbox.state_not_restored("second".into());
+        assert_eq!(inbox.take_dropped(), 1);
+        let heard: Vec<_> = inbox.drain().collect();
+        assert!(
+            matches!(heard.as_slice(), [IpcEvent::StateNotRestored { reason }] if reason == "second"),
+            "{heard:?}"
+        );
+    }
 
     /// **A request the queue refused is answered `Busy`, not left to read as a
     /// dead plugin**: the answer is filled, where a dropped reply would cancel it.
