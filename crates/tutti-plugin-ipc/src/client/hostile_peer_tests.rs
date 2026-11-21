@@ -932,14 +932,12 @@ fn the_servers_loss_counts_are_heard() {
     let heard: Arc<PlMutex<Vec<(u64, u64, u64)>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
-        if let IpcEvent::ServerLosses {
-            commands_refused,
-            edits_refused,
-            refused_off_thread_calls,
-        } = ev
-        {
-            sink.lock()
-                .push((commands_refused, edits_refused, refused_off_thread_calls));
+        if let IpcEvent::ServerLosses(losses) = ev {
+            sink.lock().push((
+                losses.commands_refused,
+                losses.edits_refused,
+                losses.refused_off_thread_calls,
+            ));
         }
     })));
     assert!(
