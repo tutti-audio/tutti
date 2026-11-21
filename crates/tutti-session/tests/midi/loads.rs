@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use tutti_midi_file::{Normalized, TimelineDrop};
 use tutti_music::TimeSignature;
 use tutti_session::{
-    DetachedSession, LoadMidiError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
+    DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
 };
 use tutti_units::{Beat, SampleRate, Seconds};
 
@@ -27,7 +27,7 @@ fn a_midi_load_of_a_dropped_session_is_shut_down() {
     let load = session().midi().load_midi(vec![0u8]);
     assert!(matches!(
         tutti_fixtures::block_on(load),
-        Err(LoadMidiError::ShutDown)
+        Err(LoadError::ShutDown)
     ));
 }
 
@@ -79,7 +79,7 @@ fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 /// Loads the file at `path`.
-fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadMidiError> {
+fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadError> {
     tutti_fixtures::block_on(s.midi().load_midi(path))
 }
 
@@ -262,8 +262,8 @@ fn a_missing_file_is_an_io_read_error() {
     let outcome = load(&mut session(), dir.path().join("none.mid"));
     assert!(
         matches!(
-            outcome,
-            Err(LoadMidiError::Read(tutti_midi_file::ReadError::Io(_)))
+            &outcome,
+            Err(LoadError::Midi(error)) if matches!(**error, tutti_midi_file::ReadError::Io(_))
         ),
         "{outcome:?}"
     );

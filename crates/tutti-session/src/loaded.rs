@@ -3,13 +3,14 @@
 
 #![cfg_attr(
     not(any(
-        all(feature = "sampler", codec),
+        feature = "sampler",
+        feature = "midi",
         feature = "soundfont",
         feature = "plugin"
     )),
     expect(
         dead_code,
-        reason = "the loads (features `sampler`, `soundfont`, `plugin`) are its users"
+        reason = "the loads (features `sampler`, `midi`, `soundfont`, `plugin`) are its users"
     )
 )]
 
@@ -70,6 +71,15 @@ pub enum LoadError {
     #[cfg(feature = "sampler")]
     #[error("{0} cannot be streamed")]
     NotStreamable(String),
+    /// A MIDI file could not be read.
+    #[cfg(feature = "midi")]
+    #[error(transparent)]
+    Midi(Arc<tutti_midi_file::ReadError>),
+    /// A file could not be opened to stream it, or is not audio this build
+    /// decodes.
+    #[cfg(feature = "sampler")]
+    #[error(transparent)]
+    Stream(Arc<tutti_sampler::OpenError>),
     /// A SoundFont could not be opened.
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
@@ -99,7 +109,7 @@ pub enum LoadError {
     ShutDown,
 }
 
-#[cfg(any(all(feature = "sampler", codec), feature = "soundfont"))]
+#[cfg(any(feature = "sampler", feature = "midi", feature = "soundfont"))]
 impl crate::unblocked::Unanswered for LoadError {
     fn shut_down() -> Self {
         Self::ShutDown

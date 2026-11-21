@@ -239,9 +239,7 @@ pub use tutti_session::{
     LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
 };
 #[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::{
-    OpenStream, OpenStreamError, OpenedStream, OpeningStream, StreamReadError,
-};
+pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream, OpeningStream};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
@@ -552,15 +550,8 @@ pub mod session {
     #[cfg(any(
         feature = "plugin",
         feature = "soundfont",
-        all(
-            feature = "sampler",
-            any(
-                feature = "decode-wav",
-                feature = "decode-flac",
-                feature = "decode-mp3",
-                feature = "decode-ogg"
-            )
-        )
+        feature = "sampler",
+        feature = "midi"
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
@@ -927,9 +918,9 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi,
-        MidiReport, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument,
-        OpenMidiSink, Stamping, TrackError,
+        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiReport, MidiRouteId,
+        MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
+        TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

@@ -20,7 +20,7 @@ use std::task::{Context, Poll};
 
 use tutti_buffers::Float;
 use tutti_midi_file::{
-    FileEvent, MidiFile, Normalized, ReadError, RefusedTimeSignature, Timebase, TimelineDrop, Track,
+    FileEvent, MidiFile, Normalized, RefusedTimeSignature, Timebase, TimelineDrop, Track,
 };
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
 use tutti_platform::{Asset, WeakExecutor};
@@ -29,8 +29,9 @@ use tutti_timeline::ProjectMeter;
 use tutti_ump::TicksPerQuarterNote;
 use tutti_units::Beat;
 
+use crate::LoadError;
 use crate::Midi;
-use crate::unblocked::{Unanswered, Unblocked};
+use crate::unblocked::Unblocked;
 
 /// A MIDI file to read and convert to clip values, built by
 /// [`Midi::load_midi`]. It is `Send`, and it is a [`Future`] through
@@ -54,13 +55,15 @@ pub struct LoadMidi {
 impl LoadMidi {
     /// Reads the file and converts each track to a clip value. The cost is a
     /// full read of the file.
-    fn run(self) -> Result<LoadedMidi, LoadMidiError> {
-        Ok(convert(MidiFile::read(self.asset)?))
+    fn run(self) -> Result<LoadedMidi, LoadError> {
+        MidiFile::read(self.asset)
+            .map(convert)
+            .map_err(|error| LoadError::Midi(Arc::new(error)))
     }
 }
 
 impl IntoFuture for LoadMidi {
-    type Output = Result<LoadedMidi, LoadMidiError>;
+    type Output = Result<LoadedMidi, LoadError>;
     type IntoFuture = LoadingMidi;
 
     fn into_future(self) -> LoadingMidi {
@@ -85,20 +88,20 @@ impl IntoFuture for LoadMidi {
 ///
 /// # Errors
 ///
-/// The output is [`LoadMidiError::Read`] for a file that cannot be read,
-/// [`LoadMidiError::Panicked`] when the parser panicked, and
-/// [`LoadMidiError::ShutDown`] when the session is gone.
+/// The output is [`LoadError::Midi`] for a file that cannot be read,
+/// [`LoadError::Panicked`] when the parser panicked, and
+/// [`LoadError::ShutDown`] when the session is gone.
 ///
 /// # Panics
 ///
 /// When polled after it resolved.
 #[must_use = "a load does nothing unless it is awaited"]
 pub struct LoadingMidi {
-    load: Unblocked<LoadMidi, LoadedMidi, LoadMidiError>,
+    load: Unblocked<LoadMidi, LoadedMidi, LoadError>,
 }
 
 impl Future for LoadingMidi {
-    type Output = Result<LoadedMidi, LoadMidiError>;
+    type Output = Result<LoadedMidi, LoadError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.load).poll(cx)
@@ -108,35 +111,6 @@ impl Future for LoadingMidi {
 impl fmt::Debug for LoadingMidi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LoadingMidi").finish_non_exhaustive()
-    }
-}
-
-/// Why a [`LoadMidi`] did not resolve to a [`LoadedMidi`].
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum LoadMidiError {
-    /// The file could not be read.
-    #[error(transparent)]
-    Read(#[from] ReadError),
-    /// The parser panicked; `message` is the panic's, when it was a string.
-    #[error("a MIDI file load panicked: {message}")]
-    Panicked {
-        /// The panic's message, or a placeholder for a payload of another type.
-        message: String,
-    },
-    /// The session was dropped before the load could run: its executor was gone,
-    /// refused the task, or dropped it before it ran. The file did not fail.
-    #[error("the session shut down before the MIDI file load ran")]
-    ShutDown,
-}
-
-impl Unanswered for LoadMidiError {
-    fn shut_down() -> Self {
-        Self::ShutDown
-    }
-
-    fn panicked(message: String) -> Self {
-        Self::Panicked { message }
     }
 }
 
@@ -308,7 +282,7 @@ impl LoadedMidi {
 impl<F: Float> Midi<'_, F> {
     /// A [`LoadMidi`] of the MIDI file `asset` (a path, or bytes); nothing is
     /// read until the app awaits it. A file that cannot be read fails with its
-    /// [`ReadError`]. The value holds the session's weak executor and nothing
+    /// [`tutti_midi_file::ReadError`]. The value holds the session's weak executor and nothing
     /// else of the session.
     pub fn load_midi(&self, asset: impl Into<Asset>) -> LoadMidi {
         LoadMidi {

@@ -218,7 +218,8 @@ pub use load_audio::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
 #[cfg(feature = "soundfont")]
 pub use load_soundfont::{LoadSoundFont, LoadedSoundFont, LoadingSoundFont};
 #[cfg(any(
-    all(feature = "sampler", codec),
+    feature = "sampler",
+    feature = "midi",
     feature = "soundfont",
     feature = "plugin"
 ))]
@@ -235,7 +236,7 @@ pub use midi_ci::{
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
 #[cfg(feature = "midi")]
 pub use midi_load::{
-    DroppedEvent, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
+    DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
     NoCommonTimelineError, TrackError,
 };
 #[cfg(feature = "midi-hardware")]
@@ -290,9 +291,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{
-    OpenStream, OpenStreamError, OpenedStream, OpeningStream, SamplerError, StreamReadError,
-};
+pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, SamplerError};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;

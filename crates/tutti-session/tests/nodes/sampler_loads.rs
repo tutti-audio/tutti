@@ -12,7 +12,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, StreamPhase, StreamStart};
 use tutti_session::{
-    AudioData, OpenStreamError, OutPort, Root, SamplerError, Session, StreamReadError, Tier,
+    AudioData, LoadError, OpenStreamError, OutPort, Root, SamplerError, Session, Tier,
 };
 use tutti_units::{Beat, SampleRate};
 
@@ -71,10 +71,9 @@ fn a_missing_file_fails_its_open_with_the_typed_error() {
     );
     assert!(
         matches!(
-            opened.err(),
-            Some(StreamReadError::Open(OpenError::Io(
-                std::io::ErrorKind::NotFound
-            )))
+            &opened,
+            Err(LoadError::Stream(error))
+                if **error == OpenError::Io(std::io::ErrorKind::NotFound)
         ),
         "the typed error names the missing file"
     );
@@ -92,7 +91,7 @@ fn an_open_of_a_dropped_session_is_shut_down() {
     };
     assert!(matches!(
         tutti_fixtures::block_on(open),
-        Err(StreamReadError::ShutDown)
+        Err(LoadError::ShutDown)
     ));
 }
 

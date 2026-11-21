@@ -19,13 +19,15 @@
 use std::fmt;
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use tutti_platform::{Asset, WeakExecutor};
-use tutti_sampler::{AdoptError, OpenError, Stream, StreamReader, StreamStart};
+use tutti_sampler::{AdoptError, Stream, StreamReader, StreamStart};
 
+use crate::LoadError;
 use crate::apply::{Cut, Sealed};
-use crate::unblocked::{Unanswered, Unblocked};
+use crate::unblocked::Unblocked;
 use crate::{AppKey, Clock, Session, SessionFloat};
 
 /// Why a sampler call did not go through.
@@ -100,16 +102,19 @@ pub struct OpenStream<F: SessionFloat> {
 impl<F: SessionFloat> OpenStream<F> {
     /// Reads the file: a seeking decoder when the file can seek, else the
     /// whole file decoded. The session is not touched.
-    fn run(self) -> Result<OpenedStream<F>, StreamReadError> {
+    fn run(self) -> Result<OpenedStream<F>, LoadError> {
         Ok(OpenedStream {
             cut: self.cut,
-            opened: self.read.run()?,
+            opened: self
+                .read
+                .run()
+                .map_err(|error| LoadError::Stream(Arc::new(error)))?,
         })
     }
 }
 
 impl<F: SessionFloat> IntoFuture for OpenStream<F> {
-    type Output = Result<OpenedStream<F>, StreamReadError>;
+    type Output = Result<OpenedStream<F>, LoadError>;
     type IntoFuture = OpeningStream<F>;
 
     fn into_future(self) -> OpeningStream<F> {
@@ -134,21 +139,21 @@ impl<F: SessionFloat> IntoFuture for OpenStream<F> {
 ///
 /// # Errors
 ///
-/// The output is [`StreamReadError::Open`] when the file cannot be opened
-/// ([`OpenError::Io`]) or is not audio this build decodes ([`OpenError::Format`]),
-/// [`StreamReadError::Panicked`] when a decoder panicked, and
-/// [`StreamReadError::ShutDown`] when the session is gone.
+/// The output is [`LoadError::Stream`] when the file cannot be opened
+/// ([`tutti_sampler::OpenError::Io`]) or is not audio this build decodes ([`tutti_sampler::OpenError::Format`]),
+/// [`LoadError::Panicked`] when a decoder panicked, and
+/// [`LoadError::ShutDown`] when the session is gone.
 ///
 /// # Panics
 ///
 /// When polled after it resolved.
 #[must_use = "an open does nothing unless it is awaited"]
 pub struct OpeningStream<F: SessionFloat> {
-    open: Unblocked<OpenStream<F>, OpenedStream<F>, StreamReadError>,
+    open: Unblocked<OpenStream<F>, OpenedStream<F>, LoadError>,
 }
 
 impl<F: SessionFloat> Future for OpeningStream<F> {
-    type Output = Result<OpenedStream<F>, StreamReadError>;
+    type Output = Result<OpenedStream<F>, LoadError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.open).poll(cx)
@@ -158,35 +163,6 @@ impl<F: SessionFloat> Future for OpeningStream<F> {
 impl<F: SessionFloat> fmt::Debug for OpeningStream<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpeningStream").finish_non_exhaustive()
-    }
-}
-
-/// Why an [`OpenStream`] did not resolve to an [`OpenedStream`].
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum StreamReadError {
-    /// The file could not be opened or is not audio this build decodes.
-    #[error(transparent)]
-    Open(#[from] OpenError),
-    /// A decoder panicked; `message` is the panic's, when it was a string.
-    #[error("a stream open panicked: {message}")]
-    Panicked {
-        /// The panic's message, or a placeholder for a payload of another type.
-        message: String,
-    },
-    /// The session was dropped before the read could run: its executor was gone,
-    /// refused the task, or dropped it before it ran. The file did not fail.
-    #[error("the session shut down before the stream open ran")]
-    ShutDown,
-}
-
-impl Unanswered for StreamReadError {
-    fn shut_down() -> Self {
-        Self::ShutDown
-    }
-
-    fn panicked(message: String) -> Self {
-        Self::Panicked { message }
     }
 }
 
