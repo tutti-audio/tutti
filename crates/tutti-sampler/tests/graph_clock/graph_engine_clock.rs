@@ -60,7 +60,8 @@ fn pool(cents: f64) -> VoicePool<f32> {
             pitch: Cents::new(cents),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     pool
 }
 

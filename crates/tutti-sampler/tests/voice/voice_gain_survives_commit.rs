@@ -88,7 +88,8 @@ fn solo_voice() -> Standalone<VoiceNodeHandle<f32>> {
         play: Playback::default(),
     };
     let mut solo = Standalone::new(
-        VoiceNode::with_channels(voice, ChannelLayout::MONO),
+        VoiceNode::with_channels(voice, ChannelLayout::MONO)
+            .expect("a finite gain and a nonempty width"),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
     solo.renderer_mut().set_transport_fn(rolling);
@@ -352,7 +353,8 @@ fn a_voices_gain_port_reads_its_cell_as_its_base() {
             ..Playback::default()
         },
     };
-    let node = VoiceNode::with_channels(voice, ChannelLayout::MONO);
+    let node = VoiceNode::with_channels(voice, ChannelLayout::MONO)
+        .expect("a finite gain and a nonempty width");
     assert_eq!(
         node.shape().params.as_slice(),
         &[tutti_units::UnitParam::Volume][..]

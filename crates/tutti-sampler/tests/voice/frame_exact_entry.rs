@@ -74,7 +74,8 @@ fn pool(start: Beat) -> VoicePool<f32> {
     let source =
         MemorySource::placed(Arc::new(wave), VoiceWindow::from(start)).expect("a placeable wave");
     let mut pool = VoicePool::new();
-    pool.insert(SlotId(1), source, Default::default());
+    pool.insert(SlotId(1), source, Default::default())
+        .expect("a finite gain and a nonempty width");
     pool
 }
 

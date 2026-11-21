@@ -489,7 +489,8 @@ impl Clips {
                 let node = VoiceNode::new(Voice {
                     source: VoiceSource::Memory(source),
                     play: Playback::default(),
-                });
+                })
+                .expect("a finite gain and a nonempty width");
                 Direct::new(node, SampleRate::of(SR), block)
             })
             .collect();

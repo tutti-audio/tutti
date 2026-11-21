@@ -24,6 +24,7 @@ use tutti_units::{
 };
 
 use super::clock::{BlockClock, Clock};
+use super::command::GainError;
 use super::interp::{
     Gate, Place, hermite_lanes, mirrored, place, place_tail, read_looped_frame, split_position, tap,
 };
@@ -482,12 +483,26 @@ impl<F: Float> MemorySource<F> {
         self.wave.duration()
     }
 
-    /// Publishes a new output gain. A NaN or infinite gain is silence.
+    /// Publishes a new output gain.
     ///
     /// `&self` and stored in a shared cell: a value stored by value here is
     /// written on a frontend clone and rendered from a different one. See the
     /// field's doc.
-    pub fn set_gain(&self, gain: Amplitude) {
+    ///
+    /// # Errors
+    ///
+    /// [`GainError::NotFinite`] for a NaN or infinite gain; the source keeps
+    /// the gain it had.
+    pub fn set_gain(&self, gain: Amplitude) -> Result<(), GainError> {
+        GainError::check(gain)?;
+        self.store_gain(gain);
+        Ok(())
+    }
+
+    /// [`set_gain`](Self::set_gain) for a gain already checked: a store, so
+    /// the audio thread's drain can apply what a control-side entry refused or
+    /// passed.
+    pub(crate) fn store_gain(&self, gain: Amplitude) {
         self.gain.store(gain);
     }
 

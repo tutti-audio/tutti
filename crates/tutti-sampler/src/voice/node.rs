@@ -12,12 +12,11 @@
 use std::sync::Arc;
 
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
-use crate::nonempty;
 use crate::streamer::{ControlCell, Stream};
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
-use super::command::{Steering, SteeringCell, VoiceNodeHandle, ask};
+use super::command::{GainError, Steering, SteeringCell, VoiceNodeHandle, ask};
 use super::disk_voice::DiskVoice;
 use super::disk_voice::VoiceHealth;
 use super::loop_span::Loop;
@@ -25,7 +24,7 @@ use super::memory_source::VoiceWindow;
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::stretched;
 use super::types::{Direction, Playback, Reach, SlotId, Voice, VoiceSource};
-use crate::SamplerFloat;
+use crate::{PlaceError, SamplerFloat};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
@@ -34,6 +33,18 @@ use tutti_graph::{
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_timeline::TempoReader;
 use tutti_units::{Amplitude, Latency, PlaybackRate, Tail, UnitParam};
+
+/// Why a [`VoiceNode`] cannot be built over a voice.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum VoiceNodeError {
+    /// The voice's [`Playback`] has a gain that is not finite.
+    #[error(transparent)]
+    Gain(#[from] GainError),
+    /// The node's width is none, or past what the sampler reads.
+    #[error(transparent)]
+    Width(#[from] PlaceError),
+}
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
 /// outputs.
@@ -129,7 +140,11 @@ pub struct VoiceNode<F: SamplerFloat> {
 impl<F: SamplerFloat> VoiceNode<F> {
     /// Wraps a single [`Voice`] as a standalone stereo graph node. Builds the
     /// resident stretch processor once (like a mixer slot), off any hot path.
-    pub fn new(voice: Voice<F>) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`VoiceNodeError::Gain`] for a `voice.play` gain that is not finite.
+    pub fn new(voice: Voice<F>) -> Result<Self, VoiceNodeError> {
         Self::with_channels(voice, ChannelLayout::STEREO)
     }
 
@@ -144,15 +159,25 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// — no stretch, no pitch shift, and no error — because
     /// `PlaybackSlot::with_channels` always leaves the field `None` and nothing
     /// else on this path fills it in.
-    pub fn with_channels(voice: Voice<F>, channels: impl Into<ChannelLayout>) -> Self {
-        let channels = nonempty(channels.into());
+    ///
+    /// # Errors
+    ///
+    /// [`VoiceNodeError::Gain`] for a `voice.play` gain that is not finite, and
+    /// [`VoiceNodeError::Width`] for a width of no channels or past the
+    /// sampler's ceiling ([`voice_width`](crate::voice_width)).
+    pub fn with_channels(
+        voice: Voice<F>,
+        channels: impl Into<ChannelLayout>,
+    ) -> Result<Self, VoiceNodeError> {
+        let channels = crate::voice_width(channels.into())?;
+        GainError::check(voice.play.gain)?;
         let stretch = stretch_wanted(&voice.play).then(|| stretched::vocoder::<F>(channels));
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;
         let mut slot = PlaybackSlot::with_channels(SlotId(0), Box::new(voice), channels);
         slot.stretch = stretch;
-        Self {
+        Ok(Self {
             slot,
             channels,
             steering: SteeringCell::default().reader(),
@@ -171,7 +196,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
             tempo: None,
             scratch: BlockScratch::new(UNPREPARED_FRAMES, channels.count() as usize),
             reach: Reach::Live,
-        }
+        })
     }
 
     /// A node over a streaming voice, and the [`Stream`] that feeds it: the
@@ -184,11 +209,20 @@ impl<F: SamplerFloat> VoiceNode<F> {
     ///
     /// A node never handed to a handle keeps the stream until it is dropped:
     /// built by hand, drop it on the control thread.
-    #[must_use]
-    pub fn streaming(mut voice: DiskVoice<F>, stream: Stream<F>, play: Playback) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`VoiceNodeError::Gain`] for a `play` gain that is not finite; the
+    /// stream is dropped with the error.
+    pub fn streaming(
+        mut voice: DiskVoice<F>,
+        stream: Stream<F>,
+        play: Playback,
+    ) -> Result<Self, VoiceNodeError> {
+        GainError::check(play.gain)?;
         ask(stream.looping_cell(), play.loop_);
         ask(stream.direction_cell(), play.direction);
-        voice.set_gain(play.gain);
+        voice.store_gain(play.gain);
         voice.set_speed(play.speed);
         let width = ChannelLayout::from_count(voice.width() as u16);
         let mut node = Self::with_channels(
@@ -197,9 +231,9 @@ impl<F: SamplerFloat> VoiceNode<F> {
                 play,
             },
             width,
-        );
+        )?;
         node.stream = Some(stream);
-        node
+        Ok(node)
     }
 
     /// This node reading the project's tempo map through `tempo`
@@ -412,8 +446,10 @@ impl<F: SamplerFloat> std::fmt::Debug for VoiceNode<F> {
     }
 }
 
-impl<F: SamplerFloat> From<Voice<F>> for VoiceNode<F> {
-    fn from(voice: Voice<F>) -> Self {
+impl<F: SamplerFloat> TryFrom<Voice<F>> for VoiceNode<F> {
+    type Error = VoiceNodeError;
+
+    fn try_from(voice: Voice<F>) -> Result<Self, VoiceNodeError> {
         Self::new(voice)
     }
 }
@@ -580,7 +616,9 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         voice.play.gain = gain;
         voice.source.apply_gain(gain);
         let health = voice.fault().map(VoiceHealth);
-        let mut node = VoiceNode::with_channels(voice, self.channels);
+        // A driven gain that is not finite refuses the fork, as the node's own
+        // constructor does.
+        let mut node = VoiceNode::with_channels(voice, self.channels).map_err(ForkCause::new)?;
         node.tempo = self.tempo.clone();
         node.reach = Reach::Frozen;
         let forked = Forked::new(Box::new(node));
@@ -634,7 +672,9 @@ mod tests {
             source: VoiceSource::Memory(MemorySource::new(wave).expect("a placeable wave")),
             play: Playback::default(),
         };
-        let (mut node, handle) = VoiceNode::new(voice).with_handle();
+        let (mut node, handle) = VoiceNode::new(voice)
+            .expect("a finite gain and a nonempty width")
+            .with_handle();
         {
             // A block in progress across the move.
             let _held = node.window.lend();
@@ -659,7 +699,9 @@ mod tests {
             source: VoiceSource::Memory(MemorySource::new(wave).expect("a placeable wave")),
             play: Playback::default(),
         };
-        let (mut node, handle) = VoiceNode::new(voice).with_handle();
+        let (mut node, handle) = VoiceNode::new(voice)
+            .expect("a finite gain and a nonempty width")
+            .with_handle();
         {
             // A block in progress across the move.
             let _held = node.speed.lend();
@@ -696,7 +738,9 @@ mod tests {
                 node: mut live,
                 fork,
                 ..
-            } = VoiceNode::new(voice).into_parts();
+            } = VoiceNode::new(voice)
+                .expect("a finite gain and a nonempty width")
+                .into_parts();
             live.prepare(&prepare);
             let mut fork = fork
                 .expect("forks")
@@ -727,7 +771,13 @@ mod tests {
             ),
             play: Playback::default(),
         };
-        assert_eq!(VoiceNode::new(placed).shape().tail, Tail::None);
+        assert_eq!(
+            VoiceNode::new(placed)
+                .expect("a finite gain and a nonempty width")
+                .shape()
+                .tail,
+            Tail::None
+        );
     }
 
     /// A standalone disk voice that stretches declares its vocoder's latency (its ring
@@ -745,7 +795,10 @@ mod tests {
             let (stream, reader) =
                 crate::testing::wait_for_open(&mut streamer, opening).expect("opens");
             let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
-            VoiceNode::streaming(voice, stream, play).shape().latency
+            VoiceNode::streaming(voice, stream, play)
+                .expect("a finite gain and a nonempty width")
+                .shape()
+                .latency
         };
         let stretched = latency(Playback {
             stretch: tutti_units::StretchFactor::new(1.5),
@@ -781,7 +834,9 @@ mod tests {
         let served = Arc::clone(&reader.status);
         let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
 
-        let (node, handle) = VoiceNode::streaming(voice, stream, Playback::default()).with_handle();
+        let (node, handle) = VoiceNode::streaming(voice, stream, Playback::default())
+            .expect("a finite gain and a nonempty width")
+            .with_handle();
         let second = handle.clone();
         let _ = streamer.step_until_idle(1_000);
         assert!(!served.closed(), "the handle holds the stream");

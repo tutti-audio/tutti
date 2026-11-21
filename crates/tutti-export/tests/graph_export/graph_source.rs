@@ -699,7 +699,8 @@ fn placed_pool(cents: f64) -> tutti_sampler::VoicePool<f32> {
             pitch: tutti_units::Cents::new(cents),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     pool
 }
 

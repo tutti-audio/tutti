@@ -580,12 +580,13 @@ mod tests {
             )
             .expect("a placeable wave");
             assert!(keeps_one(tutti_sampler::VoicePool::new()));
-            assert!(keeps_one(tutti_sampler::VoiceNode::new(
-                tutti_sampler::Voice {
+            assert!(keeps_one(
+                tutti_sampler::VoiceNode::new(tutti_sampler::Voice {
                     source: tutti_sampler::VoiceSource::Memory(source),
                     play: tutti_sampler::Playback::default(),
-                }
-            )));
+                })
+                .expect("a finite gain and a nonempty width")
+            ));
         }
         // A node that publishes nothing keeps none.
         assert!(!keeps_one(

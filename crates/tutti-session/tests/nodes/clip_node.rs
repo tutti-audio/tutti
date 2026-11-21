@@ -59,7 +59,8 @@ fn a_clip_starts_on_its_beat_at_its_gain() {
             .and_then(|c| c.channels(ChannelLayout::STEREO))
             .expect("a placeable wave")
             .at(Beat::new(1.0))
-            .gain(Amplitude::new(0.5)),
+            .gain(Amplitude::new(0.5))
+            .expect("a finite gain"),
     );
     wire(&mut s, clip.erase());
     let _ = s.update();

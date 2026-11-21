@@ -1202,7 +1202,8 @@ fn six_channel_wave_reaches_all_six_outputs() {
 #[test]
 fn gain_applies_uniformly_across_all_channels() {
     let mut u = MemorySource::with_channels(indexed_wave(6, 64), 6u16).expect("a placeable wave");
-    u.set_gain(Amplitude::new(0.5));
+    u.set_gain(Amplitude::new(0.5))
+        .expect("a finite gain and a nonempty width");
     let mut out = [0.0f32; 6];
     frame_into(&mut u, None, &mut out);
     for (c, &got) in out.iter().enumerate() {
@@ -1276,7 +1277,8 @@ fn the_fork_shares_no_gain() {
 #[test]
 fn the_shape_declares_its_gain() {
     let s = MemorySource::new(ramp_wave(64, 48_000.0)).expect("a placeable wave");
-    s.set_gain(Amplitude::new(0.25));
+    s.set_gain(Amplitude::new(0.25))
+        .expect("a finite gain and a nonempty width");
     assert_eq!(
         Node::shape(&s).params.as_slice(),
         &[tutti_units::UnitParam::Volume][..]
@@ -1395,7 +1397,9 @@ fn an_f64_source_reads_each_channel_in_f64() {
     assert_eq!(out, [3.0, -6.0]);
     source.sample_raw_into(SamplePosition::new(3.5), &mut out);
     assert_eq!(out, [3.5, -7.0]);
-    source.set_gain(Amplitude::new(0.5));
+    source
+        .set_gain(Amplitude::new(0.5))
+        .expect("a finite gain and a nonempty width");
     source.sample_into(SamplePosition::new(3.0), &mut out);
     assert_eq!(out, [1.5, -3.0]);
 }

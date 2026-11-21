@@ -26,6 +26,7 @@ use tutti_graph::{
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail};
 
 use super::clock::{BlockClock, Clock};
+use super::command::GainError;
 use super::fault::FirstError;
 use super::interp::{Gate, Place, past_window, place};
 use super::live_read::{LiveRead, Out};
@@ -547,9 +548,22 @@ impl<F: SamplerFloat> DiskVoice<F> {
         self.window = window;
     }
 
-    /// Publishes a new output gain (a NaN or infinite one is silence). `&self`: the write lands in the shared
+    /// Publishes a new output gain. `&self`: the write lands in the shared
     /// `Cells`, so no exclusivity is needed.
-    pub fn set_gain(&self, gain: Amplitude) {
+    ///
+    /// # Errors
+    ///
+    /// [`GainError::NotFinite`] for a NaN or infinite gain; the voice keeps the
+    /// gain it had.
+    pub fn set_gain(&self, gain: Amplitude) -> Result<(), GainError> {
+        GainError::check(gain)?;
+        self.store_gain(gain);
+        Ok(())
+    }
+
+    /// [`set_gain`](Self::set_gain) for a gain already checked: a store, so the
+    /// audio thread's drain can apply what a control-side entry passed.
+    pub(crate) fn store_gain(&self, gain: Amplitude) {
         self.shared_state.set_gain(gain);
     }
 
@@ -1018,9 +1032,16 @@ impl std::fmt::Debug for DiskVoiceControls {
 }
 
 impl DiskVoiceControls {
-    /// Publishes a new output gain; a NaN or infinite gain is silence.
-    pub fn set_gain(&self, gain: Amplitude) {
+    /// Publishes a new output gain, as
+    /// [`DiskVoice::set_gain`](DiskVoice::set_gain).
+    ///
+    /// # Errors
+    ///
+    /// [`GainError::NotFinite`] for a NaN or infinite gain.
+    pub fn set_gain(&self, gain: Amplitude) -> Result<(), GainError> {
+        GainError::check(gain)?;
         self.state.set_gain(gain);
+        Ok(())
     }
 
     /// The current output gain.

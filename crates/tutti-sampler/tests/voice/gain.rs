@@ -125,7 +125,8 @@ fn pool_at_gain(play_gain: f64) -> (VoicePool<f32>, Arc<Clock>) {
             gain: Amplitude::new(play_gain),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     (pool, clock)
 }
 
@@ -204,7 +205,8 @@ fn a_pooled_voice_applies_playback_gain_and_not_the_sources_own() {
             gain: Amplitude::new(0.5),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
 
     let out = render_placed(&mut pool, &clock, 8);
     let got = settled_mean(&out);
@@ -293,7 +295,8 @@ fn gain_scales_every_channel_equally() {
             gain: Amplitude::new(0.4),
             ..Default::default()
         },
-    );
+    )
+    .expect("a finite gain and a nonempty width");
 
     let want = (LEVEL * 0.4) as f64;
 
@@ -373,7 +376,8 @@ fn two_half_gain_voices_sum_to_one_full_gain_voice() {
                 gain: Amplitude::new(0.5),
                 ..Default::default()
             },
-        );
+        )
+        .expect("a finite gain and a nonempty width");
     }
 
     let out = render_placed(&mut pool, &clock, 8);

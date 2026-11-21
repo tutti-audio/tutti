@@ -287,6 +287,9 @@ impl<F: SamplerFloat> std::fmt::Debug for VoiceCommand<F> {
 pub(crate) struct Queued<F: SamplerFloat> {
     pub(crate) cmd: VoiceCommand<F>,
     pub(crate) forwarded: Option<StreamId>,
+    /// The stamp of the handle's add ([`VoicePoolHandle::stamp`]) when `cmd`
+    /// is one, which a refusal hands back; 0 for every other command.
+    pub(crate) generation: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -376,7 +379,7 @@ pub enum GainError {
 }
 
 impl GainError {
-    fn check(gain: Amplitude) -> Result<(), Self> {
+    pub(crate) fn check(gain: Amplitude) -> Result<(), Self> {
         if gain.get().is_finite() {
             Ok(())
         } else {
@@ -438,7 +441,7 @@ impl SendError {
 /// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
 /// #     play: Playback::default(),
 /// # };
-/// let (_node, handle) = VoiceNode::new(voice).with_handle();
+/// let (_node, handle) = VoiceNode::new(voice).expect("a finite gain and a nonempty width").with_handle();
 /// // A standalone voice node has no door for a pool's wave swap.
 /// let _ = handle.replace_wave(tutti_sampler::SlotId(0), wave);
 /// ```
@@ -454,7 +457,7 @@ impl SendError {
 /// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
 /// #     play: Playback::default(),
 /// # };
-/// let (_node, handle) = VoiceNode::new(voice).with_handle();
+/// let (_node, handle) = VoiceNode::new(voice).expect("a finite gain and a nonempty width").with_handle();
 /// handle.window_cell().publish(Some(VoiceWindow::from(tutti_units::Beat::new(1.0))));
 /// ```
 #[derive(Clone, Debug)]
@@ -699,7 +702,9 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
 /// [`collect_retired`](Self::collect_retired) takes the refused voice back:
 /// then its id holds no voice, its stream (if any) ends, and a command for it
 /// is [`SendError::NoSuchSlot`]. A host that never collects keeps the id (and
-/// the stream) held.
+/// the stream) held. Each add is stamped and the refusal carries its stamp, so
+/// the collect frees the id only when the entry is still that add's: an id
+/// removed and added again since keeps its new voice.
 ///
 /// # Ids the handle knows
 ///
@@ -747,7 +752,18 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     /// silent, until removed), so the control side alone keeps this exact.
     /// Locked before every other table, and across an add's or a remove's
     /// queueing, so two threads adding one id cannot both win.
-    pub(crate) live: Arc<Mutex<HashMap<SlotId, Tier>>>,
+    pub(crate) live: Arc<Mutex<HashMap<SlotId, Live>>>,
+    /// The last stamp [`stamp`](Self::stamp) gave an add; shared by every clone.
+    pub(crate) stamps: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// A live slot: the tier of its voice, and the stamp of the add that made it,
+/// which tells a refusal of that add from a refusal of an earlier one at the
+/// same id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Live {
+    pub(crate) tier: Tier,
+    pub(crate) generation: u64,
 }
 
 /// Which tier holds a live slot's voice.
@@ -793,8 +809,8 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         let mut freed = 0;
         let mut refused = Vec::new();
         for value in self.retired.lock_recover().drain() {
-            if let Retired::Refused { id, .. } = &value {
-                refused.push(*id);
+            if let Retired::Refused { id, generation, .. } = &value {
+                refused.push((*id, *generation));
             }
             freed += 1;
         }
@@ -805,7 +821,12 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             let mut streams = self.streams();
             refused
                 .iter()
-                .filter_map(|id| {
+                .filter_map(|(id, generation)| {
+                    // Only the add that was refused: the id may have been
+                    // removed and added again since, and that voice stays.
+                    if live.get(id).map(|l| l.generation) != Some(*generation) {
+                        return None;
+                    }
                     live.remove(id);
                     self.free.lock_recover().remove(id);
                     streams.remove(id)
@@ -863,9 +884,11 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         if live.contains_key(&id) {
             return Err(SendError::SlotInUse(id));
         }
+        let generation = self.stamp();
         self.send_noting_free(
             id,
             free,
+            generation,
             VoiceCommand::AddVoice {
                 id,
                 voice: Box::new(Voice {
@@ -875,7 +898,13 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 stretch: None,
             },
         )?;
-        live.insert(id, Tier::Memory);
+        live.insert(
+            id,
+            Live {
+                tier: Tier::Memory,
+                generation,
+            },
+        );
         Ok(())
     }
 
@@ -1029,11 +1058,20 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// `Ok` means only that the command was *queued*: the pool applies it on the
     /// audio thread, and that outcome is not available synchronously.
     pub(crate) fn send(&self, cmd: VoiceCommand<F>) -> Result<(), SendError> {
+        self.send_stamped(cmd, 0)
+    }
+
+    /// [`send`](Self::send) for a command that is an add stamped `generation`.
+    fn send_stamped(&self, cmd: VoiceCommand<F>, generation: u64) -> Result<(), SendError> {
         match self.prepare(cmd) {
             VoiceCommand::AddVoice { id, voice, stretch } => {
                 let displaced = {
                     let mut streams = self.streams();
-                    self.queue(VoiceCommand::AddVoice { id, voice, stretch }, None)?;
+                    self.queue_with(
+                        VoiceCommand::AddVoice { id, voice, stretch },
+                        None,
+                        generation,
+                    )?;
                     streams.remove(&id)
                 };
                 // The slot this replaced held a stream of its own, if any: it
@@ -1098,8 +1136,15 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         }) else {
             unreachable!("`prepare` returns the command kind it was given")
         };
-        self.add_stream_voice(id, voice, stream, stretch)?;
-        live.insert(id, Tier::Disk);
+        let generation = self.stamp();
+        self.add_stream_voice(id, voice, stream, stretch, generation)?;
+        live.insert(
+            id,
+            Live {
+                tier: Tier::Disk,
+                generation,
+            },
+        );
         Ok(())
     }
 
@@ -1111,6 +1156,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         voice: Box<Voice<F>>,
         stream: Stream<F>,
         stretch: Option<Box<Vocoders<F>>>,
+        generation: u64,
     ) -> Result<(), Box<StreamingAddError<F>>> {
         if self.writer().is_full() {
             let error = SendError::Full;
@@ -1123,7 +1169,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         let queued = {
             let mut streams = self.streams();
             let cmd = VoiceCommand::AddVoice { id, voice, stretch };
-            match self.queue(cmd, None) {
+            match self.queue_with(cmd, None, generation) {
                 Ok(()) => Ok(streams.insert(id, Arc::new(Mutex::new(stream)))),
                 Err(error) => Err((error, stream)),
             }
@@ -1185,9 +1231,10 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         &self,
         id: SlotId,
         free: bool,
+        generation: u64,
         cmd: VoiceCommand<F>,
     ) -> Result<(), SendError> {
-        self.send(cmd)?;
+        self.send_stamped(cmd, generation)?;
         let mut set = self.free.lock_recover();
         if free {
             set.insert(id);
@@ -1197,8 +1244,15 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         Ok(())
     }
 
+    /// A stamp no earlier add of this handle (or a clone) has had.
+    fn stamp(&self) -> u64 {
+        self.stamps
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1
+    }
+
     /// The live-slot table, locked.
-    fn live(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Tier>> {
+    fn live(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Live>> {
         self.live.lock_recover()
     }
 
@@ -1206,7 +1260,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     fn tier(&self, id: SlotId) -> Result<Tier, SendError> {
         self.live()
             .get(&id)
-            .copied()
+            .map(|l| l.tier)
             .ok_or(SendError::NoSuchSlot(id))
     }
 
@@ -1222,8 +1276,22 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 
     /// Queues `cmd` for the drain, with the stream its loop was set on.
     fn queue(&self, cmd: VoiceCommand<F>, forwarded: Option<StreamId>) -> Result<(), SendError> {
+        self.queue_with(cmd, forwarded, 0)
+    }
+
+    /// [`queue`](Self::queue) for an add stamped `generation`.
+    fn queue_with(
+        &self,
+        cmd: VoiceCommand<F>,
+        forwarded: Option<StreamId>,
+        generation: u64,
+    ) -> Result<(), SendError> {
         self.writer()
-            .push(Queued { cmd, forwarded })
+            .push(Queued {
+                cmd,
+                forwarded,
+                generation,
+            })
             .map_err(|r| match r.error {
                 PushError::Disconnected => SendError::Disconnected,
                 PushError::Full => SendError::Full,

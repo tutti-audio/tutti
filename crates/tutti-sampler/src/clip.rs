@@ -12,8 +12,8 @@ use tutti_units::{Amplitude, Beat, PlaybackRate};
 
 use crate::streamer::{Stream, StreamReader};
 use crate::{
-    DiskVoice, Loop, MemorySource, PlaceError, Playback, Voice, VoiceNode, VoiceNodeHandle,
-    VoiceSource, VoiceWindow, voice_width,
+    DiskVoice, GainError, Loop, MemorySource, PlaceError, Playback, Voice, VoiceNode,
+    VoiceNodeHandle, VoiceSource, VoiceWindow, voice_width,
 };
 
 /// A sample placed on the timeline: where it starts, how loud, and whether it
@@ -23,7 +23,7 @@ use crate::{
 ///
 /// ```ignore
 /// let kick = session.graph().add(
-///     Clip::new(wave)?.at(Beat::new(4.0)).gain(Amplitude::new(0.8)),
+///     Clip::new(wave)?.at(Beat::new(4.0)).gain(Amplitude::new(0.8))?,
 /// );
 /// ```
 ///
@@ -164,9 +164,14 @@ impl<F: SamplerFloat> Clip<F> {
     }
 
     /// The clip's level, linear (unity is `Amplitude::new(1.0)`).
-    pub fn gain(mut self, gain: Amplitude) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`GainError::NotFinite`] for a NaN or infinite gain.
+    pub fn gain(mut self, gain: Amplitude) -> Result<Self, GainError> {
+        GainError::check(gain)?;
         self.gain = gain;
-        self
+        Ok(self)
     }
 
     /// The clip's varispeed (pitch follows the rate).
@@ -207,7 +212,7 @@ impl<F: SamplerFloat> Clip<F> {
         let node = match tier {
             Tier::Resident { mut source, .. } => {
                 source.set_window(window);
-                source.set_gain(gain);
+                source.store_gain(gain);
                 source.set_speed(speed);
                 source.set_loop(loop_);
                 let width = source.channels();
@@ -222,7 +227,9 @@ impl<F: SamplerFloat> Clip<F> {
             Tier::Streamed { reader, stream } => {
                 VoiceNode::streaming(DiskVoice::from_reader(*reader, window), stream, play)
             }
-        };
+        }
+        // The clip's gain was checked when set, and its width when it was made.
+        .expect("a clip's gain and width are checked at the call that sets them");
         match tempo {
             Some(tempo) => node.with_tempo(tempo),
             None => node,
