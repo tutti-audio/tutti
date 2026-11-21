@@ -299,6 +299,12 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-buffers/src/input_output.rs",
+        "InputOutput::paired",
+        CTOR,
+        "the same validity as `InputOutput::new` with the frame count taken from the views: they must agree",
+    ),
+    ty(
+        "crates/tutti-buffers/src/input_output.rs",
         "InputOutput::from_slices",
         CTOR,
         "the same validity as `InputOutput::new` over two slice tables: their frame counts must agree",
