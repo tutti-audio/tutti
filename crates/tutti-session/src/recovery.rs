@@ -222,8 +222,8 @@ impl std::fmt::Display for RecoveryFailure {
             Self::ReplacementRefused { source } => {
                 write!(f, "the graph refused the replacement: {source}")
             }
-            Self::ReloadDropped => f.write_str("the reload job was dropped"),
-            Self::ReloadPanicked { message } => write!(f, "the reload job panicked: {message}"),
+            Self::ReloadDropped => f.write_str("the reload task was dropped"),
+            Self::ReloadPanicked { message } => write!(f, "the reload task panicked: {message}"),
             Self::ReloadTimedOut { after } => {
                 write!(f, "the reload did not finish in {after:?}")
             }
@@ -305,6 +305,15 @@ impl Recovery {
         match self.phase {
             State::Reloading { started } => Some(started),
             _ => None,
+        }
+    }
+
+    /// Restarts the clock of the reload being waited for at `now`, the instant its load
+    /// began to run: [`RecoveryPolicy::load_timeout`] counts from there, not from the
+    /// instant the load was queued. Nothing changes when no reload is waited for.
+    pub fn start_clock(&mut self, now: Instant) {
+        if let State::Reloading { started } = &mut self.phase {
+            *started = now;
         }
     }
 
@@ -540,6 +549,31 @@ mod tests {
             r.step(RecoveryEvent::Tick, started + 30 * S),
             reload(500, 2)
         );
+    }
+
+    /// The load's deadline counts from the instant the load began to run: a clock restarted
+    /// there outlasts the time the load waited in a queue, and the deadline is the same
+    /// length after it.
+    #[test]
+    fn the_load_deadline_counts_from_the_restarted_clock() {
+        let t0 = Instant::now();
+        let mut r = Recovery::new(policy());
+        r.step(died(), t0);
+        let queued_until = t0 + 20 * S;
+        r.start_clock(queued_until);
+        assert_eq!(r.reload_started(), Some(queued_until));
+        assert_action!(
+            r.step(RecoveryEvent::Tick, queued_until + 29 * S),
+            RecoveryAction::Wait
+        );
+        assert_action!(
+            r.step(RecoveryEvent::Tick, queued_until + 30 * S),
+            reload(500, 2)
+        );
+        // Nothing is waited for once running, so the clock has nothing to restart.
+        let mut idle = Recovery::new(policy());
+        idle.start_clock(t0);
+        assert_eq!(idle.reload_started(), None);
     }
 
     /// Whatever the order of events, the machine never reloads without a

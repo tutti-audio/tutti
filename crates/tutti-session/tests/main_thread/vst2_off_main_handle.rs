@@ -1,7 +1,7 @@
 //! **An in-process VST2 handle answers a pool thread while the main thread runs
 //! `Session::update`.**
 //!
-//! The snapshot and parameter-read jobs the session hands out run on a pool
+//! The snapshot and parameter-read tasks the session starts run on a pool
 //! thread and call `AnyThread::save_state` and `AnyThread::parameter_value` on
 //! the handle; the backend posts them to the main thread, and the update on the
 //! main thread runs them (the session's `MainWork`). The target runs on the
