@@ -47,8 +47,9 @@ fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>
     let node = s.graph().add(ForkByClone(Const::mono(level)));
     for port in 0..2 {
         s.graph()
-            .set_sources_unfaded(Root::output(port), [OutPort::new(node, 0)])
-            .unwrap();
+            .set_sources(Root::output(port), [OutPort::new(node, 0)])
+            .unwrap()
+            .unfaded();
     }
     let _ = s.update();
 }
@@ -714,8 +715,9 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         inside: Default::default(),
     }));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap()
+        .unfaded();
     let _ = s.update();
     wait_until("the timer never rendered", || {
         !log.lock().unwrap().is_empty()

@@ -13,7 +13,6 @@ setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod  a modulation de
 setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate  the graph's prepare rate, a configuration of the detached graph: goes with the builder's rate (11a)
 unit  crates/tutti-session/src/graph.rs::Graph::set_sample_rate  the graph's prepare rate, a configuration of the detached graph: goes with the builder's rate (11a)
 setter  crates/tutti-session/src/graph.rs::Graph::set_sources  wiring, a declaration: goes with the wiring declarations (11b)
-setter  crates/tutti-session/src/graph.rs::Graph::set_sources_unfaded  wiring, a declaration: goes with the wiring declarations (11b)
 setter  crates/tutti-session/src/graph/testing.rs::AudioSide::set_transport  a hand-driven transport for the detached graph, behind feature `testing`: goes with the transport target (7d)
 setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/midi.rs::Midi::set_routes  goes with the MIDI routing declarations (11b)

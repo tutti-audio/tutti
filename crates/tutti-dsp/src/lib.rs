@@ -115,6 +115,8 @@
 //! - **Envelope** (`envelope.rs`): an [`EnvelopeStages`] description, designed once into an
 //!   [`EnvelopeDesign`] of [`EnvelopeLeg`]s (linear or dB-linear, [`EnvelopeCurve`], timed by an
 //!   [`EnvelopePace`]), and the [`Envelope`] runner that reads it a chunk at a time.
+//! - **Granular** (`granular.rs`): [`Granular`], a cloud of Hann-windowed grains read from a
+//!   shared source ([`GrainSettings`], [`GrainScheduler`]).
 //! - **LFO** (`lfo.rs`): [`Lfo`], a sine or triangle ([`LfoWave`]) on a running phase, after a
 //!   delay and fading in; a control signal, not band-limited.
 //! - **Noise** (`noise.rs`): [`Noise`], a seeded white, pink (Kellet's filter) or brown
@@ -190,6 +192,7 @@ mod filter;
 mod fir;
 mod follower;
 mod frequency_shifter;
+mod granular;
 mod interp;
 mod level;
 mod lfo;
@@ -284,6 +287,7 @@ pub use fir::{
 pub use frequency_shifter::{
     FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
 };
+pub use granular::{GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use lfo::{Lfo, LfoWave};

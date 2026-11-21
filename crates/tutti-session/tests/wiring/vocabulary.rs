@@ -174,9 +174,19 @@ fn disconnect_removes_one_edge_and_disconnect_all_the_rest() {
     s.graph().connect(b.out(0), sink).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.75, 0.0]);
 
-    assert!(s.graph().disconnect_unfaded(a.out(0), sink).unwrap());
     assert!(
-        !s.graph().disconnect_unfaded(a.out(0), sink).unwrap(),
+        s.graph()
+            .disconnect(a.out(0), sink)
+            .unwrap()
+            .unfaded()
+            .was_connected()
+    );
+    assert!(
+        !s.graph()
+            .disconnect(a.out(0), sink)
+            .unwrap()
+            .unfaded()
+            .was_connected(),
         "already gone"
     );
     assert_eq!(s.graph_ref().sources(sink).unwrap(), [b.out(0)]);
@@ -207,11 +217,21 @@ fn a_main_bus_disconnects_what_it_connected() {
         [src.out(1)],
         "channel by channel"
     );
-    assert!(s.graph().disconnect_unfaded(src, through).unwrap());
+    assert!(
+        s.graph()
+            .disconnect(src, through)
+            .unwrap()
+            .unfaded()
+            .was_connected()
+    );
     assert!(s.graph_ref().sources(through.input(0)).unwrap().is_empty());
     assert!(s.graph_ref().sources(through.input(1)).unwrap().is_empty());
     assert!(
-        !s.graph().disconnect_unfaded(src, through).unwrap(),
+        !s.graph()
+            .disconnect(src, through)
+            .unwrap()
+            .unfaded()
+            .was_connected(),
         "nothing left to take out"
     );
 }

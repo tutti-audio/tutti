@@ -419,7 +419,12 @@ fn unwired_waits_for_the_commit_that_lands() {
     let events = s.update();
     assert!(unwired(&events).is_empty(), "still refused, still nothing");
 
-    assert!(s.graph().disconnect(v.out(0), u.input(0)).unwrap());
+    assert!(
+        s.graph()
+            .disconnect(v.out(0), u.input(0))
+            .unwrap()
+            .was_connected()
+    );
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
     let [(node, edges, _)] = <[_; 1]>::try_from(unwired(&events)).expect("reported once");

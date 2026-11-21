@@ -134,11 +134,13 @@ fn the_8_1_example_renders_its_analytic_values() {
         level: 0.8,
     }));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(filter, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(filter, 0)])
+        .unwrap()
+        .unfaded();
     s.graph()
-        .set_sources_unfaded(Root::output(1), [OutPort::new(pad, 0)])
-        .unwrap();
+        .set_sources(Root::output(1), [OutPort::new(pad, 0)])
+        .unwrap()
+        .unfaded();
 
     let cutoff = ParamRef::unit(filter, UnitParam::Cutoff);
     let gain = ParamRef::unit(pad, UnitParam::Volume);
@@ -560,8 +562,9 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
 
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
-        .set_sources_unfaded(Root::output(0), [OutPort::new(probe, 0)])
-        .unwrap();
+        .set_sources(Root::output(0), [OutPort::new(probe, 0)])
+        .unwrap()
+        .unfaded();
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
