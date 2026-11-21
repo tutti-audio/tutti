@@ -558,8 +558,10 @@ struct Core {
     /// a render or `process` slot it cleared, a null `setParameter`.
     entry_refusals: Tally<u64>,
     /// Calls that found the plugin's dispatcher cleared: an event list or a process
-    /// start or stop that did not reach it.
+    /// start or stop that did not reach it, and a main-thread opcode (answered `0`).
     dispatcher_cleared: Tally<u64>,
+    /// The main-thread calls' writer of `dispatcher_cleared`.
+    dispatcher_cleared_main: TallyWriter<u64>,
     /// Whether the control side has logged `pin_refusals` going nonzero.
     pin_refusals_logged: AtomicBool,
     /// Whether `effStartProcess` is the plugin's last word. Written under the gate, by the
@@ -601,13 +603,15 @@ impl Core {
         main_thread: ThreadId,
         work: MainWorkHandle,
     ) -> Arc<Self> {
+        let dispatcher_cleared = tally::<u64>();
         let core = Arc::new(Core {
             effect: UnsafeCell::new(effect),
             _host_ref: host_ref,
             pin_refusals: tally(),
             gate_refusals: tally(),
             entry_refusals: tally(),
-            dispatcher_cleared: tally(),
+            dispatcher_cleared_main: dispatcher_cleared.writer(),
+            dispatcher_cleared,
             pin_refusals_logged: AtomicBool::new(false),
             processing: AtomicBool::new(false),
             gate: Mutex::new(false),
@@ -1135,7 +1139,8 @@ impl PluginInstance {
         &self.core.entry_refusals
     }
 
-    /// How many audio-thread calls found the plugin's dispatcher cleared.
+    /// How many calls found the plugin's dispatcher cleared: audio-thread entries
+    /// (an event list, a process start or stop) and main-thread opcodes, which read `0`.
     pub fn dispatcher_cleared(&self) -> &Tally<u64> {
         &self.core.dispatcher_cleared
     }
@@ -1486,7 +1491,11 @@ const MAX_SHELL_PLUGINS: usize = 4096;
 trait Dispatch {
     fn get_effect(&self) -> *mut AEffect;
 
-    /// Send a dispatch message to the plugin.
+    /// Where a main-thread opcode the plugin cannot receive is counted.
+    fn dispatcher_cleared_main(&self) -> &TallyWriter<u64>;
+
+    /// Send a dispatch message to the plugin. A plugin that cleared its dispatcher
+    /// answers `0` to every opcode, counted in `dispatcher_cleared`.
     fn dispatch(
         &self,
         opcode: plugin::EffectOpCode,
@@ -1501,6 +1510,7 @@ trait Dispatch {
             // `PluginLoader::instance` refuses a null dispatcher, so only a plugin that
             // clears the slot later gets here; the opcode is unanswered.
             error!("plugin cleared its dispatcher; opcode {opcode:?} unanswered");
+            self.dispatcher_cleared_main().add(1);
             return 0;
         };
         // SAFETY: `dispatcher` came out of the `AEffect` this instance owns, so
@@ -1558,6 +1568,10 @@ impl Dispatch for PluginInstance {
     fn get_effect(&self) -> *mut AEffect {
         self.core.get_effect()
     }
+
+    fn dispatcher_cleared_main(&self) -> &TallyWriter<u64> {
+        &self.core.dispatcher_cleared_main
+    }
 }
 
 impl Dispatch for Core {
@@ -1565,6 +1579,10 @@ impl Dispatch for Core {
         // SAFETY: the cell is written once, in `PluginInstance::new`, before it is shared, and
         // never afterwards, so this read cannot race a write.
         unsafe { *self.effect.get() }
+    }
+
+    fn dispatcher_cleared_main(&self) -> &TallyWriter<u64> {
+        &self.dispatcher_cleared_main
     }
 }
 
