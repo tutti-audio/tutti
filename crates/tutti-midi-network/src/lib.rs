@@ -12,7 +12,8 @@
 //!   correction, retransmit and the idle declaration. They take datagrams and
 //!   an [`Instant`](tutti_platform::Instant), and hand back [`Transmit`]s and
 //!   [`Event`]s ([`NetworkEndpoint`]); they own no socket and read no clock.
-//! - [`UdpDriver`] runs a [`NetworkEndpoint`] over a `std::net::UdpSocket`.
+//! - [`NetworkLink`] runs a [`NetworkEndpoint`] over a `std::net::UdpSocket` on an
+//!   executor's socket task; its events are a `Stream`.
 //! - [`Advertisement`] and [`Browser`] publish and find Hosts by mDNS.
 //!
 //! ```
@@ -98,4 +99,4 @@ pub use event::{AuthFailure, EndedBy, Event, SendError, SessionState, Transmit};
 pub use policy::{Admission, Credentials};
 pub use sequence::SequenceNumber;
 pub use text::{ByeText, NakText, Username};
-pub use udp::UdpDriver;
+pub use udp::{LinkEnded, NetworkEvents, NetworkLink, Pending};

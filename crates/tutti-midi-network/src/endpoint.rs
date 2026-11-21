@@ -19,7 +19,7 @@ use crate::{
 /// An endpoint whose every input is a datagram or the clock, and whose every
 /// output is a datagram, an event or the next time it wants the clock.
 ///
-/// [`Client`] and [`Host`] are the two; a driver ([`UdpDriver`](crate::UdpDriver))
+/// [`Client`] and [`Host`] are the two; a socket link ([`NetworkLink`](crate::NetworkLink))
 /// feeds one of them from a socket. Nothing here blocks, reads a clock or
 /// touches the network.
 pub trait NetworkEndpoint {

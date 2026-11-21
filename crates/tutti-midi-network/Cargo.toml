@@ -14,17 +14,19 @@ categories = ["multimedia::audio", "network-programming"]
 workspace = true
 
 [dependencies]
+futures-core = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
 mdns-sd = { workspace = true }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
-# `Instant`, the one clock type.
+# `Instant`, the one clock type, and the `Executor` the socket task runs on.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [dev-dependencies]
 proptest = "1.9.0"
+futures-lite = { workspace = true }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [package.metadata.docs.rs]
