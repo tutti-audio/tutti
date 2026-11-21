@@ -10,11 +10,11 @@ use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorPresence, EditorWindow, Features, Layout, Loaded, LoadedPlugin, OwnBypass, ParamAccess,
-    ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
-    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId, ProcessWake,
-    RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId, TrackInfo,
-    WindowHandle, Wraps, bypass_parameter,
+    EditorOpened, EditorPresence, EditorWindow, Features, Layout, Loaded, LoadedPlugin, OwnBypass,
+    ParamAccess, ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
+    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId,
+    ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
+    TrackInfo, WindowHandle, Wraps, bypass_parameter,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -589,8 +589,10 @@ impl EditorWindow for ClapLoaded {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<dpi::Size> {
-        self.embed_editor(main, parent, scale).map_err(plugin_error)
+    ) -> PluginResult<EditorOpened<dpi::Size>> {
+        self.embed_editor(main, parent, scale)
+            .map(EditorOpened::new)
+            .map_err(plugin_error)
     }
 
     /// Opens the plugin's own floating window with no transient parent, titled
@@ -598,10 +600,11 @@ impl EditorWindow for ClapLoaded {
     /// `set_transient` is a stacking hint the plugin may ignore anyway. A host
     /// that has both uses
     /// [`open_floating_editor_with`](ClapLoaded::open_floating_editor_with).
-    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<()> {
+    fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<EditorOpened<()>> {
         let title = std::ffi::CString::new(self.info().name.as_str())
             .unwrap_or_else(|_| c"Plugin Editor".to_owned());
         self.open_floating_editor_with(main, None, &title)
+            .map(EditorOpened::new)
             .map_err(plugin_error)
     }
 

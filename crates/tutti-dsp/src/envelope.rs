@@ -40,7 +40,7 @@
 
 use tutti_buffers::Float;
 use tutti_music::Adsr;
-use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Db, Normalized, SampleRate, Samples, Seconds};
 
 use crate::design::{NO_FRAME, exact_frames};
 
@@ -91,7 +91,7 @@ pub struct EnvelopeStages {
     attack: Seconds,
     hold: Seconds,
     decay: Seconds,
-    sustain: Amplitude,
+    sustain: Normalized,
     release: Seconds,
     decay_curve: EnvelopeCurve,
     release_curve: EnvelopeCurve,
@@ -100,12 +100,12 @@ pub struct EnvelopeStages {
 
 impl EnvelopeStages {
     /// Stages with no delay and no hold, linear curves and the full-scale pace.
-    /// The sustain is held within `0..=1`.
+    /// The sustain is a fraction of the peak.
     #[must_use]
     pub const fn new(
         attack: Seconds,
         decay: Seconds,
-        sustain: Amplitude,
+        sustain: Normalized,
         release: Seconds,
     ) -> Self {
         Self {
@@ -157,10 +157,19 @@ impl EnvelopeStages {
     }
 }
 
-impl From<Adsr> for EnvelopeStages {
-    /// The four stages of an [`Adsr`], linear and at the full-scale pace.
-    fn from(adsr: Adsr) -> Self {
-        Self::new(adsr.attack, adsr.decay, adsr.sustain, adsr.release)
+impl EnvelopeStages {
+    /// The four stages of an [`Adsr`], linear and at the full-scale pace; a sustain outside
+    /// `0..=1` is pinned onto it ([`Normalized::clamped`]) and NaN is silence, since an
+    /// `Adsr`'s sustain field is any amplitude. [`new`](Self::new) takes a
+    /// [`Normalized`] and refuses nothing silently.
+    #[must_use]
+    pub fn from_adsr_clamped(adsr: Adsr) -> Self {
+        Self::new(
+            adsr.attack,
+            adsr.decay,
+            Normalized::clamped(adsr.sustain.get()),
+            adsr.release,
+        )
     }
 }
 
@@ -404,7 +413,7 @@ impl EnvelopeDesign {
             hold: exact_frames(stages.hold, rate),
             decay: Fall::new(stages.decay, stages.decay_curve, rate),
             release: Fall::new(stages.release, stages.release_curve, rate),
-            sustain: stages.sustain.get().clamp(0.0, 1.0),
+            sustain: stages.sustain.get(),
             pace: stages.pace,
         }
     }

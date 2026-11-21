@@ -11,13 +11,13 @@ use std::sync::Arc;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use std::time::Duration;
 
-use tutti_buffers::{ChannelLayout, MAX_CHANNELS, MaxBlock};
+use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Sample, SampleFormat};
 use tutti_engine::{
-    MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
+    MAX_FRAMES, OutputBlock, OutputQuantum, OutputSpec, RunningStream, StreamDriver, StreamFaults,
 };
 use tutti_platform::Executor;
-use tutti_units::{SampleRate, Samples};
+use tutti_units::SampleRate;
 
 use crate::edge::{self, OffsetBinary};
 use crate::error::{DeviceError, Result};
@@ -30,10 +30,11 @@ pub(crate) fn device_rate(rate: cpal::SampleRate) -> Result<SampleRate> {
     })
 }
 
-/// The callback size asked of a device that offers a range: 512 frames
-/// (10.7 ms at 48 kHz), a common DAW default, clamped into what the device
-/// supports.
-pub const PREFERRED_QUANTUM: MaxBlock = MaxBlock::of(Samples::new(512));
+/// The callback size asked of a device that offers a range when none was
+/// asked for ([`OutputConfig::quantum`](crate::OutputConfig::quantum)): 512
+/// frames (10.7 ms at 48 kHz), a common DAW default, clamped into what the
+/// device supports.
+pub const PREFERRED_QUANTUM: OutputQuantum = OutputQuantum::of(512);
 
 /// The [`SampleFormat`] a device's `format` reports in an [`OutputSpec`], or
 /// [`DeviceError::InvalidConfig`] for a type the driver does not build. `I8`, `I16`,
@@ -109,10 +110,14 @@ pub(crate) fn choose_output_config(
         })
 }
 
-/// A device's default output config, as the spec a stream opens at and the
-/// exact sample type its callback converts to.
+/// A device's output config, as the spec a stream opens at and the exact
+/// sample type its callback converts to. `wanted` is the callback size the
+/// caller asked for: opened at exactly it or refused, and
+/// [`PREFERRED_QUANTUM`] fitted into the device's range when none was.
 pub(crate) fn spec_from_supported(
     c: &cpal::SupportedStreamConfig,
+    device_name: &str,
+    wanted: Option<OutputQuantum>,
 ) -> Result<(OutputSpec, cpal::SampleFormat)> {
     if usize::from(c.channels()) > MAX_CHANNELS {
         return Err(DeviceError::InvalidConfig(format!(
@@ -125,7 +130,11 @@ pub(crate) fn spec_from_supported(
         ChannelLayout::from(c.channels().max(1)),
         spec_format(c.sample_format())?,
     );
-    let spec = match quantum_for(c.buffer_size()) {
+    let quantum = match wanted {
+        Some(wanted) => Some(offered(c.buffer_size(), wanted, device_name)?),
+        None => quantum_for(c.buffer_size()),
+    };
+    let spec = match quantum {
         Some(quantum) => spec.with_quantum(quantum),
         None => spec,
     };
@@ -137,24 +146,46 @@ fn stream_config(spec: &OutputSpec) -> cpal::StreamConfig {
         channels: spec.channels.count(),
         sample_rate: spec.sample_rate.get().round() as cpal::SampleRate,
         buffer_size: match spec.quantum {
-            Some(q) => cpal::BufferSize::Fixed(q.get_u32()),
+            Some(q) => cpal::BufferSize::Fixed(q.max_block().get_u32()),
             None => cpal::BufferSize::Default,
         },
     }
 }
 
-/// The fixed callback size to open a device with: [`PREFERRED_QUANTUM`]
-/// clamped into the range it reports, and never past [`MAX_FRAMES`] (the
-/// callback's own buffers). `None` for a device that reports no range, which
-/// is opened with its default buffer.
-fn quantum_for(range: &cpal::SupportedBufferSize) -> Option<MaxBlock> {
+/// `wanted` as the callback size to open a device with, when the device
+/// offers it: a size outside the range the device reports is refused by name,
+/// never clamped into it. A device that reports no range is asked for `wanted`
+/// as it is, and CPAL refuses it at the stream's build if it cannot.
+fn offered(
+    range: &cpal::SupportedBufferSize,
+    wanted: OutputQuantum,
+    device_name: &str,
+) -> Result<OutputQuantum> {
+    if let cpal::SupportedBufferSize::Range { min, max } = *range {
+        let frames = wanted.max_block().get_u32();
+        if frames < min || frames > max {
+            return Err(DeviceError::QuantumUnavailable {
+                device_name: device_name.to_owned(),
+                quantum: wanted,
+                min,
+                max,
+            });
+        }
+    }
+    Ok(wanted)
+}
+
+/// The fixed callback size to open a device with when none was asked for:
+/// [`PREFERRED_QUANTUM`] clamped into the range it reports, and never past
+/// [`MAX_FRAMES`] (the callback's own buffers). `None` for a device that
+/// reports no range, which is opened with its default buffer.
+fn quantum_for(range: &cpal::SupportedBufferSize) -> Option<OutputQuantum> {
     match *range {
         cpal::SupportedBufferSize::Range { min, max } => {
             // A device reporting a range with no usable size (a zero `max`)
             // has no quantum to open with.
             let (min, max) = ((min as usize).max(1), (max as usize).min(MAX_FRAMES));
-            (min <= max)
-                .then(|| MaxBlock::of(Samples::new(PREFERRED_QUANTUM.get().clamp(min, max))))
+            (min <= max).then(|| OutputQuantum::of(PREFERRED_QUANTUM.get().clamp(min, max)))
         }
         cpal::SupportedBufferSize::Unknown => None,
     }
@@ -295,7 +326,7 @@ impl CpalDriver {
                     // The assertion lives HERE, at the boundary CPAL crosses, and
                     // not inside `render_with`: it is a claim about CPAL, not about
                     // the block, and keeping it out is what lets a debug-build
-                    // test observe the clamp instead of panicking before it.
+                    // test observe the count instead of panicking before it.
                     debug_assert!(
                         data.len() / channels <= MAX_FRAMES,
                         "CPAL callback frames {} exceeds MAX_FRAMES {MAX_FRAMES}",

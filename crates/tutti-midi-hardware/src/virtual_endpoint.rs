@@ -291,9 +291,9 @@ impl Outbound {
                 if count == 0 {
                     // A MIDI 2.0 voice message with a MIDI 1.0 form translates to at
                     // least one packet, so zero packets is a message with none:
-                    // `Message::try_to_midi1` returns its `NoMidi1Form` here and its
+                    // `Message::to_midi1` returns its `NoMidi1Form` here and its
                     // `Ok` is not reached.
-                    message.try_to_midi1()?;
+                    message.to_midi1()?;
                 }
                 return sent;
             }

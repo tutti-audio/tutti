@@ -115,3 +115,20 @@ fn selecting_another_device_keeps_the_chosen_sample_format() {
         OutputConfig::from(DeviceSelector::named("B")).sample_format(SampleFormat::I16)
     );
 }
+
+/// **Selecting a device on a spec-built engine is refused at the call.** The
+/// engine has no device to select, so the call names the same refusal `start`
+/// would, on the engine and on the driver wrapping one.
+#[test]
+fn selecting_a_device_on_a_spec_built_engine_is_refused() {
+    let mut engine = AudioEngine::from_spec(manual_spec());
+    assert!(matches!(
+        engine.select_device(DeviceSelector::Default),
+        Err(DeviceError::InvalidDevice(_))
+    ));
+    let mut driver = driver_over(engine);
+    assert!(matches!(
+        driver.select_device(DeviceSelector::Default),
+        Err(DeviceError::InvalidDevice(_))
+    ));
+}

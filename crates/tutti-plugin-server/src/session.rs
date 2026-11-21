@@ -624,10 +624,12 @@ impl Session {
         };
         let opened = match parent {
             Some(raw) => match WindowHandle::from_remote(raw) {
-                Some(window) => control.open_editor(main, window, scale).map(Some),
+                Some(window) => control
+                    .open_editor(main, window, scale)
+                    .map(|o| Some(o.window)),
                 None => Err(EditorError::ForeignWindow(raw).into()),
             },
-            None => control.open_floating_editor(main).map(|()| None),
+            None => control.open_floating_editor(main).map(|_| None),
         };
         self.editor_open = opened.is_ok();
         opened

@@ -438,6 +438,12 @@ pub enum Error {
     #[error(transparent)]
     Modulation(#[from] crate::RouteError),
 
+    /// The block the system clock's stream renders is longer than a device
+    /// callback can be ([`MAX_FRAMES`](tutti_engine::MAX_FRAMES)): the timer
+    /// opens at the block it is given, never a shorter one.
+    #[error(transparent)]
+    Quantum(#[from] tutti_engine::QuantumOutOfRange),
+
     /// The system clock's timer thread did not start
     /// ([`SessionBuilder::system_clock`](crate::SessionBuilder::system_clock)).
     #[error(transparent)]

@@ -8,6 +8,7 @@ use crate::oscillator::Oscillator;
 use crate::region_pair::RegionPair;
 use crate::soundfont_math::SoundFontMath;
 use crate::volume_envelope::VolumeEnvelope;
+use tutti_units::Normalized;
 
 #[non_exhaustive]
 pub(crate) struct RegionEx {}
@@ -59,7 +60,7 @@ impl RegionEx {
                 region.key_number_to_volume_envelope_decay(),
                 key,
             );
-        let sustain = (-region.sustain_volume_envelope()).to_amplitude();
+        let sustain = Normalized::clamped((-region.sustain_volume_envelope()).to_amplitude().get());
         let release = region.release_time();
 
         envelope.start(delay, attack, hold, decay, sustain, release);

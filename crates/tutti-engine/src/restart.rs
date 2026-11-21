@@ -11,7 +11,9 @@ use tutti_buffers::Float;
 use tutti_units::SampleRate;
 
 use crate::callback::AudioCallbackState;
-use crate::stream::{OutputSpec, OutputStream, StartError, StreamDriver};
+use crate::stream::{
+    OutputQuantum, OutputSpec, OutputStream, QuantumOutOfRange, StartError, StreamDriver,
+};
 
 /// Access to the engine while its stream is stopped, handed to a restart hook.
 ///
@@ -105,12 +107,24 @@ impl<F: Float> StreamHost<F> {
     /// hook failed part way and left the graph where it is, so that what the
     /// host reports is what the graph is prepared at. It takes the graph's own
     /// values whole, so it cannot be told anything else.
-    pub fn sync_to_graph(&mut self, prepared: &tutti_graph::Prepare) {
+    ///
+    /// # Errors
+    /// [`QuantumOutOfRange`], when the graph's callback size is past
+    /// [`MAX_FRAMES`](crate::MAX_FRAMES); nothing changes.
+    pub fn sync_to_graph(
+        &mut self,
+        prepared: &tutti_graph::Prepare,
+    ) -> Result<(), QuantumOutOfRange> {
+        let quantum = prepared
+            .quantum()
+            .map(OutputQuantum::try_from)
+            .transpose()?;
         self.graph_rate = prepared.sample_rate();
         let mut spec = self.stream.spec().clone();
         spec.sample_rate = prepared.sample_rate();
-        spec.quantum = prepared.quantum();
+        spec.quantum = quantum;
         self.stream.set_spec(spec);
+        Ok(())
     }
 
     /// The stream this host runs, for reads: [`spec`](OutputStream::spec),

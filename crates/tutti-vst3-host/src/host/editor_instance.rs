@@ -7,9 +7,9 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, KeyEvent, KeyUse, MainThreadMarker, MainWorkHandle, ParamEdit, PluginError,
-    PluginRef, PluginResult, WindowHandle,
+    AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorOpened,
+    EditorWindow, InProcess, KeyEvent, KeyUse, MainThreadMarker, MainWorkHandle, ParamEdit,
+    PluginError, PluginRef, PluginResult, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -152,9 +152,10 @@ impl EditorWindow for Vst3Editor {
         main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
-    ) -> PluginResult<Size> {
+    ) -> PluginResult<EditorOpened<Size>> {
         self.inner
             .embed_editor(main, parent, scale)
+            .map(EditorOpened::new)
             .map_err(|e| editor_error(format!("VST3 open_editor failed: {e}")))
     }
 

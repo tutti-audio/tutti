@@ -385,7 +385,7 @@ impl<F: Float> LimiterBank<F> {
         let channels = usize::from(width.count());
         let block = MaxBlock::of(Samples::new(CHUNK));
         let detector = Detector {
-            states: (0..channels.max(1)).map(|_| plan.state(block)).collect(),
+            states: (0..channels).map(|_| plan.state(block)).collect(),
             lag: vec![F::ZERO; first],
             at: 0,
         };
