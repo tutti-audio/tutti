@@ -857,7 +857,10 @@ pub mod midi {
         Stamping, TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
-    pub use tutti_session::{MidiInput, MidiOutput, OpenMidiOutput};
+    pub use tutti_session::{
+        MidiInput, MidiOpenError, MidiOutput, OpenedMidiInput, OpenedMidiOutput, OpeningMidiInput,
+        OpeningMidiOutput,
+    };
 
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::Whole;

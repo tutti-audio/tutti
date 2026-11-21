@@ -1,6 +1,7 @@
 //! MIDI ports (feature `midi-hardware`): [`Session::open_midi_input`] and
-//! [`Session::open_midi_output`] open a saved device and return a
-//! [`MidiInput`] or a [`MidiOutput`].
+//! [`Session::open_midi_output`] begin opening a saved device, and
+//! [`Session::apply`] returns a [`MidiInput`] or a [`MidiOutput`] once the
+//! wait for the OS MIDI layer has resolved.
 //!
 //! The OS layer's background work (an input's pump, the device watch, Active
 //! Sensing, the legacy poll) runs on tutti's own thread, whether or not the app calls
@@ -29,14 +30,17 @@
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
 //! whose events the session sends to the device each update.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
     Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch,
-    PropertyAsk, PropertyPeer, ReportAsk, Started,
+    PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
 };
 use tutti_midi_runtime::{
     DeviceGeneration, GenerationWriter, InputReaders, InputWriters, JrStream, MidiInputControls,
@@ -46,79 +50,10 @@ use tutti_rt::{Counter, Gauge, LockExt};
 use tutti_ump::StreamConfig;
 use tutti_units::{Resyncs, Seconds};
 
+use crate::apply::{Cut, Sealed};
 use crate::midi::{
     Claim, Departure, Held, LossReaders, LossWriters, Retiring, Sweepable, UmpOut, loss_cells,
 };
-
-/// The OS MIDI layer with the proof that its backend started, which opening a port
-/// takes. The builder waits for the start once ([`Io::start`]); every later open
-/// passes the proof along.
-#[derive(Debug)]
-pub(crate) struct Io {
-    session: MidiSession,
-    started: Started,
-}
-
-impl Io {
-    /// `session` once its backend is ready.
-    ///
-    /// The wait parks the calling thread until the backend's thread wakes it: the
-    /// builder is synchronous, and a start has at most the retry window of the MIDI
-    /// server (about ten seconds) to finish.
-    pub(crate) fn start(
-        session: MidiSession,
-    ) -> Result<Self, tutti_midi_hardware::MidiHardwareError> {
-        use std::task::{Context, Poll, Wake, Waker};
-
-        struct Unpark(std::thread::Thread);
-        impl Wake for Unpark {
-            fn wake(self: Arc<Self>) {
-                self.0.unpark();
-            }
-        }
-        let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
-        let mut start = std::pin::pin!(session.start());
-        let started = loop {
-            if let Poll::Ready(outcome) = start.as_mut().poll(&mut Context::from_waker(&waker)) {
-                break outcome?;
-            }
-            std::thread::park();
-        };
-        Ok(Self { session, started })
-    }
-
-    /// [`MidiSession::connect_input_with`], with this layer's proof.
-    pub(crate) fn connect_input_with(
-        &mut self,
-        device: impl Into<tutti_midi_hardware::DeviceQuery>,
-        writers: InputWriters,
-    ) -> tutti_midi_hardware::Result<tutti_midi_hardware::Connected> {
-        self.session
-            .connect_input_with(self.started, device, writers)
-    }
-
-    /// [`MidiSession::connect_output`], with this layer's proof.
-    pub(crate) fn connect_output(
-        &self,
-        device: impl Into<tutti_midi_hardware::DeviceQuery>,
-    ) -> tutti_midi_hardware::Result<tutti_midi_hardware::OpenOutput> {
-        self.session.connect_output(self.started, device)
-    }
-}
-
-impl std::ops::Deref for Io {
-    type Target = MidiSession;
-
-    fn deref(&self) -> &MidiSession {
-        &self.session
-    }
-}
-
-impl std::ops::DerefMut for Io {
-    fn deref_mut(&mut self) -> &mut MidiSession {
-        &mut self.session
-    }
-}
 use crate::midi_ci::{
     ListedPeer, Pending, PortLink, ProfilePeer, ReplySender, ReportPeer, ResourcePeer,
     Subscription, at_peer, resolve,
@@ -187,6 +122,10 @@ pub enum MidiPortError {
     /// The OS layer refused to open the device.
     #[error("MIDI hardware: {0}")]
     Hardware(Arc<tutti_midi_hardware::MidiHardwareError>),
+    /// The open is another session's: its wait was made by a session other than
+    /// the one applying it.
+    #[error("the open was made by another session")]
+    Stale,
 }
 
 /// What a [`MidiInput`] says of itself: one snapshot, as of the last update
@@ -657,70 +596,139 @@ impl Peer for MidiOutput {
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// Opens the input port of the saved device `saved`: its input node joins
-    /// the graph (the next [`update`](Session::update) commits it), and the
-    /// device opens into it when it is present. The port lives while any clone
-    /// of the handle does; after the last is dropped, the device is free to open
-    /// again from the next call to this or to an `open` (the call closes what was
-    /// dropped first).
-    ///
-    /// It binds a device that is surely the saved one, or the only present one
-    /// of its name; an absent device opens the port reading
-    /// [`Lost`](Presence::Lost)([`PortCause::Unplugged`]), and it opens
-    /// behind the same handle when the device arrives.
-    ///
-    /// # Errors
-    ///
-    /// [`MidiPortError::NoHardware`] without
-    /// [`midi_hardware`](crate::SessionBuilder::midi_hardware);
-    /// [`MidiPortError::Ambiguous`] when several present devices could be
-    /// `saved`; [`MidiPortError::Hardware`] or [`MidiPortError::InUse`] when a
-    /// present device cannot be opened.
-    pub fn open_midi_input(&mut self, saved: DeviceInfo) -> Result<MidiInput, MidiPortError> {
-        let (mut midi, ids) = self.midi_and_ids();
-        let id = ids.mint();
-        let ids = ids.clone();
-        midi.open_input_port(id, ids, saved)
+/// The present device `saved` binds to: the one that is surely it, or the only
+/// present one of its name; `None` when none is present.
+///
+/// # Errors
+///
+/// [`MidiPortError::Ambiguous`] when several present devices could be `saved`.
+fn bind(io: &MidiSession, saved: &DeviceInfo) -> Result<Option<DeviceInfo>, MidiPortError> {
+    match io.devices().resolve(saved) {
+        Resolved::Exact(info) | Resolved::SameName(info) => Ok(Some(info)),
+        Resolved::Ambiguous(candidates) => Err(MidiPortError::Ambiguous(candidates)),
+        Resolved::Missing => Ok(None),
     }
+}
 
-    /// A request to open the output port of the saved device `saved`: as
-    /// [`open_midi_input`](Self::open_midi_input), for a device a port sends
-    /// to. [`active_sensing`](OpenMidiOutput::active_sensing) sets what the
-    /// port sends, and nothing opens until [`run`](OpenMidiOutput::run) is
-    /// called.
-    pub fn open_midi_output(&mut self, saved: DeviceInfo) -> OpenMidiOutput<'_, K, C> {
-        OpenMidiOutput {
-            session: self,
-            saved,
-            active_sensing: false,
+/// Why the OS MIDI layer did not start, so no port opened
+/// ([`OpeningMidiInput`], [`OpeningMidiOutput`]).
+#[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum MidiOpenError {
+    /// The backend failed to start, or its device-watch thread ended before it
+    /// answered.
+    #[error("the OS MIDI layer did not start: {0}")]
+    BackendFailed(Arc<tutti_midi_hardware::MidiHardwareError>),
+}
+
+impl From<tutti_midi_hardware::MidiHardwareError> for MidiOpenError {
+    fn from(error: tutti_midi_hardware::MidiHardwareError) -> Self {
+        match error {
+            tutti_midi_hardware::MidiHardwareError::BackendFailed(shared) => {
+                Self::BackendFailed(shared)
+            }
+            other => Self::BackendFailed(Arc::new(other)),
         }
     }
 }
 
-/// An output port to open, built by [`Session::open_midi_output`]: it borrows
-/// the session until [`run`](Self::run) opens the port.
+/// Polls the start: the proof, or why the backend has none.
+fn poll_start(start: &mut Start, cx: &mut Context<'_>) -> Poll<Result<Started, MidiOpenError>> {
+    Pin::new(start)
+        .poll(cx)
+        .map(|outcome| outcome.map_err(MidiOpenError::from))
+}
+
+/// The wait for the OS MIDI layer before an input port opens, from
+/// [`Session::open_midi_input`]: a `Send` [`Future`] that resolves to the
+/// [`OpenedMidiInput`] that [`Session::apply`] installs.
+///
+/// It resolves at once off macOS. On macOS it resolves when the device-watch
+/// thread has made the process's CoreMIDI client or given up, and that thread
+/// wakes it. It never pends for ever: a watch thread that ends without answering
+/// resolves it to [`MidiOpenError::BackendFailed`].
+///
+/// It holds nothing of the session, so a dropped session does not end it: the
+/// session that made it is gone, and its [`OpenedMidiInput`] is
+/// [`MidiPortError::Stale`] in any other session.
+#[derive(Debug)]
+#[must_use = "an input port opens only once the wait resolves and the session applies it"]
+pub struct OpeningMidiInput {
+    cut: Cut,
+    saved: DeviceInfo,
+    start: Start,
+}
+
+impl Future for OpeningMidiInput {
+    type Output = Result<OpenedMidiInput, MidiOpenError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        poll_start(&mut this.start, cx).map(|outcome| {
+            outcome.map(|started| OpenedMidiInput {
+                cut: this.cut,
+                saved: this.saved.clone(),
+                started,
+            })
+        })
+    }
+}
+
+/// An input port ready to open: what [`OpeningMidiInput`] resolves to, which
+/// [`Session::apply`] installs as a [`MidiInput`].
+///
+/// It holds the proof that the OS MIDI layer started and the device to open,
+/// not a connection: the device is bound against the session's device table when
+/// it is applied. It is cut from one session; another session refuses it as
+/// [`MidiPortError::Stale`].
+#[derive(Debug)]
+#[must_use = "an input port opens only once the session applies it"]
+pub struct OpenedMidiInput {
+    cut: Cut,
+    saved: DeviceInfo,
+    started: Started,
+}
+
+impl<F: crate::SessionFloat> Sealed<F> for OpenedMidiInput {
+    type Applied = MidiInput;
+    type Error = MidiPortError;
+
+    fn cut(&self) -> &Cut {
+        &self.cut
+    }
+
+    fn stale() -> MidiPortError {
+        MidiPortError::Stale
+    }
+
+    fn apply_to<K: crate::AppKey, C: crate::Clock<Float = F>>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<MidiInput, MidiPortError> {
+        let (mut midi, ids) = session.midi_and_ids();
+        let id = ids.mint();
+        let ids = ids.clone();
+        midi.open_input_port(id, ids, self.saved, self.started)
+    }
+}
+
+/// The wait for the OS MIDI layer before an output port opens, from
+/// [`Session::open_midi_output`]: as [`OpeningMidiInput`], resolving to the
+/// [`OpenedMidiOutput`] that [`Session::apply`] installs.
 ///
 /// The port's Active Sensing is set here and not on the handle: a transmitter
 /// that has started Active Sensing goes on (MIDI 1.0 Detailed Specification
 /// p. 32), so a running port cannot turn it off.
-#[must_use = "the port opens when the request runs"]
-pub struct OpenMidiOutput<'s, K: crate::AppKey, C: crate::Clock> {
-    session: &'s mut Session<K, C>,
+#[derive(Debug)]
+#[must_use = "an output port opens only once the wait resolves and the session applies it"]
+pub struct OpeningMidiOutput {
+    cut: Cut,
     saved: DeviceInfo,
     active_sensing: bool,
+    start: Start,
 }
 
-impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpenMidiOutput<'_, K, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenMidiOutput")
-            .field("saved", &self.saved)
-            .field("active_sensing", &self.active_sensing)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<K: crate::AppKey, C: crate::Clock> OpenMidiOutput<'_, K, C> {
+impl OpeningMidiOutput {
     /// Whether the port sends Active Sensing (`0xFE`) for its whole life: from
     /// a task on the session's executor, whenever it has been silent for 270 ms
     /// ([`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL)),
@@ -738,18 +746,131 @@ impl<K: crate::AppKey, C: crate::Clock> OpenMidiOutput<'_, K, C> {
         self.active_sensing = on;
         self
     }
+}
 
-    /// Opens the port: its output node joins the graph (the next
+impl Future for OpeningMidiOutput {
+    type Output = Result<OpenedMidiOutput, MidiOpenError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+        poll_start(&mut this.start, cx).map(|outcome| {
+            outcome.map(|started| OpenedMidiOutput {
+                cut: this.cut,
+                saved: this.saved.clone(),
+                active_sensing: this.active_sensing,
+                started,
+            })
+        })
+    }
+}
+
+/// An output port ready to open: what [`OpeningMidiOutput`] resolves to, which
+/// [`Session::apply`] installs as a [`MidiOutput`]. As [`OpenedMidiInput`].
+#[derive(Debug)]
+#[must_use = "an output port opens only once the session applies it"]
+pub struct OpenedMidiOutput {
+    cut: Cut,
+    saved: DeviceInfo,
+    active_sensing: bool,
+    started: Started,
+}
+
+impl<F: crate::SessionFloat> Sealed<F> for OpenedMidiOutput {
+    type Applied = MidiOutput;
+    type Error = MidiPortError;
+
+    fn cut(&self) -> &Cut {
+        &self.cut
+    }
+
+    fn stale() -> MidiPortError {
+        MidiPortError::Stale
+    }
+
+    fn apply_to<K: crate::AppKey, C: crate::Clock<Float = F>>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<MidiOutput, MidiPortError> {
+        let (mut midi, ids) = session.midi_and_ids();
+        let id = ids.mint();
+        midi.open_output_port(id, self.saved, self.active_sensing, self.started)
+    }
+}
+
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+    /// Begins opening the input port of the saved device `saved`: the wait for
+    /// the OS MIDI layer, which resolves to an [`OpenedMidiInput`] that
+    /// [`apply`](Self::apply) turns into the port.
+    ///
+    /// ```no_run
+    /// # use tutti_midi_device::DeviceInfo;
+    /// # use tutti_session::Session;
+    /// # async fn open(session: &mut Session, saved: DeviceInfo)
+    /// #     -> Result<(), Box<dyn std::error::Error>> {
+    /// let opened = session.open_midi_input(saved)?.await?;
+    /// let input = session.apply(opened)?;
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// The apply joins the port's input node to the graph (the next
     /// [`update`](Session::update) commits it), and the device opens into it when
-    /// it is present. The port lives while any clone of the handle does.
+    /// it is present. The port lives while any clone of the handle does; after the
+    /// last is dropped, the device is free to open again from the next apply of an
+    /// open (it closes what was dropped first).
+    ///
+    /// It binds a device that is surely the saved one, or the only present one
+    /// of its name; an absent device opens the port reading
+    /// [`Lost`](Presence::Lost)([`PortCause::Unplugged`]), and it opens
+    /// behind the same handle when the device arrives. The device table is read
+    /// again when the open is applied, so a device that came or went while the
+    /// wait was pending binds as it then is.
     ///
     /// # Errors
     ///
-    /// As [`Session::open_midi_input`].
-    pub fn run(self) -> Result<MidiOutput, MidiPortError> {
-        let (mut midi, ids) = self.session.midi_and_ids();
-        let id = ids.mint();
-        midi.open_output_port(id, self.saved, self.active_sensing)
+    /// [`MidiPortError::NoHardware`] without
+    /// [`midi_hardware`](crate::SessionBuilder::midi_hardware);
+    /// [`MidiPortError::Ambiguous`] when several present devices could be
+    /// `saved`. The apply fails the same two ways, and with
+    /// [`MidiPortError::Stale`] for another session's open,
+    /// [`MidiPortError::Hardware`] or [`MidiPortError::InUse`] when a present
+    /// device cannot be opened.
+    pub fn open_midi_input(&self, saved: DeviceInfo) -> Result<OpeningMidiInput, MidiPortError> {
+        let start = self.midi_layer_for(&saved)?;
+        Ok(OpeningMidiInput {
+            cut: Cut::of(self),
+            saved,
+            start,
+        })
+    }
+
+    /// Begins opening the output port of the saved device `saved`: as
+    /// [`open_midi_input`](Self::open_midi_input), for a device a port sends
+    /// to. [`active_sensing`](OpeningMidiOutput::active_sensing) sets what the
+    /// port sends.
+    ///
+    /// # Errors
+    ///
+    /// As [`open_midi_input`](Self::open_midi_input).
+    pub fn open_midi_output(&self, saved: DeviceInfo) -> Result<OpeningMidiOutput, MidiPortError> {
+        let start = self.midi_layer_for(&saved)?;
+        Ok(OpeningMidiOutput {
+            cut: Cut::of(self),
+            saved,
+            active_sensing: false,
+            start,
+        })
+    }
+
+    /// The wait for the OS MIDI layer, once `saved` is known to bind.
+    fn midi_layer_for(&self, saved: &DeviceInfo) -> Result<Start, MidiPortError> {
+        let io = self
+            .midi
+            .hardware
+            .io
+            .as_ref()
+            .ok_or(MidiPortError::from(NoHardware))?;
+        bind(io, saved)?;
+        Ok(io.start())
     }
 }
 
@@ -774,6 +895,8 @@ struct InputPort {
     open: Option<DeviceId>,
     /// The requests sent to the device's peers that they have not answered.
     pending: Pending,
+    /// The proof the open brought, which every reopen of the port's device takes.
+    started: Started,
 }
 
 /// One output port as the session keeps it.
@@ -798,6 +921,8 @@ struct OutputPort {
     /// The stamp stream of an output that was closed, which the next one carries
     /// on.
     parked: Option<JrStream>,
+    /// The proof the open brought, which every reopen of the port's device takes.
+    started: Started,
 }
 
 /// An input port leaves nothing while its node goes: its device's notes are being
@@ -882,7 +1007,7 @@ fn set_presence<I>(
 
 /// The snapshot of the open input `device`, as the OS layer reads it now.
 fn input_info(
-    io: &Io,
+    io: &MidiSession,
     port: ResourceId,
     device: &DeviceInfo,
     link: &PortLink,
@@ -938,7 +1063,7 @@ impl InputPort {
 
     /// Takes in what the OS layer reads of the open device, saying so when it
     /// differs from what the handles read.
-    fn refresh(&self, io: &Io, out: &mut Vec<SessionEvent>) {
+    fn refresh(&self, io: &MidiSession, out: &mut Vec<SessionEvent>) {
         let Some(id) = &self.open else { return };
         let Some(device) = io.devices().list().into_iter().find(|d| d.id == *id) else {
             return;
@@ -966,7 +1091,7 @@ impl InputPort {
 /// let go; the node releases what the device held.
 fn disconnect<F: tutti_buffers::Float>(
     port: &mut InputPort,
-    io: &mut Io,
+    io: &mut MidiSession,
     graph: &mut crate::graph::Graph<F>,
 ) {
     if let Some(id) = port.open.take() {
@@ -1002,7 +1127,7 @@ impl Ports {
     /// Takes the MPE Profile zones the peers of `device` have enabled (M2-120) as
     /// what its input node follows: the zones of every peer on a Group
     /// together, or none where no peer has the Profile enabled.
-    fn sync_mpe_profiles(&self, io: &Io, device: &DeviceId) {
+    fn sync_mpe_profiles(&self, io: &MidiSession, device: &DeviceId) {
         let Some(port) = self.inputs.iter().find(|p| p.open.as_ref() == Some(device)) else {
             return;
         };
@@ -1033,7 +1158,7 @@ impl Ports {
     fn connect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
-        io: &mut Io,
+        io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
         info: &DeviceInfo,
     ) -> Result<(), MidiPortError> {
@@ -1044,7 +1169,7 @@ impl Ports {
         let clock = InputWriters::reopen(&port.shared.cells)
             .ok_or_else(|| MidiPortError::CellsHeld(info.id.clone()))?;
         match io
-            .connect_input_with(&info.id, clock)
+            .connect_input_with(port.started, &info.id, clock)
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
@@ -1070,7 +1195,7 @@ impl Ports {
     fn disconnect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
-        io: &mut Io,
+        io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
     ) {
         disconnect(&mut self.inputs[at], io, graph);
@@ -1081,7 +1206,7 @@ impl Ports {
     /// asked, and reads what the devices said. What was edited.
     pub(crate) fn poll<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut Io,
+        io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
         rate: tutti_units::SampleRate,
         events: Vec<tutti_midi_device::DeviceEvent>,
@@ -1113,7 +1238,7 @@ impl Ports {
     /// [`close_dropped_outputs`](Self::close_dropped_outputs).
     pub(crate) fn retire<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut Io,
+        io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
     ) -> Edits {
         let mut edits = Edits::default();
@@ -1135,7 +1260,7 @@ impl Ports {
     /// [`PortCause::Unplugged`].
     fn lose<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut Io,
+        io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
         device: &DeviceInfo,
         out: &mut Vec<SessionEvent>,
@@ -1185,7 +1310,7 @@ impl Ports {
     /// is tried again when a device next arrives.
     fn restore<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut Io,
+        io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
         rate: tutti_units::SampleRate,
         arrived: &DeviceInfo,
@@ -1195,7 +1320,7 @@ impl Ports {
         // The matcher a load binds by: the device that is surely the saved one,
         // or the only present one of its name. Several that could be it stay
         // for the app to choose.
-        let is_arrived = |io: &Io, saved: &DeviceInfo| {
+        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| {
             matches!(
                 io.devices().resolve(saved),
                 Resolved::Exact(found) | Resolved::SameName(found) if found.id == arrived.id
@@ -1232,17 +1357,18 @@ impl Ports {
             {
                 continue;
             }
-            let presence = match open_device_output(io, &arrived.id, port.active_sensing) {
-                Ok(device) => {
-                    port.out = Some(match port.parked.take() {
-                        Some(stream) => UmpOut::resumed(device, stream),
-                        None => UmpOut::of_device(device, rate),
-                    });
-                    port.refresh(out);
-                    Presence::Live
-                }
-                Err(_) => Presence::Lost(PortCause::ReopenFailed),
-            };
+            let presence =
+                match open_device_output(io, port.started, &arrived.id, port.active_sensing) {
+                    Ok(device) => {
+                        port.out = Some(match port.parked.take() {
+                            Some(stream) => UmpOut::resumed(device, stream),
+                            None => UmpOut::of_device(device, rate),
+                        });
+                        port.refresh(out);
+                        Presence::Live
+                    }
+                    Err(_) => Presence::Lost(PortCause::ReopenFailed),
+                };
             set_presence(&port.shared.cell, port.shared.id, presence, out);
         }
         edits
@@ -1250,7 +1376,7 @@ impl Ports {
 
     /// Sends what the handles asked of the peers: a request the device took
     /// waits for its answer, and one it cannot take ends its future.
-    fn send_requests(&mut self, io: &mut Io) {
+    fn send_requests(&mut self, io: &mut MidiSession) {
         for port in &mut self.inputs {
             for request in port.shared.drain() {
                 match request {
@@ -1279,7 +1405,7 @@ impl Ports {
     /// Resolves the requests waiting for what a peer of `device` answered.
     fn answer(
         &mut self,
-        io: &mut Io,
+        io: &mut MidiSession,
         device: &DeviceId,
         peer: tutti_midi_hardware::PeerId,
         answer: &Answer,
@@ -1293,7 +1419,7 @@ impl Ports {
     /// they settled, reopens an input whose reader died, and says what changed.
     fn step<F: tutti_buffers::Float>(
         &mut self,
-        io: &mut Io,
+        io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
         now: tutti_platform::Instant,
         out: &mut Vec<SessionEvent>,
@@ -1484,12 +1610,13 @@ impl OutputPort {
 
 /// The output of device `id`, sending Active Sensing when `active_sensing`.
 fn open_device_output(
-    io: &Io,
+    io: &MidiSession,
+    started: Started,
     id: &DeviceId,
     active_sensing: bool,
 ) -> Result<tutti_midi_hardware::OpenOutput, MidiPortError> {
     let mut device = io
-        .connect_output(id)
+        .connect_output(started, id)
         .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?;
     if active_sensing {
         device.active_sensing();
@@ -1505,6 +1632,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         id: ResourceId,
         ids: crate::peer::ResourceIds,
         saved: DeviceInfo,
+        started: Started,
     ) -> Result<MidiInput, MidiPortError> {
         self.close_dropped();
         let io = self
@@ -1513,11 +1641,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             .ok_or(MidiPortError::from(NoHardware))?;
         // A present device is bound when it is surely the saved one, or the one
         // of its name; one of several that could be is for the app to choose.
-        let found = match io.devices().resolve(&saved) {
-            Resolved::Exact(info) | Resolved::SameName(info) => Some(info),
-            Resolved::Ambiguous(candidates) => return Err(MidiPortError::Ambiguous(candidates)),
-            Resolved::Missing => None,
-        };
+        let found = bind(io, &saved)?;
         let found = found.filter(|info| info.direction.is_input());
         let (writer, generation) = DeviceGeneration::new();
         let layout = self
@@ -1561,6 +1685,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             saved,
             open: None,
             pending,
+            started,
         });
         let at = self.state.ports.inputs.len() - 1;
         if let Some(info) = found {
@@ -1594,14 +1719,11 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         id: ResourceId,
         saved: DeviceInfo,
         active_sensing: bool,
+        started: Started,
     ) -> Result<MidiOutput, MidiPortError> {
         self.close_dropped();
         let io = self.io.as_deref().ok_or(MidiPortError::from(NoHardware))?;
-        let found = match io.devices().resolve(&saved) {
-            Resolved::Exact(info) | Resolved::SameName(info) => Some(info),
-            Resolved::Ambiguous(candidates) => return Err(MidiPortError::Ambiguous(candidates)),
-            Resolved::Missing => None,
-        };
+        let found = bind(io, &saved)?;
         let found = found.filter(|info| info.direction.is_output());
         // One connection a device: a dropped output still retiring on it ends
         // here, with what its tap held sent and what the graph has not rendered
@@ -1613,7 +1735,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 .release_device(&info.id, self.graph, timing.as_ref());
         }
         let device = match &found {
-            Some(info) => Some(open_device_output(io, &info.id, active_sensing)?),
+            Some(info) => Some(open_device_output(io, started, &info.id, active_sensing)?),
             None => None,
         };
         let rate = self.graph.prepared().sample_rate();
@@ -1654,6 +1776,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             device_seen: Losses::NONE,
             out: device.map(|device| UmpOut::of_device(device, rate)),
             parked: None,
+            started,
         });
         Ok(MidiOutput { claim })
     }

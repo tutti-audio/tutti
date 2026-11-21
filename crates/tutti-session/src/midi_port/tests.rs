@@ -5,6 +5,14 @@ use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
 use tutti_units::Frame;
 
+/// What `wait` resolved to on its first poll: a fake backend has nothing to start.
+fn ready<T, E: std::fmt::Debug>(wait: impl Future<Output = Result<T, E>>) -> T {
+    match std::pin::pin!(wait).poll(&mut Context::from_waker(std::task::Waker::noop())) {
+        Poll::Ready(outcome) => outcome.expect("a fake backend starts at once"),
+        Poll::Pending => panic!("a fake backend's start is ready on the first poll"),
+    }
+}
+
 fn render(s: &Session, blocks: usize) {
     let mut buf = vec![0.0f32; 512 * 2];
     for _ in 0..blocks {
@@ -39,7 +47,8 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         .expect("builds");
     let _ = s.update();
     let synth = s.midi().devices().remove(0);
-    let _out = s.open_midi_output(synth).run().expect("opens");
+    let opened = ready(s.open_midi_output(synth).expect("begins"));
+    let _out = s.apply(opened).expect("opens");
     let _ = s.update();
     // The device receives JR Timestamps, so the output stamps and its stream moves.
     s.midi.state.ports.outputs[0]
@@ -104,7 +113,8 @@ fn a_host_removed_input_node_does_not_keep_its_retiring_entry() {
         .expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    let port = s.open_midi_input(keys).expect("opens");
+    let opened = ready(s.open_midi_input(keys).expect("begins"));
+    let port = s.apply(opened).expect("opens");
     let _ = s.update();
     s.graph().remove(port.node()).expect("the node is there");
     drop(port);

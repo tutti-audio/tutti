@@ -3,6 +3,7 @@
 //! next block start and publishes the overlay maps, and the engine renders under
 //! them.
 
+use crate::common::OpenPorts as _;
 use crate::common::{Keyed, blocks, play, tap};
 use std::sync::Arc;
 use tutti_platform::Instant;
@@ -36,7 +37,7 @@ fn rig_with(groups: Option<MidiGroup>) -> (Keyed, FakeCounters) {
         .expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    let keys = s.open_midi_input(keys).expect("opens");
+    let keys = s.open_input(keys).expect("opens");
     (Keyed::new(s, keys), fake)
 }
 

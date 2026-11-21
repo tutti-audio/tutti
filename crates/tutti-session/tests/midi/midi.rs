@@ -4,6 +4,8 @@
 //! event input receives with its absolute frame.
 
 #[cfg(feature = "midi-hardware")]
+use crate::common::OpenPorts as _;
+#[cfg(feature = "midi-hardware")]
 use crate::common::with_input;
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 use std::sync::Arc;
@@ -749,7 +751,7 @@ pub(crate) fn connect(s: &mut Session, names: &[&'static str]) -> Vec<tutti_sess
                 .iter()
                 .find(|d| d.name.eq_ignore_ascii_case(name))
                 .unwrap_or_else(|| panic!("{name} is listed"));
-            s.open_midi_input(device.clone()).expect("opens")
+            s.open_input(device.clone()).expect("opens")
         })
         .collect();
     let _ = s.update();
@@ -918,7 +920,7 @@ fn a_remembered_device_resolves_through_the_session() {
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let saved = s.midi().devices().remove(0);
-    let port = s.open_midi_input(saved).expect("opens");
+    let port = s.open_input(saved).expect("opens");
     assert_eq!(
         port.presence(),
         Presence::Live,
@@ -2136,8 +2138,8 @@ fn open_dev(s: &mut Session) -> (tutti_session::MidiInput, tutti_session::MidiOu
         .into_iter()
         .find(|d| d.name == "Dev")
         .expect("Dev is listed");
-    let input = s.open_midi_input(dev.clone()).expect("opens");
-    let output = s.open_midi_output(dev).run().expect("opens");
+    let input = s.open_input(dev.clone()).expect("opens");
+    let output = s.open_output(dev).expect("opens");
     (input, output)
 }
 
