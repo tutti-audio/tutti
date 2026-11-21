@@ -24,7 +24,7 @@
 //!     .outputs_floor(ChannelLayout::MONO)
 //!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(512))).build()
 //!     .unwrap();
-//! let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
+//! let osc = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
 //! s.graph().connect(osc, Root).unwrap();
 //! s.update(); // commits: the graph was edited
 //!
@@ -202,7 +202,7 @@ pub use graph::{
 #[cfg(feature = "capture")]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
-pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
+pub use instrument::{AnyNode, InstrumentHandle, NotInstrument};
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
@@ -290,9 +290,7 @@ pub use sampler::{OpenStream, OpenStreamError, OpenedStream, SamplerError};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;
-pub use session::{
-    AppKey, CrossfadeControls, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent,
-};
+pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
 #[cfg(all(feature = "analyze", feature = "sampler"))]
 pub use signal_windows::windows_from_signal;
 #[cfg(feature = "device")]

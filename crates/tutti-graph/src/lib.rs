@@ -259,8 +259,8 @@
 //! must start from the values set through its [`ParamSet`], not share the
 //! live cell. (`ForkByClone(param_node)` still compiles, Rust having no way
 //! to refuse the type; see [`Params`].) In a session it is
-//! `graph.add(Params(node))`, which returns the key and the [`ParamSet`] and
-//! gives the key its typed param methods from the declaration.
+//! `graph.add(Params(node))`, which returns the key and gives it its typed param
+//! methods from the declaration.
 //!
 //! ```
 //! # use tutti_buffers::Planes;

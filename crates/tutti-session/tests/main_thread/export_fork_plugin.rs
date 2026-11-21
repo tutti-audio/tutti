@@ -148,7 +148,7 @@ fn feed_with(
     probe: NodeKey,
     node: impl tutti_session::SessionNode<Controls = ()>,
 ) {
-    let (source, ()) = session.graph().add(node);
+    let source = session.graph().add(node);
     session
         .graph()
         .set_sources(InPort::new(probe, 0), [OutPort::new(source, 0)])

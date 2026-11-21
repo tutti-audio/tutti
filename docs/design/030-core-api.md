@@ -576,7 +576,7 @@ order, one PR per step, each deleting what it replaces. It supersedes tasks
       so a host that plays from two threads wraps the handle in its own lock or moves it, and
       a handle that was `Clone` before is not. `Session::remove_instrument` and
       `GeneralMidi::remove` take their handle by value, so a second removal through it is unwritable. `Session::add_instrument` returns
-      `AddedInstrument { handle, controls }` and wires the strip to the master;
+      the `InstrumentHandle` and wires the strip to the master;
       `add_instrument_unwired` leaves the strip for a mix that routes it (`add_general_midi`
       does), a second method over a flag so each reads at the call site. `instrument` and
       `instrument_plugin` still take a node already in the graph and leave it unwired.

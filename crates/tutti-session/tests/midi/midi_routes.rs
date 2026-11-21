@@ -58,8 +58,8 @@ fn channelless() -> u16 {
 #[test]
 fn two_rules_on_one_target_take_the_union() {
     let (mut s, input) = session();
-    let (lead, _) = s.graph().add(ForkByClone(Sink));
-    let (pad, _) = s.graph().add(ForkByClone(Sink));
+    let lead = s.graph().add(ForkByClone(Sink));
+    let pad = s.graph().add(ForkByClone(Sink));
     s.midi()
         .route(MidiRouteRule::for_channel(MidiChannel::of(2)).to(lead.erase()))
         .unwrap();
@@ -84,7 +84,7 @@ fn two_rules_on_one_target_take_the_union() {
 #[test]
 fn a_disabled_rule_routes_nothing_until_it_is_armed() {
     let (mut s, input) = session();
-    let (lead, _) = s.graph().add(ForkByClone(Sink));
+    let lead = s.graph().add(ForkByClone(Sink));
     let armed = MidiRouteRule::for_channel(MidiChannel::FIRST).to(lead.erase());
     s.midi().set_routes(input, [&armed], None, Some).unwrap();
     assert!(!ports(&s, input, lead.erase()).is_empty(), "armed");
@@ -119,8 +119,8 @@ impl Node for Mute {
 #[test]
 fn a_rule_to_a_target_without_an_event_input_is_refused() {
     let (mut s, input) = session();
-    let (mute, _) = s.graph().add(ForkByClone(Mute));
-    let (lead, _) = s.graph().add(ForkByClone(Sink));
+    let mute = s.graph().add(ForkByClone(Mute));
+    let lead = s.graph().add(ForkByClone(Sink));
     let refused = s.midi().route(
         MidiRouteRule::any_channel()
             .to(lead.erase())
@@ -141,8 +141,8 @@ fn a_rule_to_a_target_without_an_event_input_is_refused() {
 #[test]
 fn a_fallback_without_an_event_input_is_refused() {
     let (mut s, input) = session();
-    let (mute, _) = s.graph().add(ForkByClone(Mute));
-    let (lead, _) = s.graph().add(ForkByClone(Sink));
+    let mute = s.graph().add(ForkByClone(Mute));
+    let lead = s.graph().add(ForkByClone(Sink));
     s.midi().set_route_fallback(Some(lead.erase())).unwrap();
     let refused = s.midi().set_route_fallback(Some(mute.erase()));
     assert!(
@@ -156,8 +156,8 @@ fn a_fallback_without_an_event_input_is_refused() {
 #[test]
 fn set_routes_from_a_node_that_is_not_an_input_is_refused() {
     let (mut s, _input) = session();
-    let (mute, _) = s.graph().add(ForkByClone(Mute));
-    let (lead, _) = s.graph().add(ForkByClone(Sink));
+    let mute = s.graph().add(ForkByClone(Mute));
+    let lead = s.graph().add(ForkByClone(Sink));
     let rule = MidiRouteRule::any_channel().to(lead.erase());
     let refused = s.midi().set_routes(mute.erase(), [&rule], None, Some);
     assert!(

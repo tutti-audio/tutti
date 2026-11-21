@@ -99,15 +99,15 @@ struct Rig {
 fn rig() -> Rig {
     let mut s = offline();
     let g = s.graph();
-    let (stereo, _) = g.add(Unforkable(Src {
+    let stereo = g.add(Unforkable(Src {
         values: vec![0.25, 0.75],
         out: named(2),
     }));
-    let (own, _) = g.add(Unforkable(Src {
+    let own = g.add(Unforkable(Src {
         values: vec![0.125],
         out: named(1),
     }));
-    let (sink, _) = g.add(Unforkable(Pass { input: named(1) }));
+    let sink = g.add(Unforkable(Pass { input: named(1) }));
     g.set_sources_unfaded(Root::output(0), [OutPort::new(sink, 0)])
         .unwrap();
     let _ = s.update();
@@ -229,7 +229,7 @@ fn a_bus_edge_fades_in_and_out_lane_by_lane() {
 fn a_refused_bus_edge_changes_nothing() {
     let mut r = rig();
     let g = r.s.graph();
-    let (three, _) = g.add(Unforkable(Src {
+    let three = g.add(Unforkable(Src {
         values: vec![0.0; 3],
         out: unassigned(3),
     }));
@@ -307,7 +307,7 @@ fn stereo_block(s: &mut Session) -> [Vec<f32>; 2] {
 fn root_rig() -> (Session, NodeKey) {
     let mut s = offline();
     s.declare_root_topology(Some(smpte(2))).expect("stereo");
-    let (src, _) = s.graph().add(Unforkable(Src {
+    let src = s.graph().add(Unforkable(Src {
         values: vec![0.5, 0.25, 0.125, 0.0, 0.0625, 0.03125],
         out: named(6),
     }));
@@ -371,7 +371,7 @@ fn an_undeclared_root_refuses_a_bus_edge() {
 fn a_refused_commit_is_an_event_of_its_update() {
     let mut s = offline();
     s.declare_root_topology(Some(smpte(2))).expect("stereo");
-    let (src, _) = s.graph().add(Unforkable(Src {
+    let src = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],
         out: named(2),
     }));
@@ -425,7 +425,7 @@ fn a_refused_commit_is_an_event_of_its_update() {
 fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     let mut s = offline();
     s.declare_root_topology(Some(smpte(2))).expect("stereo");
-    let (src, _) = s.graph().add(Unforkable(Src {
+    let src = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],
         out: named(2),
     }));

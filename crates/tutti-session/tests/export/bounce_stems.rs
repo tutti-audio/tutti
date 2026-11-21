@@ -140,8 +140,8 @@ impl Node for Half {
 #[test]
 fn stems_are_aligned_with_the_master_and_sum_to_it() {
     let mut session = session();
-    let (steady, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
-    let (late, _) = session.graph().add(ForkByClone(Late { pos: 0 }));
+    let steady = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let late = session.graph().add(ForkByClone(Late { pos: 0 }));
     for channel in 0..2 {
         session
             .graph()
@@ -211,14 +211,14 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
 #[test]
 fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
     let mut session = session();
-    let (source, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
-    let (half, _) = session.graph().add(ForkByClone(Half));
+    let source = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let half = session.graph().add(ForkByClone(Half));
     session
         .graph()
         .set_sources(InPort::new(half, 0), [OutPort::new(source, 0)])
         .unwrap();
     session.graph().connect(half, Root).unwrap();
-    let (wide, _) = session
+    let wide = session
         .graph()
         .add(ForkByClone(Const::frame(&[0.25, -0.5, 0.75])));
     for channel in 0..2 {
@@ -264,7 +264,7 @@ fn a_stem_is_the_nodes_own_output_and_not_what_is_downstream() {
 fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = session();
-    let (wide, _) = session
+    let wide = session
         .graph()
         .add(ForkByClone(Const::frame(&[0.25, -0.5, 0.75])));
     for channel in 0..2 {
@@ -305,7 +305,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
 fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = session();
-    let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
     let master = dir.path().join("master.wav");
     let stem = dir.path().join("stem.wav");
@@ -343,8 +343,8 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
 #[test]
 fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     let mut session = session();
-    let (loud, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
-    let (quiet, _) = session.graph().add(ForkByClone(Const::mono(0.25)));
+    let loud = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let quiet = session.graph().add(ForkByClone(Const::mono(0.25)));
     for channel in 0..2 {
         session
             .graph()
@@ -430,7 +430,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let path = |n: &str| dir.path().join(n);
     let mut session = session();
-    let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
     fn why<M: Master>(session: &mut DetachedSession, b: Bounce<NodeKey, M>) -> BounceConfigError {
         match refused(session, b) {
@@ -480,7 +480,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
 #[test]
 fn a_host_resolves_its_own_names_once() {
     let mut session = session();
-    let (kick, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let kick = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(kick, Root).unwrap();
     let keys: HashMap<&str, _> = HashMap::from([("kick", kick.erase())]);
 
@@ -503,7 +503,7 @@ fn a_host_resolves_its_own_names_once() {
 #[test]
 fn a_node_the_edit_removed_is_refused_where_the_taps_open() {
     let mut session = session();
-    let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
+    let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
     let b = bounce(0.01)
         .stem_with(Stem::buffers(node.erase()))

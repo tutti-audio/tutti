@@ -2147,7 +2147,7 @@ mod tests {
     /// A detached session whose outputs hear a dc node: something to bounce.
     fn session() -> crate::DetachedSession {
         let mut session = Session::builder().build_detached(RATE).unwrap();
-        let (dc, _) = session
+        let dc = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
         session.graph().connect(dc, Root).unwrap();
@@ -2165,7 +2165,7 @@ mod tests {
     #[test]
     fn a_bounce_renders_an_edit_no_update_has_committed() {
         let mut session = session();
-        let (half, _) = session
+        let half = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
         session.graph().connect(half, Root).unwrap();
@@ -2436,10 +2436,10 @@ mod tests {
         const DURATION: usize = 480;
         const LATENCY: usize = 240;
         let mut session = session();
-        let (dc, _) = session
+        let dc = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.25)));
-        let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::<f32>::from(
+        let lim = session.graph().add(tutti_nodes::LimiterNode::<f32>::from(
             tutti_nodes::LimiterConfig::new(tutti_buffers::BusTopology::MONO).controls(
                 tutti_nodes::LimiterControls {
                     threshold: Db::new(-6.0),

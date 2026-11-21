@@ -254,7 +254,7 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
 #[test]
 fn a_target_without_an_event_input_takes_no_clip() {
     let mut s = offline();
-    let (dc, _) = s
+    let dc = s
         .graph()
         .add(tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(
             0.5,
@@ -949,7 +949,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
     let (other, _) = tap(&mut s);
-    let (hand, _) = s.graph().add(MidiClipNode::new(note(
+    let hand = s.graph().add(MidiClipNode::new(note(
         62,
         MF,
         Beat::new(1.0 / 3.0),
@@ -979,7 +979,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     ons.sort_unstable();
     assert_eq!(ons, vec![(8_000, 60), (8_000, 62)], "both play");
 
-    let (hand2, _) = s.graph().add(MidiClipNode::new([]));
+    let hand2 = s.graph().add(MidiClipNode::new([]));
     s.graph()
         .set_sources(input(synth), [hand2.events_out()])
         .unwrap();

@@ -15,11 +15,7 @@ impl<F: Float> Graph<F> {
     pub(crate) fn report_crossfades(&mut self, out: &mut Vec<SessionEvent>) {
         for retried in self.retry_crossfades() {
             out.push(match retried {
-                Retried::Landed { node, id, controls } => SessionEvent::CrossfadeLanded {
-                    node,
-                    id,
-                    controls: crate::CrossfadeControls::new(controls),
-                },
+                Retried::Landed { node, id } => SessionEvent::CrossfadeLanded { node, id },
                 Retried::Failed { node, id, refused } => {
                     SessionEvent::CrossfadeFailed { node, id, refused }
                 }

@@ -83,7 +83,7 @@ mod clap {
         assert_eq!(buses.input(2), None);
 
         let aux = buses.input(1).expect("the probe has an aux input");
-        let (kick, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
+        let kick = s.graph().add(ForkByClone(Const::mono(0.5)));
         s.graph()
             .connect(kick.bus_out(0), aux)
             .expect("a mono source feeds the mono aux input");

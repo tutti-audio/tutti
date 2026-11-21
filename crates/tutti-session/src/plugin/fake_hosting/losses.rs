@@ -102,7 +102,7 @@ fn hosted() -> (DetachedSession, NodeKey, Counters, FakePlugin) {
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    let (node, _) = s.graph().add(ForkByClone(Const::mono(0.0)));
+    let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(&mut s, node, handle, plugin());
     s.commit();
     let node = node.erase();

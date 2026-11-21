@@ -38,7 +38,7 @@ fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
         .expect("builds");
     let mut filters = Vec::with_capacity(n);
     for _ in 0..n {
-        let (f, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        let f = s.graph().add(SvfFilterNode::<f32>::from(
             SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
                 .freq(Hz::new(1_000.0))
                 .q(Q::new(0.7)),

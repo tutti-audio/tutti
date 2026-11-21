@@ -54,7 +54,7 @@ fn wire(s: &mut Session, clip: NodeKey) {
 #[test]
 fn a_clip_starts_on_its_beat_at_its_gain() {
     let mut s = offline();
-    let (clip, _) = s.graph().add(
+    let clip = s.graph().add(
         Clip::new(level(0.5))
             .and_then(|c| c.channels(ChannelLayout::STEREO))
             .expect("a placeable wave")
@@ -71,7 +71,7 @@ fn a_clip_starts_on_its_beat_at_its_gain() {
     assert_eq!(first, 24_000, "on the frame of beat 1");
     // The clip's gain is a scalar on the wave's level: half of the unscaled.
     let (mut full, _) = (offline(), ());
-    let (whole, _) = full.graph().add(
+    let whole = full.graph().add(
         Clip::new(level(0.5))
             .and_then(|c| c.channels(ChannelLayout::STEREO))
             .unwrap()
@@ -93,7 +93,7 @@ fn a_clip_starts_on_its_beat_at_its_gain() {
 fn a_clip_is_as_wide_as_its_wave_unless_placed() {
     let mut s = offline();
     let outputs = |s: &mut Session, clip: Clip<f32>| {
-        let (node, _) = s.graph().add(clip);
+        let node = s.graph().add(clip);
         s.graph().buses(node).expect("in the graph").1.width()
     };
     assert_eq!(outputs(&mut s, Clip::new(level(0.5)).unwrap()), 1);

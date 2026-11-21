@@ -22,9 +22,9 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
-    let (dry, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (lim, _) = s.graph().add(LimiterNode::<f32>::from(
+    let dry = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let src = s.graph().add(ForkByClone(Const::mono(1.0)));
+    let lim = s.graph().add(LimiterNode::<f32>::from(
         LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
             threshold: Db::new(-1.0),
             ceiling: Db::new(-0.3),
