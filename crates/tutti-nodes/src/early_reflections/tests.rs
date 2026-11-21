@@ -16,7 +16,7 @@ fn tap(delay: f64, gain: f64, channel: u8) -> Tap {
 fn config(width: u16, taps: &[Tap]) -> EarlyReflectionsConfig {
     EarlyReflectionsConfig::new(
         width,
-        Taps {
+        TapSet {
             taps: Inline::from_slice(taps).unwrap(),
         },
     )

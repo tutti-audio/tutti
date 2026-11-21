@@ -70,7 +70,7 @@ fn device_errors_are_boxable() {
 }
 
 fn modulation_errors_are_boxable() {
-    err::<tutti::modulation::CompileError>();
+    err::<tutti::modulation::ModulationCompileError>();
     err::<tutti::modulation::ProgramError>();
 }
 

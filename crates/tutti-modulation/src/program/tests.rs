@@ -40,7 +40,7 @@ fn amount(depth: f64) -> Amount {
     }
 }
 
-fn layer(id: u64, clock: Clock, shape: LfoShape, amount: Amount) -> Layer {
+fn layer(id: u64, clock: LayerClock, shape: LfoShape, amount: Amount) -> Layer {
     Layer {
         id: LayerId(id),
         clock,
@@ -50,15 +50,15 @@ fn layer(id: u64, clock: Clock, shape: LfoShape, amount: Amount) -> Layer {
     }
 }
 
-fn beats(per_cycle: f64) -> Clock {
-    Clock::Beats {
+fn beats(per_cycle: f64) -> LayerClock {
+    LayerClock::Beats {
         per_cycle: BeatsPerCycle::of(per_cycle),
         phase: PhaseIncrement::new(0.0),
     }
 }
 
-fn seconds(rate: f64) -> Clock {
-    Clock::Seconds {
+fn seconds(rate: f64) -> LayerClock {
+    LayerClock::Seconds {
         rate: Hz::new(rate),
         phase: PhaseIncrement::new(0.0),
         anchor: None,
@@ -319,7 +319,7 @@ fn layers_sum_in_id_order_in_f64() {
 /// across a republish.
 #[test]
 fn phase_survives_a_depth_edit() {
-    let clock = Clock::Seconds {
+    let clock = LayerClock::Seconds {
         rate: Hz::new(3.0),
         phase: PhaseIncrement::new(0.125),
         anchor: None,
@@ -349,7 +349,7 @@ fn a_rate_anchor_continues_the_phase() {
         phase: 10.25,
         prev_rate: Hz::new(2.0),
     };
-    let clock = Clock::Seconds {
+    let clock = LayerClock::Seconds {
         rate: Hz::new(4.0),
         phase: PhaseIncrement::new(0.0),
         anchor: Some(anchor),
@@ -808,7 +808,7 @@ fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
 /// too.
 #[test]
 fn a_constant_wave_needs_no_clock() {
-    let dead = Clock::Seconds {
+    let dead = LayerClock::Seconds {
         rate: Hz::new(f64::INFINITY),
         phase: PhaseIncrement::new(0.0),
         anchor: None,
@@ -855,7 +855,7 @@ fn new_refuses_a_nan() {
     };
     let nan_depth_by = Layer {
         depth_by: Some(DepthBy {
-            clock: Clock::Seconds {
+            clock: LayerClock::Seconds {
                 rate: Hz::new(1.0),
                 phase: PhaseIncrement::new(f64::NAN),
                 anchor: None,

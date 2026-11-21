@@ -54,7 +54,7 @@ use super::interp::{
     tap_indices,
 };
 use super::loop_span::LoopSpan;
-use super::types::Direction;
+use super::types::PlayDirection;
 use crate::streamer::StreamFile;
 
 // A read is placed by the `Place` the voice built from its file's topology
@@ -204,7 +204,7 @@ impl<F: Float> OfflineRead<F> {
     pub(crate) fn read_into(
         &mut self,
         pos: SamplePosition,
-        direction: Direction,
+        direction: PlayDirection,
         place: &Place<F>,
         out: &mut [F],
     ) {
@@ -215,8 +215,8 @@ impl<F: Float> OfflineRead<F> {
         }
         // Past what this direction can play, known without opening the file.
         let played_out = match direction {
-            Direction::Reverse => true,
-            Direction::Forward => self.loop_.is_none(),
+            PlayDirection::Reverse => true,
+            PlayDirection::Forward => self.loop_.is_none(),
         };
         if played_out
             && let Some(len) = self.len
@@ -234,18 +234,18 @@ impl<F: Float> OfflineRead<F> {
         let span = LoopSpan::from_setting(setting, open.len());
         let len = open.len() as f64;
         match (direction, span) {
-            (Direction::Reverse, _) => {
+            (PlayDirection::Reverse, _) => {
                 if pos.get() >= len {
                     out.fill(F::ZERO);
                     return;
                 }
                 open.read_into(mirrored(Samples::new(open.len()), pos), place, out);
             }
-            (Direction::Forward, Some(span)) => {
+            (PlayDirection::Forward, Some(span)) => {
                 let (p, looped) = span.place(pos.get());
                 open.read_looped_into(&span, SamplePosition::new(p), looped, place, out);
             }
-            (Direction::Forward, None) => open.read_into(pos, place, out),
+            (PlayDirection::Forward, None) => open.read_into(pos, place, out),
         }
     }
 
@@ -602,7 +602,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let path = ramp_file(dir.path());
         let bound = LEN / (PAGE_FRAMES - 2 * PAGE_LEAD) + 2;
-        for direction in [Direction::Forward, Direction::Reverse] {
+        for direction in [PlayDirection::Forward, PlayDirection::Reverse] {
             let mut read = reader(path.clone());
             let mut out = [0.0f32; 1];
             for k in 0..LEN {
@@ -613,8 +613,8 @@ mod tests {
                     &mut out,
                 );
                 let want = match direction {
-                    Direction::Forward => value(k),
-                    Direction::Reverse => value(LEN - 1 - k),
+                    PlayDirection::Forward => value(k),
+                    PlayDirection::Reverse => value(LEN - 1 - k),
                 };
                 assert_eq!(out[0], want, "{direction:?}: frame {k}");
             }
@@ -649,7 +649,7 @@ mod tests {
         let mut at = |pos: f64| {
             read.read_into(
                 SamplePosition::new(pos),
-                Direction::Forward,
+                PlayDirection::Forward,
                 &Place::FAN,
                 &mut out,
             );
@@ -672,14 +672,14 @@ mod tests {
         let mut out = [0.0f32; 1];
         read.read_into(
             SamplePosition::new(10.0),
-            Direction::Forward,
+            PlayDirection::Forward,
             &Place::FAN,
             &mut out,
         );
         assert!(read.is_open());
         read.read_into(
             SamplePosition::new((LEN + 10) as f64),
-            Direction::Forward,
+            PlayDirection::Forward,
             &Place::FAN,
             &mut out,
         );
@@ -687,7 +687,7 @@ mod tests {
         assert!(!read.is_open(), "the file is still open past its end");
         read.read_into(
             SamplePosition::new((LEN + 20) as f64),
-            Direction::Forward,
+            PlayDirection::Forward,
             &Place::FAN,
             &mut out,
         );
@@ -715,7 +715,7 @@ mod tests {
         let mut out = [0.0f32; 2];
         read.read_into(
             SamplePosition::new(100.0),
-            Direction::Forward,
+            PlayDirection::Forward,
             &Place::FAN,
             &mut out,
         );
@@ -736,7 +736,7 @@ mod tests {
         let path = ramp_file(dir.path());
         let on = Some(loop_frames(10, 20, 0));
         for loop_ in [None, on] {
-            for direction in [Direction::Forward, Direction::Reverse] {
+            for direction in [PlayDirection::Forward, PlayDirection::Reverse] {
                 for pos in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
                     let mut read = OfflineRead::new(
                         Arc::new(StreamFile::new(path.clone(), SampleRate::SR_48K, None)),
@@ -794,7 +794,7 @@ mod tests {
         for k in (0..FRAMES).step_by(7).chain([FRAMES - 1]) {
             read.read_into(
                 SamplePosition::new(k as f64),
-                Direction::Forward,
+                PlayDirection::Forward,
                 &Place::FAN,
                 &mut out,
             );
@@ -842,7 +842,7 @@ mod tests {
             for k in 0..16 {
                 read.read_into(
                     SamplePosition::new(k as f64),
-                    Direction::Forward,
+                    PlayDirection::Forward,
                     &Place::FAN,
                     &mut out,
                 );

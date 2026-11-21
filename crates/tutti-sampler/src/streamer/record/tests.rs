@@ -55,14 +55,14 @@ fn record_with_cells(
     tutti_rt::PosReader,
     Arc<StatusCell>,
     Publisher<Option<Loop>>,
-    Publisher<Direction>,
+    Publisher<PlayDirection>,
 ) {
     let (out, ring, pos) = RegionBuffer::with_capacity(id, path.clone(), capacity, channels);
     let cache = Arc::new(LruCache::<f32>::new(4, 1 << 20));
     let pin = cache.pin(Asset::from(path).identity().as_ref());
     let status = Arc::new(StatusCell::new());
     let looping = Publisher::new(None);
-    let direction = Publisher::new(Direction::Forward);
+    let direction = Publisher::new(PlayDirection::Forward);
     let record = Record::new(
         out,
         Arc::new(Cells::new()),
@@ -211,11 +211,11 @@ fn a_published_request_is_taken_once_when_it_changes() {
     looping.publish(None);
     assert_eq!(rec.loop_asked(), Some(None), "a clear is a request");
 
-    direction.publish(Direction::Reverse);
-    assert_eq!(rec.direction_asked(), Some(Direction::Reverse));
+    direction.publish(PlayDirection::Reverse);
+    assert_eq!(rec.direction_asked(), Some(PlayDirection::Reverse));
     assert_eq!(rec.direction_asked(), None, "taken once");
-    direction.publish(Direction::Forward);
-    assert_eq!(rec.direction_asked(), Some(Direction::Forward));
+    direction.publish(PlayDirection::Forward);
+    assert_eq!(rec.direction_asked(), Some(PlayDirection::Forward));
 }
 
 /// **A request published before the stream is live is taken when it goes
@@ -232,13 +232,13 @@ fn a_request_published_before_the_stream_is_live_is_taken_once_it_is() {
         record_with_cells(id, PathBuf::from("t.wav"), 1024, 1u16);
     let _ = step(&mut local.streams, Cmd::Open(Box::new(rec)));
     looping.publish(ask(0, 10));
-    direction.publish(Direction::Reverse);
+    direction.publish(PlayDirection::Reverse);
 
     follow_steering(&config, &mut local);
     let held = local.streams.get(id).unwrap();
     assert_eq!(
         (held.asked_loop, held.asked_direction),
-        (None, Direction::Forward),
+        (None, PlayDirection::Forward),
         "an opening stream takes nothing"
     );
 
@@ -247,7 +247,7 @@ fn a_request_published_before_the_stream_is_live_is_taken_once_it_is() {
     let held = local.streams.get(id).unwrap();
     assert_eq!(
         (held.asked_loop, held.asked_direction),
-        (ask(0, 10), Direction::Reverse),
+        (ask(0, 10), PlayDirection::Reverse),
         "taken once it is live"
     );
 }
@@ -275,7 +275,7 @@ fn a_rate_event_re_derives_each_streams_own_ratio() {
                 cache.pin(None),
                 Arc::new(StatusCell::new()),
                 Publisher::new(None).reader(),
-                Publisher::new(Direction::Forward).reader(),
+                Publisher::new(PlayDirection::Forward).reader(),
             );
             let _ = step(&mut streams, Cmd::Open(Box::new(record)));
             cells

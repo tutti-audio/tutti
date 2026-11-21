@@ -1,8 +1,8 @@
-//! [`EarlyReflectionsNode`]: the reverb model's [`Taps`] stage as a node.
+//! [`EarlyReflectionsNode`]: the reverb model's [`TapSet`] stage as a node.
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{EarlyReflections, EarlyReflectionsError, Taps};
+use tutti_dsp::{EarlyReflections, EarlyReflectionsError, TapSet};
 use tutti_graph::{Buses, Cost, Shape};
 use tutti_units::{SampleRate, Tail};
 
@@ -13,13 +13,13 @@ use crate::params::NoControls;
 #[derive(Clone, Debug, PartialEq)]
 pub struct EarlyReflectionsConfig {
     width: ChannelLayout,
-    taps: Taps,
+    taps: TapSet,
 }
 
 impl EarlyReflectionsConfig {
     /// A stage of `taps` (a rectangular room's come from [`ShoeboxRoom::taps`](tutti_dsp::ShoeboxRoom::taps)) over an input of `width` channels (an empty layout is taken as mono).
     #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>, taps: Taps) -> Self {
+    pub fn new(width: impl Into<ChannelLayout>, taps: TapSet) -> Self {
         Self {
             width: ChannelLayout::from_count(width.into().count().max(1)),
             taps,
@@ -28,7 +28,7 @@ impl EarlyReflectionsConfig {
 }
 
 /// The early reflections of a reverb model: the mean of the input's channels through the taps
-/// of a [`Taps`] stage ([`EarlyReflections`]), one output channel for each channel a tap feeds.
+/// of a [`TapSet`] stage ([`EarlyReflections`]), one output channel for each channel a tap feeds.
 ///
 /// Each tap is a delay (in fractional frames, the whole one read exactly and a fraction as the
 /// blend of the two frames around it) and a signed gain, so an impulse puts each gain at its

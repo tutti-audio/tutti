@@ -13,12 +13,12 @@
 //! A room is made from a [`ShoeboxConfig`] (`ShoeboxRoom::try_from`), which refuses a source or
 //! listener outside it.
 //!
-//! The images up to the [`ReflectionOrder`] are the [`Taps`] of one channel, sorted by delay;
+//! The images up to the [`ReflectionOrder`] are the [`TapSet`] of one channel, sorted by delay;
 //! the direct path is left out unless asked for, since early reflections are wet only.
 
 use tutti_units::{Gain, Metres, Normalized, SampleRate, SampleSpan, Speed};
 
-use crate::{Inline, Tap, Taps};
+use crate::{Inline, Tap, TapSet};
 
 /// The distance at which a path has gain 1: a path shorter than this is not louder.
 const REFERENCE: Metres = Metres::of(1.0);
@@ -188,9 +188,9 @@ impl ShoeboxRoom {
     ///
     /// # Panics
     ///
-    /// Never: the images of the supported orders fit a [`Taps`].
+    /// Never: the images of the supported orders fit a [`TapSet`].
     #[must_use]
-    pub fn taps(&self, rate: SampleRate) -> Taps {
+    pub fn taps(&self, rate: SampleRate) -> TapSet {
         let order = self.config.order.reflections();
         let mut images: Vec<Tap> = Vec::new();
         for x in axis_images(order) {
@@ -209,7 +209,7 @@ impl ShoeboxRoom {
                 .total_cmp(&b.delay.get())
                 .then(a.gain.get().total_cmp(&b.gain.get()))
         });
-        Taps {
+        TapSet {
             taps: Inline::from_slice(&images).expect("at most 25 images fit the taps"),
         }
     }

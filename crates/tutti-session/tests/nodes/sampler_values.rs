@@ -407,15 +407,19 @@ fn a_loop_set_lands_at_the_update_and_wraps_a_streamed_voice_at_its_end() {
 fn a_direction_set_plays_the_voice_backwards(streamed: bool) {
     let mut rig = Rig::new(streamed);
     rig.s
-        .set(rig.clip.direction().to(tutti_sampler::Direction::Reverse))
+        .set(
+            rig.clip
+                .direction()
+                .to(tutti_sampler::PlayDirection::Reverse),
+        )
         .unwrap();
     assert_eq!(
         rig.s.get(rig.clip.direction()).unwrap(),
-        tutti_sampler::Direction::Reverse
+        tutti_sampler::PlayDirection::Reverse
     );
     assert_eq!(
         *rig.handle.direction_cell().current(),
-        tutti_sampler::Direction::Forward,
+        tutti_sampler::PlayDirection::Forward,
         "pending"
     );
     let _ = rig.s.update();
@@ -488,8 +492,8 @@ fn two_loop_and_direction_writes_before_an_update_publish_once_and_the_second_wi
         rig.s.set(rig.clip.looping().to(looped)).unwrap();
     }
     for direction in [
-        tutti_sampler::Direction::Reverse,
-        tutti_sampler::Direction::Forward,
+        tutti_sampler::PlayDirection::Reverse,
+        tutti_sampler::PlayDirection::Forward,
     ] {
         rig.s.set(rig.clip.direction().to(direction)).unwrap();
     }
@@ -518,7 +522,11 @@ fn a_pending_loop_or_direction_write_to_a_removed_node_never_publishes() {
     let seqs = (cells.0.seq(), cells.1.seq());
     rig.s.set(rig.clip.looping().to(loop_1000_3000())).unwrap();
     rig.s
-        .set(rig.clip.direction().to(tutti_sampler::Direction::Reverse))
+        .set(
+            rig.clip
+                .direction()
+                .to(tutti_sampler::PlayDirection::Reverse),
+        )
         .unwrap();
     let clip = rig.clip;
     rig.s.remove(clip).unwrap();
@@ -526,7 +534,7 @@ fn a_pending_loop_or_direction_write_to_a_removed_node_never_publishes() {
     let _ = rig.s.update();
     assert_eq!((cells.0.seq(), cells.1.seq()), seqs);
     assert_eq!(*cells.0.current(), None);
-    assert_eq!(*cells.1.current(), tutti_sampler::Direction::Forward);
+    assert_eq!(*cells.1.current(), tutti_sampler::PlayDirection::Forward);
     let err = rig
         .s
         .set(clip.looping().to(None))
@@ -545,7 +553,11 @@ fn blocks_adopting_a_loop_and_direction_do_not_allocate(streamed: bool) {
     let _ = rig.render(1_024);
     rig.s.set(rig.clip.looping().to(loop_1000_3000())).unwrap();
     rig.s
-        .set(rig.clip.direction().to(tutti_sampler::Direction::Reverse))
+        .set(
+            rig.clip
+                .direction()
+                .to(tutti_sampler::PlayDirection::Reverse),
+        )
         .unwrap();
     let _ = rig.s.update();
     rig.settle();
@@ -648,18 +660,18 @@ fn a_loop_cleared_mid_play_plays_straight_on(streamed: bool) {
 /// forwards over 1 024 frames, reversed (frame `f` plays source `LEN - 1 - f`),
 /// then forwards (frame `f` plays source `f`).
 fn a_direction_reversed_then_forward_mid_play(streamed: bool) {
-    use tutti_sampler::Direction;
+    use tutti_sampler::PlayDirection;
     let mut rig = Rig::new(streamed);
     let first = rig.render(1_024);
     assert_source(&first, 0, 0, |f| f);
     rig.s
-        .set(rig.clip.direction().to(Direction::Reverse))
+        .set(rig.clip.direction().to(PlayDirection::Reverse))
         .unwrap();
     let _ = rig.s.update();
     let reversed = rig.render(3_072);
     assert_source(&reversed, 1_024, 1_024 + landing(streamed), |f| LEN - 1 - f);
     rig.s
-        .set(rig.clip.direction().to(Direction::Forward))
+        .set(rig.clip.direction().to(PlayDirection::Forward))
         .unwrap();
     let _ = rig.s.update();
     let forward = rig.render(3_072);
@@ -703,7 +715,7 @@ fn a_direction_reversed_then_forward_mid_play_lands_on_a_streamed_voice() {
 /// backwards from there, bit for bit.
 #[test]
 fn a_direction_turned_mid_play_on_a_free_running_voice_jumps_to_the_mirrored_frame() {
-    use tutti_sampler::Direction;
+    use tutti_sampler::PlayDirection;
     let mut rig = Rig::new(false);
     rig.s.set(rig.clip.window().to(None)).unwrap();
     let _ = rig.s.update();
@@ -711,7 +723,7 @@ fn a_direction_turned_mid_play_on_a_free_running_voice_jumps_to_the_mirrored_fra
     let forward = rig.render(1_024);
     assert_source(&forward, 0, 0, |f| f);
     rig.s
-        .set(rig.clip.direction().to(Direction::Reverse))
+        .set(rig.clip.direction().to(PlayDirection::Reverse))
         .unwrap();
     let _ = rig.s.update();
     let reversed = rig.render(2_048);

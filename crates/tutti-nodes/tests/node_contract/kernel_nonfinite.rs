@@ -5,7 +5,7 @@
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
-use tutti_dsp::{Inline, Tap, Taps};
+use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
@@ -367,7 +367,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(
                 EarlyReflectionsNode::<f32>::try_from(EarlyReflectionsConfig::new(
                     ChannelLayout::STEREO,
-                    Taps {
+                    TapSet {
                         taps: Inline::from_slice(&[Tap {
                             delay: SampleSpan::new(300.0).unwrap(),
                             gain: Gain::new(0.5),

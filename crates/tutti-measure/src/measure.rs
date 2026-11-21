@@ -21,7 +21,7 @@ pub trait Measure<S: Sample> {
     /// What binding the config to a stream needs.
     type Context;
     /// The meter this config builds.
-    type Meter: Meter;
+    type Meter: Measurement;
 
     /// A meter at the start of one stream bound to `context`.
     ///
@@ -43,7 +43,7 @@ pub trait Measure<S: Sample> {
 ///
 /// A meter is not object-safe (its input borrows per call and `push` is
 /// generic over `out`): a consumer is generic over `A: Measure<S>`.
-pub trait Meter {
+pub trait Measurement {
     /// One chunk of the stream, a view from `tutti-buffers`: `Mono`,
     /// `Interleaved` or `StereoPlanes`.
     type Input<'a>;
@@ -67,7 +67,7 @@ pub trait Meter {
 }
 
 /// Drives one meter of `cfg` over a stream of `frames` frames in uneven chunks
-/// of 1, 7 and 64 frames and the rest, through [`Meter::push`]; `push` slices
+/// of 1, 7 and 64 frames and the rest, through [`Measurement::push`]; `push` slices
 /// the stream to the frame range it is given and pushes that view. Returns
 /// every item the pushes yielded, in order, and the output.
 #[cfg(test)]
@@ -78,9 +78,12 @@ pub(crate) fn fold_uneven<S: Sample, M: Measure<S>>(
     mut push: impl FnMut(
         &mut M::Meter,
         core::ops::Range<usize>,
-        &mut Vec<<M::Meter as Meter>::Item>,
+        &mut Vec<<M::Meter as Measurement>::Item>,
     ) -> Result<()>,
-) -> Result<(Vec<<M::Meter as Meter>::Item>, <M::Meter as Meter>::Output)> {
+) -> Result<(
+    Vec<<M::Meter as Measurement>::Item>,
+    <M::Meter as Measurement>::Output,
+)> {
     let mut meter = cfg.measure(context)?;
     let mut items = Vec::new();
     let mut at: usize = 0;

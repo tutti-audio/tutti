@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, Wave};
-use tutti_measure::{Measure, Meter};
+use tutti_measure::{Measure, Measurement};
 #[cfg(codec)]
 use tutti_platform::Asset;
 use tutti_units::{SampleRate, Samples};
@@ -117,7 +117,7 @@ pub enum AnalyzeError {
 
 /// An analysis of one audio, built by [`Session::analyze`] and not yet run:
 /// [`run`](Self::run) folds the audio through the meter and returns its
-/// [`Output`](Meter::Output).
+/// [`Output`](Measurement::Output).
 ///
 /// It holds the audio and the analysis and nothing of the session, so the app
 /// runs it on any thread it chooses; dropping it unrun cancels it.
@@ -133,7 +133,7 @@ where
     S: Float,
     A: Measure<S>,
     A::Context: AudioContext,
-    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
+    for<'a> <A::Meter as Measurement>::Input<'a>: AudioInput<'a, S>,
 {
     /// Folds the audio through the meter the analysis builds, on the calling
     /// thread, and returns the meter's output.
@@ -149,7 +149,7 @@ where
     /// [`AnalyzeError::Bind`] when the audio cannot be shown to the meter (a
     /// stereo analysis of audio of another width, a mono analysis with no
     /// fold from the audio's topology, a chunk that is not a valid view).
-    pub fn run(self) -> Result<<A::Meter as Meter>::Output, AnalyzeError> {
+    pub fn run(self) -> Result<<A::Meter as Measurement>::Output, AnalyzeError> {
         let mut reader = Reader::open(&self.audio)?;
         let topology = reader.topology();
         let context = A::Context::from_audio(reader.sample_rate(), topology.width());
@@ -161,7 +161,7 @@ where
                 return Ok(meter.finish());
             }
             meter.push(
-                <<A::Meter as Meter>::Input<'_> as View<'_, S>>::view(&mut chunk)?,
+                <<A::Meter as Measurement>::Input<'_> as View<'_, S>>::view(&mut chunk)?,
                 &mut Discard,
             )?;
         }
@@ -184,7 +184,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// is defined over floats. A path names no format, so a call that passes
     /// one states `S` (`analyze::<f32, _>`).
     ///
-    /// The analysis is generic, never boxed: [`Meter`] is not object-safe.
+    /// The analysis is generic, never boxed: [`Measurement`] is not object-safe.
     pub fn analyze<S, A>(&self, audio: impl Into<Audio<S>>, analysis: A) -> Analyze<A, S>
     where
         S: Float,

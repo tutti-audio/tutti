@@ -1,6 +1,6 @@
 //! What a stream plays ([`StreamFile`], what an export fork reads).
 //!
-//! The control side of a stream is [`Stream`](crate::Stream); the reader it
+//! The control side of a stream is [`StreamHandle`](crate::StreamHandle); the reader it
 //! hands its voice is the value of its adopt ([`DiskStreamer::adopt`](crate::DiskStreamer::adopt)).
 
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use tutti_units::SampleRate;
 /// holds it decoded whole, the wave.
 ///
 /// Immutable, built once when the stream opens and shared by the
-/// [`Stream`](crate::Stream) ([`Stream::file`](crate::Stream::file)) and the
+/// [`StreamHandle`](crate::StreamHandle) ([`StreamHandle::file`](crate::StreamHandle::file)) and the
 /// stream's [`StreamReader`](crate::StreamReader), so a fork of the voice (made
 /// from the node, which holds the reader and not the handle) plays the same
 /// material with no streamer at all. What changes while a stream runs is not

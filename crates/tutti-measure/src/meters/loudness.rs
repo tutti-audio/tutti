@@ -49,7 +49,7 @@ use tutti_dsp::{ChannelWeight, channel_weights};
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
-use crate::{Error, Measure, Meter, Result};
+use crate::{Error, Measure, Measurement, Result};
 
 /// What a loudness meter measures: the channel topology of the frames fed to
 /// it. Unlike a width, a topology is part of the analysis: it is the channel
@@ -197,7 +197,7 @@ impl<S: Sample> LoudnessMeter<S> {
     }
 }
 
-impl<S: Sample> Meter for LoudnessMeter<S> {
+impl<S: Sample> Measurement for LoudnessMeter<S> {
     type Input<'a> = Interleaved<'a, S>;
     type Item = ();
     type Output = Loudness;
@@ -327,7 +327,7 @@ impl<S: Sample> TruePeakMeter<S> {
     }
 }
 
-impl<S: Sample> Meter for TruePeakMeter<S> {
+impl<S: Sample> Measurement for TruePeakMeter<S> {
     type Input<'a> = Interleaved<'a, S>;
     type Item = ();
     type Output = Db;
@@ -504,8 +504,8 @@ impl WindowedReading {
 /// A running windowed meter at one rate and topology.
 ///
 /// Each push yields the [`WindowedReading`] after it, and
-/// [`finish`](Meter::finish) reads the last one. Not for the audio thread (see
-/// [`push`](Meter::push)).
+/// [`finish`](Measurement::finish) reads the last one. Not for the audio thread (see
+/// [`push`](Measurement::push)).
 pub struct WindowedMeter<S: Sample> {
     layout: ChannelLayout,
     rate: SampleRate,
@@ -568,7 +568,7 @@ impl<S: Sample> WindowedMeter<S> {
     }
 }
 
-impl<S: Sample> Meter for WindowedMeter<S> {
+impl<S: Sample> Measurement for WindowedMeter<S> {
     type Input<'a> = Interleaved<'a, S>;
     type Item = WindowedReading;
     type Output = WindowedReading;

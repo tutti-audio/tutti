@@ -360,7 +360,7 @@ impl ModRefusal {
     /// The route it names: a route whose follower is downstream of its own
     /// target, or one the compile refused.
     pub fn route(&self) -> Option<RouteKey> {
-        use tutti_modulation::CompileError as C;
+        use tutti_modulation::ModulationCompileError as C;
         match self {
             Self::Apply(ReconcileError::Cycle { route })
             | Self::Apply(ReconcileError::Compile(
@@ -378,7 +378,7 @@ impl ModRefusal {
 
     /// The target it names.
     pub fn target(&self) -> Option<TargetKey> {
-        use tutti_modulation::CompileError as C;
+        use tutti_modulation::ModulationCompileError as C;
         match self {
             Self::Apply(
                 ReconcileError::WrongTarget(t)
@@ -403,7 +403,7 @@ impl ModRefusal {
 
     /// The source it names.
     pub fn source(&self) -> Option<SourceKey> {
-        use tutti_modulation::CompileError as C;
+        use tutti_modulation::ModulationCompileError as C;
         match self {
             Self::Apply(
                 ReconcileError::WrongFeed(s)
@@ -425,7 +425,7 @@ impl ModRefusal {
 /// **A target takes one range and one automation.** A second of either is
 /// never merged (which one won would be the host's iteration order): both go
 /// in, and the compile refuses the pair as
-/// `CompileError::DuplicateTarget`, the one refusal path.
+/// `ModulationCompileError::DuplicateTarget`, the one refusal path.
 pub fn declare_targets(
     ranges: impl IntoIterator<Item = (TargetKey, f64, f64)>,
     automation: impl IntoIterator<Item = (TargetKey, Option<Arc<dyn Curve>>)>,
