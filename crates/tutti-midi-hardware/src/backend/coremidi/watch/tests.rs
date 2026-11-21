@@ -37,7 +37,7 @@ impl Watched {
     /// behind it; none if the guard passes first.
     fn wait(&self, within: Duration) -> Vec<DeviceEvent> {
         tutti_fixtures::block_on_within(self.events.recv(), within)
-            .and_then(Result::ok)
+            .and_then(|received| received.ok())
             .into_iter()
             .chain(self.events.try_iter())
             .collect()
