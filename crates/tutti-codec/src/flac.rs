@@ -15,8 +15,8 @@
 //! the one `encode_with_fixed_block_size` writes (the same function, block,
 //! frame number and stream info).
 
-use crate::error::{Codec, Error, Result};
-use crate::format::FlacLevel;
+use crate::error::{Codec, Error, Result, SpecError};
+use crate::format::{FlacLevel, Format};
 use crate::pcm::IntDepth;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -56,7 +56,15 @@ impl<W: Write + Seek> FlacWriter<W> {
     /// # Errors
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
-    pub fn create(spec: &Spec, depth: IntDepth, level: FlacLevel, mut sink: W) -> Result<Self> {
+    pub fn create(spec: &Spec, mut sink: W) -> Result<Self> {
+        let (depth, level) = match spec.format() {
+            Format::Flac { depth, level } => (depth, level),
+            #[allow(
+                unreachable_patterns,
+                reason = "the only `Format` variant when one encoder is the only feature on"
+            )]
+            _ => return Err(SpecError::WrongFormat { expected: "FLAC" }.into()),
+        };
         let rate = spec.header_rate()?.get() as usize;
         let channels = usize::from(spec.channels()?);
         let bits = usize::from(depth.bits());

@@ -173,7 +173,7 @@ contract!(
     wav,
     Format::Wav(crate::Pcm::Int24),
     true,
-    |spec: &Spec, sink| crate::WavWriter::create(spec, crate::Pcm::Int24, sink)
+    |spec: &Spec, sink| crate::WavWriter::create(spec, sink)
 );
 
 #[cfg(feature = "encode-aiff")]
@@ -181,7 +181,7 @@ contract!(
     aiff,
     Format::Aiff(crate::Pcm::Int16),
     true,
-    |spec: &Spec, sink| crate::AiffWriter::create(spec, crate::Pcm::Int16, sink)
+    |spec: &Spec, sink| crate::AiffWriter::create(spec, sink)
 );
 
 #[cfg(feature = "encode-flac")]
@@ -192,10 +192,5 @@ contract!(
         level: crate::FlacLevel::Standard
     },
     false,
-    |spec: &Spec, sink| crate::FlacWriter::create(
-        spec,
-        crate::IntDepth::Int16,
-        crate::FlacLevel::Standard,
-        sink
-    )
+    |spec: &Spec, sink| crate::FlacWriter::create(spec, sink)
 );

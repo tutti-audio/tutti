@@ -26,10 +26,10 @@ pub enum NoteModifier {
 /// [`to_beat_duration`](Self::to_beat_duration).
 ///
 /// ```
-/// use tutti_music::{NoteDuration, NoteModifier, NoteValue};
+/// use tutti_music::{NoteDuration, NoteValue};
 /// use tutti_units::BeatDuration;
 ///
-/// let dotted_eighth = NoteDuration::new(NoteValue::EIGHTH, NoteModifier::Dotted);
+/// let dotted_eighth = NoteDuration::new(NoteValue::EIGHTH).dotted();
 /// assert_eq!(dotted_eighth.to_beat_duration(), BeatDuration::new(0.75));
 /// ```
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -40,13 +40,34 @@ pub struct NoteDuration {
 
 impl NoteDuration {
     /// A quarter note, one beat.
-    pub const QUARTER: Self = Self::new(NoteValue::QUARTER, NoteModifier::Plain);
+    pub const QUARTER: Self = Self::new(NoteValue::QUARTER);
 
-    /// The note `value` under `modifier`.
+    /// The note `value` as written ([`NoteModifier::Plain`]).
     #[inline]
     #[must_use]
-    pub const fn new(value: NoteValue, modifier: NoteModifier) -> Self {
-        Self { value, modifier }
+    pub const fn new(value: NoteValue) -> Self {
+        Self {
+            value,
+            modifier: NoteModifier::Plain,
+        }
+    }
+
+    /// This note value dotted: one and a half times as long. A note has one
+    /// modifier, so this replaces a [`triplet`](Self::triplet).
+    #[inline]
+    #[must_use]
+    pub const fn dotted(mut self) -> Self {
+        self.modifier = NoteModifier::Dotted;
+        self
+    }
+
+    /// This note value as a triplet: two thirds as long. A note has one
+    /// modifier, so this replaces a [`dotted`](Self::dotted).
+    #[inline]
+    #[must_use]
+    pub const fn triplet(mut self) -> Self {
+        self.modifier = NoteModifier::Triplet;
+        self
     }
 
     /// The note value as written.
@@ -93,13 +114,21 @@ impl From<NoteValue> for NoteDuration {
     /// The note value, unmodified.
     #[inline]
     fn from(value: NoteValue) -> Self {
-        Self::new(value, NoteModifier::Plain)
+        Self::new(value)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn note(value: NoteValue, modifier: NoteModifier) -> NoteDuration {
+        match modifier {
+            NoteModifier::Plain => NoteDuration::new(value),
+            NoteModifier::Dotted => NoteDuration::new(value).dotted(),
+            NoteModifier::Triplet => NoteDuration::new(value).triplet(),
+        }
+    }
 
     /// The beats are the score's fractions exactly, as `f64` rounds them, including the
     /// ones a multiplication order could break: a quarter is 1, a whole 4, a half 2, an
@@ -122,7 +151,7 @@ mod tests {
             (NoteValue::of(64), NoteModifier::Triplet, 1.0 / 24.0),
         ];
         for (value, modifier, beats) in cases {
-            let note = NoteDuration::new(value, modifier);
+            let note = note(value, modifier);
             assert_eq!(
                 note.to_beat_duration(),
                 BeatDuration::new(beats),
@@ -135,10 +164,19 @@ mod tests {
                 NoteModifier::Dotted,
                 NoteModifier::Triplet,
             ] {
-                let note = NoteDuration::new(NoteValue::of(1 << exponent), modifier);
+                let note = note(NoteValue::of(1 << exponent), modifier);
                 assert_eq!(BeatDuration::from(note), note.to_beat_duration());
             }
         }
+    }
+
+    /// A note has one modifier: the last of `dotted` and `triplet` wins, and neither is plain.
+    #[test]
+    fn the_last_modifier_replaces_the_one_before() {
+        let eighth = NoteDuration::new(NoteValue::EIGHTH);
+        assert_eq!(eighth.modifier(), NoteModifier::Plain);
+        assert_eq!(eighth.dotted().triplet(), eighth.triplet());
+        assert_eq!(eighth.triplet().dotted(), eighth.dotted());
     }
 
     /// Three triplet notes fill the time of two plain ones and a dotted note is a plain
@@ -148,8 +186,8 @@ mod tests {
         for exponent in 0..=6 {
             let value = NoteValue::of(1 << exponent);
             let plain = NoteDuration::from(value).to_beat_duration().get();
-            let dotted = NoteDuration::new(value, NoteModifier::Dotted).to_beat_duration();
-            let triplet = NoteDuration::new(value, NoteModifier::Triplet).to_beat_duration();
+            let dotted = NoteDuration::new(value).dotted().to_beat_duration();
+            let triplet = NoteDuration::new(value).triplet().to_beat_duration();
             assert_eq!(
                 dotted.get(),
                 plain + plain / 2.0,

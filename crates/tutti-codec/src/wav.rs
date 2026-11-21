@@ -18,7 +18,8 @@
 
 mod mask;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, SpecError};
+use crate::format::Format;
 use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -150,7 +151,15 @@ impl<W: Write + Seek> WavWriter<W> {
     /// # Errors
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
-    pub fn create(spec: &Spec, pcm: Pcm, mut sink: W) -> Result<Self> {
+    pub fn create(spec: &Spec, mut sink: W) -> Result<Self> {
+        let pcm = match spec.format() {
+            Format::Wav(pcm) => pcm,
+            #[allow(
+                unreachable_patterns,
+                reason = "the only `Format` variant when one encoder is the only feature on"
+            )]
+            _ => return Err(SpecError::WrongFormat { expected: "WAV" }.into()),
+        };
         let rate = spec.header_rate()?.get();
         let mask = channel_mask(spec.topology());
         let header = Header::new(spec, pcm, rate, mask);

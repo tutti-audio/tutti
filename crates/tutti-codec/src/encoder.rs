@@ -77,15 +77,11 @@ impl<W: Write + Seek> Inner<W> {
     fn open(spec: &Spec, sink: W) -> Result<Self> {
         match spec.format() {
             #[cfg(feature = "encode-wav")]
-            Format::Wav(pcm) => Ok(Self::Wav(crate::WavWriter::create(spec, pcm, sink)?)),
+            Format::Wav(_) => Ok(Self::Wav(crate::WavWriter::create(spec, sink)?)),
             #[cfg(feature = "encode-aiff")]
-            Format::Aiff(pcm) => Ok(Self::Aiff(Box::new(crate::AiffWriter::create(
-                spec, pcm, sink,
-            )?))),
+            Format::Aiff(_) => Ok(Self::Aiff(Box::new(crate::AiffWriter::create(spec, sink)?))),
             #[cfg(feature = "encode-flac")]
-            Format::Flac { depth, level } => Ok(Self::Flac(Box::new(crate::FlacWriter::create(
-                spec, depth, level, sink,
-            )?))),
+            Format::Flac { .. } => Ok(Self::Flac(Box::new(crate::FlacWriter::create(spec, sink)?))),
         }
     }
 }
@@ -475,7 +471,10 @@ fn patch_header(spec: &Spec, file: &mut std::fs::File) -> std::io::Result<()> {
             let block_align = u64::from(pcm.bits().div_ceil(8)) * u64::from(spec.layout().count());
             crate::aiff::patch_unfinished(file, block_align.max(1))
         }
-        #[allow(unreachable_patterns)]
+        #[allow(
+            unreachable_patterns,
+            reason = "the only `Format` variant when one encoder is the only feature on"
+        )]
         _ => Ok(()),
     }
 }

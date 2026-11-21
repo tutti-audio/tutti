@@ -118,6 +118,12 @@ pub enum SpecError {
     /// A channel count of zero.
     #[error("channel count must be non-zero")]
     ZeroChannels,
+    /// A spec whose format is not the one the writer writes.
+    #[error("the spec's format is not {expected}")]
+    WrongFormat {
+        /// The format the writer writes.
+        expected: &'static str,
+    },
     /// More channels than the container's header can count.
     #[error("{channels} channels exceed the format's limit of {max}")]
     TooManyChannels {

@@ -10,6 +10,7 @@
 //! [`Sample`] every format shares.
 
 use crate::error::{Codec, Error, Result, SpecError};
+use crate::format::Format;
 use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
@@ -39,7 +40,15 @@ impl<W: Write + Seek> AiffWriter<W> {
     /// # Errors
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
-    pub fn create(spec: &Spec, pcm: Pcm, sink: W) -> Result<Self> {
+    pub fn create(spec: &Spec, sink: W) -> Result<Self> {
+        let pcm = match spec.format() {
+            Format::Aiff(pcm) => pcm,
+            #[allow(
+                unreachable_patterns,
+                reason = "the only `Format` variant when one encoder is the only feature on"
+            )]
+            _ => return Err(SpecError::WrongFormat { expected: "AIFF" }.into()),
+        };
         spec.header_rate()?;
         let channels = spec.channels()?;
         let info = AifcWriteInfo {

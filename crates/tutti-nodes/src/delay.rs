@@ -886,13 +886,13 @@ mod tests {
     fn a_synced_delay_echoes_at_its_notes_time_at_the_transports_tempo() {
         use tutti_dsp::NoteTimes;
         use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
-        use tutti_music::{NoteDuration, NoteModifier, NoteValue};
+        use tutti_music::{NoteDuration, NoteValue};
         use tutti_units::{Beat, Bpm, Frame};
 
         let cases = [
             (NoteDuration::QUARTER, true, 120.0, 512),
             (
-                NoteDuration::new(NoteValue::QUARTER, NoteModifier::Dotted),
+                NoteDuration::new(NoteValue::QUARTER).dotted(),
                 true,
                 60.0,
                 1536,
