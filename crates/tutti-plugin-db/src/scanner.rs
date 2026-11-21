@@ -10,11 +10,12 @@ use super::facts::{self, FileFacts, ScanDecision};
 use super::fs::{canonical_path, discover};
 use super::pedal::Pedal;
 use super::table::{FileRow, PluginDb, RowChange};
+use crate::Stop;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
-use tutti_platform::{StopToken, ThreadHandle};
+use tutti_platform::ThreadHandle;
 use tutti_plugin_types::{
     Described, PluginClass, PluginDescriptor, PluginFormat, ProbeError, ProbeRefusal,
 };
@@ -75,7 +76,7 @@ pub enum ScanProgress {
 
 /// What a scanner calls to read one plugin file's metadata.
 type ProbeFn =
-    dyn Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<Described>, ProbeFailure> + Send + Sync;
+    dyn Fn(&Path, PluginFormat, &Stop) -> Result<Vec<Described>, ProbeFailure> + Send + Sync;
 
 /// Scans plugin directories into a [`PluginDb`], with crash recovery.
 ///
@@ -109,12 +110,12 @@ impl Scanner {
     ///
     /// `probe` reads one plugin file's metadata. It runs out of process where
     /// it loads the plugin, so a crash or a hang cannot take the scan down. It
-    /// watches the [`StopToken`] it is given and, once a stop is requested, ends
+    /// watches the [`Stop`] it is given and, once a stop is requested, ends
     /// the process it is waiting on and returns at once: a dropped [`Scan`] waits
     /// for the probe in flight to return.
     pub fn new(
         pedal_path: impl Into<PathBuf>,
-        probe: impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<Described>, ProbeFailure>
+        probe: impl Fn(&Path, PluginFormat, &Stop) -> Result<Vec<Described>, ProbeFailure>
         + Send
         + Sync
         + 'static,
@@ -234,8 +235,10 @@ impl Scanner {
         };
         let (tx, rx) = crossbeam_channel::unbounded();
 
-        let worker = tutti_platform::spawn_named("plugin-scanner", None, move |stop| {
-            let result = job.run(stop, &progress, |change| {
+        let stop = Stop::new();
+        let worker_stop = stop.clone();
+        let worker = tutti_platform::spawn_named("plugin-scanner", None, move |_| {
+            let result = job.run(&worker_stop, &progress, |change| {
                 tx.send(Message::Change(change)).is_ok()
             });
             // Release the pedal before announcing the end, so a caller that
@@ -249,6 +252,7 @@ impl Scanner {
             progress_rx,
             progress_dropped: dropped,
             rx,
+            stop,
             _worker: worker,
         })
     }
@@ -348,8 +352,16 @@ pub struct Scan {
     progress_rx: Receiver<ScanProgress>,
     progress_dropped: Tally<u64>,
     rx: Receiver<Message>,
-    /// Dropping the handle stops the worker and joins it.
+    /// Raised by the drop, before the join, so the probe in flight returns.
+    stop: Stop,
+    /// Dropping the handle joins the worker.
     _worker: ThreadHandle<()>,
+}
+
+impl Drop for Scan {
+    fn drop(&mut self) {
+        self.stop.stop();
+    }
 }
 
 /// What the worker sends the owner.
@@ -444,7 +456,7 @@ impl Job {
     /// `sink`. A sink that returns `false` stops the scan.
     fn run(
         &self,
-        stop: &StopToken,
+        stop: &Stop,
         progress: &Progress,
         mut sink: impl FnMut(RowChange) -> bool,
     ) -> ScanResult {
@@ -538,7 +550,7 @@ impl Job {
     /// re-admits it without the user knowing the blacklist existed.
     fn probe_one(
         &self,
-        stop: &StopToken,
+        stop: &Stop,
         path: &Path,
         key: &Path,
         format: PluginFormat,
@@ -805,7 +817,7 @@ mod tests {
     fn filename_probe(
         path: &Path,
         _: PluginFormat,
-        _: &StopToken,
+        _: &Stop,
     ) -> Result<Vec<Described>, ProbeFailure> {
         Ok(vec![probe_plugin_fallback(path)])
     }
@@ -1721,7 +1733,7 @@ mod tests {
         let mut db = PluginDb::new();
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
         parked.recv_timeout(HANG_GUARD).unwrap();
-        let stop = scan._worker.token();
+        let stop = scan.stop.clone();
 
         // The drop waits for the parked probe: release it from this thread,
         // once the drop has asked the worker to stop.
@@ -1743,7 +1755,7 @@ mod tests {
     }
 
     /// **A dropped scan reaches the probe in flight, and has released the pedal
-    /// when the drop returns**: the probe waits on its `StopToken` as a real one
+    /// when the drop returns**: the probe waits on its `Stop` as a real one
     /// waits on its child, so the drop returns as soon as the probe sees the
     /// request, not when its own deadline passes (ten minutes here, past the
     /// test harness's limit, so a drop that waited for it fails).
@@ -1792,7 +1804,7 @@ mod tests {
             .spawn_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
             .unwrap();
         probing_rx.recv_timeout(HANG_GUARD).unwrap();
-        task._worker.token().stop();
+        task.stop.stop();
         let result = task.wait(&mut db).expect("the worker finishes");
 
         assert!(result.failures().is_empty(), "{result:?}");

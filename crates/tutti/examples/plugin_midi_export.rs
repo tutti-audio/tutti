@@ -72,9 +72,7 @@ fn load(
             ScanPoll::Died => return Err("the probe's worker died".into()),
         }
     };
-    if let Some(unsaved) = catalog.take_persist_error() {
-        return Err(unsaved.into());
-    }
+    catalog.save().run()?;
     if let Some(failure) = scanned.failures().first() {
         return Err(format!("the plugin did not probe: {failure:?}").into());
     }
