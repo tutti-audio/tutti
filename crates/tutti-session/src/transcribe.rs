@@ -110,7 +110,7 @@ fn note_events(
     let mut events = Vec::with_capacity(notes.len() * 3 + 1);
     let mut first = None;
     for note in notes {
-        let Some(number) = u8::try_from(note.note).ok().and_then(NoteNumber::new) else {
+        let Some(number) = NoteNumber::try_from(note.note).ok() else {
             continue;
         };
         let (start, end) = (

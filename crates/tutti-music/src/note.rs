@@ -1,17 +1,9 @@
 //! Notes in twelve-tone equal temperament.
 //!
-//! A note is a musical fact: C#4 exists whether or not MIDI does. MIDI's
-//! contribution is an *encoding* — an integer 0..=127 with a fixed origin —
-//! so it appears here as a conversion, not as the type's identity. Naming this
-//! `MidiNote` would let one consumer's wire format define what a note is, and
-//! would quietly make MIDI's range the limit of what is expressible.
-//!
-//! It is not: [`Note`] can name A9 or A-2, neither of which has a MIDI
-//! number. That asymmetry is why the conversion out is fallible, and it is the
-//! evidence that the two concepts are genuinely different.
-//!
-//! Existing MIDI code keeps its `u8` — the wire format is honest there. Cross
-//! into `Note` where you want a frequency, a name, or transposition.
+//! A note is a musical fact: C#4 exists whether or not MIDI does. [`Note`] can
+//! name A9 or A-2, which have no MIDI note number, so no MIDI range limits what
+//! it expresses. The MIDI note number encoding of a note lives in
+//! `tutti_ump::NoteNumber`, as its `From` and `TryFrom` conversions.
 
 use alloc::format;
 use alloc::string::String;
@@ -136,9 +128,8 @@ impl PitchClass {
 /// A note: a pitch class in a numbered octave.
 ///
 /// Octaves use scientific pitch notation, where middle C is C4 and A4 is
-/// 440 Hz. MIDI's own numbering is a *different* convention and lives in the
-/// conversion rather than here: `Note` converts to and from a MIDI note number
-/// with `TryFrom`, in both directions fallible.
+/// 440 Hz. This type names no MIDI: the MIDI note number encoding of a note is
+/// `tutti_ump::NoteNumber`'s `From` and `TryFrom` conversions.
 ///
 /// # Examples
 ///
@@ -146,16 +137,12 @@ impl PitchClass {
 /// use tutti_units::{Hz, Semitones};
 /// use tutti_music::{Note, PitchClass};
 ///
-/// let a4 = Note::try_from(69u8).unwrap();
-/// assert_eq!(a4, Note::A4);
+/// let a4 = Note::A4;
 /// assert_eq!(a4.frequency(), Hz::new(440.0));
 ///
 /// let c_sharp_5 = a4.transpose(Semitones::new(4.0));
 /// assert_eq!(c_sharp_5.class(), PitchClass::CSharp);
 /// assert_eq!(c_sharp_5.flat_label(), "Db5");
-///
-/// // A9 is a note, but not a MIDI note number.
-/// assert!(u8::try_from(Note::new(PitchClass::A, 9)).is_err());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -163,17 +150,6 @@ pub struct Note {
     class: PitchClass,
     octave: i8,
 }
-
-/// The error converting a [`Note`] outside MIDI's `0..=127` range to a note
-/// number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{0} has no MIDI note number")]
-pub struct NotOnMidiScale(pub Note);
-
-/// The error converting a MIDI note number above 127 to a [`Note`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("MIDI note number {0} is above 127")]
-pub struct NoteNumberOutOfRange(pub u8);
 
 impl Note {
     /// Concert A — 440 Hz by definition.
@@ -190,8 +166,7 @@ impl Note {
 
     /// Builds a note from its class and octave.
     ///
-    /// Any `i8` octave is accepted, including ones outside MIDI's `0..=127` —
-    /// that range is a property of the encoding, not of the note.
+    /// Any `i8` octave is accepted, including ones with no MIDI note number.
     #[inline]
     #[must_use]
     pub const fn new(class: PitchClass, octave: i8) -> Self {
@@ -294,48 +269,11 @@ impl Note {
 
     /// Concert A's frequency. The one tuning constant this module carries.
     const A4_HZ: Hz = Hz::new(440.0);
-
-    /// MIDI note 0 is C-1 in scientific pitch notation. This offset is a MIDI
-    /// convention, so it lives with the conversion rather than on the note.
-    const MIDI_C_OCTAVE: i32 = -1;
 }
 
 impl core::fmt::Display for Note {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}{}", self.class.sharp_name(), self.octave)
-    }
-}
-
-// ── MIDI encoding ───────────────────────────────────────────────────────────
-//
-// One encoding of a note, not the note itself. Both directions are fallible
-// because the two ranges genuinely differ: MIDI cannot name A9, and a `u8`
-// can hold 200.
-
-impl TryFrom<u8> for Note {
-    type Error = NoteNumberOutOfRange;
-
-    /// MIDI note number → note. `69` is A4.
-    fn try_from(number: u8) -> Result<Self, Self::Error> {
-        if number > 127 {
-            return Err(NoteNumberOutOfRange(number));
-        }
-        Ok(Self::from_semitones_from_c0(
-            number as i32 + Self::MIDI_C_OCTAVE * 12,
-        ))
-    }
-}
-
-impl TryFrom<Note> for u8 {
-    type Error = NotOnMidiScale;
-
-    /// Note → MIDI note number, if the note is on MIDI's scale at all.
-    fn try_from(note: Note) -> Result<Self, Self::Error> {
-        let number = note.semitones_from_c0() - Note::MIDI_C_OCTAVE * 12;
-        u8::try_from(number)
-            .ok()
-            .filter(|n| *n <= 127)
-            .ok_or(NotOnMidiScale(note))
     }
 }
 
@@ -419,42 +357,6 @@ mod tests {
         assert_eq!(c4.interval_to(g4), Semitones::new(7.0));
         assert_eq!(g4.interval_to(c4), Semitones::new(-7.0));
         assert_eq!(c4.interval_to(c4), Semitones::UNISON);
-    }
-
-    // ── MIDI encoding ───────────────────────────────────────────────────
-
-    #[test]
-    fn midi_note_69_is_a4() {
-        assert_eq!(Note::try_from(69u8).unwrap(), Note::A4);
-        assert_eq!(u8::try_from(Note::A4).unwrap(), 69);
-
-        // MIDI 0 is C-1, and 60 is middle C.
-        assert_eq!(Note::try_from(0u8).unwrap(), Note::new(PitchClass::C, -1));
-        assert_eq!(Note::try_from(60u8).unwrap(), Note::C4);
-    }
-
-    #[test]
-    fn every_midi_note_round_trips() {
-        for number in 0u8..=127 {
-            let note = Note::try_from(number).unwrap();
-            assert_eq!(u8::try_from(note).unwrap(), number);
-        }
-    }
-
-    /// The asymmetry that makes this a conversion rather than an identity:
-    /// notes exist that MIDI cannot name, and `u8`s exist that are not notes.
-    #[test]
-    fn the_two_ranges_do_not_coincide() {
-        assert_eq!(Note::try_from(128u8), Err(NoteNumberOutOfRange(128)));
-        assert_eq!(Note::try_from(255u8), Err(NoteNumberOutOfRange(255)));
-
-        // Above MIDI's ceiling (G9 is 127).
-        let too_high = Note::new(PitchClass::CSharp, 10);
-        assert_eq!(u8::try_from(too_high), Err(NotOnMidiScale(too_high)));
-
-        // Below its floor (C-1 is 0).
-        let too_low = Note::new(PitchClass::A, -2);
-        assert_eq!(u8::try_from(too_low), Err(NotOnMidiScale(too_low)));
     }
 
     #[test]

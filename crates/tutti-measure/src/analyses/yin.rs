@@ -386,7 +386,7 @@ impl PitchDetector {
 /// pushes callers to reconstruct "is this voiced?" from two float comparisons.
 ///
 /// The note is a [`Note`] rather than a raw MIDI integer — a note is a musical
-/// fact and MIDI one encoding of it. `u8::try_from(pitch.note)` crosses into
+/// fact and MIDI one encoding of it. `tutti_ump::NoteNumber::try_from(pitch.note)` crosses into
 /// that encoding where a caller actually needs it.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum PitchEstimate {

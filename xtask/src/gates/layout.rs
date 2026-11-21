@@ -47,7 +47,8 @@ fn skipped(dir: &str) -> bool {
 pub(super) const LAYERS: &[&[&str]] = &[
     &["tutti-platform"],
     &["tutti-units", "tutti-plugin-ipc-ffi"],
-    &["tutti-music", "tutti-ump", "tutti-buffers"],
+    &["tutti-music", "tutti-buffers"],
+    &["tutti-ump"],
     &[
         "tutti-alsa-ffi",
         "tutti-coremidi-ffi",
@@ -123,7 +124,7 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-alsa-ffi", &["tutti-ump", "tutti-platform"]),
     ("tutti-coremidi-ffi", &["tutti-ump", "tutti-platform"]),
     ("tutti-winmm-ffi", &["tutti-ump", "tutti-platform"]),
-    ("tutti-ump", &["tutti-units"]),
+    ("tutti-ump", &["tutti-units", "tutti-music"]),
     // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
     // audio-shaped structures are generic over.
@@ -745,7 +746,7 @@ mod tests {
             "[dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
         assert!(r.findings.iter().any(|l| {
-            l.contains("tutti-units -> tutti-graph (normal) points up or sideways (layer 1 -> 5)")
+            l.contains("tutti-units -> tutti-graph (normal) points up or sideways (layer 1 -> 6)")
         }));
         // A dev-dependency may point anywhere.
         let r = with((
@@ -761,11 +762,9 @@ mod tests {
             "tutti-ump",
             "[dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
-        assert!(
-            r.findings
-                .iter()
-                .any(|l| l.contains("tutti-ump may depend on [\"tutti-units\"] only"))
-        );
+        assert!(r.findings.iter().any(|l| {
+            l.contains("tutti-ump may depend on [\"tutti-music\", \"tutti-units\"] only")
+        }));
         let r = with((
             "crates/tutti-ump",
             "tutti-ump",
