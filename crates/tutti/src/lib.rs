@@ -817,7 +817,7 @@ pub mod plugin {
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiReport`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
-/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpeningMidiSink`, `Stamping`), and under `midi-hardware` a device (`DeviceId`,
+/// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`DeviceId`,
 /// `DeviceInfo`), the ports a session opens for them
 /// (`MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
@@ -925,7 +925,7 @@ pub mod midi {
     pub use tutti_session::{
         AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
         LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport, MidiRouteId,
-        MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpeningMidiSink, Stamping,
+        MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
         TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]

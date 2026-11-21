@@ -72,11 +72,11 @@ impl MidiSink {
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// A request to open `sink` as an output: wire what it should receive to
     /// its [`node`](MidiSink::node). Nothing opens until
-    /// [`open`](OpeningMidiSink::open) is called, and the sink
+    /// [`open`](OpenMidiSink::open) is called, and the sink
     /// ends when every clone of the handle is dropped, once the graph has
     /// rendered past the drop ([`update`](Self::update) ends it).
-    pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpeningMidiSink<'_, K, C> {
-        OpeningMidiSink {
+    pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpenMidiSink<'_, K, C> {
+        OpenMidiSink {
             session: self,
             sink,
             stamping: Stamping::Off,
@@ -87,21 +87,21 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 /// A sink to open, built by [`Session::open_midi_sink`]: it borrows the session
 /// until [`open`](Self::open) opens the sink.
 #[must_use = "the sink opens when `open` is called"]
-pub struct OpeningMidiSink<'s, K: crate::AppKey, C: crate::Clock> {
+pub struct OpenMidiSink<'s, K: crate::AppKey, C: crate::Clock> {
     session: &'s mut Session<K, C>,
     sink: Arc<dyn MidiOut>,
     stamping: Stamping,
 }
 
-impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpeningMidiSink<'_, K, C> {
+impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpenMidiSink<'_, K, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpeningMidiSink")
+        f.debug_struct("OpenMidiSink")
             .field("stamping", &self.stamping)
             .finish_non_exhaustive()
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> OpeningMidiSink<'_, K, C> {
+impl<K: crate::AppKey, C: crate::Clock> OpenMidiSink<'_, K, C> {
     /// Whether the sink is sent JR Timestamps. It gates timestamps, not
     /// delivery: with it off (the default) the events still go out, unstamped.
     pub const fn stamping(mut self, stamping: Stamping) -> Self {

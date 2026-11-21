@@ -172,8 +172,8 @@ pub struct FollowClock {
 }
 
 impl FollowClock {
-    /// Follows the `kind` of clock `group` of the input port whose input node
-    /// is `input` (`MidiInput::node`) sends. A Group is a cable of its own
+    /// Follows the `kind` of clock that `group` carries on the input port whose
+    /// input node is `input` (`MidiInput::node`). A Group is a cable of its own
     /// (M2-104 §2.1.2, Appendix B.1); the Group must be one the input hears
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
     #[must_use]
