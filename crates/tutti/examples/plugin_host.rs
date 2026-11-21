@@ -69,10 +69,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     eprintln!("scanned {} plugin file(s)", scanned.scanned());
-    //    The scan's save runs on its own thread; a failure is kept for the app.
-    if let Some(unsaved) = catalog.take_persist_error() {
-        return Err(unsaved.into());
-    }
+    //    A scan leaves its rows in memory; the save is a value this app runs inline.
+    catalog.save().run()?;
 
     // 2. Pick by name. An entry knows its file, its format and its descriptor;
     //    the ref made from it is what the load and a saved state both name.

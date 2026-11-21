@@ -134,11 +134,13 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
     exec
 }
 
-/// Blocks from one frame to the maximum, ragged, rolling from beat 0.
+/// Blocks from one frame to the maximum, ragged, rolling from beat 0: 160 of
+/// them, about 5 000 frames, past the 2 049 a stretched voice's vocoder
+/// holds back its first sound.
 fn render(exec: &mut Executor, channels: usize) -> Vec<Vec<f32>> {
     let mut all = vec![Vec::new(); channels];
     let mut frame = 0usize;
-    for i in 0..60 {
+    for i in 0..160 {
         let n = 1 + (i * 37) % MAX_BLOCK;
         let mut chunk = vec![vec![0.0f32; n]; channels];
         {
