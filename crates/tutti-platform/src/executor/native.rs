@@ -317,7 +317,7 @@ impl Drop for Threads {
 impl Executor {
     /// Starts `n` threads that drive this executor's queue, until the returned [`Threads`](super::Threads)
     /// drops. Native targets only: a web page starts no threads, and the browser's queue drives with
-    /// [`drive_on_page`](Self::drive_on_page).
+    /// `drive_on_page`.
     ///
     /// # Errors
     ///

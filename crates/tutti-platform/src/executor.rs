@@ -5,7 +5,7 @@
 //! [`run_until_stalled`](Executor::run_until_stalled) or
 //! [`try_tick`](Executor::try_tick) drives it; on a native target
 //! [`spawn_threads`](Executor::spawn_threads) starts threads that drive it for good, and on
-//! the web [`drive_on_page`](Executor::drive_on_page) hands the browser's queue a future that does.
+//! the web `Executor::drive_on_page` hands the browser's queue a future that does.
 //! This is not an async runtime: it has no I/O reactor.
 
 use std::fmt;

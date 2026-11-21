@@ -26,7 +26,7 @@
 //!   that the caller's [`run_until_stalled`](Executor::run_until_stalled) and
 //!   [`try_tick`](Executor::try_tick), or the [`Threads`] of
 //!   [`spawn_threads`](Executor::spawn_threads) (native) or the [`PageDriver`] of
-//!   [`drive_on_page`](Executor::drive_on_page) (the web, on the browser's own queue), drive.
+//!   `Executor::drive_on_page` (the web, on the browser's own queue), drive.
 //!   [`spawn`](Executor::spawn) returns a [`Task`] that cancels on drop;
 //!   [`unblock`](Executor::unblock) runs a blocking closure off the drive;
 //!   [`spawn_dedicated`](Executor::spawn_dedicated) gives a long-lived future a thread
