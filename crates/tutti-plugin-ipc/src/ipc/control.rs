@@ -35,11 +35,7 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameters_answer()
             }
 
-            fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
-                self.link.bridge.audio().parameter(id)
-            }
-
-            fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
+            fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
                 self.link.bridge.audio().parameter_answer(id)
             }
 
@@ -217,7 +213,7 @@ macro_rules! served_control {
             }
 
             fn parameter(&self, _main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
-                AnyThread::parameter_value(self, id)
+                self.link.bridge.audio().parameter(id)
             }
 
             fn set_parameter(

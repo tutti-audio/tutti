@@ -35,18 +35,10 @@ struct FakeBackend {
 
 impl tutti_plugin_types::AnyThread for FakeBackend {
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
-        let read = || None;
-        tutti_plugin_types::answered(read())
+        tutti_plugin_types::answered(None)
     }
-    fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
-        None
-    }
-
-    fn parameter_value_answer(
-        &self,
-        id: ParamId,
-    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        tutti_plugin_types::answered(self.parameter_value(id))
+    fn parameter_value(&self, _id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        tutti_plugin_types::answered(None)
     }
 
     fn set_parameter_value(
@@ -64,8 +56,7 @@ impl tutti_plugin_types::AnyThread for FakeBackend {
         _id: ParamId,
         _plain: f64,
     ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        let read = || None;
-        tutti_plugin_types::answered(read())
+        tutti_plugin_types::answered(None)
     }
     fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
         None

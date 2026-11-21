@@ -254,27 +254,28 @@ pub(crate) mod tests {
         pub(crate) writes: AtomicU32,
     }
 
-    impl AnyThread for Plugin {
-        fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
-            let read = || {
-                Some(vec![
-                    ParameterInfo::new(ID, "bypass")
-                        .with_flags(ParamFlags::BYPASS, ParamFlags::BYPASS),
-                ])
-            };
-            tutti_plugin_types::answered(read())
-        }
-        fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
+    impl Plugin {
+        /// The plugin's bypass value, `None` when it answers no read.
+        fn read(&self) -> Option<Normalized> {
             self.readable
                 .load(SeqCst)
                 .then(|| bypass_value(self.held.load(SeqCst)))
         }
+    }
 
-        fn parameter_value_answer(
-            &self,
-            id: ParamId,
-        ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::answered(self.parameter_value(id))
+    impl AnyThread for Plugin {
+        fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+            tutti_plugin_types::answered(Some(vec![
+                ParameterInfo::new(ID, "bypass").with_flags(ParamFlags::BYPASS, ParamFlags::BYPASS),
+            ]))
+        }
+        fn parameter_value(&self, _id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
+            tutti_plugin_types::answered(self.read())
+        }
+        /// The way an in-process backend reads it: the plugin's own value, at
+        /// once.
+        fn bypassed(&self, _site: OwnBypass) -> Option<bool> {
+            self.read().map(is_bypassed)
         }
 
         fn set_parameter_value(
@@ -310,8 +311,7 @@ pub(crate) mod tests {
             _id: ParamId,
             _plain: f64,
         ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            let read = || None;
-            tutti_plugin_types::answered(read())
+            tutti_plugin_types::answered(None)
         }
         fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
             None
@@ -376,6 +376,24 @@ pub(crate) mod tests {
                 .expect("the fake answers"),
         );
         (handle, plugin, mirror)
+    }
+
+    /// **A served plugin's bypass is read from its mirrored parameter**: a plugin
+    /// holding bypass reads `Some(true)`, one processing `Some(false)`, with no
+    /// read of the plugin.
+    #[test]
+    fn a_served_plugins_bypass_is_read_from_its_mirror() {
+        let (handle, plugin, _) = rig(true);
+        for bypassed in [true, false] {
+            plugin.held.store(bypassed, SeqCst);
+            // A mirror started after the plugin changed reads its value.
+            let (mut mirror, read) = PluginParamValues::start(&handle);
+            mirror.land(
+                futures_lite::future::block_on(std::future::IntoFuture::into_future(read))
+                    .expect("the fake answers"),
+            );
+            assert_eq!(super::held(&handle, &mirror), Some(bypassed));
+        }
     }
 
     /// **A write the plugin ignores is retried with a growing wait and counted

@@ -191,7 +191,7 @@ impl PluginStatus {
 ///
 /// **Blocking round-trips.** [`AnyThread::save_state`],
 /// [`load_state`](Self::load_state), [`AnyThread::parameter_descriptors`],
-/// [`AnyThread::parameter_value`], [`presets`](Self::presets),
+/// [`presets`](Self::presets),
 /// [`load_preset`](Self::load_preset), [`current_preset`](Self::current_preset)
 /// and [`AnyThread::set_render_mode`] wait for the reply. An out-of-process plugin's answer is bounded by five seconds
 /// for the parameter and preset calls and ten for state, a wedged plugin
@@ -898,9 +898,9 @@ impl PluginHandle {
 
     /// Whether the plugin's own bypass is on now, read from the plugin: `None`
     /// when it has none or did not answer, or the instance is busy (an
-    /// in-process read never waits for it). An out-of-process plugin's read is a round
-    /// trip, which the session never makes: it compares the plugin's mirrored
-    /// parameter values instead.
+    /// in-process read never waits for it). An out-of-process plugin reads
+    /// `None`: its bypass is compared through its mirrored parameter values
+    /// ([`PluginParamValues`](crate::PluginParamValues)).
     #[must_use]
     pub fn bypassed(&self) -> Option<bool> {
         self.any_thread.bypassed(self.loaded.own_bypass?)
@@ -1118,18 +1118,14 @@ mod tests {
             fn parameter_descriptors(
                 &self,
             ) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
-                let read = || None;
-                tutti_plugin_types::answered(read())
-            }
-            fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
-                None
+                tutti_plugin_types::answered(None)
             }
 
-            fn parameter_value_answer(
+            fn parameter_value(
                 &self,
-                id: ParamId,
+                _id: ParamId,
             ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-                tutti_plugin_types::answered(self.parameter_value(id))
+                tutti_plugin_types::answered(None)
             }
 
             fn set_parameter_value(
@@ -1147,8 +1143,7 @@ mod tests {
                 _id: ParamId,
                 _plain: f64,
             ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-                let read = || None;
-                tutti_plugin_types::answered(read())
+                tutti_plugin_types::answered(None)
             }
             fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
                 None

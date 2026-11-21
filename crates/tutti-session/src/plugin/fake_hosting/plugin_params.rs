@@ -125,18 +125,10 @@ impl Fake {
 
 impl AnyThread for Fake {
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
-        let read = || Some(self.infos.lock_recover().clone());
-        tutti_plugin_types::answered(read())
+        tutti_plugin_types::answered(Some(self.infos.lock_recover().clone()))
     }
-    fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
-        self.values.lock_recover().get(&id).copied()
-    }
-
-    fn parameter_value_answer(
-        &self,
-        id: ParamId,
-    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        tutti_plugin_types::answered(self.parameter_value(id))
+    fn parameter_value(&self, id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
+        tutti_plugin_types::answered(self.values.lock_recover().get(&id).copied())
     }
 
     fn set_parameter_value(
