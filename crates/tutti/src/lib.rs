@@ -165,6 +165,10 @@ pub use tutti_cpal::{AudioHost, DeviceId};
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::Clip;
 
+// The sampler nodes `Graph::handle` reaches by key.
+#[cfg(feature = "sampler")]
+pub use tutti_session::Handled;
+
 // A decoded wave, and what a bounce writes.
 #[cfg(feature = "codec")]
 pub use tutti_buffers::Wave;
