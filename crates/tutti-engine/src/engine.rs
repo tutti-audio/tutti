@@ -807,10 +807,18 @@ impl<F: Float> Engine<F> {
         self.process_stamped(output, Some(os_ns));
     }
 
+    /// Forgets the device the last block rendered into, for a stream about to
+    /// open. Control side.
+    pub(crate) fn forget_device_in_use(&self) {
+        self.output.forget_in_use();
+    }
+
     /// Counts one device callback longer than the ceiling in
     /// [`BlockCounts::truncated`]. Audio thread.
     #[inline]
     pub(crate) fn count_truncated(&self) {
+        // Only the audio callback borrows `load`, and this runs on that same
+        // callback outside any other borrow of it, so the borrow is always free.
         if let Some(mut load) = self.load.try_borrow_mut() {
             load.truncated();
         }
@@ -2701,6 +2709,33 @@ mod tests {
             "nothing is installed"
         );
         assert_eq!(first_frame(&engine, 2), before, "the block folds as before");
+    }
+
+    /// **A routing is judged against the device the stream renders into now.**
+    /// After a block at 2 channels, stating the 8-channel device moves the
+    /// device in use, so a map to output 5 is taken instead of refused against
+    /// the 2-channel device.
+    #[test]
+    fn a_device_statement_forgets_the_device_the_last_block_rendered_into() {
+        use crate::{OutputMap, Routing};
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(64)),
+        ));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let _ = first_frame(&engine, 2);
+        let control = engine.output_control();
+        let to_five = Routing {
+            map: OutputMap::channels([0, 5]).unwrap(),
+            ..Routing::default()
+        };
+        assert!(control.set_routing(to_five.clone()).is_err(), "device 2");
+        control
+            .state_device(ChannelLayout::from(8u16), None)
+            .unwrap();
+        assert_eq!(control.set_routing(to_five), Ok(()));
     }
 
     /// Before a block has rendered there is no device in use, so a routing the

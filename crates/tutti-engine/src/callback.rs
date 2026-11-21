@@ -155,6 +155,9 @@ impl<F: Float> OutputBlock<F> {
     ///
     /// If `layout` has no channels: a device has at least one.
     pub fn new(state: Arc<AudioCallbackState<F>>, layout: ChannelLayout) -> Self {
+        // A new block is a new stream: the device it renders into is not yet
+        // the one the last block rendered into.
+        state.engine.forget_device_in_use();
         state
             .engine
             .support_output(layout)

@@ -337,7 +337,12 @@ pub struct OutputControl<F: Float = f32> {
     /// finished or cut: its `previous` table is no longer read.
     routing_ended: Arc<AtomicU64>,
     /// The root width and the device width of the last block rendered, packed
-    /// by [`pack_in_use`]; `0` before one has. Written by the audio thread.
+    /// by [`pack_in_use`]; `0` before one has. Written by the audio thread and
+    /// cleared on the control side wherever the device in use changes
+    /// ([`state_device`](Self::state_device) onto another width, a new
+    /// [`OutputBlock`](crate::OutputBlock)). A late write from the last
+    /// callback of a stream being replaced can put the old pair back, until
+    /// that stream stops.
     in_use: Arc<AtomicU64>,
 }
 
@@ -365,6 +370,12 @@ impl<F: Float> OutputControl<F> {
 
     /// The widths of the (root, device) pair the last block rendered, once one
     /// has: the root's, then the device's.
+    /// Forgets the pair in use: the device is about to change, and the next
+    /// block renders the pair that counts.
+    pub(crate) fn forget_in_use(&self) {
+        self.in_use.store(0, Ordering::Relaxed);
+    }
+
     fn in_use(&self) -> Option<(usize, usize)> {
         let packed = self.in_use.load(Ordering::Relaxed);
         (packed != 0).then(|| {
@@ -471,6 +482,9 @@ impl<F: Float> OutputControl<F> {
                 placement: Placement::Default,
             },
         };
+        if self.in_use().is_some_and(|(_, d)| d != slot + 1) {
+            self.forget_in_use();
+        }
         self.update(|folds| {
             if folds.devices.get(slot).and_then(Option::as_ref) == Some(&entry) {
                 return Ok(false);
