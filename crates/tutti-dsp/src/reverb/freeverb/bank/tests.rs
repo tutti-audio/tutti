@@ -166,7 +166,7 @@ const ALL_PASSES: [usize; 4] = [556, 441, 341, 225];
 /// The tunings and the stereo spread are Freeverb's (combs 1116, 1188, 1277, 1356, 1422,
 /// 1491, 1557, 1617 and all-passes 556, 441, 341, 225 at 44.1 kHz), the right channel's
 /// lines 23 frames longer, and at another rate each is `round(rate / 44100 * tuning)` of
-/// the rate rounded to whole hertz.
+/// the rate as given, fractional included.
 #[test]
 fn the_tunings_and_the_stereo_spread_are_freeverbs() {
     let bank = FreeverbBank::<f32>::new(RATE);
@@ -188,10 +188,16 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
             aps.iter().map(|l| l + 23).collect()
         )
     );
-    for hz in [22_050.0f64, 44_100.4, 48_000.0, 96_000.0, 192_000.0] {
+    for hz in [
+        22_050.0f64,
+        35_000.4,
+        44_100.4,
+        48_000.0,
+        96_000.0,
+        192_000.0,
+    ] {
         let bank = FreeverbBank::<f32>::new(SampleRate::of(hz));
-        let whole = hz.round();
-        let scale = |t: usize| (whole / 44_100.0 * t as f64).round() as usize;
+        let scale = |t: usize| (hz / 44_100.0 * t as f64).round() as usize;
         for (side, spread) in [(0, 0), (1, 23)] {
             assert_eq!(
                 bank.combs[side]

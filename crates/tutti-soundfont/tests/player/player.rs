@@ -1058,3 +1058,29 @@ fn a_sample_stating_rate_zero_plays_at_the_nearest_practical_rate() {
         "a stated rate is kept"
     );
 }
+
+/// A program change to a bank and program the font has no preset for is counted, and one to a
+/// preset it has is not: the count is read from the handle taken before the unit is in use.
+#[test]
+fn a_program_change_to_a_missing_preset_is_counted() {
+    use support::Hand;
+    let font = support::font::one_preset(vec![vec![]]);
+    let unit = Settings::new().build(font).unwrap();
+    let missing = unit.missing_presets();
+    let mut rig = Rig {
+        hand: Hand::new(unit),
+    };
+    rig.program(0, 0);
+    assert_eq!(missing.get(), 0, "bank 0, program 0 is in the font");
+    rig.program(0, 7);
+    rig.program(1, 8);
+    rig.note_on(0, 60, 100);
+    rig.energy(512);
+    assert_eq!(missing.get(), 2, "two changes to programs the font lacks");
+    rig.program(0, 0);
+    assert_eq!(
+        missing.get(),
+        2,
+        "a change to a preset it has is not counted"
+    );
+}

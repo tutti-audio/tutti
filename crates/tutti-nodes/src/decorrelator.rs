@@ -104,12 +104,16 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
         Shape::through(bus).with_cost(Cost::Heavy)
     }
 
-    /// Draws the sequences at `rate`: a re-prepare empties the rings.
+    /// Draws the sequences at `rate`: a re-prepare empties the rings. `prepare` has no refusal
+    /// path, so a density past the rate is lowered to it ([`VelvetDensity::clamped_to_rate`]:
+    /// one impulse a frame); the bank refuses it only at a rate under 1 Hz.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let c = self.config;
-        self.bank = Some(Decorrelator::new(
-            c.width, c.density, c.length, rate, c.seed,
-        ));
+        let density = c.density.clamped_to_rate(rate);
+        self.bank = Some(
+            Decorrelator::new(c.width, density, c.length, rate, c.seed)
+                .expect("a density at most the rate, at a rate of at least 1 Hz"),
+        );
     }
 
     fn reset(&mut self) {
