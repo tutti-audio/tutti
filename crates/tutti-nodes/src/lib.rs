@@ -406,7 +406,7 @@ pub use tutti_dsp::{CombControls, CombForm, FrequencyShifterControls};
 // Pitch shifter.
 mod pitch_shifter;
 pub use pitch_shifter::{
-    DEFAULT_HOP, PitchShifterConfig, PitchShifterKernel, PitchShifterNode, PitchShifterSet,
+    PitchShifterConfig, PitchShifterKernel, PitchShifterNode, PitchShifterSet,
 };
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a

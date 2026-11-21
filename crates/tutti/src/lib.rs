@@ -344,9 +344,9 @@ pub mod nodes {
         TransientShaperKernel, TransientShaperSet,
     };
     pub use tutti_nodes::{
-        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, DEFAULT_HOP,
-        FrequencyShifterConfig, FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet,
-        PitchShifterConfig, PitchShifterKernel, PitchShifterNode, PitchShifterSet,
+        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
+        FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig,
+        PitchShifterKernel, PitchShifterNode, PitchShifterSet,
     };
 }
 
