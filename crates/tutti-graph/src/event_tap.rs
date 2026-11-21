@@ -52,7 +52,38 @@ use tutti_units::{Frame, SampleRate};
 use crate::event::{EventKind, note_off_room};
 use crate::node::Env;
 use crate::slots::EventSlots;
-use crate::{EventCapacity, EventTapId};
+use crate::{EventCapacity, EventTapId, TapAlign};
+
+/// How an event tap is opened: its ring capacity and where its copy sits in
+/// time. Taken by [`Editor::open_event_tap`](crate::Editor::open_event_tap).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventTapOptions {
+    capacity: EventCapacity,
+    align: TapAlign,
+}
+
+impl EventTapOptions {
+    /// Options for an event tap whose ring holds `capacity` events: aligned
+    /// to the output ([`TapAlign::ToOutput`]).
+    #[must_use]
+    pub fn new(capacity: EventCapacity) -> Self {
+        Self {
+            capacity,
+            align: TapAlign::default(),
+        }
+    }
+
+    /// Where the copy sits in time.
+    #[must_use]
+    pub fn align(mut self, align: TapAlign) -> Self {
+        self.align = align;
+        self
+    }
+
+    pub(crate) fn into_parts(self) -> (EventCapacity, TapAlign) {
+        (self.capacity, self.align)
+    }
+}
 
 /// One event a tap copied out: the packet, and the frame of the graph's clock
 /// it was due on.

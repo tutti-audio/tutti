@@ -24,8 +24,7 @@ fn block(level: f32) -> OutputBlock<f32> {
         2
     ]);
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     Box::leak(Box::new(ed));
     OutputBlock::new(
         Arc::new(AudioCallbackState::new(engine)),

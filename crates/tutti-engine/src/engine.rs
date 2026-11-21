@@ -419,9 +419,8 @@ impl<F: Float> Engine<F> {
         transport: &tutti_timeline::Transport,
         editor: &mut Editor<F>,
         executor: Executor<F>,
-        dates: BlockDates,
     ) -> Result<Self, GraphEngineError> {
-        Self::with_capacity(transport, editor, executor, DEFAULT_BLOCK_CAPACITY, dates)
+        Self::with_capacity(transport, editor, executor, DEFAULT_BLOCK_CAPACITY)
     }
 
     /// As [`new`](Self::new), with the fold scratch sized for blocks of up
@@ -458,8 +457,8 @@ impl<F: Float> Engine<F> {
     /// follows the beat (`ClickNode`, a beat-synced LFO or automation lane)
     /// reads it from its block's `Env`, which shares nothing.
     ///
-    /// `dates` is what dates every render call ([`BlockDates`]), fixed for
-    /// the engine's life; for `Frames` the origin is read here.
+    /// Every render call is dated by the OS clock until [`dates`](Self::dates)
+    /// says otherwise.
     ///
     /// Control thread. Allocates the fold scratch
     /// (`MAX_CHANNELS × capacity` samples).
@@ -480,7 +479,6 @@ impl<F: Float> Engine<F> {
         editor: &mut Editor<F>,
         executor: Executor<F>,
         capacity: Samples,
-        dates: BlockDates,
     ) -> Result<Self, GraphEngineError> {
         if !editor.is_paired_with(&executor) {
             return Err(GraphEngineError::NotAPair);
@@ -525,7 +523,7 @@ impl<F: Float> Engine<F> {
                 crossings: BeatCrossings::new(),
                 dropped_seen,
                 clock,
-                dates: DateKeeper::new(dates),
+                dates: DateKeeper::new(BlockDates::default()),
                 installed: Arc::clone(output.installed()),
                 stage: OutputStage::new(),
                 routing: RoutingRun {
@@ -583,6 +581,15 @@ impl<F: Float> Engine<F> {
     /// [`FoldError::Buffer`] (a zero width) for a device of no channels; nothing is published.
     pub fn support_output(&self, device: ChannelLayout) -> Result<(), FoldError> {
         self.output.support(device)
+    }
+
+    /// What dates every render call ([`BlockDates`]), fixed for the engine's
+    /// life from here on; for `Frames` the origin is read now, on the
+    /// control thread.
+    #[must_use]
+    pub fn dates(mut self, dates: BlockDates) -> Self {
+        self.graph.get_mut().dates = DateKeeper::new(dates);
+        self
     }
 
     /// The control side of the output folds, to keep when this engine moves to
@@ -1666,8 +1673,9 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Frames).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec)
+            .expect("empty graph")
+            .dates(crate::BlockDates::Frames);
         let reader = engine.block_clock();
         let mut samples = vec![0.0f32; 512 * 2];
         let mut out = InterleavedMut::new(&mut samples, ChannelLayout::STEREO).unwrap();
@@ -1686,8 +1694,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         transport
             .motion()
             .schedule(At::Frame(Frame::new(100)), MotionCommand::Play)
@@ -1734,8 +1741,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = transport.motion().try_send(MotionCommand::Play);
         let mut buf = vec![1.0f32; 64 * 2];
         let mut seg = vec![1.0f32; 64 * 2];
@@ -1765,8 +1771,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let mut tap = engine
             .output_taps()
             .open(ChannelLayout::STEREO, Samples::new(256))
@@ -1805,8 +1810,7 @@ mod tests {
                 SampleRate::SR_48K,
                 MaxBlock::of(Samples::new(512)),
             ));
-            let engine =
-                Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+            let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
             let _ = transport.motion().try_send(MotionCommand::Play);
             engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
             assert!(transport.is_rolling());
@@ -1815,8 +1819,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine = Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os)
-            .expect("the first engine is gone");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("the first engine is gone");
         let _ = transport.motion().try_send(MotionCommand::stop_unfaded());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         assert!(!transport.is_rolling(), "the machine knew it was rolling");
@@ -1832,14 +1835,13 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let _running =
-            Engine::new(&first, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let _running = Engine::new(&first, &mut ed, exec).expect("empty graph");
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
         assert!(matches!(
-            Engine::new(&second, &mut ed, exec, crate::BlockDates::Os),
+            Engine::new(&second, &mut ed, exec),
             Err(GraphEngineError::TransportHeld(_))
         ));
     }
@@ -1856,8 +1858,7 @@ mod tests {
                 SampleRate::SR_48K,
                 MaxBlock::of(Samples::new(512)),
             ));
-            let engine =
-                Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+            let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
             let stop = MotionCommand::stop_unfaded();
             if first_is_play {
                 transport
@@ -1903,7 +1904,7 @@ mod tests {
                 SampleRate::SR_48K,
                 MaxBlock::of(Samples::new(2048)),
             ));
-            Engine::new(transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph")
+            Engine::new(transport, &mut ed, exec).expect("empty graph")
         };
 
         let transport = Transport::new(SampleRate::SR_48K);
@@ -1951,8 +1952,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let _ = transport.motion().try_send(MotionCommand::Play);
         let mut render = engine.graph.borrow_mut();
         let mut pieces = GraphPieces {
@@ -2009,8 +2009,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(512)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let mut buf = vec![0.0f32; 64 * 2];
         {
             let _control = engine.graph.borrow_mut();
@@ -2190,8 +2189,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let wide = ChannelLayout::from(20u16);
         engine.support_output(wide).expect("a width");
@@ -2226,8 +2224,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 5);
         let three = ChannelLayout::from(3u16);
         let mut out = vec![-9.0f32; 3 * 8];
@@ -2270,8 +2267,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
         let six = ChannelLayout::from(6u16);
         // The first block installs the plan (silent); the rows read the next.
@@ -2301,8 +2297,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 2);
         let m = <f32 as Float>::MINUS_3_DB;
@@ -2341,8 +2336,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
         let eight = ChannelLayout::from(8u16);
         let _ = first_frame(&engine, 8);
@@ -2390,13 +2384,7 @@ mod tests {
         ));
         rewire(&mut ed, 4);
         let ed = RefCell::new(ed);
-        let engine = Engine::new(
-            &transport,
-            &mut ed.borrow_mut(),
-            exec,
-            crate::BlockDates::Os,
-        )
-        .expect("within limits");
+        let engine = Engine::new(&transport, &mut ed.borrow_mut(), exec).expect("within limits");
         let control = engine.output_control();
         let six = ChannelLayout::from(6u16);
         let _ = block_with(&engine, 6, || {});
@@ -2428,8 +2416,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
         let six = ChannelLayout::from(6u16);
         let _ = first_frame(&engine, 6);
@@ -2459,8 +2446,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
         let control = engine.output_control();
         let six = ChannelLayout::from(6u16);
@@ -2514,8 +2500,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
         let first = RootId::GENESIS.next();
@@ -2542,8 +2527,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 2);
         let control = engine.output_control();
@@ -2581,8 +2565,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let before = control.cell().current();
         for _ in 0..4 {
@@ -2601,8 +2584,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 2);
         let unheard = RootId::GENESIS.next();
@@ -2634,8 +2616,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 6);
         let control = engine.output_control();
@@ -2678,8 +2659,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 2);
         engine.output_control().set_routing(Routing {
@@ -2714,8 +2694,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 2);
         let control = engine.output_control();
@@ -2786,8 +2765,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let three = ChannelLayout::from(3u16);
         let genesis = RootId::GENESIS;
@@ -2826,8 +2804,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let control = engine.output_control();
         let _ = first_frame(&engine, 2);
@@ -2873,8 +2850,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let control = engine.output_control();
         let stereo = ChannelLayout::STEREO;
@@ -2944,17 +2920,9 @@ mod tests {
         ed.insert(tutti_graph::NodeKey(1), "dc", tutti_graph::Unforkable(Dc));
         feed(&mut ed, 2, 0);
         ed.commit().expect("commits");
-        let engine = Engine::new(
-            &Transport::new(SampleRate::SR_48K),
-            &mut ed,
-            exec,
-            crate::BlockDates::Os,
-        )
-        .expect("within limits");
-        ed.set_root_fade(Some(tutti_graph::Fade::new(
-            Samples::new(fade),
-            tutti_graph::FadeLaw::EqualAmplitude,
-        )));
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
+        ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(fade))));
         assert_eq!(block_with(&engine, 2, || {}), [1.0, 0.0].repeat(8));
         (engine, ed)
     }
@@ -2986,8 +2954,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 4);
         engine.output_control().set_routing(Routing {
@@ -3144,8 +3111,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let _ = first_frame(&engine, 2);
         control.set_routing(change());
@@ -3159,8 +3125,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 5);
         let control = engine.output_control();
         let _ = first_frame(&engine, 3);
@@ -3210,8 +3175,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 2);
         let swapped = ChannelTopology::new([
@@ -3444,17 +3408,9 @@ mod tests {
         });
         ed.spec_mut().topology.set_outputs([count, late]);
         ed.commit().expect("commits");
-        let engine = Engine::new(
-            &Transport::new(SampleRate::SR_48K),
-            &mut ed,
-            exec,
-            crate::BlockDates::Os,
-        )
-        .expect("within limits");
-        ed.set_root_fade(Some(tutti_graph::Fade::new(
-            Samples::new(20),
-            tutti_graph::FadeLaw::EqualAmplitude,
-        )));
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
+        ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(20))));
         let control = engine.output_control();
         // 16 frames of the old root, whose left is the counter 16 behind.
         for _ in 0..2 {
@@ -3514,17 +3470,9 @@ mod tests {
         });
         ed.spec_mut().topology.set_outputs([count, late]);
         ed.commit().expect("commits");
-        let engine = Engine::new(
-            &Transport::new(SampleRate::SR_48K),
-            &mut ed,
-            exec,
-            crate::BlockDates::Os,
-        )
-        .expect("within limits");
-        ed.set_root_fade(Some(tutti_graph::Fade::new(
-            Samples::new(20),
-            tutti_graph::FadeLaw::EqualAmplitude,
-        )));
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
+        ed.set_root_fade(Some(tutti_graph::Fade::new(Samples::new(20))));
         let control = engine.output_control();
         for _ in 0..2 {
             let _ = block_with(&engine, 2, || {});
@@ -3579,8 +3527,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         let control = engine.output_control();
         let loan_holder = &engine.folds;
         let mut reader = loan_holder.borrow_mut();
@@ -3607,8 +3554,7 @@ mod tests {
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
         ));
-        let engine =
-            Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 4);
         let _ = first_frame(&engine, 2);
         let before = first_frame(&engine, 2);
@@ -3653,13 +3599,7 @@ mod tests {
             MaxBlock::of(Samples::new(512)),
         ));
         let ed = RefCell::new(ed);
-        let engine = Engine::new(
-            &transport,
-            &mut ed.borrow_mut(),
-            exec,
-            crate::BlockDates::Os,
-        )
-        .expect("empty graph");
+        let engine = Engine::new(&transport, &mut ed.borrow_mut(), exec).expect("empty graph");
         let want = |w: usize| -> Vec<f32> {
             (0..8)
                 .flat_map(|_| (0..w).map(|c| (10 * w + c + 1) as f32))
@@ -3690,13 +3630,7 @@ mod tests {
         ));
         rewire(&mut ed, 4);
         let ed = RefCell::new(ed);
-        let engine = Engine::new(
-            &transport,
-            &mut ed.borrow_mut(),
-            exec,
-            crate::BlockDates::Os,
-        )
-        .expect("within limits");
+        let engine = Engine::new(&transport, &mut ed.borrow_mut(), exec).expect("within limits");
         let wide: Vec<f32> = (0..8).flat_map(|_| [41.0, 42.0, 43.0, 44.0]).collect();
         let narrow: Vec<f32> = (0..8).flat_map(|_| [21.0, 22.0]).collect();
         assert_eq!(block_with(&engine, 4, || {}), wide);
@@ -3718,13 +3652,7 @@ mod tests {
         ));
         rewire(&mut ed, 2);
         let ed = RefCell::new(ed);
-        let engine = Engine::new(
-            &transport,
-            &mut ed.borrow_mut(),
-            exec,
-            crate::BlockDates::Os,
-        )
-        .expect("within limits");
+        let engine = Engine::new(&transport, &mut ed.borrow_mut(), exec).expect("within limits");
         ed.borrow_mut()
             .reprepare(Prepare::new(
                 SampleRate::SR_48K,

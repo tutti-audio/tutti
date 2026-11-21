@@ -137,8 +137,8 @@ impl Node for RampEvery {
                             (f % 3) as f64,
                             (f % 7) as f64,
                             Samples::new(50),
-                            shape,
-                        );
+                        )
+                        .law(shape);
                         let seg = if k == 2 {
                             seg.resumed(Samples::new(3), Samples::new(41))
                         } else {

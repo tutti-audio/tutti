@@ -199,8 +199,8 @@ impl ParamRamp {
 ///     Hz::new(200.0),
 ///     Hz::new(800.0),
 ///     Samples::new(480),
-///     Law::PowerIn(Exponent::of(2.0)),
-/// );
+/// )
+/// .law(Law::PowerIn(Exponent::of(2.0)));
 /// assert_eq!(s.target(ParamKey::<Hz>::CUTOFF), Some(Hz::new(800.0)));
 /// assert_eq!(s.start(ParamKey::<Hz>::CUTOFF), Some(Hz::new(200.0)));
 /// assert_eq!(s.shape(), Law::PowerIn(Exponent::of(2.0)));
@@ -224,11 +224,11 @@ pub struct ParamSegment {
 
 impl ParamSegment {
     /// A segment of built-in parameter `key` from `from` to `to` along
-    /// `shape` over `duration` frames, in the ramp convention: the event's
-    /// frame is one step in, and `to` lands on its last frame (a zero
-    /// duration is a step to `to`).
-    pub fn new<U: Scalar>(key: ParamKey<U>, from: U, to: U, duration: Samples, shape: Law) -> Self {
-        Self::unit(key.addr(), from.to_cell(), to.to_cell(), duration, shape)
+    /// [`Law::default`] (see [`law`](Self::law)) over `duration` frames,
+    /// in the ramp convention: the event's frame is one step in, and `to`
+    /// lands on its last frame (a zero duration is a step to `to`).
+    pub fn new<U: Scalar>(key: ParamKey<U>, from: U, to: U, duration: Samples) -> Self {
+        Self::unit(key.addr(), from.to_cell(), to.to_cell(), duration)
     }
 
     /// A segment of built-in parameter `param` (a [`UnitParam`],
@@ -237,23 +237,24 @@ impl ParamSegment {
     /// over the unit (a control lane built from a `ParamAddr`),
     /// and for a param with no [`ParamKey`] yet. The raw value is exactly what
     /// [`new`](Self::new) sends for a key with this id.
-    pub fn unit(
-        param: impl Into<UnitAddr>,
-        from: f64,
-        to: f64,
-        duration: Samples,
-        shape: Law,
-    ) -> Self {
-        Self::packed(ParamAddr::unit(param.into()), from, to, duration, shape)
+    pub fn unit(param: impl Into<UnitAddr>, from: f64, to: f64, duration: Samples) -> Self {
+        Self::packed(ParamAddr::unit(param.into()), from, to, duration)
     }
 
     /// A segment of a id-addressed target's parameter `id`, in its own
     /// normalisation, as [`new`](Self::new) otherwise.
-    pub fn by_id(id: ParamId, from: f64, to: f64, duration: Samples, shape: Law) -> Self {
-        Self::packed(ParamAddr::Id(id), from, to, duration, shape)
+    pub fn by_id(id: ParamId, from: f64, to: f64, duration: Samples) -> Self {
+        Self::packed(ParamAddr::Id(id), from, to, duration)
     }
 
-    fn packed(addr: ParamAddr, from: f64, to: f64, duration: Samples, shape: Law) -> Self {
+    /// This segment along `shape`.
+    #[must_use]
+    pub fn law(mut self, shape: Law) -> Self {
+        self.shape = shape;
+        self
+    }
+
+    fn packed(addr: ParamAddr, from: f64, to: f64, duration: Samples) -> Self {
         Self {
             addr,
             from,
@@ -261,7 +262,7 @@ impl ParamSegment {
             position: 1,
             lead: SampleSpan::ZERO,
             span: SampleSpan::from_samples(Samples::new(saturate(duration) as usize)),
-            shape,
+            shape: Law::default(),
         }
     }
 
@@ -503,25 +504,15 @@ mod tests {
     fn a_segment_reads_back_as_built() {
         let key = ParamKey::<Hz>::CUTOFF;
         let id = ParamId::new(u32::from(key.addr().to_u16()));
-        let by_id = ParamSegment::by_id(
-            id,
-            0.25,
-            0.75,
-            Samples::new(8),
-            Law::Exp(Curvature::of(2.0)),
-        );
+        let by_id =
+            ParamSegment::by_id(id, 0.25, 0.75, Samples::new(8)).law(Law::Exp(Curvature::of(2.0)));
         assert_eq!(by_id.target(key), None);
         assert_eq!(by_id.target_by_id(id), Some(0.75));
         assert_eq!(by_id.start_by_id(id), Some(0.25));
         assert_eq!(by_id.addr(), ParamAddr::Id(id));
-        let s = ParamSegment::new(
-            key,
-            Hz::new(1.0),
-            Hz::new(2.0),
-            Samples::new(8),
-            Law::PowerOut(Exponent::of(3.0)),
-        )
-        .resumed(Samples::new(2), Samples::new(10));
+        let s = ParamSegment::new(key, Hz::new(1.0), Hz::new(2.0), Samples::new(8))
+            .law(Law::PowerOut(Exponent::of(3.0)))
+            .resumed(Samples::new(2), Samples::new(10));
         assert_eq!(s.addr(), ParamAddr::unit(key.addr()));
         assert_eq!(s.target_by_id(id), None);
         assert_eq!(s.start(key), Some(Hz::new(1.0)));
@@ -535,18 +526,14 @@ mod tests {
         assert_eq!(s.raw_value_after(Samples::new(1_000)), 2.0);
         assert_eq!(s.arrives_after(), Samples::new(8));
         // A zero length is a step.
-        let step = ParamSegment::new(key, Hz::new(1.0), Hz::new(2.0), Samples::new(0), Law::Hold);
+        let step =
+            ParamSegment::new(key, Hz::new(1.0), Hz::new(2.0), Samples::new(0)).law(Law::Hold);
         assert_eq!(step.raw_value_after(Samples::new(0)), 2.0);
         assert_eq!(step.arrives_after(), Samples::new(0));
         // The pure part: endpoints and law (a law with no parameter,
         // `Smootherstep`, among them).
-        let smooth = ParamSegment::new(
-            key,
-            Hz::new(1.0),
-            Hz::new(2.0),
-            Samples::new(8),
-            Law::Smootherstep,
-        );
+        let smooth = ParamSegment::new(key, Hz::new(1.0), Hz::new(2.0), Samples::new(8))
+            .law(Law::Smootherstep);
         assert_eq!(smooth.piece(), Piece::new(1.0, 2.0, Law::Smootherstep));
         assert_eq!(
             s.piece(),
@@ -559,13 +546,7 @@ mod tests {
     #[test]
     fn counts_saturate_at_u32_max() {
         let key = ParamKey::<Hz>::CUTOFF;
-        let s = ParamSegment::new(
-            key,
-            Hz::new(0.0),
-            Hz::new(1.0),
-            Samples::new(usize::MAX),
-            Law::Linear,
-        );
+        let s = ParamSegment::new(key, Hz::new(0.0), Hz::new(1.0), Samples::new(usize::MAX));
         assert_eq!(s.length(), Samples::new(u32::MAX as usize));
         let r = ParamRamp::new(key, Hz::new(1.0), Samples::new(usize::MAX));
         assert_eq!(r.duration(), Samples::new(u32::MAX as usize));
@@ -586,7 +567,6 @@ mod tests {
             Hz::new(0.0),
             Hz::new(FRAMES as f64),
             Samples::new(FRAMES),
-            Law::Linear,
         )
         .resumed(Samples::new(0), Samples::new(FRAMES));
         // The loss `f32` would take, so the test cannot pass vacuously.
@@ -608,7 +588,7 @@ mod tests {
     fn a_fractional_start_reads_the_law_at_the_exact_place() {
         let law = Law::Exp(Curvature::of(4.0));
         let key = ParamKey::<Hz>::CUTOFF;
-        let base = ParamSegment::new(key, Hz::new(0.0), Hz::new(8.0), Samples::new(11), law);
+        let base = ParamSegment::new(key, Hz::new(0.0), Hz::new(8.0), Samples::new(11)).law(law);
         let exact = base.resumed_exactly(SamplePosition::new(0.6), SamplePosition::new(11.0));
         let flat = base.resumed(Samples::new(0), Samples::new(11));
         let mut apart = 0.0f64;
@@ -634,13 +614,7 @@ mod tests {
         // Setup: both round in `f32`.
         assert_eq!(f64::from(from as f32), 1.0);
         assert_eq!(f64::from(to as f32), 3.0);
-        let s = ParamSegment::new(
-            key,
-            Hz::new(from),
-            Hz::new(to),
-            Samples::new(4),
-            Law::Linear,
-        );
+        let s = ParamSegment::new(key, Hz::new(from), Hz::new(to), Samples::new(4));
         assert_eq!(s.start(key), Some(Hz::new(from)));
         assert_eq!(s.target(key), Some(Hz::new(to)));
         assert_eq!(s.raw_value_after(Samples::new(3)), to);

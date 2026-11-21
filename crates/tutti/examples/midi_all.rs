@@ -192,7 +192,8 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // The take: what was played, each event on its frame of the graph, placed
     // where the performer meant it for this device's latencies (figures a host
     // reads off its devices; here none reported, and a 10 ms trim).
-    let latency = TakeLatency::new(None, None, Samples::ZERO, Trim::Later(Samples::new(480)));
+    let latency =
+        TakeLatency::new(None, None, Samples::ZERO).offset(Trim::Later(Samples::new(480)));
     let take = take
         .drain()
         .map(|e| {

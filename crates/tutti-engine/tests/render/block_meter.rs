@@ -41,8 +41,7 @@ fn four_four_then(at: f64, signature: TimeSignature) -> MeterMap {
 fn logging(transport: &Transport) -> (Engine, Arc<Mutex<Vec<tutti_graph::Env>>>) {
     let log = Arc::new(Mutex::new(Vec::new()));
     let (mut ed, exec) = env_graph(512, &log);
-    let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, log)
 }
 
@@ -92,7 +91,7 @@ fn click_graph(mode: MetronomeMode) -> (Editor, Executor) {
 /// The click graph as a live engine under `transport`.
 fn click_engine(transport: &Transport, mode: MetronomeMode) -> Engine {
     let (mut ed, exec) = click_graph(mode);
-    Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os).expect("within the limits")
+    Engine::new(transport, &mut ed, exec).expect("within the limits")
 }
 
 /// Whether each click of `stereo` at `onsets` is an accent: an accent peaks

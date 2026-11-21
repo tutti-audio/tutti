@@ -22,8 +22,7 @@ fn engine() -> Engine {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
     Box::leak(Box::new(ed));
     TRANSPORTS.with(|t| t.borrow_mut().push(transport));
     engine
@@ -189,7 +188,9 @@ fn dated(dates: BlockDates, rate: f64) -> (Engine, Editor, Transport) {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, dates).expect("within limits");
+    let engine = Engine::new(&transport, &mut ed, exec)
+        .expect("within limits")
+        .dates(dates);
     (engine, ed, transport)
 }
 

@@ -716,7 +716,7 @@ pub use event_inlet::{
     EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, Stamp,
 };
 pub use event_losses::Losses;
-pub use event_tap::{EventTapReader, EventTapWriter, TapEvent};
+pub use event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, QUEUE_CAPACITY, RootFade};
 pub use fade::Fade;
 pub use fork::{

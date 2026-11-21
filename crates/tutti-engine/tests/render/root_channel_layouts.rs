@@ -47,13 +47,8 @@ fn root(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor) {
 /// interleaved buffer. `wire` feeds the source to the root outputs it picks.
 fn render_root_to(outputs: usize, target: usize, wire: &[usize]) -> Vec<f32> {
     let (mut ed, exec) = root(outputs, wire);
-    let engine = Engine::new(
-        &Transport::new(SampleRate::SR_48K),
-        &mut ed,
-        exec,
-        tutti_engine::BlockDates::Os,
-    )
-    .expect("within the limits");
+    let engine =
+        Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within the limits");
     let frames = 256;
     let mut out = vec![0.0f32; frames * target];
     // `target` stays a plain count in the assertions below — they read as
@@ -168,13 +163,7 @@ fn a_714_root_folds_to_a_stereo_device_by_speaker() {
 fn over_wide_root_is_refused_before_it_can_render() {
     let wide = MAX_CHANNELS + 1;
     let (mut ed, exec) = root(wide, &(0..wide).collect::<Vec<_>>());
-    let refused = Engine::new(
-        &Transport::new(SampleRate::SR_48K),
-        &mut ed,
-        exec,
-        tutti_engine::BlockDates::Os,
-    )
-    .err();
+    let refused = Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).err();
     assert_eq!(
         refused,
         Some(GraphEngineError::Limits(CommitError::TooManyOutputs {

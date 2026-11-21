@@ -1962,7 +1962,7 @@ fn random_fade(rng: &mut Rng) -> tutti_graph::Fade {
     };
     // Mostly shorter than the rounds between edits, often longer, so fades
     // end mid-block, run across edits, and queue behind each other.
-    tutti_graph::Fade::new(Samples::new(1 + rng.below(250) as usize), curve)
+    tutti_graph::Fade::new(Samples::new(1 + rng.below(250) as usize)).law(curve)
 }
 
 /// An edit that replaces one to three running nodes with a crossfade — the

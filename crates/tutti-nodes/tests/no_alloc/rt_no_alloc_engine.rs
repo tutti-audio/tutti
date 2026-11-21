@@ -93,8 +93,7 @@ fn build_engine_with_chain() -> Engine {
         })
     }));
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // Every commit is sent; the editor only had to outlive the setup.
     drop(ed);
     let _ = transport.motion().try_send(MotionCommand::Play);

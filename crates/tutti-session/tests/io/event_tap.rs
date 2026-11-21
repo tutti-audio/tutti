@@ -10,8 +10,8 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{
-    Cx, Event, EventCapacity, Io, MissingSource, Node, Op, Prepare, Shape, Status, TapAlign,
-    TapEvent, Unforkable,
+    Cx, Event, EventCapacity, EventTapOptions, Io, MissingSource, Node, Op, Prepare, Shape, Status,
+    TapAlign, TapEvent, Unforkable,
 };
 use tutti_session::{CloseError, DetachedSession, EventInPort, EventOutPort, Session};
 use tutti_ump::Ump;
@@ -95,7 +95,10 @@ fn opening_a_tap_yields_the_events_rendered_since_the_open() {
     let mut tap = s
         .graph()
         .taps()
-        .open_event(source, TapAlign::Raw, EventCapacity::of(64))
+        .open_event(
+            source,
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
+        )
         .expect("the port exists");
     assert_eq!(tap.rate(), SampleRate::SR_48K);
     frames(15, &mut s);
@@ -112,8 +115,7 @@ fn opening_refuses_a_port_the_graph_does_not_have() {
             .taps()
             .open_event(
                 EventOutPort::new(source.node(), 3),
-                TapAlign::Raw,
-                EventCapacity::of(8)
+                EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw)
             )
             .err(),
         Some(MissingSource::EventPort {
@@ -132,7 +134,10 @@ fn closing_the_tap_stops_the_copy() {
     let mut tap = s
         .graph()
         .taps()
-        .open_event(source, TapAlign::Raw, EventCapacity::of(64))
+        .open_event(
+            source,
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
+        )
         .expect("the port exists");
     frames(6, &mut s);
     assert_eq!(tap_ops(&s), 1);
@@ -155,7 +160,10 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
     let tap = s
         .graph()
         .taps()
-        .open_event(source, TapAlign::Raw, EventCapacity::of(64))
+        .open_event(
+            source,
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
+        )
         .expect("the port exists");
     let _ = s.update();
     assert_eq!(tap_ops(&s), 1, "one op a tap while it is open");
@@ -179,7 +187,10 @@ fn reopening_replaces_the_tap_at_the_new_rate() {
     let mut old = s
         .graph()
         .taps()
-        .open_event(source, TapAlign::Raw, EventCapacity::of(64))
+        .open_event(
+            source,
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
+        )
         .expect("the port exists");
     frames(5, &mut s);
     assert_eq!(drain(&mut old), vec![0, 4]);
@@ -229,8 +240,7 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
             .taps()
             .open_event(
                 EventInPort::new(hears.erase(), 1),
-                TapAlign::Raw,
-                EventCapacity::of(8)
+                EventTapOptions::new(EventCapacity::of(8)).align(TapAlign::Raw)
             )
             .err(),
         Some(MissingSource::EventInPort {
@@ -242,7 +252,10 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
     let mut tap = s
         .graph()
         .taps()
-        .open_event(hears.events_in(), TapAlign::Raw, EventCapacity::of(64))
+        .open_event(
+            hears.events_in(),
+            EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
+        )
         .expect("the input exists");
     frames(16, &mut s);
     assert_eq!(drain(&mut tap), vec![0, 4, 8, 12]);

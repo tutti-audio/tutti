@@ -195,8 +195,7 @@ fn graph_engine(
     ed.insert(NodeKey(1), "node", node);
     outputs(&mut ed, NodeKey(1), width);
     ed.commit().expect("commits");
-    let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, ed)
 }
 
@@ -640,8 +639,7 @@ fn a_declick_lasts_five_milliseconds_at_any_rate() {
         ed.insert(NodeKey(1), "node", Unforkable(DcLog(log)));
         outputs(&mut ed, NodeKey(1), 1);
         ed.commit().expect("commits");
-        let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-            .expect("within the limits");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
         transport
             .motion()
             .try_send(MotionCommand::Play)
@@ -1037,7 +1035,7 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
         }));
     ed.commit().expect("no limits yet");
     assert!(matches!(
-        Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os),
+        Engine::new(&transport, &mut ed, exec),
         Err(GraphEngineError::Limits(CommitError::TooManyOutputs { outputs, .. }))
             if outputs == wide
     ));
@@ -1061,7 +1059,7 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     let (mut ed, _exec) = Editor::new(prepare(256));
     let (_other, stranger) = Editor::new(prepare(256));
     assert_eq!(
-        Engine::new(&transport, &mut ed, stranger, tutti_engine::BlockDates::Os).err(),
+        Engine::new(&transport, &mut ed, stranger).err(),
         Some(GraphEngineError::NotAPair)
     );
 }
@@ -1081,14 +1079,8 @@ fn re_preparing_under_the_engine_adopts_the_new_block_at_once() {
         ed.insert(NodeKey(1), "node", Unforkable(Clocked));
         outputs(&mut ed, NodeKey(1), 3);
         ed.commit().expect("commits");
-        let engine = Engine::with_capacity(
-            &transport,
-            &mut ed,
-            exec,
-            Samples::new(2048),
-            tutti_engine::BlockDates::Os,
-        )
-        .expect("fits");
+        let engine =
+            Engine::with_capacity(&transport, &mut ed, exec, Samples::new(2048)).expect("fits");
         assert_eq!(engine.block_capacity(), Samples::new(2048));
         let layout = ChannelLayout::from_count(3);
         let go = |n: usize| {
@@ -1370,8 +1362,7 @@ fn a_re_prepare_keeps_the_beat_and_a_frame_command_on_wall_clock_time() {
     );
     outputs(&mut ed, NodeKey(1), 1);
     ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("within the limits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport
         .motion()
         .try_send(MotionCommand::Play)
@@ -1440,7 +1431,7 @@ fn a_transport_has_one_playhead_writer() {
     let (mut ed, exec) = Editor::new(prepare(256));
     let twin = transport.clone();
     assert_eq!(
-        Engine::new(&twin, &mut ed, exec, tutti_engine::BlockDates::Os).err(),
+        Engine::new(&twin, &mut ed, exec).err(),
         Some(GraphEngineError::TransportHeld(AudioTaken)),
         "a clone shares the playhead, so it shares the claim"
     );
@@ -1448,8 +1439,7 @@ fn a_transport_has_one_playhead_writer() {
 
     drop(engine);
     let (mut ed, exec) = Editor::new(prepare(256));
-    let again = Engine::new(&twin, &mut ed, exec, tutti_engine::BlockDates::Os)
-        .expect("the first engine is gone");
+    let again = Engine::new(&twin, &mut ed, exec).expect("the first engine is gone");
     render(&again, ChannelLayout::STEREO, &[64]);
 }
 

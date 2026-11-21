@@ -123,14 +123,9 @@ impl<S: ControlSource> SourceNode<S> {
     }
 
     fn segment(&self, leg: Leg) -> ParamSegment {
-        ParamSegment::by_id(
-            self.id.get(),
-            leg.piece.from,
-            leg.piece.to,
-            Samples::new(0),
-            leg.piece.law,
-        )
-        .resumed(Samples::new(0), leg.frames)
+        ParamSegment::by_id(self.id.get(), leg.piece.from, leg.piece.to, Samples::new(0))
+            .law(leg.piece.law)
+            .resumed(Samples::new(0), leg.frames)
     }
 
     /// The value it has sent, at stream frame `now` (0 before any).

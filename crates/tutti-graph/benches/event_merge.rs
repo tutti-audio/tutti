@@ -18,7 +18,7 @@ use std::num::NonZeroU32;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::MaxBlock;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Law, Node, NodeKey, ParamEvent,
+    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Node, NodeKey, ParamEvent,
     ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_ump::Ump;
@@ -61,8 +61,7 @@ impl Node for Source {
                 let _ = out.push(Event::midi(at, Ump([0x2090_3c64, 0, 0, 0])));
             }
             if matches!(self.mix, Mix::Params | Mix::Mixed) {
-                let seg =
-                    ParamSegment::by_id(ParamId::new(1), 0.0, 1.0, Samples::new(32), Law::Linear);
+                let seg = ParamSegment::by_id(ParamId::new(1), 0.0, 1.0, Samples::new(32));
                 let _ = out.push_param(ParamEvent::segment(at, seg));
             }
         }

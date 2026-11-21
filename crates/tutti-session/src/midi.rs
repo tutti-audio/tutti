@@ -20,7 +20,7 @@ use tutti_graph::UmpAt;
 use tutti_platform::Instant;
 
 use std::sync::{Arc, Weak};
-use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
+use tutti_graph::{EventTapOptions, EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
     ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MidiClipNode, MidiInputPorts,
@@ -1798,7 +1798,10 @@ impl<F: Float> Midi<'_, F> {
         let source = EventOutPort::new(node, 0);
         self.graph
             .taps()
-            .open_event(source, tutti_graph::TapAlign::Raw, capacity)
+            .open_event(
+                source,
+                EventTapOptions::new(capacity).align(tutti_graph::TapAlign::Raw),
+            )
             .map_err(MidiError::Tap)
     }
 
@@ -1823,8 +1826,7 @@ impl<F: Float> Midi<'_, F> {
             .taps()
             .open_event(
                 EventOutPort::new(input, port),
-                tutti_graph::TapAlign::Raw,
-                capacity,
+                EventTapOptions::new(capacity).align(tutti_graph::TapAlign::Raw),
             )
             .map_err(MidiError::Tap)
     }
@@ -2131,8 +2133,7 @@ impl<F: Float> Midi<'_, F> {
             .taps()
             .open_event(
                 EventOutPort::new(node, 0),
-                tutti_graph::TapAlign::ToOutput,
-                MIDI_OUT_TAP_CAPACITY,
+                EventTapOptions::new(MIDI_OUT_TAP_CAPACITY),
             )
             .expect("the output node is in the graph with its event output");
         (node, tap, departure)

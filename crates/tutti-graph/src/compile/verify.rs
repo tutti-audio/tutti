@@ -1816,7 +1816,7 @@ mod tests {
             compile(&spec.validate().expect("valid"), &shapes, &prepare, prev).expect("compiles")
         };
         let (base, _) = build(generator(), 0, None);
-        let fade = Fade::new(tutti_units::Samples::new(32), FadeLaw::EqualPower);
+        let fade = Fade::new(tutti_units::Samples::new(32)).law(FadeLaw::EqualPower);
         let check = |shape_a: Shape, fades: Vec<(NodeKey, Fade)>| {
             let (plan, mut delta) = build(shape_a, 1, Some(&base));
             delta.fades = fades;

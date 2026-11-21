@@ -85,7 +85,7 @@ fn a_fade_has_no_step_at_either_end() {
         ed.replace(
             NODE,
             Unforkable(gain(3.0)),
-            Fade::new(Samples::new(len), curve),
+            Fade::new(Samples::new(len)).law(curve),
         )
         .expect("same shape");
         ed.commit().expect("commits");
@@ -119,12 +119,8 @@ fn the_fade_is_exactly_its_length() {
     let (mut ed, mut exec) = gain_graph(1.0);
     let mut out = dc(&mut exec, 20);
     let start = out.len();
-    ed.replace(
-        NODE,
-        Unforkable(gain(3.0)),
-        Fade::new(Samples::new(len), FadeLaw::EqualAmplitude),
-    )
-    .expect("same shape");
+    ed.replace(NODE, Unforkable(gain(3.0)), Fade::new(Samples::new(len)))
+        .expect("same shape");
     ed.commit().expect("commits");
     for &n in RAGGED.iter().cycle().take(10) {
         out.extend(dc(&mut exec, n));
@@ -209,7 +205,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
     ed.replace(
         NODE,
         Unforkable(gain(2.0)),
-        Fade::new(Samples::new(100), FadeLaw::EqualPower),
+        Fade::new(Samples::new(100)).law(FadeLaw::EqualPower),
     )
     .expect("same shape");
     ed.commit().expect("commits");
@@ -245,7 +241,7 @@ fn long_fades_do_not_block_commits() {
     }
     ed.commit().expect("commits");
     exec.process(64, &TransportPosition::default(), &[], &mut []);
-    let second = Fade::new(Samples::new(48_000), FadeLaw::EqualAmplitude);
+    let second = Fade::new(Samples::new(48_000));
     for &k in &keys {
         ed.replace(k, Unforkable(gain(2.0)), second).expect("fits");
         ed.commit().expect("a running fade blocks nothing");
@@ -265,12 +261,8 @@ fn a_remove_beside_a_fade_retires_at_once() {
     ed.commit().expect("commits");
     dc(&mut exec, 16);
     ed.collect();
-    ed.replace(
-        NODE,
-        Unforkable(gain(2.0)),
-        Fade::new(Samples::new(48_000), FadeLaw::EqualAmplitude),
-    )
-    .expect("fits");
+    ed.replace(NODE, Unforkable(gain(2.0)), Fade::new(Samples::new(48_000)))
+        .expect("fits");
     ed.remove(other);
     ed.commit().expect("commits");
     dc(&mut exec, 16);
@@ -285,7 +277,7 @@ fn a_remove_beside_a_fade_retires_at_once() {
 /// over in a delta built by hand.
 #[test]
 fn a_shape_mismatch_is_refused() {
-    let fade = Fade::new(Samples::new(64), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(64));
     let (mut ed, mut exec) = gain_graph(1.0);
     let wider = TestNode::new(Kind::Gain {
         gain: 1.0,
@@ -421,7 +413,7 @@ fn a_shape_mismatch_is_refused() {
 #[test]
 fn a_replace_during_a_fade_waits_for_it() {
     let (mut ed, mut exec) = gain_graph(1.0);
-    let fade = |len| Fade::new(Samples::new(len), FadeLaw::EqualAmplitude);
+    let fade = |len| Fade::new(Samples::new(len));
     ed.replace(NODE, Unforkable(gain(2.0)), fade(100))
         .expect("fits");
     ed.commit().expect("commits");
@@ -541,7 +533,7 @@ fn events_go_to_the_incoming_unit_only() {
     ed.replace(
         NODE,
         Unforkable(EventCount(Arc::clone(&new))),
-        Fade::new(Samples::new(200), FadeLaw::EqualPower),
+        Fade::new(Samples::new(200)).law(FadeLaw::EqualPower),
     )
     .expect("same shape");
     ed.commit().expect("commits");
@@ -564,7 +556,7 @@ fn events_go_to_the_incoming_unit_only() {
 /// cut.
 #[test]
 fn a_hard_edit_cuts_a_fade() {
-    let fade = Fade::new(Samples::new(1000), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(1000));
     for cut in ["remove", "insert"] {
         let (mut ed, mut exec) = gain_graph(1.0);
         ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
@@ -624,7 +616,7 @@ fn a_hard_edit_cuts_a_fade() {
 /// the plan compensates, so a fade cannot run across the change.
 #[test]
 fn set_latency_cuts_a_fade() {
-    let fade = Fade::new(Samples::new(1000), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(1000));
     let (mut ed, mut exec) = gain_graph(1.0);
     ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
     ed.commit().expect("commits");
@@ -687,7 +679,7 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
             .into_iter()
             .collect()
     };
-    let fade = Fade::new(Samples::new(1000), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(1000));
     let fades: BTreeMap<NodeKey, Fade> = [(NODE, fade)].into_iter().collect();
     let mut r = Reference::new(prepare(128));
     let render = |r: &mut Reference| {
@@ -722,7 +714,7 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
 /// diagnostics print), whether the replace fades or swaps.
 #[test]
 fn a_replace_takes_the_incoming_units_kind() {
-    let fade = Fade::new(Samples::new(100), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(100));
     for incoming in [gain(3.0), TestNode::new(Kind::Lag { latency: 3 })] {
         let (mut ed, _exec) = gain_graph(1.0);
         assert_eq!(ed.spec().topology.nodes[&NODE].kind, "gain");
@@ -743,7 +735,7 @@ fn a_replace_takes_the_incoming_units_kind() {
 /// node that is not running yet.
 #[test]
 fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
-    let fade = Fade::new(Samples::new(100), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(100));
 
     let (mut ed, mut exec) = gain_graph(1.0);
     dc(&mut exec, 20);

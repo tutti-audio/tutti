@@ -11,8 +11,8 @@ use common::{Kind, TestNode, prepare};
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, Executor, Fade, FadeLaw, Io, MAX_NODE_TAIL, Node, Prepare, Shape,
-    Status, TransportPosition, Unforkable,
+    CommitError, Cx, Editor, Executor, Fade, Io, MAX_NODE_TAIL, Node, Prepare, Shape, Status,
+    TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_units::{SampleRate, Samples, Tail};
@@ -212,7 +212,7 @@ fn set_tail_refuses_and_never_clamps() {
 /// is `replace.rs`'s).
 #[test]
 fn set_tail_does_not_cut_a_fade() {
-    let fade = Fade::new(Samples::new(1000), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(1000));
     let gain = |g: f32| TestNode::new(Kind::Gain { gain: g, width: 1 });
     let (mut ed, mut exec, _) = graph(Tail::None);
     // A gain node at its own key: the fade needs a unit whose shape matches.
