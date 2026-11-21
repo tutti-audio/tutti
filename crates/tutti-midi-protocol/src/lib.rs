@@ -113,9 +113,9 @@
 //! hold, never clamped), and [`flex_tempo_field`] and [`flex_time_signature_wire`]
 //! write them back;
 //! [`song_position`](fn@song_position) converts a beat to a Song Position
-//! Pointer; [`SmpteTimecode::from_seconds`] and
-//! [`MtcTimeCode::nibbles`] are the timecode of a time and its Quarter Frame
-//! pieces; [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
+//! Pointer and [`SmpteTimecode::from_seconds`] a time to a timecode (each
+//! `None` outside its field, never clamped); [`MtcTimeCode::nibbles`] gives a
+//! timecode's Quarter Frame pieces; [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
 //! MPE zone layout (RP-053, and the MIDI-CI MPE Profile's, M2-120), checked
 //! at construction; and [`TuningMessage`] and
 //! its types are the MIDI Tuning Standard's wire values.

@@ -93,6 +93,10 @@ pub(crate) struct ClockMaster {
     mtc: MtcGrid,
     /// What the Flex messages last stated.
     flex: FlexOut,
+    /// The Song Position Pointers and MTC timecodes not sent since the host
+    /// last took the count ([`take_refused`](Self::take_refused)): a position
+    /// the 14-bit pointer or a timecode cannot name.
+    refused: u32,
 }
 
 /// What the Flex output has stated to the receiver, and what it has seen of
@@ -208,6 +212,24 @@ impl ClockMaster {
             prev: PrevTick::FRESH,
             mtc: MtcGrid::RESTARTED,
             flex: FlexOut::SILENT,
+            refused: 0,
+        }
+    }
+
+    /// The messages refused since the last call, then zero: a Song Position
+    /// Pointer for a beat past its 14-bit field (4096 beats) or before the
+    /// start, and an MTC position for a time before zero or NaN. Each is
+    /// skipped, never sent clamped to a position the transport is not at.
+    pub(crate) fn take_refused(&mut self) -> u32 {
+        std::mem::take(&mut self.refused)
+    }
+
+    /// A Song Position Pointer for `beat` on `at`, or a count of one refusal
+    /// when `beat` is outside the pointer's field.
+    fn emit_song_position(&mut self, beat: Beat, at: Offset, emit: &mut impl FnMut(UmpAt)) {
+        match song_position(beat) {
+            Some(position) => emit((at, self.system(System::SongPosition(position)))),
+            None => self.refused = self.refused.saturating_add(1),
         }
     }
 
@@ -352,10 +374,7 @@ impl ClockMaster {
                 if (beat - Beat::new(0.0)).abs() <= START_EPSILON {
                     emit((Offset::ZERO, self.system(System::Start)));
                 } else {
-                    emit((
-                        Offset::ZERO,
-                        self.system(System::SongPosition(song_position(beat))),
-                    ));
+                    self.emit_song_position(beat, Offset::ZERO, emit);
                     emit((Offset::ZERO, self.system(System::Continue)));
                 }
             }
@@ -405,10 +424,7 @@ impl ClockMaster {
         let wrapped = self.prev.wrapped;
         if !is_edge && (located || wrapped) {
             if messages.clock {
-                emit((
-                    Offset::ZERO,
-                    self.system(System::SongPosition(song_position(beat))),
-                ));
+                self.emit_song_position(beat, Offset::ZERO, emit);
             }
             if messages.mtc {
                 self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
@@ -429,10 +445,11 @@ impl ClockMaster {
             ends_on_wrap = pass.end == PassEnd::Wrap;
             if !pass.start.is_zero() {
                 if messages.clock {
-                    emit((
+                    self.emit_song_position(
+                        pass.beat,
                         frame_offset(pass.start.get(), block_size),
-                        self.system(System::SongPosition(song_position(pass.beat))),
-                    ));
+                        emit,
+                    );
                 }
                 if messages.mtc {
                     self.send_full_message(
@@ -480,7 +497,7 @@ impl ClockMaster {
     /// The position is `beat` at the transport's tempo from beat 0, the grid's
     /// own timeline.
     fn send_full_message(
-        &self,
+        &mut self,
         beat: Beat,
         transport: &TransportPosition,
         sample_rate: SampleRate,
@@ -489,7 +506,11 @@ impl ClockMaster {
     ) {
         let per_sample = tutti_music::beats_per_sample(transport.tempo, sample_rate);
         let seconds = Seconds::new(samples_at(beat, per_sample) / sample_rate.get());
-        for packet in MtcFullMessage::from(MtcTimeCode::at(seconds, self.fps)).packets(self.group) {
+        let Some(position) = MtcTimeCode::at(seconds, self.fps) else {
+            self.refused = self.refused.saturating_add(1);
+            return;
+        };
+        for packet in MtcFullMessage::from(position).packets(self.group) {
             emit((at, packet));
         }
     }
@@ -666,10 +687,13 @@ impl ClockMaster {
             // A cycle's timecode is that of the sample piece 0 goes out on;
             // the receiver adds the two frames the cycle takes.
             if piece == 0 {
-                cycle = mtc_cycle(
+                match mtc_cycle(
                     Seconds::new((block_pos + qf_sample as f64) / rate.get()),
                     fps,
-                );
+                ) {
+                    Some(next_cycle) => cycle = next_cycle,
+                    None => self.refused = self.refused.saturating_add(1),
+                }
             }
             emit((
                 frame_offset(sample_offset, block_size),
@@ -736,9 +760,10 @@ fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
 /// even one (a cycle's eight pieces span two frames). Rounding, not flooring,
 /// so a position a float's width short of a frame boundary still reads as that
 /// frame.
-fn mtc_cycle(position: Seconds, fps: MtcRate) -> QuarterFrameCycle {
-    let nearest = SmpteTimecode::from_seconds(position, fps.frame_rate());
-    MtcTimeCode::from_frame_count(nearest.frame_count() & !1, fps).cycle()
+/// `None` for a time before zero or NaN; the hours wrap at 24 as MTC's do.
+fn mtc_cycle(position: Seconds, fps: MtcRate) -> Option<QuarterFrameCycle> {
+    let nearest = SmpteTimecode::from_seconds_wrapping(position, fps.frame_rate())?;
+    Some(MtcTimeCode::from_frame_count(nearest.frame_count() & !1, fps).cycle())
 }
 
 #[cfg(test)]

@@ -414,12 +414,40 @@ impl SmpteTimecode {
 
     /// The label of the frame nearest `seconds` at `frame_rate`: rounding, not
     /// flooring, so a time a float's width short of a frame boundary reads as
-    /// that frame. A time before zero or NaN is the origin; hours wrap at 24.
+    /// that frame. `None` for a time no label names: before zero, NaN or
+    /// infinite, or 24 hours and beyond (a time that rounds up to the 24th
+    /// hour included).
+    ///
+    /// ```
+    /// use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
+    /// use tutti_units::Seconds;
+    ///
+    /// let rate = SmpteFrameRate::Fps30;
+    /// let at = |s| SmpteTimecode::from_seconds(Seconds::new(s), rate);
+    /// assert_eq!(at(3661.5).unwrap().to_string(), "01:01:01:15");
+    /// assert_eq!(at(-1.0), None);
+    /// assert_eq!(at(86_400.0), None);
+    /// ```
     #[must_use]
-    pub fn from_seconds(seconds: Seconds, frame_rate: SmpteFrameRate) -> Self {
-        // `max` turns a negative and NaN into 0, and `as` saturates the rest.
-        let frames = libm::round(frame_rate.frames_at(seconds)).max(0.0);
-        Self::from_frame_count(frames as u64, frame_rate)
+    pub fn from_seconds(seconds: Seconds, frame_rate: SmpteFrameRate) -> Option<Self> {
+        if seconds.get() >= SECONDS_PER_DAY {
+            return None;
+        }
+        let count = nearest_frame(seconds, frame_rate)?;
+        let label = Self::from_frame_count(count, frame_rate);
+        // A time that rounds up to the 24th hour wrapped its hours: its label
+        // does not count back to it.
+        (label.frame_count() == count).then_some(label)
+    }
+
+    /// The label of the frame nearest `seconds` at `frame_rate`, the hours
+    /// wrapping at 24: for a generator whose clock runs on past a day, whose
+    /// hours field counts 0 to 23 and starts again (MIDI Time Code, M1 p.53).
+    /// `None` before zero, for NaN and for a time no frame count holds.
+    #[must_use]
+    pub fn from_seconds_wrapping(seconds: Seconds, frame_rate: SmpteFrameRate) -> Option<Self> {
+        let count = nearest_frame(seconds, frame_rate)?;
+        Some(Self::from_frame_count(count, frame_rate))
     }
 
     /// The label of frame number `count` since `00:00:00:00` at `frame_rate`;
@@ -445,6 +473,20 @@ impl SmpteTimecode {
             frame_rate,
         }
     }
+}
+
+/// Seconds in the 24 hours a timecode's hours field spans.
+const SECONDS_PER_DAY: f64 = 86_400.0;
+
+/// The frame count of the frame nearest `seconds`: `None` before zero, for NaN
+/// and the infinities, and past 2^53 frames (where a count is no longer exact).
+fn nearest_frame(seconds: Seconds, frame_rate: SmpteFrameRate) -> Option<u64> {
+    if !seconds.get().is_finite() || seconds.get() < 0.0 {
+        return None;
+    }
+    let frames = libm::round(frame_rate.frames_at(seconds));
+    // A whole number in `0..2^53`, so the cast is exact.
+    (frames < 9_007_199_254_740_992.0).then_some(frames as u64)
 }
 
 #[cfg(test)]

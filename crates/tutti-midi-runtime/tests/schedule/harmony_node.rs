@@ -12,11 +12,13 @@ use tutti_buffers::MaxBlock;
 use crate::common::{beat_of, connect, rolling};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventKind, Executor, ForkMode, ForkTarget, Harmony, Io, Node, Prepare, Shape,
-    Status, TransportPosition,
+    Cx, Editor, EventKind, Executor, ForkMode, ForkTarget, Harmony, HarmonyKind, Io, Node, Prepare,
+    Shape, Status, TransportPosition,
 };
 use tutti_graph::{OutPort, PortSource};
-use tutti_midi_runtime::{HarmonyChanges, HarmonyControls, HarmonyNode, TimedHarmony};
+use tutti_midi_runtime::{
+    HarmonyChanges, HarmonyChangesError, HarmonyControls, HarmonyNode, TimedHarmony,
+};
 use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -49,8 +51,13 @@ impl Node for Sink {
 }
 
 /// Replaces the lanes `controls` publishes with `changes`.
-fn publish(controls: &HarmonyControls, changes: impl IntoIterator<Item = TimedHarmony>) {
-    controls.set(changes.into_iter().collect::<HarmonyChanges>());
+fn publish(controls: &HarmonyControls, list: impl IntoIterator<Item = TimedHarmony>) {
+    controls.set(changes(list));
+}
+
+/// The lanes of `list`: finite beats, one chord and one scale to a beat.
+fn changes(list: impl IntoIterator<Item = TimedHarmony>) -> HarmonyChanges {
+    HarmonyChanges::new(list).expect("the lanes are well formed")
 }
 
 fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, Seen) {
@@ -108,7 +115,7 @@ fn lanes() -> Vec<TimedHarmony> {
 /// at 0, G at 10 000, F/A at 24 000, A minor at 30 000; nothing re-stated.
 #[test]
 fn changes_land_on_their_frames_and_are_sent_once() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 512);
+    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     for b in 0..64 {
         block(&mut exec, 512, rolling(b * 512));
     }
@@ -129,7 +136,7 @@ fn changes_land_on_their_frames_and_are_sent_once() {
 /// sends G and C major at 0, then F/A on its frame.
 #[test]
 fn a_start_mid_lane_restates_the_context() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 512);
+    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     for b in 0..10 {
         block(&mut exec, 512, rolling(20_000 + b * 512));
     }
@@ -143,7 +150,7 @@ fn a_start_mid_lane_restates_the_context() {
 /// in force at the seek, sent on its frame (the executor's 1 536).
 #[test]
 fn a_seek_restates_the_context_and_a_stop_sends_nothing() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 512);
+    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     block(&mut exec, 512, rolling(0));
     block(
         &mut exec,
@@ -161,7 +168,7 @@ fn a_seek_restates_the_context_and_a_stop_sends_nothing() {
 /// frames in: at the wrap (loop start, beat 0.5) G and C major are in force.
 #[test]
 fn a_loop_wrap_restates_the_context_at_the_wrap() {
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 512);
+    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     let lp = Some(LoopRange::new(Beat::new(0.5), Beat::new(1.5)).expect("a loop"));
     block(
         &mut exec,
@@ -189,7 +196,7 @@ fn a_loop_pass_restates_only_what_changed() {
     const SIXTY_FOURTH: u64 = 375;
     let lanes = || vec![at(0, C), at(0, C_MAJOR), at(12_000, G)];
     let render = |start: u64, end: u64| {
-        let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 2_048);
+        let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes())), 2_048);
         let lp = Some(LoopRange::new(beat_of(start), beat_of(end)).expect("a loop"));
         block(
             &mut exec,
@@ -227,7 +234,7 @@ fn a_loop_pass_restates_only_what_changed() {
 #[test]
 fn a_change_on_the_loops_start_is_each_passs_context() {
     let lanes = vec![at(0, F_OVER_A), at(12_000, C), at(12_200, G)];
-    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes), 2_048);
+    let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(changes(lanes)), 2_048);
     let lp = Some(LoopRange::new(beat_of(12_000), beat_of(12_375)).expect("a loop"));
     block(
         &mut exec,
@@ -244,7 +251,7 @@ fn a_change_on_the_loops_start_is_each_passs_context() {
 /// **New lanes re-state from the next block; the same lanes cut nothing.**
 #[test]
 fn replaced_lanes_restate_and_the_same_lanes_do_not() {
-    let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(lanes()), 512);
+    let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     block(&mut exec, 512, rolling(0));
     // The same changes, beat order kept (at one beat, order is meaning).
     publish(&controls, lanes());
@@ -260,7 +267,7 @@ fn replaced_lanes_restate_and_the_same_lanes_do_not() {
 /// blocks restate once.**
 #[test]
 fn a_restate_follows_a_publish_and_only_a_publish() {
-    let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(lanes()), 512);
+    let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     block(&mut exec, 512, rolling(0));
     block(&mut exec, 512, rolling(512));
     block(&mut exec, 512, rolling(1_024));
@@ -276,7 +283,7 @@ fn a_restate_follows_a_publish_and_only_a_publish() {
 /// lanes replaced: the fork re-states C and C major on its first block.
 #[test]
 fn a_fork_sends_the_lanes_as_they_stood() {
-    let (live, _exec, controls, seen) = rig(HarmonyNode::new(lanes()), 512);
+    let (live, _exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live
         .fork(ForkTarget::Master, ForkMode::Live, prepare)
@@ -284,4 +291,52 @@ fn a_fork_sends_the_lanes_as_they_stood() {
     publish(&controls, [at(0, G)]);
     block(&mut fork_exec, 512, rolling(0));
     assert_eq!(seen.lock().unwrap()[..], [(0, C), (0, C_MAJOR)]);
+}
+
+/// **A change at a NaN or infinite beat is refused, with its place in the
+/// input**: the first such change, whatever follows it.
+#[test]
+fn a_change_at_a_non_finite_beat_is_refused_with_its_index() {
+    let nan = TimedHarmony::new(Beat::new(f64::NAN), G);
+    let inf = TimedHarmony::new(Beat::new(f64::INFINITY), G);
+    assert_eq!(
+        HarmonyChanges::new([at(0, C), nan, at(24_000, G)]),
+        Err(HarmonyChangesError::NonFiniteBeat { index: 1 })
+    );
+    assert_eq!(
+        HarmonyChanges::new([inf, nan]),
+        Err(HarmonyChangesError::NonFiniteBeat { index: 0 })
+    );
+}
+
+/// **Two chords at one beat are refused, and so are two scales**: neither is
+/// picked. The clash is found wherever the two sit in the input.
+#[test]
+fn two_changes_of_one_kind_at_one_beat_are_refused() {
+    let one = beat_of(24_000);
+    assert_eq!(
+        HarmonyChanges::new([at(24_000, C), at(0, G), at(24_000, G)]),
+        Err(HarmonyChangesError::SameBeat {
+            beat: one,
+            kind: HarmonyKind::Chord
+        })
+    );
+    assert_eq!(
+        HarmonyChanges::new([at(24_000, C_MAJOR), at(24_000, A_MINOR)]),
+        Err(HarmonyChangesError::SameBeat {
+            beat: one,
+            kind: HarmonyKind::Scale
+        })
+    );
+}
+
+/// **A chord and a scale at one beat are two lanes, both kept**, sorted by
+/// beat from any input order.
+#[test]
+fn a_chord_and_a_scale_at_one_beat_are_both_kept_in_beat_order() {
+    let lanes = HarmonyChanges::new([at(24_000, G), at(24_000, C_MAJOR), at(0, C)])
+        .expect("distinct per kind");
+    let beats: Vec<_> = lanes.as_slice().iter().map(|c| c.beat).collect();
+    assert_eq!(beats, [beat_of(0), beat_of(24_000), beat_of(24_000)]);
+    assert_eq!(lanes.len(), 3);
 }

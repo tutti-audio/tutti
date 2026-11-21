@@ -673,7 +673,8 @@ fn outbound_mtc_assembles_whole_valid_timecodes_across_a_minute() {
 #[test]
 fn timecode_rounds_to_the_nearest_even_frame() {
     let at = |pos: f64, fps| {
-        let cycle = mtc_cycle(Seconds::new(pos / SampleRate::SR_48K.get()), fps);
+        let cycle =
+            mtc_cycle(Seconds::new(pos / SampleRate::SR_48K.get()), fps).expect("a time of day");
         let nibbles =
             std::array::from_fn(|p| cycle.frame(QuarterFramePiece::masked(p as u8)).nibble.get());
         MtcTimeCode::from_nibbles(nibbles)
@@ -954,6 +955,45 @@ fn a_wrap_on_the_block_edge_and_a_locate_are_one_song_position() {
     let second = drain_all(&cons);
     assert_eq!(offsets(&second, 0xF2), [0], "the wrap that ended block one");
     assert_eq!(offsets(&second, 0xF8), [0, 1_000, 2_000]);
+}
+
+/// **A locate past the 14-bit Song Position field sends no pointer and counts
+/// one refusal**: a Continue still goes, the pointer is not clamped to the
+/// largest, and the count is taken once. Beat 4096 is 16384 sixteenths, one
+/// past the field's 16383.
+#[test]
+fn a_locate_past_the_song_position_field_is_skipped_and_counted() {
+    let (mut cm, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
+    transport.set_beat(4_096.0);
+    transport.set_playing(true);
+    cm.tick(512);
+    let events = drain_all(&cons);
+    assert!(events.iter().any(|e| is_status(e, 0xFB)), "Continue goes");
+    assert!(
+        !events.iter().any(|e| is_status(e, 0xF2)),
+        "no Song Position: {events:?}"
+    );
+    assert_eq!(cm.cm.take_refused(), 1);
+    assert_eq!(cm.cm.take_refused(), 0, "taken once");
+
+    // A locate while playing, to a beat before the start, counts again.
+    transport.set_beat(-8.0);
+    cm.tick(512);
+    assert!(!drain_all(&cons).iter().any(|e| is_status(e, 0xF2)));
+    assert_eq!(cm.cm.take_refused(), 1);
+
+    // The last position that fits is sent, and counts nothing.
+    transport.set_beat(16_383.0 / 4.0);
+    cm.tick(512);
+    let sent: Vec<_> = drain_all(&cons)
+        .iter()
+        .filter_map(|e| match system(e.1) {
+            Some(System::SongPosition(p)) => Some(p.get()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent, [16_383]);
+    assert_eq!(cm.cm.take_refused(), 0);
 }
 
 /// **A master sends on the Group it was built with**: Start, Timing Clocks,

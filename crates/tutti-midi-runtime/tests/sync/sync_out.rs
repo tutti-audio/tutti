@@ -761,3 +761,37 @@ fn a_fork_states_the_live_nodes_meter() {
         )]
     );
 }
+
+/// **A beat the Song Position field cannot hold is no pointer and a counted
+/// refusal** in the node's losses: rolling from beat 4096 (16384 sixteenths,
+/// one past 16383) sends the Continue and no Song Position, and `refused`
+/// reads one; from the last beat that fits it sends the pointer and counts
+/// nothing more.
+#[test]
+fn a_song_position_past_the_field_is_not_sent_and_is_counted_refused() {
+    let mut rig = Rig::new(G, clock());
+    let events = rig.block(512, rolling(Beat::new(4_096.0)), &[]);
+    assert!(
+        systems(&events, |m| matches!(m, System::Continue).then_some(())).len() == 1,
+        "Continue goes"
+    );
+    assert!(
+        systems(&events, |m| match m {
+            System::SongPosition(p) => Some(p),
+            _ => None,
+        })
+        .is_empty()
+    );
+    assert_eq!(rig.controls.losses().refused, 1);
+
+    let mut rig = Rig::new(G, clock());
+    let events = rig.block(512, rolling(Beat::new(16_383.0 / 4.0)), &[]);
+    assert_eq!(
+        systems(&events, |m| match m {
+            System::SongPosition(p) => Some(p),
+            _ => None,
+        }),
+        [(0, U14::of(16_383))]
+    );
+    assert_eq!(rig.controls.losses().refused, 0);
+}

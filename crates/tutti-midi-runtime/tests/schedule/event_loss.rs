@@ -282,9 +282,9 @@ fn the_input_node_follows_the_block() {
 /// passes of two events each, 256 events. Its port, of 2,048, holds them.
 #[test]
 fn the_harmony_port_follows_the_block() {
-    use tutti_midi_runtime::HarmonyNode;
+    use tutti_midi_runtime::{HarmonyChanges, HarmonyNode};
     for (block, want) in [(64usize, 256u32), (1024, 2048), (16_384, 8_192)] {
-        let mut node = HarmonyNode::new([]);
+        let mut node = HarmonyNode::new(HarmonyChanges::default());
         tutti_graph::Node::<f32>::prepare(
             &mut node,
             &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),
