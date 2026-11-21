@@ -920,7 +920,7 @@ impl MidiState {
     #[cfg(feature = "midi-hardware")]
     pub(crate) fn midi_input_phase<F: Float>(
         &mut self,
-        io: Option<&mut crate::midi_port::Io>,
+        io: Option<&mut tutti_midi_hardware::MidiSession>,
         nodes: Option<&MidiNodes>,
         graph: &mut Graph<F>,
         now: Instant,
@@ -1220,7 +1220,7 @@ pub struct Midi<'a, F: Float = f32> {
     pub(crate) meter: tutti_timeline::ProjectMeter,
     /// The OS MIDI layer, when the builder opened it.
     #[cfg(feature = "midi-hardware")]
-    pub(crate) io: Option<&'a mut crate::midi_port::Io>,
+    pub(crate) io: Option<&'a mut tutti_midi_hardware::MidiSession>,
 }
 
 impl<F: Float> Midi<'_, F> {
