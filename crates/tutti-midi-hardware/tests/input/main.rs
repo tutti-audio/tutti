@@ -18,6 +18,11 @@ mod listener;
     all(target_os = "linux", feature = "sequencer-tests"),
     target_os = "macos"
 ))]
+mod listing;
+#[cfg(any(
+    all(target_os = "linux", feature = "sequencer-tests"),
+    target_os = "macos"
+))]
 mod opening;
 #[cfg(all(target_os = "linux", feature = "sequencer-tests"))]
 mod virtual_endpoint;
