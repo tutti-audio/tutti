@@ -163,9 +163,11 @@ std only. A rule the compiler already enforces is not a gate.
 
 ### Work off the audio thread
 
-- The app runs the work it asks for: a load, an analysis, a state save, a scan or a bounce
-  is an inert value with `run(self)`, and its output reaches the session through
-  `session.apply(out)`. tutti never runs it, and never offers a blocking call as a future.
+- The app runs the work it asks for. A load, an analysis, a scan or a bounce is an inert
+  value the app runs (`run(self)`, or `run(self, main)` where the OS needs the main
+  thread). A wait for a device's or the plugin server's answer is a std `Future` that
+  tutti's input or IPC path fills; a wait that ends only on a time is a value with
+  `poll(.., now)` and `deadline()`. tutti offers no blocking call beside these.
 - tutti runs only the work that keeps pace with the audio thread or the hardware (the
   streamer, a take's pump, OS edges, sensing, the bells' tick), on the session's own
   executor, which the app never sees. A blocking OS wait or a priority loop is
