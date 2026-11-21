@@ -81,7 +81,7 @@
 //!
 //! Every out-of-process plugin runs in its own `plugin-server` subprocess (the
 //! [`tutti-plugin-server`](https://docs.rs/tutti-plugin-server) crate: one generic
-//! shell over each served format's `Loaded`, CLAP, VST3 and AU; VST2 is not served,
+//! shell over each out-of-process format's `Loaded`, CLAP, VST3 and AU; VST2 is not hosted out of process,
 //! its editor and audio instance being one object, so it runs in the host's
 //! process and a VST2 path refuses out-of-process hosting with
 //! [`IpcError::NotOutOfProcess`](tutti_plugin_types::IpcError::NotOutOfProcess)).
@@ -101,15 +101,15 @@
 //! A loaded [`Plugin`](catalog::Plugin) yields two values that share the plugin's
 //! lifetime — it dies only when the last of either drops:
 //!
-//! - [`PluginClient`] — the client of a served plugin and its audio-graph
-//!   node (`tutti-plugin-host`'s generic `PluginNode` over the served hosting).
+//! - [`PluginClient`] — the client of an out-of-process plugin and its audio-graph
+//!   node (`tutti-plugin-host`'s generic `PluginNode` over the out-of-process hosting).
 //!   Loaded `Unbound`; `bind()` makes it a `PluginClient<Bound>`, which holds the
 //!   node and is what a graph inserts. `Plugin` does this for you when inserted directly.
 //! - [`PluginHandle`](tutti_plugin_host::PluginHandle) (`tutti-plugin-host`'s;
 //!   [`PluginClient::handle`] makes one) — the
 //!   control surface: the editor, state restore and presets (main thread), and the
 //!   parameters, state save and render mode (`PluginHandle::any_thread`, from any
-//!   thread: a served plugin answers concurrently, an in-process one hops to the
+//!   thread: an out-of-process plugin answers concurrently, an in-process one hops to the
 //!   main thread with a deadline). Cheap to clone (`Arc`-shared).
 //!
 //! Per-block inputs (MIDI, chord/scale context, parameter automation) are gated
@@ -126,11 +126,11 @@
 //!   `tutti-plugin-db`'s, and the identity type is
 //!   [`PluginDescriptor`](tutti_plugin_types::PluginDescriptor).
 //! - [`PluginClient`] — the client and graph
-//!   node of a served plugin. The control surface over it, [`PluginHandle`](tutti_plugin_host::PluginHandle),
+//!   node of an out-of-process plugin. The control surface over it, [`PluginHandle`](tutti_plugin_host::PluginHandle),
 //!   the node's [`PluginControls`](tutti_plugin_host::PluginControls), the in-process
 //!   node and the host policy written once for every host
 //!   ([`PluginParamValues`](tutti_plugin_host::PluginParamValues) and its
-//!   [`ParamRead`](tutti_plugin_host::ParamRead) job,
+//!   [`ParamRead`](tutti_plugin_host::ParamRead) value,
 //!   [`Liveness`](tutti_plugin_host::Liveness), the death debounce: 3 unhealthy
 //!   observations spanning 50 ms, and
 //!   [`needs_notify`](tutti_plugin_host::needs_notify)) are
@@ -269,7 +269,7 @@
 //! [`Control`](tutti_plugin_types::Control) (parameters, state, presets, in any
 //! state that has a plugin), [`Processor`](tutti_plugin_types::Processor) (blocks,
 //! on the realtime thread) and [`Loaded`](tutti_plugin_types::Loaded) (the
-//! transitions), so a lifecycle reaches this crate only as the served and in-process
+//! transitions), so a lifecycle reaches this crate only as the out-of-process and in-process
 //! hostings that drive it. A probe never activates at all.
 //!
 //! What that buys is room. No format crate has to meet another in the middle, so each
@@ -350,8 +350,8 @@
 //! - [`tutti-plugin-server`](https://docs.rs/tutti-plugin-server) — the
 //!   subprocess side of the bridge.
 //! - `tutti-vst3-host`, `tutti-clap-host`, `tutti-au-host`, `tutti-vst2-host` —
-//!   the format hosts. A served plugin arrives already loaded and activated inside
-//!   the subprocess, which names the served three (`tutti-vst2-host` runs in this
+//!   the format hosts. An out-of-process plugin arrives already loaded and activated inside
+//!   the subprocess, which names the out-of-process three (`tutti-vst2-host` runs in this
 //!   process).
 //! - [`tutti_graph`] — the audio graph a plugin node is inserted into.
 //!

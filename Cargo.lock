@@ -2482,6 +2482,7 @@ dependencies = [
 name = "tutti"
 version = "0.0.1"
 dependencies = [
+ "futures-lite",
  "tempfile",
  "tutti-buffers",
  "tutti-codec",
@@ -2752,6 +2753,7 @@ dependencies = [
  "assert_no_alloc",
  "bytemuck",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-buffers",
  "tutti-fixtures",
  "tutti-graph",

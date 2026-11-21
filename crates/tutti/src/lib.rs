@@ -291,6 +291,7 @@ pub mod nodes {
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
+    pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
     pub use tutti_dsp::{
         Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, VelvetDensity,
         VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise, VelvetPulse,
@@ -369,9 +370,10 @@ pub mod nodes {
         SpringReverbSet, SvfSet, TiltFilterSet, TransientShaperKernel, TransientShaperSet,
     };
     pub use tutti_nodes::{
-        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, FrequencyShifterConfig,
-        FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig,
-        PitchShifterKernel, PitchShifterNode, PitchShifterSet,
+        CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet, DistanceConfig,
+        DistanceKernel, DistanceNode, DistanceSet, FrequencyShifterConfig, FrequencyShifterKernel,
+        FrequencyShifterNode, FrequencyShifterSet, PitchShifterConfig, PitchShifterKernel,
+        PitchShifterNode, PitchShifterSet,
     };
     pub use tutti_nodes::{
         DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,

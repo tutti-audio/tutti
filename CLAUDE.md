@@ -278,7 +278,10 @@ touched.
 - A main-thread entry takes a `tutti_plugin_types::MainThreadMarker`; holding one is the proof.
 - A format host is a `Loaded` typestate whose `activate` splits a plugin into a realtime
   `Processor` and a main-thread `Controller`.
-- The plugin-server is one `Server<F: OutOfProcess>`; VST2 is not served.
+- The plugin-server is one `Server<F: OutOfProcess>`; VST2 is not hosted out of process.
+- A plugin load, state save or restore, and preset load is a value split by where the plugin
+  runs: `InProcess` runs on main (`run(main)`), `OutOfProcess` is a `Send` future the IPC
+  reply fills. A reload is the app's composition (`Session::swap_plugin`'s "Reloading").
 - `tutti_plugin_types::bundle` is the only code that knows a bundle's layout. Build a VST3
   UID with `inline_uid`.
 - **The plugin contract** (`testing/tutti-plugin-contract`) runs the same cases against

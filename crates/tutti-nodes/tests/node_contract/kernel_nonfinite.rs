@@ -13,13 +13,13 @@ use tutti_nodes::{
     AmbisonicRotatorConfig, AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode,
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
     CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
-    DelayLayout, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode,
-    FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
-    InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig, LimiterControls,
-    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
-    MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
-    PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
-    ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
+    DelayLayout, DelayNode, DistanceConfig, DistanceNode, DistortionConfig, DistortionNode,
+    DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
+    GateControls, GateNode, InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
+    LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands,
+    MultibandCompressorConfig, MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode,
+    PitchShifterConfig, PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
+    RingModNode, ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
     SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
@@ -37,8 +37,8 @@ use tutti_nodes::{
 use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{
-    BitDepth, Cents, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate,
-    Samples, Seconds, Semitones,
+    BitDepth, Cents, Db, Drive, Feedback, Frame, HoldFactor, Hz, Metres, Mix, Q, Resonance,
+    SampleRate, Samples, Seconds, Semitones,
 };
 use tutti_units::{Gain, SampleSpan};
 
@@ -359,6 +359,14 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "frequency shifter",
             Box::new(FrequencyShifterNode::<f32>::from(
                 FrequencyShifterConfig::new(ChannelLayout::STEREO).shift(Hz::new(300.0)),
+            )),
+        ),
+        (
+            "distance",
+            Box::new(DistanceNode::<f32>::from(
+                DistanceConfig::new(ChannelLayout::STEREO, Metres::of(50.0))
+                    .air_absorption(Hz::new(4000.0))
+                    .distance(Metres::of(3.0)),
             )),
         ),
         (

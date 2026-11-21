@@ -169,6 +169,9 @@ pub enum UnitParam {
     /// moves its input. Not [`Semitones`](Self::Semitones), an envelope filter's depth, and not
     /// [`Detune`](Self::Detune), a unison stack's spread.
     Pitch = 40,
+    /// A source's distance from the listener (`Metres`, at least zero): how far a distance
+    /// node places its input, which sets its delay and its level.
+    Distance = 41,
 }
 
 /// The error converting a `u16` that is not a known [`UnitParam`]
@@ -228,6 +231,7 @@ impl TryFrom<u16> for UnitParam {
             38 => HoldFactor,
             39 => Semitones,
             40 => Pitch,
+            41 => Distance,
             other => return Err(UnitParamOutOfRange(other)),
         })
     }
@@ -644,7 +648,7 @@ impl<U> From<ParamKey<U>> for UnitAddr {
 
 use super::units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
-    Elevation, Feedback, HoldFactor, Hz, Mix, Q, Seconds, Semitones, Spread, StereoWidth,
+    Elevation, Feedback, HoldFactor, Hz, Metres, Mix, Q, Seconds, Semitones, Spread, StereoWidth,
 };
 
 /// Defines the typed keys, and — from the same lines — the registry
@@ -756,6 +760,10 @@ param_keys! {
     Cents {
         /// A pitch shift in cents.
         PITCH = Pitch;
+    }
+    Metres {
+        /// A source's distance from the listener.
+        DISTANCE = Distance;
     }
 }
 
@@ -888,7 +896,7 @@ mod tests {
         assert_eq!(UnitParam::try_from(26), Ok(UnitParam::Diffusion));
         assert_eq!(UnitParam::try_from(27), Ok(UnitParam::Freeze));
         assert_eq!(UnitParam::try_from(28), Ok(UnitParam::Azimuth));
-        assert_eq!(UnitParam::try_from(41), Err(UnitParamOutOfRange(41)));
+        assert_eq!(UnitParam::try_from(42), Err(UnitParamOutOfRange(42)));
         // Decay's three bands are indices of one kind.
         for (index, packed) in [(0u8, 0x0019u16), (1, 0x0119), (2, 0x0219)] {
             assert_eq!(UnitAddr::new(UnitParam::Decay, index).to_u16(), packed);
@@ -899,7 +907,7 @@ mod tests {
     /// (and is `AudioParam`'s `P`), so this table is the compatibility
     /// record: a renumbered or re-ordered variant fails here by name, which
     /// `u16_round_trips` (any id maps to *some* variant) cannot say.
-    const PINNED: [(UnitParam, u16); 40] = [
+    const PINNED: [(UnitParam, u16); 41] = [
         (UnitParam::Cutoff, 0),
         (UnitParam::Q, 1),
         (UnitParam::GainDb, 2),
@@ -940,6 +948,7 @@ mod tests {
         (UnitParam::HoldFactor, 38),
         (UnitParam::Semitones, 39),
         (UnitParam::Pitch, 40),
+        (UnitParam::Distance, 41),
     ];
 
     /// **Index 0 is the plain id**, for every param: the packed form of

@@ -1,5 +1,5 @@
 //! What a fork carries of the live plugin, and the order it restores in. The
-//! in-process fork (`PluginNode::fork_instance`) and the served one
+//! in-process fork (`PluginNode::fork_instance`) and the out-of-process one
 //! (`tutti-plugin`'s `PluginClient::fork_instance`) read and restore through
 //! this one type.
 
@@ -51,7 +51,7 @@ impl ForkState {
     /// Restores the `fresh` plugin: its preset first, then its state. In that
     /// order because a preset change may move every parameter, and the state
     /// is what the live plugin holds now. The in-process fork calls it before
-    /// activation; a served fork calls it after the launch, which loaded the
+    /// activation; an out-of-process fork calls it after the launch, which loaded the
     /// state and activated the plugin (a plugin may take its mode from the
     /// state at activation), so the state goes in again over the preset.
     ///

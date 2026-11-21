@@ -22,7 +22,7 @@ pub enum ResolvedHosting {
 ///
 /// # Errors
 ///
-/// [`IpcError::NotOutOfProcess`] for a VST2 plugin asked to be served,
+/// [`IpcError::NotOutOfProcess`] for a VST2 plugin asked to be hosted out of process,
 /// [`IpcError::NotInProcess`] for a format this build cannot host in
 /// process: the answer is the format's and the build's, so it comes before
 /// a server or a file is looked for.
@@ -88,7 +88,7 @@ mod tests {
     use super::*;
 
     /// **`Auto` is the format's default**: CLAP, VST3 and AU
-    /// are served, whatever the build holds.
+    /// are hosted out of process, whatever the build holds.
     #[test]
     fn auto_serves_every_format_but_vst2() {
         for format in [
@@ -105,7 +105,7 @@ mod tests {
         }
     }
 
-    /// **VST2 cannot be served, and is not quietly hosted here instead.**
+    /// **VST2 cannot be hosted out of process, and is not quietly hosted here instead.**
     #[test]
     fn vst2_asked_for_out_of_process_is_refused() {
         let err = resolve(

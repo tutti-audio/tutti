@@ -337,7 +337,7 @@ impl Editor {
 
     /// Tells the open editor its window's backing-store scale changed (it moved
     /// to another monitor), without closing it: CLAP's `gui.set_scale`, VST3's
-    /// `setContentScaleFactor`. A served plugin's editor is the editor-only
+    /// `setContentScaleFactor`. An out-of-process plugin's editor is the editor-only
     /// instance in this process, so this reaches it as it is.
     ///
     /// # Errors

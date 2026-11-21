@@ -1,6 +1,6 @@
 //! The plugin node, over any [`Loaded`](tutti_plugin_types::Loaded) hosting: an
 //! [`InProcess`](tutti_plugin_types::InProcess) format ([`load_client`]), or a
-//! plugin served by another process ([`client_over`]: built over an
+//! plugin hosted by another process ([`client_over`]: built over an
 //! already-activated plugin, with no main thread).
 //!
 //! The plugin's `Lifecycle` runs on the control side; its

@@ -15,8 +15,8 @@
 //!
 //! Every [`Control`] entry is a main-thread call
 //! that takes a [`MainThreadMarker`]. [`MainThreadControl`] is lent to a caller that
-//! holds one; [`AnyThread`] takes none, because a served plugin answers those
-//! calls from any thread and the session calls them from pool jobs. Here they
+//! holds one; [`AnyThread`] takes none, because an out-of-process plugin answers those
+//! calls from any thread and the session calls them from its executor tasks. Here they
 //! work from any thread too, through `on_main`: on the main thread the call runs
 //! at once; off it the
 //! work is posted to the owner's [`MainWork`](tutti_plugin_types::MainWork) and the
@@ -24,7 +24,7 @@
 //! runs the session's `MainWork` every tick). The wait has
 //! a deadline ([`OFF_MAIN_DEADLINE`]): the host's main thread must keep
 //! pumping, and a host that blocks its main thread on such a call (joining the
-//! job from the main thread) gets the trait's "unavailable" answer (`None`,
+//! task from the main thread) gets the trait's "unavailable" answer (`None`,
 //! `Err`, `false`) when it expires. A timed-out call's work still runs at the
 //! next tick. Fire-and-forget writes post and do not wait.
 
@@ -633,7 +633,7 @@ mod off_main_tests {
     /// **A pool thread's call on the handle is answered by the main thread's
     /// tick**, with the real values: the state equals one saved on the main
     /// thread, and the parameter reads what was written. This is what the
-    /// session's snapshot and parameter-mirror jobs do.
+    /// session's snapshot and parameter-mirror tasks do.
     #[test]
     fn a_pool_threads_calls_are_answered_by_the_main_threads_tick() {
         let (_unit, handle, _pump) = loaded();

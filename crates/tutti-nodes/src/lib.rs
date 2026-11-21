@@ -74,6 +74,9 @@
 //!   the mean of the input through signed, delayed taps onto output channels, no latency, the tail
 //!   the last tap) and `DecorrelatorNode` (a sparse velvet-noise FIR per channel, each from its own
 //!   seeded sequence, of unit energy), from an `EarlyReflectionsConfig` and a `DecorrelatorConfig`.
+//! - **Distance** — `DistanceNode` (a source at a distance in metres: the delay `r / c`, the level
+//!   `r_ref / r` and optional air absorption; a moving distance is the Doppler shift, and the
+//!   delay is musical, so it reports no latency), from a `DistanceConfig`.
 //! - **Pitch shifter** — `PitchShifterNode` (a shift in cents at the input's duration over a phase
 //!   vocoder shared by every channel, so a stereo image survives; its latency is reported), from a
 //!   `PitchShifterConfig`.
@@ -420,6 +423,9 @@ pub use early_reflections::{EarlyReflectionsConfig, EarlyReflectionsKernel, Earl
 pub use tutti_dsp::{
     EarlyReflectionsError, Taps, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError,
 };
+// Distance: a source's delay, level and air absorption.
+mod distance;
+pub use distance::{DistanceConfig, DistanceKernel, DistanceNode, DistanceSet};
 
 // Pitch shifter.
 mod pitch_shifter;

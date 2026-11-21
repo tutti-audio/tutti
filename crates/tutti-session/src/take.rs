@@ -836,10 +836,9 @@ impl<S: InFlight> Take<S> {
     ///
     /// Never blocks and never joins: the pump closes the sink on its own thread.
     ///
-    /// The result is lost when the [`Session`] is gone. A `Take` that outlives its
-    /// session, or a session dropped before the take's [`TakeEvent::Finished`] lands,
-    /// has no bells to carry the stop ring, so the parked pump's waker is released and
-    /// no event arrives.
+    /// A session dropped before the take's [`TakeEvent::Finished`] lands commits the
+    /// take in its own drop, and the result reaches no one. On a `Take` that outlives
+    /// its session this does nothing: that drop already ended the take.
     pub fn finish(self) {
         self.stop.stop();
     }
