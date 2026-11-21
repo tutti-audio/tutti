@@ -52,6 +52,15 @@ pub fn join<T>(task: Task<T>) -> Option<T> {
     os::join(task)
 }
 
+/// Whether the calling thread drives an executor (a dedicated thread, a [`Threads`]
+/// driver): a thread where [`join`] and [`join_within`] panic, since a wait there would
+/// stop the tasks it runs. A `Drop` that would join checks it first and detaches instead.
+/// Always `false` on the web, where no thread drives.
+#[must_use]
+pub fn is_driving() -> bool {
+    os::is_driving()
+}
+
 /// [`join`] with a bound: waits at most `bound` for `task` to end, and hands the task back
 /// when it has not.
 ///

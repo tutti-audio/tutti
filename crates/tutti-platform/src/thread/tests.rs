@@ -217,3 +217,15 @@ fn an_overflowing_deadline_never_ends() {
         Some(Duration::MAX)
     );
 }
+
+/// **`panic_message` reads a `&str` or a `String` payload and names any other**: the three
+/// payload shapes a `panic!` and `panic_any` make.
+#[test]
+fn panic_message_reads_str_and_string_payloads_and_names_others() {
+    let text: Box<dyn std::any::Any + Send> = Box::new("literal");
+    let owned: Box<dyn std::any::Any + Send> = Box::new(String::from("formatted 7"));
+    let other: Box<dyn std::any::Any + Send> = Box::new(7_u8);
+    assert_eq!(panic_message(text.as_ref()), "literal");
+    assert_eq!(panic_message(owned.as_ref()), "formatted 7");
+    assert_eq!(panic_message(other.as_ref()), "(not a string)");
+}

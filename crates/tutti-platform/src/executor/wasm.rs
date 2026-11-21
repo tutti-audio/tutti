@@ -11,6 +11,11 @@ use std::time::Duration;
 use super::{Executor, Handle, Shared, Task};
 use crate::priority::PriorityRequest;
 
+/// No thread drives on the web.
+pub(super) fn is_driving() -> bool {
+    false
+}
+
 /// The web cannot block: one look at `task`, its output when it has ended.
 pub(super) fn join<T>(task: Task<T>) -> Option<T> {
     let mut ended = pin!(task.fallible());

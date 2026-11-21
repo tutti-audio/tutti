@@ -32,7 +32,8 @@
 //!   [`Executor::timer`] gives a [`Timer`] that makes them and keeps nothing alive, and
 //!   [`Executor::downgrade`] a [`WeakExecutor`] that reaches the executor while it lives;
 //!   [`join`] waits on the calling thread for a [`Task`] that runs elsewhere to end, and
-//!   [`join_within`] waits at most a bound, handing the task back past it; [`yield_now`]
+//!   [`join_within`] waits at most a bound, handing the task back past it ([`is_driving`]
+//!   says where neither may wait); [`yield_now`]
 //!   returns to the executor once between slices of a task's work.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
@@ -97,5 +98,5 @@ pub use executor::*;
 pub use main_thread::MainThreadMarker;
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use sleep::sleep_until_ns;
-pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};
+pub use thread::{Panicked, StopToken, ThreadHandle, panic_message, spawn_named};
 pub use web_time::{Instant, SystemTime};
