@@ -179,7 +179,10 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record) {
                 log.lock()
                     .unwrap()
                     .push(Said::Control(ControlRequest::SetSampleRate { rate }));
-                Some(ControlReply::SampleRateSet { rate, error: None })
+                Some(ControlReply::SampleRateSet {
+                    rate,
+                    refusal: None,
+                })
             }
             _ => None,
         };

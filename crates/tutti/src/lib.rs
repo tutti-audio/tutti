@@ -756,7 +756,10 @@ pub mod plugin {
     pub use tutti_plugin_types::{
         AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
     };
-    pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
+    pub use tutti_plugin_types::{
+        EditorError, LoadStage, NoEditorHost, RateRefusal, RateRefusalCause, ServerError,
+        TerminationReason,
+    };
     pub use tutti_plugin_types::{
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
     };

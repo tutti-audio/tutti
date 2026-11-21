@@ -104,6 +104,9 @@ fn open(
 /// direction, Groups, UI hint and MIDI 1.0 port field the spec declared, and the
 /// spec's Device Identity and Product Instance Id. Where the OS is before macOS
 /// 15 the spec is refused by name.
+///
+/// CoreMIDI's listing on macOS 15 reports every block's direction as 0, so there
+/// it reads `Reserved(0)`; from macOS 26 it is the registered direction.
 pub fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
     let name = &unique_name("tutti-vend-blocks");
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
@@ -131,12 +134,22 @@ pub fn an_endpoint_with_function_blocks_is_listed_with_those_blocks() {
             .info
     };
     let out = block("Out");
-    assert_eq!(out.direction, BlockDirection::Output);
+    let from_26 = tutti_fixtures::macos_major().is_some_and(|major| major >= 26);
+    let is_zero = |d: BlockDirection| matches!(d, BlockDirection::Reserved(r) if r.get() == 0);
+    if from_26 {
+        assert_eq!(out.direction, BlockDirection::Output);
+    } else {
+        assert!(is_zero(out.direction), "{:?}", out.direction);
+    }
     assert_eq!(out.ui_hint, UiHint::Sender);
     assert_eq!(out.first_group.value().map(FirstGroup::get), Some(1));
     assert_eq!(out.groups_spanned.value().map(GroupSpan::get), Some(2));
     let both = block("Both");
-    assert_eq!(both.direction, BlockDirection::Bidirectional);
+    if from_26 {
+        assert_eq!(both.direction, BlockDirection::Bidirectional);
+    } else {
+        assert!(is_zero(both.direction), "{:?}", both.direction);
+    }
     assert_eq!(both.midi1, Midi1Port::Unrestricted);
     assert_eq!(both.first_group.value().map(FirstGroup::get), Some(4));
     assert_eq!(

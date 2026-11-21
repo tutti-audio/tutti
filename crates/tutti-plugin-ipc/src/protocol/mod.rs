@@ -171,7 +171,12 @@ pub(crate) mod wire;
 ///   frame. The receiver refuses an object of another length than
 ///   declared, a length over `MAX_STATE_BYTES`, and on Linux one that is not a
 ///   sealed memfd.
-pub const PROTOCOL_VERSION: u32 = 55;
+/// - **Version 56** types two replies' payloads. `SampleRateSet` carries a
+///   `refusal` (`RateRefusalCause`: unconfigured, rolled back to a running
+///   rate, deactivated, no answer) in place of the reason text, and `Error`
+///   carries a `ServerError` (a load's stage and reason, a state's two lengths,
+///   a slab setup's failure) in place of the message.
+pub const PROTOCOL_VERSION: u32 = 56;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -242,6 +247,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use tutti_buffers::FloatWidth;
+    use tutti_plugin_types::RateRefusalCause;
 
     use tutti_plugin_types::{
         ChordValue, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue, ParameterInfo,
@@ -386,11 +392,13 @@ mod tests {
             ControlReply::ParameterValueFromText { value: None },
             ControlReply::SampleRateSet {
                 rate: SampleRate::SR_96K,
-                error: None,
+                refusal: None,
             },
             ControlReply::SampleRateSet {
                 rate: SampleRate::SR_96K,
-                error: Some("refused".to_string()),
+                refusal: Some(RateRefusalCause::Deactivated {
+                    reason: "refused".to_string(),
+                }),
             },
         ];
         for msg in responses {
