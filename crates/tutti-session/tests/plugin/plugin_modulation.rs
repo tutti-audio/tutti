@@ -53,10 +53,7 @@ fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
 /// environment.
 fn detached() -> DetachedSession {
     set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-    // The executor is polled: a job runs in the `Collect` that polls it, and lands
-    // there.
     Session::builder()
-        .executor(tutti_platform::Executor::new())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds")
@@ -75,8 +72,8 @@ fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::AnyPl
 }
 
 /// A virtual clock for the session's phases, and the plugin changes they
-/// reported: a parameter read or a reload is a job on the session's polled
-/// executor, run and landed in the next frame's collect.
+/// reported: a parameter read or a reload runs on tutti's thread and lands in a later
+/// frame's collect.
 struct Drive {
     now: Instant,
     told: Vec<&'static str>,

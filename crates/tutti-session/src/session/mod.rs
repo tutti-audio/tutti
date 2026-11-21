@@ -61,6 +61,10 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// loading an in-process plugin, restoring state) takes the proof
 /// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
 ///
+/// Dropping a session commits every take before it returns: it joins each
+/// take's writer. Never drop a session on a thread that drives an executor (inside
+/// a future on a `tutti_platform::Executor`): the join panics there.
+///
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples};

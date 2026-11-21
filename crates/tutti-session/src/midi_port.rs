@@ -3,11 +3,8 @@
 //! [`MidiInput`] or a [`MidiOutput`].
 //!
 //! The OS layer's background work (an input's pump, the device watch, Active
-//! Sensing, the legacy poll) runs on the session's executor. Until core-engine's
-//! R2-last, a session built with the app's own executor
-//! ([`SessionBuilder::executor`](crate::SessionBuilder::executor)) drives it inside
-//! [`update`](Session::update), so in that mode this work advances only while the
-//! app calls `update`.
+//! Sensing, the legacy poll) runs on tutti's own thread, whether or not the app calls
+//! [`update`](Session::update).
 //!
 //! A port needs no device to exist. A saved device that is absent opens at
 //! once and reads [`Presence::Lost`] with [`PortCause::Unplugged`]; the session
@@ -669,13 +666,8 @@ impl<K: crate::AppKey, C: crate::Clock> OpenMidiOutput<'_, K, C> {
     /// that has seen one releases its notes when they stop (MIDI 1.0 Detailed
     /// Specification p. 32). Off by default.
     ///
-    /// **A session built with the app's own executor
-    /// ([`SessionBuilder::executor`](crate::SessionBuilder::executor)) sends it
-    /// only while the app drives the executor, inside [`update`](Session::update)
-    /// until core-engine's R2-last: when the app stops calling `update`, Active
-    /// Sensing stops and the receiver releases its notes after about 300 ms.**
-    /// A session that makes its own executor is driven on threads of its own, and
-    /// a stalled `update` does not stop it.
+    /// It is tutti's own thread that sends it, so a stalled
+    /// [`update`](Session::update) does not stop it.
     ///
     /// A port whose device is in the MIDI 2.0 Protocol sends none: MIDI 2.0
     /// has no Active Sensing. It starts when a negotiation moves the device to
