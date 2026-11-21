@@ -11,14 +11,6 @@ use tutti_plugin_types::{
     InProcess, Lifecycle, MainThreadMarker, OutOfProcess, ParamEdit, Request,
 };
 
-/// How many of the plugin's answers to one-way writes are refusals.
-pub(in crate::served) fn refusals<E>(answers: impl IntoIterator<Item = Result<(), E>>) -> u64 {
-    answers
-        .into_iter()
-        .map(|answer| u64::from(answer.is_err()))
-        .sum()
-}
-
 /// What the server does to a loaded plugin of format `Self`, beyond what the
 /// format's [`OutOfProcess::load_served`] and its `Control` give.
 pub(crate) trait ServerSide: OutOfProcess + InProcess {
@@ -78,7 +70,15 @@ pub(in crate::served) mod clap {
     use tutti_clap_host::ClapLoaded;
     use tutti_plugin_types::{Control, Lifecycle, MainThreadMarker, Request, Seat};
 
-    use super::{ServerSide, refusals};
+    use super::ServerSide;
+
+    /// How many of the plugin's answers to one-way writes are refusals.
+    fn refusals<E>(answers: impl IntoIterator<Item = Result<(), E>>) -> u64 {
+        answers
+            .into_iter()
+            .map(|answer| u64::from(answer.is_err()))
+            .sum()
+    }
 
     /// The pool this process serves `clap.thread-pool` requests on, built the
     /// first time a plugin that implements the extension loads; `None` on a
@@ -222,6 +222,22 @@ pub(in crate::served) mod clap {
             }))
         }
     }
+    #[cfg(test)]
+    mod tests {
+        use super::refusals;
+
+        /// **Each write the plugin answered with an error is counted, and no
+        /// other**: a flush of three writes of which two were refused is two.
+        #[test]
+        fn a_flush_counts_the_writes_the_plugin_refused() {
+            assert_eq!(
+                refusals([Ok(()), Err("read-only"), Ok(()), Err("unknown")]),
+                2
+            );
+            assert_eq!(refusals::<()>([Ok(()), Ok(())]), 0);
+            assert_eq!(refusals::<()>([]), 0);
+        }
+    }
 }
 
 #[cfg(feature = "vst3")]
@@ -245,22 +261,5 @@ impl ServerSide for tutti_vst3_host::Vst3Loaded {
             }
             Lifecycle::Poisoned => {}
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::refusals;
-
-    /// **Each write the plugin answered with an error is counted, and no
-    /// other**: a flush of three writes of which two were refused is two.
-    #[test]
-    fn a_flush_counts_the_writes_the_plugin_refused() {
-        assert_eq!(
-            refusals([Ok(()), Err("read-only"), Ok(()), Err("unknown")]),
-            2
-        );
-        assert_eq!(refusals::<()>([Ok(()), Ok(())]), 0);
-        assert_eq!(refusals::<()>([]), 0);
     }
 }
