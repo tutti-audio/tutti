@@ -381,12 +381,13 @@ fn a_held_policy_asks_for_nothing() {
 #[test]
 fn a_listing_that_does_not_answer_is_reported_slow_once() {
     let (release, held) = std::sync::mpsc::channel::<()>();
+    let executor = tutti_platform::Executor::new();
     let mut listing = OutputListing::new(
-        DeviceListing::spawn_with(move || {
+        &executor,
+        DeviceListing::from_fn(move || {
             held.recv().ok();
             Ok(Vec::new())
-        })
-        .unwrap(),
+        }),
     );
     let base = t0();
     assert!(!listing.poll(base).1);

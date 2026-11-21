@@ -349,7 +349,12 @@ mod tests {
                 tutti_plugin_types::PluginClass::Unknown,
             ),
         )];
-        for end in ["kill -SEGV $$", "exec sleep 300"] {
+        // A crash ends the probe by itself, so its window only guards a hang; a hang
+        // ends at the window, so it is short.
+        for (end, window) in [
+            ("kill -SEGV $$", Duration::from_secs(60)),
+            ("exec sleep 300", Duration::from_secs(2)),
+        ] {
             let dir = TempDir::new().unwrap();
             let prepared = dir.path().join("listing");
             write_result(
@@ -361,7 +366,7 @@ mod tests {
             )
             .unwrap();
             let locator = stand_in(&dir, &format!("cp {} \"$2\"\n{end}", prepared.display()));
-            let result = probe(&locator, Duration::from_secs(2));
+            let result = probe(&locator, window);
             assert_eq!(result, Ok(listed.clone()), "after `{end}`");
         }
     }
