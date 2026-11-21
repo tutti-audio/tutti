@@ -149,6 +149,7 @@ impl UmpVirtualEndpoint {
             Endpoint::WithBlocks(
                 UmpEndpoint::new(
                     main,
+                    client,
                     name,
                     protocol,
                     spec.device(),
