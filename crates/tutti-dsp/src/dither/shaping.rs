@@ -115,6 +115,16 @@ impl NoiseShaping {
         self.taps.len()
     }
 
+    /// `Σ |c_k|`: the most the filtered past errors can add to one value, in
+    /// units of the largest error. The quantizer's output differs from its
+    /// input by `e[n] + Σ c_k e[n-k]`, so with every `|e| <= E` it stays
+    /// within `(1 + feedback_gain()) * E`, which a caller that must keep a
+    /// shaped signal clear of full scale sizes its headroom by.
+    #[must_use]
+    pub fn feedback_gain(&self) -> Amplitude {
+        Amplitude::new(self.taps.iter().map(|c| c.abs()).sum())
+    }
+
     /// The taps `c_1..=c_n`.
     pub(crate) fn taps(&self) -> &[f64] {
         &self.taps

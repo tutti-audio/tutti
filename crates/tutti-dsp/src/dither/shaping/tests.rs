@@ -351,3 +351,21 @@ fn each_channel_keeps_its_own_history() {
     }
     assert_eq!(feedback.peak_of(1), 0.0);
 }
+
+/// `feedback_gain` bounds the shaped output's departure from its input: every error the loop
+/// records is within `1.5` LSB (TPDF dither of one LSB plus half an LSB of rounding), so
+/// `y - x = e[n] + Σ c_k e[n-k]` stays within `(1 + feedback_gain()) * 1.5` LSB.
+#[test]
+fn the_feedback_gain_bounds_the_shaped_error() {
+    for sr in [44_100.0, 96_000.0] {
+        let shaping = NoiseShaping::new(rate(sr));
+        let gain = shaping.feedback_gain().get();
+        let bound = 1.0 + gain;
+        assert!(gain > 1.0, "rate {sr}: it shapes");
+        let e = error_lsb(Some(&shaping), &tone(1 << 18, sr));
+        let peak = e.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        assert!(peak <= 1.5 * bound + 1e-9, "rate {sr}: {peak}");
+        // The bound is not slack by an order of magnitude: the run gets past the unshaped 1.5.
+        assert!(peak > 1.5, "rate {sr}: {peak}");
+    }
+}

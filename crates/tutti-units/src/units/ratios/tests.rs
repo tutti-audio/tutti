@@ -49,19 +49,28 @@ fn cents_and_semitones_convert_rather_than_scale() {
 #[test]
 fn a_pitch_ratio_round_trips_through_cents() {
     for ratio in [0.5_f64, 1.0, 1.5, 2.0, 3.0] {
-        let back = Cents::from_pitch_ratio(ratio).to_pitch_ratio();
+        let back = Cents::from_pitch_ratio(fr(ratio)).to_pitch_ratio();
         assert!(
             (back - ratio).abs() <= ratio * f64::EPSILON * 4.0,
             "{ratio} round-tripped to {back}"
         );
     }
-    assert_eq!(Cents::from_pitch_ratio(2.0), Cents(1200.0));
-    assert_eq!(Cents::from_pitch_ratio(1.0), Cents(0.0));
+    assert_eq!(Cents::from_pitch_ratio(fr(2.0)), Cents(1200.0));
+    assert_eq!(Cents::from_pitch_ratio(fr(1.0)), Cents(0.0));
+    assert_eq!(Semitones::from_pitch_ratio(fr(2.0)), Semitones(12.0));
+}
 
-    // A ratio has no logarithm at or below zero. Unison, not NaN — a NaN
-    // here reaches a frequency table and silences a note with no error.
-    assert_eq!(Cents::from_pitch_ratio(0.0), Cents(0.0));
-    assert_eq!(Cents::from_pitch_ratio(-1.0), Cents(0.0));
+/// A ratio with no logarithm is not a `FrequencyRatio`, so the converters
+/// never see one.
+#[test]
+fn a_ratio_without_a_logarithm_is_unwritable() {
+    for raw in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(FrequencyRatio::new(raw), None, "{raw}");
+    }
+}
+
+fn fr(raw: f64) -> FrequencyRatio {
+    FrequencyRatio::new(raw).expect("a positive finite ratio")
 }
 
 /// The four ratios store `f64`: a figure past `f32` resolution survives construction, clamping
@@ -179,8 +188,8 @@ fn a_pitch_ratio_narrows_to_the_f32_closed_form() {
 #[test]
 fn a_pitch_interval_narrows_to_the_f32_closed_form() {
     for ratio in [0.25_f32, 0.5, 1.5, 2.0, 3.0, 7.0] {
-        let st = Semitones::from_pitch_ratio(f64::from(ratio)).0 as f32;
-        let cents = Cents::from_pitch_ratio(f64::from(ratio)).0 as f32;
+        let st = Semitones::from_pitch_ratio(fr(f64::from(ratio))).0 as f32;
+        let cents = Cents::from_pitch_ratio(fr(f64::from(ratio))).0 as f32;
         let closed = 12.0 * ratio.log2();
         assert!((st - closed).abs() <= closed.abs().max(1.0) * f32::EPSILON * 2.0);
         assert!(

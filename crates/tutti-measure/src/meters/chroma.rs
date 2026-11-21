@@ -56,7 +56,7 @@ use tutti_dsp::local_maxima;
 
 use tutti_buffers::{Mono, Sample};
 use tutti_music::Note;
-use tutti_units::{Cents, Db, Hz, SampleRate, Samples, Semitones};
+use tutti_units::{Cents, Db, FrequencyRatio, Hz, SampleRate, Samples, Semitones};
 
 use crate::convert::{all_finite, for_blocks, widen};
 use crate::framing::{
@@ -373,7 +373,10 @@ impl ChromaPlan {
 
     /// Adds a peak's distance from the equal-tempered grid to `sums`.
     fn tune(frequency: f64, energy: f64, sums: &mut TuningSums) {
-        let off = off_grid(frequency);
+        // A frequency with no pitch (not above zero) adds no tuning evidence.
+        let Some(off) = off_grid(frequency) else {
+            return;
+        };
         let turn = off * std::f64::consts::TAU;
         let w = energy;
         sums.cos += w * libm::cos(turn);
@@ -388,8 +391,10 @@ impl ChromaPlan {
             if sub < self.min_freq.get() {
                 break;
             }
-            let class = class_of(sub, tuning);
-            frame[class] += weight;
+            // A frequency with no pitch (not above zero) folds into no class.
+            if let Some(class) = class_of(sub, tuning) {
+                frame[class] += weight;
+            }
             weight *= self.harmonic_decay.get();
         }
     }
@@ -397,21 +402,22 @@ impl ChromaPlan {
 
 /// The half-semitone-wide distance of `frequency` from the nearest
 /// equal-tempered pitch, in semitones, `-0.5..=0.5`.
-fn off_grid(frequency: f64) -> f64 {
-    let s = semitones_from_a4(frequency).get();
-    s - s.round()
+fn off_grid(frequency: f64) -> Option<f64> {
+    let s = semitones_from_a4(frequency)?.get();
+    Some(s - s.round())
 }
 
 /// `frequency`'s distance from A4.
-fn semitones_from_a4(frequency: f64) -> Semitones {
-    Semitones::from_pitch_ratio(frequency / Note::A4.frequency().get())
+/// `None` for a frequency that is not above zero.
+fn semitones_from_a4(frequency: f64) -> Option<Semitones> {
+    FrequencyRatio::new(frequency / Note::A4.frequency().get()).map(Semitones::from_pitch_ratio)
 }
 
 /// The class of `frequency` once `tuning` is taken out, as a column.
-fn class_of(frequency: f64, tuning: Semitones) -> usize {
+fn class_of(frequency: f64, tuning: Semitones) -> Option<usize> {
     let a = f64::from(Note::A4.class().semitones_above_c());
-    let position = a + semitones_from_a4(frequency).get() - tuning.get();
-    (position.round() as i64).rem_euclid(CLASSES as i64) as usize
+    let position = a + semitones_from_a4(frequency)?.get() - tuning.get();
+    Some((position.round() as i64).rem_euclid(CLASSES as i64) as usize)
 }
 
 /// Parabolic interpolation of the log magnitude through three bins, whose

@@ -37,6 +37,9 @@ pub(super) struct Link<F: Float> {
     /// leaves them out once one was sent; their latch is raised once the
     /// executor has applied it.
     ending_taps: Vec<(Option<u64>, Arc<TapEnd>)>,
+    /// Items the executor's apply could not return, summed from each list as
+    /// its box or crossfade came back.
+    leaked: u64,
 }
 
 impl<F: Float> Link<F> {
@@ -49,6 +52,7 @@ impl<F: Float> Link<F> {
             sent: 0,
             acked: 0,
             ending_taps: Vec::new(),
+            leaked: 0,
         }
     }
 
@@ -123,6 +127,7 @@ impl<F: Float> Link<F> {
         let done = self.channels.returned.pop()?;
         self.out -= 1;
         self.acked += 1;
+        self.leaked = self.leaked.saturating_add(done.refused() as u64);
         Some(done)
     }
 
@@ -150,6 +155,7 @@ impl<F: Float> Link<F> {
     pub(super) fn pop_faded(&mut self) -> Option<Box<Crossfade<F>>> {
         let x = self.channels.faded.pop()?;
         self.fades_out -= 1;
+        self.leaked = self.leaked.saturating_add(x.refused() as u64);
         Some(x)
     }
 
@@ -168,6 +174,11 @@ impl<F: Float> Link<F> {
         self.channels
             .unreported
             .swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Items the executor's apply leaked, since the editor was built.
+    pub(super) fn leaked(&self) -> u64 {
+        self.leaked
     }
 
     /// The executor's play clock, as it last published it.

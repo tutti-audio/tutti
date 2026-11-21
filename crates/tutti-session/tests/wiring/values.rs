@@ -102,7 +102,7 @@ fn a_failing_item_lands_nothing_and_at_counts_a_none() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
     let gone = filter(&mut s, 1_000.0);
-    s.graph().remove(gone).unwrap();
+    s.remove(gone).unwrap();
     let nothing: Option<Assign<ParamTarget<Hz>>> = None;
 
     let e = s
@@ -234,7 +234,7 @@ fn a_removed_node_is_no_such_target_and_names_its_key() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
     let values = s.values();
-    s.graph().remove(lp).unwrap();
+    s.remove(lp).unwrap();
     for e in [
         s.get(lp.cutoff()).unwrap_err(),
         values.get(lp.cutoff()).unwrap_err(),
@@ -583,7 +583,7 @@ fn a_failing_read_inside_a_vec_is_at_its_position() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
     let gone = filter(&mut s, 1_000.0);
-    s.graph().remove(gone).unwrap();
+    s.remove(gone).unwrap();
     let e = s
         .get((
             lp.cutoff(),

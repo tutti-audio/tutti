@@ -93,6 +93,7 @@ fn config(freq_target: SampleRateTarget) -> ExportConfig {
             SampleRateTarget::Convert => Some(Resample::to(tutti_units::SampleRate::of(OUT_RATE))),
             SampleRateTarget::Passthrough => None,
         },
+        noise_shaping: false,
     }
 }
 
