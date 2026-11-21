@@ -45,7 +45,7 @@ use super::{AnyPlugin, HostPlugin, Open, Origin, PluginLoad};
 use crate::apply::SessionId;
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
-use crate::{CrossfadeRefused, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence, WorkerError};
+use crate::{CrossfadeRefused, GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
 use crate::{OtherPeer, PeerState, ReplaceRefused, Resource, ResourceId, SavedPeer, Session};
 
 /// A plugin to open, built by [`Session::load_plugin`] and not yet run. Where it
@@ -225,12 +225,18 @@ impl IntoFuture for LoadOutOfProcess {
 /// target; [`LoadError::Plugin`] when the catalog blacklisted the plugin since
 /// the load was built, the session is gone
 /// ([`IpcError::ShutDown`]), or the plugin does not open;
-/// [`LoadError::Job`] ([`WorkerError::Dropped`]) when the launch task ended
-/// without an answer (the executor went away before or while it ran), and
-/// [`WorkerError::NotStarted`] when the executor could not start it;
-/// [`LoadError::Panicked`] when a plugin or the host panicked in the open.
+/// [`IpcError::ShutDown`] too when the launch task ended without an answer
+/// (the executor dropped it before it ran: the host is shutting down, and the
+/// plugin did not fail), and [`IpcError::Io`] when the executor could not
+/// start it; [`LoadError::Panicked`] when a plugin or the host panicked in
+/// the open.
+///
+/// # Panics
+///
+/// When polled after it resolved.
 ///
 /// [`IpcError::ShutDown`]: tutti_plugin_types::IpcError::ShutDown
+/// [`IpcError::Io`]: tutti_plugin_types::IpcError::Io
 #[must_use = "a load does nothing unless it is awaited"]
 pub struct LoadingOutOfProcess {
     stage: Stage,
@@ -278,7 +284,7 @@ impl LoadingOutOfProcess {
                 // back and closes here, which reaps its server.
                 drop(reply.send(node));
             })
-            .map_err(|refused| LoadError::Job(WorkerError::NotStarted(refused.kind())))?;
+            .map_err(|refused| plugin_failed(IpcError::Io(std::io::Error::from(refused.kind()))))?;
         // The task runs on without the future: its end is the reply.
         task.detach();
         Ok(receiver)
@@ -305,8 +311,9 @@ impl Future for LoadingOutOfProcess {
         };
         let answered = std::task::ready!(Pin::new(receiver).poll(cx));
         this.stage = Stage::Finished;
-        // A sender dropped unanswered: the launch task never ran to its end.
-        Poll::Ready(answered.unwrap_or(Err(LoadError::Job(WorkerError::Dropped))))
+        // A sender dropped unanswered: the executor dropped the launch task
+        // before it ran (the open is `caught`, so a panic answers).
+        Poll::Ready(answered.unwrap_or_else(|_| Err(plugin_failed(IpcError::ShutDown))))
     }
 }
 
@@ -509,9 +516,8 @@ pub enum SwapPluginError {
 /// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// A plugin to open, as a value the app runs: a [`LoadInProcess`] on the
-    /// main thread or a [`LoadOutOfProcess`] on any thread, by where `hosting`
-    /// resolves for the plugin's format in this build ([`Hosting::Auto`] is the
-    /// format's default).
+    /// main thread or a [`LoadOutOfProcess`] on any thread, by where the
+    /// plugin's format runs by default in this build.
     ///
     /// `id` is resolved and bound against `catalog` now ([`Catalog::resolve`]),
     /// and the load keeps the answer. The load runs at the session's rate and
@@ -524,14 +530,45 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// # Errors
     ///
     /// [`LoadError::Unresolved`] when `id` names no plugin of the catalog, or
-    /// several; [`LoadError::Plugin`] when the plugin is blacklisted now or the
-    /// format cannot be hosted as `hosting` ([`IpcError::NotOutOfProcess`] for
-    /// VST2, [`IpcError::NotInProcess`] for a format this build holds no host
-    /// for).
+    /// several; [`LoadError::Plugin`] when the plugin is blacklisted now or
+    /// this build holds no host for its format
+    /// ([`IpcError::NotInProcess`]).
+    ///
+    /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
+    pub fn load_plugin(&self, id: &PluginId, catalog: &Catalog) -> Result<LoadPlugin, LoadError> {
+        self.load_hosted(id, catalog, Hosting::Auto)
+    }
+
+    /// [`load_plugin`](Self::load_plugin), run where `hosting` says rather than
+    /// where the format runs by default.
+    ///
+    /// # Errors
+    ///
+    /// As [`load_plugin`](Self::load_plugin), and [`LoadError::Plugin`] when
+    /// the format cannot be hosted as `hosting` ([`IpcError::NotOutOfProcess`]
+    /// for VST2, [`IpcError::NotInProcess`] for a format this build holds no
+    /// in-process host for).
     ///
     /// [`IpcError::NotOutOfProcess`]: tutti_plugin_types::IpcError::NotOutOfProcess
     /// [`IpcError::NotInProcess`]: tutti_plugin_types::IpcError::NotInProcess
-    pub fn load_plugin(
+    pub fn load_plugin_as(
+        &self,
+        id: &PluginId,
+        catalog: &Catalog,
+        hosting: ResolvedHosting,
+    ) -> Result<LoadPlugin, LoadError> {
+        self.load_hosted(
+            id,
+            catalog,
+            match hosting {
+                ResolvedHosting::InProcess => Hosting::InProcess,
+                ResolvedHosting::OutOfProcess => Hosting::OutOfProcess,
+            },
+        )
+    }
+
+    /// The load of `id` as `hosting` asks.
+    fn load_hosted(
         &self,
         id: &PluginId,
         catalog: &Catalog,
@@ -780,10 +817,10 @@ mod tests {
         assert!(matches!(error, LoadError::Module(_)), "{error:?}");
     }
 
-    /// **A launch task that ends without sending resolves as a dropped job**,
-    /// never a wait without end: the reply's sender is gone.
+    /// **A launch task dropped before it answers resolves as a shut-down
+    /// host**, never a wait without end: the reply's sender is gone.
     #[test]
-    fn a_dropped_sender_resolves_as_a_dropped_job() {
+    fn a_dropped_sender_resolves_as_a_shut_down_host() {
         let (reply, receiver) = oneshot::channel();
         drop(reply);
         let load = LoadingOutOfProcess {
@@ -791,7 +828,7 @@ mod tests {
         };
         let error = tutti_fixtures::block_on(load).expect_err("nobody answered");
         assert!(
-            matches!(error, LoadError::Job(WorkerError::Dropped)),
+            matches!(error, LoadError::Plugin(ref failed) if matches!(**failed, IpcError::ShutDown)),
             "{error:?}"
         );
     }

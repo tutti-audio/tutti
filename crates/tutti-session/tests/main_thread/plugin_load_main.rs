@@ -13,6 +13,7 @@ use tutti_platform::Instant;
 use tutti_clap_test_plugin::{ClapProbe, Site, ThreadAnswer};
 
 use tutti_buffers::MaxBlock;
+use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_types::{Locator, PluginId};
@@ -125,7 +126,7 @@ fn an_in_process_hosting_resolves_to_an_in_process_load() {
     let (catalog, _dir) = catalog();
     let s = session();
     assert!(matches!(
-        s.load_plugin(&id(), &catalog, Hosting::InProcess),
+        s.load_plugin_as(&id(), &catalog, ResolvedHosting::InProcess),
         Ok(tutti_session::LoadPlugin::InProcess(_))
     ));
 }

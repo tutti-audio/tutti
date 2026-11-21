@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_types::MainThreadMarker;
@@ -215,7 +216,14 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         hosting: Hosting,
         state: Option<PeerState>,
     ) -> Result<(LoadedPlugin, Key<AnyPlugin>), LoadError> {
-        let opened = match self.load_plugin(id, catalog, hosting)? {
+        let load = match hosting {
+            Hosting::Auto => self.load_plugin(id, catalog),
+            Hosting::InProcess => self.load_plugin_as(id, catalog, ResolvedHosting::InProcess),
+            Hosting::OutOfProcess => {
+                self.load_plugin_as(id, catalog, ResolvedHosting::OutOfProcess)
+            }
+        };
+        let opened = match load? {
             Load::InProcess(mut load) => {
                 if let Some(state) = state {
                     load.initial_state(state).expect("a state of the plugin");
@@ -257,14 +265,14 @@ pub trait Hosted {
 
 impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> Hosted for Session<K, C> {
     fn load_out_of_process(&self, id: &PluginId, catalog: &Catalog) -> LoadOutOfProcess {
-        match self.load_plugin(id, catalog, Hosting::OutOfProcess) {
+        match self.load_plugin_as(id, catalog, ResolvedHosting::OutOfProcess) {
             Ok(Load::OutOfProcess(load)) => load,
             other => panic!("an out-of-process load: {other:?}"),
         }
     }
 
     fn load_in_process(&self, id: &PluginId, catalog: &Catalog) -> LoadInProcess {
-        match self.load_plugin(id, catalog, Hosting::InProcess) {
+        match self.load_plugin_as(id, catalog, ResolvedHosting::InProcess) {
             Ok(Load::InProcess(load)) => load,
             other => panic!("an in-process load: {other:?}"),
         }
