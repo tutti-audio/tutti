@@ -44,8 +44,13 @@ fn frame_of(envelope: &mut Envelope, stage: EnvelopeStage) -> usize {
         + 1
 }
 
-fn db(level: Amplitude) -> f64 {
+fn db_of(level: Amplitude) -> f64 {
     Db::from_amplitude(level).get()
+}
+
+/// A dB-linear curve of `depth` decibels.
+fn db(depth: f64) -> EnvelopeCurve {
+    EnvelopeCurve::db_linear(Db::new(depth)).expect("a depth above zero")
 }
 
 fn ceil(x: f64) -> usize {
@@ -56,12 +61,7 @@ fn ceil(x: f64) -> usize {
 /// takes its own, whatever the sustain.
 #[test]
 fn a_stage_takes_its_authored_frames_at_the_stage_pace_for_both_curves() {
-    for curve in [
-        EnvelopeCurve::Linear,
-        EnvelopeCurve::DbLinear {
-            depth: Db::new(-60.0),
-        },
-    ] {
+    for curve in [EnvelopeCurve::LINEAR, db(60.0)] {
         let stages = stages().decay_curve(curve).pace(EnvelopePace::Stage);
         let mut envelope = runner(&stages);
         assert_eq!(frame_of(&mut envelope, EnvelopeStage::Attack), 240);
@@ -90,13 +90,7 @@ fn a_full_scale_fall_takes_the_share_of_the_scale_it_covers() {
         ceil((1.0 - sustain) * 960.0)
     );
 
-    let curved = stages()
-        .decay_curve(EnvelopeCurve::DbLinear {
-            depth: Db::new(depth),
-        })
-        .release_curve(EnvelopeCurve::DbLinear {
-            depth: Db::new(depth),
-        });
+    let curved = stages().decay_curve(db(depth)).release_curve(db(depth));
     let mut envelope = runner(&curved);
     frame_of(&mut envelope, EnvelopeStage::Decay);
     assert_eq!(
@@ -119,14 +113,12 @@ fn a_db_linear_segment_falls_its_depth_over_its_time_in_a_straight_line() {
     let depth = 100.0;
     let decay = 4800.0;
     let stages = EnvelopeStages::new(secs(0.0), secs(decay), Amplitude::SILENT, secs(1.0))
-        .decay_curve(EnvelopeCurve::DbLinear {
-            depth: Db::new(depth),
-        });
+        .decay_curve(db(depth));
     let design = EnvelopeDesign::new(&stages, rate());
     let leg = design.enter(EnvelopeStage::Decay, Amplitude::UNITY);
     assert!((leg.duration(rate()).get() * RATE - decay).abs() < 1e-9);
     for n in [1_usize, 480, 1200, 2400, 4799] {
-        let fell = -db(leg.level_at(frames(n)));
+        let fell = -db_of(leg.level_at(frames(n)));
         let want = depth * n as f64 / decay;
         assert!(
             (fell - want).abs() < 1e-11,
@@ -134,7 +126,7 @@ fn a_db_linear_segment_falls_its_depth_over_its_time_in_a_straight_line() {
         );
     }
     // The whole time is the whole depth.
-    assert!((-db(leg.to()) - depth).abs() < 1e-11);
+    assert!((-db_of(leg.to()) - depth).abs() < 1e-11);
 }
 
 /// The closed form `level_at(n)` is the per-frame increments of `step` applied `n` times, to
@@ -143,10 +135,8 @@ fn a_db_linear_segment_falls_its_depth_over_its_time_in_a_straight_line() {
 /// `(n + 1) epsilon` (absolute for a line, relative for a dB line).
 fn recurrence_matches<F: Float + Into<f64>>(epsilon: f64) {
     let stages = stages()
-        .decay_curve(EnvelopeCurve::DbLinear {
-            depth: Db::new(80.0),
-        })
-        .release_curve(EnvelopeCurve::Linear);
+        .decay_curve(db(80.0))
+        .release_curve(EnvelopeCurve::LINEAR);
     let design = EnvelopeDesign::new(&stages, rate());
     for (stage, start) in [
         (EnvelopeStage::Attack, 0.0),
@@ -220,16 +210,14 @@ fn a_quick_release_ends_within_its_time() {
         Amplitude::new(0.8),
         secs(240_000.0),
     )
-    .release_curve(EnvelopeCurve::DbLinear {
-        depth: Db::new(100.0),
-    });
+    .release_curve(db(100.0));
     let mut envelope = runner(&stages);
     envelope.advance(frames(48 + 10_000));
-    let before = db(envelope.level());
+    let before = db_of(envelope.level());
     envelope.release_within(secs(480.0));
     envelope.release();
     envelope.advance(frames(240));
-    assert!((before - db(envelope.level()) - 50.0).abs() < 1e-11);
+    assert!((before - db_of(envelope.level()) - 50.0).abs() < 1e-11);
     envelope.advance(frames(240));
     assert!(envelope.is_idle());
     assert_eq!(envelope.level(), Amplitude::SILENT);
@@ -247,25 +235,33 @@ fn a_quick_release_never_slows_a_shorter_release() {
     assert_eq!(frame_of(&mut envelope, EnvelopeStage::Idle), 100);
 }
 
-/// A stage of no frames takes none: with every time zero the envelope is at its sustain the
-/// moment it starts, and a zero release is silent at once.
+/// A stage of no frames takes none: a zero attack is already at its end, unity, at frame 0 and
+/// the envelope is in its decay, and a zero release is silent at once.
 #[test]
 fn a_zero_length_stage_takes_no_frame() {
-    let stages = EnvelopeStages::new(secs(0.0), secs(0.0), Amplitude::new(0.6), secs(0.0));
+    let stages = EnvelopeStages::new(secs(0.0), secs(960.0), Amplitude::new(0.6), secs(0.0));
     let mut envelope = runner(&stages);
-    assert_eq!(envelope.stage(), EnvelopeStage::Sustain);
-    assert_eq!(envelope.level(), Amplitude::new(0.6));
+    assert_eq!(envelope.stage(), EnvelopeStage::Decay);
+    assert_eq!(envelope.level(), Amplitude::UNITY);
     envelope.release();
     assert!(envelope.is_idle());
+    assert_eq!(envelope.level(), Amplitude::SILENT);
+}
+
+/// A depth that is not above zero, or not finite, is no fall: it makes no curve.
+#[test]
+fn a_depth_that_is_no_fall_makes_no_curve() {
+    for depth in [0.0, -60.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(EnvelopeCurve::db_linear(Db::new(depth)), None, "{depth}");
+    }
+    assert!(EnvelopeCurve::db_linear(Db::new(60.0)).is_some());
 }
 
 /// The level after `N` frames is the same read in one chunk, in frames of one, or in chunks
 /// that straddle stage ends.
 #[test]
 fn any_chunking_of_the_same_frames_reads_the_same_level() {
-    let stages = stages().decay_curve(EnvelopeCurve::DbLinear {
-        depth: Db::new(70.0),
-    });
+    let stages = stages().decay_curve(db(70.0));
     for total in [1, 239, 240, 241, 719, 720, 912, 1500, 3000] {
         let mut whole = runner(&stages);
         whole.advance(frames(total));

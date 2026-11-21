@@ -10,8 +10,9 @@ use crate::soundfont_math::SoundFontMath;
 
 /// The fall of the decay and release times (SF2 2.04 section 8.1.2, generators 36 and 38):
 /// the time to fall 100 dB, at a constant dB per time unit.
-const FALL: EnvelopeCurve = EnvelopeCurve::DbLinear {
-    depth: Db::new(100.0),
+const FALL: EnvelopeCurve = match EnvelopeCurve::db_linear(Db::new(100.0)) {
+    Some(curve) => curve,
+    None => panic!("100 dB is a fall"),
 };
 
 /// The volume envelope (SF2 2.04 section 8.1.2, generators 33 to 38) read once a chunk: a

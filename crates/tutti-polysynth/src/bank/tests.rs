@@ -517,9 +517,7 @@ fn a_db_linear_release_is_a_straight_line_in_decibels<F: SynthFloat>(epsilon: f6
         Amplitude::UNITY,
         Seconds::new(release / SR),
     )
-    .release_curve(EnvelopeCurve::DbLinear {
-        depth: Db::new(depth),
-    });
+    .release_curve(EnvelopeCurve::db_linear(Db::new(depth)).expect("a depth above zero"));
     b.design = EnvelopeDesign::new(&stages, sr());
     start(
         &mut b,

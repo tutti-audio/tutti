@@ -20,3 +20,7 @@ pub(crate) fn along<F: Float>(k: u32, n: u32) -> F {
 pub(crate) fn prewarp(fc: Hz, rate: SampleRate) -> f64 {
     libm::tan(core::f64::consts::PI * fc.get() / rate.get())
 }
+
+/// The frames under which a time is none: one that short has no frame to reach its end in, and a
+/// slope over it would not be finite.
+pub(crate) const NO_FRAME: f64 = 1e-12;

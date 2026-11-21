@@ -12,8 +12,8 @@
 //! # Curves and time
 //!
 //! The attack is a straight line in amplitude. A decay and a release are a straight line in
-//! amplitude ([`EnvelopeCurve::Linear`]) or a straight line in decibels
-//! ([`EnvelopeCurve::DbLinear`]), which falls a stated depth over the time and is the
+//! amplitude ([`EnvelopeCurve::LINEAR`]) or a straight line in decibels
+//! ([`EnvelopeCurve::db_linear`]), which falls a stated depth over the time and is the
 //! exponential of a constant rate. A dB-linear fall ends at its floor, `depth` below unity,
 //! and the level then goes to the stage's own level: silence after a release.
 //!
@@ -42,6 +42,8 @@ use tutti_buffers::Float;
 use tutti_music::Adsr;
 use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 
+use crate::design::NO_FRAME;
+
 /// A relative tolerance on a leg's length: a leg whose elapsed frames are within it of its
 /// length has ended, so a rounding error in a product never costs a frame.
 const END_TOLERANCE: f64 = 1e-12;
@@ -49,17 +51,27 @@ const END_TOLERANCE: f64 = 1e-12;
 /// The nepers in a decibel of amplitude: `ln 10 / 20`.
 const NEPERS_PER_DB: f64 = core::f64::consts::LN_10 / 20.0;
 
-/// The shape of a decay or a release.
+/// The shape of a decay or a release: a straight line in amplitude, or in decibels.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum EnvelopeCurve {
+pub struct EnvelopeCurve {
+    /// The fall over the whole scale, in decibels; `None` is a straight line in amplitude.
+    depth: Option<Db>,
+}
+
+impl EnvelopeCurve {
     /// A straight line in amplitude.
-    Linear,
-    /// A straight line in decibels: the level falls `depth` over the stage time. The
-    /// magnitude of `depth` is the fall; a depth of zero is a fall of no length.
-    DbLinear {
-        /// The fall over the whole scale.
-        depth: Db,
-    },
+    pub const LINEAR: Self = Self { depth: None };
+
+    /// A straight line in decibels: the level falls `depth` over the stage time. `None` for a
+    /// depth that is not finite and above zero, which is no fall.
+    #[must_use]
+    pub const fn db_linear(depth: Db) -> Option<Self> {
+        if depth.get().is_finite() && depth.get() > 0.0 {
+            Some(Self { depth: Some(depth) })
+        } else {
+            None
+        }
+    }
 }
 
 /// What a decay or release time measures.
@@ -103,8 +115,8 @@ impl EnvelopeStages {
             decay,
             sustain,
             release,
-            decay_curve: EnvelopeCurve::Linear,
-            release_curve: EnvelopeCurve::Linear,
+            decay_curve: EnvelopeCurve::LINEAR,
+            release_curve: EnvelopeCurve::LINEAR,
             pace: EnvelopePace::FullScale,
         }
     }
@@ -320,10 +332,7 @@ impl Fall {
     fn new(time: Seconds, curve: EnvelopeCurve, rate: SampleRate) -> Self {
         Self {
             frames: frames(time, rate),
-            depth: match curve {
-                EnvelopeCurve::Linear => None,
-                EnvelopeCurve::DbLinear { depth } => Some(depth.get().abs()),
-            },
+            depth: curve.depth.map(Db::get),
         }
     }
 
@@ -345,7 +354,7 @@ impl Fall {
                 (libm::log(from / to), depth * NEPERS_PER_DB)
             }
         };
-        if span <= 0.0 || self.frames < END_TOLERANCE {
+        if span <= 0.0 || self.frames < NO_FRAME {
             return hold(to);
         }
         let (frames, per_frame) = match pace {
@@ -444,7 +453,7 @@ impl EnvelopeDesign {
 
     fn attack_leg(&self, from: f64) -> EnvelopeLeg {
         let span = 1.0 - from;
-        if span <= 0.0 || self.attack < END_TOLERANCE {
+        if span <= 0.0 || self.attack < NO_FRAME {
             return EnvelopeLeg::hold(EnvelopeStage::Attack, 1.0, 0.0);
         }
         EnvelopeLeg {
