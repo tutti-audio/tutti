@@ -399,6 +399,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// it at the next block boundary instead. A replacement waiting on it is
     /// dropped and reported
     /// ([`SessionEvent::ReplaceDropped`]).
+    ///
     /// Any thread that owns the session: the removal frees nothing itself. The unit is freed
     /// when the executor hands it back, at a collect, which is where the
     /// main-thread guard is (see the type docs).
