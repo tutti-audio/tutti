@@ -27,12 +27,13 @@ fn enumeration_yields_well_formed_records() {
 #[test]
 fn an_unknown_id_does_not_open() {
     let backend = CoreMidiEndpoints::new();
+    let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let unknown = EndpointId::from_raw(u64::from(u32::MAX));
     assert!(
         !backend.outputs().iter().any(|e| e.id == unknown),
         "precondition: the sentinel id must not belong to a real endpoint"
     );
-    assert!(backend.open_output(unknown).is_err());
+    assert!(backend.open_output(started, unknown).is_err());
 }
 
 /// Capability must be *read from the endpoint*, not assumed.
@@ -113,13 +114,14 @@ fn a_scheduled_packet_arrives_after_the_one_sent_now() {
         let _ = tx.send(ump);
     });
     let backend = CoreMidiEndpoints::new();
+    let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let id = backend
         .outputs()
         .into_iter()
         .find(|e| e.name.contains("tutti-sched-out"))
         .expect("the virtual endpoint is listed")
         .id;
-    let out = backend.open_output(id).expect("opens");
+    let out = backend.open_output(started, id).expect("opens");
     out.follow(Protocol::Midi2);
 
     let note = |n| midi::note_on(MidiChannel::FIRST, n, 0xFFFF);
@@ -155,8 +157,21 @@ pub(in crate::backend::coremidi) fn plain(
         None,
     )
     .protocol(protocol);
-    UmpVirtualEndpoint::create(&spec, tutti_fixtures::main_thread(), move |ump, _| {
+    let main = tutti_fixtures::main_thread();
+    // The client is the hub's: it exists once the start resolved.
+    let devices = crate::Devices::open_over(
+        &tutti_platform::Executor::new(),
+        Box::new(CoreMidiEndpoints::new()),
+    )
+    .expect("devices");
+    let started = tutti_fixtures::block_on(devices.start()).expect("the hub makes its client");
+    let mut opening = UmpVirtualEndpoint::create(&spec, started, main, move |ump, _| {
         on_event(ump);
     })
-    .expect("a virtual UMP endpoint")
+    .expect("an opening");
+    // No Function Blocks: nothing is retried, so the first poll is the endpoint.
+    match opening.poll_endpoint(main, tutti_platform::Instant::now()) {
+        std::task::Poll::Ready(made) => made.expect("a virtual UMP endpoint"),
+        std::task::Poll::Pending => panic!("an endpoint with no blocks is ready on the first poll"),
+    }
 }

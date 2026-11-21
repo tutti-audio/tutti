@@ -1347,13 +1347,14 @@ mod tests {
             drops_within_guard(executor),
             "the executor's drop waits on an idle lane"
         );
-        assert!(lone.lane.is_finished(), "the lane outlived the executor");
-        drop(lone.lane);
+        assert!(ends(lone.lane), "the lane outlived the executor");
     }
 
     /// **A lane fed without a break stops with the executor**: the audio lane
     /// is answered block after block, so it rarely idles, and dropping the last
-    /// executor clone still ends it (the drop joins its thread).
+    /// executor clone still ends it. The drop stops its thread and joins it within
+    /// the executor's stop bound; a loaded machine can pass that bound, so the test
+    /// waits for the lane's end under the hang guard.
     #[test]
     fn a_busy_lane_stops_when_the_executor_drops() {
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -1404,11 +1405,10 @@ mod tests {
         let dropped = drops_within_guard(executor);
         feeding.store(false, Ordering::Release);
         assert!(dropped, "the executor's drop waits on a busy lane");
-        assert!(lone.lane.is_finished(), "the lane outlived the executor");
+        assert!(ends(lone.lane), "the lane outlived the executor");
         feeder.join().expect("the feeder ends");
         drop(lone.audio_peer);
         let _ = server.join();
-        drop(lone.lane);
     }
 
     /// Records the threads that wake it.

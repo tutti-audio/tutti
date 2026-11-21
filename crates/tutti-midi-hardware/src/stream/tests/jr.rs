@@ -23,7 +23,10 @@ fn jr(utility: Utility) -> Ump {
 /// A connected, settled wire and a graph reading its inlets.
 fn settled(timing: InputTiming, device: Endpoint) -> (Wire, Rig, DeviceStream) {
     let mut wire = session_over_timing(midi2(), PortDirection::Duplex, device, timing);
-    let crate::Connected::Opened(inlet) = wire.session.connect_input(&wire.id.clone()).unwrap()
+    let crate::Connected::Opened(inlet) = wire
+        .session
+        .connect_input(crate::testing::started(), &wire.id.clone())
+        .unwrap()
     else {
         panic!("the wire's input was not open");
     };
@@ -84,7 +87,10 @@ fn txjr_is_asked_for_only_by_an_input_opened_for_jr() {
         (InputTiming::Arrival, false),
     ] {
         let mut wire = session_over_timing(midi2(), PortDirection::Duplex, offering_both(), timing);
-        let _ = wire.session.connect_input(&wire.id.clone()).unwrap();
+        let _ = wire
+            .session
+            .connect_input(crate::testing::started(), &wire.id.clone())
+            .unwrap();
         let mut asked = Vec::new();
         let mut settled = None;
         for ms in 0..8 {
@@ -170,7 +176,10 @@ fn no_jr_is_expected_before_the_notification() {
         offering_both(),
         InputTiming::JitterReduction,
     );
-    let crate::Connected::Opened(inlet) = wire.session.connect_input(&wire.id.clone()).unwrap()
+    let crate::Connected::Opened(inlet) = wire
+        .session
+        .connect_input(crate::testing::started(), &wire.id.clone())
+        .unwrap()
     else {
         panic!("the wire's input was not open");
     };
@@ -251,7 +260,10 @@ fn a_reconnected_input_asks_again_to_stop_jr() {
     send_ump(&wire, on, 20);
     wire.poll(30);
     assert!(wire.session.disconnect_input(&wire.id.clone()));
-    let _ = wire.session.connect_input(&wire.id.clone()).unwrap();
+    let _ = wire
+        .session
+        .connect_input(crate::testing::started(), &wire.id.clone())
+        .unwrap();
     wire.counters.take_sent(wire.raw);
     // A new device state answers the new negotiation, and turns TXJR on again.
     let settled = settle(&mut wire);

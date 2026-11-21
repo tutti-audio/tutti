@@ -14,6 +14,11 @@ mod hardware_poll_no_alloc;
     target_os = "macos"
 ))]
 mod listener;
+#[cfg(any(
+    all(target_os = "linux", feature = "sequencer-tests"),
+    target_os = "macos"
+))]
+mod opening;
 #[cfg(all(target_os = "linux", feature = "sequencer-tests"))]
 mod virtual_endpoint;
 #[cfg(any(

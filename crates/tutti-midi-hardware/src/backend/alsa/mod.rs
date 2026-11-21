@@ -44,6 +44,7 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::Result;
+use crate::start::Started;
 use std::sync::Mutex;
 use tutti_alsa_ffi::{Address, Client, UmpVersion};
 use tutti_midi_device::{EndpointId, OsDevice, PortDirection};
@@ -127,13 +128,14 @@ impl MidiEndpoints for AlsaEndpoints {
 
     fn open_input(
         &self,
+        _started: Started,
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         input::open(&self.executor, id, producer)
     }
 
-    fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: Started, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         output::open(id)
     }
 }

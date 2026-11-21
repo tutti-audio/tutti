@@ -23,13 +23,14 @@ fn a_packet_sent_to_the_endpoint_reaches_its_callback() {
         let _ = tx.send(ump);
     });
     let backend = CoreMidiEndpoints::new();
+    let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let id = backend
         .outputs()
         .into_iter()
         .find(|e| e.name.contains(&name))
         .expect("the virtual endpoint's destination is listed")
         .id;
-    let out = backend.open_output(id).expect("opens");
+    let out = backend.open_output(started, id).expect("opens");
     out.follow(Protocol::Midi2);
 
     let discovery = Ump::from(Message::Stream(Stream::EndpointDiscovery {
