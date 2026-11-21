@@ -647,7 +647,7 @@ pub mod sampler {
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
         ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
-        SlotId, StreamingAddError, VoiceWindow,
+        SlotId, StreamingAddError, VoiceNodeError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",
