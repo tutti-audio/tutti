@@ -15,7 +15,7 @@ use tutti_platform::Instant;
 use crate::loading::Perform as _;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
+use tutti_graph::{CommitError, Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_plugin_db::Catalog;
 use tutti_plugin_types::StateError;
 use tutti_plugin_types::StateUse;
@@ -24,7 +24,7 @@ use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
     DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
     PluginHealth, PluginNode, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState,
-    SaveState, Session, SessionEvent, StateStartError, SwapPluginError,
+    SaveState, Session, SessionEvent, SetRateError, StateStartError, SwapPluginError,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -771,7 +771,7 @@ fn repreparing<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
 ) -> tutti_session::AudioSide {
     let side = s.graph().take_audio_side();
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
     assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
     side
 }
@@ -841,8 +841,16 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
     let (mut s, node) = with_node(&catalog);
     s.graph().add(Unforkable(Grenade));
     // The session's executor is local, so both halves of the re-prepare run
-    // here and the grenade's panic has poisoned the editor when this returns.
-    s.graph().set_sample_rate(SampleRate::SR_96K);
+    // here and the grenade's panic has poisoned the editor when this returns,
+    // with the poisoning as the refusal.
+    let poisoned = s.graph().set_sample_rate(SampleRate::SR_96K);
+    assert!(
+        matches!(
+            poisoned,
+            Err(SetRateError::Commit(CommitError::Poisoned { .. }))
+        ),
+        "{poisoned:?}"
+    );
     let second = load(&s, &catalog, &second_id());
     let handle = second.handle();
     let refused = s.swap_plugin(node, second, tutti_fixtures::main_thread());
