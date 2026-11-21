@@ -188,7 +188,6 @@ impl<F: Float> Kernel for WaveguideStringKernel<F> {
             Some(bank) => bank.process(block),
             None => Ok(()),
         }
-        Ok(())
     }
 
     /// A decay is any time, so the ceiling is unbounded; [`tail_of`](Kernel::tail_of) narrows it

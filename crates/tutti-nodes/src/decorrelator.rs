@@ -133,7 +133,6 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
             Some(bank) => bank.process(block),
             None => Ok(()),
         }
-        Ok(())
     }
 
     fn tail(&self) -> Tail {
