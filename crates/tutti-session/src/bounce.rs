@@ -1810,6 +1810,11 @@ fn open_stem_taps<F: Float>(
 /// (dropped on the main thread by [`Session::apply`]), and the bounce's token.
 /// `Send`. [`Session::apply`] takes it back and gives the [`Bounced`] or the
 /// error the render ended in.
+///
+/// Applying releases the bounce's token but announces nothing: hosted plugins
+/// stay Offline until the next [`update`](Session::update)'s
+/// [`Phase::RenderMode`](crate::Phase::RenderMode) tells them Realtime. An app
+/// that plays live after a bounce updates right after applying.
 #[must_use = "a bounce is finished only when the session applies its render"]
 pub struct BounceRendered<M: Master, F: Float = f32> {
     result: Result<Bounced<M, F>, BounceError>,
