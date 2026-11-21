@@ -1,18 +1,24 @@
 //! A wave file as a value: [`Session::load_audio`] returns a [`LoadAudio`] that,
-//! when the app runs it, reads the file and returns a [`LoadedAudio`] handle.
+//! when the app awaits it, reads the file and resolves to a [`LoadedAudio`]
+//! handle.
 //!
-//! A load holds the asset and nothing of the session, so the app runs it on any
-//! thread. Two loads of one asset are two values and two decodes; an app that
+//! A load holds the asset and the session's weak executor, and the read is a
+//! task on that executor: awaiting it never blocks. Two loads of one asset are two values and two decodes; an app that
 //! wants one copy keeps the handle and clones it. The session keeps no cache:
 //! the wave lives while a clone of the handle does.
 
+use std::fmt;
+use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use tutti_buffers::{Float, Wave};
-use tutti_platform::Asset;
+use tutti_platform::{Asset, WeakExecutor};
 
 use crate::loaded::{Stamp, caught};
+use crate::unblocked::Unblocked;
 use crate::{AppKey, Clock, LoadError, Session};
 
 /// Where a file's samples are read from: [`LoadAudio::tier`]'s choice.
@@ -63,23 +69,27 @@ impl Default for Tier {
     }
 }
 
-/// A wave file to read, built by [`Session::load_audio`] and not yet run:
-/// [`run`](Self::run) returns a [`LoadedAudio`].
+/// A wave file to read, built by [`Session::load_audio`]. It is `Send`, and it
+/// is a [`Future`] through [`IntoFuture`]: awaiting it reads the file as a task
+/// on the session's executor and resolves to a [`LoadedAudio`]. There is no
+/// blocking form.
 ///
-/// It holds the asset and nothing of the session, so the app runs it on any
-/// thread it chooses; dropping it unrun cancels it.
+/// It holds the asset and a weak handle to the session's executor, and nothing
+/// else of the session. Dropping it unawaited reads nothing.
 #[derive(Debug)]
-#[must_use = "work does nothing until it runs"]
+#[must_use = "a load does nothing unless it is awaited"]
 pub struct LoadAudio<F: Float = f32> {
     asset: Asset,
+    executor: WeakExecutor,
     tier: Tier,
     float: PhantomData<fn() -> F>,
 }
 
 impl<F: Float> LoadAudio<F> {
-    pub(crate) fn new(asset: Asset) -> Self {
+    pub(crate) fn new(asset: Asset, executor: WeakExecutor) -> Self {
         Self {
             asset,
+            executor,
             tier: Tier::default(),
             float: PhantomData,
         }
@@ -92,17 +102,10 @@ impl<F: Float> LoadAudio<F> {
         self
     }
 
-    /// Reads the file on the calling thread: decodes it whole into `F`, or
-    /// reads its header when the tier streams it.
-    ///
-    /// The asset's [`Identity`](tutti_platform::Identity) is taken before the read, so a rewrite during
-    /// it shows in [`LoadedAudio::changed`].
-    ///
-    /// # Errors
-    ///
-    /// The [`LoadError`] of a file that cannot be decoded, probed or streamed;
-    /// [`LoadError::Panicked`] when a decoder panicked.
-    pub fn run(self) -> Result<LoadedAudio<F>, LoadError> {
+    /// Decodes the file whole into `F`, or reads its header when the tier
+    /// streams it. The asset's [`Identity`](tutti_platform::Identity) is taken
+    /// before the read, so a rewrite during it shows in [`LoadedAudio::changed`].
+    fn run(self) -> Result<LoadedAudio<F>, LoadError> {
         let stamp = Stamp::take(self.asset.clone());
         let data = caught(|| self.read())?;
         Ok(LoadedAudio { stamp, data })
@@ -153,6 +156,59 @@ impl<F: Float> LoadAudio<F> {
     }
 }
 
+impl<F: Float> IntoFuture for LoadAudio<F> {
+    type Output = Result<LoadedAudio<F>, LoadError>;
+    type IntoFuture = LoadingAudio<F>;
+
+    fn into_future(self) -> LoadingAudio<F> {
+        LoadingAudio {
+            load: Unblocked::new(self.executor.clone(), self, Self::run),
+        }
+    }
+}
+
+/// A wave file load being awaited ([`LoadAudio`]): resolves to the
+/// [`LoadedAudio`] once the file is read.
+///
+/// The first poll starts the read as a task on the session's executor (the
+/// session's weak handle, upgraded for the spawn only) and awaits the receiver
+/// of a oneshot. **The task fills the sender**: it takes the asset's
+/// [`Identity`](tutti_platform::Identity), reads the file, and sends the handle
+/// or the error, which wakes the future. A poll never blocks, and
+/// `Session::update` is not needed.
+///
+/// Dropped before it resolves, the future drops the receiver: a read that has
+/// not begun reads nothing, and one in flight finishes and its handle is dropped.
+/// Dropped before its first poll it starts nothing.
+///
+/// # Errors
+///
+/// The output is the [`LoadError`] of a file that cannot be decoded, probed or
+/// streamed; [`LoadError::Panicked`] when a decoder panicked;
+/// [`LoadError::ShutDown`] when the session is gone.
+///
+/// # Panics
+///
+/// When polled after it resolved.
+#[must_use = "a load does nothing unless it is awaited"]
+pub struct LoadingAudio<F: Float = f32> {
+    load: Unblocked<LoadAudio<F>, LoadedAudio<F>, LoadError>,
+}
+
+impl<F: Float> Future for LoadingAudio<F> {
+    type Output = Result<LoadedAudio<F>, LoadError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.load).poll(cx)
+    }
+}
+
+impl<F: Float> fmt::Debug for LoadingAudio<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadingAudio").finish_non_exhaustive()
+    }
+}
+
 /// What a [`LoadedAudio`] holds: the decoded wave, or the file's header.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -195,7 +251,7 @@ impl<F: Float> LoadedAudio<F> {
     ///
     /// An asset of bytes never changes. A file stamped at the load reads
     /// changed when it is gone or differs; one that could not be stamped reads
-    /// changed once it can be. To reload, run [`Session::load_audio`] over
+    /// changed once it can be. To reload, await [`Session::load_audio`] over
     /// [`asset`](Self::asset) and swap the handle where it is used.
     #[must_use]
     pub fn changed(&self) -> bool {
@@ -204,11 +260,12 @@ impl<F: Float> LoadedAudio<F> {
 }
 
 impl<K: AppKey, C: Clock> Session<K, C> {
-    /// A wave file to load, as a value the app runs where it likes.
+    /// A wave file to load, as a value the app awaits.
     ///
-    /// It holds nothing of the session, and the session keeps nothing of what
-    /// it loads: two loads of one file are two values.
+    /// It holds the session's weak executor and nothing else of the session, and
+    /// the session keeps nothing of what it loads: two loads of one file are two
+    /// values.
     pub fn load_audio(&self, asset: impl Into<Asset>) -> LoadAudio<C::Float> {
-        LoadAudio::new(asset.into())
+        LoadAudio::new(asset.into(), self.background.executor().downgrade())
     }
 }

@@ -202,7 +202,8 @@ pub use tutti_session::{
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
-    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
+    BindError,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -238,7 +239,9 @@ pub use tutti_session::{
     LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
 };
 #[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream};
+pub use tutti_session::{
+    OpenStream, OpenStreamError, OpenedStream, OpeningStream, StreamReadError,
+};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
@@ -606,7 +609,7 @@ pub mod session {
             feature = "decode-ogg"
         )
     ))]
-    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, Tier};
+    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
@@ -628,7 +631,7 @@ pub mod session {
         RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
-    pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};
+    pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont, LoadingSoundFont};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
@@ -924,9 +927,9 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        LoadMidi, LoadReport, LoadedMidi, LoadedTrack, Midi, MidiReport, MidiRouteId,
-        MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
-        TrackError,
+        LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi,
+        MidiReport, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument,
+        OpenMidiSink, Stamping, TrackError,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

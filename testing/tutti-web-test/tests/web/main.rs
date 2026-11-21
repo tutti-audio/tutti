@@ -1,5 +1,5 @@
 //! What a web session runs with no tutti thread, under node (`cargo xtask test-wasm`): an offline
-//! build, a bounce to memory, a WAV in memory, and the work an app runs itself (`analyze`,
+//! build, a bounce to memory, a WAV in memory, and the work an app awaits itself (`analyze`,
 //! `load_midi`). Every input is bytes or samples in memory: the web has no file system.
 #![cfg(target_arch = "wasm32")]
 
@@ -78,14 +78,14 @@ fn a_wav_in_memory_reads_back_equal() {
     assert_eq!(read_wave::<f32>(bytes).expect("decodes"), wave);
 }
 
-/// **An analysis run by the app reads the wave in memory.** A square of amplitude 0.5 peaks at
+/// **An analysis the app awaits reads the wave in memory.** A square of amplitude 0.5 peaks at
 /// 0.5 and has a root-mean-square of 0.5: the one block over all 4 096 frames.
 #[wasm_bindgen_test]
-fn an_analysis_of_a_wave_in_memory_reads_its_peak_and_rms() {
+async fn an_analysis_of_a_wave_in_memory_reads_its_peak_and_rms() {
     let session = session();
     let peaks = session
         .analyze(square(4_096), PeakConfig::new(Samples::new(4_096)))
-        .run()
+        .await
         .expect("analyzes");
     assert_eq!(peaks.layout(), ChannelLayout::MONO);
     let block = peaks.channel(0).expect("a channel")[0];
@@ -96,7 +96,7 @@ fn an_analysis_of_a_wave_in_memory_reads_its_peak_and_rms() {
 /// **A MIDI file loaded from bytes holds the notes it was written with.** A format 0 file of two
 /// quarter notes: two paired notes, each a note-on and a note-off in the track's clip.
 #[wasm_bindgen_test]
-fn a_midi_file_loaded_from_bytes_has_its_notes() {
+async fn a_midi_file_loaded_from_bytes_has_its_notes() {
     // A quarter note at the delta before it (480 ticks of a division of 480).
     let note = |key: u8| [0, 0x90, key, 100, 0x83, 0x60, 0x80, key, 64];
     let mut body: Vec<u8> = [note(60), note(64)].concat();
@@ -106,7 +106,7 @@ fn a_midi_file_loaded_from_bytes_has_its_notes() {
     bytes.extend(body);
 
     let mut session = session();
-    let loaded = session.midi().load_midi(bytes).run().expect("loads");
+    let loaded = session.midi().load_midi(bytes).await.expect("loads");
     assert_eq!(loaded.file().tracks().len(), 1);
     assert_eq!(loaded.file().tracks()[0].notes().len(), 2);
     assert_eq!(loaded.track(0).unwrap().events.len(), 4);

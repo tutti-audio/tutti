@@ -103,11 +103,11 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
     let (voice, stream) = match tier {
         Tier::Disk => {
             // The app reads the file, and the session puts it in service.
-            let opened = s
-                .open_stream(&path, StreamStart::HEAD)
-                .expect("an offline session streams")
-                .run()
-                .expect("the file reads");
+            let opened = tutti_fixtures::block_on(
+                s.open_stream(&path, StreamStart::HEAD)
+                    .expect("an offline session streams"),
+            )
+            .expect("the file reads");
             let (stream, reader) = s.apply(opened).expect("the session serves it");
             let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(1.0)));
             (s.graph().add(voice).erase(), Some(stream))

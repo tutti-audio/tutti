@@ -76,8 +76,16 @@ impl Background {
 
     /// The session's executor, held for the session's whole life.
     #[cfg_attr(
-        not(feature = "device"),
-        expect(dead_code, reason = "a device switch (feature `device`) is its user")
+        not(any(
+            feature = "device",
+            feature = "sampler",
+            feature = "analyze",
+            feature = "midi"
+        )),
+        expect(
+            dead_code,
+            reason = "a device switch (feature `device`) and the file loads (features `sampler`, `analyze`, `midi`) are its users"
+        )
     )]
     pub(crate) fn executor(&self) -> &Executor {
         &self.executor
