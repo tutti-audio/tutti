@@ -54,6 +54,7 @@ pub struct MatrixConvolverConfig<'a, S: Sample> {
     outputs: ChannelLayout,
     irs: &'a [Mono<'a, S>],
     block_size: Samples,
+    zero_latency: bool,
 }
 
 impl<'a, S: Sample> MatrixConvolverConfig<'a, S> {
@@ -66,6 +67,7 @@ impl<'a, S: Sample> MatrixConvolverConfig<'a, S> {
             outputs,
             irs,
             block_size: DEFAULT_BLOCK_SIZE,
+            zero_latency: false,
         }
     }
 
@@ -73,6 +75,16 @@ impl<'a, S: Sample> MatrixConvolverConfig<'a, S> {
     #[must_use]
     pub fn block_size(self, block_size: Samples) -> Self {
         Self { block_size, ..self }
+    }
+
+    /// No latency on every path: each runs [`Convolver::zero_latency`], a direct head of
+    /// `block_size` taps per frame per path.
+    #[must_use]
+    pub fn zero_latency(self) -> Self {
+        Self {
+            zero_latency: true,
+            ..self
+        }
     }
 
     /// The matrix, in the float `F`.
@@ -103,7 +115,13 @@ impl<'a, S: Sample> MatrixConvolverConfig<'a, S> {
             self.outputs,
             self.irs
                 .iter()
-                .map(|ir| Convolver::new(*ir, self.block_size))
+                .map(|ir| {
+                    if self.zero_latency {
+                        Convolver::zero_latency(*ir, self.block_size)
+                    } else {
+                        Convolver::new(*ir, self.block_size)
+                    }
+                })
                 .collect(),
         ))
     }
@@ -184,7 +202,8 @@ impl<F: FftFloat> MatrixConvolver<F> {
             .unwrap_or(Samples::ZERO)
     }
 
-    /// The latency in samples, one head partition on every path.
+    /// The latency in samples, one head partition on every path, or zero for a
+    /// [`zero_latency`](MatrixConvolverConfig::zero_latency) matrix.
     pub fn latency(&self) -> Samples {
         self.paths[0].latency()
     }
