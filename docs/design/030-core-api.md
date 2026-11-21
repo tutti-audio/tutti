@@ -503,7 +503,7 @@ order, one PR per step, each deleting what it replaces. It supersedes tasks
      topology was; `layout()` is derived). `SpecError::TopologyWidth` is gone with the
      disagreement. The codec's constructors are `(spec, target)`: `Encoder::create(spec,
      sink)`, `create_file(spec, path)`, `create_file_planned(spec, path, frames)` and
-     `FileOut::create(spec, path)` (it was `(path, spec)`); the error is `tutti_codec::Error`
+     `FileOut::create(spec, path)` (it was `(path, spec)`); the error is `tutti_codec::EncodeError`
      for writing (`FileOut::create` and `MicIn::matching_sink` return it, no longer an
      `io::Error`, and `TakeError::Open` carries it) and `DecodeError` for reading.
    - C2: `Wave::write(path, Format)` writes at the wave's own rate and topology (staged

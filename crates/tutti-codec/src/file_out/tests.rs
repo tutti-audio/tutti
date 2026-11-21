@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Error as CodecError, Format, Pcm};
+use crate::{EncodeError, Format, Pcm};
 use hound::SampleFormat;
 use std::path::Path;
 use tutti_buffers::ChannelTopology;
@@ -161,8 +161,8 @@ fn a_failed_sink_stops_writing_and_leaves_a_readable_prefix() {
     let err = sink.finalize().expect_err("the failure must be reported");
     assert!(
         err.get_ref()
-            .and_then(|e| e.downcast_ref::<CodecError>())
-            .is_some_and(|e| matches!(e, CodecError::WavTooLarge { limit_frames: 2 })),
+            .and_then(|e| e.downcast_ref::<EncodeError>())
+            .is_some_and(|e| matches!(e, EncodeError::WavTooLarge { limit_frames: 2 })),
         "carrying the typed error, got: {err}"
     );
 
@@ -292,7 +292,7 @@ fn a_plain_header_is_left_alone() {
 }
 
 /// The write that would pass the frame limit stops the sink; `finalize`
-/// reports a typed [`CodecError::WavTooLarge`] and the file holds exactly the
+/// reports a typed [`EncodeError::WavTooLarge`] and the file holds exactly the
 /// frames under the limit, with correct header sizes and mask. Later writes
 /// are ignored.
 ///
@@ -313,9 +313,12 @@ fn the_frame_limit_stops_at_a_whole_frame_and_is_reported() {
     let err = sink.finalize().expect_err("the limit must be reported");
     let limit = err
         .get_ref()
-        .and_then(|e| e.downcast_ref::<CodecError>())
+        .and_then(|e| e.downcast_ref::<EncodeError>())
         .expect("the typed error rides out of finalize");
-    assert!(matches!(limit, CodecError::WavTooLarge { limit_frames: 3 }));
+    assert!(matches!(
+        limit,
+        EncodeError::WavTooLarge { limit_frames: 3 }
+    ));
 
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(
