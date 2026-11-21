@@ -34,14 +34,6 @@ pub enum Format {
     },
 }
 
-/// `Wav(Pcm::Int24)`: the format an export defaults to.
-#[cfg(feature = "encode-wav")]
-impl Default for Format {
-    fn default() -> Self {
-        Self::Wav(Pcm::default())
-    }
-}
-
 impl Format {
     /// The format a file extension names, with that format's defaults. Case
     /// does not matter, and `aif` aliases `aiff`.

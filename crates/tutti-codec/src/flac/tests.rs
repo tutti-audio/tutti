@@ -32,8 +32,9 @@ fn an_empty_stream_states_valid_sizes() {
 /// and `finish` return errors.
 #[test]
 fn a_writer_that_lost_a_frame_fails_every_later_call() {
+    use crate::Spec;
     use crate::test_sink::Flaky;
-    use crate::{FormatWriter, Spec};
+    use crate::writer::FormatWriter;
     use tutti_buffers::ChannelLayout;
     use tutti_buffers::Interleaved;
     use tutti_units::SampleRate;

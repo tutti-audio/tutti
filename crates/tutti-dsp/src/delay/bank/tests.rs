@@ -1,6 +1,6 @@
 use tutti_buffers::BusTopology;
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_music::{NoteDuration, NoteModifier, NoteValue};
+use tutti_music::{NoteDuration, NoteValue};
 use tutti_units::{Bpm, Feedback, SampleRate, Seconds};
 
 use super::*;
@@ -642,19 +642,10 @@ fn a_synced_time_is_the_notes_beats_over_the_tempo_in_frames() {
     // (the note, its beats written out, not derived)
     let notes = [
         (NoteDuration::QUARTER, 1.0),
-        (
-            NoteDuration::new(NoteValue::QUARTER, NoteModifier::Dotted),
-            1.5,
-        ),
-        (
-            NoteDuration::new(NoteValue::QUARTER, NoteModifier::Triplet),
-            2.0 / 3.0,
-        ),
-        (
-            NoteDuration::new(NoteValue::EIGHTH, NoteModifier::Dotted),
-            0.75,
-        ),
-        (NoteDuration::new(NoteValue::HALF, NoteModifier::Plain), 2.0),
+        (NoteDuration::new(NoteValue::QUARTER).dotted(), 1.5),
+        (NoteDuration::new(NoteValue::QUARTER).triplet(), 2.0 / 3.0),
+        (NoteDuration::new(NoteValue::EIGHTH).dotted(), 0.75),
+        (NoteDuration::new(NoteValue::HALF), 2.0),
     ];
     for bpm in [120.0, 90.0] {
         for (note, beats) in notes {

@@ -18,7 +18,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use tutti_buffers::{I24, Interleaved, Sample};
 
 /// Writes an AIFF (or AIFF-C) file through the [`FormatWriter`] contract.
-pub struct AiffWriter<W: Write + Seek> {
+pub(crate) struct AiffWriter<W: Write + Seek> {
     writer: AifcWriter<W>,
     pcm: Pcm,
     ints: Vec<i32>,
@@ -39,7 +39,7 @@ impl<W: Write + Seek> AiffWriter<W> {
     /// # Errors
     ///
     /// As [`Encoder::create`](crate::Encoder::create).
-    pub fn create(spec: &Spec, pcm: Pcm, sink: W) -> Result<Self> {
+    pub(crate) fn create(spec: &Spec, pcm: Pcm, sink: W) -> Result<Self> {
         spec.header_rate()?;
         let channels = spec.channels()?;
         let info = AifcWriteInfo {

@@ -17,7 +17,7 @@ use std::borrow::BorrowMut;
 use std::path::{Path, PathBuf};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_codec::Format;
+use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{
     BufferTarget, Control, EventLossPolicy, FileTarget, Job, Normalize, NormalizeSpec, Outcome,
@@ -60,7 +60,7 @@ pub struct EncodeConfig {
 impl Default for EncodeConfig {
     fn default() -> Self {
         Self {
-            format: Format::default(),
+            format: Format::Wav(Pcm::default()),
             channels: ChannelLayout::STEREO,
             topology: None,
         }

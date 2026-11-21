@@ -13,9 +13,8 @@ use tutti_buffers::{Interleaved, Sample};
 use tutti_platform::{Staged, StagedCommitError, StagedFile, StagedKeep};
 use tutti_units::Samples;
 
-/// Writes blocks of audio as one file of a [format](crate::Format): the
-/// [writer](crate::FormatWriter) of whichever format the [`Spec`] names,
-/// behind one type.
+/// Writes blocks of audio as one file of a [format](crate::Format): whichever
+/// format the [`Spec`] names, behind one type.
 ///
 /// An encoder takes blocks already at the [`Spec`]'s rate and width: it does not
 /// pull, resample or dither, and nothing here stops a caller from handing it
@@ -62,11 +61,11 @@ impl<W: Write + Seek> std::fmt::Debug for Encoder<W> {
 
 enum Inner<W: Write + Seek> {
     #[cfg(feature = "encode-wav")]
-    Wav(crate::WavWriter<W>),
+    Wav(crate::wav::WavWriter<W>),
     #[cfg(feature = "encode-aiff")]
-    Aiff(Box<crate::AiffWriter<W>>),
+    Aiff(Box<crate::aiff::AiffWriter<W>>),
     #[cfg(feature = "encode-flac")]
-    Flac(Box<crate::FlacWriter<W>>),
+    Flac(Box<crate::flac::FlacWriter<W>>),
     // No format feature: `Format` has no value, so neither has this.
     #[cfg(not(encode))]
     Never(std::convert::Infallible, std::marker::PhantomData<W>),
@@ -77,15 +76,15 @@ impl<W: Write + Seek> Inner<W> {
     fn open(spec: &Spec, sink: W) -> Result<Self> {
         match spec.format() {
             #[cfg(feature = "encode-wav")]
-            Format::Wav(pcm) => Ok(Self::Wav(crate::WavWriter::create(spec, pcm, sink)?)),
+            Format::Wav(pcm) => Ok(Self::Wav(crate::wav::WavWriter::create(spec, pcm, sink)?)),
             #[cfg(feature = "encode-aiff")]
-            Format::Aiff(pcm) => Ok(Self::Aiff(Box::new(crate::AiffWriter::create(
+            Format::Aiff(pcm) => Ok(Self::Aiff(Box::new(crate::aiff::AiffWriter::create(
                 spec, pcm, sink,
             )?))),
             #[cfg(feature = "encode-flac")]
-            Format::Flac { depth, level } => Ok(Self::Flac(Box::new(crate::FlacWriter::create(
-                spec, depth, level, sink,
-            )?))),
+            Format::Flac { depth, level } => Ok(Self::Flac(Box::new(
+                crate::flac::FlacWriter::create(spec, depth, level, sink)?,
+            ))),
         }
     }
 }
@@ -475,7 +474,10 @@ fn patch_header(spec: &Spec, file: &mut std::fs::File) -> std::io::Result<()> {
             let block_align = u64::from(pcm.bits().div_ceil(8)) * u64::from(spec.layout().count());
             crate::aiff::patch_unfinished(file, block_align.max(1))
         }
-        #[allow(unreachable_patterns)]
+        #[allow(
+            unreachable_patterns,
+            reason = "the only `Format` variant when one encoder is the only feature on"
+        )]
         _ => Ok(()),
     }
 }

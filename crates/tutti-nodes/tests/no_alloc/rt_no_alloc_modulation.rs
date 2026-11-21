@@ -16,7 +16,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node, ParamNode, ParamSet, TransportPosition};
-use tutti_music::{NoteDuration, NoteModifier, NoteValue};
+use tutti_music::{NoteDuration, NoteValue};
 use tutti_nodes::{
     ChannelTimes, DelayConfig, DelayControls, DelayLayout, DelayNode, FeedbackRouting,
     InterpolationMode, LfoConfig, LfoNode, LfoShape, MaxDelay, ModDelayConfig, ModDelayNode,
@@ -1650,8 +1650,8 @@ fn the_delay_corners_are_allocation_free() {
 #[test]
 fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
     let notes = [
-        NoteDuration::new(NoteValue::SIXTEENTH, NoteModifier::Triplet),
-        NoteDuration::new(NoteValue::of(64), NoteModifier::Dotted),
+        NoteDuration::new(NoteValue::SIXTEENTH).triplet(),
+        NoteDuration::new(NoteValue::of(64)).dotted(),
     ];
     let layout = DelayLayout::builder(
         BusTopology::STEREO,
