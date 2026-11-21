@@ -77,11 +77,11 @@ fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     let target = s.graph().add(Tap(seen.clone()));
     let latent = s.graph().add(ForkByClone(Latent));
     s.graph().connect(latent, tutti_session::Root).unwrap();
+    let mut live = s.midi().input(target).expect("a live input");
     let mut take = s
         .midi()
         .tap(target, EventCapacity::of(64))
         .expect("the tap takes MIDI");
-    let mut live = s.midi().input(target).expect("the take left the keys");
     let _ = s.update();
     let (c, k) = (MidiChannel::of(2), NoteNumber::of(60));
     live.note_on(Frame::new(600), c, k, NoteVelocity::CENTER)
@@ -202,6 +202,17 @@ fn an_instruments_typed_key_takes_a_wire_of_the_callers_own() {
             .contains(&inlet.events_out()),
         "the caller's wire is one of the input's sources"
     );
+}
+
+/// **A target with no live input is refused, never given one.**
+#[test]
+fn tapping_a_target_with_no_live_input_is_refused() {
+    let mut s = offline();
+    let target = s.graph().add(Tap(tutti_fixtures::Record::new()));
+    assert!(matches!(
+        s.midi().tap(target, EventCapacity::of(8)),
+        Err(MidiError::NoLiveInput(n)) if n == target.erase()
+    ));
 }
 
 /// A target that takes no MIDI cannot be recorded.
