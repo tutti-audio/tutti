@@ -206,3 +206,30 @@ fn dropping_the_executor_while_the_bells_live_returns_and_ends_the_tick() {
         "the stopped executor ended the tick task"
     );
 }
+
+/// **Bells dropped on a thread that drives an executor detach their tick instead of
+/// panicking**: a dedicated future builds and drops a set, and its task ends with no
+/// panic.
+#[test]
+fn bells_dropped_on_a_driving_thread_detach_their_tick() {
+    let executor = tutti_platform::Executor::new();
+    let other = tutti_platform::Executor::new();
+    let task = executor
+        .spawn_dedicated("drops-bells", None, async move {
+            let bells = Bells::new(&other).expect("the bells' tick task");
+            drop(bells);
+            true
+        })
+        .unwrap();
+    let (out, joined) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = out.send(tutti_platform::join(task));
+    });
+    assert_eq!(
+        joined
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .unwrap(),
+        Some(true),
+        "the drop returns without a panic"
+    );
+}
