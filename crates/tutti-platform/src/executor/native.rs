@@ -108,6 +108,11 @@ impl Drop for Driving {
     }
 }
 
+/// Whether this thread runs [`drive`].
+pub(super) fn is_driving() -> bool {
+    DRIVING.with(Cell::get)
+}
+
 /// Parks the calling thread until `task` ends: the task's waker unparks it.
 pub(super) fn join<T>(task: Task<T>) -> Option<T> {
     match wait(task, None) {
@@ -124,7 +129,7 @@ pub(super) fn join_within<T>(task: Task<T>, bound: Duration) -> Result<Option<T>
 /// Polls `task`'s handle, parking between polls, until it ends or `deadline` passes.
 fn wait<T>(mut task: Task<T>, deadline: Option<Instant>) -> Result<Option<T>, Task<T>> {
     assert!(
-        !DRIVING.with(Cell::get),
+        !is_driving(),
         "join on a thread that drives an executor: the wait would stop the tasks it runs"
     );
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
