@@ -203,6 +203,13 @@
 // Every raw AudioToolbox, CoreAudio and CoreFoundation call is in `tutti-au-ffi`;
 // this crate holds the logic over its safe handles.
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "a test starts the threads it races"
+    )
+)]
 
 pub mod error;
 
