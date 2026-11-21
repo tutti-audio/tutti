@@ -25,7 +25,6 @@ fn granular_process_is_allocation_free_with_the_controls_moving() {
             .timing_jitter(Normalized::of(0.5)),
     )
     .unwrap();
-    let position = node.position();
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 480);
     let move_controls = |i: usize| {
         let k = (i % 4) as f64;
@@ -34,7 +33,7 @@ fn granular_process_is_allocation_free_with_the_controls_moving() {
         controls.set(UnitParam::GrainLength, 0.005 + 0.015 * k);
         controls.set(UnitAddr::new(UnitParam::Jitter, 0), 0.1 * k);
         controls.set(UnitAddr::new(UnitParam::Jitter, 1), 0.2 * k);
-        position.store(Normalized::of(0.2 * k));
+        controls.set(UnitParam::Position, 0.2 * k);
     };
     for i in 0..16 {
         move_controls(i);
