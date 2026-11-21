@@ -759,9 +759,10 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// Open the OS MIDI layer: its devices are listed by
-    /// [`Midi::devices`](crate::Midi::devices) and opened by
-    /// [`Session::open_midi_input`](crate::Session::open_midi_input) and
-    /// [`Session::open_midi_output`](crate::Session::open_midi_output),
+    /// [`Midi::devices`](crate::Midi::devices); a port is begun by
+    /// [`Session::open_midi_input`](crate::Session::open_midi_input) or
+    /// [`Session::open_midi_output`](crate::Session::open_midi_output) and installed
+    /// by [`Session::apply`](crate::Session::apply),
     /// each input feeding the graph through an input node and an event
     /// inlet of its own, with `config` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's

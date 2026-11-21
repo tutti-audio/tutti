@@ -1,7 +1,8 @@
 //! The OS MIDI devices through the session's [`Midi`] view (feature
-//! `midi-hardware`): list them. A device is opened by
+//! `midi-hardware`): list them. A port is begun by
 //! [`Session::open_midi_input`](crate::Session::open_midi_input) or
-//! [`Session::open_midi_output`](crate::Session::open_midi_output); what it says
+//! [`Session::open_midi_output`](crate::Session::open_midi_output) and installed by
+//! [`Session::apply`](crate::Session::apply); what it says
 //! of itself is its handle's [`Peer::info`](crate::Peer::info).
 
 use tutti_buffers::Float;

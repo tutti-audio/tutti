@@ -815,7 +815,7 @@ pub(crate) struct MidiState {
     host_routes: bool,
     /// The sinks opened by `open_midi_sink`.
     pub(crate) sinks: crate::midi_sink::Sinks,
-    /// The ports opened by `open_midi_input` and `open_midi_output`.
+    /// The ports begun by `open_midi_input` and `open_midi_output` and installed by `apply`.
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`MpeModeTarget`](crate::MpeModeTarget)),
     /// the cell every input and clip transform reads.
