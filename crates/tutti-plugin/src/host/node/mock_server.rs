@@ -37,7 +37,7 @@ pub(super) const BEATS_PER_FRAME_90: f64 = 1.5 / 48_000.0;
 
 /// The playhead at stream frame `frame`, rolling from beat 4: at the map's
 /// tempo, so a block starting where the last ended continues the stretch (a
-/// playhead that did not is a seek, which the served node reports at the call
+/// playhead that did not is a seek, which the out-of-process node reports at the call
 /// and this node, reading each piece apart, does not).
 pub(super) fn beat_at(frame: u64) -> f64 {
     if frame <= STEP_FRAME {

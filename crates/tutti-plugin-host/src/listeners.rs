@@ -174,7 +174,7 @@ impl<A: Clone> Listener<A> {
     /// from inside; one that subscribes inside the call hears the next
     /// notification, not this one.
     ///
-    /// Public for `tutti-plugin`'s bridge thread, which feeds a served plugin's notifications in.
+    /// Public for `tutti-plugin`'s bridge thread, which feeds an out-of-process plugin's notifications in.
     pub fn fire(&self, event: A) {
         self.fire_all([event]);
     }

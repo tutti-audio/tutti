@@ -112,7 +112,7 @@ impl BypassSync {
 
     /// Compares the plugin's bypass with the mode and writes it again where they
     /// differ. An in-process plugin is read (without waiting for its instance);
-    /// a served one's value is its mirrored parameter, where the session records
+    /// an out-of-process one's value is its mirrored parameter, where the session records
     /// what it wrote only once the write was delivered, so a plugin's own refusal
     /// is not seen there and a change it reports (its editor, its automation) is.
     /// A plugin that refused the mode is left alone.
@@ -196,7 +196,7 @@ impl BypassSync {
 }
 
 /// Whether the plugin's own bypass is on now: an in-process plugin is read, a
-/// served one's value is its mirrored parameter. `None` while it cannot be read.
+/// out-of-process one's value is its mirrored parameter. `None` while it cannot be read.
 fn held(handle: &PluginHandle, mirror: &PluginParamValues) -> Option<bool> {
     let site = handle.loaded().own_bypass?;
     if handle.server_pid().is_some() {
@@ -329,7 +329,7 @@ pub(crate) mod tests {
         fn terminate(&self, _reason: TerminationReason) {}
     }
 
-    /// A handle over a plugin that holds a bypass, in process or served, with the
+    /// A handle over a plugin that holds a bypass, in process or out of process, with the
     /// mirror of its parameters read.
     pub(crate) fn rig(served: bool) -> (PluginHandle, Arc<Plugin>, PluginParamValues) {
         let plugin = Arc::new(Plugin {
@@ -527,7 +527,7 @@ pub(crate) mod tests {
         assert_eq!(plugin.attempts.load(SeqCst), 3, "one attempt each");
     }
 
-    /// **A served write the link drops is written again and counted once, with
+    /// **An out-of-process write the link drops is written again and counted once, with
     /// no read to tell.** The mirror is not told of a write that was not
     /// delivered, so it cannot claim the node's mode; the retries back off, and
     /// the write that gets through is the last.
@@ -555,7 +555,7 @@ pub(crate) mod tests {
     }
 
     /// **A bypass the plugin reports moved is written back, from the mirror.** A
-    /// served plugin is never read: the mirror holds the plugin's own report, and
+    /// out-of-process plugin is never read: the mirror holds the plugin's own report, and
     /// differs from the node's mode.
     #[test]
     fn a_served_plugins_own_report_that_differs_is_written_back() {

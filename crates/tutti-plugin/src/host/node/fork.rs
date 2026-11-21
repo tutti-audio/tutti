@@ -534,7 +534,7 @@ mod tests {
         seen
     }
 
-    /// A fork of a served plugin with preset P loaded carries P, and its
+    /// A fork of an out-of-process plugin with preset P loaded carries P, and its
     /// saved state: the preset is read from the live plugin at the gather.
     #[test]
     fn a_served_forks_capture_carries_the_live_preset() {
@@ -556,7 +556,7 @@ mod tests {
         assert_eq!(restored_with(&capture).0, None);
     }
 
-    /// A live fork of a served plugin in render mode M is in M: offline when
+    /// A live fork of an out-of-process plugin in render mode M is in M: offline when
     /// the live plugin was told offline, realtime when it was told nothing,
     /// and an offline fork is offline either way.
     #[test]

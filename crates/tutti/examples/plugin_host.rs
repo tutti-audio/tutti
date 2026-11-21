@@ -1,5 +1,5 @@
-//! A plugin host, end to end: scan, pick, load, wire, play,
-//! set a parameter, save the state, read its health, diagnostics and presets, bounce.
+//! A plugin host, end to end: scan, pick, load, wire, play, set a parameter,
+//! save and restore its state, load a preset, read its health, bounce.
 //!
 //! ```text
 //! cargo build -p tutti-plugin-server -p tutti-plugin-probe
@@ -13,7 +13,13 @@
 //! that exports several loads the one that was picked); the session loads it,
 //! hosts it, and bounces four beats of it to `out.wav`. An instrument plays a
 //! note; the plugin's first parameter is set and dragged (`params()`); its state is saved with
-//! `session.save_state(..)` and written beside the WAV.
+//! `session.save_state(..)`, written beside the WAV and restored.
+//!
+//! Work is a value the app runs. A load, a state or a preset is `InProcess` (a
+//! plugin that lives in this process: `run(main)` on the main thread) or
+//! `OutOfProcess` (a plugin in a `plugin-server` process: a `Send` future the
+//! server's reply fills). This app awaits the second kind with `block_on`, a
+//! few lines of std; a host with a frame loop hands it to its own executor.
 //!
 //! The plugin is a [`Plugin`](tutti::Plugin) view (`session.plugin_view(node)`), and what happens to
 //! it is a [`PluginEvent`] in `update()`'s events. The host makes the token on its
@@ -26,7 +32,12 @@
 //! above built); `cargo build -p tutti --features clap,export --examples`
 //! compiles it.
 
+use std::future::{Future, IntoFuture};
 use std::path::PathBuf;
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
+use std::thread::{self, Thread};
 
 use tutti::midi::{Address, Message, MidiChannel, NoteNumber, TimedMidiEvent, U7, Ump, Voice1};
 use tutti::plugin::PresetSupport;
@@ -34,11 +45,34 @@ use tutti::plugin::catalog::{CatalogConfig, PluginDb};
 use tutti::session::Peer as _;
 use tutti::{
     Beat, Bounce, Catalog, Format, LoadPlugin, LoadPreset, MaxBlock, ParamId, Pcm, PluginEvent,
-    Range, Root, SampleRate, Samples, SaveState, Session, SessionEvent, StateUse,
+    Range, RestoreState, Root, SampleRate, Samples, SaveState, Session, SessionEvent, StateUse,
 };
 use tutti_units::Normalized;
 
 const RATE: SampleRate = SampleRate::SR_48K;
+
+/// Wakes the thread that waits on a future.
+struct Unpark(Thread);
+
+impl Wake for Unpark {
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
+    }
+}
+
+/// Awaits an out-of-process value on this thread: polls, and parks until the
+/// server's reply wakes it. An app with an executor spawns the future there.
+fn block_on<F: IntoFuture>(work: F) -> F::Output {
+    let waker = Waker::from(Arc::new(Unpark(thread::current())));
+    let mut cx = Context::from_waker(&waker);
+    let mut work = pin!(work.into_future());
+    loop {
+        if let Poll::Ready(output) = work.as_mut().poll(&mut cx) {
+            return output;
+        }
+        thread::park();
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1);
@@ -59,8 +93,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         |_| Ok(()),
     );
     //    The scan is a value: `run` blocks and this example has nothing else to
-    //    do; a host with a frame loop runs it off the frame thread (a thread of its
-    //    own, or `Executor::unblock`) and reads its progress.
+    //    do; a host with a frame loop runs it off the frame thread and reads its
+    //    progress (`progress()`), or stops it (`canceller()`).
     let scanned = catalog.scan()?.run();
     let scanned = catalog.apply(scanned)?;
     eprintln!("scanned {} plugin file(s)", scanned.scanned());
@@ -96,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("the scan could not read the plugin's id")?;
     let opened = match session.load_plugin(&id, &catalog)? {
         LoadPlugin::InProcess(load) => load.run(main)?,
-        LoadPlugin::OutOfProcess(load) => tutti_fixtures::block_on(load)?,
+        LoadPlugin::OutOfProcess(load) => block_on(load)?,
     };
     let loaded = opened.handle();
     let node = session.add_plugin(opened)?;
@@ -156,13 +190,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Save its state: now, from the plugin (`last_good` is the session's
     //    crash-recovery copy, up to a snapshot interval old). `save_state`
-    //    makes the work, by where the plugin runs: the app runs a plugin in
-    //    process on the main thread, and awaits one in a plugin server. The state names
-    //    the plugin it came from, so a project that keeps it restores it into
-    //    that plugin and no other (`restore_state`, run, then `apply`).
+    //    makes the work, by where the plugin runs. The state names the plugin it
+    //    came from, so a project that keeps it restores it into that plugin and
+    //    no other (`restore_state`, run, then `apply`).
     let state = match session.save_state(&node, StateUse::Project)? {
         SaveState::InProcess(save) => save.run(main)?,
-        SaveState::OutOfProcess(save) => tutti_fixtures::block_on(save)?,
+        SaveState::OutOfProcess(save) => block_on(save)?,
     };
     let state_path = out.with_extension("state");
     std::fs::write(&state_path, state.bytes())?;
@@ -172,6 +205,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.peer(),
         state_path.display()
     );
+    let restored = match session.restore_state(&node, state)? {
+        RestoreState::InProcess(restore) => restore.run(main)?,
+        RestoreState::OutOfProcess(restore) => block_on(restore)?,
+    };
+    session.apply(restored)?;
 
     // 8. Health and presets. `health()` is one reading of the plugin's life
     //    (running, stalled, dead and about to be written off, or being
@@ -190,7 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(first) = presets.iter().next() {
                     let loaded = match session.load_preset(&node, &first)? {
                         LoadPreset::InProcess(load) => load.run(main)?,
-                        LoadPreset::OutOfProcess(load) => tutti_fixtures::block_on(load)?,
+                        LoadPreset::OutOfProcess(load) => block_on(load)?,
                     };
                     session.apply(loaded)?;
                     eprintln!(
@@ -208,6 +246,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    tail) and what happens to it (died, reloading) is one stream: the
     //    session's `SessionEvent::Plugin`, named by node. A host reads it from
     //    `update()`; there is no callback to install and none to clear.
+    //    A session with recovery reloads a plugin that died. An app that wants
+    //    its own reload composes it: `load_plugin_as` with the plugin's `info()`
+    //    id and hosting, started from its state, then `swap_plugin` at the node
+    //    (see `swap_plugin`'s "Reloading").
     //    `update` on the main thread also drops the plugins the session
     //    retired and services every open editor.
     for event in session.update() {
@@ -218,12 +260,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 10. Bounce four beats to a 24-bit WAV. The plugin hears Offline while it
     //    renders and Realtime after.
-    let job = session.bounce_start(
+    let bounce = session.bounce_start(
         Bounce::project()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
             .master(out.as_path(), Format::Wav(Pcm::Int24)),
     )?;
-    let written = session.finish_bounce(job.run())?.into_master();
+    let written = session.finish_bounce(bounce.run())?.into_master();
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
     Ok(())
 }

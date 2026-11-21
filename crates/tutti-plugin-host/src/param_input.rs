@@ -4,7 +4,7 @@
 //! become points in the node's [`ParamDelivery`], through its
 //! [`SegmentPoints`], and every other event is handed back on its frame.
 //!
-//! One walk for both plugin nodes: a chunked Processor (the served one) runs it for each
+//! One walk for both plugin nodes: a chunked Processor (the out-of-process one) runs it for each
 //! piece of a chunk (`node`'s graph module), the other in-process
 //! Processors for each block (`node`), so the two read a
 //! ramp, a segment and an address the same way.

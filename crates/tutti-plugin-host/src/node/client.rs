@@ -1,6 +1,6 @@
 //! `InProcessClient`: the graph node (`node.rs`) that drives an in-process
 //! plugin of any hosting ([`Loaded`]: an [`InProcess`](tutti_plugin_types::InProcess)
-//! format, or a served plugin, `tutti-plugin-ipc`'s `Ipc`) from the host audio thread.
+//! format, or an out-of-process plugin, `tutti-plugin-ipc`'s `Ipc`) from the host audio thread.
 //!
 //! The audio thread renders through the Processor the node's realtime end
 //! ([`tutti_rt::Rt`]) holds, and takes no lock. The plugin's control side
@@ -89,22 +89,22 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     pub(super) figures: Arc<Figures>,
     /// Where a pump of the instance delivers what it finds, for a node whose
     /// plugin has a handle to hear it; the successor a [`Rebinder`](super::Rebinder) builds
-    /// delivers through the same. `None` for a served plugin, whose own
+    /// delivers through the same. `None` for an out-of-process plugin, whose own
     /// listener reports it.
     pub(super) reporting: Option<Reporting>,
     /// The host's parameter writes (`host_edits`), drained at the head of each
     /// block a Processor renders. `None` for a plugin whose writes do not come
-    /// through this node (a served one's go to its bridge).
+    /// through this node (an out-of-process one's go to its bridge).
     pub(super) edits: Option<EditPort>,
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
     pub(super) reload: Option<Reload>,
     /// What the Processor adds to the plugin's own latency
-    /// ([`Processor::latency`]), as the last `prepare` read it: the served
+    /// ([`Processor::latency`]), as the last `prepare` read it: the out-of-process
     /// pipeline's chunk.
     pub(super) pipeline: Samples,
-    /// A served plugin's host-side controls (`PluginControls`): its latency and
+    /// An out-of-process plugin's host-side controls (`PluginControls`): its latency and
     /// tail are re-reported by the bridge's thread into cells the controls
     /// share, so `shape` reads the figures from them, `retune` writes the
     /// pipeline's chunk and the rate into them, and the meter, the delivery
@@ -662,7 +662,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
 
     /// Drops the host clock the transport tells the plugin
     /// (`TransportInfo::system_time_ns`): for an offline render, which has none.
-    /// A fork of the in-process node does this itself; a served plugin's fork
+    /// A fork of the in-process node does this itself; an out-of-process plugin's fork
     /// (`tutti-plugin`) does it through this.
     pub fn go_offline(&mut self) {
         self.transport.go_offline();
@@ -1469,7 +1469,7 @@ mod declared_buses {
 
     /// **A plugin wider than a block serves is refused by name, never narrowed.**
     /// A direction past `MAX_BLOCK_CHANNELS` over all its buses has no node;
-    /// the widest served plugin has one.
+    /// the widest out-of-process plugin has one.
     #[test]
     fn a_plugin_wider_than_a_block_is_refused_by_name() {
         let max = MAX_BLOCK_CHANNELS;
