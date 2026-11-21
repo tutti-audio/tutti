@@ -50,7 +50,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
     let synth = s.graph().add(ForkByClone(Sink(Arc::clone(&heard))));
     let synth = synth.erase();
     s.midi()
-        .route(MidiRouteRule::any_channel().to(synth))
+        .route(MidiRouteRule::new().to(synth))
         .expect("routes");
     let list = s.midi().devices();
     let input = s.open_input(list[0].clone()).expect("opens");
