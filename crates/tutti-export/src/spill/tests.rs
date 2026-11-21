@@ -116,7 +116,7 @@ fn remove_answers_the_path_of_a_file_it_could_not_remove() {
     };
 
     let mut spill = spill_file();
-    assert_eq!(spill.remove(), None);
+    assert!(spill.remove().is_none());
     assert!(listing(dir.path()).is_empty());
 
     // A directory under the file's name is not removable as a file.
@@ -125,7 +125,7 @@ fn remove_answers_the_path_of_a_file_it_could_not_remove() {
     let path = dir.path().join(&name);
     std::fs::remove_file(&path).unwrap();
     std::fs::create_dir(&path).unwrap();
-    assert_eq!(spill.remove(), Some(path));
+    assert_eq!(spill.remove().map(|(left, _)| left), Some(path));
 }
 
 /// The budget is shared: a spill that has taken all of it leaves the next one

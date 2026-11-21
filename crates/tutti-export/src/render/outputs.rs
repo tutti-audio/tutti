@@ -470,7 +470,7 @@ fn finish<F: FftFloat>(
                 ))));
             }
             Sink::Spill { chain, mut waiting } => {
-                spill_left[i] = waiting.spill.remove();
+                spill_left[i] = waiting.spill.remove().map(|(path, _)| path);
                 files.push(PendingFile {
                     index: i,
                     path: lane.path.expect("a file lane has a path"),
