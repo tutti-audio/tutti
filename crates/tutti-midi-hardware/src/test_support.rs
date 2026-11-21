@@ -409,11 +409,13 @@ impl MidiOut for FakeSink {
 /// An [`OsEndpoint`] with a raw id and a name, MIDI 2.0 capable.
 #[must_use]
 pub fn endpoint(raw: u64, name: &str) -> OsEndpoint {
+    let described = from_os(Protocol::Midi2, None, []);
     OsEndpoint {
         id: EndpointId::from_raw(raw),
         identity: Identity::alsa(name, "port"),
         name: name.to_string(),
-        capability: from_os(Protocol::Midi2, None, []),
+        capability: described.endpoint,
+        blocks_left_out: described.blocks_left_out,
     }
 }
 
@@ -549,12 +551,12 @@ impl MidiEndpoints for FakeBackend {
         }))
     }
 
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        self.devices().inputs.clone()
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(self.devices().inputs.clone())
     }
 
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        self.devices().outputs.clone()
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(self.devices().outputs.clone())
     }
 
     fn open_input(

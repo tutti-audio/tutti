@@ -931,7 +931,7 @@ impl MidiState {
         let pending: Vec<_> = self
             .device_events
             .iter()
-            .flat_map(tutti_midi_hardware::DeviceEvents::try_iter)
+            .flat_map(tutti_midi_hardware::DeviceEvents::pending)
             .collect();
         let rate = graph.prepared().sample_rate();
         let edits = self.ports.poll(io, graph, rate, pending, now, out);

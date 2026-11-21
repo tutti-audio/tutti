@@ -15,4 +15,4 @@ pub(crate) mod async_port;
 mod manager;
 
 pub use async_port::{Delivered, InputProducerHandle, StreamDrain};
-pub use manager::{HardwareMidiInputs, PortInfo};
+pub use manager::{HardwareMidiInputs, PortInfo, StaleInput};

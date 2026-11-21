@@ -26,6 +26,7 @@ fn a_packet_sent_to_the_endpoint_reaches_its_callback() {
     let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let id = backend
         .outputs()
+        .expect("the OS lists its endpoints")
         .into_iter()
         .find(|e| e.name.contains(&name))
         .expect("the virtual endpoint's destination is listed")

@@ -423,3 +423,21 @@ fn the_beats_in_a_span_are_bpm_times_seconds_over_sixty() {
         assert_eq!(tempo.beats_in(tempo.beat_period()), BeatDuration::new(1.0));
     }
 }
+
+/// **`ReadRate::step` is the rate in position counts**: unity is one frame, a
+/// half rate half a frame; a negative or non-finite rate has no forward step.
+#[test]
+fn a_read_rate_steps_by_its_rate_in_counts() {
+    assert_eq!(
+        ReadRate::UNITY.step(),
+        Some(ReadPosition::from_frames(Samples::new(1)))
+    );
+    assert_eq!(
+        ReadRate(0.5).step(),
+        Some(ReadPosition::from_count(1 << 31))
+    );
+    assert_eq!(ReadRate(0.0).step(), Some(ReadPosition::START));
+    assert_eq!(ReadRate(-1.0).step(), None);
+    assert_eq!(ReadRate(f64::NAN).step(), None);
+    assert_eq!(ReadRate(f64::INFINITY).step(), None);
+}

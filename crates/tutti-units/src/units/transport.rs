@@ -465,6 +465,18 @@ impl ReadRate {
         SamplePosition(self.0 * out.get() as f64)
     }
 
+    /// The read head's advance per output frame, as a [`ReadPosition`] count
+    /// rounded to the nearest `2^-32` frame: what a resampler adds to its
+    /// position each frame ([`ReadPosition::advanced`]). `None` for a negative or
+    /// non-finite rate, which no forward read head steps by; a rate past the
+    /// position's range saturates at [`ReadPosition::MAX`].
+    #[inline]
+    #[must_use]
+    pub fn step(self) -> Option<ReadPosition> {
+        (self.0.is_finite() && self.0 >= 0.0)
+            .then(|| ReadPosition::from_span(SampleSpan::clamped(self.0)))
+    }
+
     /// Composes two read rates applied in series.
     ///
     /// The named replacement for the omitted `Mul<Self>`, and deliberately

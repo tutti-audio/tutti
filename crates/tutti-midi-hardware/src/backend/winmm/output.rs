@@ -10,7 +10,7 @@ use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_platform::{Executor, Task, join};
-use tutti_rt::CounterWriter;
+use tutti_rt::{Counter, CounterWriter};
 use tutti_ump::Ump;
 use tutti_winmm_ffi::{MidiOut as Port, OutputPort, TimerWaiter, TimerWaker, waitable_timer};
 
@@ -19,6 +19,8 @@ const MAX_PENDING: usize = 8192;
 
 struct Shared {
     mailbox: Mailbox<Ump>,
+    /// The messages the sender had no MIDI 1.0 form for.
+    unrepresentable: Counter<u64>,
     /// Ends the thread's wait when an earlier event arrives or the output stops.
     wake: TimerWaker,
 }
@@ -76,6 +78,10 @@ impl DeviceOut for WinMmOutput {
         self.shared.mailbox.losses()
     }
 
+    fn unrepresentable(&self) -> u64 {
+        self.shared.unrepresentable.get()
+    }
+
     fn pending(&self) -> usize {
         self.shared.mailbox.state().pending()
     }
@@ -100,9 +106,14 @@ impl Drop for WinMmOutput {
 
 /// The sender thread: the loop of [`run`], with winmm for the send and the
 /// timer for the wait.
-fn thread(mut port: Port, mut wait: TimerWaiter, losses: CounterWriter<Losses>, shared: &Shared) {
+fn thread(
+    mut port: Port,
+    mut wait: TimerWaiter,
+    losses: CounterWriter<Losses>,
+    mut bytes: ByteOut,
+    shared: &Shared,
+) {
     run(&shared.mailbox, losses, || {
-        let mut bytes = ByteOut::new();
         (
             move |ump| {
                 bytes.encode(ump, |wire| match wire {
@@ -128,12 +139,17 @@ pub(super) fn open(executor: &Executor, port: &OutputPort) -> Result<WinMmOutput
     let port = Port::open(port)?;
     let (wake, wait) = waitable_timer()?;
     let (mailbox, losses) = Mailbox::new();
-    let shared = Arc::new(Shared { mailbox, wake });
+    let (bytes, unrepresentable) = ByteOut::new();
+    let shared = Arc::new(Shared {
+        mailbox,
+        unrepresentable,
+        wake,
+    });
     let task = executor
         .spawn_dedicated(MidiThread::MidiOut.name(), None, {
             let shared = Arc::clone(&shared);
             async move {
-                thread(port, wait, losses, &shared);
+                thread(port, wait, losses, bytes, &shared);
             }
         })
         .map_err(|source| MidiHardwareError::Spawn {

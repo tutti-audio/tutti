@@ -446,7 +446,9 @@ fn the_inputs_disconnect_ends_midi_ci() {
     let _ = polled(&mut wire, 50);
     assert_eq!(wire.session.ci_peers(&wire.id).len(), 1, "alive");
 
-    assert!(wire.session.disconnect_input(&wire.id.clone()));
+    wire.session
+        .disconnect_input(&wire.id.clone())
+        .expect("the input is open");
     // The close announced the MUID invalid, once; nothing follows it.
     assert_eq!(ci_sent(&wire).len(), 1);
     for ms in [60, 5_000, 60_000] {
@@ -826,7 +828,9 @@ fn disconnecting_an_input_sends_one_invalidate_muid_from_our_muid() {
     let (mut wire, ours) = midi1_running();
     find_peer(&mut wire, GROUP_0, ours, 40);
     let _ = received(&wire);
-    assert!(wire.session.disconnect_input(&wire.id.clone()));
+    wire.session
+        .disconnect_input(&wire.id.clone())
+        .expect("the input is open");
     let sent = ci_sent(&wire);
     assert!(
         matches!(
@@ -861,7 +865,9 @@ fn closing_an_input_without_midi_ci_sends_nothing() {
     let mut wire = midi1_wire();
     let _ = polled(&mut wire, 0);
     let _ = received(&wire);
-    assert!(wire.session.disconnect_input(&wire.id.clone()));
+    wire.session
+        .disconnect_input(&wire.id.clone())
+        .expect("the input is open");
     assert!(ci_sent(&wire).is_empty());
 }
 
@@ -2626,7 +2632,7 @@ fn a_call_for_a_peer_that_is_gone_is_refused_or_reported_not_sent() {
         Err(PeerError::NoSuchPeer)
     );
 
-    wire.session.disconnect_input(&wire.id.clone());
+    wire.session.disconnect_input(&wire.id.clone()).unwrap();
     assert_eq!(
         wire.session.ask_property(handle.ask(get())),
         Err(PeerError::NotOpen)

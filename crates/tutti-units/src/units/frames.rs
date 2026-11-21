@@ -341,6 +341,16 @@ impl ReadPosition {
     pub const fn saturating_sub(self, frames: Samples) -> ReadPosition {
         ReadPosition(self.0.saturating_sub(ReadPosition::from_frames(frames).0))
     }
+
+    /// This position moved on by `n` steps of `step` (a per-frame advance,
+    /// [`ReadRate::step`]), in exact integer counts: `n` steps land where `n`
+    /// single advances would, with no drift. Saturates at [`MAX`](Self::MAX), as
+    /// every operation on a position does.
+    #[inline]
+    #[must_use]
+    pub const fn advanced(self, step: ReadPosition, n: Samples) -> ReadPosition {
+        ReadPosition(self.0.saturating_add(step.0.saturating_mul(n.get() as u64)))
+    }
 }
 
 #[cfg(test)]

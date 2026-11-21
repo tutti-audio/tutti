@@ -1,10 +1,15 @@
 use super::*;
 use tutti_alsa_ffi::UmpBlock;
-use tutti_midi_device::FunctionBlock;
+use tutti_midi_device::{Endpoint, FunctionBlock};
 use tutti_ump::{
     EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Midi1Port, OsFunctionBlock,
     Protocol, UiHint, UmpVersion, read_function_block, read_protocol,
 };
+
+/// The Endpoint a UMP record describes.
+fn capability_of(ump: Option<&UmpEndpoint>) -> Endpoint {
+    super::capability_of(ump).endpoint
+}
 
 fn block(
     id: u8,

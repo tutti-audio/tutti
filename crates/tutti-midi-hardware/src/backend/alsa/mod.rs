@@ -90,19 +90,17 @@ impl AlsaEndpoints {
 
     /// A fresh snapshot in `direction`.
     ///
-    /// An unopenable sequencer means no endpoints, not a panic — the same shape
-    /// CoreMIDI's failed-client path takes. Callers see an empty list and the
-    /// reason lands in `debug!`.
-    fn list(&self, direction: PortDirection) -> Vec<OsEndpoint> {
+    /// An unopenable sequencer is the platform error, tried again at the next
+    /// call.
+    fn list(&self, direction: PortDirection) -> Result<Vec<OsEndpoint>> {
         let mut held = self.enumerator.lock_recover();
-        if held.is_none() {
-            *held = client::open("tutti-enum", UmpVersion::Midi2)
-                .inspect_err(|e| tracing::debug!("ALSA enumeration: {}", crate::error::chain(e)))
-                .ok();
-        }
-        held.as_ref()
-            .map(|seq| enumerate::endpoints(seq, direction))
-            .unwrap_or_default()
+        let seq = match held.take() {
+            Some(seq) => seq,
+            None => client::open("tutti-enum", UmpVersion::Midi2)?,
+        };
+        let listed = enumerate::endpoints(&seq, direction);
+        *held = Some(seq);
+        Ok(listed)
     }
 }
 
@@ -118,11 +116,11 @@ impl MidiEndpoints for AlsaEndpoints {
         watch::start(&self.executor, sink, devices)
     }
 
-    fn inputs(&self) -> Vec<OsEndpoint> {
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
         self.list(PortDirection::Input)
     }
 
-    fn outputs(&self) -> Vec<OsEndpoint> {
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
         self.list(PortDirection::Output)
     }
 

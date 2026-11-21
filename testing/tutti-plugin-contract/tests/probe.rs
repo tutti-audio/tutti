@@ -22,7 +22,8 @@ use tutti_plugin_contract::{
 };
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{
-    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, ProbeFailure,
+    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, FileFailureCause,
+    ProbeFailure,
 };
 use tutti_plugin_ipc::{Ipc, IpcConfig, Launched};
 use tutti_plugin_types::{
@@ -55,7 +56,10 @@ fn run_task(
         .apply(scanned)
         .expect("the output of this catalog's own scan");
     match result.failures().into_iter().next() {
-        Some(failed) => Err(failed.failure),
+        Some(failed) => match failed.cause {
+            FileFailureCause::Probe(failure) => Err(failure),
+            other => panic!("the file was not probed: {other:?}"),
+        },
         None => Ok(catalog.db().clone()),
     }
 }
