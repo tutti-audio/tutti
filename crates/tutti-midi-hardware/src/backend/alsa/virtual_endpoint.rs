@@ -12,6 +12,7 @@ use tutti_alsa_ffi::{
     Client, ClientHandle, Operation, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::{FunctionBlock, UMP_VERSION};
+use tutti_platform::Executor;
 use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Protocol, Ump};
 
 use super::input::{self, AlsaInput};
@@ -144,6 +145,7 @@ impl EndpointBackend for AlsaVirtualEndpoint {
 /// write to it is read by a pump into `producer`, each event stamped by the
 /// kernel as it arrives; what the app sends goes to the port's subscribers.
 pub(crate) fn endpoint(
+    executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
 ) -> Result<(AlsaVirtualEndpoint, VirtualProtocol)> {
@@ -157,7 +159,7 @@ pub(crate) fn endpoint(
     )?;
     publish(&client, spec, protocol)?;
     let clock = client.stamp_port(port)?;
-    let input = input::start(client, clock, producer)?;
+    let input = input::start(executor, client, clock, producer)?;
     let live = Arc::new(RwLock::new(true));
     Ok((AlsaVirtualEndpoint { input, port, live }, protocol))
 }

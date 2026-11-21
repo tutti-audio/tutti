@@ -21,7 +21,8 @@ use tutti_midi_device::Endpoint;
 use tutti_midi_hardware::{Devices, RecvTimeoutError};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let devices = Devices::open()?;
+    let executor = tutti_platform::Executor::new();
+    let devices = Devices::open(&executor)?;
     let events = devices.subscribe();
 
     println!("=== MIDI devices ===");

@@ -10,7 +10,7 @@
 //! rather than skip.
 
 use crate::param_reads::ParamReads as _;
-use crate::pooled::{LandOn as _, LoadPlugin, Spec};
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
@@ -494,7 +494,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
     let mut s = detached();
     let mut drive = Drive::new();
-    let (entry, node) = add_probe_keyed(&mut s);
+    let (_entry, node) = add_probe_keyed(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
     let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
@@ -522,10 +522,12 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
         params.get(first).unwrap().normalized()
     };
     let before = cutoff(&s);
-    s.load_preset_file(&entry, "/nowhere/bright.tutti-preset")
-        .expect("the entry has a node")
-        .land_on(&mut s)
+    let loaded = s
+        .load_preset_file(&node, "/nowhere/bright.tutti-preset")
+        .expect("the node hosts a plugin")
+        .run(tutti_fixtures::main_thread())
         .expect("the plugin takes the preset");
+    s.apply(loaded).expect("the node hosts the plugin");
     let deadline = Instant::now() + Duration::from_secs(10);
     while cutoff(&s) == before {
         assert!(Instant::now() < deadline, "the read never landed");

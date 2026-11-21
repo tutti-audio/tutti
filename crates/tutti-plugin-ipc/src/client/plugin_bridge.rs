@@ -5,6 +5,7 @@ use super::editor_site::EditorSite;
 use crate::ServerWatch;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tutti_platform::Executor;
 use tutti_plugin_types::{Delivered, Editor, IpcResult, PluginFormat, PluginRef, Timeouts};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateError};
 use tutti_units::{Normalized, ParamId, SampleRate};
@@ -92,6 +93,7 @@ impl PluginBridge {
     ///
     /// The bridge thread cannot be spawned, or `timeouts` has a zero deadline.
     pub fn new(
+        executor: &Executor,
         socket_path: PathBuf,
         origin: PluginRef,
         format: PluginFormat,
@@ -102,7 +104,7 @@ impl PluginBridge {
     ) -> IpcResult<(Arc<Self>, IpcThread, Replies)> {
         timeouts.validate()?;
         let (audio, bridge_thread, replies) =
-            AudioBridge::new(socket_path, sample_rate, watch, timeouts)?;
+            AudioBridge::new(executor, socket_path, sample_rate, watch, timeouts)?;
         let editor = EditorSite::new(&audio, origin, format, load_editor);
         Ok((Arc::new(Self { audio, editor }), bridge_thread, replies))
     }
