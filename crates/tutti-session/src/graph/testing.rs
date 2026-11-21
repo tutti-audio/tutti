@@ -116,6 +116,52 @@ impl<F: Float> Testing<'_, F> {
             .map(crate::plugin::RebindState::is_settling)
     }
 
+    /// Whether `node` declares `param` modulatable (its shape's params): the
+    /// declaration a write or a route to it is refused without.
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`](crate::NoSuchNode) when `node` is not in the graph.
+    #[must_use = "the call refuses a node that does not exist"]
+    pub fn declares_param(
+        &self,
+        node: impl Into<NodeKey>,
+        param: impl Into<tutti_units::UnitAddr>,
+    ) -> Result<bool, crate::NoSuchNode> {
+        Ok(self
+            .graph
+            .shape_of(node.into())?
+            .params
+            .index_of(param)
+            .is_some())
+    }
+
+    /// How the editor holds `node`'s `param` modulation: `None` when nothing
+    /// drives it.
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`](crate::NoSuchNode) when `node` is not in the graph.
+    #[must_use = "the call refuses a node that does not exist"]
+    pub fn param_mod(
+        &self,
+        node: impl Into<NodeKey>,
+        param: impl Into<tutti_units::UnitAddr>,
+    ) -> Result<Option<tutti_graph::ParamMod>, crate::NoSuchNode> {
+        let node = node.into();
+        self.graph.shape_of(node)?;
+        Ok(self
+            .graph
+            .editor
+            .spec()
+            .params
+            .get(&tutti_graph::ParamIn {
+                node,
+                param: param.into(),
+            })
+            .cloned())
+    }
+
     /// How many replacements wait for a re-prepare to resume.
     pub fn waiting_replacements(&self) -> usize {
         self.graph.parked.len()

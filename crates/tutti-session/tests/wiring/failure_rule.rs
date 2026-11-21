@@ -4,7 +4,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::ForkByClone;
-use tutti_graph::{GraphInvalid, NodeKey, ParamRange};
+use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
     ConnectError, DetachedSession, EventInPort, EventOutPort, InPort, OutPort, ReplaceRefused,
@@ -36,14 +36,16 @@ fn a_query_of_a_node_that_is_not_there_names_it() {
     assert_eq!(named(g.node_latency(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.node_tail(GHOST).unwrap_err()), GHOST);
     assert_eq!(named(g.node_buses(GHOST).unwrap_err()), GHOST);
-    assert_eq!(named(g.mode(GHOST).unwrap_err()), GHOST);
-    assert_eq!(named(g.mix(GHOST).unwrap_err()), GHOST);
     assert_eq!(
-        named(g.declares_param(GHOST, UnitParam::Cutoff).unwrap_err()),
+        named(
+            g.testing()
+                .declares_param(GHOST, UnitParam::Cutoff)
+                .unwrap_err()
+        ),
         GHOST
     );
     assert_eq!(
-        named(g.param_mod(GHOST, UnitParam::Cutoff).unwrap_err()),
+        named(g.testing().param_mod(GHOST, UnitParam::Cutoff).unwrap_err()),
         GHOST
     );
 }
@@ -61,9 +63,10 @@ fn a_query_of_a_node_that_is_there_answers() {
     assert_eq!(g.node_outputs(through).unwrap(), 2);
     assert_eq!(g.node_event_inputs(through).unwrap(), 0);
     assert!(g.node_buses(through).is_ok());
-    assert!(g.mode(through).is_ok());
-    assert!(g.mix(through).is_ok());
-    assert_eq!(g.param_mod(through, UnitParam::Cutoff).unwrap(), None);
+    assert_eq!(
+        g.testing().param_mod(through, UnitParam::Cutoff).unwrap(),
+        None
+    );
 }
 
 /// **A wire taken out names a node that is not there, and says when an edge
@@ -86,8 +89,8 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
         Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
-        g.disconnect_all(ghost_in),
-        Err(ConnectError::NoSuchNode(GHOST))
+        g.set_sources(ghost_in, []).err(),
+        Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(g.sources(ghost_in), Err(ConnectError::NoSuchNode(GHOST)));
     assert_eq!(
@@ -120,53 +123,12 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
             .unwrap()
             .was_connected()
     );
-    assert_eq!(g.disconnect_all(Root::output(0)), Ok(false));
+    assert!(g.set_sources(Root::output(0), []).is_ok());
     assert_eq!(g.sources(Root::output(0)), Ok(Vec::new()));
     // A port a real node does not have is a named error too.
     assert_eq!(
         g.sources(InPort::new(a.erase(), 9)),
         Err(ConnectError::NoSuchInPort(InPort::new(a.erase(), 9)))
-    );
-}
-
-/// **A modulation naming a node that is not there is refused at the call**
-/// (`GraphInvalid::UnknownParamNode`, what the commit would have said), and the
-/// graph is left alone: not marked edited, nothing stored.
-#[test]
-fn a_param_modulation_of_a_missing_node_is_refused_at_the_call() {
-    let mut s = detached();
-    let through = s
-        .graph()
-        .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
-    let _ = s.update();
-    assert!(!s.graph_ref().has_uncommitted_edits());
-    let range = ParamRange { min: 0.0, max: 1.0 };
-    let refused = s
-        .graph()
-        .set_param_mod(GHOST, UnitParam::Cutoff, None, range)
-        .unwrap_err();
-    assert!(
-        matches!(refused, GraphInvalid::UnknownParamNode { missing, .. } if missing == GHOST),
-        "{refused:?}"
-    );
-    let refused = s
-        .graph()
-        .set_param_mod(through, UnitParam::Cutoff, Some(GHOST), range)
-        .unwrap_err();
-    assert!(
-        matches!(refused, GraphInvalid::UnknownParamNode { missing, .. } if missing == GHOST),
-        "{refused:?}"
-    );
-    assert!(
-        !s.graph_ref().has_uncommitted_edits(),
-        "a refusal changes nothing"
-    );
-    assert_eq!(
-        s.graph()
-            .clear_param_mod(GHOST, UnitParam::Cutoff)
-            .unwrap_err()
-            .node(),
-        GHOST
     );
 }
 

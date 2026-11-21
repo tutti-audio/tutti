@@ -475,7 +475,7 @@ fn removing_a_node_through_the_graph_forgets_its_declarations() {
         .unwrap();
     settle(&mut s);
 
-    s.graph().remove(probe).unwrap();
+    s.remove(probe).unwrap();
     for _ in 0..8 {
         let _ = s.update();
     }
@@ -679,6 +679,7 @@ fn an_own_edit_after_a_steady_state_applies() {
     let _ = s.update();
     let range = s
         .graph()
+        .testing()
         .param_mod(probe, UnitParam::Cutoff)
         .unwrap()
         .expect("a modulated port")

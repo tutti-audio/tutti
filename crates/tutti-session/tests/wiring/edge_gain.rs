@@ -467,7 +467,7 @@ fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
 
     let mut r = rig();
     let gain = lane(&mut r);
-    r.s.graph().remove(r.a).unwrap();
+    r.s.remove(r.a).unwrap();
     refused(&mut r, gain, "node removal");
 
     let mut r = rig();

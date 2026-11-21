@@ -404,7 +404,7 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     let mut s = session(true);
     let (_, a) = in_a_node(&mut s, &catalog, &first_id());
     let (_, gone) = in_a_node(&mut s, &catalog, &first_id());
-    s.graph().remove(gone).unwrap();
+    s.remove(gone).unwrap();
 
     assert_eq!(
         s.save_state(&gone, StateUse::Project)

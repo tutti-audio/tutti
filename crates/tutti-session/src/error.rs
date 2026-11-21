@@ -39,8 +39,7 @@ pub enum DeclarationError {
     },
 }
 
-/// Why [`Graph::remove`](crate::Graph::remove) (or
-/// [`Session::remove`](crate::Session::remove)) refused: what was not there.
+/// Why [`Session::remove`](crate::Session::remove) refused: what was not there.
 /// Nothing is changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
@@ -249,7 +248,7 @@ pub enum MidiError {
     NoClip(tutti_graph::NodeKey),
 
     /// A clip's events could not be written through its target: the clip's
-    /// node was taken out of the graph directly (`Graph::remove`), or the call
+    /// node was removed ([`Session::remove`](crate::Session::remove)), or the call
     /// was made from inside a `modify` closure.
     #[error("a clip's events could not be written")]
     ClipEvents(#[source] crate::ValueErrorKind),

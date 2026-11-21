@@ -155,27 +155,34 @@ fn the_graph_declares_each_band_and_crossover() {
     for band in 0..2u8 {
         for kind in tutti_nodes::BAND_PARAMS {
             assert!(
-                g.declares_param(mb, UnitAddr::new(kind, band)).unwrap(),
+                g.testing()
+                    .declares_param(mb, UnitAddr::new(kind, band))
+                    .unwrap(),
                 "{kind:?} {band}"
             );
         }
         for kind in [UnitParam::Bypass, UnitParam::Solo] {
             assert!(
-                !g.declares_param(mb, UnitAddr::new(kind, band)).unwrap(),
+                !g.testing()
+                    .declares_param(mb, UnitAddr::new(kind, band))
+                    .unwrap(),
                 "{kind:?}"
             );
         }
     }
     assert!(
-        g.declares_param(mb, UnitAddr::new(UnitParam::Cutoff, 0))
+        g.testing()
+            .declares_param(mb, UnitAddr::new(UnitParam::Cutoff, 0))
             .unwrap()
     );
     assert!(
-        !g.declares_param(mb, UnitAddr::new(UnitParam::Cutoff, 1))
+        !g.testing()
+            .declares_param(mb, UnitAddr::new(UnitParam::Cutoff, 1))
             .unwrap()
     );
     assert!(
-        !g.declares_param(mb, UnitAddr::new(UnitParam::Threshold, 2))
+        !g.testing()
+            .declares_param(mb, UnitAddr::new(UnitParam::Threshold, 2))
             .unwrap()
     );
 }
