@@ -95,7 +95,7 @@ impl OutputSpec {
 
     /// Returns this spec with a fixed `quantum`-frame callback buffer.
     ///
-    /// An [`OutputQuantum`] is from one frame to [`MAX_FRAMES`](crate::MAX_FRAMES),
+    /// An [`OutputQuantum`] is from one frame to [`MAX_FRAMES`],
     /// so a quantum the callback could not render whole cannot be written.
     #[must_use]
     pub fn with_quantum(mut self, quantum: OutputQuantum) -> Self {
