@@ -117,45 +117,42 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     }
 
     let m = &transport.motion();
-    assert_no_alloc::assert_no_alloc(|| {
-        for round in 0..20u64 {
-            let base = 1024 * (1 + 8 * round);
-            m.schedule(At::Frame(Frame::new(base + 300)), MotionCommand::Play)
-                .expect("room");
-            m.schedule(
-                At::Frame(Frame::new(base + 2100)),
-                TransportCommand::Loop(LoopEdit::over(
-                    LoopRange::new(Beat::new(0.0), Beat::new(4.0)).expect("ordered"),
-                )),
-            )
+    for round in 0..20u64 {
+        let base = 1024 * (1 + 8 * round);
+        m.schedule(At::Frame(Frame::new(base + 300)), MotionCommand::Play)
             .expect("room");
-            m.schedule(
-                At::Beat(Beat::new(0.5)),
-                MotionCommand::locate(Beat::new(0.0)),
-            )
+        m.schedule(
+            At::Frame(Frame::new(base + 2100)),
+            TransportCommand::Loop(LoopEdit::over(
+                LoopRange::new(Beat::new(0.0), Beat::new(4.0)).expect("ordered"),
+            )),
+        )
+        .expect("room");
+        m.schedule(
+            At::Beat(Beat::new(0.5)),
+            MotionCommand::locate(Beat::new(0.0)),
+        )
+        .expect("room");
+        m.schedule(At::Frame(Frame::new(base + 6000)), MotionCommand::stop())
             .expect("room");
-            m.schedule(At::Frame(Frame::new(base + 6000)), MotionCommand::stop())
-                .expect("room");
-            m.schedule(
-                At::Frame(Frame::new(base + 7000)),
-                TransportCommand::Loop(LoopEdit::armed(false)),
-            )
+        m.schedule(
+            At::Frame(Frame::new(base + 7000)),
+            TransportCommand::Loop(LoopEdit::armed(false)),
+        )
+        .expect("room");
+        // The snapshot publish: a bounds edit and a re-arm.
+        m.schedule(
+            At::Frame(Frame::new(base + 7500)),
+            LoopEdit::bounds(LoopRange::new(Beat::new(1.0), Beat::new(3.0)).expect("ordered")),
+        )
+        .expect("room");
+        m.schedule(At::Frame(Frame::new(base + 7600)), LoopEdit::armed(true))
             .expect("room");
-            // The snapshot publish: a bounds edit and a re-arm.
-            m.schedule(
-                At::Frame(Frame::new(base + 7500)),
-                LoopEdit::bounds(LoopRange::new(Beat::new(1.0), Beat::new(3.0)).expect("ordered")),
-            )
-            .expect("room");
-            m.schedule(At::Frame(Frame::new(base + 7600)), LoopEdit::armed(true))
-                .expect("room");
-            for _ in 0..8 {
-                engine
-                    .process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
-            }
-            m.cancel_scheduled();
+        for _ in 0..8 {
+            engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
         }
-    });
+        m.cancel_scheduled();
+    }
     // The engine really ran every block, through its own clock.
     assert_eq!(transport.settings().steady_time(), 1024 * (1 + 20 * 8));
 }
@@ -192,12 +189,9 @@ fn a_published_tempo_map_is_taken_without_allocating() {
     for round in 0..20u32 {
         let bpm = Bpm::of(80.0 + f64::from(round));
         transport.settings().set_tempo(bpm);
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..3 {
-                engine
-                    .process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
-            }
-        });
+        for _ in 0..3 {
+            engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
+        }
         assert_eq!(transport.settings().current_tempo(), bpm, "round {round}");
         transport.settings().reclaim_tempo();
     }
@@ -277,12 +271,9 @@ fn a_step_map_is_followed_without_allocating() {
         .expect("room");
         m.try_send(MotionCommand::play_from(Beat::new(0.0)))
             .expect("room");
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..4 {
-                engine
-                    .process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
-            }
-        });
+        for _ in 0..4 {
+            engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
+        }
         // Looping over beats 0 to 0.02 keeps the tempo among the first 21.
         let tempo = transport.settings().current_tempo().get();
         assert!((120.0..=140.0).contains(&tempo), "round {round}: {tempo}");
@@ -352,12 +343,9 @@ fn a_step_map_is_followed_without_allocating() {
         .expect("room");
         m.try_send(MotionCommand::play_from(Beat::new(0.2)))
             .expect("room");
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..4 {
-                engine
-                    .process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
-            }
-        });
+        for _ in 0..4 {
+            engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
+        }
         // Looping over beats 0.1 to 0.3 of a ramp that starts at 120 keeps the
         // chord between the ramp's tempo there and its start.
         let tempo = transport.settings().current_tempo().get();
@@ -406,11 +394,9 @@ fn the_heard_tap_is_allocation_free() {
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..8 {
-            engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
-        }
-    });
+    for _ in 0..8 {
+        engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
+    }
     drop(first);
     taps.reclaim();
     // The reclaim queued a close; a new open queues a replacement behind it.
@@ -419,15 +405,11 @@ fn the_heard_tap_is_allocation_free() {
         .expect("reopens")
         .reader()
         .expect("the audio thread is not behind");
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..8 {
-            engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
-        }
-    });
-    taps.close().unwrap();
-    assert_no_alloc::assert_no_alloc(|| {
+    for _ in 0..8 {
         engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
-    });
+    }
+    taps.close().unwrap();
+    engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
     taps.reclaim();
     assert_eq!(
         second.available().get(),
@@ -513,55 +495,34 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
 
     let m = &transport.motion();
     let mut clicked = false;
-    assert_no_alloc::assert_no_alloc(|| {
-        for round in 0..20u64 {
-            let base = 1024 * (1 + 8 * round);
-            m.schedule(
-                At::Frame(Frame::new(base + 1500)),
-                TransportCommand::Loop(LoopEdit::over(
-                    LoopRange::new(Beat::new(0.0), Beat::new(2.0)).expect("ordered"),
-                )),
-            )
-            .expect("room");
-            m.schedule(
-                At::Beat(Beat::new(1.75)),
-                MotionCommand::locate(Beat::new(0.9)),
-            )
-            .expect("room");
-            m.schedule(
-                At::Frame(Frame::new(base + 7000)),
-                TransportCommand::Loop(LoopEdit::armed(false)),
-            )
-            .expect("room");
-            for _ in 0..8 {
-                engine.process(&mut InterleavedMut::new(&mut output, four).unwrap());
-                // Channel 0 of each frame: the click's left.
-                clicked |= output.iter().step_by(4).any(|&s| s != 0.0);
-            }
-            m.cancel_scheduled();
+    for round in 0..20u64 {
+        let base = 1024 * (1 + 8 * round);
+        m.schedule(
+            At::Frame(Frame::new(base + 1500)),
+            TransportCommand::Loop(LoopEdit::over(
+                LoopRange::new(Beat::new(0.0), Beat::new(2.0)).expect("ordered"),
+            )),
+        )
+        .expect("room");
+        m.schedule(
+            At::Beat(Beat::new(1.75)),
+            MotionCommand::locate(Beat::new(0.9)),
+        )
+        .expect("room");
+        m.schedule(
+            At::Frame(Frame::new(base + 7000)),
+            TransportCommand::Loop(LoopEdit::armed(false)),
+        )
+        .expect("room");
+        for _ in 0..8 {
+            engine.process(&mut InterleavedMut::new(&mut output, four).unwrap());
+            // Channel 0 of each frame: the click's left.
+            clicked |= output.iter().step_by(4).any(|&s| s != 0.0);
         }
-    });
+        m.cancel_scheduled();
+    }
     // Not vacuous: the click sounded inside the gate.
     assert!(clicked, "the metronome clicked");
-}
-
-/// A [`WorkerPool`](tutti_graph::WorkerPool) whose every participant runs its
-/// share of a job inside `assert_no_alloc` — the helper threads too, which a
-/// gate around the callback alone would not see (`assert_no_alloc` is per
-/// thread).
-struct GatedPool(tutti_graph::WorkerPool);
-
-impl tutti_graph::Pool for GatedPool {
-    fn participants(&self) -> usize {
-        self.0.participants()
-    }
-    fn run(&self, wake: usize, job: &(dyn Fn(usize) + Sync)) {
-        self.0
-            .run(wake, &|i| assert_no_alloc::assert_no_alloc(|| job(i)));
-    }
-    fn waits(&self) -> tutti_rt::BlockWaits {
-        self.0.waits()
-    }
 }
 
 /// The engine on the parallel executor, on the engine's own pool: a block's
@@ -589,7 +550,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
         .idle(std::time::Duration::from_micros(1))
         .build()
         .expect("a worker pool");
-    exec.set_pool(Some(Arc::new(GatedPool(pool))));
+    exec.set_pool(Some(Arc::new(pool)));
     for k in 0..6u64 {
         ed.insert(
             NodeKey(k + 1),
@@ -632,19 +593,15 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
     let mut output = vec![0.0f32; 512 * 2];
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
     ed.collect();
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..200 {
-            engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
-        }
-    });
+    for _ in 0..200 {
+        engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
+    }
     // Idle long enough for every helper to park, then render again: the
     // wake is gated too.
     std::thread::sleep(std::time::Duration::from_millis(20));
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..20 {
-            engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
-        }
-    });
+    for _ in 0..20 {
+        engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
+    }
     assert!(output.iter().any(|&x| x != 0.0), "the graph rendered");
 }
 
@@ -700,12 +657,10 @@ fn a_714_root_block_is_allocation_free() {
     let layout = ChannelLayout::from(12u16);
     // The commit applies on the first block, which may allocate.
     engine.process(&mut InterleavedMut::new(&mut wide, layout).unwrap());
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..16 {
-            engine.process(&mut InterleavedMut::new(&mut wide, layout).unwrap());
-            engine.process(&mut InterleavedMut::new(&mut stereo, ChannelLayout::STEREO).unwrap());
-        }
-    });
+    for _ in 0..16 {
+        engine.process(&mut InterleavedMut::new(&mut wide, layout).unwrap());
+        engine.process(&mut InterleavedMut::new(&mut stereo, ChannelLayout::STEREO).unwrap());
+    }
     // Every channel of the twelve-wide device is its own constant, in every frame.
     for frame in wide.as_chunks::<12>().0 {
         for (c, &s) in frame.iter().enumerate() {
@@ -776,11 +731,9 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
     let mut out = vec![0.0f32; 512 * 12];
     // The first guarded block adopts the plan that carries the new root, lends
     // its folds and renders with them: the swap block allocates nothing.
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..16 {
-            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
-        }
-    });
+    for _ in 0..16 {
+        engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+    }
     let v = |c: usize| (c + 1) as f32 / 16.0;
     for frame in out.as_chunks::<12>().0 {
         assert_eq!(frame[0], v(1), "the left channel carries the right speaker");
@@ -823,9 +776,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     // Blocks of 64 frames: the 240-frame declick crosses four of them.
     let mut out = vec![0.0f32; 64 * 12];
     let mut block = |engine: &Engine| {
-        assert_no_alloc::assert_no_alloc(|| {
-            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
-        });
+        engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
     };
     // The first block adopts the plan (the commit apply is guarded elsewhere).
     engine.process(&mut InterleavedMut::new(&mut vec![0.0f32; 64 * 12], twelve).unwrap());
@@ -904,9 +855,7 @@ fn a_routing_crossfade_is_allocation_free() {
     let control = engine.output_control();
     let mut out = vec![0.0f32; 64 * 12];
     let mut block = |engine: &Engine| {
-        assert_no_alloc::assert_no_alloc(|| {
-            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
-        });
+        engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
     };
     let to = |outputs: [usize; 12]| Routing {
         map: OutputMap::channels(outputs).unwrap(),
@@ -1019,11 +968,9 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     ed.spec_mut().root_id = id;
     wire(&mut ed, 6);
     ed.commit().expect("commits");
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..8 {
-            engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
-        }
-    });
+    for _ in 0..8 {
+        engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+    }
     let v = |c: usize| (c + 1) as f32 / 16.0;
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let (left, right) = (v(0) + m * (v(2) + v(4)), v(1) + m * (v(2) + v(5)));

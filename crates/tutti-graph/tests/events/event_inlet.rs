@@ -614,15 +614,9 @@ fn commit(ed: &mut Editor, exec: &mut Executor) {
     ed.collect();
 }
 
-/// Renders `total` frames in blocks of `sizes` in turn, gated when asked, and
-/// returns the audio's bits.
-fn render(
-    ed: &mut Editor,
-    exec: &mut Executor,
-    sizes: &[usize],
-    total: usize,
-    gated: bool,
-) -> Vec<u32> {
+/// Renders `total` frames in blocks of `sizes` in turn and returns the audio's
+/// bits.
+fn render(ed: &mut Editor, exec: &mut Executor, sizes: &[usize], total: usize) -> Vec<u32> {
     let t = TransportPosition::default();
     let (mut done, mut i) = (0, 0);
     let mut bits = Vec::new();
@@ -631,11 +625,7 @@ fn render(
         let mut chan = vec![0.0f32; n];
         {
             let mut outs: Vec<&mut [f32]> = vec![chan.as_mut_slice()];
-            if gated {
-                assert_no_alloc::assert_no_alloc(|| exec.process(n, &t, &[], &mut outs));
-            } else {
-                exec.process(n, &t, &[], &mut outs);
-            }
+            exec.process(n, &t, &[], &mut outs);
         }
         ed.collect();
         bits.extend(chan.iter().map(|s| s.to_bits()));
@@ -674,7 +664,7 @@ fn the_parallel_render_equals_the_serial_one_and_allocates_nothing() {
         }
         commit(&mut ed, &mut exec);
         assert_eq!(exec.is_parallel(), gated);
-        let bits = render(&mut ed, &mut exec, &[100, 37, 128], 600, gated);
+        let bits = render(&mut ed, &mut exec, &[100, 37, 128], 600);
         let mut tap = tap.expect("opened");
         let mut got = Vec::new();
         let mut buf = [TapEvent {
@@ -735,9 +725,9 @@ fn the_fork_is_silent() {
         )
         .expect("forks");
     fexec.apply_pending();
-    let live = render(&mut ed, &mut exec, &[64], 64, false);
+    let live = render(&mut ed, &mut exec, &[64], 64);
     assert!(live.iter().any(|&b| b != 0), "the live graph hears it");
     writers[0].push(Stamp::NextBlock, note(6)).unwrap();
-    let silent = render(&mut fed, &mut fexec, &[64], 128, false);
+    let silent = render(&mut fed, &mut fexec, &[64], 128);
     assert!(silent.iter().all(|&b| b == 0), "the fork renders silence");
 }

@@ -139,7 +139,7 @@ fn gate(workers: usize) {
     let mut chans = vec![vec![0.0f32; BLOCK]; 6];
     let mut block = |ed: &mut Editor, exec: &mut Executor| {
         let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
-        assert_no_alloc::assert_no_alloc(|| exec.process(BLOCK, &t, &ins, &mut outs));
+        exec.process(BLOCK, &t, &ins, &mut outs);
         ed.collect();
     };
     // Warm up, so first-touch faults are not counted against the audio thread.

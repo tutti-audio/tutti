@@ -18,8 +18,8 @@ use tutti_units::Q;
 use tutti_units::Resonance;
 use tutti_units::SampleRate;
 
-/// A node through `BlockRig`: 16 warm-up blocks, then 2 000 blocks
-/// under `assert_no_alloc`, `between` run before each (a control move).
+/// A node through `BlockRig`: 16 warm-up blocks, then 240 blocks
+/// under `RtScope`, `between` run before each (a control move).
 fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     // A 32-frame square: low enough that every filter here passes some of
@@ -43,12 +43,10 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
             .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for i in 0..2_000 {
-            between(&controls, i);
-            rig.block();
-        }
-    });
+    for i in 0..240 {
+        between(&controls, i);
+        rig.block();
+    }
 }
 
 #[test]

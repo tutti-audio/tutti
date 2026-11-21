@@ -27,7 +27,7 @@ use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 
 /// `node` alone in a graph through `BlockRig`: every input an alternating
 /// ±`amplitude` (to keep the envelope follower active), `warm` warm-up
-/// blocks, then `blocks` 64-frame blocks under `assert_no_alloc`.
+/// blocks, then `blocks` 64-frame blocks under `RtScope`.
 fn gate<N: IntoNode>(node: N, amplitude: f32, warm: usize, blocks: usize) {
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for c in rig.inputs_mut().iter_mut() {
@@ -47,11 +47,9 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, warm: usize, blocks: usize) {
             .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate would walk no DSP"
     );
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..blocks {
-            rig.block();
-        }
-    });
+    for _ in 0..blocks {
+        rig.block();
+    }
 }
 
 #[test]
@@ -350,7 +348,7 @@ fn gate_key_filter_process_is_allocation_free() {
 }
 
 /// A lookahead limiter through a burst and its release, every block under
-/// `assert_no_alloc` from the first. Whenever the envelope rises (from the
+/// `RtScope` from the first. Whenever the envelope rises (from the
 /// node's initial zero onto the burst, and through the release after it)
 /// every gain is larger than the last, so the window-minimum deque keeps
 /// every push and fills to the whole lookahead window. The constant-drive
@@ -376,16 +374,14 @@ fn limiter_node_burst_and_release_are_allocation_free() {
     };
     // 0.1 s of release at 48 kHz is 75 blocks of 64: each phase runs well
     // past the 240-frame window, so the deque fills and turns over.
-    assert_no_alloc::assert_no_alloc(|| {
-        fill(&mut rig, 4.0);
-        for _ in 0..200 {
-            rig.block();
-        }
-        fill(&mut rig, 0.05);
-        for _ in 0..200 {
-            rig.block();
-        }
-    });
+    fill(&mut rig, 4.0);
+    for _ in 0..200 {
+        rig.block();
+    }
+    fill(&mut rig, 0.05);
+    for _ in 0..200 {
+        rig.block();
+    }
     assert!(
         rig.output()
             .plane(0)

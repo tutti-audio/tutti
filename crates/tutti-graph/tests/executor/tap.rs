@@ -153,11 +153,7 @@ fn block(r: &mut Rig, n: usize, frame: u64) -> Vec<Vec<f32>> {
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let ins = [&input[..]];
     // Only the render is inside the gate: this helper's own buffers allocate.
-    if r.gated {
-        assert_no_alloc::assert_no_alloc(|| r.exec.process(n, &t, &ins, &mut outs));
-    } else {
-        r.exec.process(n, &t, &ins, &mut outs);
-    }
+    r.exec.process(n, &t, &ins, &mut outs);
     chans
 }
 

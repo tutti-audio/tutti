@@ -509,30 +509,28 @@ fn a_clip_into_a_synth_is_allocation_free() {
     // Installs the plan (and its first-block setup) outside the gate.
     let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
     exec.process(BLOCK, &at(0, true), &[], &mut [&mut l[..], &mut r[..]]);
-    assert_no_alloc::assert_no_alloc(|| {
-        for b in 1..40 {
-            exec.process(
-                BLOCK,
-                &at(b * BLOCK, true),
-                &[],
-                &mut [&mut l[..], &mut r[..]],
-            );
-        }
+    for b in 1..40 {
         exec.process(
             BLOCK,
-            &at(40 * BLOCK, false),
+            &at(b * BLOCK, true),
             &[],
             &mut [&mut l[..], &mut r[..]],
         );
-        for b in 0..8 {
-            exec.process(
-                BLOCK,
-                &at(b * BLOCK, true),
-                &[],
-                &mut [&mut l[..], &mut r[..]],
-            );
-        }
-    });
+    }
+    exec.process(
+        BLOCK,
+        &at(40 * BLOCK, false),
+        &[],
+        &mut [&mut l[..], &mut r[..]],
+    );
+    for b in 0..8 {
+        exec.process(
+            BLOCK,
+            &at(b * BLOCK, true),
+            &[],
+            &mut [&mut l[..], &mut r[..]],
+        );
+    }
 }
 
 /// The note logic's other paths run inside the gate too: a mono and a legato

@@ -9,7 +9,7 @@
 //! a debug build (`NodeBox`'s `ControlDrop` field).
 //!
 //! The test removes the node while the engine renders, applies the removal and renders the next
-//! blocks inside `assert_no_alloc`, reads the plugin's close count (the plugin's own view: 0,
+//! blocks under `RtScope`, reads the plugin's close count (the plugin's own view: 0,
 //! nothing closed on the audio side), then collects on the control thread and reads it again
 //! (1).
 
@@ -90,15 +90,12 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
         .topology
         .set_outputs(vec![PortSource::Zero, PortSource::Zero]);
     editor.commit().expect("the removal commits");
-    // The executor applies the removal: the unit moves into the commit box (a drop here would
-    // panic in a debug build, inside the audio scope). Applying may allocate, so it is outside
-    // the gate, as in the other no-alloc suites; the blocks that follow are inside it.
+    // The executor applies the removal under `RtScope`: the unit moves into the commit box (a
+    // drop here would abort the test binary); the blocks that follow render under it too.
     exec.apply_pending();
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..4 {
-            block(&mut exec, &mut left, &mut right);
-        }
-    });
+    for _ in 0..4 {
+        block(&mut exec, &mut left, &mut right);
+    }
     assert_eq!(
         close_count(&path),
         before,

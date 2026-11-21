@@ -673,13 +673,11 @@ mod no_alloc {
         let law = FadeLaw::EqualPower;
         let run = |r: &mut Renderer| {
             let exec = r.executor_mut();
-            assert_no_alloc::assert_no_alloc(|| exec.apply_pending());
+            exec.apply_pending();
             let rendered = exec.plan().expect("plan").rendered_outputs();
             let mut bufs = vec![vec![0.0f32; BLOCK]; rendered];
             let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(|b| &mut b[..]).collect();
-            assert_no_alloc::assert_no_alloc(|| {
-                exec.process(BLOCK, &TransportPosition::default(), &[], &mut refs);
-            });
+            exec.process(BLOCK, &TransportPosition::default(), &[], &mut refs);
             r.editor_mut().collect();
         };
         run(&mut r);
