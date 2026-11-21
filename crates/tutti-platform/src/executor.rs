@@ -320,6 +320,34 @@ impl Executor {
         os::spawn_dedicated(self, name, priority, future)
     }
 
+    /// [`spawn_dedicated`](Self::spawn_dedicated) for a future that is not `Send`: the new
+    /// thread calls `make` and runs the future it returns there, so the future never
+    /// leaves that thread (an OS object bound to the thread that made it, say). Its output
+    /// is `Send`, and so is the [`Task`].
+    ///
+    /// The thread is the executor's like any dedicated one: it fires the due sleeps, ends
+    /// when the future ends, when the [`Task`] drops, or at shutdown, and drops the future
+    /// on itself. This returns once the thread has spawned the future, before its first
+    /// poll.
+    ///
+    /// # Errors
+    ///
+    /// The OS's refusal to start the thread, as [`spawn_dedicated`](Self::spawn_dedicated).
+    /// On the web, [`io::ErrorKind::Unsupported`]: a page starts no threads, and a future
+    /// that is not `Send` cannot join the shared queue.
+    pub fn spawn_dedicated_local<T, F>(
+        &self,
+        name: &str,
+        priority: Option<PriorityRequest>,
+        make: impl FnOnce() -> F + Send + 'static,
+    ) -> io::Result<Task<T>>
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + 'static,
+    {
+        os::spawn_dedicated_local(self, name, priority, make)
+    }
+
     /// A future that resolves once [`Instant::now`] is at or past `deadline`; a deadline
     /// already past resolves on its first poll.
     ///

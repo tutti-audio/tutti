@@ -1033,7 +1033,7 @@ impl<C: Clock> SessionBuilder<C> {
                 Arc::clone(&table),
             ),
             sampler,
-            devices: Default::default(),
+            devices: crate::session::parts::DevicePart::new(&executor),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
             jobs: crate::jobs::Jobs::new(executor, parts.background, bells),

@@ -16,6 +16,9 @@ impl OsStatus {
     /// to the server fails.
     pub(crate) const SERVER_GONE: Self = Self(-304);
 
+    /// `kMIDINotPermitted` (`MIDIServices.h`): CoreMIDI refuses the call.
+    pub(crate) const NOT_PERMITTED: Self = Self(-10844);
+
     /// The status with code `raw`.
     #[must_use]
     pub const fn new(raw: i32) -> Self {
@@ -131,6 +134,9 @@ pub enum Error {
         /// How many CoreMIDI listed.
         listed: usize,
     },
+    /// CoreMIDI refused the call with `kMIDINotPermitted` (-10844).
+    #[error("{0} was refused: kMIDINotPermitted (-10844)")]
+    NotPermitted(Operation),
     /// The endpoint a send was for has been dropped.
     #[error("the endpoint was dropped")]
     EndpointGone,
@@ -157,5 +163,75 @@ impl Error {
     #[must_use]
     pub fn call(operation: Operation, status: OsStatus) -> Self {
         Self::Call { operation, status }
+    }
+
+    /// `operation` failed with the `NSError` code `code`: `NotPermitted` for
+    /// `kMIDINotPermitted`, the error's own fields otherwise.
+    pub(crate) fn from_ns_error(
+        operation: Operation,
+        code: isize,
+        domain: String,
+        description: String,
+    ) -> Self {
+        if i32::try_from(code) == Ok(OsStatus::NOT_PERMITTED.get()) {
+            return Self::NotPermitted(operation);
+        }
+        Self::Objc {
+            operation,
+            code,
+            domain,
+            description,
+        }
+    }
+
+    /// The `OSStatus` of the failure when it carries one: a call's status, the
+    /// refusal `kMIDINotPermitted`, or an `NSError` code that fits one.
+    pub(crate) fn os_status(&self) -> Option<OsStatus> {
+        match self {
+            Self::Call { status, .. } => Some(*status),
+            Self::NotPermitted(_) => Some(OsStatus::NOT_PERMITTED),
+            Self::Objc { code, .. } => i32::try_from(*code).ok().map(OsStatus::new),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `kMIDINotPermitted` (-10844) from an `NSError` is `NotPermitted`; any other
+    /// code keeps the error's own fields.
+    #[test]
+    fn an_ns_error_with_kmidinotpermitted_is_not_permitted() {
+        let op = Operation::EnableUmpEndpoint;
+        assert_eq!(
+            Error::from_ns_error(op, -10844, "NSOSStatusErrorDomain".into(), "x".into()),
+            Error::NotPermitted(op)
+        );
+        assert!(matches!(
+            Error::from_ns_error(op, -10843, "d".into(), "x".into()),
+            Error::Objc { code: -10843, .. }
+        ));
+    }
+
+    #[test]
+    fn os_status_is_the_status_a_failure_carries() {
+        let op = Operation::EnableUmpEndpoint;
+        let status = OsStatus::new(-10843);
+        assert_eq!(Error::call(op, status).os_status(), Some(status));
+        assert_eq!(
+            Error::NotPermitted(op).os_status(),
+            Some(OsStatus::NOT_PERMITTED)
+        );
+        assert_eq!(
+            Error::from_ns_error(op, -10843, "d".into(), "x".into()).os_status(),
+            Some(status)
+        );
+        assert_eq!(
+            Error::from_ns_error(op, isize::MAX, "d".into(), "x".into()).os_status(),
+            None
+        );
+        assert_eq!(Error::EndpointGone.os_status(), None);
     }
 }

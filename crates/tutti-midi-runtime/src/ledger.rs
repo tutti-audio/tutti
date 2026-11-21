@@ -43,7 +43,7 @@ use tutti_ump::{
 
 /// The off a ledger owes `key`: a MIDI 2.0 Note Off at velocity 0 on its Group,
 /// Channel and Note Number.
-fn owed_off(key: NoteKey, at: Offset) -> Event {
+pub(crate) fn owed_off(key: NoteKey, at: Offset) -> Event {
     let off = Voice2::note_off(key.note(), NoteVelocity::MIN);
     Event::midi(at, Message::Midi2(key.address(), off))
 }

@@ -31,13 +31,10 @@ fn a_blocked_enumeration_does_not_hold_the_update_and_lands_when_it_answers() {
         )
         .expect("builds with no device");
     let (release, held) = std::sync::mpsc::channel::<()>();
-    s.list_outputs(
-        DeviceListing::spawn_with(move || {
-            held.recv().ok();
-            Ok(["Card", "USB"].into_iter().map(DeviceId::new).collect())
-        })
-        .expect("the listing thread starts"),
-    );
+    s.list_outputs(DeviceListing::from_fn(move || {
+        held.recv().ok();
+        Ok(["Card", "USB"].into_iter().map(DeviceId::new).collect())
+    }));
     for _ in 0..3 {
         let events = s.update();
         assert!(
@@ -81,10 +78,9 @@ fn a_failed_listing_reports_the_typed_error() {
             driver,
         )
         .expect("builds with no device");
-    s.list_outputs(
-        DeviceListing::spawn_with(|| Err(tutti_cpal::DeviceError::InvalidDevice("no card".into())))
-            .expect("the listing thread starts"),
-    );
+    s.list_outputs(DeviceListing::from_fn(|| {
+        Err(tutti_cpal::DeviceError::InvalidDevice("no card".into()))
+    }));
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let failed = s.update().into_iter().find_map(|e| match e {
@@ -94,6 +90,41 @@ fn a_failed_listing_reports_the_typed_error() {
         if let Some(why) = failed {
             assert!(
                 matches!(&why, tutti_cpal::DeviceError::InvalidDevice(what) if what == "no card"),
+                "{why:?}"
+            );
+            break;
+        }
+        assert!(Instant::now() < deadline, "no failure arrived");
+        std::thread::yield_now();
+    }
+}
+
+/// **A listing whose enumeration panics is a failure, not a wait that never ends**:
+/// the update reports `DeviceError::ListingEnded`.
+#[test]
+fn a_listing_that_panics_reports_that_it_ended() {
+    let (driver, _stream) = ManualStreamDriver::new();
+    let mut s = Session::builder()
+        .device(Default::default())
+        .build_device_on(
+            OutputSpec::new(
+                SampleRate::SR_48K,
+                ChannelLayout::STEREO,
+                tutti_buffers::SampleFormat::F32,
+            ),
+            driver,
+        )
+        .expect("builds with no device");
+    s.list_outputs(DeviceListing::from_fn(|| panic!("the host exploded")));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let failed = s.update().into_iter().find_map(|e| match e {
+            SessionEvent::Device(DeviceEvent::OutputsListFailed(why)) => Some(why),
+            _ => None,
+        });
+        if let Some(why) = failed {
+            assert!(
+                matches!(why, tutti_cpal::DeviceError::ListingEnded),
                 "{why:?}"
             );
             break;

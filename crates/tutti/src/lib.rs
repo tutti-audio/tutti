@@ -448,7 +448,7 @@ pub mod session {
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
         DeviceChange, DeviceDirection, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
-        Listed, OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
+        OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
