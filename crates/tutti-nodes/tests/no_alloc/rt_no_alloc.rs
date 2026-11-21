@@ -34,6 +34,47 @@ fn convolver_process_is_allocation_free() {
     let ir = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
     gate(mono_node(Mono::new(&ir), Samples::new(512)));
 }
+/// A zero-latency node, a mono response and a true-stereo set, each cut into a direct head and
+/// levels.
+#[test]
+fn zero_latency_convolver_process_is_allocation_free() {
+    use tutti_buffers::BusTopology;
+    use tutti_fixtures::signal::decay_ir;
+    use tutti_nodes::ConvolverConfig;
+
+    let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
+    let irs = [Mono::new(&ir); 4];
+    for (bus, layout) in [(BusTopology::MONO, false), (BusTopology::STEREO, true)] {
+        let config = ConvolverConfig::new(bus, if layout { &irs[..] } else { &irs[..1] })
+            .block_size(Samples::new(128))
+            .zero_latency();
+        let config = if layout { config.true_stereo() } else { config };
+        gate_at(ConvolverNode::<f32>::try_from(config).unwrap(), 100);
+    }
+}
+
+/// The bare zero-latency convolver under ragged calls across its head and levels.
+#[test]
+fn zero_latency_convolver_ragged_calls_are_allocation_free() {
+    use tutti_dsp::Convolver;
+    use tutti_fixtures::signal::decay_ir;
+
+    let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
+    let mut c = Convolver::zero_latency(Mono::new(&ir), Samples::new(128));
+    let x: Vec<f32> = (0..513).map(|i| ((i as f32) * 0.31).sin()).collect();
+    let mut y = vec![0.0f32; 513];
+    let lens = [1usize, 7, 33, 100, 127, 128, 129, 255, 513, 64];
+    for k in 0..40 {
+        let n = lens[k % lens.len()];
+        c.process(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
+    }
+    assert_no_alloc::assert_no_alloc(|| {
+        for k in 0..3_000 {
+            let n = lens[k % lens.len()];
+            c.process(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
+        }
+    });
+}
 #[test]
 fn fir_convolver_process_is_allocation_free() {
     use tutti_dsp::{LinearPhaseDesign, MatchedBell};

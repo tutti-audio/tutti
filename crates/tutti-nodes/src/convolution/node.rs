@@ -185,6 +185,7 @@ pub struct ConvolverConfig<'a, S: Sample> {
     irs: &'a [Mono<'a, S>],
     layout: IrLayout,
     block_size: Samples,
+    zero_latency: bool,
 }
 
 impl<'a, S: Sample> ConvolverConfig<'a, S> {
@@ -197,6 +198,7 @@ impl<'a, S: Sample> ConvolverConfig<'a, S> {
             irs,
             layout: IrLayout::PerChannel,
             block_size: DEFAULT_BLOCK,
+            zero_latency: false,
         }
     }
 
@@ -234,6 +236,17 @@ impl<'a, S: Sample> ConvolverConfig<'a, S> {
     pub fn block_size(self, block_size: Samples) -> Self {
         Self { block_size, ..self }
     }
+
+    /// No latency ([`Convolver::zero_latency`]): the first `block_size` taps of every
+    /// response run as a direct-form FIR, which costs `block_size` multiply-adds per frame
+    /// per path, and the node's latency is zero. Off by default.
+    #[must_use]
+    pub fn zero_latency(self) -> Self {
+        Self {
+            zero_latency: true,
+            ..self
+        }
+    }
 }
 
 impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for ConvolverNode<F> {
@@ -255,7 +268,15 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
             irs,
             layout,
             block_size,
+            zero_latency,
         } = config;
+        let convolver = |ir: Mono<'_, S>| {
+            if zero_latency {
+                Convolver::zero_latency(ir, block_size)
+            } else {
+                Convolver::new(ir, block_size)
+            }
+        };
         let input = layout.input(output);
         let (n_in, n_out) = (input.layout(), output.layout());
         if n_in.count() == 0 || n_out.count() == 0 {
@@ -289,23 +310,27 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
         };
         let engine = match layout {
             IrLayout::PerChannel | IrLayout::Folded if shared => {
-                let head = Convolver::new(irs[0], block_size);
+                let head = convolver(irs[0]);
                 Engine::PerChannel(
                     (0..usize::from(n_out.count()))
                         .map(|_| head.fresh())
                         .collect(),
                 )
             }
-            IrLayout::PerChannel | IrLayout::Folded => Engine::PerChannel(
-                irs.iter()
-                    .map(|ir| Convolver::new(*ir, block_size))
-                    .collect(),
-            ),
-            IrLayout::TrueStereo | IrLayout::Ambisonic(_) => Engine::Matrix(Box::new(
-                MatrixConvolverConfig::new(n_in, n_out, irs)
-                    .block_size(block_size)
+            IrLayout::PerChannel | IrLayout::Folded => {
+                Engine::PerChannel(irs.iter().map(|ir| convolver(*ir)).collect())
+            }
+            IrLayout::TrueStereo | IrLayout::Ambisonic(_) => {
+                let matrix = MatrixConvolverConfig::new(n_in, n_out, irs).block_size(block_size);
+                Engine::Matrix(Box::new(
+                    if zero_latency {
+                        matrix.zero_latency()
+                    } else {
+                        matrix
+                    }
                     .build()?,
-            )),
+                ))
+            }
         };
         Ok(Self::assemble(engine, layout, input, output, fold))
     }
@@ -388,7 +413,7 @@ impl<F: FftFloat + Lerp> TryFrom<FirConvolverConfig<'_>> for ConvolverNode<F> {
 /// Convolution reverb as a graph node, N channels in and M out.
 ///
 /// Built from a [`ConvolverConfig`] at fixed channel counts, with an [`IrLayout`] saying which
-/// impulse response each path from an input to an output has. Latency is one FFT block, the same on every output, declared
+/// impulse response each path from an input to an output has. Latency is one FFT block (none with [`zero_latency`](ConvolverConfig::zero_latency)), the same on every output, declared
 /// in its [`Shape`] for the **whole** output. Its tail is the longest IR's ring-out.
 ///
 /// The output is the wet signal alone, scaled by one wet-path [`Amplitude`] shared by every
@@ -542,7 +567,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         self.gain.handle()
     }
 
-    /// The node's latency in [`Samples`] — one FFT block, plus the declared delay of a
+    /// The node's latency in [`Samples`] — one FFT block (zero with [`ConvolverConfig::zero_latency`]), plus the declared delay of a
     /// [`FirConvolverConfig`] node, the same on every output.
     ///
     /// Partitioned convolution cannot emit a sample until its first block is
@@ -757,7 +782,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
 }
 
 impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
-    /// `N` in, `N` out; one FFT block of latency for the whole output, and the
+    /// `N` in, `N` out; one FFT block of latency for the whole output (none for a
+    /// [`zero_latency`](ConvolverConfig::zero_latency) node), and the
     /// longest IR's ring-out as its tail — exact rather than estimated, a
     /// convolution being linear and finite. The tail excludes the FFT block
     /// latency, which is declared on its own and compensated.
