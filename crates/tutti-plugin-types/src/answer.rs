@@ -24,6 +24,15 @@ pub struct Answer<T>(oneshot::Receiver<T>);
 pub struct AnswerSender<T>(oneshot::Sender<T>);
 
 impl<T> Answer<T> {
+    /// An answer that is already filled with `value`, as
+    /// [`std::future::ready`] is a future already resolved.
+    pub fn ready(value: T) -> Self {
+        let (tx, answer) = Self::channel();
+        // The answer is alive: the send cannot fail.
+        drop(tx.send(value));
+        answer
+    }
+
     /// A sender and the answer it fills. Dropping the sender unanswered cancels
     /// the answer.
     pub fn channel() -> (AnswerSender<T>, Self) {
@@ -55,14 +64,6 @@ impl<T> AnswerSender<T> {
     pub fn send(self, value: T) -> Result<(), T> {
         self.0.send(value)
     }
-}
-
-/// An [`Answer`] that is already filled with `value`.
-pub fn answered<T>(value: T) -> Answer<T> {
-    let (tx, answer) = Answer::channel();
-    // The answer is alive: the send cannot fail.
-    drop(tx.send(value));
-    answer
 }
 
 #[cfg(test)]

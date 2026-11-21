@@ -494,7 +494,7 @@ mod tests {
                     parked.lock().unwrap().push(Box::new((tx, value)));
                     rx
                 }
-                _ => tutti_plugin_types::answered(value),
+                _ => tutti_plugin_types::Answer::ready(value),
             }
         }
     }

@@ -3237,7 +3237,7 @@ mod tests {
 
     impl tutti_plugin_types::AnyThread for Fake {
         fn parameter_value(&self, id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::answered(
+            tutti_plugin_types::Answer::ready(
                 self.params
                     .iter()
                     .find(|(a, _)| *a == id)
@@ -3251,7 +3251,7 @@ mod tests {
             assert!(!self.panics, "the backend failed while asked for its list");
             let Some(hold) = self.hold.clone() else {
                 self.held();
-                return tutti_plugin_types::answered(self.listing());
+                return tutti_plugin_types::Answer::ready(self.listing());
             };
             let listed = self.listing();
             let (tx, answer) = tutti_plugin_types::Answer::channel();
@@ -3282,7 +3282,7 @@ mod tests {
             _id: ParamId,
             _plain: f64,
         ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-            tutti_plugin_types::answered(None)
+            tutti_plugin_types::Answer::ready(None)
         }
         fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
             None

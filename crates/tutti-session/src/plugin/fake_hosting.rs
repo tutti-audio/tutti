@@ -92,10 +92,10 @@ impl Drop for Inert {
 
 impl tutti_plugin_types::AnyThread for Inert {
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
-        tutti_plugin_types::answered(None)
+        tutti_plugin_types::Answer::ready(None)
     }
     fn parameter_value(&self, _id: ParamId) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        tutti_plugin_types::answered(None)
+        tutti_plugin_types::Answer::ready(None)
     }
 
     fn set_parameter_value(
@@ -116,7 +116,7 @@ impl tutti_plugin_types::AnyThread for Inert {
         _id: ParamId,
         _plain: f64,
     ) -> tutti_plugin_types::Answer<Option<Normalized>> {
-        tutti_plugin_types::answered(None)
+        tutti_plugin_types::Answer::ready(None)
     }
     fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
         None

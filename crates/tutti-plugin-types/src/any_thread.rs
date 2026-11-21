@@ -208,7 +208,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::{AutomationMode, ParamFlags, StateError, answered, bypass_parameter};
+    use crate::{Answer, AutomationMode, ParamFlags, StateError, bypass_parameter};
 
     /// A plugin that lists `params` and records every parameter write.
     struct Listed {
@@ -218,10 +218,10 @@ mod tests {
 
     impl AnyThread for Listed {
         fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
-            answered(Some(self.params.clone()))
+            Answer::ready(Some(self.params.clone()))
         }
         fn parameter_value(&self, _: ParamId) -> Answer<Option<Normalized>> {
-            answered(None)
+            Answer::ready(None)
         }
         fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
             self.written.lock().unwrap().push((id, value.get()));
@@ -234,7 +234,7 @@ mod tests {
             None
         }
         fn parameter_normalized(&self, _: ParamId, _: f64) -> Answer<Option<Normalized>> {
-            answered(None)
+            Answer::ready(None)
         }
         fn parameter_text(&self, _: ParamId, _: Normalized) -> Option<String> {
             None
