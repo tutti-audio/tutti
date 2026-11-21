@@ -13,19 +13,20 @@ const PATIENCE: Duration = Duration::from_secs(30);
 /// go), and a virtual endpoint is listed when the watch sees it. `what` names
 /// the device in the panic when it never is.
 pub fn listed(session: &MidiSession, what: &str, keep: impl Fn(&DeviceInfo) -> bool) -> DeviceInfo {
-    let events = session.devices().subscribe();
+    let mut events = session.devices().subscribe();
     if let Some(device) = events.initial().iter().find(|d| keep(d)) {
         return device.clone();
     }
     loop {
-        match tutti_fixtures::block_on_within(events.recv(), PATIENCE) {
-            Some(Ok(DeviceEvent::Added(device) | DeviceEvent::Changed(device)))
+        match tutti_fixtures::block_on_within(futures_lite::StreamExt::next(&mut events), PATIENCE)
+        {
+            Some(Some(DeviceEvent::Added(device) | DeviceEvent::Changed(device)))
                 if keep(&device) =>
             {
                 return device;
             }
-            Some(Ok(_)) => {}
-            Some(Err(failure)) => panic!("the device watch ended: {failure:?}"),
+            Some(Some(_)) => {}
+            Some(None) => panic!("the device watch ended: {:?}", events.failure()),
             None => panic!("{what} is never listed"),
         }
     }

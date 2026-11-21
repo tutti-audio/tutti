@@ -67,7 +67,9 @@
 //! graph's rate over the same shared SoundFont, keeping the presets and channel
 //! state. A note struck by hand (`note_on`) before that is cut with the old
 //! voices. A fork of the graph for an offline export does the same at the
-//! export's rate. A rate outside 16–192 kHz leaves the unit at its own rate.
+//! export's rate. The unit declares the rates it runs at, 16–192 kHz
+//! (`Shape::with_rates`), and a graph refuses a re-rate or a fork outside them; a unit
+//! added at a rate outside them is left at its own rate.
 //!
 //! ## MIDI timing resolution: 8 frames
 //!
@@ -309,7 +311,8 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// A player's voices are built against a rate and cannot be re-rated in place.
 /// `SoundFontUnit::try_from` builds at 44.1 kHz; the node's `prepare` swaps in a
 /// player at the graph's rate (control thread, keeping the presets and
-/// channel state), and a rate outside 16 to 192 kHz leaves it at its own. The
+/// channel state). It runs at 16 to 192 kHz, which its shape declares so that a graph
+/// refuses a rate outside; a node added at one is left at its own. The
 /// rate is the graph's: nothing here names one.
 pub struct SoundFontUnit<F: Float + SimdLanes> {
     player: Player<F>,

@@ -1,6 +1,7 @@
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::task::Waker;
+use std::task::{Poll, Waker};
 use std::time::Duration;
 
 use super::*;
@@ -17,12 +18,13 @@ const PATIENCE: Duration = Duration::from_secs(30);
 
 /// Waits for the next change, failing at the hang guard when the change did
 /// not wake the waiter.
-fn next(events: &DeviceEvents) -> std::result::Result<DeviceEvent, WatchFailure> {
-    tutti_fixtures::block_on_within(events.recv(), PATIENCE).expect("an event before the guard")
+fn next(events: &mut DeviceEvents) -> Option<DeviceEvent> {
+    tutti_fixtures::block_on_within(futures_lite::StreamExt::next(events), PATIENCE)
+        .expect("an event before the guard")
 }
 
 /// The event that woke the waiter and any queued behind it.
-fn wake(events: &DeviceEvents) -> Vec<DeviceEvent> {
+fn wake(events: &mut DeviceEvents) -> Vec<DeviceEvent> {
     let first = next(events).expect("an event");
     std::iter::once(first).chain(events.pending()).collect()
 }
@@ -70,9 +72,9 @@ fn open_lists_what_is_plugged_in_and_reports_no_event_for_it() {
 
 #[test]
 fn plug_is_added_and_unplug_is_removed() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    let added = wake(&events);
+    let added = wake(&mut events);
     let [DeviceEvent::Added(info)] = &added[..] else {
         panic!("one Added, got {added:?}");
     };
@@ -80,13 +82,13 @@ fn plug_is_added_and_unplug_is_removed() {
     assert_eq!(devices.list(), std::slice::from_ref(info));
 
     fake.unplug(EndpointId::from_raw(1));
-    assert_eq!(wake(&events), [DeviceEvent::Removed(info.clone())]);
+    assert_eq!(wake(&mut events), [DeviceEvent::Removed(info.clone())]);
     assert!(devices.list().is_empty());
 }
 
 #[test]
 fn a_replug_of_a_known_state_and_an_unknown_unplug_are_silent() {
-    let (_devices, events, fake) = fake();
+    let (_devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     fake.unplug(EndpointId::from_raw(9));
@@ -94,7 +96,7 @@ fn a_replug_of_a_known_state_and_an_unknown_unplug_are_silent() {
     fake.plug(endpoint(2, "Pads"), PortDirection::Input);
     let mut seen = Vec::new();
     while seen.len() < 2 {
-        seen.extend(wake(&events));
+        seen.extend(wake(&mut events));
     }
     let names: Vec<_> = seen.iter().map(|e| e.info().name.as_str()).collect();
     assert_eq!(names, ["Keys", "Pads"]);
@@ -103,15 +105,15 @@ fn a_replug_of_a_known_state_and_an_unknown_unplug_are_silent() {
 
 #[test]
 fn a_rename_is_changed_and_keeps_the_id() {
-    let (_devices, events, fake) = fake();
+    let (_devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    let [DeviceEvent::Added(before)] = &wake(&events)[..] else {
+    let [DeviceEvent::Added(before)] = &wake(&mut events)[..] else {
         panic!("Added");
     };
     let mut renamed = endpoint(1, "Keys");
     renamed.name = "Keys II".into();
     fake.plug(renamed, PortDirection::Input);
-    let events = wake(&events);
+    let events = wake(&mut events);
     let [DeviceEvent::Changed(after)] = &events[..] else {
         panic!("Changed, got {events:?}");
     };
@@ -120,10 +122,10 @@ fn a_rename_is_changed_and_keeps_the_id() {
 
 #[test]
 fn a_wake_takes_the_change_off_the_queue() {
-    let (_devices, events, fake) = fake();
+    let (_devices, mut events, fake) = fake();
     assert!(events.pending().next().is_none());
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    let got = wake(&events);
+    let got = wake(&mut events);
     assert_eq!(got.len(), 1);
     assert!(events.pending().next().is_none(), "wake consumed it");
 }
@@ -143,79 +145,85 @@ fn a_watch_that_fails_says_so_and_the_list_freezes() {
     assert_eq!(devices.list().len(), 1);
 }
 
-/// With no change reported, a `recv` is pending and takes nothing.
+/// Polls `events` once with `cx`.
+fn poll(events: &mut DeviceEvents, cx: &mut std::task::Context<'_>) -> Poll<Option<DeviceEvent>> {
+    Pin::new(events).poll_next(cx)
+}
+
+/// With no change reported, the stream is pending and takes nothing.
 #[test]
-fn recv_is_pending_while_nothing_changed() {
-    let (_devices, events, _fake) = fake();
-    let mut recv = std::pin::pin!(events.recv());
-    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
-    assert!(recv.as_mut().poll(&mut cx).is_pending());
+fn the_stream_is_pending_while_nothing_changed() {
+    let (_devices, mut events, _fake) = fake();
+    let mut cx = std::task::Context::from_waker(Waker::noop());
+    assert!(poll(&mut events, &mut cx).is_pending());
     assert!(events.pending().next().is_none());
 }
 
-/// A pending `recv` is woken by the change that resolves it, once.
+/// A pending poll is woken by the change that resolves it, once.
 #[test]
-fn a_change_wakes_the_pending_recv() {
-    let (_devices, events, fake) = fake();
+fn a_change_wakes_the_pending_stream() {
+    let (_devices, mut events, fake) = fake();
     let count = Arc::new(WakeCount::default());
     let waker = Waker::from(Arc::clone(&count));
     let mut cx = std::task::Context::from_waker(&waker);
-    let mut recv = std::pin::pin!(events.recv());
-    assert!(recv.as_mut().poll(&mut cx).is_pending());
+    assert!(poll(&mut events, &mut cx).is_pending());
     assert_eq!(count.0.load(Ordering::SeqCst), 0);
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     assert_eq!(count.0.load(Ordering::SeqCst), 1);
     assert!(matches!(
-        recv.as_mut().poll(&mut cx),
-        std::task::Poll::Ready(Ok(DeviceEvent::Added(_)))
+        poll(&mut events, &mut cx),
+        Poll::Ready(Some(DeviceEvent::Added(_)))
     ));
 }
 
-/// A pending `recv` is woken when the watch ends, and resolves to why.
+/// A pending poll is woken when the watch ends, and the stream ends with `None`.
 #[test]
-fn the_end_of_the_watch_wakes_the_pending_recv() {
-    let (_devices, events, fake) = fake();
+fn the_end_of_the_watch_wakes_the_pending_stream_and_ends_it() {
+    let (_devices, mut events, fake) = fake();
     let count = Arc::new(WakeCount::default());
     let waker = Waker::from(Arc::clone(&count));
     let mut cx = std::task::Context::from_waker(&waker);
-    let mut recv = std::pin::pin!(events.recv());
-    assert!(recv.as_mut().poll(&mut cx).is_pending());
+    assert!(poll(&mut events, &mut cx).is_pending());
     fake.fail_watch();
     assert_eq!(count.0.load(Ordering::SeqCst), 1);
-    assert!(matches!(
-        recv.as_mut().poll(&mut cx),
-        std::task::Poll::Ready(Err(WatchFailure::Failed(_)))
-    ));
+    assert!(matches!(poll(&mut events, &mut cx), Poll::Ready(None)));
+    assert!(matches!(events.failure(), Some(WatchFailure::Failed(_))));
 }
 
-/// A `recv` polled with one waker and then another, then dropped, leaves no
+/// Once the watch has ended and the queue is drained every poll is `None`, never
+/// `Pending`, and a change reported after the end queues nothing.
+#[test]
+fn a_send_after_fail_leaves_an_ended_stream_at_none() {
+    let (sink, devices) = sink_over_empty();
+    let mut events = devices.subscribe();
+    sink.fail(WatchFailure::Failed(Arc::new(
+        MidiHardwareError::DescriptorBroken,
+    )));
+    let present = os_devices(&[endpoint(1, "Keys")], &[]);
+    sink.send(OsChange::Present(present[0].clone()));
+    let mut cx = std::task::Context::from_waker(Waker::noop());
+    for _ in 0..3 {
+        assert!(matches!(poll(&mut events, &mut cx), Poll::Ready(None)));
+    }
+    assert!(events.pending().next().is_none());
+}
+
+/// A stream polled with one waker and then another, then dropped, leaves no
 /// waker in the inbox: a change wakes neither.
 #[test]
-fn a_dropped_recv_and_a_replaced_waker_leave_nothing_to_wake() {
-    let (_devices, events, fake) = fake();
+fn a_dropped_stream_and_a_replaced_waker_leave_nothing_to_wake() {
+    let (_devices, mut events, fake) = fake();
+    let queue = Arc::clone(&events.queue);
     let (a, b) = (
         Arc::new(WakeCount::default()),
         Arc::new(WakeCount::default()),
     );
     let (wa, wb) = (Waker::from(Arc::clone(&a)), Waker::from(Arc::clone(&b)));
-    let mut recv = Box::pin(events.recv());
-    assert!(
-        recv.as_mut()
-            .poll(&mut std::task::Context::from_waker(&wa))
-            .is_pending()
-    );
-    assert!(
-        recv.as_mut()
-            .poll(&mut std::task::Context::from_waker(&wb))
-            .is_pending()
-    );
-    assert_eq!(
-        events.queue.inbox().wakers.len(),
-        1,
-        "the re-poll replaced it"
-    );
-    drop(recv);
-    assert!(events.queue.inbox().wakers.is_empty());
+    assert!(poll(&mut events, &mut std::task::Context::from_waker(&wa)).is_pending());
+    assert!(poll(&mut events, &mut std::task::Context::from_waker(&wb)).is_pending());
+    assert!(queue.inbox().waker.is_some(), "the re-poll replaced it");
+    drop(events);
+    assert!(queue.inbox().waker.is_none());
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     assert_eq!(
         (a.0.load(Ordering::SeqCst), b.0.load(Ordering::SeqCst)),
@@ -234,10 +242,10 @@ impl std::task::Wake for WakeCount {
 }
 
 #[test]
-fn recv_wakes_for_a_change_made_on_another_thread() {
-    let (_devices, events, fake) = fake();
+fn the_stream_wakes_for_a_change_made_on_another_thread() {
+    let (_devices, mut events, fake) = fake();
     let plugger = std::thread::spawn(move || fake.plug(endpoint(1, "Keys"), PortDirection::Input));
-    let events = wake(&events);
+    let events = wake(&mut events);
     plugger.join().unwrap();
     assert!(matches!(&events[..], [DeviceEvent::Added(_)]));
 }
@@ -246,11 +254,11 @@ fn recv_wakes_for_a_change_made_on_another_thread() {
 /// other.
 #[test]
 fn each_subscriber_sees_every_change() {
-    let (devices, first, fake) = fake();
-    let second = devices.subscribe();
+    let (devices, mut first, fake) = fake();
+    let mut second = devices.subscribe();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    assert_eq!(wake(&first).len(), 1);
-    assert_eq!(wake(&second).len(), 1);
+    assert_eq!(wake(&mut first).len(), 1);
+    assert_eq!(wake(&mut second).len(), 1);
 }
 
 /// The list at subscription and the stream after it neither overlap nor leave
@@ -259,11 +267,11 @@ fn each_subscriber_sees_every_change() {
 fn initial_and_stream_split_at_the_subscription() {
     let (devices, _first, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    let late = devices.subscribe();
+    let mut late = devices.subscribe();
     fake.plug(endpoint(2, "Pads"), PortDirection::Input);
     let names: Vec<_> = late.initial().iter().map(|d| d.name.as_str()).collect();
     assert_eq!(names, ["Keys"]);
-    let streamed = wake(&late);
+    let streamed = wake(&mut late);
     assert!(matches!(&streamed[..], [DeviceEvent::Added(i)] if i.name == "Pads"));
 }
 
@@ -284,20 +292,21 @@ fn a_dropped_subscriber_is_forgotten() {
 /// subscriber that arrives later is told at once.
 #[test]
 fn a_failed_watch_ends_the_stream_after_what_it_reported() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     fake.fail_watch();
-    assert!(matches!(next(&events), Ok(DeviceEvent::Added(_))));
-    assert!(matches!(next(&events), Err(WatchFailure::Failed(_))));
-    assert!(next(&devices.subscribe()).is_err());
+    assert!(matches!(next(&mut events), Some(DeviceEvent::Added(_))));
+    assert!(next(&mut events).is_none());
+    assert!(matches!(events.failure(), Some(WatchFailure::Failed(_))));
+    assert!(next(&mut devices.subscribe()).is_none());
 }
 
 /// A dropped `OpenInput` retires its port.
 #[test]
 fn a_dropped_input_retires_its_port() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    wake(&events);
+    wake(&mut events);
     let ports = ports();
     let (input, _inlet) = devices
         .open_input(
@@ -417,7 +426,7 @@ fn a_change_during_subscribe_is_in_initial_or_in_the_stream_once() {
 /// and direction, and a lone same-named device only by name.
 #[test]
 fn a_saved_device_resolves_through_devices() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     let port = |raw, name: &str, direction| {
         let mut e = endpoint(raw, name);
         e.identity = OsEndpointIdentity::Product(ProductInstanceId::new("unit-1").unwrap());
@@ -428,7 +437,7 @@ fn a_saved_device_resolves_through_devices() {
     fake.plug(endpoint(3, "Keys"), PortDirection::Input);
     let mut seen = 0;
     while seen < 3 {
-        seen += wake(&events).len();
+        seen += wake(&mut events).len();
     }
     let by_name = |name: &str| devices.list().into_iter().find(|d| d.name == name).unwrap();
     let (pad_out, keys) = (by_name("Pad Out"), by_name("Keys"));
@@ -465,12 +474,12 @@ fn dropping_devices_stops_the_watch_thread() {
 
 #[test]
 fn open_input_takes_a_present_input_only() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     fake.plug(endpoint(10, "Synth"), PortDirection::Output);
     let mut seen = 0;
     while seen < 2 {
-        seen += wake(&events).len();
+        seen += wake(&mut events).len();
     }
     assert!(
         devices
@@ -506,12 +515,12 @@ fn open_input_takes_a_present_input_only() {
 
 #[test]
 fn open_input_refuses_a_device_that_was_unplugged() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    wake(&events);
+    wake(&mut events);
     let keys = id_of(&devices, "Keys");
     fake.unplug(EndpointId::from_raw(1));
-    wake(&events);
+    wake(&mut events);
     assert!(matches!(
         devices.open_input(
             crate::testing::started(),
@@ -525,9 +534,9 @@ fn open_input_refuses_a_device_that_was_unplugged() {
 
 #[test]
 fn a_duplex_device_opens_both_ways() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Box"), PortDirection::Duplex);
-    wake(&events);
+    wake(&mut events);
     let id = id_of(&devices, "Box");
     assert_eq!(devices.list()[0].direction, PortDirection::Duplex);
     assert!(
@@ -545,9 +554,9 @@ fn a_duplex_device_opens_both_ways() {
 
 #[test]
 fn capability_is_the_backends_for_a_present_device() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
-    wake(&events);
+    wake(&mut events);
     let caps = devices
         .capability(&id_of(&devices, "Keys"))
         .unwrap()
@@ -561,9 +570,9 @@ fn capability_is_the_backends_for_a_present_device() {
 /// says it went nowhere. The note beside it is sent.
 #[test]
 fn an_event_with_no_wire_form_is_taken_and_counted() {
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Synth"), PortDirection::Output);
-    wake(&events);
+    wake(&mut events);
     let mut out = devices
         .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
         .unwrap();
@@ -603,7 +612,7 @@ fn the_blocks_left_out_of_a_device_are_readable() {
         None,
         [block(0), block(32), block(40)].map(|b| (b, None)),
     );
-    let (devices, events, fake) = fake();
+    let (devices, mut events, fake) = fake();
     fake.plug(
         OsEndpoint {
             capability: described.endpoint,
@@ -612,7 +621,7 @@ fn the_blocks_left_out_of_a_device_are_readable() {
         },
         PortDirection::Input,
     );
-    wake(&events);
+    wake(&mut events);
     let keys = id_of(&devices, "Keys");
     assert_eq!(devices.blocks_left_out(&keys).unwrap(), Some(2));
     let caps = devices.capability(&keys).unwrap().unwrap();
@@ -927,13 +936,13 @@ fn the_sink_follows_the_protocol_the_output_is_in() {
 /// leaves nothing queued: the same queue is read, not a copy.
 #[test]
 fn a_reference_to_the_events_iterates_the_queued_changes() {
-    let (_devices, events, fake) = fake();
+    let (_devices, mut events, fake) = fake();
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     fake.plug(endpoint(2, "Pads"), PortDirection::Input);
     // Both reached the queue (the sentinel orders the watch thread).
     let mut seen = Vec::new();
     while seen.len() < 2 {
-        let first = wake(&events);
+        let first = wake(&mut events);
         seen.extend(first.iter().map(|e| e.info().name.clone()));
     }
     fake.plug(endpoint(3, "Drums"), PortDirection::Input);
@@ -978,9 +987,9 @@ mod sensing {
     ) -> (OpenOutput, FakeCounters, Devices, Threads) {
         let executor = Executor::new();
         let threads = executor.spawn_threads(NonZeroUsize::MIN).unwrap();
-        let (devices, events, fake) = fake_on(&executor);
+        let (devices, mut events, fake) = fake_on(&executor);
         fake.plug(endpoint(SYNTH, "Synth"), PortDirection::Output);
-        wake(&events);
+        wake(&mut events);
         let mut out = devices
             .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
             .unwrap();

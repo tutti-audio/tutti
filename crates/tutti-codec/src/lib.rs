@@ -96,7 +96,7 @@ pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
 pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile, Kept, Unfinished};
-pub use error::{Codec, Error, Result, SpecError};
+pub use error::{Codec, EncodeError, Result, SpecError};
 pub use file_out::FileOut;
 pub use format::{FlacLevel, Format};
 pub use pcm::{IntDepth, Pcm};

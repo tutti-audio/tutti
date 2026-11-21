@@ -17,7 +17,7 @@ const WRITE_CHUNK: usize = 8192;
 ///   [`FileEncoder::create`] does, so a failure leaves what was at the path as
 ///   it was. An existing file is replaced unless the destination is
 ///   [`create_new`](Destination::create_new), which refuses it with an
-///   [`Error::Commit`](crate::Error::Commit) whose source kind is
+///   [`EncodeError::Commit`](crate::EncodeError::Commit) whose source kind is
 ///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists). A failed commit
 ///   keeps the complete file at the error's `kept` path, the caller's to move
 ///   or delete.
@@ -31,10 +31,10 @@ const WRITE_CHUNK: usize = 8192;
 ///
 /// # Errors
 ///
-/// [`Error::Spec`](crate::Error::Spec) for a wave the format cannot hold (no
+/// [`EncodeError::Spec`](crate::EncodeError::Spec) for a wave the format cannot hold (no
 /// channels, a rate no header states, a width past the format's limit),
-/// [`Error::WavTooLarge`](crate::Error::WavTooLarge) for a WAV too long for its
-/// 32-bit sizes, [`Error::Io`](crate::Error::Io) when the writer fails, and the
+/// [`EncodeError::WavTooLarge`](crate::EncodeError::WavTooLarge) for a WAV too long for its
+/// 32-bit sizes, [`EncodeError::Io`](crate::EncodeError::Io) when the writer fails, and the
 /// encoder's other errors.
 ///
 /// # Examples
