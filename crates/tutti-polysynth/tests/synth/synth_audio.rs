@@ -408,7 +408,7 @@ fn master_volume_scales_the_output() {
     let loud = render(&mut full, 100);
 
     let mut half = Hand::new(PolySynth::<f32>::new(SynthConfig {
-        volume: tutti_units::Amplitude::new(0.5),
+        volume: tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
         ..config(OscillatorType::Sine)
     }));
     half.queue_midi(&[note_on(69, 100)]);
@@ -423,7 +423,7 @@ fn master_volume_scales_the_output() {
 
     // Zero must be silence, not merely quiet.
     let mut muted = Hand::new(PolySynth::<f32>::new(SynthConfig {
-        volume: tutti_units::Amplitude::SILENT,
+        volume: tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::SILENT),
         ..config(OscillatorType::Sine)
     }));
     muted.queue_midi(&[note_on(69, 100)]);
@@ -442,7 +442,7 @@ fn master_volume_scales_the_output() {
 fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut synth = Hand::new(PolySynth::<f32>::new(SynthConfig {
-            volume: tutti_units::Amplitude::new(0.5),
+            volume: tutti_polysynth::MasterVolume::of(tutti_units::Amplitude::new(0.5)),
             ..config(OscillatorType::Sine)
         }));
         synth.queue_midi(&[note_on(69, 100)]);
