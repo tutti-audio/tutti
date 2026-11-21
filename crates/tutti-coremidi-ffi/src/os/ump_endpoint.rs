@@ -145,9 +145,10 @@ impl UmpEndpoint {
     ///
     /// `client` proves that [`SharedClient::start`] succeeded, so the process has
     /// connected to the MIDI server. The endpoint API takes no client, and with no
-    /// connection and the server gone, CoreMIDI raises an exception that [`catch`]
-    /// cannot catch: the process aborts. A process whose start failed has no way to
-    /// call this. The proof does not cover a server that dies after the start.
+    /// connection and the server gone, CoreMIDI raises an exception that the crate's
+    /// exception catch cannot catch: the process aborts. A process whose start
+    /// failed has no way to call this. The proof does not cover a server that
+    /// dies after the start.
     ///
     /// CoreMIDI numbers the blocks itself, in registration order. `blocks` are
     /// given in number order with their numbers running from 0 without a gap, and
