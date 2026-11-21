@@ -2230,6 +2230,52 @@ fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
     });
 }
 
+/// **A shutdown ends a setting's wait through its reply.** The control lane is
+/// held in a query the server answers late, a render mode waits in its slot, and
+/// the bridge is shut down: the lane's end drops the setting's reply, so the
+/// audio lane's wait ends at once instead of at the settle deadline (made huge
+/// here; the call bound only guards a hang).
+#[test]
+fn a_shutdown_ends_a_waiting_setting_through_its_reply() {
+    let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.rate = Duration::from_secs(600);
+        t
+    };
+    let mut mock =
+        MockServer::start_lanes_under("setting-shutdown", timeouts, answer_blocks, move |msg| {
+            if matches!(msg, ControlRequest::GetParameter { .. }) {
+                let _ = seen.try_send(());
+                let _ = release.recv();
+            }
+            Action::Silent
+        });
+    let bridge = Arc::clone(&mock.bridge);
+    let query = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the control lane is held in the query");
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+
+    let mut thread = mock.thread.take().expect("the bridge thread");
+    let shutdown = std::thread::spawn(move || thread.shutdown());
+    release_tx.send(()).expect("the control lane is waiting");
+    let (done_tx, done) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = done_tx.send(shutdown.join());
+    });
+    done.recv_timeout(Duration::from_secs(60))
+        .expect("the shutdown completes before the settle deadline")
+        .expect("the shutdown's thread");
+    let _ = query.join();
+}
+
 /// A control script that holds a setting while a block may overtake it: the
 /// setting's request waits up to a window for the block to arrive at the audio
 /// lane's script (it ends at once if one does, and is only waited out by a host

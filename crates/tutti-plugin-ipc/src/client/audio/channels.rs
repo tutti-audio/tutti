@@ -279,6 +279,8 @@ struct Settings {
     rate: Option<(tutti_units::SampleRate, Reply<()>)>,
     mode: Option<(tutti_plugin_types::RenderMode, Reply<()>)>,
     fence: Option<Reply<()>>,
+    /// The control lane has ended: a setting put now is dropped at once.
+    closed: bool,
 }
 
 /// The settings a caller has requested and the audio lane has not taken, each
@@ -772,6 +774,10 @@ impl Channels {
     pub(super) fn put_setting(&self, setting: Setting, applied: Reply<()>) {
         {
             let mut slots = self.settings.lock_recover();
+            if slots.closed {
+                // No lane takes it: dropping the reply ends its waiter.
+                return;
+            }
             match setting {
                 Setting::SampleRate(rate) => slots.rate = Some((rate, applied)),
                 Setting::RenderMode(mode) => slots.mode = Some((mode, applied)),
@@ -782,6 +788,19 @@ impl Channels {
         // A control command waiting for blocks the audio lane is holding for
         // this setting must see it.
         self.progress.notify();
+    }
+
+    /// Ends the settings' slots: the control lane takes no more, so a setting
+    /// waiting is dropped with its reply and one put later is dropped on
+    /// arrival. Each waiter sees its reply disconnect. Control lane's thread,
+    /// as it ends (stop or crash).
+    pub(super) fn close_settings(&self) {
+        let dropped = {
+            let mut slots = self.settings.lock_recover();
+            slots.closed = true;
+            (slots.rate.take(), slots.mode.take(), slots.fence.take())
+        };
+        drop(dropped);
     }
 
     /// The setting waiting for the control lane, if any: a rate first, then a
@@ -883,6 +902,7 @@ impl ResponseWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::RecvTimeoutError;
 
     /// **A fates word is the code in its low two bits and the sequence above
     /// them**: a literal word, the round trip at the edges of the sequence, and
@@ -1092,5 +1112,33 @@ mod tests {
         writer.push(resp(), &c);
         writer.push(resp(), &c);
         assert_eq!(lost.get(), 2);
+    }
+
+    /// **Closing the settings' slots disconnects the waiters' replies**: a
+    /// setting waiting in a slot, and one put after the close, both end their
+    /// waiter at once (the 60 s bound only guards a hang).
+    #[test]
+    fn closing_the_settings_drops_every_waiting_reply() {
+        let (c, _) = channels();
+        let guard = Duration::from_secs(60);
+        let (waiting, reply) = super::super::ask::ask::<()>();
+        c.put_setting(Setting::Fence, reply);
+        c.close_settings();
+        assert!(!c.setting_waiting());
+        assert_eq!(
+            waiting.recv_timeout_borrowed(guard),
+            Err(RecvTimeoutError::Disconnected)
+        );
+
+        let (late, reply) = super::super::ask::ask::<()>();
+        c.put_setting(
+            Setting::RenderMode(tutti_plugin_types::RenderMode::Offline),
+            reply,
+        );
+        assert_eq!(
+            late.recv_timeout_borrowed(guard),
+            Err(RecvTimeoutError::Disconnected)
+        );
+        assert!(c.take_setting().is_none());
     }
 }
