@@ -1,8 +1,8 @@
 //! Walking the sequencer's clients and ports.
 
-use crate::capability::{OsEndpoint, from_os, legacy};
+use crate::capability::{Described, OsEndpoint, from_os, legacy};
 use tutti_alsa_ffi::{Client, PortCaps, PortEntry, UmpEndpoint};
-use tutti_midi_device::{Endpoint, Identity, PortDirection};
+use tutti_midi_device::{Identity, PortDirection};
 
 /// Whether a port allows `direction`: a port that is readable but not
 /// *subscribe*-readable cannot be connected to, so listing it would offer the
@@ -23,11 +23,10 @@ mod tests;
 /// Names are `"Client: Port"`, matching how `aconnect -l` presents them, unless
 /// the port name already starts with the client's.
 ///
-/// A walk that stopped on an error gives the ports it reached. Its callers are
-/// `Session::connect_input_with` and `connect_output_with` (through `inputs()`
-/// and `outputs()`) and `Devices::capability`: a short list there is a
-/// transient `NotFound` (or a `None` capability) for a device that is still
-/// present, and the next call walks again and finds it. Only a change report
+/// A walk that stopped on an error gives the ports it reached. Its caller is
+/// `Devices::capability` (through `inputs()` and `outputs()`): a short list
+/// there is a `None` capability for a device that is still present, and the
+/// next call walks again and finds it. Only a change report
 /// must be whole, since a short one would remove devices that are still there
 /// ([`both`]).
 pub(super) fn endpoints(seq: &Client, direction: PortDirection) -> Vec<OsEndpoint> {
@@ -94,6 +93,7 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
         ump,
         ..
     } = port;
+    let described = capability_of(ump.as_deref());
     OsEndpoint {
         id: super::handle_of(address),
         identity: Identity::alsa(client_name.as_str(), port_name.as_str()),
@@ -104,7 +104,8 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
         } else {
             format!("{client_name}: {port_name}")
         },
-        capability: capability_of(ump.as_deref()),
+        capability: described.endpoint,
+        blocks_left_out: described.blocks_left_out,
     }
 }
 
@@ -118,9 +119,12 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
 /// legacy port is dropped in translation, not carried. Having a block is not
 /// having the MIDI 2.0 Protocol: an Endpoint that offers both and is in MIDI 1.0
 /// reads as MIDI 1.0.
-pub(super) fn capability_of(ump: Option<&UmpEndpoint>) -> Endpoint {
+pub(super) fn capability_of(ump: Option<&UmpEndpoint>) -> Described {
     let Some(endpoint) = ump else {
-        return legacy();
+        return Described {
+            endpoint: legacy(),
+            blocks_left_out: 0,
+        };
     };
     from_os(
         endpoint.protocol,

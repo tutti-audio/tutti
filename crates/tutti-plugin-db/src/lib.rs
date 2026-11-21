@@ -63,12 +63,13 @@ pub use facts::FileFacts;
 pub use fs::canonical_path;
 pub use loadable::{BindError, Hosting, Loadable, Resolved};
 pub use mtime::{BeforeEpoch, Mtime};
+pub use pedal::{PedalError, Recovered, RecoveryFailure};
 pub use probe::DEFAULT_PROBE_TIMEOUT;
 pub use probing::DEFAULT_MEASURE_TIMEOUT;
 pub use scanner::{
-    FileFailure, FilesError, ProbeFailure, ScanBusy, ScanError, ScanFuture, ScanOutcome,
-    ScanPlugins, ScanProgress, ScanProgressReader, ScanReport, ScannedFile, ScannedPlugins,
-    Scanner, StaleScan, probe_plugin_fallback,
+    FileFailure, FileFailureCause, FilesError, ForgetError, ProbeFailure, ProbeListing, ScanBusy,
+    ScanError, ScanFuture, ScanOutcome, ScanPlugins, ScanProgress, ScanProgressReader, ScanReport,
+    ScannedFile, ScannedPlugins, Scanner, StaleScan, UnmeasuredPlugin,
 };
 pub use table::{
     BlacklistedFile, FileRow, FileState, FormatMismatch, PluginDb, PluginEntry, Probed, RowChange,

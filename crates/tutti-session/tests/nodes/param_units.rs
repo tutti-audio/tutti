@@ -11,8 +11,8 @@ use std::any::TypeId;
 use tutti_session::HasParam;
 use tutti_units::{
     Amplitude, Azimuth, Balance, BitDepth, Cents, CompressionRatio, Db, Depth, Drive, Elevation,
-    Feedback, HoldFactor, Hz, Metres, Mix, Normalized, Q, Resonance, Seconds, Semitones, Spread,
-    StereoWidth, UnitParam,
+    Feedback, HoldFactor, Hz, Metres, Mix, ModulationIndex, Normalized, Q, Resonance, Seconds,
+    Semitones, Spread, StereoWidth, UnitParam,
 };
 
 /// Whether `N`'s param of kind `P` is in `U`: the unit a key's method for it
@@ -88,6 +88,10 @@ units! {
             Position => Normalized
         }
         tutti_nodes::TransientShaperNode<f32> { GainDb => Db }
+        tutti_nodes::FmNode<f32> {
+            Frequency => Hz, Volume => Amplitude, Index => ModulationIndex
+        }
+        tutti_nodes::AdditiveNode<f32> { Frequency => Hz, Volume => Amplitude }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
         tutti_nodes::CrossoverNode<f32> { Cutoff => Hz }
         tutti_nodes::MultibandCompressorNode<f32> {

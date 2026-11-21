@@ -98,7 +98,7 @@ struct Control<F: Float> {
     /// A close the install queue had no room for, owed to the audio thread:
     /// sent on the next open, close or reclaim, whichever comes first.
     owed_close: bool,
-    /// Where each tap opened takes its bell ([`OutputTaps::notify_with`]).
+    /// Where each tap opened takes its bell ([`HeardTaps::notify_with`]).
     bells: Option<tutti_rt::BellsHandle>,
 }
 

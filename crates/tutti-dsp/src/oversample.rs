@@ -60,7 +60,7 @@ use std::sync::Arc;
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, MonoMut, Sample};
-use tutti_units::{Db, Hz, SampleRate, Samples};
+use tutti_units::{Db, Hz, SampleRate, SampleSpan, Samples};
 
 use crate::{FirDesign, FirError, FirResponse};
 
@@ -267,21 +267,33 @@ impl OversamplingPlan {
         self.shared.latency
     }
 
+    /// The group delay of the down-sampling half alone, in base frames: how far a generator
+    /// that writes at the higher rate ([`Oversampler::source`]) is delayed. The half-bands are
+    /// linear-phase, so every frequency in the passband is delayed by exactly this much; it is
+    /// half the round trip before the latency's padding to whole frames.
+    #[must_use]
+    pub fn down_delay(&self) -> SampleSpan {
+        SampleSpan::clamped(self.stage_delay() as f64 / self.shared.factor.get() as f64)
+    }
+
+    /// The summed stage delays, in frames of the higher rate.
+    fn stage_delay(&self) -> usize {
+        let stages = self.shared.taps.len();
+        self.shared
+            .taps
+            .iter()
+            .enumerate()
+            .map(|(j, s)| s.delay << (stages - 1 - j))
+            .sum()
+    }
+
     /// The delay of the up-sampling half alone, in frames of the oversampled rate: the
     /// oversampled point `h` of an impulse that entered at base frame 0 peaks at `h` equal to
     /// this. It is the sum of the up stages' delays, each in oversampled frames, plus the
     /// pad that makes the round trip whole base frames (all of it on the up side), so it is
     /// not a whole number of base frames in general; the round trip is.
     pub(crate) fn upsample_delay(&self) -> usize {
-        let stages = self.shared.taps.len();
-        let stage_sum: usize = self
-            .shared
-            .taps
-            .iter()
-            .enumerate()
-            .map(|(j, s)| s.delay << (stages - 1 - j))
-            .sum();
-        stage_sum + 2 * self.shared.lead
+        self.stage_delay() + 2 * self.shared.lead
     }
 
     /// One channel's state for blocks of at most `max_block` base frames, its filters and
@@ -447,6 +459,15 @@ impl<F: Float> Oversampler<F> {
                 up_stage(taps, &mut self.up[j], n_in, &mut self.high[..2 * n_in]);
             }
         }
+    }
+
+    /// Opens a block of `frames` base frames for a generator that has no input to up-sample:
+    /// returns the higher-rate view (`frames * factor` frames) to write, which
+    /// [`downsample`](Self::downsample) then reads. Frames past the prepared maximum are
+    /// ignored. No allocation.
+    pub fn source(&mut self, frames: Samples) -> MonoMut<'_, F> {
+        self.frames = frames.get().min(self.max_block);
+        self.high_rate().1
     }
 
     /// The block [`upsample`](Self::upsample) took, at the higher rate, and where its processed

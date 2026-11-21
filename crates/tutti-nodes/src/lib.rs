@@ -80,6 +80,10 @@
 //!   the mean of the input through signed, delayed taps onto output channels, no latency, the tail
 //!   the last tap) and `DecorrelatorNode` (a sparse velvet-noise FIR per channel, each from its own
 //!   seeded sequence, of unit energy), from an `EarlyReflectionsConfig` and a `DecorrelatorConfig`.
+//! - **FM and additive synthesis** — `FmNode` (operators that modulate one another's phase as an
+//!   algorithm says, oversampled, with two-sample-average feedback) and `AdditiveNode` (a bank of
+//!   sine partials as ratios of a frequency, a partial at or above the Nyquist dropped), from an
+//!   `FmConfig` and an `AdditiveConfig`.
 //! - **Distance** — `DistanceNode` (a source at a distance in metres: the delay `r / c`, the level
 //!   `r_ref / r` and optional air absorption; a moving distance is the Doppler shift, and the
 //!   delay is musical, so it reports no latency), from a `DistanceConfig`.
@@ -314,6 +318,12 @@ pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 mod oscillator;
 pub use oscillator::{OscillatorConfig, OscillatorNode};
 
+// Phase-modulation and additive synthesis: operators and partials as sources.
+mod additive;
+mod fm;
+pub use additive::{AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet};
+pub use fm::{FmConfig, FmKernel, FmNode, FmSet};
+
 mod granular;
 pub use granular::{GranularConfig, GranularError, GranularNode};
 mod noise;
@@ -415,6 +425,17 @@ pub use tutti_dsp::{
     AutoPanControls, NoiseColour, OscillatorWave, PanLaw, RingModControls, TremoloControls,
 };
 
+// Physical models: a plucked string and a waveguide string.
+mod karplus_strong;
+mod waveguide_string;
+pub use karplus_strong::{
+    KarplusStrongConfig, KarplusStrongKernel, KarplusStrongNode, KarplusStrongSet,
+};
+pub use waveguide_string::{
+    WaveguideStringConfig, WaveguideStringKernel, WaveguideStringNode, WaveguideStringSet,
+};
+// The controls those start at and the positions on a string.
+pub use tutti_dsp::{KarplusStrongControls, WaveguideControls, WaveguidePositions};
 // A modal bank: damped resonators excited by the input.
 mod modal_bank;
 pub use modal_bank::{ModalBankConfig, ModalBankKernel, ModalBankNode, ModalBankSet};

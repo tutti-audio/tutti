@@ -54,7 +54,7 @@ impl Watched {
         tutti_fixtures::block_on_within(self.events.recv(), within)
             .and_then(Result::ok)
             .into_iter()
-            .chain(self.events.try_iter())
+            .chain(self.events.pending())
             .collect()
     }
 
@@ -505,11 +505,11 @@ impl crate::MidiEndpoints for Panicky {
             Some(Vec::new())
         })
     }
-    fn inputs(&self) -> Vec<crate::OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
+        Ok(Vec::new())
     }
-    fn outputs(&self) -> Vec<crate::OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
+        Ok(Vec::new())
     }
     fn open_input(
         &self,
@@ -587,7 +587,7 @@ fn asking_for_capabilities_does_not_wake_the_watch() {
     let _device = plug(&name);
     let id = info(until(&devices, added(&name))).id;
     // The first call opens the enumerating client, which announces itself once.
-    assert!(devices.capability(&id).is_some());
+    assert!(devices.capability(&id).unwrap().is_some());
     let opens = tutti_alsa_ffi::clients_opened();
     for _ in 0..1000 {
         let _ = devices.capability(&id);
@@ -1187,7 +1187,7 @@ fn capability_of(devices: &Watched, name: &str) -> Endpoint {
     let deadline = Instant::now() + PATIENCE;
     loop {
         if let Some(d) = devices.list().into_iter().find(|d| d.name == want) {
-            return devices.capability(&d.id).expect("a capability");
+            return devices.capability(&d.id).unwrap().expect("a capability");
         }
         assert!(Instant::now() < deadline, "{name} never listed");
         devices.wait(deadline.saturating_duration_since(Instant::now()));

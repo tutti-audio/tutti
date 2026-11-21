@@ -305,7 +305,7 @@ fn sysex(status: SysexStatus, data: &[u8]) -> Ump {
 fn a_midi1_note_on_is_one_short_message() {
     let note_on = Ump([0x2090_3C64, 0, 0, 0]);
     assert_eq!(
-        sent(&mut ByteOut::new(), note_on),
+        sent(&mut ByteOut::new().0, note_on),
         [vec![0x20, 0x90, 0x3C, 0x64]]
     );
 }
@@ -314,7 +314,7 @@ fn a_midi1_note_on_is_one_short_message() {
 fn a_midi1_program_change_is_one_short_message() {
     let program = Ump([0x20C3_0A00, 0, 0, 0]);
     assert_eq!(
-        sent(&mut ByteOut::new(), program),
+        sent(&mut ByteOut::new().0, program),
         [vec![0x20, 0xC3, 0x0A, 0]]
     );
 }
@@ -325,7 +325,7 @@ fn a_midi2_note_on_is_one_midi1_note_on_with_the_top_seven_velocity_bits() {
     // Type 4, status 9 channel 0, note 0x3C; velocity 0xC000 (top 7 bits 0x60).
     let note_on = Ump([0x4090_3C00, 0xC000_0000, 0, 0]);
     assert_eq!(
-        sent(&mut ByteOut::new(), note_on),
+        sent(&mut ByteOut::new().0, note_on),
         [vec![0x20, 0x90, 0x3C, 0x60]]
     );
 }
@@ -336,7 +336,7 @@ fn a_midi2_pitch_bend_range_is_four_control_changes() {
     // Type 4, status 2 (Registered), RPN 0/0, value 12 << 25.
     let rpn = Ump([0x4020_0000, 12 << 25, 0, 0]);
     assert_eq!(
-        sent(&mut ByteOut::new(), rpn),
+        sent(&mut ByteOut::new().0, rpn),
         [
             vec![0x20, 0xB0, 101, 0],
             vec![0x20, 0xB0, 100, 0],
@@ -348,7 +348,7 @@ fn a_midi2_pitch_bend_range_is_four_control_changes() {
 
 #[test]
 fn sysex7_packets_are_sent_as_one_framed_message_at_the_end_packet() {
-    let mut out = ByteOut::new();
+    let mut out = ByteOut::new().0;
     assert!(sent(&mut out, sysex(SysexStatus::Start, &[1, 2, 3, 4, 5, 6])).is_empty());
     assert!(
         sent(
@@ -367,21 +367,31 @@ fn sysex7_packets_are_sent_as_one_framed_message_at_the_end_packet() {
 #[test]
 fn a_complete_sysex7_packet_is_a_whole_message() {
     let message = sent(
-        &mut ByteOut::new(),
+        &mut ByteOut::new().0,
         sysex(SysexStatus::Complete, &[0x7E, 0x7F]),
     );
     assert_eq!(message, [vec![0xF0, 0x7E, 0x7F, 0xF7]]);
 }
 
+/// **A message with no MIDI 1.0 form sends nothing and is counted**; a NOOP,
+/// which carries nothing, is not.
 #[test]
-fn a_message_with_no_midi1_form_sends_nothing() {
+fn a_message_with_no_midi1_form_sends_nothing_and_is_counted() {
+    let (mut out, count) = ByteOut::new();
+    // Flex Data (type 0xD): no MIDI 1.0 byte form.
+    let flex = Ump([0xD000_0000, 0, 0, 0]);
+    assert!(sent(&mut out, flex).is_empty());
+    assert_eq!(count.get(), 1);
     // Utility: a NOOP (type 0).
-    assert!(sent(&mut ByteOut::new(), Ump::default()).is_empty());
+    assert!(sent(&mut out, Ump::default()).is_empty());
+    assert_eq!(count.get(), 1, "a NOOP says nothing to send");
+    assert_eq!(sent(&mut out, Ump([0x2090_3C64, 0, 0, 0])).len(), 1);
+    assert_eq!(count.get(), 1, "a note is not counted");
 }
 
 #[test]
 fn a_failed_send_stops_the_message_and_is_returned() {
-    let mut out = ByteOut::new();
+    let mut out = ByteOut::new().0;
     let failed = out.encode(Ump([0x2090_3C64, 0, 0, 0]), |_| Err("no"));
     assert_eq!(failed, Err("no"));
 }
@@ -675,11 +685,11 @@ impl MidiEndpoints for Polled {
             Duration::from_millis(5),
         )?))
     }
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
     fn open_input(
         &self,
@@ -749,11 +759,11 @@ impl MidiEndpoints for Captured {
         *self.0.lock().unwrap() = Some(sink);
         Ok(Box::new(crate::endpoints::NoWatch))
     }
-    fn inputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
-    fn outputs(&self) -> Vec<OsEndpoint> {
-        Vec::new()
+    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
+        Ok(Vec::new())
     }
     fn open_input(
         &self,

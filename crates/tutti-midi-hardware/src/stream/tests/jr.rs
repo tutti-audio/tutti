@@ -259,7 +259,9 @@ fn a_reconnected_input_asks_again_to_stop_jr() {
     });
     send_ump(&wire, on, 20);
     wire.poll(30);
-    assert!(wire.session.disconnect_input(&wire.id.clone()));
+    wire.session
+        .disconnect_input(&wire.id.clone())
+        .expect("the input is open");
     let _ = wire
         .session
         .connect_input(crate::testing::started(), &wire.id.clone())

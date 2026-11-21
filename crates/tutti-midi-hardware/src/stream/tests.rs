@@ -53,7 +53,7 @@ fn streams(polled: impl IntoIterator<Item = Polled>) -> Vec<(DeviceId, DeviceStr
 
 /// A MIDI 2.0 endpoint the OS describes, with no blocks.
 fn midi2() -> Endpoint {
-    from_os(Protocol::Midi2, None, [])
+    from_os(Protocol::Midi2, None, []).endpoint
 }
 
 fn session_over(os: Endpoint, direction: PortDirection, device: Endpoint) -> Wire {
@@ -540,33 +540,6 @@ fn after_giving_up_the_sysex_copy_is_off_and_nothing_is_sent() {
     );
 }
 
-/// An output the session cannot open (another app holds it) does not fail the
-/// input: the connect succeeds, the device is the `Described` device the OS
-/// says it is, and nothing is sent or waited for.
-#[test]
-fn a_refused_output_does_not_fail_the_input_and_nothing_is_asked() {
-    use tutti_midi_device::INQUIRY_TIMEOUT;
-    let mut wire = session_over(
-        legacy(),
-        PortDirection::Duplex,
-        Endpoint::new(Supports::of(Capabilities {
-            midi1: true,
-            ..Capabilities::default()
-        })),
-    );
-    wire.counters.refuse_output_opens(true);
-    wire.open();
-    assert!(wire.session.is_input_connected(&wire.id));
-    let ms = INQUIRY_TIMEOUT.as_millis() as u64;
-    for step in 0..4 {
-        assert!(wire.session.poll(wire.at(step * ms)).next().is_none());
-    }
-    assert!(received(&wire).is_empty(), "no output, nothing sent");
-    let stream = wire.session.stream(&wire.id).unwrap();
-    assert_eq!(stream.basis(), Basis::Described);
-    assert_eq!(stream.endpoint().identity(), None);
-}
-
 /// The output an input opens to ask its device is that input's own: it is not
 /// one the caller holds (`connect_output` to the same device is a separate open
 /// that the caller owns), and it goes with the input: once disconnected, the
@@ -578,7 +551,9 @@ fn the_asking_output_is_the_inputs_own_and_closes_with_it() {
     assert!(wire.session.poll(wire.at(0)).next().is_none());
     assert_eq!(received(&wire).len(), 1, "the request");
 
-    assert!(wire.session.disconnect_input(&wire.id.clone()));
+    wire.session
+        .disconnect_input(&wire.id.clone())
+        .expect("the input is open");
     let ms = INQUIRY_TIMEOUT.as_millis() as u64;
     for step in 1..4 {
         assert!(wire.session.poll(wire.at(step * ms)).next().is_none());
@@ -1057,7 +1032,7 @@ fn a_midi1_device_that_answers_an_identity_request_is_learned_and_checked_agains
     assert_eq!(saved.confirm(&learned), Match::SameModel);
 
     let closed = wire.id.clone();
-    wire.session.disconnect_input(&closed);
+    wire.session.disconnect_input(&closed).unwrap();
     assert!(wire.session.learned(&closed).is_empty());
     assert!(wire.session.saved(&closed).is_none());
 }
