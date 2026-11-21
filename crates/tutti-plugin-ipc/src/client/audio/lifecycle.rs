@@ -112,13 +112,18 @@ impl Lifecycle {
         self.refusal.lock_recover().clone()
     }
 
-    /// Offers every refusal and clearing to `wait` from now on, the standing
-    /// one included. Control side.
+    /// Offers every refusal to `wait` from now on, the standing one included.
+    /// Control side.
     pub(super) fn offer_refusals_to(&self, wait: Arc<OfflineWait>) {
+        // Under the `offered_to` lock: the wait is stored, then the standing
+        // refusal read. A `set_rate_refusal` that holds the lock first wrote
+        // its refusal before this read and is offered here; one that holds it
+        // after finds the wait and offers it itself.
+        let mut offered_to = self.offered_to.lock_recover();
+        let wait = offered_to.insert(wait);
         if let Some(refusal) = self.rate_refusal() {
             wait.offer_refusal(refusal);
         }
-        *self.offered_to.lock_recover() = Some(wait);
     }
 
     /// Whether a refused rate stands. Wait-free: no lock, no allocation.
@@ -128,15 +133,22 @@ impl Lifecycle {
 
     pub(super) fn set_rate_refusal(&self, refusal: Option<RateRefusal>) {
         let refused = refusal.is_some();
-        // The fork's wait first: the flag is raised after it, so a reader of
-        // the flag finds the reason offered. A clearing is not offered: the
-        // wait's slot is only filled, and its latch decides what is reported.
-        if let Some(refusal) = &refusal
-            && let Some(wait) = self.offered_to.lock_recover().as_ref()
+        // Under the `offered_to` lock: the refusal is written, then offered
+        // to the fork's wait, and the flag is raised after both, so a reader
+        // of the flag finds the reason offered. `offer_refusals_to` takes the
+        // same lock to store the wait and read the refusal, so a refusal
+        // written while the wait is being registered is offered by one side
+        // or the other. A clearing is not offered: the wait's slot is only
+        // filled, and its latch decides what is reported.
         {
-            wait.offer_refusal(refusal.clone());
+            let offered_to = self.offered_to.lock_recover();
+            *self.refusal.lock_recover() = refusal.clone();
+            if let Some(refusal) = refusal
+                && let Some(wait) = offered_to.as_ref()
+            {
+                wait.offer_refusal(refusal);
+            }
         }
-        *self.refusal.lock_recover() = refusal;
         self.refused.store(refused, Ordering::Release);
     }
 
