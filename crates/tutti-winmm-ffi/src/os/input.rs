@@ -208,10 +208,10 @@ impl MidiIn {
     /// callback.
     ///
     /// The worker blocks on a wait it cannot interrupt but by its wake, so it
-    /// cannot see its executor shut down: an input still open when its executor
-    /// drops costs the executor's shutdown bound, and the thread is then detached
-    /// with a warning (it ends when the input drops). Drop an input before its
-    /// executor.
+    /// cannot see its executor shut down: an input still open when the last clone
+    /// of its executor drops costs the executor's shutdown bound, and the thread is
+    /// then detached with a warning (it ends when the input drops). Drop an input
+    /// before its executor.
     ///
     /// `handler` is dropped when the last reference to the input's state goes,
     /// which can be on winmm's thread after the `MidiIn` has been dropped (a

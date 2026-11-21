@@ -363,6 +363,7 @@ impl Devices {
             port: producer.port(),
             ports: Arc::clone(ports),
             info,
+            _executor: self.inner.executor.clone(),
         };
         // On an error `input` drops here, and takes the port with it.
         input.connection = Some(self.inner.backend.open_input(handle, producer)?);
@@ -554,6 +555,10 @@ pub struct OpenInput {
     port: InputId,
     ports: Arc<HardwareMidiInputs>,
     info: DeviceInfo,
+    /// Keeps the executor of the connection's thread alive: declared last, so the
+    /// connection ends its thread and frees the port before the last clone of the
+    /// executor can shut it down.
+    _executor: Executor,
 }
 
 impl core::fmt::Debug for OpenInput {
@@ -619,13 +624,15 @@ pub struct OpenOutput {
     /// being polled when it is cancelled ends on its driver, which then drops the
     /// sink it holds, so the connection may close on that thread.
     heartbeat: Option<Heartbeat>,
-    /// What the heartbeat is spawned on.
-    executor: Executor,
     info: DeviceInfo,
     sink: Arc<dyn DeviceOut>,
     wire: Wire,
     /// The packets the sink had no room for, for [`losses`](Self::losses).
     refused: u64,
+    /// What the heartbeat is spawned on. Declared after `sink`: the sink ends its
+    /// sender and frees the port before the last clone of the executor can shut
+    /// it down.
+    executor: Executor,
 }
 
 impl core::fmt::Debug for OpenOutput {

@@ -42,7 +42,8 @@ pub(super) const MIN_FILES: usize = 500;
 const TARGETS: [&str; 2] = ["spawn", "spawn_dedicated"];
 const OWNERS: [&str; 4] = ["core-foundation", "core-engine", "plugin", "midi"];
 
-/// A file whose thread starts are the audio side's.
+/// A file whose thread starts the executor does not take, with the reason: the audio
+/// side's, or a process-lifetime OS client's.
 pub(crate) struct Exempt {
     pub(crate) file: &'static str,
     pub(crate) reason: &'static str,

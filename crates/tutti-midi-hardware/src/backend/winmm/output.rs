@@ -29,10 +29,11 @@ struct Shared {
 /// stops the sender, waits for it to end and closes the port; events not yet due
 /// are dropped.
 ///
-/// The sender blocks on a wait it cannot interrupt but by its wake, so it cannot
-/// see its executor shut down: an output still open when its executor drops costs
-/// the executor's shutdown bound, and the thread is then detached with a warning
-/// (it ends when the output drops). Drop an output before its executor.
+/// The output ends its sender before the executor clone it was opened with drops,
+/// and the sender cannot see its executor shut down: an app that holds the
+/// executor's last clone elsewhere and drops it while an output is open costs the
+/// executor's shutdown bound, and the thread is then detached with a warning (it
+/// ends when the output drops). Drop an output before its executor.
 pub struct WinMmOutput {
     shared: Arc<Shared>,
     task: Option<Task<()>>,
