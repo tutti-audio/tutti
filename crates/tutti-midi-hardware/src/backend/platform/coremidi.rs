@@ -18,10 +18,10 @@ pub(crate) fn open_virtual_endpoint(
     _executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
-    _started: Started,
+    started: Started,
     main: MainThreadMarker,
 ) -> Result<Box<dyn OpeningBackend>> {
-    let opening = super::coremidi::UmpVirtualEndpoint::open(spec, producer, main)?;
+    let opening = super::coremidi::UmpVirtualEndpoint::open(spec, producer, started, main)?;
     Ok(Box::new(opening))
 }
 

@@ -42,8 +42,8 @@
 //! CoreMIDI has been seen to refuse for a few milliseconds while other processes
 //! create endpoints: a poll then reports `Pending`, and
 //! [`deadline`](OpeningVirtualEndpoint::deadline) is the instant the next poll can
-//! make progress. Nothing waits inside it, and there is no blocking form: the
-//! caller polls from its own loop or timer.
+//! make progress. Nothing waits inside it: the caller polls from its own loop or
+//! timer.
 //!
 //! # Main thread
 //!
@@ -208,12 +208,12 @@ pub(crate) trait OpeningBackend {
 }
 
 /// A creation that is ready on the first poll: the endpoint, or why there is none.
-pub(crate) struct Immediate {
+pub(crate) struct AtOnce {
     made: Option<Result<(Box<dyn EndpointBackend>, VirtualProtocol)>>,
     created_at: Instant,
 }
 
-impl Immediate {
+impl AtOnce {
     pub(crate) fn new(made: Result<(Box<dyn EndpointBackend>, VirtualProtocol)>) -> Self {
         Self {
             made: Some(made),
@@ -222,7 +222,7 @@ impl Immediate {
     }
 }
 
-impl OpeningBackend for Immediate {
+impl OpeningBackend for AtOnce {
     fn poll(
         &mut self,
         _main: MainThreadMarker,
@@ -349,10 +349,10 @@ impl VirtualEndpoint {
     ///
     /// # Errors
     ///
-    /// [`MidiHardwareError::BackendStarting`]
-    /// when the backend is not ready after all. A platform with no backend, a
-    /// `spec` that declares Function Blocks the platform cannot publish and an OS
-    /// that refuses the endpoint are the polls' errors
+    /// A `spec` the platform cannot publish is refused here when the platform
+    /// checks it before any OS call (macOS: a reserved protocol, a block CoreMIDI
+    /// cannot carry, an OS before 15). Every other refusal (a platform with no
+    /// backend, an OS that refuses the endpoint) is the polls' error
     /// ([`OpeningVirtualEndpoint::poll`]).
     pub fn open(
         executor: &Executor,

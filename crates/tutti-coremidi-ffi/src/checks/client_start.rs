@@ -12,40 +12,62 @@ use super::os_status::OsStatus;
 use std::task::Poll;
 use tutti_platform::Instant;
 
-/// The rule for a creation whose first attempt starts at `start`, and whether it
-/// has a retry window.
+/// Whether a creation retries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Window {
+    /// The creation has its full retry window.
+    Full,
+    /// An earlier window ended in failure recently: one attempt, no retry.
+    Suppressed,
+}
+
+/// The rule for a creation whose first attempt starts at `start`, and its window.
 ///
 /// `gave_up` is the instant an earlier creation's window ended in failure. Within
 /// [`CLIENT_BOUND`] of it the server is still known to be gone, so this creation
 /// makes its one attempt and does not retry; after that it gets a full window
 /// again.
-pub(crate) fn rule(start: Instant, gave_up: Option<Instant>) -> (Backoff, bool) {
+pub(crate) fn rule(start: Instant, gave_up: Option<Instant>) -> (Backoff, Window) {
     let suppressed = gave_up.is_some_and(|at| start < at + CLIENT_BOUND);
     let backoff = Backoff::client(start);
     if suppressed {
-        (backoff.single_attempt(), false)
+        (backoff.single_attempt(), Window::Suppressed)
     } else {
-        (backoff, true)
+        (backoff, Window::Full)
     }
+}
+
+/// Why a creation ended without a client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StartFailure {
+    /// The call failed with a status that is not retried.
+    Failed(OsStatus),
+    /// The bound passed; `last` is the status that kept failing, if an attempt ran.
+    TimedOut { last: Option<OsStatus> },
+    /// The creation already ended: this poll made no attempt.
+    Finished,
 }
 
 /// One client creation in progress.
 #[derive(Debug)]
 pub(crate) struct ClientStart {
     backoff: Backoff,
-    windowed: bool,
+    window: Window,
     gave_up_at: Option<Instant>,
+    /// Set by the poll that ended the creation, with how it ended.
+    ended: Option<StartFailure>,
 }
 
 impl ClientStart {
     /// A creation whose first attempt is due at `start`, after a window that
     /// ended in failure at `gave_up` (see [`rule`]).
     pub(crate) fn new(start: Instant, gave_up: Option<Instant>) -> Self {
-        let (backoff, windowed) = rule(start, gave_up);
+        let (backoff, window) = rule(start, gave_up);
         Self {
             backoff,
-            windowed,
+            window,
             gave_up_at: None,
+            ended: None,
         }
     }
 
@@ -60,17 +82,33 @@ impl ClientStart {
         self.gave_up_at
     }
 
-    /// One poll at `now`: runs `create` only when an attempt is due.
+    /// One poll at `now`: runs `create` only when an attempt is due. After the poll
+    /// that ended the creation, a poll makes no attempt: it repeats a failure and
+    /// is [`StartFailure::Finished`] after a success.
     pub(crate) fn poll<T>(
         &mut self,
         now: Instant,
         create: impl FnOnce() -> Result<T, OsStatus>,
-    ) -> Poll<Result<T, Failure<OsStatus>>> {
-        let polled = poll_attempt(&mut self.backoff, now, create, |status| Some(*status));
-        if self.windowed && matches!(polled, Poll::Ready(Err(Failure::TimedOut { .. }))) {
-            self.gave_up_at = Some(now);
+    ) -> Poll<Result<T, StartFailure>> {
+        if let Some(ended) = self.ended {
+            return Poll::Ready(Err(ended));
         }
-        polled
+        let polled = match poll_attempt(&mut self.backoff, now, create, |status| Some(*status)) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Ok(done)) => {
+                self.ended = Some(StartFailure::Finished);
+                return Poll::Ready(Ok(done));
+            }
+            Poll::Ready(Err(Failure::Failed(status))) => StartFailure::Failed(status),
+            Poll::Ready(Err(Failure::TimedOut { last })) => {
+                if self.window == Window::Full {
+                    self.gave_up_at = Some(now);
+                }
+                StartFailure::TimedOut { last }
+            }
+        };
+        self.ended = Some(polled);
+        Poll::Ready(Err(polled))
     }
 }
 
@@ -114,8 +152,8 @@ mod tests {
     fn a_creation_within_the_bound_of_a_failed_window_makes_one_attempt() {
         let start = Instant::now();
         for later in [ms(0), ms(5_000), CLIENT_BOUND - ms(1)] {
-            let (mut backoff, windowed) = rule(start + later, Some(start));
-            assert!(!windowed);
+            let (mut backoff, window) = rule(start + later, Some(start));
+            assert_eq!(window, Window::Suppressed);
             assert_eq!(backoff.failed(SERVER_GONE, start + later), Verdict::Fatal);
         }
     }
@@ -123,8 +161,8 @@ mod tests {
     #[test]
     fn a_creation_after_the_bound_of_a_failed_window_gets_a_full_window() {
         let start = Instant::now();
-        let (mut backoff, windowed) = rule(start + CLIENT_BOUND, Some(start));
-        assert!(windowed);
+        let (mut backoff, window) = rule(start + CLIENT_BOUND, Some(start));
+        assert_eq!(window, Window::Full);
         assert_eq!(
             backoff.failed(SERVER_GONE, start + CLIENT_BOUND),
             Verdict::Retry
@@ -162,7 +200,9 @@ mod tests {
         assert_eq!(start.gave_up_at(), None);
         assert_eq!(
             start.poll(t0 + CLIENT_BOUND, &mut create),
-            Poll::Ready(Err(Failure::TimedOut { last: SERVER_GONE }))
+            Poll::Ready(Err(StartFailure::TimedOut {
+                last: Some(SERVER_GONE)
+            }))
         );
         assert_eq!(calls.get(), attempts, "the timeout makes no attempt");
         assert_eq!(start.gave_up_at(), Some(t0 + CLIENT_BOUND));
@@ -175,7 +215,7 @@ mod tests {
         let (mut create, calls) = creator(usize::MAX, SERVER_GONE);
         assert_eq!(
             start.poll(t0 + ms(1), &mut create),
-            Poll::Ready(Err(Failure::Failed(SERVER_GONE)))
+            Poll::Ready(Err(StartFailure::Failed(SERVER_GONE)))
         );
         assert_eq!(calls.get(), 1);
         assert_eq!(start.gave_up_at(), None);
@@ -188,7 +228,7 @@ mod tests {
         let (mut create, calls) = creator(usize::MAX, SERVER_GONE);
         assert_eq!(
             start.poll(t0 + ms(1) + CLIENT_BOUND, &mut create),
-            Poll::Ready(Err(Failure::TimedOut { last: SERVER_GONE }))
+            Poll::Ready(Err(StartFailure::TimedOut { last: None }))
         );
         assert_eq!(calls.get(), 0);
         assert_eq!(
@@ -205,10 +245,29 @@ mod tests {
         let (mut create, calls) = creator(usize::MAX, OsStatus::new(-10839));
         assert_eq!(
             start.poll(t0, &mut create),
-            Poll::Ready(Err(Failure::Failed(OsStatus::new(-10839))))
+            Poll::Ready(Err(StartFailure::Failed(OsStatus::new(-10839))))
         );
         assert_eq!(calls.get(), 1);
         assert_eq!(start.gave_up_at(), None);
+    }
+
+    #[test]
+    fn a_poll_after_the_creation_ended_makes_no_attempt() {
+        let t0 = Instant::now();
+        let mut start = ClientStart::new(t0, None);
+        let (mut create, calls) = creator(0, SERVER_GONE);
+        assert_eq!(start.poll(t0, &mut create), Poll::Ready(Ok(7)));
+        assert_eq!(
+            start.poll(t0, &mut create),
+            Poll::Ready(Err(StartFailure::Finished))
+        );
+        assert_eq!(calls.get(), 1);
+        let mut start = ClientStart::new(t0, None);
+        let (mut create, calls) = creator(usize::MAX, OsStatus::new(-10839));
+        let failed = Poll::Ready(Err(StartFailure::Failed(OsStatus::new(-10839))));
+        assert_eq!(start.poll(t0, &mut create), failed);
+        assert_eq!(start.poll(t0 + ms(5), &mut create), failed);
+        assert_eq!(calls.get(), 1, "a failed creation is not attempted again");
     }
 
     #[test]

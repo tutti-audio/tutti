@@ -28,7 +28,7 @@ const PATIENCE: Duration = Duration::from_secs(30);
 const INSTANCE: &str = "tutti-test-instance";
 
 /// `session` once its backend has started: CoreMIDI's client is made on a thread of
-/// the backend's own, and opening before then is `BackendStarting`.
+/// the backend's own, so a port is opened with the proof that it resolved.
 fn started(session: MidiSession) -> MidiSession {
     tutti_fixtures::block_on(session.start()).expect("the backend starts");
     session
@@ -220,7 +220,9 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
         .into_iter()
         .find(|d| d.name.contains(name))
         .expect("the destination is listed");
-    let mut out = session.connect_output(&device.id).expect("connects");
+    let mut out = session
+        .connect_output(opening::started(&session), &device.id)
+        .expect("connects");
     for key in 40..45 {
         let note: Ump = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::of(1), key, 0x8000);
         assert_eq!(out.queue(&[(Offset::ZERO, note)]).packets(), 1);

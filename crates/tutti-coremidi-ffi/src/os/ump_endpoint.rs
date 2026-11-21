@@ -164,8 +164,7 @@ impl UmpSender {
 pub struct CreateUmpEndpoint {
     // Declared first, so it is taken down before the receiver its callback reads
     // goes (fields drop in order).
-    endpoint: TakeDown<Retained<MIDIUMPMutableEndpoint>>,
-    function_blocks: Retained<NSArray<MIDIUMPMutableFunctionBlock>>,
+    endpoint: TakeDown<Held>,
     blocks: Vec<PlatformBlock>,
     protocol: MIDIProtocolID,
     // `None` once the finished endpoint owns it.
@@ -174,8 +173,14 @@ pub struct CreateUmpEndpoint {
     // What the read-back found, taken when the creation finishes.
     built: Option<(MIDIEndpointRef, Vec<FunctionBlockId>)>,
     // Makes the type `!Send` and `!Sync` whatever its fields are.
-    _main: MainThreadMarker,
     _thread: PhantomData<*const ()>,
+}
+
+/// What a creation owns of CoreMIDI: the endpoint and the blocks it registers.
+/// Both are Objective-C objects, so both are released inside the guarded disposal.
+struct Held {
+    endpoint: Retained<MIDIUMPMutableEndpoint>,
+    function_blocks: Retained<NSArray<MIDIUMPMutableFunctionBlock>>,
 }
 
 impl core::fmt::Debug for CreateUmpEndpoint {
@@ -222,7 +227,7 @@ impl CreateUmpEndpoint {
         reason = "every one is a field of the endpoint's creation"
     )]
     pub fn new<F>(
-        main: MainThreadMarker,
+        _main: MainThreadMarker,
         _client: SharedClient,
         name: &str,
         protocol: Protocol,
@@ -253,14 +258,18 @@ impl CreateUmpEndpoint {
         .map_err(Error::from)
         .and_then(|inner| inner)?;
         Ok(Self {
-            endpoint: TakeDown::new(endpoint, disable_and_release),
-            function_blocks,
+            endpoint: TakeDown::new(
+                Held {
+                    endpoint,
+                    function_blocks,
+                },
+                take_down,
+            ),
             blocks,
             protocol,
             receiver: Some(receiver),
             phases: Phases::new(now),
             built: None,
-            _main: main,
             _thread: PhantomData,
         })
     }
@@ -298,7 +307,6 @@ impl CreateUmpEndpoint {
     ) -> Poll<Result<UmpEndpoint, Error>> {
         let Self {
             endpoint,
-            function_blocks,
             blocks,
             phases,
             built,
@@ -314,9 +322,11 @@ impl CreateUmpEndpoint {
                 phases.poll(
                     now,
                     |stage| match stage {
-                        Stage::Register => register(live, function_blocks, count),
-                        Stage::Enable => enable(live),
-                        Stage::ReadBack => read_back(live, blocks).map(|done| *built = Some(done)),
+                        Stage::Register => register(&live.endpoint, &live.function_blocks, count),
+                        Stage::Enable => enable(&live.endpoint),
+                        Stage::ReadBack => {
+                            read_back(&live.endpoint, blocks).map(|done| *built = Some(done))
+                        }
                     },
                     Error::os_status,
                 )
@@ -344,8 +354,16 @@ impl CreateUmpEndpoint {
     fn finish(&mut self, main: MainThreadMarker) -> UmpEndpoint {
         let (source, numbers) = self.built.take().expect("the read-back ran");
         let receiver = self.receiver.take().expect("the creation has not finished");
+        let held = self
+            .endpoint
+            .release()
+            .expect("the creation has not finished");
+        // The blocks were registered and are no longer needed: released with the
+        // exceptions caught, as the endpoint's own release is.
+        let function_blocks = held.function_blocks;
+        let _ = autoreleasepool(|_| catch(|| drop(function_blocks)));
         UmpEndpoint {
-            endpoint: self.endpoint.release(),
+            endpoint: Some(held.endpoint),
             sender: UmpSender {
                 source,
                 protocol: self.protocol,
@@ -555,6 +573,17 @@ fn objc(operation: Operation, error: &NSError) -> Error {
         error.domain().to_string(),
         error.localizedDescription().to_string(),
     )
+}
+
+/// Takes a creation down: disables the endpoint and releases it and the blocks it
+/// registered, each release inside its own [`catch`] and pool.
+fn take_down(held: Held) {
+    let Held {
+        endpoint,
+        function_blocks,
+    } = held;
+    disable_and_release(endpoint);
+    let _ = autoreleasepool(|_| catch(|| drop(function_blocks)));
 }
 
 /// Disables `endpoint` and releases it, each in its own [`catch`] (releasing runs the

@@ -102,13 +102,14 @@ fn a_change_is_reported_when_an_output_port_comes_first() {
     let first_name = format!("tutti-port-first-{pid}");
     let first = plain(&first_name, VirtualProtocol::Midi2, |_| {});
     let backend = crate::backend::coremidi::CoreMidiEndpoints::new();
+    let started = tutti_fixtures::block_on(backend.start()).expect("the hub makes its client");
     let id = backend
         .outputs()
         .into_iter()
         .find(|e| e.name.contains(&first_name))
         .expect("the virtual endpoint is listed")
         .id;
-    let out = backend.open_output(id).expect("opens");
+    let out = backend.open_output(started, id).expect("opens");
     let devices = Watched::open();
     let name = format!("tutti-after-port-{pid}");
     let destination = plain(&name, VirtualProtocol::Midi2, |_| {});
@@ -145,7 +146,7 @@ fn a_change_is_reported_when_a_virtual_endpoint_comes_first() {
 #[test]
 fn a_hub_thread_that_ends_before_answering_fails_the_start() {
     let hub = Hub::new();
-    let start = Start::over(Arc::clone(&hub.gate), hub.gate.begin());
+    let start = hub.gate.start(hub.gate.begin(false));
     *hub.unparker.lock_recover() = Some(parker().0);
     hub.thread_ended();
     let Err(MidiHardwareError::BackendFailed(why)) = tutti_fixtures::block_on(start) else {
@@ -161,17 +162,4 @@ fn a_hub_thread_that_ends_before_answering_fails_the_start() {
         hub.unparker.lock_recover().is_none(),
         "the next start makes a thread"
     );
-    assert!(matches!(
-        hub.client(),
-        Err(MidiHardwareError::BackendFailed(_))
-    ));
-}
-
-/// A hub whose client is not made says so by name and does not wait.
-#[test]
-fn a_hub_with_no_client_yet_is_starting() {
-    assert!(matches!(
-        Hub::new().client(),
-        Err(MidiHardwareError::BackendStarting)
-    ));
 }

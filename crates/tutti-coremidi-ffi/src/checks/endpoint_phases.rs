@@ -270,7 +270,12 @@ mod tests {
         assert_eq!(phases.stage(), Stage::Enable);
         assert_eq!(
             phases.poll(t0 + Duration::from_secs(2), &mut attempt, status),
-            Poll::Ready(Err((Stage::Enable, Failure::TimedOut { last: REFUSED })))
+            Poll::Ready(Err((
+                Stage::Enable,
+                Failure::TimedOut {
+                    last: Some(REFUSED)
+                }
+            )))
         );
     }
 

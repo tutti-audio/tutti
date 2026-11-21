@@ -49,7 +49,7 @@ pub(crate) struct Backoff {
     bound_at: Instant,
     next_at: Instant,
     single_attempt: bool,
-    last: OsStatus,
+    last: Option<OsStatus>,
 }
 
 impl Backoff {
@@ -69,7 +69,7 @@ impl Backoff {
             bound_at: start + bound,
             next_at: start,
             single_attempt: false,
-            last: retried,
+            last: None,
         }
     }
 
@@ -104,7 +104,8 @@ impl Backoff {
     }
 
     /// When the next poll can make progress: the next attempt's instant, never
-    /// past the bound (a poll at the bound is the timeout).
+    /// past the bound (a poll at the bound is the timeout). After the last failure
+    /// it is the give-up instant: the bound.
     pub(crate) fn deadline(&self) -> Instant {
         self.next_at
     }
@@ -120,9 +121,9 @@ impl Backoff {
         }
     }
 
-    /// The status the rule last retried, or the one it retries before any attempt
-    /// failed: what a timeout names.
-    pub(crate) fn last(&self) -> OsStatus {
+    /// The status the rule last retried; `None` before any attempt failed (a bound
+    /// that passed with no attempt).
+    pub(crate) fn last(&self) -> Option<OsStatus> {
         self.last
     }
 
@@ -134,7 +135,7 @@ impl Backoff {
         if self.single_attempt || status != self.retried {
             return Verdict::Fatal;
         }
-        self.last = status;
+        self.last = Some(status);
         self.next_at = (now + self.wait).min(self.bound_at);
         self.wait = (self.wait * 2).min(self.longest_wait);
         Verdict::Retry
@@ -146,10 +147,10 @@ impl Backoff {
 pub(crate) enum Failure<E> {
     /// An attempt failed with an error the rule does not retry.
     Failed(E),
-    /// The bound passed while the retried status kept failing; `last` is that status.
+    /// The bound passed; `last` is the status that kept failing, if an attempt ran.
     TimedOut {
         /// The last status retried.
-        last: OsStatus,
+        last: Option<OsStatus>,
     },
 }
 
@@ -346,7 +347,9 @@ mod tests {
         );
         assert_eq!(
             poll_attempt(&mut rule, start + CLIENT_BOUND, &mut fail, |s| Some(*s)),
-            Poll::Ready(Err(Failure::TimedOut { last: SERVER_GONE }))
+            Poll::Ready(Err(Failure::TimedOut {
+                last: Some(SERVER_GONE)
+            }))
         );
         assert_eq!(calls, 1);
     }

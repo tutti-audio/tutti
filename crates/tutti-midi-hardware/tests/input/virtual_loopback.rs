@@ -38,9 +38,6 @@ fn session(executor: &Executor) -> (MidiSession, Listener) {
     let listener = Listener::over(&inlets);
     let session =
         MidiSession::open(executor, inlets, MidiHardwareConfig::new()).expect("a session");
-    // CoreMIDI's client is made on a thread of the backend's own: opening before it
-    // is made is `BackendStarting`.
-    tutti_fixtures::block_on(session.start()).expect("the backend starts");
     (session, listener)
 }
 
@@ -80,8 +77,9 @@ fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
     let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let device = listed(|| io.inputs(), &spec);
-    let tutti_midi_hardware::Connected::Opened(inlet) =
-        io.connect_input(&device.id).expect("connects")
+    let tutti_midi_hardware::Connected::Opened(inlet) = io
+        .connect_input(super::opening::started(&io), &device.id)
+        .expect("connects")
     else {
         panic!("a new input opens");
     };
@@ -109,7 +107,9 @@ fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
     let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let device = listed(|| io.outputs(), &spec);
-    let mut out = io.connect_output(&device.id).expect("connects");
+    let mut out = io
+        .connect_output(super::opening::started(&io), &device.id)
+        .expect("connects");
     graph.ready(
         || {
             let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8000))]);
@@ -142,7 +142,9 @@ fn a_midi1_endpoint_delivers_what_the_input_node_widens() {
     let _endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
     let device = listed(|| io.outputs(), &spec);
-    let mut out = io.connect_output(&device.id).expect("connects");
+    let mut out = io
+        .connect_output(super::opening::started(&io), &device.id)
+        .expect("connects");
     graph.ready(
         || {
             let _ = out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 59, 0x8100))]);

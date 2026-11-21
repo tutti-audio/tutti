@@ -14,7 +14,7 @@ fn it_enumerates_nothing() {
 fn opening_reports_unsupported_rather_than_not_found() {
     let b = StubEndpoints::new();
     assert!(matches!(
-        b.open_output(EndpointId::from_raw(0)),
+        b.open_output(crate::testing::started(), EndpointId::from_raw(0)),
         Err(MidiHardwareError::Unsupported(_))
     ));
 }

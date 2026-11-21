@@ -33,19 +33,19 @@
 //! future the thread wakes when the client is made or the start failed. Nothing waits
 //! on the hub while holding a lock, and the client is made on the hub thread only,
 //! never on a caller's thread or inside a poll. A watch registered before the client
-//! is made is seeded when it is; a failed start fails every watch registered, and the
-//! next [`Start`] asks the thread for a new one.
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+//! is made is seeded when it is. A failed start ends no watch: the watches stay
+//! registered and unseeded, the failure reaches the callers through their [`Start`],
+//! and the next [`Start`] asks the thread for a new client, which seeds them.
+use std::sync::{Arc, Mutex, OnceLock};
 use std::task::Poll;
 use std::time::Duration;
-use tutti_rt::{LockExt, Unparker, parker};
+use tutti_rt::{LockExt, Parker, Unparker, parker};
 
+use crate::backend::hub::{Registry, StartGate, failed_start};
 use crate::devices::ChangeSink;
-use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
 use crate::error::{MidiHardwareError, MidiThread, Result};
-use crate::start::{Begun, Start, StartGate};
+use crate::start::Start;
 use tutti_coremidi_ffi::{SharedClient, StartClient, run_notifications};
 use tutti_midi_device::OsDevice;
 use tutti_platform::{Instant, spawn_named};
@@ -55,132 +55,37 @@ use tutti_platform::{Instant, spawn_named};
 /// A hub whose loop has the source (the usual case) never looks on a timer.
 const IDLE_LOOK: Duration = Duration::from_secs(1);
 
-/// One registered watch: the reporting state of a `Devices`, and the sink to
-/// tell if it fails.
-struct Watcher {
-    reporter: Reporter,
-    snapshot: fn() -> Vec<OsDevice>,
-    sink: ChangeSink,
-    /// Whether the device list has been seeded: only once the client exists.
-    seeded: bool,
-    /// False once its `Devices` has dropped, or the hub failed.
-    live: bool,
-}
-
-type Shared = Arc<Mutex<Watcher>>;
-
-/// Looks again at CoreMIDI and reports what changed, seeding the watch first if it
-/// has not been. A panic does not unwind into CoreMIDI's block: it fails the watch.
-///
-/// The hub's own lock is not held here. The watcher's enumeration calls into
-/// CoreMIDI, and a thread holding the hub lock across such a call would block
-/// the notification callback that CoreMIDI may be waiting on.
-fn look(watcher: &Shared) {
-    let mut watcher = watcher.lock_recover();
-    if !watcher.live {
-        return;
-    }
-    let Watcher {
-        reporter,
-        snapshot,
-        seeded,
-        ..
-    } = &mut *watcher;
-    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if *seeded {
-            reporter.report(snapshot(), |_| false);
-            Ok(())
-        } else {
-            let seeded_now = reporter.seed(snapshot());
-            *seeded = seeded_now.is_ok();
-            seeded_now
-        }
-    }));
-    match run {
-        Ok(Ok(())) => {}
-        Ok(Err(seed)) => {
-            watcher.live = false;
-            watcher.sink.fail(MidiHardwareError::from(seed));
-        }
-        Err(_) => {
-            watcher.live = false;
-            watcher.sink.fail(crate::WatchFailure::Panicked);
-        }
-    }
-}
-
-/// Fails `watcher` with the error the hub's start ended in.
-fn fail(watcher: &Shared, error: &Arc<MidiHardwareError>) {
-    let mut watcher = watcher.lock_recover();
-    if watcher.live {
-        watcher.live = false;
-        watcher
-            .sink
-            .fail(crate::WatchFailure::Failed(Arc::clone(error)));
-    }
-}
-
 /// The watches registered with the process-wide client, and the state of its start.
 pub(super) struct Hub {
-    watches: Mutex<Vec<(u64, Shared)>>,
-    next: AtomicU64,
+    registry: Arc<Registry>,
     /// The state of the start and the futures waiting on it.
     gate: Arc<StartGate>,
     /// The client, set once, before the gate says ready.
     client: OnceLock<SharedClient>,
-    /// Wakes the hub thread; `None` while there is no thread.
+    /// Wakes the hub thread; `None` while there is no thread. Its lock orders a
+    /// thread's end against a future asking for a new round: both run under it.
     unparker: Mutex<Option<Unparker>>,
 }
 
 impl Hub {
     fn new() -> Self {
         Self {
-            watches: Mutex::new(Vec::new()),
-            next: AtomicU64::new(0),
+            registry: Arc::new(Registry::new()),
             gate: Arc::new(StartGate::new()),
             client: OnceLock::new(),
             unparker: Mutex::new(None),
         }
     }
 
-    fn watches(&self) -> MutexGuard<'_, Vec<(u64, Shared)>> {
-        self.watches.lock_recover()
-    }
-
-    fn all(&self) -> Vec<Shared> {
-        self.watches().iter().map(|(_, w)| Arc::clone(w)).collect()
-    }
-
-    /// Has every registered watch look again.
-    fn notify(&self) {
-        for watcher in &self.all() {
-            look(watcher);
-        }
-    }
-
-    /// The client, once made; why there is none yet otherwise.
-    pub(super) fn client(&self) -> Result<SharedClient> {
-        self.client.get().copied().ok_or_else(|| {
-            self.gate
-                .failure()
-                .map_or(MidiHardwareError::BackendStarting, |error| {
-                    MidiHardwareError::BackendFailed(error)
-                })
-        })
-    }
-
-    /// Starts the hub thread if there is none (and no client to keep).
+    /// Starts the hub thread if there is none (and no client to keep), under the
+    /// lock `slot` holds.
     ///
     /// # Errors
     ///
     /// [`MidiHardwareError::Spawn`] when the OS refuses the thread; nothing is kept,
     /// so the next call tries again.
-    fn ensure_thread(&'static self) -> Result<()> {
-        if self.client.get().is_some() {
-            return Ok(());
-        }
-        let mut slot = self.unparker.lock_recover();
-        if slot.is_some() {
+    fn ensure_thread(&'static self, slot: &mut Option<Unparker>) -> Result<()> {
+        if self.client.get().is_some() || slot.is_some() {
             return Ok(());
         }
         let (unparker, parker) = parker();
@@ -200,15 +105,16 @@ impl Hub {
         Ok(())
     }
 
-    /// The hub thread ended, however it did: a start still under way failed, and
-    /// the next start makes a thread again.
+    /// The hub thread ended, however it did: a round still under way is over (the
+    /// client exists, or the round failed), and the next start makes a thread again.
     fn thread_ended(&self) {
-        self.gate.ended();
-        *self.unparker.lock_recover() = None;
+        let mut slot = self.unparker.lock_recover();
+        self.gate.ended(self.client.get().is_some());
+        *slot = None;
     }
 
-    /// What the hub thread does: makes the client for each start asked of it.
-    fn run(&'static self, mut parker: tutti_rt::Parker) {
+    /// What the hub thread does: makes the client for each round asked of it.
+    fn run(&'static self, mut parker: Parker) {
         let mut done = None;
         loop {
             let (generation, carried) = loop {
@@ -223,7 +129,7 @@ impl Hub {
                 "tutti-midi-watch",
                 move |notification| {
                     if notification.changes_devices() {
-                        hub.notify();
+                        hub.registry.look_all();
                     }
                 },
                 Instant::now(),
@@ -232,7 +138,7 @@ impl Hub {
             let mut start = match started {
                 Ok(start) => start,
                 Err(error) => {
-                    self.fail_start(error, carried);
+                    self.fail_round(error, carried);
                     continue;
                 }
             };
@@ -251,10 +157,10 @@ impl Hub {
                     // The client lives as long as the process. The loop runs for the
                     // thread's life; where it has no notification source, its timer
                     // has the watches look.
-                    run_notifications(client, IDLE_LOOK, move || hub.notify());
+                    run_notifications(client, IDLE_LOOK, move || hub.registry.look_all());
                     return;
                 }
-                Err(error) => self.fail_start(error, start.gave_up_at().or(carried)),
+                Err(error) => self.fail_round(error, start.gave_up_at().or(carried)),
             }
         }
     }
@@ -263,17 +169,15 @@ impl Hub {
     /// and wakes the futures: a caller that awaited the start finds the list seeded.
     fn publish_client(&self, client: SharedClient) {
         let _ = self.client.set(client);
-        self.notify();
+        self.registry.look_all();
         self.gate.publish_ready();
     }
 
-    /// The start failed: say so and wake the futures, then fail the watches.
-    fn fail_start(&self, error: tutti_coremidi_ffi::Error, gave_up: Option<Instant>) {
-        let error = Arc::new(MidiHardwareError::Os(error));
-        self.gate.publish_failed(Arc::clone(&error), gave_up);
-        for watcher in &self.all() {
-            fail(watcher, &error);
-        }
+    /// The round failed: the futures waiting on it are woken with the error. The
+    /// watches stay registered and are seeded by a later round that makes the client.
+    fn fail_round(&self, error: tutti_coremidi_ffi::Error, gave_up: Option<Instant>) {
+        self.gate
+            .publish_failed(Arc::new(MidiHardwareError::Os(error)), gave_up);
     }
 }
 
@@ -298,50 +202,38 @@ fn cell() -> &'static Hub {
 /// [`MidiHardwareError::Spawn`] when the OS refuses the thread.
 pub(super) fn hub() -> Result<&'static Hub> {
     let hub = cell();
-    hub.ensure_thread()?;
+    hub.ensure_thread(&mut hub.unparker.lock_recover())?;
     Ok(hub)
 }
 
-/// The wait for the hub's client: a future the hub thread wakes. A start that
-/// failed is asked of the thread again.
+/// The process's client, once the hub made it.
+pub(super) fn client() -> Option<SharedClient> {
+    cell().client.get().copied()
+}
+
+/// The wait for the hub's client: a future the hub thread wakes. After a failed
+/// round it asks the thread for a new one. The thread's end and this run under one
+/// lock, so a round is never handed to a thread that is ending.
 pub(super) fn begin_start() -> Start {
-    let hub = match hub() {
-        Ok(hub) => hub,
-        Err(error) => return Start::failed(error),
-    };
-    let begun: Begun = hub.gate.begin();
-    if begun.restarted
-        && let Some(unparker) = hub.unparker.lock_recover().as_ref()
+    let hub = cell();
+    let mut slot = hub.unparker.lock_recover();
+    if let Err(error) = hub.ensure_thread(&mut slot) {
+        return failed_start(error);
+    }
+    let round = hub.gate.begin(hub.client.get().is_some());
+    if round.restarted
+        && let Some(unparker) = slot.as_ref()
     {
         unparker.unpark();
     }
-    Start::over(Arc::clone(&hub.gate), begun)
-}
-
-/// A registration with the hub. Dropping it removes the registration, and
-/// returns once a look in progress has finished (it takes the watch's own lock,
-/// which an enumeration holds): nothing is reported after, and a drop can wait
-/// for one enumeration.
-struct CoreMidiWatch {
-    hub: &'static Hub,
-    key: u64,
-    watcher: Shared,
-}
-
-impl Watch for CoreMidiWatch {}
-
-impl Drop for CoreMidiWatch {
-    fn drop(&mut self) {
-        self.hub.watches().retain(|(key, _)| *key != self.key);
-        self.watcher.lock_recover().live = false;
-    }
+    hub.gate.start(round)
 }
 
 /// Registers `sink` with the hub: it is seeded with `snapshot()` once the hub's
 /// client exists (at once, if it does), then reports it again on each notification
 /// that the device setup changed, until the returned watch drops. Returns at once.
-/// Where CoreMIDI refuses a client the watch reports nothing, as enumeration lists
-/// nothing, and says so through [`ChangeSink::fail`].
+/// The watch stays registered if a start fails, and is seeded by the start that
+/// makes the client.
 pub(super) fn start(sink: ChangeSink, snapshot: fn() -> Vec<OsDevice>) -> Result<Box<dyn Watch>> {
     let hub = match hub() {
         Ok(hub) => hub,
@@ -350,30 +242,15 @@ pub(super) fn start(sink: ChangeSink, snapshot: fn() -> Vec<OsDevice>) -> Result
             return Ok(Box::new(NoWatch));
         }
     };
-    let watcher: Shared = Arc::new(Mutex::new(Watcher {
-        reporter: Reporter::new(sink.clone()),
-        snapshot,
-        sink,
-        seeded: false,
-        live: true,
-    }));
-    let key = hub.next.fetch_add(1, Ordering::Relaxed);
-    hub.watches().push((key, Arc::clone(&watcher)));
-    // The hub seeds the watches registered when it makes the client, and fails them
-    // when it gives up; one that registers after either looks at what it missed.
-    if hub.client.get().is_some() {
-        look(&watcher);
-    }
-    if let Some(error) = hub.gate.failure() {
-        fail(&watcher, &error);
-    }
-    Ok(Box::new(CoreMidiWatch { hub, key, watcher }))
+    Ok(hub
+        .registry
+        .register(sink, snapshot, || hub.client.get().is_some()))
 }
 
 /// How many watches are registered, for the test that one drops.
 #[cfg(test)]
 pub(super) fn registered() -> usize {
-    hub().map_or(0, |hub| hub.watches().len())
+    hub().map_or(0, |hub| hub.registry.len())
 }
 
 #[cfg(test)]

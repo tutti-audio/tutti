@@ -238,7 +238,7 @@ pub(crate) struct Parts<F: Float> {
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<crate::MidiNodes>,
     #[cfg(feature = "midi-hardware")]
-    pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
+    pub(crate) midi_io: Option<crate::midi_port::Io>,
     #[cfg(feature = "midi-hardware")]
     pub(crate) device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
@@ -921,6 +921,9 @@ impl<C: Clock> SessionBuilder<C> {
                 None => tutti_midi_hardware::MidiSession::open(&executor, inlets, options)
                     .map_err(crate::Error::MidiHardware)?,
             };
+            // The backend is ready before the first port opens (the one place the
+            // synchronous builder waits for it).
+            let io = crate::midi_port::Io::start(io).map_err(crate::Error::MidiHardware)?;
             // Subscribed before anything can plug in unseen: `Phase::Poll`
             // is this subscription's only reader.
             let events = io.devices().subscribe();

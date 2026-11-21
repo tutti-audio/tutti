@@ -120,12 +120,12 @@ pub enum Error {
     #[error("the process's CoreMIDI client is already started")]
     ClientExists,
     /// A call kept failing with the status it is retried on until its bound passed.
-    #[error("{operation} kept failing with {last} until its retry bound passed")]
+    #[error("{operation} did not succeed before its retry bound passed (last status: {})", last.map_or_else(|| "none".to_string(), |status| status.to_string()))]
     RetryTimedOut {
         /// The call.
         operation: Operation,
-        /// The last status it failed with.
-        last: OsStatus,
+        /// The last status it failed with; `None` when the bound passed before any attempt.
+        last: Option<OsStatus>,
     },
 }
 

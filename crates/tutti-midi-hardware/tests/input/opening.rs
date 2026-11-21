@@ -4,8 +4,8 @@
 use std::task::Poll;
 use std::time::Duration;
 use tutti_midi_hardware::{
-    Devices, InputProducerHandle, MidiHardwareError, OpeningVirtualEndpoint, VirtualEndpoint,
-    VirtualSpec,
+    Devices, InputProducerHandle, MidiHardwareError, MidiSession, OpeningVirtualEndpoint, Started,
+    VirtualEndpoint, VirtualSpec,
 };
 use tutti_platform::{Executor, Instant, MainThreadMarker};
 
@@ -43,4 +43,9 @@ pub fn open(
         VirtualEndpoint::open(executor, spec, producer, started, main)?,
         main,
     )
+}
+
+/// The proof that `session`'s backend has started.
+pub fn started(session: &MidiSession) -> Started {
+    tutti_fixtures::block_on(session.start()).expect("the backend starts")
 }

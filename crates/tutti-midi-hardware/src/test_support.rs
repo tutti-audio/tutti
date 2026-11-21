@@ -30,6 +30,7 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, MidiThread, NotFound, Result};
+use crate::start::Started;
 use crate::{InputFault, InputProducerHandle};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
@@ -554,6 +555,7 @@ impl MidiEndpoints for FakeBackend {
 
     fn open_input(
         &self,
+        _started: Started,
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
@@ -577,7 +579,7 @@ impl MidiEndpoints for FakeBackend {
         }))
     }
 
-    fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: Started, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let devices = self.devices();
         if devices.refuse_outputs {
             return Err(MidiHardwareError::InUse(id));

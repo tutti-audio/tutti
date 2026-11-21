@@ -23,7 +23,7 @@ use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, NoWatch, Watch};
 use crate::error::{MidiHardwareError, Result};
 use crate::start::Started;
-use crate::virtual_endpoint::{Immediate, OpeningBackend, VirtualSpec};
+use crate::virtual_endpoint::{AtOnce, OpeningBackend, VirtualSpec};
 use tutti_midi_device::EndpointId;
 use tutti_platform::{Executor, MainThreadMarker};
 
@@ -57,13 +57,14 @@ impl MidiEndpoints for StubEndpoints {
 
     fn open_input(
         &self,
+        _started: Started,
         _id: EndpointId,
         _producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         Err(MidiHardwareError::Unsupported(REASON))
     }
 
-    fn open_output(&self, _id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+    fn open_output(&self, _started: Started, _id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         Err(MidiHardwareError::Unsupported(REASON))
     }
 }
@@ -79,9 +80,9 @@ pub(crate) fn open_virtual_endpoint(
     _started: Started,
     _main: MainThreadMarker,
 ) -> Result<Box<dyn OpeningBackend>> {
-    Ok(Box::new(Immediate::new(Err(
-        MidiHardwareError::Unsupported(VIRTUAL_REASON),
-    ))))
+    Ok(Box::new(AtOnce::new(Err(MidiHardwareError::Unsupported(
+        VIRTUAL_REASON,
+    )))))
 }
 
 #[cfg(test)]

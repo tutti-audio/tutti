@@ -4,7 +4,7 @@ use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::{MidiHardwareError, Result};
 use crate::start::Started;
-use crate::virtual_endpoint::{Immediate, OpeningBackend, VirtualSpec};
+use crate::virtual_endpoint::{AtOnce, OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Why no virtual endpoint can be published here.
@@ -23,9 +23,9 @@ pub(crate) fn open_virtual_endpoint(
     _started: Started,
     _main: MainThreadMarker,
 ) -> Result<Box<dyn OpeningBackend>> {
-    Ok(Box::new(Immediate::new(Err(
-        MidiHardwareError::Unsupported(VIRTUAL_REASON),
-    ))))
+    Ok(Box::new(AtOnce::new(Err(MidiHardwareError::Unsupported(
+        VIRTUAL_REASON,
+    )))))
 }
 
 /// The platform's own error, as [`MidiHardwareError::Os`] carries it.

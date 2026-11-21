@@ -36,6 +36,7 @@ use tutti_ump::{FunctionBlockId, Protocol, Ump};
 
 use crate::InputProducerHandle;
 use crate::error::{MidiHardwareError, Result};
+use crate::start::Started;
 use crate::virtual_endpoint::{
     EndpointBackend, OpeningBackend, SenderBackend, VirtualProtocol, VirtualSpec,
 };
@@ -117,12 +118,12 @@ impl UmpVirtualEndpoint {
     /// message into `producer` exactly as a hardware input port does: the events land
     /// in the same [`HardwareMidiInputs`](crate::HardwareMidiInputs) rings a physical
     /// endpoint feeds. A spec that declares Function Blocks publishes them on a UMP
-    /// Endpoint. `main` is the proof the endpoint is made on the main thread.
+    /// Endpoint. `started` is the proof the hub's client is made, and `main` the proof
+    /// the endpoint is made on the main thread.
     ///
     /// # Errors
     ///
-    /// [`MidiHardwareError::BackendStarting`](crate::MidiHardwareError::BackendStarting)
-    /// while the process's client is not made,
+    ///
     /// [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported)
     /// when `spec` declares blocks and the OS is before macOS 15, and
     /// [`MidiHardwareError::Os`](crate::MidiHardwareError::Os) if CoreMIDI refuses
@@ -131,9 +132,10 @@ impl UmpVirtualEndpoint {
     pub(crate) fn open(
         spec: &VirtualSpec,
         mut producer: InputProducerHandle,
+        started: Started,
         main: MainThreadMarker,
     ) -> Result<Opening> {
-        Self::create(spec, main, move |event, arrived| {
+        Self::create(spec, started, main, move |event, arrived| {
             // A full inlet counts the drop itself; a log line would run on
             // CoreMIDI's thread.
             let _ = producer.push(event, arrived);
@@ -146,6 +148,7 @@ impl UmpVirtualEndpoint {
     /// must not block.
     pub(super) fn create<F>(
         spec: &VirtualSpec,
+        started: Started,
         main: MainThreadMarker,
         mut on_event: F,
     ) -> Result<Opening>
@@ -154,11 +157,11 @@ impl UmpVirtualEndpoint {
     {
         let name = spec.name().as_str();
         let protocol = protocol_of(spec.protocol);
-        // The device watch's client is made before either endpoint is (`hub_ready`),
-        // a UMP Endpoint included: CoreMIDI sends notifications to the run loop of
+        // The device watch's client is made before either endpoint is (`started` is its
+        // proof), a UMP Endpoint included: CoreMIDI sends notifications to the run loop of
         // the process's first client, and an endpoint's creation is what would
         // otherwise make that client.
-        let client = super::hub_ready()?;
+        let client = super::hub_client(started);
         let on_ump = move |time, event| {
             on_event(
                 event,

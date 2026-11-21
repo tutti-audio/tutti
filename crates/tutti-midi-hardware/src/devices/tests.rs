@@ -223,7 +223,12 @@ fn a_dropped_input_retires_its_port() {
     wake(&events);
     let ports = ports();
     let (input, _inlet) = devices
-        .open_input(&id_of(&devices, "Keys"), &ports, DeviceWriters::unread())
+        .open_input(
+            crate::testing::started(),
+            &id_of(&devices, "Keys"),
+            &ports,
+            DeviceWriters::unread(),
+        )
         .unwrap();
     assert_eq!(ports.list_input_ports().len(), 1);
     assert_eq!(input.name(), "Keys");
@@ -247,12 +252,17 @@ impl MidiEndpoints for Refuses {
     }
     fn open_input(
         &self,
+        _started: crate::Started,
         _: EndpointId,
         _: crate::InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         Err(MidiHardwareError::Unsupported("refused"))
     }
-    fn open_output(&self, _: EndpointId) -> Result<Box<dyn crate::DeviceOut>> {
+    fn open_output(
+        &self,
+        _started: crate::Started,
+        _: EndpointId,
+    ) -> Result<Box<dyn crate::DeviceOut>> {
         Err(MidiHardwareError::Unsupported("refused"))
     }
 }
@@ -266,7 +276,12 @@ fn a_backend_failure_leaves_no_port() {
     let keys = id_of(&devices, "Keys");
     for _ in 0..3 {
         assert!(matches!(
-            devices.open_input(&keys, &ports, DeviceWriters::unread()),
+            devices.open_input(
+                crate::testing::started(),
+                &keys,
+                &ports,
+                DeviceWriters::unread()
+            ),
             Err(MidiHardwareError::Unsupported(_))
         ));
     }
@@ -382,16 +397,34 @@ fn open_input_takes_a_present_input_only() {
     }
     assert!(
         devices
-            .open_input(&id_of(&devices, "Keys"), &ports(), DeviceWriters::unread())
+            .open_input(
+                crate::testing::started(),
+                &id_of(&devices, "Keys"),
+                &ports(),
+                DeviceWriters::unread()
+            )
             .is_ok()
     );
     let synth = id_of(&devices, "Synth");
     assert!(matches!(
-        devices.open_input(&synth, &ports(), DeviceWriters::unread()),
+        devices.open_input(
+            crate::testing::started(),
+            &synth,
+            &ports(),
+            DeviceWriters::unread()
+        ),
         Err(MidiHardwareError::WrongDirection { .. })
     ));
-    assert!(devices.open_output(&synth).is_ok());
-    assert!(devices.open_output(&id_of(&devices, "Keys")).is_err());
+    assert!(
+        devices
+            .open_output(crate::testing::started(), &synth)
+            .is_ok()
+    );
+    assert!(
+        devices
+            .open_output(crate::testing::started(), &id_of(&devices, "Keys"))
+            .is_err()
+    );
 }
 
 #[test]
@@ -403,7 +436,12 @@ fn open_input_refuses_a_device_that_was_unplugged() {
     fake.unplug(EndpointId::from_raw(1));
     wake(&events);
     assert!(matches!(
-        devices.open_input(&keys, &ports(), DeviceWriters::unread()),
+        devices.open_input(
+            crate::testing::started(),
+            &keys,
+            &ports(),
+            DeviceWriters::unread()
+        ),
         Err(MidiHardwareError::NotFound(NotFound::Device(_)))
     ));
 }
@@ -417,10 +455,15 @@ fn a_duplex_device_opens_both_ways() {
     assert_eq!(devices.list()[0].direction, PortDirection::Duplex);
     assert!(
         devices
-            .open_input(&id, &ports(), DeviceWriters::unread())
+            .open_input(
+                crate::testing::started(),
+                &id,
+                &ports(),
+                DeviceWriters::unread()
+            )
             .is_ok()
     );
-    assert!(devices.open_output(&id).is_ok());
+    assert!(devices.open_output(crate::testing::started(), &id).is_ok());
 }
 
 #[test]
@@ -639,12 +682,17 @@ impl MidiEndpoints for Tagging {
     }
     fn open_input(
         &self,
+        _started: crate::Started,
         _: EndpointId,
         _: crate::InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         Err(MidiHardwareError::Unsupported("no inputs"))
     }
-    fn open_output(&self, _: EndpointId) -> Result<Box<dyn crate::DeviceOut>> {
+    fn open_output(
+        &self,
+        _started: crate::Started,
+        _: EndpointId,
+    ) -> Result<Box<dyn crate::DeviceOut>> {
         Ok(Box::new(TaggedSink(Arc::clone(&self.0))))
     }
 }
@@ -663,7 +711,9 @@ fn the_sink_follows_the_protocol_the_output_is_in() {
         Box::new(Tagging(Arc::clone(&told))),
     )
     .unwrap();
-    let mut out = devices.open_output(&id_of(&devices, "Synth")).unwrap();
+    let mut out = devices
+        .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
+        .unwrap();
     assert_eq!(*told.lock().unwrap(), [Protocol::Midi2], "at open");
     out.set_config(StreamConfig {
         protocol: Protocol::Midi1,
@@ -731,7 +781,9 @@ mod sensing {
         let (devices, events, fake) = fake_on(&executor);
         fake.plug(endpoint(SYNTH, "Synth"), PortDirection::Output);
         wake(&events);
-        let mut out = devices.open_output(&id_of(&devices, "Synth")).unwrap();
+        let mut out = devices
+            .open_output(crate::testing::started(), &id_of(&devices, "Synth"))
+            .unwrap();
         out.set_config(StreamConfig {
             protocol,
             rx_jr: false,

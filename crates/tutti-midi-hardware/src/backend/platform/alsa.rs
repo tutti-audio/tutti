@@ -4,7 +4,7 @@ use crate::InputProducerHandle;
 use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
 use crate::start::Started;
-use crate::virtual_endpoint::{Immediate, OpeningBackend, VirtualSpec};
+use crate::virtual_endpoint::{AtOnce, OpeningBackend, VirtualSpec};
 use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend.
@@ -23,7 +23,7 @@ pub(crate) fn open_virtual_endpoint(
 ) -> Result<Box<dyn OpeningBackend>> {
     let made = super::alsa::virtual_endpoint::endpoint(executor, spec, producer)
         .map(|(endpoint, protocol)| (Box::new(endpoint) as _, protocol));
-    Ok(Box::new(Immediate::new(made)))
+    Ok(Box::new(AtOnce::new(made)))
 }
 
 /// The platform's own error, as [`MidiHardwareError::Os`](crate::MidiHardwareError::Os) carries it.

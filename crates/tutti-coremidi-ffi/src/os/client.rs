@@ -9,8 +9,7 @@
 
 use super::error::{Error, Operation, OsStatus};
 use crate::Notification;
-use crate::checks::backoff::Failure;
-use crate::checks::client_start::ClientStart;
+use crate::checks::client_start::{ClientStart, StartFailure};
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use coremidi_sys::{MIDIClientCreate, MIDIClientRef, MIDINotification};
@@ -150,8 +149,9 @@ impl StartClient {
 
     /// One poll at `now`: makes a `MIDIClientCreate` attempt only when one is due.
     ///
-    /// `Pending` means try again at [`deadline`](Self::deadline). Polling after
-    /// the start finished makes no attempt and reports [`Error::ClientExists`].
+    /// `Pending` means try again at [`deadline`](Self::deadline). A poll after the
+    /// start ended makes no attempt: it repeats the error, or is
+    /// [`Error::ClientExists`] after the client was made.
     ///
     /// # Errors
     ///
@@ -159,9 +159,6 @@ impl StartClient {
     /// retried, and [`Error::RetryTimedOut`] when the server stayed gone until the
     /// bound.
     pub fn poll(&mut self, now: Instant) -> Poll<Result<SharedClient, Error>> {
-        if self.made {
-            return Poll::Ready(Err(Error::ClientExists));
-        }
         let (name, callback) = (&self.name, self.callback);
         let polled = self.state.poll(now, || create(name, callback));
         match polled {
@@ -171,10 +168,11 @@ impl StartClient {
                 *claim() = Claim::Started;
                 Poll::Ready(Ok(SharedClient { reference }))
             }
-            Poll::Ready(Err(Failure::Failed(status))) => {
+            Poll::Ready(Err(StartFailure::Failed(status))) => {
                 Poll::Ready(Err(Error::call(Operation::CreateClient, status)))
             }
-            Poll::Ready(Err(Failure::TimedOut { last })) => {
+            Poll::Ready(Err(StartFailure::Finished)) => Poll::Ready(Err(Error::ClientExists)),
+            Poll::Ready(Err(StartFailure::TimedOut { last })) => {
                 Poll::Ready(Err(Error::RetryTimedOut {
                     operation: Operation::CreateClient,
                     last,
@@ -185,12 +183,17 @@ impl StartClient {
 }
 
 /// One `MIDIClientCreate` attempt.
+///
+/// A reference CoreMIDI wrote is a client that exists, whatever status came with
+/// it ([`OsStatus::made`]): the caller then keeps `callback` alive and never frees it.
 fn create(name: &CFString, callback: *mut Callback) -> Result<MIDIClientRef, OsStatus> {
     let mut client: MIDIClientRef = 0;
     // SAFETY: `name` outlives the call and `client` is a valid out-pointer.
     // `callback` is a `Box<Callback>` leaked by `StartClient::new`, which `notify`
-    // reads as one; it is freed only if no client was created (`Drop`), so it is
-    // live whenever CoreMIDI calls `notify`.
+    // reads as one. It is freed only by `Drop` when no client was made, and a client
+    // is made whenever `client != 0` after this call, so `callback` is live whenever
+    // CoreMIDI can call `notify`; the failure path never frees it while CoreMIDI may
+    // hold it.
     let status = unsafe {
         MIDIClientCreate(
             name.as_concrete_TypeRef(),
@@ -199,7 +202,7 @@ fn create(name: &CFString, callback: *mut Callback) -> Result<MIDIClientRef, OsS
             &mut client,
         )
     };
-    OsStatus::check(status).map(|()| client)
+    OsStatus::made(status, client)
 }
 
 impl Drop for StartClient {

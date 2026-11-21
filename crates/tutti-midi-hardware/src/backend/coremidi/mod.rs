@@ -39,7 +39,7 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
-use crate::start::Start;
+use crate::start::{Start, Started};
 use crate::virtual_endpoint::VirtualSpec;
 use tutti_coremidi_ffi::{
     Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
@@ -59,11 +59,16 @@ pub(crate) use virtual_endpoint::UmpVirtualEndpoint;
 /// that created the process's first client, and the hub thread creates it, so the
 /// endpoints and ports of this backend are all created on the client this returns.
 ///
-/// It never waits: a hub whose client is not made yet is
-/// [`MidiHardwareError::BackendStarting`], and one whose start failed is
-/// [`MidiHardwareError::BackendFailed`]. A caller awaits [`start`] first.
-pub(crate) fn hub_ready() -> Result<SharedClient> {
-    watch::hub()?.client()
+/// `started` is the proof that the hub's start resolved, which the hub does only
+/// after it set the client, so this never waits and never fails.
+///
+/// # Panics
+///
+/// When `started` did not come from this backend's hub (a [`Started`] of another
+/// backend): the proof then says nothing about this client.
+pub(crate) fn hub_client(_started: Started) -> SharedClient {
+    watch::client()
+        .expect("a Started of this backend: the hub sets its client before it says ready")
 }
 
 /// The wait for the hub's client to be made: see [`Start`].
@@ -197,10 +202,10 @@ impl CoreMidiEndpoints {
     /// CoreMIDI client. Returns at once: the client is made on that thread, and
     /// [`start`](MidiEndpoints::start) resolves when it is.
     ///
-    /// A client CoreMIDI refuses is not kept: enumeration then reports nothing,
-    /// opening reports the error the start failed with, and the next `start` asks the
-    /// hub for a new one, which is what a headless machine or a sandbox without MIDI
-    /// access should look like.
+    /// A client CoreMIDI refuses is not kept: the [`Start`] resolves to the error,
+    /// enumeration lists what it can, and the next `start` asks the hub for a new
+    /// client. Devices opened before and during a failed start stay registered and
+    /// are seeded when a later start makes the client.
     ///
     /// While the MIDI server restarts (CoreMIDI refuses clients for about five
     /// seconds) the hub thread retries for up to 10 s once per process window;
@@ -303,10 +308,11 @@ impl MidiEndpoints for CoreMidiEndpoints {
 
     fn open_input(
         &self,
+        started: Started,
         id: EndpointId,
         mut producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        let client = hub_ready()?;
+        let client = hub_client(started);
         let endpoint = Self::find_source(id).ok_or(NotFound::Endpoint(id))?;
 
         // The port speaks the source's protocol: a MIDI 1.0 source is delivered
@@ -341,8 +347,8 @@ impl MidiEndpoints for CoreMidiEndpoints {
         Ok(Box::new(CoreMidiInput { port }))
     }
 
-    fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        let client = hub_ready()?;
+    fn open_output(&self, started: Started, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
+        let client = hub_client(started);
         let destination = Self::find_destination(id).ok_or(NotFound::Endpoint(id))?;
         let port = OutputPort::new(client, "tutti-out")?;
         Ok(Box::new(CoreMidiOutput {

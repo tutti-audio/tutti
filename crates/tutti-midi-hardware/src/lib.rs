@@ -108,11 +108,13 @@
 //! the process's one CoreMIDI client is made on a thread of the backend's own, and
 //! CoreMIDI's server may be restarting for several seconds. That wait ends when the
 //! backend's thread says so, so [`Devices::start`] and [`MidiSession::start`]
-//! return a [`Start`], a `Send` [`Future`] that thread wakes,
-//! with no executor of this crate behind it. Opening a port
-//! before it resolved is [`MidiHardwareError::BackendStarting`]; a start that
-//! failed is [`MidiHardwareError::BackendFailed`], and asking again starts again.
-//! Every other backend is ready on the first poll.
+//! return a [`Start`], a `Send` [`Future`] that thread wakes, with no executor of
+//! this crate behind it. It resolves to the [`Started`] that opening a port or a
+//! virtual endpoint takes, so a port is never opened before the backend can open it.
+//! A start that failed is [`MidiHardwareError::BackendFailed`] for every future
+//! waiting on it; the device watches stay registered, and the next [`Start`] asks the
+//! backend again and, when it succeeds, seeds them. Every other backend is ready on
+//! the first poll.
 //!
 //! ## Background work
 //!
@@ -151,8 +153,8 @@
 //! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
 //! let executor = tutti_platform::Executor::new();
 //! let mut session = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())?;
-//! // Awaited before any port opens: opening earlier is `BackendStarting`.
-//! session.start().await?;
+//! // Awaited before any port opens: the proof it resolves to is what opening takes.
+//! let started = session.start().await?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
 //! // the OS.
@@ -163,14 +165,14 @@
 //! // Connect by id when the choice matters (see "Matching by name" below).
 //! if let Some(first) = session.inputs().first() {
 //!     // The inlet node of a newly opened input is the graph's to add and wire.
-//!     let _inlet = session.connect_input(&first.id)?;
+//!     let _inlet = session.connect_input(started, &first.id)?;
 //! }
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
 //! session.disconnect_input("keystep");
 //!
 //! // Outbound: the output is a value the caller owns; `queue` returns what the
 //! // device took of them, always whole messages.
-//! let mut output = session.connect_output("iac")?;
+//! let mut output = session.connect_output(started, "iac")?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
 //! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
 //! # Ok(())

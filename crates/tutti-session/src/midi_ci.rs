@@ -35,8 +35,8 @@ use tutti_midi_ci::{
 };
 use tutti_midi_device::SavedDevice;
 use tutti_midi_hardware::{
-    Answer, ChannelCount, ChannelSwitcher as ListedChannel, CiPeerInfo, MidiSession, PeerId,
-    PeerProfiles, ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
+    Answer, ChannelCount, ChannelSwitcher as ListedChannel, CiPeerInfo, PeerId, PeerProfiles,
+    ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
     Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
 use tutti_rt::LockExt;
@@ -822,7 +822,7 @@ impl Pending {
     /// for its Profile at its address.
     pub(crate) fn switch(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut crate::midi_port::Io,
         switch: ProfileSwitch,
         reply: ReplySender<ProfileState, Nak>,
     ) {
@@ -849,7 +849,7 @@ impl Pending {
     /// peer.
     pub(crate) fn report(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut crate::midi_port::Io,
         ask: ReportAsk,
         reply: ReplySender<(), Nak>,
     ) {
@@ -871,7 +871,7 @@ impl Pending {
     /// peer's Resource.
     pub(crate) fn get(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut crate::midi_port::Io,
         ask: PropertyAsk,
         reply: ReplySender<PeData>,
     ) {
@@ -892,7 +892,7 @@ impl Pending {
     /// its peer's Resource.
     pub(crate) fn set(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut crate::midi_port::Io,
         ask: PropertyAsk,
         reply: ReplySender<PeStatus>,
     ) {
@@ -913,7 +913,7 @@ impl Pending {
     /// is its own.
     pub(crate) fn subscribe(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut crate::midi_port::Io,
         ask: PropertyAsk,
         reply: ReplySender<Subscription>,
     ) {
@@ -927,7 +927,7 @@ impl Pending {
     }
 
     /// Takes in the end of a Subscription, asked when its lease dropped.
-    pub(crate) fn unsubscribe(&mut self, io: &mut MidiSession, ask: PropertyAsk) {
+    pub(crate) fn unsubscribe(&mut self, io: &mut crate::midi_port::Io, ask: PropertyAsk) {
         self.properties.push(PropertySlot::Unsubscribe(Slot {
             peer: peer_of(&ask),
             request: ask,
@@ -955,14 +955,14 @@ impl Pending {
 
     /// Room may have opened in every peer's requests, as one of the peer's own
     /// (the driver's, which this port did not make) ended.
-    pub(crate) fn make_room_everywhere(&mut self, io: &mut MidiSession) {
+    pub(crate) fn make_room_everywhere(&mut self, io: &mut crate::midi_port::Io) {
         self.full.clear();
         self.send(io);
     }
 
     /// Sends each request that waits for nothing, and ends one the device
     /// cannot take.
-    pub(crate) fn send(&mut self, io: &mut MidiSession) {
+    pub(crate) fn send(&mut self, io: &mut crate::midi_port::Io) {
         let mut at = 0;
         while at < self.switches.len() {
             let busy = {
@@ -1015,7 +1015,7 @@ impl Pending {
     /// behind it.
     pub(crate) fn answer(
         &mut self,
-        io: &mut MidiSession,
+        io: &mut crate::midi_port::Io,
         link: &PortLink,
         peer: PeerId,
         answer: &Answer,

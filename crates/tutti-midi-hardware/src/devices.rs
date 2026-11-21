@@ -29,6 +29,7 @@ use crate::capability::{described, legacy};
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::sensing::Heartbeat;
+use crate::start::Started;
 use crate::wire::Wire;
 use crate::{HardwareMidiInputs, InputFault};
 
@@ -294,11 +295,11 @@ impl Devices {
     }
 
     /// The wait for the backend to be ready to open endpoints and ports: resolves
-    /// when it is, or with the error the backend failed to start with. On macOS the
-    /// process's CoreMIDI client is made on a thread of the backend's own, and the
-    /// device list is seeded when it resolves; opening a device before then is
-    /// [`MidiHardwareError::BackendStarting`]. Every other backend is ready on the
-    /// first poll.
+    /// to the [`Started`] that opening takes, or to the error the backend failed to
+    /// start with. On macOS the process's CoreMIDI client is made on a thread of the
+    /// backend's own, and the device list is seeded when it resolves; a failed start
+    /// ends no watch, and a later start that succeeds seeds it. Every other backend
+    /// is ready on the first poll.
     pub fn start(&self) -> crate::Start {
         self.inner.backend.start()
     }
@@ -362,6 +363,7 @@ impl Devices {
     /// open leaves no port in `ports`.
     pub(crate) fn open_input(
         &self,
+        started: Started,
         id: &DeviceId,
         ports: &Arc<HardwareMidiInputs>,
         writers: DeviceWriters,
@@ -376,21 +378,22 @@ impl Devices {
             _executor: self.inner.executor.clone(),
         };
         // On an error `input` drops here, and takes the port with it.
-        input.connection = Some(self.inner.backend.open_input(handle, producer)?);
+        input.connection = Some(self.inner.backend.open_input(started, handle, producer)?);
         Ok((input, inlet))
     }
 
-    /// Opens `id` for output.
+    /// Opens `id` for output. `started` is what [`start`](Self::start) resolved to:
+    /// the backend is ready.
     ///
     /// # Errors
     ///
     /// [`MidiHardwareError::NotFound`] when `id` is not present, [`MidiHardwareError::WrongDirection`]
     /// when it is not an output, or the platform error from opening it.
-    pub fn open_output(&self, id: &DeviceId) -> Result<OpenOutput> {
+    pub fn open_output(&self, started: Started, id: &DeviceId) -> Result<OpenOutput> {
         let (info, handle) = self.present(id, PortDirection::is_output)?;
         // What the OS says it speaks, until a negotiation says better.
         let described = described(&self.capability(id).unwrap_or_else(legacy)).active();
-        let sink = self.inner.backend.open_output(handle)?;
+        let sink = self.inner.backend.open_output(started, handle)?;
         sink.follow(described.protocol);
         Ok(OpenOutput {
             info,
