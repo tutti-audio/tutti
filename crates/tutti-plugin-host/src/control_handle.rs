@@ -395,7 +395,6 @@ impl PluginHandle {
 
     /// The normalized value `plain` stands for ([`AnyThread::parameter_normalized`]),
     /// answered when the plugin replies: the call queues the question and returns.
-    #[must_use]
     pub fn parameter_normalized(
         &self,
         id: ParamId,
