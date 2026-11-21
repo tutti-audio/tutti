@@ -370,11 +370,31 @@ impl PluginControls {
         self.chunks.leaked_buffers()
     }
 
-    /// Parameter writes the editor's mirror refused because its queue was
-    /// full. The plugin still got the write; only the open editor's display
-    /// missed it. RT-safe: one relaxed load.
-    pub fn mirror_writes_refused(&self) -> u64 {
-        self.chunks.mirror_refused()
+    /// Transfers between the plugin and its editor instance that were refused:
+    /// a parameter write the mirror's full queue dropped (the plugin still got
+    /// it; only the open editor's display missed it), an edit the user made in
+    /// the editor that the plugin did not take, and a state that could not be
+    /// read or loaded either way (an editor opened at the plugin's defaults
+    /// among them). RT-safe: one relaxed load.
+    pub fn mirror_transfers_refused(&self) -> u64 {
+        self.chunks.mirror_transfers_refused()
+    }
+
+    /// Requests the plugin's editor instance made that were dropped: every
+    /// [`Request`](tutti_plugin_types::Request) but a transport request (a
+    /// restart, an I/O change, a parameter rescan, a latency or tail change, a
+    /// reload, a callback, a MIDI-CC or note-expression change, a timer or a
+    /// file descriptor), which the plugin's audio instance cannot be told.
+    /// RT-safe: one relaxed load.
+    pub fn editor_requests_dropped(&self) -> u64 {
+        self.chunks.editor_requests_dropped()
+    }
+
+    /// Tasks of the plugin's server on the host side (the bridge's lanes, the
+    /// process's exit watch) that did not stop in time and were left running.
+    /// Zero for a plugin that runs in this process. RT-safe: one relaxed load.
+    pub fn detached_tasks(&self) -> u64 {
+        self.chunks.detached()
     }
 
     /// Whether the chunk the node submitted last, and has not played yet,

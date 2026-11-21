@@ -114,7 +114,8 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(DistortionNode::<f32>::from(
                 DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
                     .drive(Drive::new(4.0))
-                    .antialiasing(Antialiasing::FirstOrder),
+                    .antialiasing(Antialiasing::FirstOrder)
+                    .expect("an order the kind has"),
             )),
         ),
         (
@@ -122,7 +123,8 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             Box::new(DistortionNode::<f32>::from(
                 DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
                     .drive(Drive::new(4.0))
-                    .antialiasing(Antialiasing::SecondOrder),
+                    .antialiasing(Antialiasing::SecondOrder)
+                    .expect("an order the kind has"),
             )),
         ),
         (

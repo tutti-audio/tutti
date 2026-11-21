@@ -83,7 +83,7 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     ),
     (
         "tutti_engine",
-        "OutputTapError",
+        "HeardTapError",
         "the payload of session's SessionHeardTapError::Tap, matched through its variants",
     ),
     (

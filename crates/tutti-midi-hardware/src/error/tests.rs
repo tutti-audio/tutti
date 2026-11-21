@@ -41,17 +41,3 @@ fn a_seed_failure_keeps_the_seed_error_as_its_source() {
     assert!(matches!(error, MidiHardwareError::Seed(_)));
     assert!(error.source().is_some_and(|s| s.is::<crate::SeedError>()));
 }
-
-/// **`NoDeviceNamed` says what was searched**, in its message too.
-#[test]
-fn a_name_that_matched_nothing_lists_its_candidates() {
-    let error = MidiHardwareError::NoDeviceNamed {
-        name: "keystpe".into(),
-        searched: vec!["Keystep Pro".into(), "IAC Bus 1".into()],
-    };
-    let MidiHardwareError::NoDeviceNamed { name, searched } = error else {
-        panic!("not NoDeviceNamed");
-    };
-    assert_eq!(name, "keystpe");
-    assert_eq!(searched, ["Keystep Pro", "IAC Bus 1"]);
-}

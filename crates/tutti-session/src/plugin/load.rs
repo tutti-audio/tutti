@@ -43,7 +43,7 @@ use super::opened::{Context, Install, PluginCause, PluginInfo, PluginPorts, Shar
 use super::opened::{plugin_failed, ports_of};
 use super::{AnyPlugin, HostPlugin, Open, Origin, PluginLoad};
 use crate::apply::SessionId;
-use crate::graph::SwapRefused;
+use crate::graph::{OnShape, SwapRefused};
 use crate::loaded::{Stamp, caught};
 use crate::peer::sealed;
 use crate::{GiveUp, Key, LoadError, NoSuchNode, Peer, Presence};
@@ -809,7 +809,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         match plugin.into_client() {
             Ok(client) => {
                 client.controls().set_meter(meter);
-                let swapped = self.graph.replace_plugin_with_rebinder(node, client, None);
+                let swapped =
+                    self.graph
+                        .replace_plugin_with_rebinder(node, client, None, OnShape::Cut);
                 if swapped.is_ok()
                     && let Some(hosted) = self.graph.plugins.get_mut(&node)
                 {
@@ -823,7 +825,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             Err(plugin) => {
                 plugin.node_controls().set_meter(meter);
                 self.graph
-                    .replace_hosted_plugin(node, plugin, None)
+                    .replace_hosted_plugin(node, plugin, None, OnShape::Cut)
                     .map_err(|refused| match refused {
                         SwapRefused::Failed(refused) => refused,
                         SwapRefused::Busy(_) => unreachable!("the graph is not re-preparing"),

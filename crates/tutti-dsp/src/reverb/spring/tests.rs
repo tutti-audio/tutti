@@ -4,6 +4,8 @@ use tutti_units::{Feedback, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
 
+const NZ2: ChannelLayout = ChannelLayout::STEREO;
+
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// `x` through a spring of `width` channels, in one call; the channels out.
@@ -61,7 +63,7 @@ fn stage_delay(g: f64, k: usize, w: f64) -> f64 {
 /// `g^(8000/K)` ~ 1e-440 of its peak, so the sums carry only rounding.
 #[test]
 fn the_cascades_group_delay_is_the_sum_of_the_stages() {
-    let k = STRETCH;
+    let k = STRETCH.get();
     for (m, g) in [(6u16, 0.6), (9, 0.3), (1, 0.0)] {
         let mut stages = cascade::<f64>(SpringStages::of(m), Feedback::new(g));
         let mut h = impulse(8000);
@@ -83,7 +85,7 @@ fn the_cascades_group_delay_is_the_sum_of_the_stages() {
 /// `w k = pi`, `m k (1 - g) / (1 + g)`, so a low frequency arrives after a high one.
 #[test]
 fn a_low_frequency_arrives_after_a_high_one() {
-    let (m, g, k) = (6u16, 0.6, STRETCH);
+    let (m, g, k) = (6u16, 0.6, STRETCH.get());
     let mut stages = cascade::<f64>(SpringStages::of(m), Feedback::new(g));
     let mut h = impulse(8000);
     for stage in &mut stages {
@@ -194,7 +196,7 @@ fn the_tail_covers_the_ring_out_and_is_no_longer_than_the_decay_and_three_trips(
 /// Each channel is its own spring: input on one channel leaves the other exactly silent.
 #[test]
 fn a_channel_with_no_input_stays_silent() {
-    let mut spring = SpringReverb::<f64>::new(ChannelLayout::STEREO, RATE, layout(8, 0.02));
+    let mut spring = SpringReverb::<f64>::new(NZ2, RATE, layout(8, 0.02));
     let silent = vec![0.0; 4000];
     let y = render(&mut spring, &[&impulse(4000), &silent]);
     assert!(y[0].iter().any(|v| *v != 0.0));
@@ -289,4 +291,16 @@ fn the_render_is_the_same_at_every_block_split() {
     assert_eq!(whole, run(96));
     assert_eq!(whole, run(50));
     assert_eq!(whole, run(7));
+}
+
+/// Every channel of a three-wide spring is a spring: an impulse on each of three channels rings
+/// on each of them.
+#[test]
+fn every_channel_of_a_three_wide_spring_rings() {
+    let mut spring = SpringReverb::<f64>::new(ChannelLayout::from_count(3), RATE, layout(8, 0.02));
+    let x = impulse(4000);
+    let y = render(&mut spring, &[&x, &x, &x]);
+    for (c, ch) in y.iter().enumerate() {
+        assert!(ch.iter().any(|v| *v != 0.0), "channel {c} is silent");
+    }
 }

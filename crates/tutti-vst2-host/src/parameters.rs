@@ -203,7 +203,9 @@ impl Vst2Loaded {
     /// `effCanBeAutomated` (opcode 26), one dispatch per parameter, so the flag
     /// is reported as *known* with whatever the plugin said. It is the only bit
     /// VST2 can answer: `READ_ONLY` and the rest have no opcode, so they stay
-    /// out of the `known` mask rather than being reported as absent.
+    /// out of the `known` mask rather than being reported as absent. The one
+    /// exception is a plugin that leaves `setParameter` null: the host cannot
+    /// write any of its parameters, so each is reported read-only.
     ///
     /// `default_value` comes from the load-time snapshot, not the live value.
     /// VST2 has no default-value opcode, so a plugin's initial state is the only
@@ -274,6 +276,17 @@ impl Vst2Loaded {
         } else {
             ParamFlags::empty()
         };
+        // A plugin that exposes no `setParameter` takes no host write, which is
+        // reported as read-only for every parameter, so a write is refused where
+        // the descriptor is read; any other plugin leaves the bit unreported.
+        let (known, reported) = if self.instance.exposes_set_parameter() {
+            (ParamFlags::AUTOMATABLE, flags)
+        } else {
+            (
+                ParamFlags::AUTOMATABLE | ParamFlags::READ_ONLY,
+                flags | ParamFlags::READ_ONLY,
+            )
+        };
         // `effGetParameterProperties` carries the category under
         // `SUPPORTS_DISPLAY_CATEGORY`. The "numbered from 1, so 0 means
         // uncategorised" rule is already applied in the decoder, so there is no
@@ -293,7 +306,7 @@ impl Vst2Loaded {
         .with_unit(label)
         .with_range(range)
         .with_steps(steps)
-        .with_flags(ParamFlags::AUTOMATABLE, flags)
+        .with_flags(known, reported)
         .with_group(group)
         .with_measures(measures);
         // The integer range's own map; a parameter with none leaves the map to

@@ -27,8 +27,8 @@ use crate::{
     ChannelLayout, ContentScale, Control, Controller, EditReader, EditWriter, EditorError,
     EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, ParamEdit, ParamFlags,
     ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail,
-    Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
-    SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
+    Prepare, Processor, Rebuilt, Refused, RenderMode, RenderModeSupport, Request, RescanScope,
+    RestartRules, SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
 };
 use tutti_buffers::{Float, FloatWidth};
 use tutti_units::Normalized;
@@ -286,6 +286,9 @@ struct Shared {
     /// until [`FakePlugin::declare`]: the fake refuses a write to an id it does
     /// not declare, as every format does.
     declared: Mutex<Vec<(ParamId, bool)>>,
+    /// The failure the fake's editor reports for its state mirror at each open
+    /// (`FakePlugin::with_editor_mirror_failure`).
+    mirror_failure: Mutex<Option<crate::EditorMirrorError>>,
 }
 
 impl Shared {
@@ -359,6 +362,7 @@ impl FakePlugin {
             told_mode: AtomicU8::new(0),
             dropped_edits: AtomicU64::new(0),
             declared: Mutex::new(Vec::new()),
+            mirror_failure: Mutex::new(None),
         });
         (
             Self(shared.clone()),
@@ -537,6 +541,12 @@ impl FakePlugin {
     /// window calls are logged. The default is none.
     pub fn with_editor(&self, has: bool) {
         self.0.editor.store(has, Ordering::Relaxed);
+    }
+
+    /// Makes every open of the fake's editor report `error` as its failed state
+    /// mirror: the editor still opens.
+    pub fn with_editor_mirror_failure(&self, error: crate::EditorMirrorError) {
+        *self.0.mirror_failure.lock_recover() = Some(error);
     }
 
     /// Makes the fake's editor take a new scale live. The default is the trait's
@@ -769,14 +779,18 @@ macro_rules! fake_control {
                 _main: MainThreadMarker,
                 _parent: WindowHandle,
                 _scale: ContentScale,
-            ) -> PluginResult<Size> {
+            ) -> PluginResult<crate::EditorOpened<Size>> {
                 if !self.shared.editor.load(Ordering::Relaxed) {
                     return Err(PluginError::Editor(EditorError::PluginError(
                         "the fake plugin has no editor".into(),
                     )));
                 }
                 self.shared.log.push(Call::OpenEditor);
-                Ok(PhysicalSize::new(640, 480).into())
+                let opened = crate::EditorOpened::new(PhysicalSize::new(640, 480).into());
+                Ok(match self.shared.mirror_failure.lock_recover().clone() {
+                    Some(error) => opened.mirror_failed(error),
+                    None => opened,
+                })
             }
 
             fn set_editor_scale(
@@ -940,7 +954,7 @@ impl Loaded for FakeLoaded {
         })
     }
 
-    fn rebuild(self, _main: MainThreadMarker) -> Result<Self, Refused<Self>> {
+    fn rebuild(self, _main: MainThreadMarker) -> Result<Rebuilt<Self>, Refused<Self>> {
         self.shared.log.push(Call::Rebuild);
         assert!(
             !self.shared.panic_in_rebuild.load(Ordering::Relaxed),
@@ -952,7 +966,7 @@ impl Loaded for FakeLoaded {
                 reason: PluginError::Other("the fake cannot rebuild".into()),
             });
         }
-        Ok(self)
+        Ok(Rebuilt::whole(self))
     }
 }
 

@@ -38,6 +38,7 @@ enum Fx {
     MidiMapping,
     NoteExprNotice,
     Reloaded,
+    StateNotRestoredNotice,
     RefusedNotice,
     StuckNotice,
     LostNotice,
@@ -66,6 +67,7 @@ fn tag(effect: &Effect) -> Fx {
         Effect::Notify(Notice::ParamTitlesChanged) => Fx::ParamTitles,
         Effect::Notify(Notice::NoteExpressionChanged) => Fx::NoteExprNotice,
         Effect::Notify(Notice::Reloaded) => Fx::Reloaded,
+        Effect::Notify(Notice::StateNotRestored { .. }) => Fx::StateNotRestoredNotice,
         Effect::Notify(Notice::Refused { .. }) => Fx::RefusedNotice,
         Effect::Notify(Notice::Stuck { .. }) => Fx::StuckNotice,
         Effect::Notify(Notice::Lost { .. }) => Fx::LostNotice,
@@ -339,7 +341,7 @@ impl Shell {
                 {
                     Reply::Refused(err())
                 } else {
-                    Reply::Rebuilt
+                    Reply::Rebuilt { restored: Ok(()) }
                 }
             }
             Effect::Recall => {
@@ -460,7 +462,7 @@ fn any_reply() -> impl Strategy<Value = Reply> {
         lazy(|| Reply::Activated),
         lazy(|| Reply::Refused(err())),
         lazy(|| Reply::Deactivated),
-        lazy(|| Reply::Rebuilt),
+        lazy(|| Reply::Rebuilt { restored: Ok(()) }),
         (0usize..3).prop_map(|n| Reply::Latency(Samples::new(n))),
         lazy(|| Reply::Tail(PluginTail::Unknown)),
         lazy(|| Reply::Tail(PluginTail::None)),
@@ -1192,7 +1194,7 @@ fn a_reply_that_answers_nothing_is_ignored() {
     let s = active(RESTARTS, prep(1));
     for r in [
         Reply::Deactivated,
-        Reply::Rebuilt,
+        Reply::Rebuilt { restored: Ok(()) },
         Reply::Activated,
         Reply::Refused(err()),
         Reply::Stuck(err()),
@@ -1251,9 +1253,35 @@ fn a_request_raised_while_a_plan_waits_is_answered_by_the_plan() {
     // A reload is not lost: the rebuild joins the plan.
     let (s, fx) = reply(park(Request::Reload), Reply::Deactivated);
     assert_eq!(fx, [Fx::Rebuild]);
-    let (s, fx) = reply(s, Reply::Rebuilt);
+    let (s, fx) = reply(s, Reply::Rebuilt { restored: Ok(()) });
     assert_eq!(fx, [Fx::Reloaded, Fx::Activate(q)]);
     finish(s);
+}
+
+/// **A rebuilt instance that did not take the saved state is told to the host
+/// after the reload**, and one that did is not.
+#[test]
+fn a_rebuild_that_restored_nothing_is_told_after_the_reload() {
+    let q = prep(2);
+    let s = active(RESTARTS, prep(1));
+    let (s, _) = go(s, Event::Op(HostOp::Reconfigure(q)));
+    let (s, _) = reply(s, Reply::Lent);
+    let s = req(s, Request::Reload);
+    let (s, fx) = go(s, Event::Returned);
+    assert_eq!(fx, [Fx::Deactivate]);
+    let (s, fx) = reply(s, Reply::Deactivated);
+    assert_eq!(fx, [Fx::Rebuild]);
+    let refusal = PluginError::Other("setState refused".into());
+    let (_, fx) = reply(
+        s,
+        Reply::Rebuilt {
+            restored: Err(refusal),
+        },
+    );
+    assert_eq!(
+        fx,
+        [Fx::Reloaded, Fx::StateNotRestoredNotice, Fx::Activate(q)]
+    );
 }
 
 #[test]
@@ -1385,7 +1413,7 @@ fn a_refused_rebuild_is_retried_before_the_activation() {
     assert!(matches!(s.stage(), Stage::Refused { .. }));
     let (s, fx) = go(s, Event::Op(HostOp::Activate(p)));
     assert_eq!(fx, [Fx::Rebuild]);
-    let (s, fx) = reply(s, Reply::Rebuilt);
+    let (s, fx) = reply(s, Reply::Rebuilt { restored: Ok(()) });
     assert_eq!(fx, [Fx::Reloaded, Fx::Activate(p)]);
     // Once rebuilt, a later refusal retries the activation alone.
     let (s, _) = reply(s, Reply::Refused(err()));

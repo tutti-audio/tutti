@@ -620,7 +620,7 @@ impl VoiceAllocator {
             next: 1,
             strike: 0,
             held: [Held::NONE; CHANNELS],
-            per_note: PerNoteState::new(1, rules.per_note_bend_range),
+            per_note: PerNoteState::new(tutti_ump::GroupSpan::of(1), rules.per_note_bend_range),
             events: Vec::with_capacity(NOTE_EVENTS),
             retired: Vec::with_capacity(2 * polyphony + MAX_SPECS + 2),
             strike_note: NoteId::from_raw(0),

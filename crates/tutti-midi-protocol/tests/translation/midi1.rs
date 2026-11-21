@@ -289,29 +289,29 @@ fn a_refusal_names_why_there_is_no_midi1_message() {
     );
 }
 
-/// `Message::try_to_midi1` is `Voice1::try_from` on the voice with the Group and Channel kept
+/// `Message::to_midi1` is `Voice1::try_from` on the voice with the Group and Channel kept
 /// (M2-104 Appendix D.2): a MIDI 2.0 Note On on Group 2, Channel 5 is the MIDI
 /// 1.0 Note On there, and a message that is not MIDI 2.0 channel voice is as
 /// it came.
 #[test]
-fn try_to_midi1_keeps_the_address() {
+fn to_midi1_keeps_the_address() {
     let to = Address::new(MidiGroup::of(2), MidiChannel::of(5));
     let note = NoteNumber::of(60);
     let on2 = Message::Midi2(to, Voice2::note_on(note, NoteVelocity::from(U7::of(100))));
     assert_eq!(
-        on2.try_to_midi1(),
+        on2.to_midi1(),
         Ok(Message::midi1(to, Voice1::note_on(note, U7::of(100))))
     );
     let clock = Message::System(MidiGroup::of(2), System::TimingClock);
-    assert_eq!(clock.try_to_midi1(), Ok(clock));
+    assert_eq!(clock.to_midi1(), Ok(clock));
     let already = Message::midi1(to, Voice1::note_on(note, U7::of(9)));
-    assert_eq!(already.try_to_midi1(), Ok(already));
+    assert_eq!(already.to_midi1(), Ok(already));
 }
 
 /// A message MIDI 1.0 has no single message for is refused with the reason
 /// `Voice1::try_from` gives, not dropped: a Per-Note Pitch Bend (D.2.8).
 #[test]
-fn try_to_midi1_refuses_what_try_from_refuses() {
+fn to_midi1_refuses_what_try_from_refuses() {
     let bend = Message::Midi2(
         address(0),
         Voice2::PerNotePitchBend {
@@ -319,7 +319,7 @@ fn try_to_midi1_refuses_what_try_from_refuses() {
             value: BendValue::CENTER,
         },
     );
-    assert_eq!(bend.try_to_midi1(), Err(NoMidi1Form::PerNote));
+    assert_eq!(bend.to_midi1(), Err(NoMidi1Form::PerNote));
 }
 
 /// **SysEx 8, Mixed Data Set and Utility messages have no MIDI 1.0 bytes.**

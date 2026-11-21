@@ -255,7 +255,7 @@ pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
 };
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
-pub use dct::Dct2;
+pub use dct::{Dct2, TooManyOutputs};
 pub use decorrelator::{
     Decorrelator, VelvetDensity, VelvetDensityError, VelvetLength, VelvetLengthError, VelvetNoise,
     VelvetPulse,
@@ -267,7 +267,10 @@ pub use delay::{
     FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
     MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
-pub use distance::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
+pub use distance::{
+    DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
+    ReferenceDistanceError,
+};
 pub use dither::shaping::NoiseShaping;
 pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
@@ -319,7 +322,7 @@ pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{
     MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayBank, ModDelayControls, ModDelayLayout,
-    ModDelayLayoutBuilder, SweepDesign,
+    ModDelayLayoutBuilder, ModulationRate, ModulationRateError, SweepDesign,
 };
 pub use modulation::phaser::{
     MAX_PHASER_CHANNELS, PhaserChain, PhaserControls, Stages, StagesError, SweepRange,
@@ -332,7 +335,8 @@ pub use novelty::{
 };
 pub use oscillator::{Oscillator, OscillatorStep, OscillatorWave};
 pub use oversample::{
-    Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
+    BlockTooLong, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband,
+    PassbandError,
 };
 pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
@@ -369,10 +373,10 @@ pub use sos::{
     SosBank, SosCoefficients, SosError, StopbandAttenuation, StopbandAttenuationError, Tilt,
 };
 pub use spatial::{
-    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HRTF_LATENCY, HRTF_STEP,
-    HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
-    MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation, SpeakerGeometryError,
-    SpeakerLayout, VbapGains, VbapKernel,
+    AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, GainsLengthMismatch, HRTF_LATENCY,
+    HRTF_STEP, HarmonicNormalization, Harmonics, HrirMeasurement, HrirSphere, HrtfBinaural,
+    HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, Rotation,
+    SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
 };
 pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
 pub use stereo::{MidSide, WidthBank, WidthControls};
@@ -383,10 +387,13 @@ pub use stft::geometry::{
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
+pub use string_tuning::{LowestPitch, LowestPitchError};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
-pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
+pub use waveshape::{
+    Antialiasing, AntialiasingError, ShapeKind, WaveshaperBank, WaveshaperControls,
+};
 pub use wavetable::{
     TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
 };

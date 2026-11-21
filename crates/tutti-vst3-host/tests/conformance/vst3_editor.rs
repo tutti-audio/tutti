@@ -71,7 +71,7 @@ fn open(plugin: &mut Vst3Loaded) -> Result<PhysicalSize<u32>, tutti_plugin_types
             StandInWindow.handle(),
             ContentScale::IDENTITY,
         )
-        .map(pixels)
+        .map(|opened| pixels(opened.window))
 }
 
 /// What the host's run loop holds for the plugin: a timer and a descriptor on

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize};
 use tutti_buffers::Float;
 
 use tutti_curve::FadeLaw;
-use tutti_rt::{ControlDrop, Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{CappedVec, ControlDrop, Overflow, PushError, RingReader, RingWriter, ring};
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
@@ -100,7 +100,7 @@ pub(crate) struct Crossfade<F: Float = f32> {
     /// While this fade waits behind the one running at its key: what the unit
     /// fading in wrote for the unit that waits (`Node::chase`), delivered to
     /// it when this fade starts. Empty otherwise.
-    pub(super) chase: Vec<Event>,
+    pub(super) chase: CappedVec<Event>,
 }
 
 impl<F: Float> Crossfade<F> {
@@ -161,19 +161,19 @@ pub(crate) struct Commit<F: Float = f32> {
     /// Kept units whose declared latency changed, each with its rebuilt
     /// bypass line (`Editor::set_latency`).
     pub(super) relined: Vec<Relined<F>>,
-    pub(super) retired: Vec<(NodeKey, NodeBox<F>)>,
+    pub(super) retired: CappedVec<(NodeKey, NodeBox<F>)>,
     /// Param state the executor let go of, carried back to be freed on the
     /// control side: a retired unit's, and one built for an incoming unit
     /// that crossfades in over one already at its key, which keeps its own
     /// (the port's modulation runs on across a replace).
-    pub(super) spare_params: Vec<ParamState<F>>,
+    pub(super) spare_params: CappedVec<ParamState<F>>,
     /// Mode state the executor let go of (a retired unit's, an unused
     /// incoming one's), freed on the control side.
-    pub(super) spare_modes: Vec<ModeState<F>>,
+    pub(super) spare_modes: CappedVec<ModeState<F>>,
     /// Bypass lines a rebuilt one replaced.
-    pub(super) spare_lines: Vec<BypassLine<F>>,
+    pub(super) spare_lines: CappedVec<BypassLine<F>>,
     /// Held-key tables the executor let go of, freed on the control side.
-    pub(super) spare_held: Vec<Tables>,
+    pub(super) spare_held: CappedVec<Tables>,
     pub(super) old_state: Option<State<F>>,
     /// The state the plan needs, built on the control side (`stage.rs`);
     /// after applying, what applying did not use.
@@ -182,7 +182,7 @@ pub(crate) struct Commit<F: Float = f32> {
     pub(super) gone: Gone,
     /// A re-prepare's first half: where the units' held-key tables wait for
     /// the resume (`Executor::parked`), with room for every unit.
-    pub(super) parked: Vec<(NodeKey, Keys)>,
+    pub(super) parked: CappedVec<(NodeKey, Keys)>,
     /// Tap producers and meter cells the editor opened since the last commit.
     pub(super) opened: Opened<F>,
 }
@@ -252,7 +252,7 @@ impl<F: Float> Commit<F> {
                             done: 0,
                             len: f.duration.get(),
                             law: f.law,
-                            chase: Vec::new(),
+                            chase: CappedVec::with_capacity(0),
                         })
                     });
                 // The unit's param state, sized here so the audio thread
@@ -295,14 +295,14 @@ impl<F: Float> Commit<F> {
             units.keys().collect::<Vec<_>>()
         );
         // Reserved here so applying moves retirees in without growing.
-        let retired = Vec::with_capacity(delta.retire.len() + delta.replace.len());
+        let retired = CappedVec::with_capacity(delta.retire.len() + delta.replace.len());
         // Every incoming unit's may come back unused, and every unit leaving
         // brings its own.
         let spare_params =
-            Vec::with_capacity(incoming.len() + delta.retire.len() + delta.replace.len());
+            CappedVec::with_capacity(incoming.len() + delta.retire.len() + delta.replace.len());
         let delta_units = delta.retire.len() + delta.replace.len();
-        let spare_modes = Vec::with_capacity(incoming.len() + delta_units);
-        let spare_lines = Vec::with_capacity(relined.len());
+        let spare_modes = CappedVec::with_capacity(incoming.len() + delta_units);
+        let spare_lines = CappedVec::with_capacity(relined.len());
         Box::new(Self {
             _control: ControlDrop::new(),
             seq,
@@ -315,11 +315,11 @@ impl<F: Float> Commit<F> {
             spare_params,
             spare_modes,
             spare_lines,
-            spare_held: Vec::new(),
+            spare_held: CappedVec::with_capacity(0),
             old_state: None,
             staged: None,
             gone: Gone::default(),
-            parked: Vec::new(),
+            parked: CappedVec::with_capacity(0),
             opened,
         })
     }
@@ -337,15 +337,15 @@ impl<F: Float> Commit<F> {
             delta: Delta::default(),
             incoming: Vec::new(),
             relined: Vec::new(),
-            retired: Vec::with_capacity(units),
-            spare_params: Vec::with_capacity(units),
-            spare_modes: Vec::with_capacity(units),
-            spare_lines: Vec::new(),
-            spare_held: Vec::with_capacity(units),
+            retired: CappedVec::with_capacity(units),
+            spare_params: CappedVec::with_capacity(units),
+            spare_modes: CappedVec::with_capacity(units),
+            spare_lines: CappedVec::with_capacity(0),
+            spare_held: CappedVec::with_capacity(units),
             old_state: None,
             staged: None,
             gone: Gone::default(),
-            parked: Vec::with_capacity(units),
+            parked: CappedVec::with_capacity(units),
             opened: Opened::default(),
         })
     }

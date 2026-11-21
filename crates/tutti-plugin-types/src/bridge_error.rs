@@ -36,6 +36,21 @@ pub enum IpcError {
     #[error("the plugin-server's exit cannot be watched")]
     ExitUnwatched(#[source] std::io::Error),
 
+    /// `IpcConfig::protect_host_memory` was asked for and the host's memory
+    /// could not be protected, so no server is started.
+    #[error("the host's memory cannot be protected from its plugins")]
+    HostMemoryUnprotected(#[source] std::io::Error),
+
+    /// The subprocess could not be bound to the host's end (Windows: the
+    /// kill-on-close job), so it could outlive a dead host; it was killed and
+    /// no server runs.
+    #[error("the plugin-server cannot be bound to the host's end")]
+    ServerNotBound(#[source] std::io::Error),
+
+    /// The bridge cannot watch its control connection, so it does not run.
+    #[error("the bridge cannot watch its control connection")]
+    ConnectionUnwatched(#[source] std::io::Error),
+
     /// The subprocess ended before it bound its control socket.
     #[error("the plugin-server exited before binding its socket")]
     ServerExited {
@@ -153,6 +168,16 @@ pub enum IpcError {
     /// The plugin-server failed a request it was asked.
     #[error("the plugin-server failed the request: {0}")]
     Server(#[from] crate::ServerError),
+
+    /// The plugin-server did not list the plugin's parameters: the request
+    /// could not be sent, the server answered something else, the plugin died
+    /// first, or the server did not answer within `param_wait`. A server slower
+    /// than `param_wait` fails the load, and any `Ipc::launch` relaunch, instead
+    /// of loading degraded. A plugin with no parameters lists none, which is an answer;
+    /// this is the lack of one, and the node's per-parameter delivery cannot be
+    /// sized without it.
+    #[error("the plugin-server did not list the plugin's parameters")]
+    ParametersUnlisted,
 
     /// The served plugin has no origin to load a fresh instance from.
     #[error("the served plugin has no origin")]

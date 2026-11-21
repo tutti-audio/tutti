@@ -52,10 +52,10 @@ fn through(
 ) -> Vec<f32> {
     let mut y = vec![0.0; x.len()];
     for (xs, ys) in x.chunks(block).zip(y.chunks_mut(block)) {
-        os.upsample(Mono::new(xs));
+        os.upsample(Mono::new(xs)).unwrap();
         let (high, mut out) = os.high_rate();
         process(high.as_ref(), out.as_mut());
-        os.downsample(MonoMut::new(ys));
+        os.downsample(MonoMut::new(ys)).unwrap();
     }
     y
 }
@@ -221,18 +221,38 @@ fn the_down_sampler_rejects_what_would_alias() {
     }
 }
 
-/// The oversampled signal of a block is `factor` times as long, and a block longer than the
-/// prepared maximum is cut to it rather than overrun.
+/// The oversampled signal of a block is `factor` times as long.
 #[test]
 fn a_block_has_factor_times_the_frames() {
     for factor in FACTORS {
         let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(32)));
-        os.upsample(Mono::new(&[0.5f32; 20]));
+        os.upsample(Mono::new(&[0.5f32; 20])).unwrap();
         let (high, out) = os.high_rate();
         assert_eq!(high.frames(), Samples::new(20 * factor.get()));
         assert_eq!(out.frames(), Samples::new(20 * factor.get()));
-        os.upsample(Mono::new(&[0.5f32; 100]));
+        os.upsample(Mono::new(&[0.5f32; 32])).unwrap();
         assert_eq!(os.high_rate().0.frames(), Samples::new(32 * factor.get()));
+    }
+}
+
+/// A block longer than the prepared maximum is refused by all three entries with the frames and
+/// the maximum, and the block in flight, the oversampled views and the output are untouched.
+#[test]
+fn a_block_past_the_prepared_maximum_is_refused_and_changes_nothing() {
+    for factor in FACTORS {
+        let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(32)));
+        os.upsample(Mono::new(&[0.5f32; 20])).unwrap();
+        let refused = BlockTooLong {
+            frames: Samples::new(33),
+            max: Samples::new(32),
+        };
+        assert_eq!(os.upsample(Mono::new(&[1.0f32; 33])), Err(refused));
+        assert_eq!(os.high_rate().0.frames(), Samples::new(20 * factor.get()));
+        assert_eq!(os.source(Samples::new(33)).err(), Some(refused));
+        assert_eq!(os.high_rate().0.frames(), Samples::new(20 * factor.get()));
+        let mut out = [7.0f32; 33];
+        assert_eq!(os.downsample(MonoMut::new(&mut out)), Err(refused));
+        assert!(out.iter().all(|&y| y == 7.0), "{factor:?}");
     }
 }
 
@@ -260,11 +280,11 @@ fn a_block_round_trips_in_either_format() {
             .map(|n| libm::sin(TAU * 100.0 * n as f64 / WINDOW as f64))
             .collect();
         let input: Vec<F> = x.iter().map(|&v| F::from_f64(v)).collect();
-        os.upsample(Mono::new(&input));
+        os.upsample(Mono::new(&input)).unwrap();
         let (high, mut out) = os.high_rate();
         out.as_mut().copy_from_slice(high.as_ref());
         let mut y = vec![F::ZERO; 1024];
-        os.downsample(MonoMut::new(&mut y));
+        os.downsample(MonoMut::new(&mut y)).unwrap();
         let worst = (4 * latency..1024)
             .map(|n| (y[n].to_f64() - x[n - latency]).abs())
             .fold(0.0, f64::max);
@@ -324,10 +344,10 @@ fn a_source_block_is_written_at_the_higher_rate_and_down_sampled() {
         let mut os = plan(factor).state::<f64>(MaxBlock::of(Samples::new(256)));
         let mut out = vec![0.0f64; 256];
         for _ in 0..2 {
-            let mut high = os.source(Samples::new(256));
+            let mut high = os.source(Samples::new(256)).unwrap();
             assert_eq!(high.frames().get(), 256 * factor.get());
             high.samples_mut().fill(1.0);
-            os.downsample(MonoMut::new(&mut out));
+            os.downsample(MonoMut::new(&mut out)).unwrap();
         }
         assert!(
             out[128..].iter().all(|&y| (y - 1.0).abs() <= DELTA),
@@ -351,12 +371,12 @@ fn the_down_delay_is_the_delay_of_a_sine_written_at_the_higher_rate() {
         let mut os = plan.state::<f64>(MaxBlock::of(Samples::new(WINDOW)));
         let mut out = vec![0.0f64; WINDOW];
         for pass in 0..2 {
-            let mut written = os.source(Samples::new(WINDOW));
+            let mut written = os.source(Samples::new(WINDOW)).unwrap();
             for (m, y) in written.samples_mut().iter_mut().enumerate() {
                 let n = (pass * WINDOW * factor.get() + m) as f64;
                 *y = (TAU * f * n / high).sin();
             }
-            os.downsample(MonoMut::new(&mut out));
+            os.downsample(MonoMut::new(&mut out)).unwrap();
         }
         let worst = (SETTLE..WINDOW)
             .map(|n| {

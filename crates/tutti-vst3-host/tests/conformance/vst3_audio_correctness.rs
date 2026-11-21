@@ -677,6 +677,27 @@ fn event_buses_are_activated_not_merely_counted() {
     );
 }
 
+/// **A plugin with no event input bus is activated and takes no events.**
+/// The probe declares none (`kMisbehaveNoEventInput`), so the host builds no
+/// encoder for it: the note that gates the probe's output on, in the mode
+/// `note_on_takes_effect_at_its_sample_offset` measures, never reaches it and
+/// the block stays silent, while the render completes.
+#[test]
+fn a_plugin_with_no_event_input_bus_is_sent_no_events() {
+    let _guard = plugin_guard();
+    let _misbehaviour = ProbeMisbehaviour::set("17");
+    let mut inst = load_probe(512);
+    set_mode(&mut inst, mode(4));
+
+    const FRAMES: usize = 512;
+    let midi = [(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000))];
+    let rendered = render(&mut inst, FRAMES, &midi, None, |_, _, _| 0.0);
+    assert!(
+        rendered.out[0][0].iter().all(|&v| v <= 0.5),
+        "the note reached a plugin that declared no event input bus"
+    );
+}
+
 /// A note-on must take effect at exactly the sample offset it carried.
 ///
 /// The probe gates its output on at the note's `sampleOffset`. Measuring where

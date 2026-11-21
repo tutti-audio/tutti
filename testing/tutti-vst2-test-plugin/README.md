@@ -98,6 +98,7 @@ change its mind about is a switch.
 | `IS_SYNTH` | `effFlagsIsSynth`, category `Synth` |
 | `EDITOR` | `effFlagsHasEditor` |
 | `NO_CHUNKS` | clears `effFlagsProgramChunks` |
+| NO_SET_PARAMETER | clears `AEffect::setParameter`: a plugin with no setter |
 | `F64` | `effFlagsCanDoubleReplacing` |
 | `NO_CAN_REPLACING` | clears `effFlagsCanReplacing` while still being asked to process |
 | `TAIL_SIZE` | raw `effGetTailSize` answer: `0`, `1`, and large all mean different things |

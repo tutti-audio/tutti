@@ -29,7 +29,7 @@ fn modes_of(modes: &[Mode]) -> Modes {
 }
 
 fn bank(modes: &[Mode]) -> ModalBank<f64> {
-    ModalBank::new(&modes_of(modes), 1, SampleRate::of(RATE))
+    ModalBank::new(&modes_of(modes), ChannelLayout::MONO, SampleRate::of(RATE))
 }
 
 fn impulse(b: &mut ModalBank<f64>, len: usize) -> Vec<f64> {
@@ -155,23 +155,31 @@ fn the_mode_count_is_from_one_to_the_most() {
     assert!(Modes::try_from(&vec![one; MAX_MODES + 1][..]).is_err());
 }
 
-/// The input is the excitation: a unit step in at frame `k` rings `h[n - k]`, and two channels
-/// do not leak into each other.
+/// The input is the excitation: a unit step in at frame `k` rings `h[n - k]` on each of two
+/// channels, and a channel is silent until its own input arrives.
 #[test]
-fn a_late_impulse_rings_the_same_response_later_and_channels_are_independent() {
+fn a_late_impulse_rings_the_same_response_later_on_every_channel() {
     let m = modes();
-    let mut b = ModalBank::<f64>::new(&modes_of(&m), 2, SampleRate::of(RATE));
+    let mut b = ModalBank::<f64>::new(
+        &modes_of(&m),
+        ChannelLayout::from_count(2),
+        SampleRate::of(RATE),
+    );
     let mut x0 = vec![0.0; 512];
     x0[100] = 1.0;
-    let x1 = vec![0.0; 512];
+    let mut x1 = vec![0.0; 512];
+    x1[200] = 1.0;
     let (mut y0, mut y1) = (vec![0.0; 512], vec![0.0; 512]);
     b.process(
         Planes::new(&[&x0[..], &x1[..]]).unwrap(),
         PlanesMut::new(&mut [&mut y0[..], &mut y1[..]]).unwrap(),
     );
     let h = impulse(&mut bank(&m), 412);
-    assert!(y1.iter().all(|&v| v == 0.0));
+    assert!(y1[..=200].iter().all(|&v| v == 0.0));
     assert!(y0[..=100].iter().all(|&v| v == 0.0));
+    for n in 0..312 {
+        assert!((y1[200 + n] - h[n]).abs() < 1e-15, "channel 1 frame {n}");
+    }
     for n in 0..412 {
         assert!((y0[100 + n] - h[n]).abs() < 1e-15, "frame {n}");
     }

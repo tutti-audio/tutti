@@ -72,3 +72,43 @@ fn pop_takes_the_last_item_and_keeps_the_flag() {
     assert_eq!(v.as_slice(), &[1]);
     assert!(v.is_overflowed(), "still latched");
 }
+
+/// A refused `push_within_capacity` returns the very item, undropped, latches
+/// the flag, and leaves the run as it was; an accepted one is `Ok`.
+#[test]
+fn push_within_capacity_hands_a_refused_item_back() {
+    use std::rc::Rc;
+    let item = Rc::new(());
+    let mut v = CappedVec::with_capacity(1);
+    assert_eq!(v.push_within_capacity(Rc::clone(&item)), Ok(()));
+    assert!(!v.is_overflowed());
+    let back = v.push_within_capacity(Rc::clone(&item)).unwrap_err();
+    assert!(v.is_overflowed());
+    assert_eq!(v.len(), 1);
+    assert_eq!(Rc::strong_count(&item), 3, "original, stored, handed back");
+    drop(back);
+    assert_eq!(Rc::strong_count(&item), 2);
+}
+
+/// `drain` yields the range in order, shifts the rest down and keeps the
+/// storage and the cap, so the room it frees is pushable again.
+#[test]
+fn drain_yields_in_order_and_keeps_the_storage() {
+    let mut v = CappedVec::with_capacity(4);
+    v.extend([1, 2, 3, 4]);
+    let storage = v.as_slice().as_ptr();
+    assert_eq!(v.drain(1..3).collect::<Vec<_>>(), [2, 3]);
+    assert_eq!(v.as_slice(), &[1, 4]);
+    assert_eq!(v.drain(..).collect::<Vec<_>>(), [1, 4]);
+    assert!(v.is_empty());
+    assert!(v.push(9) && v.push(8) && v.push(7) && v.push(6) && !v.push(5));
+    assert_eq!(v.as_slice().as_ptr(), storage);
+}
+
+/// The default has a cap of zero and refuses every push.
+#[test]
+fn the_default_has_a_zero_cap() {
+    let mut v: CappedVec<u8> = CappedVec::default();
+    assert_eq!(v.capacity(), 0);
+    assert!(!v.push(1));
+}

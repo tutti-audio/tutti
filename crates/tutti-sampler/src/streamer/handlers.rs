@@ -27,10 +27,10 @@ use super::prefetch::RegionBuffer;
 use super::record::{Cmd, Record, Streams, step};
 use super::status::StatusCell;
 use crate::Loop;
+use crate::PlaceError;
 use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::voice_width;
-use crate::{PlaceError, nonempty};
 use tutti_buffers::ChannelLayout;
 use tutti_platform::Asset;
 use tutti_rt::RingFloat;
@@ -190,7 +190,7 @@ pub(super) fn build_stream<F: RingFloat>(
 
     // Where the file's channels go in the voice, built (and so refused) now,
     // before a ring exists to free again.
-    let width = voice_width(width.unwrap_or_else(|| nonempty(file_topology.width())));
+    let width = voice_width(width.unwrap_or_else(|| file_topology.width()))?;
     let place = Place::for_topology(&file_topology, width)?;
 
     // Sizing only: a rate that moves before the ratio is set below changes the

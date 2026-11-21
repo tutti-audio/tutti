@@ -237,7 +237,7 @@ fn smooth9<F: Float>(x: F) -> F {
 ///
 /// Each order delays the signal: half a frame at first order, a whole frame at second
 /// ([`delay`](Self::delay)). A kind whose antiderivatives are not elementary to the order asked
-/// for shapes with the highest order it has ([`ShapeKind::max_antialiasing`]); `Off` is the
+/// for refuses it ([`ShapeKind::max_antialiasing`], [`AntialiasingError`]); `Off` is the
 /// memoryless curve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[non_exhaustive]
@@ -281,6 +281,18 @@ impl Antialiasing {
     }
 }
 
+/// The order asked of a [`ShapeKind`] is above the highest it has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{kind:?} has antialiasing up to {max:?}, not {order:?}")]
+pub struct AntialiasingError {
+    /// The curve.
+    pub kind: ShapeKind,
+    /// The order asked.
+    pub order: Antialiasing,
+    /// The highest order the kind has ([`ShapeKind::max_antialiasing`]).
+    pub max: Antialiasing,
+}
+
 /// The controls of a [`WaveshaperBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WaveshaperControls {
@@ -308,7 +320,7 @@ pub struct WaveshaperBank<F: Float> {
     drive: Ramp<F>,
     /// The steps a drive ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
-    /// The order the bank shapes with: the one asked for, within what the kind has.
+    /// The order the bank shapes with, one the kind has.
     antialiasing: Antialiasing,
     /// Each channel's last two inputs before the drive, newest first: per-sample values in `F`.
     history: [[F; 2]; MAX_CHANNELS],
@@ -333,15 +345,18 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         }
     }
 
-    /// Shapes with `order` of antialiasing, up to what the kind has
-    /// ([`ShapeKind::max_antialiasing`]); the default is [`Antialiasing::Off`].
-    #[must_use]
-    pub fn antialiasing(mut self, order: Antialiasing) -> Self {
-        self.antialiasing = order.min(self.kind.max_antialiasing());
-        self
+    /// Shapes with `order` of antialiasing; the default is [`Antialiasing::Off`].
+    ///
+    /// # Errors
+    ///
+    /// [`AntialiasingError`] when `order` is above what the kind has
+    /// ([`ShapeKind::max_antialiasing`]).
+    pub fn antialiasing(mut self, order: Antialiasing) -> Result<Self, AntialiasingError> {
+        self.antialiasing = self.kind.antialiasing(order)?;
+        Ok(self)
     }
 
-    /// The order the bank shapes with: the one asked for, within what the kind has.
+    /// The order the bank shapes with.
     #[must_use]
     pub fn antialiasing_order(&self) -> Antialiasing {
         self.antialiasing

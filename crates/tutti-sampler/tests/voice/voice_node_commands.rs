@@ -67,6 +67,7 @@ fn voice_at(start: f64) -> Voice<f32> {
 
 fn node_at(start: f64) -> VoiceNode<f32> {
     VoiceNode::with_channels(voice_at(start), ChannelLayout::MONO)
+        .expect("a finite gain and a nonempty width")
 }
 
 /// Peak over a 64-frame block of `node` under a transport rolling at `beat`
@@ -344,7 +345,8 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
             play: Playback::default(),
         },
         ChannelLayout::MONO,
-    );
+    )
+    .expect("a finite gain and a nonempty width");
     let (ed, _exec, handle) = graph_with(node);
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(256)));
     let (_before_ed, mut before) = ed

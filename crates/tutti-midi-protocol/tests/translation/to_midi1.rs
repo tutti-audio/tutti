@@ -123,14 +123,14 @@ fn a_note_on_velocity_never_translates_to_a_note_off() {
     }
 }
 
-/// **`Voice1::try_from_with` applies D.1.5 to every value it translates**: with the extremes
+/// **`Voice1::from_voice2` applies D.1.5 to every value it translates**: with the extremes
 /// avoided a value above 0 never downscales to 0, and one below its maximum never to
 /// the maximum, at each width; the minimum and maximum downscale to themselves.
 /// Scaled is `Voice1::try_from`'s plain shift. A message with no MIDI 1.0 form is refused
 /// as `Voice1::try_from` refuses it.
 /// Spec: m2-104/d.1.5#1
 #[test]
-fn try_from_with_keeps_values_off_the_extremes_only_when_avoided() {
+fn from_voice2_keeps_values_off_the_extremes_only_when_avoided() {
     use tutti_ump::Voice2;
     use tutti_ump::{
         BendValue, CCNumber, ControlValue, ExtremeValues, NoMidi1Form, NoteNumber, NoteVelocity,
@@ -153,11 +153,11 @@ fn try_from_with_keeps_values_off_the_extremes_only_when_avoided() {
         (u32::MAX, 127, 127),
     ] {
         assert_eq!(
-            cc_of(Voice1::try_from_with(ExtremeValues::Scaled, cc(value))),
+            cc_of(Voice1::from_voice2(cc(value), ExtremeValues::Scaled)),
             scaled
         );
         assert_eq!(
-            cc_of(Voice1::try_from_with(ExtremeValues::Avoided, cc(value))),
+            cc_of(Voice1::from_voice2(cc(value), ExtremeValues::Avoided)),
             avoided
         );
         assert_eq!(cc_of(Voice1::try_from(cc(value))), scaled);
@@ -176,15 +176,15 @@ fn try_from_with_keeps_values_off_the_extremes_only_when_avoided() {
     // A Note On velocity never downscales to 0 (D.2.1), and one below the maximum
     // is off the maximum when avoided.
     assert_eq!(
-        velocity_of(Voice1::try_from_with(ExtremeValues::Avoided, on(1))),
+        velocity_of(Voice1::from_voice2(on(1), ExtremeValues::Avoided)),
         U7::of(1)
     );
     assert_eq!(
-        velocity_of(Voice1::try_from_with(ExtremeValues::Avoided, on(0xFFFE))),
+        velocity_of(Voice1::from_voice2(on(0xFFFE), ExtremeValues::Avoided)),
         U7::of(126)
     );
     assert_eq!(
-        velocity_of(Voice1::try_from_with(ExtremeValues::Scaled, on(0xFFFE))),
+        velocity_of(Voice1::from_voice2(on(0xFFFE), ExtremeValues::Scaled)),
         U7::of(127)
     );
 
@@ -194,18 +194,18 @@ fn try_from_with_keeps_values_off_the_extremes_only_when_avoided() {
         other => panic!("{other:?}"),
     };
     assert_eq!(
-        bend_of(Voice1::try_from_with(ExtremeValues::Avoided, bend(1))),
+        bend_of(Voice1::from_voice2(bend(1), ExtremeValues::Avoided)),
         U14::of(1)
     );
     assert_eq!(
-        bend_of(Voice1::try_from_with(
-            ExtremeValues::Avoided,
-            bend(u32::MAX - 1)
+        bend_of(Voice1::from_voice2(
+            bend(u32::MAX - 1),
+            ExtremeValues::Avoided
         )),
         U14::of(0x3FFE)
     );
     assert_eq!(
-        bend_of(Voice1::try_from_with(ExtremeValues::Scaled, bend(1))),
+        bend_of(Voice1::from_voice2(bend(1), ExtremeValues::Scaled)),
         U14::of(0)
     );
 
@@ -215,7 +215,7 @@ fn try_from_with_keeps_values_off_the_extremes_only_when_avoided() {
         value: ControlValue::new(0),
     };
     assert_eq!(
-        Voice1::try_from_with(ExtremeValues::Avoided, parameter),
+        Voice1::from_voice2(parameter, ExtremeValues::Avoided),
         Err(NoMidi1Form::Parameter)
     );
 }

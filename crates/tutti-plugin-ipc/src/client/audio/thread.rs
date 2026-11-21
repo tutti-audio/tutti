@@ -183,6 +183,7 @@ impl IpcThread {
             ] {
                 if let Err(lane) = join_within(lane, patience) {
                     tracing::warn!("plugin-ipc: the {name} lane did not stop; leaving it");
+                    self.lifecycle.watch().note_detached();
                     lane.detach();
                 }
             }
@@ -583,9 +584,15 @@ async fn control_loop(
     // Unsolicited events read while a request waited for its reply. One
     // buffer for the connection, handed to the listener after each turn.
     let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
+    // A bridge that cannot watch its connection does not run: it is declared
+    // failed here, before any request is sent.
     match ipc::Watch::of(&lane.stream) {
         Ok(watch) => channels.set_probe(Arc::new(watch)),
-        Err(e) => tracing::warn!("the bridge cannot watch the control connection: {e}"),
+        Err(e) => crash(
+            lifecycle,
+            listener,
+            PluginFailure::from_stream(IpcError::ConnectionUnwatched(e)),
+        ),
     }
     // The control command taken off its queue and not yet sent, with the end of
     // its wait for the blocks before it.
@@ -1186,6 +1193,50 @@ mod tests {
             lifecycle.crash_cause(),
             Some(PluginFailure::Handshake { .. })
         ));
+    }
+
+    /// **A lane that does not stop within its patience is counted as detached**,
+    /// on the server watch the host reads: both lanes here block until released,
+    /// so the shutdown leaves both running.
+    #[test]
+    fn a_lane_that_does_not_stop_is_counted_detached() {
+        let (channels, _waits) =
+            Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        let watch = Arc::new(crate::ServerWatch::new());
+        let mut short = timeouts();
+        let patience = Duration::from_millis(10);
+        (short.call, short.load, short.state_restore, short.state) =
+            (patience, patience, patience, patience);
+        (short.param, short.editor, short.rate, short.reply_margin) =
+            (patience, patience, patience, patience);
+        let lifecycle = Lifecycle::new(Arc::clone(&watch), short);
+        let (release, held) = mpsc::channel::<()>();
+        let held = Arc::new(std::sync::Mutex::new(held));
+        let blocked = |name| {
+            let held = Arc::clone(&held);
+            tutti_fixtures::executor()
+                .spawn_dedicated(name, None, async move {
+                    let _ = held.lock().expect("the lock").recv();
+                })
+                .expect("the lane starts")
+        };
+        let mut thread = IpcThread {
+            channels,
+            lifecycle,
+            lanes: Some(Lanes {
+                audio: blocked("test-audio"),
+                control: blocked("test-control"),
+            }),
+        };
+
+        thread.shutdown();
+
+        assert_eq!(
+            watch.detached_cell().get(),
+            2,
+            "both lanes were left running"
+        );
+        drop(release);
     }
 
     /// **A late reply to a block the lane gave up on is skipped by its `seq`**:

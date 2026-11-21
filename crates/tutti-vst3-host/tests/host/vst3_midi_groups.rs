@@ -155,7 +155,7 @@ fn note_on_pitched(group: MidiGroup, channel: MidiChannel, key: u8, pitch: f64) 
 /// counted, not sent as a `Data` event).
 #[test]
 fn two_groups_land_on_event_buses_zero_and_one() {
-    let mut stager = Stager::new(2);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(2));
     let seen = block(
         &mut stager,
         &[
@@ -199,7 +199,7 @@ fn two_groups_land_on_event_buses_zero_and_one() {
 /// (`unsendable_dropped`).
 #[test]
 fn a_group_without_an_event_bus_is_dropped_and_counted() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     let seen = block(
         &mut stager,
         &[
@@ -235,7 +235,7 @@ fn a_group_without_an_event_bus_is_dropped_and_counted() {
 /// it reaches the new note alone.
 #[test]
 fn a_detach_then_a_note_on_is_a_new_note_that_alone_hears_the_controller() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     let first = note_on_id(
         &block(
             &mut stager,
@@ -293,7 +293,7 @@ fn a_detach_then_a_note_on_is_a_new_note_that_alone_hears_the_controller() {
 /// A Note Off names no note (`-1`): the plugin matches it by channel and pitch.
 #[test]
 fn a_note_off_names_no_note() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     block(
         &mut stager,
         &[midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000)],
@@ -310,7 +310,7 @@ fn a_note_off_names_no_note() {
 /// is followed by each held value as an event of the new note.
 #[test]
 fn values_told_before_a_note_on_are_its_initial_events() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     let held = block(
         &mut stager,
         &[
@@ -365,7 +365,7 @@ fn values_told_before_a_note_on_are_its_initial_events() {
 /// 60.25 on key 60 is +0.25 st, and an attribute of 60.5 is +0.5 st.
 #[test]
 fn per_note_pitch_and_the_pitch_attribute_are_tunings() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     block(
         &mut stager,
         &[midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000)],
@@ -408,7 +408,7 @@ fn per_note_pitch_and_the_pitch_attribute_are_tunings() {
 /// again for the sounding note; the RPN itself is consumed.
 #[test]
 fn a_per_note_bend_is_scaled_by_the_channels_sensitivity() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     let id = note_on_id(
         &block(
             &mut stager,
@@ -457,7 +457,7 @@ fn a_per_note_bend_is_scaled_by_the_channels_sensitivity() {
 #[test]
 fn a_pitch_then_a_bend_is_one_tuning_from_the_key() {
     for bend_first in [false, true] {
-        let mut stager = Stager::new(1);
+        let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
         block(
             &mut stager,
             &[midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000)],
@@ -489,7 +489,7 @@ fn a_pitch_then_a_bend_is_one_tuning_from_the_key() {
 /// and its pressure to 0.
 #[test]
 fn a_reset_returns_the_notes_values_to_their_defaults() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     let id = note_on_id(
         &block(
             &mut stager,
@@ -539,7 +539,7 @@ fn a_reset_returns_the_notes_values_to_their_defaults() {
 /// A stop or reset of the plugin forgets the notes and the held values.
 #[test]
 fn a_reset_forgets_the_per_note_state() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     block(
         &mut stager,
         &[midi::poly_pressure(
@@ -575,7 +575,7 @@ fn a_reset_forgets_the_per_note_state() {
 /// dropped whole and counted, on every Group, and nothing is staged.
 #[test]
 fn an_rpn_and_a_bank_are_dropped_and_counted() {
-    let mut stager = Stager::new(2);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(2));
     let bank = Bank {
         msb: U7::of(5),
         lsb: U7::of(9),
@@ -604,7 +604,7 @@ fn an_rpn_and_a_bank_are_dropped_and_counted() {
 /// A minted id names no `(channel, key)` pair.
 #[test]
 fn a_minted_id_is_above_every_channel_and_key_pair() {
-    let mut stager = Stager::new(1);
+    let mut stager = Stager::new(tutti_ump::GroupSpan::of(1));
     let id = note_on_id(
         &block(
             &mut stager,

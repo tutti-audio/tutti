@@ -19,14 +19,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
-use tutti_rt::LockExt;
+use tutti_rt::{LockExt, Tally, TallyWriter, tally};
 
 /// The latch for "this server is gone": set once, with the cause that set it.
 ///
 /// Reads are wait-free ([`is_dead`](Self::is_dead)), so the audio thread asks
 /// it every block; the cause behind it is read under a lock off the audio
 /// thread.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ServerWatch {
     dead: AtomicBool,
     cause: Mutex<Option<PluginFailure>>,
@@ -36,6 +36,21 @@ pub struct ServerWatch {
     /// What [`declare`](Self::declare) calls once it has set the latch: the
     /// rings of the threads that wait on the server.
     wakers: Mutex<Wakers>,
+    /// Tasks of this server's host side that did not stop within their
+    /// patience and were left running ([`note_detached`](Self::note_detached)).
+    detached: TallyWriter<u64>,
+}
+
+impl Default for ServerWatch {
+    fn default() -> Self {
+        Self {
+            dead: AtomicBool::default(),
+            cause: Mutex::default(),
+            wake: Arc::default(),
+            wakers: Mutex::default(),
+            detached: tally::<u64>().writer(),
+        }
+    }
 }
 
 /// The calls a declaration makes ([`ServerWatch::on_declared`]).
@@ -102,6 +117,19 @@ impl ServerWatch {
     pub fn wait_dead(&self, timeout: Duration) -> bool {
         let deadline = Wake::deadline_in(timeout);
         self.wake.wait_until(deadline, || self.is_dead())
+    }
+
+    /// Counts a host-side task of this server (a bridge lane, the exit task)
+    /// that did not stop within its patience and was left to end on its own.
+    pub(crate) fn note_detached(&self) {
+        self.detached.add(1);
+    }
+
+    /// The count of [`note_detached`](Self::note_detached), for the pipeline's
+    /// diagnostics.
+    #[must_use]
+    pub(crate) fn detached_cell(&self) -> Tally<u64> {
+        self.detached.tally()
     }
 
     /// Whether the server is gone. Wait-free: no lock, no allocation.

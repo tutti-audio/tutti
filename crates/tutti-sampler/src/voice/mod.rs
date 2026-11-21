@@ -53,7 +53,9 @@ mod wrap_fade;
 pub use build::{memory_voice, voice_width};
 /// The control-plane protocol and the two handles that send it — one per owner
 /// ([`VoicePool`] and [`VoiceNode`]). Documented on `command`.
-pub use command::{PlayError, SendError, StreamingAddError, VoiceNodeHandle, VoicePoolHandle};
+pub use command::{
+    GainError, PlayError, SendError, StreamingAddError, VoiceNodeHandle, VoicePoolHandle,
+};
 /// Disk-streaming playback: the reader, its source and its configuration.
 ///
 /// See `disk_voice` for the full docs on each; they are re-exported flat so a
@@ -66,9 +68,9 @@ pub use loop_span::{Loop, LoopError};
 /// configuration. Documented on `memory_source`.
 pub use memory_source::{MemorySource, MemorySourceConfig, VoiceWindow};
 /// One voice as a standalone graph node. Documented on `node`.
-pub use node::VoiceNode;
+pub use node::{VoiceNode, VoiceNodeError};
 /// The per-track multi-voice mixer. Documented on `pool`.
-pub use pool::{PoolDrops, PoolTooWide, VoicePool};
+pub use pool::{PoolDrops, VoicePool};
 /// The voice vocabulary: what a voice is, which tier it reads from, and the
 /// control intent recorded for it. Documented on `types`.
 pub use types::{Direction, Playback, SlotId, Voice, VoiceSource};

@@ -167,7 +167,8 @@ impl Rig {
                 let mut node = VoiceNode::new(Voice {
                     source: VoiceSource::Memory(source),
                     play,
-                });
+                })
+                .expect("a finite gain and a nonempty width");
                 node.prepare(&Prepare::new(
                     SampleRate::of(SR),
                     MaxBlock::of(Samples::new(self.max_block)),
@@ -175,7 +176,7 @@ impl Rig {
                 *slot = Some(Box::new(node));
             }
             Hosted::Node(node) => {
-                source.set_gain(play.gain);
+                source.store_gain(play.gain);
                 source.set_loop(play.loop_);
                 source.prepare(&Prepare::new(
                     SampleRate::of(SR),
@@ -499,7 +500,7 @@ fn a_seek_or_a_stop_during_the_fade_ends_it(host: Host) {
     }
 }
 
-/// A NaN or infinite gain is silence, never NaN, on every host, in frames
+/// A NaN or infinite gain is silence, never NaN, on a host that holds one, in frames
 /// inside and outside the voice's window (it starts 100 frames into the run
 /// and the run crosses a wrap).
 fn a_non_finite_gain_renders_silence(host: Host) {
@@ -774,8 +775,19 @@ fn a_voice_with_its_own_loop_is_judged_by_its_window(host: Host) {
     assert!(out[0][WRAP..].iter().all(|s| s.is_finite() && *s <= 0.75));
 }
 
+// A voice node refuses a gain that is not finite at its constructor, so only the
+// hosts that can hold one (a pool's slot, a source) answer it with silence.
+#[test]
+fn a_non_finite_gain_renders_silence_in_a_pool() {
+    a_non_finite_gain_renders_silence(Host::Pool);
+}
+
+#[test]
+fn a_non_finite_gain_renders_silence_in_a_source() {
+    a_non_finite_gain_renders_silence(Host::Node);
+}
+
 on_each_host!(
-    a_non_finite_gain_renders_silence,
     a_tone_has_no_cut_at_the_wrap_at_any_block_length,
     the_fade_begins_on_the_wrap_frame_and_changes_nothing_before_it,
     the_fade_holds_the_energy_of_unrelated_material,

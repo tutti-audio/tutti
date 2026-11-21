@@ -561,7 +561,7 @@ async fn poll_loop(
         {
             return;
         }
-        if timer.sleep(interval).await.is_err() {
+        if timer.sleep(interval.get()).await.is_err() {
             return;
         }
     }

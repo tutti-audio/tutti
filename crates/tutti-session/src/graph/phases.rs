@@ -13,6 +13,11 @@ impl<F: Float> Graph<F> {
     /// Retries the replacements that waited out a re-prepare, and reports each
     /// as it landed or failed.
     pub(crate) fn report_replacements(&mut self, out: &mut Vec<SessionEvent>) {
+        out.extend(
+            self.take_dropped()
+                .into_iter()
+                .map(|node| SessionEvent::ReplaceDropped { node }),
+        );
         for retried in self.retry_replacements() {
             out.push(match retried {
                 Retried::Landed { node } => SessionEvent::Replaced { node },

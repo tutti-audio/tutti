@@ -291,8 +291,8 @@ pub mod nodes {
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
     pub use tutti_dsp::{
-        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, HarmonicNormalization, Harmonics,
-        Rotation, SpeakerLayout,
+        AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, GainsLengthMismatch,
+        HarmonicNormalization, Harmonics, Rotation, SpeakerLayout,
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
@@ -300,7 +300,14 @@ pub mod nodes {
         LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
-    pub use tutti_dsp::{DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec};
+    pub use tutti_dsp::{
+        BlockTooLong, MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes,
+        Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
+    };
+    pub use tutti_dsp::{
+        DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ModulationRate,
+        ModulationRateError, ReferenceDistance, ReferenceDistanceError,
+    };
     pub use tutti_dsp::{
         Decorrelator, EarlyReflections, EarlyReflectionsError, MAX_TAP_DELAY, ReflectionOrder,
         ShoeboxConfig, ShoeboxError, ShoeboxRoom, VelvetDensity, VelvetDensityError, VelvetLength,
@@ -318,17 +325,13 @@ pub mod nodes {
         GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
     };
     pub use tutti_dsp::{
-        KarplusStrong, KarplusStrongBank, KarplusStrongControls, WaveguideBank, WaveguideControls,
-        WaveguidePositions, WaveguideString,
+        KarplusStrong, KarplusStrongBank, KarplusStrongControls, LowestPitch, LowestPitchError,
+        WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString,
     };
     pub use tutti_dsp::{Lfo, LfoWave};
     pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
-    };
-    pub use tutti_dsp::{
-        MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes, Oversampler,
-        Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
     };
     pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_dsp::{
@@ -353,12 +356,12 @@ pub mod nodes {
         DirectionSet,
     };
     pub use tutti_nodes::{
-        Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
-        ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour, OscillatorWave, PanLaw,
-        PolarityConfig, PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel,
-        RingModNode, RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode,
-        StereoWidthSet, TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet,
-        WidthControls,
+        Antialiasing, AntialiasingError, AutoPanConfig, AutoPanControls, AutoPanKernel,
+        AutoPanNode, AutoPanSet, ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour,
+        OscillatorWave, PanLaw, PolarityConfig, PolarityError, PolarityNode, RingModConfig,
+        RingModControls, RingModKernel, RingModNode, RingModSet, StereoWidthConfig,
+        StereoWidthKernel, StereoWidthNode, StereoWidthSet, TremoloConfig, TremoloControls,
+        TremoloKernel, TremoloNode, TremoloSet, WidthControls,
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
@@ -523,12 +526,14 @@ pub mod session {
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
         DeviceChange, DeviceDirection, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
-        OutputConfig, Snapshot, SnapshotSource, SupportedConfig,
+        OutputConfig, PollInterval, PollIntervalTooShort, Snapshot, SnapshotSource,
+        SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
-        OutputLevels, OutputMap, OutputMapError, OutputSpec, OutputStrip, Routing, RoutingError,
-        StartError, StreamFault, StreamFaultKind, StreamFaults, StreamLatency, TimerError,
+        OutputLevels, OutputMap, OutputMapError, OutputQuantum, OutputSpec, OutputStrip,
+        QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault, StreamFaultKind,
+        StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -563,9 +568,9 @@ pub mod session {
     pub use tutti_session::{
         BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
         DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, Removal,
         RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
         RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
         SetSources, Taps, TempoError, Weighted, Wire, root_width,
@@ -668,8 +673,8 @@ pub mod sampler {
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        ControlCell, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
-        StreamingAddError, VoiceWindow,
+        ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
+        SlotId, StreamingAddError, VoiceNodeError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",
@@ -711,7 +716,7 @@ pub mod measure {
     pub use tutti_dsp::{
         BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
         CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
-        StftGeometry, WindowLength, WindowLengthError,
+        StftGeometry, TooManyOutputs, WindowLength, WindowLengthError,
     };
 }
 
@@ -786,8 +791,8 @@ pub mod plugin {
         AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
     };
     pub use tutti_plugin_types::{
-        EditorError, LoadStage, NoEditorHost, RateRefusal, RateRefusalCause, ServerError,
-        TerminationReason,
+        EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,
+        RateRefusalCause, ServerError, TerminationReason,
     };
     pub use tutti_plugin_types::{
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
@@ -940,9 +945,9 @@ pub mod midi {
     pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
-        InputFault, MidiHardwareConfig, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError,
-        ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
+        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, Errno, ErrnoOutOfRange, InputFault,
+        MidiHardwareConfig, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError, ProfileSwitch,
+        ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

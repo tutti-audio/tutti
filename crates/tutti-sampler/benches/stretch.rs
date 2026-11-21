@@ -47,7 +47,8 @@ fn stretch(c: &mut Criterion) {
     let node = VoiceNode::<f32>::new(Voice {
         source: VoiceSource::Memory(source),
         play,
-    });
+    })
+    .expect("a finite gain and a nonempty width");
     let mut direct = Direct::new(node, RATE, BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut blocks = 0usize;
