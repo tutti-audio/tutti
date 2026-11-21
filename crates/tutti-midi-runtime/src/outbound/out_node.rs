@@ -73,24 +73,16 @@ fn track(held: &mut [u64; HELD_WORDS], raw: tutti_ump::Ump) {
 
 /// Writes a Note Off for each key `held` has, at `at`, clearing a key only when
 /// the port took its off; the first refusal (the port is full) leaves the rest
-/// for the next block. `retry`: the offs were refused in an earlier block, each
-/// attempt gives its count back, so a delayed off nets zero.
-fn end_notes(
-    held: &mut [u64; HELD_WORDS],
-    out: &mut tutti_graph::EventWriter<'_>,
-    at: Offset,
-    retry: bool,
-) {
+/// for the next block. A refused off is deferred, not lost: the refusal is given
+/// back at once, so the executor's lost count does not carry it.
+fn end_notes(held: &mut [u64; HELD_WORDS], out: &mut tutti_graph::EventWriter<'_>, at: Offset) {
     for (word, bits) in held.iter_mut().enumerate() {
         let mut rest = *bits;
         while rest != 0 {
             let low = rest.trailing_zeros() as u16;
             let key = NoteKey::from_index(MIDI2_KEY | (word as u16) << 6 | low);
-            let taken = out.push(owed_off(key, at)).is_ok();
-            if retry {
+            if out.push(owed_off(key, at)).is_err() {
                 out.recovered();
-            }
-            if !taken {
                 return;
             }
             rest &= rest - 1;
@@ -292,7 +284,7 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
         if let Some(held) = self.held.as_deref_mut()
             && phase != Phase::Live
         {
-            end_notes(held, io.event_out(0), at, phase == Phase::Closed);
+            end_notes(held, io.event_out(0), at);
         }
         Status::Modified
     }

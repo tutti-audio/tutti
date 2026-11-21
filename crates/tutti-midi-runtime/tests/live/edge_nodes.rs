@@ -654,6 +654,14 @@ fn a_retiring_out_node_ends_every_held_note_across_blocks_and_is_idle_after() {
         rig.block(512);
     }
     assert_eq!(ended(&rig), HELD as usize, "every note was ended");
+    // A refused off is deferred, so each refusal is given back and nothing is
+    // lost: the counts match, not merely lost = dropped - recovered saturating at 0.
+    assert_eq!(
+        rig.exec.dropped_event_count(),
+        rig.exec.recovered_event_count(),
+        "every refusal was given back, and no more"
+    );
+    assert_eq!(rig.exec.lost_event_count(), 0);
     rig.block(512);
     assert!(generations[0].is_idle(), "nothing is owed");
 }
