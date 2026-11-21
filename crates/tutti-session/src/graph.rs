@@ -780,16 +780,15 @@ impl<F: Float> Graph<F> {
     /// [`SetRateError::Commit`] when the editor would not re-prepare; the graph
     /// keeps its rate.
     pub fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
-        let unsupported = self.nodes.keys().find_map(|&node| {
-            let supported = self.shape(node)?.rates();
-            (!supported.contains(rate)).then_some(SetRateError::RateUnsupported {
+        if let Some((node, supported)) = self
+            .editor
+            .first_unsupported_rate(self.nodes.keys().copied(), rate)
+        {
+            return Err(SetRateError::RateUnsupported {
                 node,
                 supported,
                 rate,
-            })
-        });
-        if let Some(refused) = unsupported {
-            return Err(refused);
+            });
         }
         let current = *self.editor.prepare();
         self.editor

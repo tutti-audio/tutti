@@ -692,8 +692,8 @@ impl Shape {
     }
 
     /// This shape for a node that runs at `rates` only: a session's
-    /// `Graph::set_sample_rate` refuses a rate outside them and changes
-    /// nothing. A node's rates do not depend on its `prepare`. Every rate
+    /// `Graph::set_sample_rate` and a fork (a bounce or an export) refuse a
+    /// rate outside them and change nothing. A node's rates do not depend on its `prepare`. Every rate
     /// unless set.
     ///
     /// ```

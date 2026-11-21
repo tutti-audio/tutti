@@ -6,8 +6,11 @@ use tutti_units::SampleRate;
 /// included. [`Shape::with_rates`](crate::Shape::with_rates) declares it,
 /// [`SampleRates::ALL`] being the default of a node that runs at any.
 ///
-/// A session's `Graph::set_sample_rate` refuses a rate that a node's rates
-/// leave out, and changes nothing.
+/// A session's `Graph::set_sample_rate` and a fork ([`Editor::fork`], a bounce
+/// or an export) refuse a rate that a node's rates leave out, and change
+/// nothing.
+///
+/// [`Editor::fork`]: crate::Editor::fork
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SampleRates {
     min: SampleRate,
