@@ -40,7 +40,7 @@ use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
 
-use super::load::NodeLink;
+use super::load::{LoadedPlugin, NodeLink};
 use super::{AnyPlugin, HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded};
 use crate::PluginPresets;
 use crate::loaded::Stamp;
@@ -233,7 +233,7 @@ pub enum PluginCause {
     GaveUp(GiveUp),
 }
 
-/// A plugin opened and not yet in a graph: what a [`LoadedPlugin`](crate::LoadedPlugin)
+/// A plugin opened and not yet in a graph: what a [`LoadedPlugin`]
 /// shares, and what the pool holds for [`PoolPluginEntry`]
 /// ([`PoolEntry::Loaded`]).
 ///
@@ -411,14 +411,14 @@ pub struct PoolPluginEntry {
 
 impl PoolEntry for PoolPluginEntry {
     type Identity = (PluginId, Hosting);
-    type Loaded = Shared;
+    type Loaded = LoadedPlugin;
     type Handle = PooledPlugin;
 
     fn identity(&self) -> (PluginId, Hosting) {
         (self.id.clone(), self.hosting)
     }
 
-    fn load(&self) -> PoolLoad<Shared> {
+    fn load(&self) -> PoolLoad<LoadedPlugin> {
         let cx = self.cx.clone();
         let loadable = match &self.resolved {
             Ok(loadable) => loadable.clone().hosting(self.hosting),
@@ -450,7 +450,8 @@ impl PoolEntry for PoolPluginEntry {
         }
     }
 
-    fn handle(loaded: &Shared, life: &Life) -> PooledPlugin {
+    fn handle(loaded: &LoadedPlugin, life: &Life) -> PooledPlugin {
+        let loaded = &loaded.shared;
         PooledPlugin {
             id: loaded.id,
             info: Arc::clone(&loaded.info),
@@ -459,8 +460,8 @@ impl PoolEntry for PoolPluginEntry {
         }
     }
 
-    fn is_lost(loaded: &Shared) -> bool {
-        loaded.standing.lost()
+    fn is_lost(loaded: &LoadedPlugin) -> bool {
+        loaded.shared.standing.lost()
     }
 }
 
@@ -468,10 +469,12 @@ fn land(
     cx: &Context,
     loaded: PluginLoaded,
     main: Option<MainThreadMarker>,
-) -> Result<Shared, LoadError> {
+) -> Result<LoadedPlugin, LoadError> {
     let (loadable, config, open) = loaded.finish(main);
     let stamp = Stamp::take(Asset::from(loadable.plugin().path()));
-    Shared::new(cx, stamp, open, loadable, config, main)
+    Shared::new(cx, stamp, open, loadable, config, main).map(|shared| LoadedPlugin {
+        shared: Arc::new(shared),
+    })
 }
 
 /// A plugin to keep loaded, under `key`: what [`Session::plugin_entry`]
@@ -683,6 +686,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             .pool
             .entries
             .loaded::<P, PoolPluginEntry>(key)?
+            .shared
             .standing
             .lost()
         {
@@ -705,10 +709,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return Err(AddPooledPluginError::Installed(key.clone()));
         }
         let loaded = self.pool.entries.loaded::<P, PoolPluginEntry>(key)?;
-        let Some(install) = loaded.take_install() else {
+        let Some(install) = loaded.shared.take_install() else {
             return Err(AddPooledPluginError::Installed(key.clone()));
         };
-        let standing = Arc::clone(&loaded.standing);
+        let standing = Arc::clone(&loaded.shared.standing);
         let Install {
             plugin,
             mirror,
@@ -759,23 +763,23 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         else {
             return Swap::Done;
         };
-        if !loaded.has_install() {
+        if !loaded.shared.has_install() {
             return Swap::Done;
         }
         // A replacement with other ports would leave the node's edges on ports
         // that are gone and refuse every later commit.
-        if loaded.ports != was {
-            let got = loaded.ports.clone();
+        if loaded.shared.ports != was {
+            let got = loaded.shared.ports.clone();
             return Swap::Refused(generation, LoadError::PluginPorts { got, was });
         }
         // An in-process plugin binds, and the plugin it replaces closes, on the
         // main thread only.
-        let off_main = loaded.in_process && MainThreadMarker::new().is_none();
+        let off_main = loaded.shared.in_process && MainThreadMarker::new().is_none();
         if off_main || self.graph.is_repreparing() {
             return Swap::Waiting;
         }
-        let standing = Arc::clone(&loaded.standing);
-        let Some(Install { plugin, origin, .. }) = loaded.take_install() else {
+        let standing = Arc::clone(&loaded.shared.standing);
+        let Some(Install { plugin, origin, .. }) = loaded.shared.take_install() else {
             return Swap::Done;
         };
         let swapped = self.swap_installed(node, plugin, origin);
