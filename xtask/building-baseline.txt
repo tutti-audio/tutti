@@ -310,19 +310,19 @@ tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings
 tutti-timeline  ctor-result  crates/tutti-timeline/src/tempo_reader.rs::TempoReader::constant
 
 # tutti-ump
-tutti-ump  chain-result  crates/tutti-ump/src/midi_translation.rs::Message::try_to_midi1
+tutti-ump  chain-result  crates/tutti-ump/src/midi_translation.rs::Message::to_midi1
 tutti-ump  chain-result  crates/tutti-ump/src/mpe_zone.rs::MpeZoneSet::with
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::Articulation::from_parts
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::Classification::from_attribute_type
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::NoteArticulation::from_attribute
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::NoteArticulation::from_note_on
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::NoteOffArticulation::from_attribute
-tutti-ump  ctor-result  crates/tutti-ump/src/midi_translation.rs::Voice1::try_from_with
+tutti-ump  ctor-result  crates/tutti-ump/src/midi_translation.rs::Voice1::from_voice2
 tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteMessage::from_voice
 tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteType::from_value
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::Sysex7Packets::from_payload
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::SysexMessage::from_framed
-tutti-ump  default-enum-arg  crates/tutti-ump/src/midi_translation.rs::Voice1::try_from_with
+tutti-ump  default-enum-arg  crates/tutti-ump/src/midi_translation.rs::Voice1::from_voice2
 
 # tutti-voicing
 tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_bend_range
