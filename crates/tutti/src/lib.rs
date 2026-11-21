@@ -298,6 +298,9 @@ pub mod nodes {
         VelvetLengthError, VelvetNoise, VelvetPulse, Wall,
     };
     pub use tutti_dsp::{
+        GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset,
+    };
+    pub use tutti_dsp::{
         Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection, SpringLength,
         SpringLengthError,
     };
@@ -380,6 +383,7 @@ pub mod nodes {
         DecorrelatorConfig, DecorrelatorKernel, DecorrelatorNode, EarlyReflectionsConfig,
         EarlyReflectionsKernel, EarlyReflectionsNode, NoControls,
     };
+    pub use tutti_nodes::{GranularConfig, GranularError, GranularNode};
 }
 
 /// The shared vocabulary (units, music types, buffers and the param cells: `tutti-units`,

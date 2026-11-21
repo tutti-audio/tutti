@@ -110,6 +110,8 @@
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
+//! - **Granular** (`granular.rs`): [`Granular`], a cloud of Hann-windowed grains read from a
+//!   shared source ([`GrainSettings`], [`GrainScheduler`]).
 //! - **Noise** (`noise.rs`): [`Noise`], a seeded white, pink (Kellet's filter) or brown
 //!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
@@ -180,6 +182,7 @@ mod filter;
 mod fir;
 mod follower;
 mod frequency_shifter;
+mod granular;
 mod interp;
 mod level;
 mod loudness;
@@ -267,6 +270,7 @@ pub use fir::{
 pub use frequency_shifter::{
     FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
 };
+pub use granular::{GrainScheduler, GrainSettings, Granular, MaxGrains, MaxGrainsError, Onset};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};
