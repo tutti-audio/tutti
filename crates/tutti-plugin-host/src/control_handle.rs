@@ -393,9 +393,13 @@ impl PluginHandle {
         self.any_thread.parameter_plain(id, value)
     }
 
-    /// The normalized value `plain` stands for ([`AnyThread::parameter_normalized`]).
-    #[must_use]
-    pub fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized> {
+    /// The normalized value `plain` stands for ([`AnyThread::parameter_normalized`]),
+    /// answered when the plugin replies: the call queues the question and returns.
+    pub fn parameter_normalized(
+        &self,
+        id: ParamId,
+        plain: f64,
+    ) -> tutti_plugin_types::Answer<Option<Normalized>> {
         self.any_thread.parameter_normalized(id, plain)
     }
 
@@ -1111,12 +1115,23 @@ mod tests {
         // from the same fake so no subprocess is needed.
         struct Inert;
         impl AnyThread for Inert {
-            fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-                None
+            fn parameter_descriptors(
+                &self,
+            ) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
+                let read = || None;
+                tutti_plugin_types::answered(read())
             }
             fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
                 None
             }
+
+            fn parameter_value_answer(
+                &self,
+                id: ParamId,
+            ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+                tutti_plugin_types::answered(self.parameter_value(id))
+            }
+
             fn set_parameter_value(
                 &self,
                 _id: ParamId,
@@ -1127,8 +1142,13 @@ mod tests {
             fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
                 None
             }
-            fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
-                None
+            fn parameter_normalized(
+                &self,
+                _id: ParamId,
+                _plain: f64,
+            ) -> tutti_plugin_types::Answer<Option<Normalized>> {
+                let read = || None;
+                tutti_plugin_types::answered(read())
             }
             fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
                 None

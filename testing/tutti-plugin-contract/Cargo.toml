@@ -53,6 +53,8 @@ name = "automation_state"
 required-features = ["server"]
 
 [dev-dependencies]
+# Test reads block on a `ParamRead` (a test may block).
+futures-lite.workspace = true
 # `tests/server.rs` and `tests/probe.rs` (feature `server`) name it; the library
 # does not, and an optional dependency cannot be a dev-dependency.
 # Those tests need `cargo build -p tutti-plugin-server --no-default-features

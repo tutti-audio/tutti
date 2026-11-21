@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_platform::Instant;
 
 use super::listener::Listener;
 
@@ -41,23 +40,17 @@ fn session(executor: &Executor) -> (MidiSession, Listener) {
     (session, listener)
 }
 
-/// The device `spec` published, once the session lists it.
-fn listed(find: impl Fn() -> Vec<DeviceInfo>, spec: &VirtualSpec) -> DeviceInfo {
-    let deadline = Instant::now() + PATIENCE;
-    loop {
-        if let Some(device) = find()
-            .into_iter()
-            .find(|d| d.name.contains(spec.name().as_str()))
-        {
-            return device;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "{} is never listed",
-            spec.name().as_str()
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
+/// The device `spec` published, as the session's input (`input`) or output,
+/// once the session lists it.
+fn listed(io: &MidiSession, spec: &VirtualSpec, input: bool) -> DeviceInfo {
+    super::listing::listed(io, spec.name().as_str(), |d| {
+        let way = if input {
+            d.direction.is_input()
+        } else {
+            d.direction.is_output()
+        };
+        way && d.name.contains(spec.name().as_str())
+    })
 }
 
 fn notes() -> Vec<Ump> {
@@ -76,7 +69,7 @@ fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
     let (producer, _inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
-    let device = listed(|| io.inputs(), &spec);
+    let device = listed(&io, &spec, true);
     let tutti_midi_hardware::Connected::Opened(inlet) = io
         .connect_input(super::opening::started(&io), &device.id)
         .expect("connects")
@@ -106,7 +99,7 @@ fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
     graph.attach(inlet);
     let endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
-    let device = listed(|| io.outputs(), &spec);
+    let device = listed(&io, &spec, false);
     let mut out = io
         .connect_output(super::opening::started(&io), &device.id)
         .expect("connects");
@@ -141,7 +134,7 @@ fn a_midi1_endpoint_delivers_what_the_input_node_widens() {
     graph.attach(inlet);
     let _endpoint = super::opening::open(&executor, &spec, producer, plain_endpoint_main())
         .expect("a virtual endpoint");
-    let device = listed(|| io.outputs(), &spec);
+    let device = listed(&io, &spec, false);
     let mut out = io
         .connect_output(super::opening::started(&io), &device.id)
         .expect("connects");

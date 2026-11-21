@@ -1051,7 +1051,14 @@ pub(super) fn handle_control(
             };
             reply.send(value);
         }
-        ControlCommand::GetParameter { param_id, reply } => {
+        ControlCommand::GetParameter {
+            param_id,
+            flush,
+            reply,
+        } => {
+            if let Some(applied) = flush {
+                let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
+            }
             let value = match query(
                 lane,
                 inbox,
@@ -1373,6 +1380,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
             inbox.resync(ResyncKind::Io);
         }
         News::PluginReloaded => inbox.resync(ResyncKind::Reloaded),
+        News::PluginStateNotRestored { reason } => inbox.state_not_restored(reason),
         News::ProcessRequested => inbox.process_requested(),
         News::TransportRequested { request } => inbox.transport(request),
         // The server's editor is the remote editor's to hear of: no event of

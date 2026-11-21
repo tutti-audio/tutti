@@ -14,7 +14,7 @@ pub(crate) trait ParamReads {
 
 fn mirror(handle: &PluginHandle) -> Option<PluginParamValues> {
     let (mut values, read) = PluginParamValues::start(handle);
-    values.land(read.run().ok()?);
+    values.land(futures_lite::future::block_on(std::future::IntoFuture::into_future(read)).ok()?);
     Some(values)
 }
 

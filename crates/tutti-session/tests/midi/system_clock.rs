@@ -50,7 +50,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
-    let _sink = s.open_midi_sink(Arc::new(wire.clone())).run();
+    let _sink = s.open_midi_sink(Arc::new(wire.clone())).open();
     let _ = s.update();
     s.play().expect("room");
 

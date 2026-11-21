@@ -11,7 +11,7 @@ use tutti_rt::{DrainMark, DrainWatch};
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, Controller, EditWriter, Loaded, ParamAccess, ParamEdit, ParamWriteError, PluginError,
-    PluginResult, PluginTail, Prepare, PresetId, Processor, Refused, ReportDrain, Request,
+    PluginResult, PluginTail, Prepare, PresetId, Processor, Rebuilt, Refused, ReportDrain, Request,
     RestartRules, Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
@@ -633,11 +633,11 @@ impl Loaded for Vst3Loaded {
 
     /// Loads the plugin again from where it came, state and all, and drops the
     /// old instance (`kReloadComponent`). The new instance is built first, so a
-    /// refusal leaves the old one in place.
-    fn rebuild(mut self, main: MainThreadMarker) -> Result<Self, Refused<Self>> {
-        let state = self
-            .save_state(main, tutti_plugin_types::StateUse::Project)
-            .ok();
+    /// refusal leaves the old one in place. An old instance that will not save
+    /// its state, or a new one that refuses it, leaves the new instance at its
+    /// defaults and is [`Rebuilt::restored`]'s error.
+    fn rebuild(mut self, main: MainThreadMarker) -> Result<Rebuilt<Self>, Refused<Self>> {
+        let state = self.save_state(main, tutti_plugin_types::StateUse::Project);
         let options = match self.origin.id() {
             Some(tutti_plugin_types::PluginId::Vst3(class)) => {
                 super::loaded::LoadOptions::new().class_id(*class)
@@ -653,12 +653,13 @@ impl Loaded for Vst3Loaded {
                 });
             }
         };
-        if let Some(state) = state {
-            // A plugin that refuses its own state leaves the fresh instance at
-            // its defaults.
-            let _ = fresh.load_state(main, &state, tutti_plugin_types::StateUse::Project);
-        }
+        let restored = state.and_then(|state| {
+            fresh.load_state(main, &state, tutti_plugin_types::StateUse::Project)
+        });
         fresh.carried = std::mem::take(&mut self.carried);
-        Ok(fresh)
+        Ok(Rebuilt {
+            plugin: fresh,
+            restored,
+        })
     }
 }

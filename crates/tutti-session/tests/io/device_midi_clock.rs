@@ -76,7 +76,7 @@ fn a_restart_re_rates_the_midi_clock() {
         .expect("builds with no device");
     let _ = s.update();
     let wire = Wire::default();
-    let _sink = s.open_midi_sink(Arc::new(wire.clone())).run();
+    let _sink = s.open_midi_sink(Arc::new(wire.clone())).open();
     let _ = s.update();
     s.midi_nodes()
         .expect("the engine's MIDI nodes")

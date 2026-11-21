@@ -648,6 +648,13 @@ pub enum News {
         /// What it asked.
         request: tutti_plugin_types::TransportRequest,
     },
+    /// The plugin was rebuilt in place ([`PluginReloaded`](Self::PluginReloaded)
+    /// precedes it) and did not take the state it was saved with: it is at its
+    /// defaults.
+    PluginStateNotRestored {
+        /// Why the state was not restored.
+        reason: String,
+    },
 }
 
 /// One frame the server sends on the control connection: an answer, a sign of
