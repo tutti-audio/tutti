@@ -11,25 +11,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Panics [`ffi_guard`] has contained since the process began.
 static CONTAINED: AtomicU64 = AtomicU64::new(0);
 
-/// `[main-thread]` host callbacks refused off the main thread since the process began.
-static REFUSED_OFF_THREAD: AtomicU64 = AtomicU64::new(0);
-
-/// Counts one `[main-thread]` host callback refused because a plugin made it
-/// from another thread. For a format's host-callback shims; wait-free, so the
-/// audio thread may call it.
-pub fn count_refused_off_thread_call() {
-    REFUSED_OFF_THREAD.fetch_add(1, Ordering::Relaxed);
-}
-
-/// How many `[main-thread]` host callbacks a plugin made from another thread (or
-/// from the main thread while it holds the audio claim), process-wide since the
-/// process began, like [`contained_panics`]. Each was refused and answered its
-/// fallback, so a nonzero count is a plugin that breaks its format's thread rules.
-#[must_use]
-pub fn refused_off_thread_calls() -> u64 {
-    REFUSED_OFF_THREAD.load(Ordering::Relaxed)
-}
-
 /// Runs `f`; if it panics, returns `fallback` (the callback's "not handled"
 /// value) and counts the panic in [`contained_panics`].
 ///
@@ -78,13 +59,6 @@ mod tests {
         let answered: i32 = ffi_guard(-1, || panic!("a callback body"));
         assert_eq!(answered, -1);
         assert_eq!(contained_panics(), before + 1);
-    }
-
-    #[test]
-    fn a_refused_off_thread_call_is_counted_once() {
-        let before = super::refused_off_thread_calls();
-        super::count_refused_off_thread_call();
-        assert_eq!(super::refused_off_thread_calls(), before + 1);
     }
 
     #[test]

@@ -209,6 +209,15 @@ impl<'a> Diagnostics<'a> {
         self.hosted.failed_snapshots
     }
 
+    /// The callbacks the plugin made from a thread its format forbids, which the
+    /// host refused and answered with the callback's fallback, over the life of
+    /// the node: a nonzero count is a plugin that breaks its format's thread
+    /// rules. Only CLAP counts them; a served plugin's is the server's, as it
+    /// last told.
+    pub fn refused_off_thread_calls(&self) -> u64 {
+        self.hosted.refused_off_thread_calls()
+    }
+
     /// The latency the graph compensates for this plugin's node, as of the last
     /// update: the plugin's own, and out of process one chunk of the pipeline
     /// that carries its audio.

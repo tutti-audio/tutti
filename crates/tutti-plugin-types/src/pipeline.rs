@@ -95,6 +95,7 @@ pub struct ChunkCounters {
     /// ([`note_server_losses`](Self::note_server_losses)).
     server_refused_commands: AtomicU64,
     server_refused_edits: AtomicU64,
+    server_refused_off_thread_calls: AtomicU64,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -197,7 +198,14 @@ impl ChunkCounters {
     }
 
     /// Takes the server's cumulative counts, as it last told them.
-    pub fn note_server_losses(&self, commands_refused: u64, edits_refused: u64) {
+    pub fn note_server_losses(
+        &self,
+        commands_refused: u64,
+        edits_refused: u64,
+        refused_off_thread_calls: u64,
+    ) {
+        self.server_refused_off_thread_calls
+            .store(refused_off_thread_calls, Ordering::Relaxed);
         self.server_refused_commands
             .store(commands_refused, Ordering::Relaxed);
         self.server_refused_edits
@@ -207,6 +215,14 @@ impl ChunkCounters {
     /// See `PluginControls::server_refused_commands`.
     pub fn server_refused_commands(&self) -> u64 {
         self.server_refused_commands.load(Ordering::Relaxed)
+    }
+
+    /// The callbacks the plugin made from a thread its format forbids, which
+    /// its server refused, as the server last told them
+    /// ([`Control::refused_off_thread_calls`](crate::Control::refused_off_thread_calls)
+    /// of a served plugin).
+    pub fn server_refused_off_thread_calls(&self) -> u64 {
+        self.server_refused_off_thread_calls.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::server_refused_edits`.

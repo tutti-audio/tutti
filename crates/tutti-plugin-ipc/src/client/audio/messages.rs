@@ -309,6 +309,9 @@ pub enum IpcEvent {
         commands_refused: u64,
         /// One-way edits the plugin refused.
         edits_refused: u64,
+        /// `[main-thread]` callbacks the plugin made from another thread, which
+        /// the server refused.
+        refused_off_thread_calls: u64,
     },
     /// The plugin refused the rate it was asked to run at (`Some`: the rate in
     /// Hz and the plugin's reason), or took a rate after refusing one (`None`).
@@ -403,7 +406,7 @@ pub(super) struct Unsolicited {
     /// it.
     would_not_stop: Option<String>,
     /// The server's latest cumulative losses (commands, edits), until drained.
-    server_losses: Option<(u64, u64)>,
+    server_losses: Option<(u64, u64, u64)>,
     io: bool,
     /// The buses the last `PluginIoChanged` carried, until drained.
     io_layout: Option<tutti_plugin_types::Layout>,
@@ -548,8 +551,13 @@ impl Unsolicited {
 
     /// The server's cumulative losses, replacing any held: a figure that is
     /// cumulative loses nothing by being replaced.
-    pub(super) fn server_losses(&mut self, commands_refused: u64, edits_refused: u64) {
-        self.server_losses = Some((commands_refused, edits_refused));
+    pub(super) fn server_losses(
+        &mut self,
+        commands_refused: u64,
+        edits_refused: u64,
+        refused_off_thread_calls: u64,
+    ) {
+        self.server_losses = Some((commands_refused, edits_refused, refused_off_thread_calls));
     }
 
     /// A resync request; a second of the same kind adds nothing.
@@ -604,13 +612,13 @@ impl Unsolicited {
             .would_not_stop
             .take()
             .map(|reason| IpcEvent::WouldNotStop { reason });
-        let losses = self
-            .server_losses
-            .take()
-            .map(|(commands_refused, edits_refused)| IpcEvent::ServerLosses {
+        let losses = self.server_losses.take().map(
+            |(commands_refused, edits_refused, refused_off_thread_calls)| IpcEvent::ServerLosses {
                 commands_refused,
                 edits_refused,
-            });
+                refused_off_thread_calls,
+            },
+        );
         layout
             .into_iter()
             .chain(structural.into_iter().flatten())

@@ -669,7 +669,7 @@ pub enum News {
         /// Why the plugin would not stop.
         reason: String,
     },
-    /// What the server's own work lost, over its life, sent when either count
+    /// What the server's own work lost, over its life, sent when any count
     /// has moved since it was last sent (at most once per control tick). The
     /// figures are cumulative: a later one replaces an earlier one.
     ServerLosses {
@@ -678,6 +678,9 @@ pub enum News {
         /// One-way edits the plugin refused: an automation state, a track's
         /// info or a parameter write.
         edits_refused: u64,
+        /// `[main-thread]` callbacks the plugin made from another thread, which
+        /// the server refused.
+        refused_off_thread_calls: u64,
     },
 }
 

@@ -223,7 +223,7 @@ pub(crate) struct Server<L: OutOfProcess> {
     /// the plugin refused.
     edits_refused: TallyWriter<u64>,
     /// The loss counts last told to the host ([`News::ServerLosses`]).
-    told_losses: (u64, u64),
+    told_losses: (u64, u64, u64),
 }
 
 /// How long a plan that waits for the Processor to come home from the render
@@ -365,7 +365,7 @@ impl<L: ServerSide> Server<L> {
             events: Vec::new(),
             refused: false,
             edits_refused: ties.edits_refused.writer(),
-            told_losses: (0, 0),
+            told_losses: (0, 0, 0),
             ties,
         };
         // The wake outlives every activation: the plugin's host state is the
@@ -727,15 +727,22 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         if self.ties.bell.take() {
             self.events.push(News::ProcessRequested);
         }
+        // A poisoned plugin has no control surface: its last count stands.
+        let refused_off_thread = self
+            .lifecycle
+            .control()
+            .map_or(self.told_losses.2, |c| c.refused_off_thread_calls());
         let losses = (
             self.ties.commands_refused.get(),
             self.ties.edits_refused.get(),
+            refused_off_thread,
         );
         if losses != self.told_losses {
             self.told_losses = losses;
             self.events.push(News::ServerLosses {
                 commands_refused: losses.0,
                 edits_refused: losses.1,
+                refused_off_thread_calls: losses.2,
             });
         }
         std::mem::take(&mut self.events)

@@ -94,6 +94,11 @@ pub trait HostCallbacks: Send + Sync + 'static {
     fn log(&self, severity: LogSeverity, message: &str) {
         let _ = (severity, message);
     }
+    /// A `[main-thread]` callback the plugin made from another thread (or from
+    /// the main thread while it holds the audio claim) was refused. Any thread;
+    /// wait-free: count it, nothing more. Required, because a host that drops
+    /// the count hides a plugin that breaks CLAP's thread rules.
+    fn refused_off_thread_call(&self);
     /// `clap.log` on the audio thread (or in a served pool task): the line is
     /// counted, not recorded, because recording allocates.
     fn log_dropped_on_audio_thread(&self) {}
@@ -310,9 +315,9 @@ fn guarded<R: Copy>(
 
 /// [`guarded`] for a callback CLAP marks `[main-thread]`: off the instance's
 /// main thread (or on it while it holds the audio claim) the call is refused,
-/// answering `fallback` and counted in
-/// [`refused_off_thread_calls`](tutti_plugin_types::refused_off_thread_calls); the
-/// embedding crate sees nothing. A plugin that
+/// answering `fallback` and counted through
+/// [`HostCallbacks::refused_off_thread_call`]; the embedding crate sees nothing
+/// else. A plugin that
 /// calls one from `process` or a pool task would otherwise have the host take
 /// locks and allocate there, or race the main thread's own state.
 fn main_only<R: Copy>(
@@ -324,7 +329,7 @@ fn main_only<R: Copy>(
         if cb.is_main_thread() {
             f(cb)
         } else {
-            tutti_plugin_types::count_refused_off_thread_call();
+            cb.refused_off_thread_call();
             fallback
         }
     })
@@ -888,6 +893,8 @@ mod tests {
     struct Count(AtomicU32);
 
     impl HostCallbacks for Count {
+        fn refused_off_thread_call(&self) {}
+
         fn is_main_thread(&self) -> bool {
             true
         }
@@ -989,6 +996,7 @@ mod tests {
     struct Spy {
         main: std::sync::atomic::AtomicBool,
         reached: AtomicU32,
+        refused: AtomicU32,
     }
 
     impl HostCallbacks for Spy {
@@ -998,6 +1006,10 @@ mod tests {
 
         fn is_audio_thread(&self) -> bool {
             false
+        }
+
+        fn refused_off_thread_call(&self) {
+            self.refused.fetch_add(1, Ordering::SeqCst);
         }
 
         fn request_callback(&self) {
@@ -1047,7 +1059,8 @@ mod tests {
             let mut id = 0u32;
 
             spy.main.store(false, Ordering::SeqCst);
-            let refused_before = tutti_plugin_types::refused_off_thread_calls();
+            let bystander = Arc::new(Spy::default());
+            let _bystander_host = Host::new(bystander.clone());
             assert!(!(timers.register_timer.unwrap())(raw, 10, &mut id));
             (state.mark_dirty.unwrap())(raw);
             assert!(!(fds.register_fd.unwrap())(raw, 3, 1));
@@ -1057,9 +1070,14 @@ mod tests {
                 "refused off the main thread"
             );
             assert_eq!(
-                tutti_plugin_types::refused_off_thread_calls() - refused_before,
+                spy.refused.load(Ordering::SeqCst),
                 3,
-                "each refused call is counted"
+                "each refused call is counted on the instance that made it"
+            );
+            assert_eq!(
+                bystander.refused.load(Ordering::SeqCst),
+                0,
+                "another instance's count is untouched"
             );
             ((*raw).request_callback.unwrap())(raw);
             assert_eq!(
@@ -1074,7 +1092,7 @@ mod tests {
             assert!((fds.register_fd.unwrap())(raw, 3, 1));
             assert_eq!(spy.reached.load(Ordering::SeqCst), 4);
             assert_eq!(
-                tutti_plugin_types::refused_off_thread_calls() - refused_before,
+                spy.refused.load(Ordering::SeqCst),
                 3,
                 "an admitted call is not counted"
             );

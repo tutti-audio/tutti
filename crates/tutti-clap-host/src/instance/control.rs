@@ -533,6 +533,12 @@ impl Control for ClapLoaded {
         self.flush_lost
     }
 
+    /// The `[main-thread]` callbacks the plugin made from another thread,
+    /// which the host refused (`HostCallbacks::refused_off_thread_call`).
+    fn refused_off_thread_calls(&self) -> u64 {
+        self.host_state.refused_off_thread.get()
+    }
+
     /// What the plugin's `request_process` raises: CLAP's `SLEEP` status is
     /// the plugin's word that it needs no `process` until it asks.
     fn bind_wake(&self, wake: ProcessWake) {
