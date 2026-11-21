@@ -4,9 +4,20 @@
 
 use std::future::Future;
 use std::io;
+use std::pin::pin;
+use std::task::{Context, Poll, Waker};
 
 use super::{Executor, Handle, Shared, Task};
 use crate::priority::PriorityRequest;
+
+/// The web cannot block: one look at `task`, its output when it has ended.
+pub(super) fn join<T>(task: Task<T>) -> Option<T> {
+    let mut ended = pin!(task.fallible());
+    match ended.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(output) => output,
+        Poll::Pending => None,
+    }
+}
 
 /// No thread is ever parked on the web.
 #[derive(Default)]
