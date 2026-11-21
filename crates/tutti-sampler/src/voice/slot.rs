@@ -445,13 +445,13 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                 let wrap = window.and_then(|w| wrap_ahead(clock, range.start, w));
                 if let (Some(spare), Some((to_wrap, loop_start, tempo))) = (spare.as_mut(), wrap) {
                     let lead = stretched::prime(spare.vocoder).get().div_ceil(PRIME_SPEED);
-                    if spare.cursor.is_some() || to_wrap <= lead + longest {
-                        if let Some(gate) = feed.sampler.gate(spare.consumption) {
-                            let origin = gate.origin(loop_start, tempo, Some(clock));
-                            stretched::preroll(
-                                spare, &mut feed, origin, None, to_wrap, frames, &mut input, prime,
-                            );
-                        }
+                    if (spare.cursor.is_some() || to_wrap <= lead + longest)
+                        && let Some(gate) = feed.sampler.gate(spare.consumption)
+                    {
+                        let origin = gate.origin(loop_start, tempo, Some(clock));
+                        stretched::preroll(
+                            spare, &mut feed, origin, None, to_wrap, frames, &mut input, prime,
+                        );
                     }
                 }
                 if !sounds {
