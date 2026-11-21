@@ -31,12 +31,13 @@ pub enum Phase {
     /// main thread) and, mid re-prepare, sends the resumed plan.
     Collect,
     /// Hosted plugins' health, latency, parameter edits and state
-    /// snapshots (feature `plugin`): a dead pooled plugin's node stays at its
+    /// snapshots (feature `plugin`): what the plugin tasks sent lands first; a dead
+    /// pooled plugin's node stays at its
     /// key, silent, and a host-inserted plugin's is removed
     /// (`PluginChange::Died`), a moved latency handed to the graph
     /// (`PluginChange::LatencyChanged`), a due snapshot, a parameter
-    /// read and a reload submitted to the session's executor (their results land in
-    /// the next `Phase::Collect`).
+    /// read and a reload started on the session's executor (their results land in
+    /// the next `Phase::Plugins`).
     Plugins,
     /// The plugins' render mode (features `plugin` and `export`): Offline
     /// while an export is in flight, Realtime otherwise, each plugin told on

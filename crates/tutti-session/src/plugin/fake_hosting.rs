@@ -63,6 +63,20 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     Key::new(node)
 }
 
+/// Waits until the session has no plugin task in flight ([`Session::plugin_tasks`]): the
+/// ends the tasks sent are in the inbox for the next update. The guard only bounds a hang.
+pub(super) fn await_tasks<K: crate::AppKey, C: Clock<Float = f32>>(session: &Session<K, C>) {
+    let guard = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
+    while session.plugin_tasks() > 0 {
+        assert!(
+            tutti_platform::Instant::now() < guard,
+            "{} plugin task(s) never ended",
+            session.plugin_tasks()
+        );
+        std::thread::yield_now();
+    }
+}
+
 /// A backend that answers nothing: the editor route is the fake control's.
 #[derive(Default)]
 pub(super) struct Inert {
