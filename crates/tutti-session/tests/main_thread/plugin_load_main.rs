@@ -139,6 +139,7 @@ fn an_in_process_load_is_a_plugin_hosted_in_this_process() {
     let opened = load(&s, &catalog);
     let handle = opened.handle();
     assert_eq!(handle.info().hosting(), ResolvedHosting::InProcess);
+    assert_eq!(handle.info().id(), &id());
     assert!(matches!(handle.presence(), Presence::Live));
     let node = s.add_plugin(opened).expect("the plugin enters");
     assert!(

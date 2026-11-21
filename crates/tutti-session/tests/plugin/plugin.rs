@@ -13,9 +13,10 @@
 //! it every test here fails, naming that command. They must fail rather than
 //! skip.
 
-use crate::loading::{LoadPlugin, Spec};
+use crate::loading::{Block as _, LoadFrom as _, LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
 use crate::support;
+use tutti_plugin_db::Hosting;
 use tutti_rt::LockExt;
 use tutti_session::InPort;
 use tutti_session::Root;
@@ -37,11 +38,11 @@ use tutti_plugin_types::PluginFailure;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::RenderMode;
 use tutti_session::BufferMaster;
-use tutti_session::PeerState;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Phase, PhaseCx, PluginHealth,
     Range, Session, SessionEvent,
 };
+use tutti_session::{Peer as _, PeerState};
 use tutti_session::{RecoveryFailure, ReloadCause};
 use tutti_units::{SampleRate, Samples};
 
@@ -792,6 +793,100 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
     );
     assert!(s.graph_ref().contains(node), "the node stays at its key");
     assert!(s.plugin_view(node).is_ok(), "and its record");
+}
+
+/// **A node that gave up is revived by a reload composed from what its handle
+/// and its view read.** The node's servers abort on their 40th block, so it gives
+/// up with the gain set to 0.25 held in its record. The load of the handle's id
+/// and hosting, started from the withheld state (else the last good), swapped in
+/// at the node's key, renders again with that gain.
+#[test]
+fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
+    let (catalog, id, _dir) = crate::loading::catalog_of(&PluginRef::file(clap_probe()));
+    let mut s = session_built(
+        &[
+            PASSTHROUGH,
+            APPLY_GAIN,
+            ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "40"),
+        ],
+        |b| {
+            b.snapshot_interval(Duration::from_secs(1)).plugin_recovery(
+                tutti_session::RecoveryPolicy {
+                    max_failures: 2,
+                    backoff: Duration::from_millis(1),
+                    ..Default::default()
+                },
+            )
+        },
+    );
+    let main = tutti_fixtures::main_thread();
+    let (handle, node) = s
+        .load_from(main, &catalog, &id, Hosting::OutOfProcess, None)
+        .expect("the reference plugin loads");
+    s.graph().connect(node, Root).unwrap();
+    let _ = s.update();
+    let gain = gain_param(&s, node.erase());
+    let target = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(gain)
+        .expect("the plugin declares the parameter")
+        .target();
+    s.set(target.to(tutti_units::Normalized::of(0.25))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !is_quarter(param(&s, node.erase(), gain)) {
+        assert!(Instant::now() < deadline, "the probe never took the value");
+        let _ = s.update();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    snapshot_now(&mut s, node.erase());
+    let mut drive = Drive::new();
+    drive.until(&mut s, "given up", |e| {
+        matches!(
+            e,
+            SessionEvent::Plugin(PluginEvent {
+                change: PluginChange::GaveUp { .. },
+                ..
+            })
+        )
+    });
+    // SAFETY: nextest runs each test in its own process, and the servers that
+    // read the variable are spawned from this thread, after this call.
+    unsafe { std::env::remove_var("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK") };
+
+    let state = {
+        let view = s.plugin_view(node).unwrap();
+        view.state()
+            .withheld()
+            .or(view.state().last_good())
+            .cloned()
+            .expect("a node that gave up still reads the state worth keeping")
+    };
+    let info = handle.info();
+    let mut load = match s
+        .load_plugin_as(info.id(), &catalog, info.hosting())
+        .unwrap()
+    {
+        tutti_session::LoadPlugin::OutOfProcess(load) => load,
+        other => panic!("{other:?}"),
+    };
+    load.initial_state(state).expect("its own plugin's state");
+    let revived = load.block().expect("the plugin loads again");
+    s.swap_plugin(node, revived, main).expect("it swaps in");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !(is_quarter(param(&s, node.erase(), gain)) && renders_sound(&mut s)) {
+        assert!(
+            Instant::now() < deadline,
+            "the revived node never rendered with its state"
+        );
+        let _ = s.update();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(matches!(
+        s.plugin_view(node).unwrap().health(),
+        PluginHealth::Running
+    ));
 }
 
 #[cfg(target_os = "linux")]

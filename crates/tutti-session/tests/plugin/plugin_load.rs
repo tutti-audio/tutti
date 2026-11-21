@@ -102,6 +102,7 @@ fn a_load_gives_a_node_whose_handle_observes_it_and_renders() {
         "the plugin the id names, not the file's first"
     );
     assert_eq!(plugin.info().hosting(), ResolvedHosting::OutOfProcess);
+    assert_eq!(plugin.info().id(), &second_id());
     assert!(matches!(plugin.presence(), Presence::Live));
     assert!(!plugin.changed(), "the file is as it was loaded");
 
@@ -141,6 +142,7 @@ fn an_out_of_process_load_runs_on_a_spawned_thread_and_its_node_renders() {
     .expect("the reference plugin loads off the main thread");
     let plugin = opened.handle();
     assert_eq!(plugin.info().hosting(), ResolvedHosting::OutOfProcess);
+    assert_eq!(plugin.info().id(), &second_id());
     assert_eq!(
         plugin.asset().name(),
         tutti_plugin_db::canonical_path(&clap_probe())

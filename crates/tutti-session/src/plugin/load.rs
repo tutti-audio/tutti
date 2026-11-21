@@ -109,15 +109,8 @@ impl Request {
         };
         let config = request.config.clone();
         let opened = open(request);
-        let (shared, install) = Shared::new(
-            &cx,
-            stamp,
-            self.id,
-            opened,
-            self.loadable,
-            config,
-            presets,
-        )?;
+        let (shared, install) =
+            Shared::new(&cx, stamp, self.id, opened, self.loadable, config, presets)?;
         Ok(PluginNode {
             handle: LoadedPlugin {
                 shared: Arc::new(shared),
