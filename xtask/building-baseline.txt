@@ -57,7 +57,7 @@ tutti-clap-host  setter  crates/tutti-clap-host/src/instance/thread_pool.rs::Cla
 
 # tutti-codec
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create
-tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
+tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::new
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_path
 
@@ -220,14 +220,9 @@ tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::Par
 
 
 # tutti-sampler
-tutti-sampler  with-prefix  crates/tutti-sampler/src/clip.rs::Clip::with_tempo
-tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoice::with_tempo
 tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
-tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_tempo
 tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_handle
-tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_tempo
 tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_handle
-tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_tempo
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::channels
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::gain
 tutti-sampler  chain-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade

@@ -1,7 +1,7 @@
 use super::*;
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::News;
-use tutti_plugin_types::{Control, ProcessOutput, Request};
+use tutti_plugin_types::{Control, Notice, PluginError, ProcessOutput, Request};
 use tutti_vst3_host::Vst3Loaded;
 
 type Vst3Instance = Server<Vst3Loaded>;
@@ -395,6 +395,15 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
         !instance.set_render_mode(main_thread(), RenderMode::Offline),
         "the probe refuses offline"
     );
+    assert!(
+        instance.poll(main_thread()).iter().any(|news| matches!(
+            news,
+            News::RenderModeNotApplied {
+                mode: RenderMode::Offline
+            }
+        )),
+        "the host is told the mode was refused, and which"
+    );
     assert!(instance.is_active(), "the refusal was rolled back");
     assert_eq!(
         instance.state.prepare().map(|p| p.mode()),
@@ -412,6 +421,43 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
         "the mode it already has is taken without a restart"
     );
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 2);
+    assert!(
+        !instance
+            .poll(main_thread())
+            .iter()
+            .any(|news| matches!(news, News::RenderModeNotApplied { .. })),
+        "a mode the plugin took is not reported"
+    );
+}
+
+/// **A restart the plugin would not make is told to the host** as the news
+/// `PluginWouldNotStop`, with the plugin's reason.
+#[test]
+fn a_plugin_that_would_not_stop_is_told_to_the_host() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let mut instance = Vst3Instance::load_first(
+        main_thread(),
+        Path::new(vst3_plugin()),
+        48_000.0,
+        128,
+        FloatWidth::F32,
+    )
+    .expect("the vendored VST3 probe loads");
+    let refusal = instance.absorb(
+        main_thread(),
+        Notice::Stuck {
+            reason: PluginError::Process("render thread inside the plugin".into()),
+        },
+    );
+    assert!(refusal.is_none(), "a stuck restart is not a rate refusal");
+    let told = instance.poll(main_thread());
+    assert!(
+        told.iter().any(|news| matches!(
+            news,
+            News::PluginWouldNotStop { reason } if reason.contains("render thread inside the plugin")
+        )),
+        "{told:?}"
+    );
 }
 
 /// A VST3 program keeps both coordinates, and its list's name.
@@ -796,5 +842,49 @@ fn test_vst3_process_f32_with_note() {
     assert!(
         has_nonzero,
         "Expected at least one non-zero output sample after NoteOn"
+    );
+}
+
+/// **The server's counts reach the host as news, once per change**: a command
+/// the render thread was not given and an edit the plugin refused are told with
+/// their cumulative totals at the next poll, and a poll after tells nothing.
+#[test]
+fn the_servers_losses_are_told_to_the_host_when_they_change() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let mut instance = Vst3Instance::load_first(
+        main_thread(),
+        Path::new(vst3_plugin()),
+        48_000.0,
+        128,
+        FloatWidth::F32,
+    )
+    .expect("the vendored VST3 probe loads");
+    let losses = |told: &[News]| {
+        told.iter()
+            .filter_map(|news| match news {
+                News::ServerLosses {
+                    commands_refused,
+                    edits_refused,
+                } => Some((*commands_refused, *edits_refused)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        losses(&instance.poll(main_thread())).is_empty(),
+        "nothing lost yet"
+    );
+    instance.ties.commands_refused.writer().add(2);
+    instance.edits_refused.add(1);
+    assert_eq!(losses(&instance.poll(main_thread())), [(2, 1)]);
+    assert!(
+        losses(&instance.poll(main_thread())).is_empty(),
+        "told once"
+    );
+    instance.edits_refused.add(1);
+    assert_eq!(
+        losses(&instance.poll(main_thread())),
+        [(2, 2)],
+        "cumulative"
     );
 }

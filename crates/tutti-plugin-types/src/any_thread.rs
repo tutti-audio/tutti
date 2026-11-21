@@ -7,26 +7,12 @@
 //! [`MainThreadMarker`](crate::MainThreadMarker).
 
 use crate::{
-    AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass, ParameterInfo,
-    PluginFailure, RenderMode, StateError, StateUse, TerminationReason, UnknownParam, bypass_value,
-    is_bypassed,
+    Answer, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass,
+    ParameterInfo, PluginFailure, RenderMode, StateError, StateUse, TerminationReason,
+    UnknownParam, bypass_value,
 };
-use futures_channel::oneshot;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-
-/// An answer a plugin's hosting fills: the receiver of a oneshot whose sender
-/// the thread that learns the answer holds. A sender dropped unanswered (the
-/// hosting ended) cancels it.
-pub type Answer<T> = oneshot::Receiver<T>;
-
-/// An [`Answer`] that is already filled with `value`.
-pub fn answered<T>(value: T) -> Answer<T> {
-    let (tx, rx) = oneshot::channel();
-    // The receiver is alive: the send cannot fail.
-    drop(tx.send(value));
-    rx
-}
 
 /// What a loaded plugin answers from any thread, without a main-thread token.
 ///
@@ -65,16 +51,12 @@ pub trait AnyThread: Send + Sync {
     /// unavailable too.
     fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>>;
 
-    /// The plugin's current value for one parameter.
+    /// The plugin's current value for one parameter as an [`Answer`], filled as
+    /// [`parameter_descriptors`](Self::parameter_descriptors) is.
     ///
     /// `None` if unavailable, including when `id` uses the other addressing
     /// model, which addresses no parameter of this plugin. See [`ParamId`].
-    /// Blocks on a round trip (served) or a main-thread tick (in-process).
-    fn parameter_value(&self, id: ParamId) -> Option<Normalized>;
-
-    /// [`parameter_value`](Self::parameter_value) as an [`Answer`], filled as
-    /// [`parameter_descriptors`](Self::parameter_descriptors) is.
-    fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>>;
+    fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>>;
 
     /// Writes one parameter value, for a UI knob or an initial value.
     ///
@@ -169,17 +151,12 @@ pub trait AnyThread: Send + Sync {
         }
     }
 
-    /// Whether the plugin's own bypass is on now, read back from the plugin:
-    /// `None` when the plugin did not answer, or (a
-    /// [`Property`](OwnBypass::Property)) the backend cannot reach it. A served
-    /// plugin's read is a round trip, so the session compares such a plugin
-    /// with its mirrored parameter values instead.
-    fn bypassed(&self, site: OwnBypass) -> Option<bool> {
-        match site {
-            OwnBypass::Parameter(id) => self.parameter_value(id).map(is_bypassed),
-            OwnBypass::Property => None,
-        }
-    }
+    /// Whether the plugin's own bypass is on now, read back from the plugin
+    /// without waiting: `None` when the plugin did not answer or the backend
+    /// does not read it. An in-process backend reads it live; a served
+    /// plugin's bypass is compared through its mirrored parameter values
+    /// instead, so its backend answers `None`.
+    fn bypassed(&self, site: OwnBypass) -> Option<bool>;
 
     /// Announces the host's automation mode, for the editor's UI feedback
     /// (VST3 `IAutomationState`). Applies to the whole plugin. `Ok(())` means
@@ -231,7 +208,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::{AutomationMode, ParamFlags, StateError, bypass_parameter};
+    use crate::{Answer, AutomationMode, ParamFlags, StateError, bypass_parameter};
 
     /// A plugin that lists `params` and records every parameter write.
     struct Listed {
@@ -241,23 +218,23 @@ mod tests {
 
     impl AnyThread for Listed {
         fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
-            answered(Some(self.params.clone()))
+            Answer::ready(Some(self.params.clone()))
         }
-        fn parameter_value(&self, _: ParamId) -> Option<Normalized> {
-            None
-        }
-        fn parameter_value_answer(&self, _: ParamId) -> Answer<Option<Normalized>> {
-            answered(None)
+        fn parameter_value(&self, _: ParamId) -> Answer<Option<Normalized>> {
+            Answer::ready(None)
         }
         fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
             self.written.lock().unwrap().push((id, value.get()));
             Ok(())
         }
+        fn bypassed(&self, _: OwnBypass) -> Option<bool> {
+            None
+        }
         fn parameter_plain(&self, _: ParamId, _: Normalized) -> Option<f64> {
             None
         }
         fn parameter_normalized(&self, _: ParamId, _: f64) -> Answer<Option<Normalized>> {
-            answered(None)
+            Answer::ready(None)
         }
         fn parameter_text(&self, _: ParamId, _: Normalized) -> Option<String> {
             None

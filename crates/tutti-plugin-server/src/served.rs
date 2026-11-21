@@ -21,13 +21,14 @@ use tutti_platform::Instant;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
-    AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, LoadStage,
-    LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
-    ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult,
-    Prepare, Preset, PresetId, ProcessWake, RateRefusal, RateRefusalCause, RenderMode,
-    RenderModeSupport, Request, SampleRate, Samples, Seat, Stage, State, StateError, StateUse,
-    TrackInfo, Widths,
+    AutomationMode, Control, Delivered, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle,
+    LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
+    ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef,
+    PluginResult, Prepare, Preset, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
+    RenderMode, RenderModeSupport, Request, SampleRate, Samples, Seat, Stage, State, StateError,
+    StateUse, TrackInfo, Widths,
 };
+use tutti_rt::TallyWriter;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -218,6 +219,11 @@ pub(crate) struct Server<L: OutOfProcess> {
     /// the plugin's request to be processed again (any thread), and taken by
     /// `poll`, which tells the host.
     ties: Ties,
+    /// Adds to [`Losses::edits_refused`](crate::render::Losses): one-way edits
+    /// the plugin refused.
+    edits_refused: TallyWriter<u64>,
+    /// The loss counts last told to the host ([`News::ServerLosses`]).
+    told_losses: (u64, u64),
 }
 
 /// How long a plan that waits for the Processor to come home from the render
@@ -358,6 +364,8 @@ impl<L: ServerSide> Server<L> {
             edits: Vec::new(),
             events: Vec::new(),
             refused: false,
+            edits_refused: ties.edits_refused.writer(),
+            told_losses: (0, 0),
             ties,
         };
         // The wake outlives every activation: the plugin's host state is the
@@ -532,6 +540,9 @@ impl<L: ServerSide> Server<L> {
             }
             Notice::Stuck { reason } => {
                 tracing::warn!("plugin would not stop: {reason}");
+                self.events.push(News::PluginWouldNotStop {
+                    reason: reason.to_string(),
+                });
             }
             Notice::StateNotRestored { reason } => {
                 tracing::warn!("plugin did not restore its state after a reload: {reason}");
@@ -716,6 +727,17 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         if self.ties.bell.take() {
             self.events.push(News::ProcessRequested);
         }
+        let losses = (
+            self.ties.commands_refused.get(),
+            self.ties.edits_refused.get(),
+        );
+        if losses != self.told_losses {
+            self.told_losses = losses;
+            self.events.push(News::ServerLosses {
+                commands_refused: losses.0,
+                edits_refused: losses.1,
+            });
+        }
         std::mem::take(&mut self.events)
     }
 
@@ -795,6 +817,8 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
                 let took = control.set_render_mode(main, mode);
                 if took {
                     self.state.set_mode(mode);
+                } else {
+                    self.events.push(News::RenderModeNotApplied { mode });
                 }
                 took
             }
@@ -802,9 +826,15 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
                 self.state.set_mode(mode);
                 false
             }
-            RenderModeSupport::OnActivation => self
-                .reconfigure(main, previous, previous.with_mode(mode))
-                .is_ok(),
+            RenderModeSupport::OnActivation => {
+                let took = self
+                    .reconfigure(main, previous, previous.with_mode(mode))
+                    .is_ok();
+                if !took {
+                    self.events.push(News::RenderModeNotApplied { mode });
+                }
+                took
+            }
         }
     }
 
@@ -825,6 +855,8 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         self.lifecycle.control_ref()?.parameter(main, id)
     }
 
+    /// Whether the plugin took the mode is not counted: `false` is the format
+    /// having no such call (AU's every time), not a refusal.
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
         if let Some(control) = self.lifecycle.control() {
             let _ = control.set_automation_state(main, mode);
@@ -832,10 +864,13 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
     }
 
     /// The wire has no reply to this, so what the plugin's `Control` answers
-    /// is not sent back; the host's own queue already said whether it went.
+    /// is not sent back: a track info that did not reach the plugin is counted
+    /// ([`Losses::edits_refused`](crate::render::Losses)).
     fn set_track_info(&mut self, main: MainThreadMarker, info: &TrackInfo) {
         if let Some(control) = self.lifecycle.control() {
-            let _ = control.set_track_info(main, info);
+            let delivered = control.set_track_info(main, info);
+            self.edits_refused
+                .add(u64::from(delivered != Delivered::Yes));
         }
     }
 
@@ -909,7 +944,8 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         // no block is draining the writes.
         let home = self.bring_home(main);
         if home {
-            L::settle_edits(&mut self.lifecycle, main);
+            let refused = L::settle_edits(&mut self.lifecycle, main);
+            self.edits_refused.add(refused);
         }
         let saved = self
             .lifecycle

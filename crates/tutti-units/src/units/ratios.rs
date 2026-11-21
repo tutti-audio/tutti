@@ -163,18 +163,12 @@ impl Cents {
     /// The interval a frequency multiplier spans. Inverse of
     /// [`to_pitch_ratio`](Self::to_pitch_ratio).
     ///
-    /// A named method rather than a `From`, because it is not total: a
-    /// non-positive ratio has no logarithm. Those give [`Cents::new(0.0)`](Cents) —
-    /// the unison a caller building a scale degree wants — rather than a NaN
-    /// that reaches a frequency table before anyone notices.
+    /// Total: a [`FrequencyRatio`] is finite and above zero, so it has a
+    /// logarithm.
     #[inline]
     #[must_use]
-    pub fn from_pitch_ratio(ratio: f64) -> Cents {
-        if ratio > 0.0 {
-            Cents(1200.0 * libm::log2(ratio))
-        } else {
-            Cents(0.0)
-        }
+    pub fn from_pitch_ratio(ratio: FrequencyRatio) -> Cents {
+        Cents(1200.0 * libm::log2(ratio.get()))
     }
 }
 
@@ -348,20 +342,10 @@ impl Semitones {
     /// The interval a frequency multiplier spans. Inverse of
     /// [`to_pitch_ratio`](Self::to_pitch_ratio), and the semitone twin of
     /// [`Cents::from_pitch_ratio`].
-    ///
-    /// Named rather than a `From` for that method's reason: it is not total,
-    /// because a non-positive ratio has no logarithm. Those give
-    /// [`Semitones::UNISON`] — a unison — rather than a NaN that
-    /// reaches a note table before anyone notices.
-    ///
     #[inline]
     #[must_use]
-    pub fn from_pitch_ratio(ratio: f64) -> Semitones {
-        if ratio > 0.0 {
-            Semitones(12.0 * libm::log2(ratio))
-        } else {
-            Semitones::UNISON
-        }
+    pub fn from_pitch_ratio(ratio: FrequencyRatio) -> Semitones {
+        Semitones(12.0 * libm::log2(ratio.get()))
     }
 }
 

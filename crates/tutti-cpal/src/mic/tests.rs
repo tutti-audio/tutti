@@ -448,7 +448,10 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mic-fault.wav");
     let mut sink = mic
-        .matching_sink(&path, Format::Wav(tutti_codec::Pcm::Float32))
+        .matching_sink(
+            std::fs::File::create(&path).unwrap(),
+            Format::Wav(tutti_codec::Pcm::Float32),
+        )
         .unwrap();
 
     prod.push_interleaved(Interleaved::new(&[0.5, -0.5], prod.layout()).unwrap());
