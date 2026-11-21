@@ -1039,7 +1039,7 @@ impl AudioBridge {
         answer
     }
 
-    /// [`load_state`](Self::load_state) as a oneshot receiver, filled and bounded as
+    /// `load_state` as a oneshot receiver, filled and bounded as
     /// [`save_state_answer`](Self::save_state_answer) is: [`StateError::Stalled`]
     /// at [`Timeouts::state`]. The server may apply a state whose answer is no
     /// longer awaited.
@@ -1061,7 +1061,7 @@ impl AudioBridge {
         answer
     }
 
-    /// [`load_preset`](Self::load_preset) as a oneshot receiver, filled and bounded as
+    /// `load_preset` as a oneshot receiver, filled and bounded as
     /// [`save_state_answer`](Self::save_state_answer) is:
     /// [`PresetError::Stalled`] at [`Timeouts::param`].
     pub fn load_preset_answer(
