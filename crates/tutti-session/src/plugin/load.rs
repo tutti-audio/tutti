@@ -815,7 +815,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 if swapped.is_ok()
                     && let Some(hosted) = self.graph.plugins.get_mut(&node)
                 {
-                    hosted.set_reload(Some(origin), recovery);
+                    hosted.reloadable = Some(super::Reloadable { origin, recovery });
                 }
                 swapped.map_err(|refused| match refused {
                     ReplaceRefused::Failed(refused) => refused,

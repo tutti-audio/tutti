@@ -866,9 +866,9 @@ pub(crate) struct HostedPlugin {
     /// Until when a plugin that has just restored a state is suspected of
     /// dying of it.
     probation_until: Option<Instant>,
-    /// How this plugin was loaded, for a reload; `None`: not recoverable.
-    origin: Option<Origin>,
-    recovery: Option<Recovery>,
+    /// How a plugin that died is brought back; `None`: not reloaded (hosted in
+    /// process).
+    reloadable: Option<Reloadable>,
     reload: Reload,
     /// Held by the snapshot task in flight, if one is.
     snapshot_token: Arc<()>,
@@ -1019,6 +1019,14 @@ struct Origin {
     loadable: Loadable,
 }
 
+/// What an out-of-process plugin's way back holds: the load it came from and,
+/// with recovery on, the recovery's budget. A recovery without an origin is not
+/// writable.
+struct Reloadable {
+    origin: Origin,
+    recovery: Option<Recovery>,
+}
+
 /// A recovering plugin's reload, between its death and its replacement.
 #[derive(Default)]
 struct Reload {
@@ -1061,7 +1069,7 @@ impl std::fmt::Debug for HostedPlugin {
             .field("snapshot_token", &self.snapshot_token)
             .field("snapshot_at", &self.snapshot_at)
             .field("hearing", &self.hearing)
-            .field("recovery", &self.recovery)
+            .field("recovery", &self.recovery())
             .field("reload_due", &self.reload.due);
         d.field("mirror", &self.mirror)
             .field("param_read", &self.param_read)
@@ -1116,8 +1124,7 @@ impl HostedPlugin {
             snapshot_from: None,
             withheld: None,
             probation_until: None,
-            origin: None,
-            recovery: None,
+            reloadable: None,
             reload: Reload::default(),
             snapshot_token: Arc::new(()),
             snapshot_at: None,
@@ -1193,20 +1200,31 @@ impl HostedPlugin {
         let outgoing = self.adopt(handle, Placement::InProcess);
         // A plugin in process is not reloaded: nothing of an out-of-process
         // outgoing plugin's way back carries over.
-        self.set_reload(None, None);
+        self.reloadable = None;
         self.set_node(node);
         self.controls = None;
         outgoing
     }
 
-    /// How a plugin that died is brought back: the load it came from and the
-    /// recovery policy's state, both of the out-of-process kind, and `None` for
-    /// each when the plugin is not reloaded (hosted in process, or recovery off).
-    /// The one place the pair is written, so a record never holds the one
-    /// kind's origin with the other kind's recovery.
-    fn set_reload(&mut self, origin: Option<Origin>, recovery: Option<Recovery>) {
-        self.origin = origin;
-        self.recovery = recovery;
+    /// The recovery's state, when the plugin is reloaded and recovery is on.
+    fn recovery(&self) -> Option<&Recovery> {
+        self.reloadable.as_ref()?.recovery.as_ref()
+    }
+
+    fn recovery_mut(&mut self) -> Option<&mut Recovery> {
+        self.reloadable.as_mut()?.recovery.as_mut()
+    }
+
+    /// Takes the recovery out, to be put back with
+    /// [`restore_recovery`](Self::restore_recovery).
+    fn take_recovery(&mut self) -> Option<Recovery> {
+        self.reloadable.as_mut()?.recovery.take()
+    }
+
+    fn restore_recovery(&mut self, recovery: Option<Recovery>) {
+        if let Some(reloadable) = self.reloadable.as_mut() {
+            reloadable.recovery = recovery;
+        }
     }
 
     /// This record, retired: an in-process plugin's waits for the main
@@ -1314,7 +1332,12 @@ impl HostedPlugin {
         self.snapshot_from = None;
         self.withheld = None;
         self.probation_until = None;
-        self.recovery = self.recovery.as_ref().map(|r| Recovery::new(r.policy()));
+        if let Some(reloadable) = self.reloadable.as_mut() {
+            reloadable.recovery = reloadable
+                .recovery
+                .as_ref()
+                .map(|r| Recovery::new(r.policy()));
+        }
         self.reload = Reload::default();
         // The incoming plugin's bypass is its own: nothing of the outgoing one's
         // episode, waits or count carries over.
@@ -1422,9 +1445,9 @@ impl HostedPlugin {
     /// The IPC timeouts the plugin was loaded with, which bound its loops' round trips; the
     /// defaults for a plugin with no origin (one the host inserted in process).
     fn timeouts(&self) -> tutti_plugin_types::Timeouts {
-        self.origin
+        self.reloadable
             .as_ref()
-            .map_or_else(Default::default, |origin| origin.config.timeouts)
+            .map_or_else(Default::default, |r| r.origin.config.timeouts)
     }
 
     /// Asks for the parameters to be read again (the plugin announced a
@@ -1573,7 +1596,7 @@ impl<'a> Plugin<'a> {
         let hosted = self.hosted;
         match &hosted.status {
             PluginLiveness::Recovering { cause } => PluginHealth::Reloading {
-                attempt: hosted.recovery.as_ref().map_or(1, Recovery::failures),
+                attempt: hosted.recovery().map_or(1, Recovery::failures),
                 cause: cause.clone(),
             },
             PluginLiveness::Dead { cause } => PluginHealth::Died {
@@ -1737,7 +1760,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 client.controls().set_meter(meter);
                 let (key, rebinder) = self.graph.insert_plugin_with_rebinder(client);
                 if let Some(hosted) = self.graph.plugins.get_mut(&key.erase()) {
-                    hosted.set_reload(Some(origin), self.plugins.recovery.map(Recovery::new));
+                    hosted.reloadable = Some(Reloadable {
+                        origin,
+                        recovery: self.plugins.recovery.map(Recovery::new),
+                    });
                 }
                 (key, rebinder)
             }
@@ -2056,7 +2082,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let snapshot = hosted.snapshot.take();
         let snapshot_from = hosted.snapshot_from;
         let withheld_bytes = hosted.withheld.take();
-        let recovery = hosted.recovery.take();
+        let recovery = hosted.take_recovery();
         let latency_before = hosted.reload.latency_before;
         let withheld = hosted.reload.withheld_age;
         let attempts = recovery.as_ref().map_or(1, Recovery::failures);
@@ -2076,7 +2102,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                     hosted.snapshot = snapshot;
                     hosted.withheld = withheld_bytes;
-                    hosted.recovery = recovery;
+                    hosted.restore_recovery(recovery);
                     hosted.reload.ready = Some(Ready {
                         client,
                         restore,
@@ -2090,7 +2116,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                     hosted.snapshot = snapshot;
                     hosted.withheld = withheld_bytes;
-                    hosted.recovery = recovery;
+                    hosted.restore_recovery(recovery);
                 }
                 let mut gave_up = Vec::new();
                 let cause = RecoveryFailure::ReplacementRefused { source: refused };
@@ -2107,8 +2133,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         hosted.snapshot = snapshot;
         hosted.withheld = withheld_bytes;
         hosted.snapshot_from = snapshot_from;
-        hosted.recovery = recovery;
-        if let Some(recovery) = hosted.recovery.as_mut() {
+        hosted.restore_recovery(recovery);
+        if let Some(recovery) = hosted.recovery_mut() {
             recovery.step(RecoveryEvent::Loaded, now);
         }
         // The replacement's own read, after the restore, is the mirror: the
@@ -2133,7 +2159,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             (StateRestore::NoSnapshot, Some(age)) => StateRestore::Withheld { age },
             (restore, _) => restore,
         };
-        hosted.probation_until = match (&restore, hosted.recovery.as_ref()) {
+        hosted.probation_until = match (&restore, hosted.recovery()) {
             (StateRestore::Restored { .. }, Some(r)) => Some(now + r.policy().state_probation),
             _ => None,
         };
@@ -2164,7 +2190,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return;
         };
         hosted.reload.in_flight = false;
-        let Some(recovery) = hosted.recovery.as_mut() else {
+        let Some(recovery) = hosted.recovery_mut() else {
             return;
         };
         let action = recovery.step(
@@ -2287,14 +2313,13 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 return;
             }
             if !std::mem::replace(&mut hosted.reload.clock_started, true)
-                && let Some(recovery) = hosted.recovery.as_mut()
+                && let Some(recovery) = hosted.recovery_mut()
             {
                 recovery.start_clock(now);
             }
         }
         let (tick, load_timeout) = hosted
-            .recovery
-            .as_mut()
+            .recovery_mut()
             .map_or((RecoveryAction::Wait, Duration::ZERO), |r| {
                 (r.step(RecoveryEvent::Tick, now), r.policy().load_timeout)
             });
@@ -2306,7 +2331,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             self.apply_failure(node, tick, reason, now, out, gave_up);
             return;
         }
-        let (Some(origin), Some(due)) = (hosted.origin.clone(), hosted.reload.due) else {
+        let (Some(origin), Some(due)) = (
+            hosted.reloadable.as_ref().map(|r| r.origin.clone()),
+            hosted.reload.due,
+        ) else {
             return;
         };
         if hosted.reload.in_flight || now < due {
@@ -2447,7 +2475,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                         );
                         hosted.withhold_snapshot(now);
                     }
-                    let action = hosted.recovery.as_mut().map(|r| {
+                    let action = hosted.recovery_mut().map(|r| {
                         r.step(
                             RecoveryEvent::Died {
                                 cause: cause.clone(),
@@ -2724,9 +2752,12 @@ mod tests {
         let mut rig = rig(None);
         let hosted = rig.session.graph.plugins.get_mut(&rig.node).unwrap();
         assert_eq!(hosted.timeouts(), Timeouts::default(), "no origin");
-        hosted.origin = Some(Origin {
-            config: AudioConfig::default().timeouts(timeouts),
-            loadable: Loadable::uncatalogued(PluginRef::file("fake.clap")),
+        hosted.reloadable = Some(Reloadable {
+            origin: Origin {
+                config: AudioConfig::default().timeouts(timeouts),
+                loadable: Loadable::uncatalogued(PluginRef::file("fake.clap")),
+            },
+            recovery: None,
         });
         assert_eq!(hosted.timeouts(), timeouts);
     }
@@ -3330,10 +3361,6 @@ mod tests {
         fn recovering(&mut self, plugin: PluginRef, loadable: Loadable) {
             let hosted = self.session.graph.plugins.get_mut(&self.node).unwrap();
             hosted.plugin = plugin;
-            hosted.origin = Some(Origin {
-                config: AudioConfig::default(),
-                loadable,
-            });
             let mut recovery = Recovery::new(RecoveryPolicy::default());
             let _ = recovery.step(
                 RecoveryEvent::Died {
@@ -3341,7 +3368,13 @@ mod tests {
                 },
                 self.t0,
             );
-            hosted.recovery = Some(recovery);
+            hosted.reloadable = Some(Reloadable {
+                origin: Origin {
+                    config: AudioConfig::default(),
+                    loadable,
+                },
+                recovery: Some(recovery),
+            });
             hosted.status = PluginLiveness::Recovering {
                 cause: ReloadCause::Died(PluginFailure::StreamClosed),
             };
@@ -3892,7 +3925,13 @@ mod tests {
                 },
                 now,
             );
-            hosted.recovery = Some(recovery);
+            hosted.reloadable = Some(Reloadable {
+                origin: Origin {
+                    config: AudioConfig::default(),
+                    loadable: Loadable::uncatalogued(PluginRef::file("fake.clap")),
+                },
+                recovery: Some(recovery),
+            });
             hosted.status = PluginLiveness::Recovering {
                 cause: ReloadCause::Died(PluginFailure::StreamClosed),
             };
@@ -4111,20 +4150,19 @@ mod tests {
     /// budget; the in-process plugin that replaces it is never reloaded, so
     /// neither is left to act on.
     #[test]
-    fn a_replacement_in_process_holds_no_origin_and_no_recovery() {
+    fn a_replacement_in_process_holds_no_way_back() {
         let (outgoing, _) = fake_handle(None, Vec::new());
         let mut hosted = HostedPlugin::new(outgoing, PluginRef::file("fake.clap"), node_controls());
-        hosted.set_reload(
-            Some(Origin {
+        hosted.reloadable = Some(Reloadable {
+            origin: Origin {
                 config: AudioConfig::default(),
                 loadable: Loadable::uncatalogued(PluginRef::file("fake.clap")),
-            }),
-            Some(Recovery::new(RecoveryPolicy::default())),
-        );
+            },
+            recovery: Some(Recovery::new(RecoveryPolicy::default())),
+        });
         let (incoming, _) = fake_handle(None, Vec::new());
         let _ = hosted.replace_hosted(incoming, node_controls(), PluginRef::file("other.clap"));
-        assert!(hosted.origin.is_none(), "no load to repeat");
-        assert!(hosted.recovery.is_none(), "no budget to spend");
+        assert!(hosted.reloadable.is_none(), "no way back to act on");
     }
 
     /// **A plugin that replaces another starts its own bypass episode.** The
