@@ -226,8 +226,9 @@ fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<Reaped> {
         .resolve(Helper::Server)
         .ok_or(IpcError::ServerNotFound)?;
     tracing::debug!("spawning plugin-server: {}", server_path.display());
+    // Idempotent: every launch that asks for the protection has it or is refused.
     if config.protect_host_memory {
-        protect_host_memory_once();
+        tutti_plugin_ipc_ffi::protect_host_memory().map_err(IpcError::HostMemoryUnprotected)?;
     }
     let mut command = Command::new(server_path);
     command
@@ -239,24 +240,15 @@ fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<Reaped> {
         .stderr(std::process::Stdio::inherit());
     tutti_plugin_ipc_ffi::own_group(&mut command);
     let child = command.spawn().map_err(IpcError::Io)?;
-    // A host that cannot bind the server to its own end still hosts: the server
-    // then outlives a host that dies, which its own watch on the host ends. A
-    // child spawned before the assignment stays outside the job.
-    if let Err(e) = tutti_plugin_ipc_ffi::bind_to_host(&child) {
-        tracing::warn!("the server is not bound to the host's end: {e}");
-    }
-    Ok(Reaped::leading_group(child))
-}
-
-/// Clears the host's dumpable flag, once for the process, at the first server
-/// it spawns ([`IpcConfig::protect_host_memory`]).
-fn protect_host_memory_once() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        if let Err(e) = tutti_plugin_ipc_ffi::protect_host_memory() {
-            tracing::warn!("the host's memory is not protected from its plugins: {e}");
-        }
-    });
+    // A server that cannot be bound to the host's end could outlive a host
+    // that dies: it is ended and the launch refused. A child spawned before the
+    // assignment stays outside the job. (Unix binds at the spawn, in
+    // `own_group`, and has nothing to do here.)
+    let bound = tutti_plugin_ipc_ffi::bind_to_host(&child);
+    // On the refusal below `reaped` drops: its group is killed and reaped.
+    let reaped = Reaped::leading_group(child);
+    bound.map_err(IpcError::ServerNotBound)?;
+    Ok(reaped)
 }
 
 /// Connect as soon as the server is listening, rather than after a fixed wait.

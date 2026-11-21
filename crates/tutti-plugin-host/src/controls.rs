@@ -377,6 +377,13 @@ impl PluginControls {
         self.chunks.mirror_refused()
     }
 
+    /// Tasks of the plugin's server on the host side (the bridge's lanes, the
+    /// process's exit watch) that did not stop in time and were left running.
+    /// Zero for a plugin that runs in this process. RT-safe: one relaxed load.
+    pub fn detached_tasks(&self) -> u64 {
+        self.chunks.detached()
+    }
+
     /// Whether the chunk the node submitted last, and has not played yet,
     /// has been answered: `true` with none in flight.
     ///
