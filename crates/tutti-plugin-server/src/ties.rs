@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_rt::{LockExt, Parker, Unparker, parker};
+use tutti_rt::{LockExt, Parker, Tally, Unparker, parker, tally};
 
 use crate::main_loop::Bell;
 
@@ -109,6 +109,12 @@ pub(crate) struct Ties {
     /// Set when the host process has ended: the main loop then shuts down
     /// as it does when the control connection ends.
     pub(crate) host_gone: Arc<AtomicBool>,
+    /// Commands for the render thread that the main thread could not queue
+    /// ([`RenderLink::tell`](crate::render::RenderLink::tell)).
+    pub(crate) commands_refused: Tally<u64>,
+    /// One-way edits (an automation state, a track's info, a parameter write)
+    /// the plugin refused: the wire has no reply to carry the refusal.
+    pub(crate) edits_refused: Tally<u64>,
 }
 
 /// The render thread's half of [`Ties`].
@@ -137,6 +143,8 @@ pub(crate) fn ties() -> std::io::Result<(Ties, RenderTies)> {
                 parker: Arc::new(Mutex::new(parker)),
             },
             host_gone: Arc::default(),
+            commands_refused: tally(),
+            edits_refused: tally(),
         },
         RenderTies {
             wake,

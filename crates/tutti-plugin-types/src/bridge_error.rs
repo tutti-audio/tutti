@@ -36,6 +36,11 @@ pub enum IpcError {
     #[error("the plugin-server's exit cannot be watched")]
     ExitUnwatched(#[source] std::io::Error),
 
+    /// The plugin-server could not start the thread that watches its host, so
+    /// it does not run: a server that cannot see its host end would outlive it.
+    #[error("the plugin-server cannot watch its host")]
+    HostUnwatched(#[source] std::io::Error),
+
     /// `IpcConfig::protect_host_memory` was asked for and the host's memory
     /// could not be protected, so no server is started.
     #[error("the host's memory cannot be protected from its plugins")]

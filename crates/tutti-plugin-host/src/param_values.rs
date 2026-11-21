@@ -184,7 +184,7 @@ impl Future for ReadingParams {
         }
         if let Stage::Listing(listing) = &mut this.stage {
             // A canceled answer is as unavailable as a `None` one.
-            let listed = std::task::ready!(Pin::new(listing).poll(cx)).ok().flatten();
+            let listed = std::task::ready!(Pin::new(listing).poll(cx)).flatten();
             let Some(listed) = listed else {
                 this.stage = Stage::Finished;
                 return Poll::Ready(Err(Box::new(ParamRead::of(&this.handle))));
@@ -211,13 +211,13 @@ impl Future for ReadingParams {
                     return Poll::Ready(Ok(snapshot));
                 };
                 if reading.seen.insert(info.id()) {
-                    let question = Question::Value(params.parameter_value_answer(info.id()));
+                    let question = Question::Value(params.parameter_value(info.id()));
                     reading.asked = Some((info, question));
                 }
                 continue;
             };
             let (Question::Value(answer) | Question::Default(answer)) = question;
-            let answered = std::task::ready!(Pin::new(answer).poll(cx)).ok().flatten();
+            let answered = std::task::ready!(Pin::new(answer).poll(cx)).flatten();
             let value = match (&*question, answered) {
                 (_, Some(value)) => value,
                 (Question::Value(_), None) => match info.range() {
@@ -473,7 +473,7 @@ mod tests {
         fn fill(self: Box<Self>);
     }
 
-    impl<T: Send> Owed for (futures_channel::oneshot::Sender<T>, T) {
+    impl<T: Send> Owed for (tutti_plugin_types::AnswerSender<T>, T) {
         fn canceled(&self) -> bool {
             self.0.is_canceled()
         }
@@ -486,15 +486,15 @@ mod tests {
     impl FakeParams {
         fn deliver<T: Send + 'static>(&self, value: T, canceled: bool) -> Answer<T> {
             if canceled {
-                return futures_channel::oneshot::channel().1;
+                return Answer::channel().1;
             }
             match &self.mode {
                 Mode::Held(parked) => {
-                    let (tx, rx) = futures_channel::oneshot::channel();
+                    let (tx, rx) = Answer::channel();
                     parked.lock().unwrap().push(Box::new((tx, value)));
                     rx
                 }
-                _ => tutti_plugin_types::answered(value),
+                _ => tutti_plugin_types::Answer::ready(value),
             }
         }
     }
@@ -520,18 +520,14 @@ mod tests {
         fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
             self.deliver(self.listed(), matches!(self.mode, Mode::ListCanceled))
         }
-        fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
-            self.params
+        fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
+            let value = self
+                .params
                 .iter()
-                .find(|(a, _)| *a == id)?
-                .1
-                .map(|v| Normalized::clamped(f64::from(v)))
-        }
-        fn parameter_value_answer(&self, id: ParamId) -> Answer<Option<Normalized>> {
-            self.deliver(
-                self.parameter_value(id),
-                matches!(self.mode, Mode::ValuesCanceled),
-            )
+                .find(|(a, _)| *a == id)
+                .and_then(|(_, v)| *v)
+                .map(|v| Normalized::clamped(f64::from(v)));
+            self.deliver(value, matches!(self.mode, Mode::ValuesCanceled))
         }
         fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Answer<Option<Normalized>> {
             self.deliver(None, matches!(self.mode, Mode::ValuesCanceled))
@@ -542,6 +538,9 @@ mod tests {
             _value: Normalized,
         ) -> Result<(), tutti_plugin_types::UnknownParam> {
             Ok(())
+        }
+        fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
+            None
         }
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
             None
