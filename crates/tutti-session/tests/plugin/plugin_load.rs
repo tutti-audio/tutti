@@ -80,11 +80,6 @@ fn render_until(s: &mut Session, what: &str, mut done: impl FnMut(&[f32]) -> boo
     }
 }
 
-#[cfg(target_os = "linux")]
-fn alive(pid: u32) -> bool {
-    std::path::Path::new(&format!("/proc/{pid}")).exists()
-}
-
 /// **A load gives a handle whose node renders.** The handle reads the plugin
 /// the id names, served and live; the node over it renders the plugin's tag
 /// (`probe_tag(0, 0)`, 1) on every frame once the server's first blocks arrive.
@@ -173,84 +168,91 @@ fn a_failed_load_returns_its_error() {
     );
 }
 
-/// **Dropping every clone of a handle releases the plugin**: the server ends
-/// with the last clone, not before.
+/// The cases that name the server by its process id.
 #[cfg(target_os = "linux")]
-#[test]
-fn dropping_every_clone_reaps_the_server() {
-    let (catalog, _dir) = catalog();
-    let mut s = session();
-    let plugin = s
-        .load_plugin(&first_id(), &catalog)
-        .run(tutti_fixtures::main_thread())
-        .unwrap();
-    let pid = plugin.info().server_pid().expect("a served plugin");
-    assert!(alive(pid));
-    let clone = plugin.clone();
-    drop(plugin);
-    let _ = s.update();
-    assert!(alive(pid), "a clone holds the plugin");
-    drop(clone);
-    render_until(&mut s, "the server's end", |_| !alive(pid));
-}
+mod process {
+    use super::*;
 
-/// **A node keeps its plugin alive after the app drops its handle**, and the
-/// node's removal is what releases it.
-#[cfg(target_os = "linux")]
-#[test]
-fn a_node_keeps_its_plugin_alive_after_the_app_drops_its_handle() {
-    let (catalog, _dir) = catalog();
-    let mut s = session();
-    let plugin = s
-        .load_plugin(&first_id(), &catalog)
-        .run(tutti_fixtures::main_thread())
-        .unwrap();
-    let pid = plugin.info().server_pid().expect("a served plugin");
-    let node = s.add_plugin(plugin.node()).unwrap();
-    s.graph().connect(node.out(0), Root::output(0)).unwrap();
-    drop(plugin);
-    render_until(&mut s, "the plugin's tag", |left| {
-        left.iter().all(|&x| x == 1.0)
-    });
-    assert!(alive(pid), "the node holds the plugin");
+    fn alive(pid: u32) -> bool {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
 
-    s.remove(node).unwrap();
-    render_until(&mut s, "the server's end", |_| !alive(pid));
-}
+    /// **Dropping every clone of a handle releases the plugin**: the server ends
+    /// with the last clone, not before.
+    #[test]
+    fn dropping_every_clone_reaps_the_server() {
+        let (catalog, _dir) = catalog();
+        let mut s = session();
+        let plugin = s
+            .load_plugin(&first_id(), &catalog)
+            .run(tutti_fixtures::main_thread())
+            .unwrap();
+        let pid = plugin.info().server_pid().expect("a served plugin");
+        assert!(alive(pid));
+        let clone = plugin.clone();
+        drop(plugin);
+        let _ = s.update();
+        assert!(alive(pid), "a clone holds the plugin");
+        drop(clone);
+        render_until(&mut s, "the server's end", |_| !alive(pid));
+    }
 
-/// **A plugin that died before it had a node is lost, and refuses one**: the
-/// handle reads `Lost`, and neither a node nor a swap takes it.
-#[cfg(target_os = "linux")]
-#[test]
-fn a_plugin_dead_before_its_node_is_lost_and_refuses_one() {
-    let (catalog, _dir) = catalog();
-    let mut s = session();
-    let plugin = s
-        .load_plugin(&first_id(), &catalog)
-        .run(tutti_fixtures::main_thread())
-        .unwrap();
-    let pid = plugin.info().server_pid().expect("a served plugin");
-    let killed = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .expect("kill runs");
-    assert!(killed.success());
-    render_until(&mut s, "the loss", |_| !plugin.presence().is_live());
-    assert!(matches!(
-        plugin.presence(),
-        Presence::Lost(PluginCause::Died(_))
-    ));
-    assert!(matches!(
-        s.add_plugin(plugin.node()),
-        Err(AddPluginError::Lost)
-    ));
-    let host = s
-        .load_plugin(&first_id(), &catalog)
-        .run(tutti_fixtures::main_thread())
-        .unwrap();
-    let node = s.add_plugin(host.node()).unwrap();
-    assert!(matches!(
-        s.swap_plugin(node, plugin.node(), tutti_fixtures::main_thread()),
-        Err(SwapPluginError::Lost)
-    ));
+    /// **A node keeps its plugin alive after the app drops its handle**, and the
+    /// node's removal is what releases it.
+    #[test]
+    fn a_node_keeps_its_plugin_alive_after_the_app_drops_its_handle() {
+        let (catalog, _dir) = catalog();
+        let mut s = session();
+        let plugin = s
+            .load_plugin(&first_id(), &catalog)
+            .run(tutti_fixtures::main_thread())
+            .unwrap();
+        let pid = plugin.info().server_pid().expect("a served plugin");
+        let node = s.add_plugin(plugin.node()).unwrap();
+        s.graph().connect(node.out(0), Root::output(0)).unwrap();
+        drop(plugin);
+        render_until(&mut s, "the plugin's tag", |left| {
+            left.iter().all(|&x| x == 1.0)
+        });
+        assert!(alive(pid), "the node holds the plugin");
+
+        s.remove(node).unwrap();
+        render_until(&mut s, "the server's end", |_| !alive(pid));
+    }
+
+    /// **A plugin that died before it had a node is lost, and refuses one**: the
+    /// handle reads `Lost`, and neither a node nor a swap takes it.
+    #[test]
+    fn a_plugin_dead_before_its_node_is_lost_and_refuses_one() {
+        let (catalog, _dir) = catalog();
+        let mut s = session();
+        let plugin = s
+            .load_plugin(&first_id(), &catalog)
+            .run(tutti_fixtures::main_thread())
+            .unwrap();
+        let pid = plugin.info().server_pid().expect("a served plugin");
+        let killed = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(killed.success());
+        render_until(&mut s, "the loss", |_| !plugin.presence().is_live());
+        assert!(matches!(
+            plugin.presence(),
+            Presence::Lost(PluginCause::Died(_))
+        ));
+        assert!(matches!(
+            s.add_plugin(plugin.node()),
+            Err(AddPluginError::Lost)
+        ));
+        let host = s
+            .load_plugin(&first_id(), &catalog)
+            .run(tutti_fixtures::main_thread())
+            .unwrap();
+        let node = s.add_plugin(host.node()).unwrap();
+        assert!(matches!(
+            s.swap_plugin(node, plugin.node(), tutti_fixtures::main_thread()),
+            Err(SwapPluginError::Lost)
+        ));
+    }
 }

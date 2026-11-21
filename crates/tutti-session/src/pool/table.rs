@@ -137,10 +137,10 @@ pub enum WhenLoadedError<K: fmt::Debug> {
 /// What a [`Hold`] is for: whether the entry parks when the hold is old.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(
-    not(any(test, feature = "plugin")),
+    not(test),
     expect(
         dead_code,
-        reason = "a node over an entry (feature `plugin`) and a snapshot take holds"
+        reason = "the pool's tests take holds; the pool goes with R4d"
     )
 )]
 pub(crate) enum HoldKind {
@@ -877,54 +877,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         }
     }
 
-    /// Refuses a landed value the graph could not take: its value is dropped,
-    /// its handles read closed, and the entry reads failed with `error`
-    /// ([`PoolEvent::Failed`], after the landing's event). `generation` is the
-    /// landing that was refused ([`landing_of`](Self::landing_of)): a refusal of
-    /// a landing that a newer declaration or a pending load has since
-    /// superseded is stale and records nothing, so it cannot clobber the load
-    /// in flight. Returns whether the entry failed.
-    #[cfg(feature = "plugin")]
-    pub(crate) fn refuse_landed(
-        &mut self,
-        key: &PoolKey,
-        generation: u64,
-        error: LoadError,
-    ) -> bool {
-        let Some(slot) = self
-            .slots
-            .get_mut(key)
-            .filter(|slot| slot.generation == generation && slot.loaded.is_some())
-        else {
-            return false;
-        };
-        slot.loaded = None;
-        slot.life.close();
-        slot.life = Life::new();
-        slot.state = PoolState::Failed(error.clone());
-        let event = PoolEvent::Failed(error);
-        if slot.declared {
-            self.queued.push(Pending {
-                order: slot.order,
-                key: key.clone(),
-                event,
-            });
-        } else {
-            slot.unreported = Some(event);
-        }
-        true
-    }
-
-    /// The keys whose load landed since the last report, in landing order.
-    #[cfg(feature = "plugin")]
-    pub(crate) fn landed_keys(&self) -> Vec<PoolKey> {
-        self.queued
-            .iter()
-            .filter(|queued| matches!(queued.event, PoolEvent::Loaded | PoolEvent::Reloaded))
-            .map(|queued| queued.key.clone())
-            .collect()
-    }
-
     /// Loads the declared entry under `key` again: one that failed, or one the
     /// kind reads as lost.
     ///
@@ -1107,10 +1059,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
 
     /// A hold of `kind` on `key`'s entry, `None` when the pool has none.
     #[cfg_attr(
-        not(any(test, feature = "plugin")),
+        not(test),
         expect(
             dead_code,
-            reason = "a node over an entry (feature `plugin`) takes holds"
+            reason = "the pool's tests take holds; the pool goes with R4d"
         )
     )]
     pub(crate) fn hold(&mut self, key: &PoolKey, kind: HoldKind) -> Option<Hold> {
@@ -1136,10 +1088,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
 
     /// `E`'s handle for the loaded entry under `key`.
     #[cfg_attr(
-        not(any(test, feature = "plugin")),
+        not(test),
         expect(
             dead_code,
-            reason = "the readers of the kinds (feature `plugin`) are its callers"
+            reason = "the pool's tests read handles; the pool goes with R4d"
         )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>
@@ -1149,16 +1101,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     {
         let (loaded, life) = self.loaded_with_life::<K, E>(key)?;
         Ok(E::handle(loaded, life))
-    }
-
-    /// `E`'s loaded value under `key`, for a reader that makes its own handle.
-    #[cfg(feature = "plugin")]
-    pub(crate) fn loaded<K, E>(&self, key: &K) -> Result<&E::Loaded, HandleError<K>>
-    where
-        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
-        E: PoolEntry<C::Float>,
-    {
-        self.loaded_with_life::<K, E>(key).map(|(loaded, _)| loaded)
     }
 
     /// `E`'s loaded value under `key` and the entry's life: what a handle is
@@ -1184,20 +1126,5 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             .downcast_ref::<E::Loaded>()
             .ok_or_else(|| HandleError::WrongKind(key.clone()))?;
         Ok((loaded, &slot.life))
-    }
-
-    /// `E`'s loaded value under `key` and the generation of the landing that
-    /// made it, wherever the entry stands in the app's set (declared or held).
-    #[cfg(feature = "plugin")]
-    pub(crate) fn landing_of<E: PoolEntry<C::Float>>(
-        &self,
-        key: &PoolKey,
-    ) -> Option<(u64, &E::Loaded)> {
-        let slot = self
-            .slots
-            .get(key)
-            .filter(|slot| slot.kind == TypeId::of::<E>())?;
-        let loaded = slot.loaded.as_ref()?.downcast_ref::<E::Loaded>()?;
-        Some((slot.generation, loaded))
     }
 }

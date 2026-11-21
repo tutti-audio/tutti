@@ -32,7 +32,7 @@ pub enum Phase {
     Collect,
     /// Hosted plugins' health, latency, parameter edits and state
     /// snapshots (feature `plugin`): what the plugin tasks sent lands first; a dead
-    /// pooled plugin's node stays at its
+    /// loaded plugin's node stays at its
     /// key, silent, and a host-inserted plugin's is removed
     /// (`PluginChange::Died`), a moved latency handed to the graph
     /// (`PluginChange::LatencyChanged`), a due snapshot, a parameter
