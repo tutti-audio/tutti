@@ -368,14 +368,14 @@ impl<F: Float> OutputControl<F> {
         &self.in_use
     }
 
-    /// The widths of the (root, device) pair the last block rendered, once one
-    /// has: the root's, then the device's.
     /// Forgets the pair in use: the device is about to change, and the next
     /// block renders the pair that counts.
     pub(crate) fn forget_in_use(&self) {
         self.in_use.store(0, Ordering::Relaxed);
     }
 
+    /// The widths of the (root, device) pair the last block rendered, once one
+    /// has: the root's, then the device's.
     fn in_use(&self) -> Option<(usize, usize)> {
         let packed = self.in_use.load(Ordering::Relaxed);
         (packed != 0).then(|| {
